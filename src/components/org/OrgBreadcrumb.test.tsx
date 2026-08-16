@@ -47,6 +47,14 @@ describe("OrgBreadcrumb", () => {
     orgContext.setAllOrgs.mockClear()
   })
 
+  it("renders the organization name as a navigable crumb without a logo", () => {
+    renderBreadcrumb(<OrgBreadcrumb section="Teams" />, "/orgs/7/teams")
+
+    const orgCrumb = screen.getByRole("link", { name: "Dev Org" })
+    expect(orgCrumb).toHaveAttribute("href", "/orgs/7")
+    expect(orgCrumb.querySelector('[aria-hidden="true"]')).toBeNull()
+  })
+
   it("shows a complete, navigable hierarchy in the project workspace", () => {
     renderBreadcrumb(
       <OrgBreadcrumb
@@ -76,10 +84,34 @@ describe("OrgBreadcrumb", () => {
     orgContext.activeOrgId = null
     orgContext.isAllOrgs = true
 
-    renderBreadcrumb(<OrgBreadcrumb section="Projects" />, "/orgs/all")
+    renderBreadcrumb(<OrgBreadcrumb section="Overview" isProjectsLanding />, "/orgs/all")
 
     expect(screen.queryByRole("link", { name: "All organizations" })).not.toBeInTheDocument()
     expect(screen.getByText("All organizations")).toHaveAttribute("aria-current", "page")
+    // Portfolio home omits a redundant Overview section crumb.
+    expect(screen.queryByText("Overview")).not.toBeInTheDocument()
+  })
+
+  it("shows Projects as the current crumb on the member-org projects page", () => {
+    renderBreadcrumb(<OrgBreadcrumb section="Projects" />, "/orgs/7/projects")
+
+    expect(screen.getByRole("link", { name: "All organizations" })).toHaveAttribute("href", "/orgs/all")
+    expect(screen.getByRole("link", { name: "Dev Org" })).toHaveAttribute("href", "/orgs/7")
+    expect(screen.getByText("Projects")).toHaveAttribute("aria-current", "page")
+  })
+
+  // AQU-832: `isProjectsLanding` replaced an implicit `section === "Projects"`
+  // string comparison — translating `section` must not silently duplicate a
+  // crumb. A section whose ENGLISH TEXT happens to be "Projects" but that
+  // isn't flagged as the landing page must still render its own crumb.
+  it("does not infer the landing page from the section text — only from isProjectsLanding", () => {
+    orgContext.activeOrgId = null
+    orgContext.isAllOrgs = true
+
+    renderBreadcrumb(<OrgBreadcrumb section="Projects" />, "/orgs/all")
+
+    expect(screen.getByText("Projects")).toHaveAttribute("aria-current", "page")
+    expect(screen.getByRole("link", { name: "All organizations" })).toBeInTheDocument()
   })
 
   // AQU-790: viewing a guest org (`/orgs/:guestId`), the guest org is a sibling
@@ -89,13 +121,15 @@ describe("OrgBreadcrumb", () => {
     orgContext.orgs = [{ id: 7, name: "Dev Org" }]
     orgContext.guestOrgs = [{ id: 2, name: "Guest Org" }]
 
-    renderBreadcrumb(<OrgBreadcrumb section="Projects" />, "/orgs/2")
+    renderBreadcrumb(<OrgBreadcrumb section="Projects" isProjectsLanding />, "/orgs/2")
 
     // The guest org is the current page, directly under All organizations.
     expect(screen.getByRole("link", { name: "All organizations" })).toHaveAttribute("href", "/orgs/all")
     expect(screen.getByText("Guest Org")).toHaveAttribute("aria-current", "page")
     // The caller's owned org never appears as an ancestor of the guest org.
     expect(screen.queryByText("Dev Org")).not.toBeInTheDocument()
+    // Guest index is the project list — no separate Projects section crumb.
+    expect(screen.queryByText("Projects")).not.toBeInTheDocument()
   })
 
   it("keeps the breadcrumb on one line and scrolls horizontally instead of clipping", () => {
@@ -105,14 +139,13 @@ describe("OrgBreadcrumb", () => {
 
     const list = container.querySelector('[data-slot="breadcrumb-list"]')
     expect(list).toHaveClass(
+      "scroll-fade-x",
+      "scroll-fade-8",
       "flex-nowrap",
       "overflow-x-auto",
       "overscroll-x-contain",
       "whitespace-nowrap",
       "scrollbar-none",
     )
-    // Edge fades match TabStrip — present even when unused (opacity toggled).
-    const fades = container.querySelectorAll('[data-slot="breadcrumb"] > span[aria-hidden]')
-    expect(fades).toHaveLength(2)
   })
 })

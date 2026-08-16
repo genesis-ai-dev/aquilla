@@ -4,6 +4,7 @@
 // Inline subtitle markup (<i>, <b>, <font>) in the text is passed through
 // verbatim: SRT payload tags are content, not formatting to strip.
 import type { CellData } from "@/hooks/useCells"
+import { effectiveSourceText } from "@/lib/cell-text"
 
 const pad = (n: number, w = 2): string => String(n).padStart(w, "0")
 
@@ -21,7 +22,7 @@ export function exportSrt(cells: CellData[]): Blob {
   const cues: string[] = []
   for (const cell of cells) {
     if (cell.startTime == null || cell.endTime == null) continue
-    const text = (cell.translated || cell.original || "").trim()
+    const text = (cell.translated || effectiveSourceText(cell) || "").trim()
     if (!text) continue
     cues.push(`${cues.length + 1}\n${formatSrtTime(cell.startTime)} --> ${formatSrtTime(cell.endTime)}\n${text}`)
   }

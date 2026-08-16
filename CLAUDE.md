@@ -1,7 +1,7 @@
 # CLAUDE.md
 
 Guidance for Claude Code working in this repo. See also **`AGENTS.md`** (testing/E2E rules,
-shared by all AI assistants) and `docs/` (SYNC, AGENT-API, AGENT-SANDBOX, SEO, FEATURE-STORIES;
+shared by all AI assistants) and `docs/` (SYNC, AGENT-API, AGENT-SANDBOX, SEO, OPSEC, FEATURE-STORIES;
 SPEC.md covers the separate VS Code Codex extension that uses Aquilla as a backend).
 
 ## Layout — flat single-SPA trunk
@@ -30,19 +30,18 @@ abandoned — if you find docs or memory describing `apps/workspace/`, `packages
 ├── infra/modal/        # Modal services: diarization.py, seed_vc.py, omnivoice_app.py
 ├── src-tauri/          # Tauri desktop shell
 ├── e2e/                # Playwright specs + page objects + JOURNEYS.md (see AGENTS.md)
-├── scripts/            # dev-stack.ts (local full stack), e2e-up.ts, prerender-marketing.ts,
-│                       #   brand/build helpers
+├── scripts/            # dev-stack.ts (local full stack), e2e-up.ts, brand/build helpers
 └── vite.config.ts      # drives the SPA + Tauri build; @/ → ./src
 ```
 
 `@/` resolves to `./src` (tsconfig + vite). Vitest runs in `happy-dom`; `src/test-setup.ts`
 loads `fake-indexeddb/auto` so IDB/idb tests run without a browser.
 
-The standalone marketing pages (`homepage.html`, `beta.html`, the case studies,
-`bible-translation.html`) are separate vite inputs with their own React entries. `pnpm build`
-prerenders each one to static HTML after `vite build` so crawlers and unfurlers see the whole
-page — `createRoot` then clears it and renders the live page over it. Anything those pages
-render must be DOM-free-safe. See **`docs/SEO.md`**.
+The public marketing surface lives in the sibling **`aquilla-marketing`** repo. Its
+Worker claims `/`, `/homepage`, `/beta`, `/bible-translation`, `/case-studies/*`,
+`/privacy`, `/terms`, sitemap/robots, and `/mkt/*` ahead of this repo's
+`aquilla.app/*` catch-all. This repo builds only `index.html`; marketing deploys do
+not ride the app's QA-gated release cycle. See **`docs/SEO.md`**.
 
 ## Commands
 
@@ -100,7 +99,10 @@ worker binds D1; workers fail fast if `HYPERDRIVE` is unbound and query through
   durable DO state), comments (+ email notifications via CF Email Service), `/audio/*`,
   diarization, voice-convert, and the external **Agent API** under `/api/v1/external/*`
   (changeset engine + apply gate, artifacts, tools-only MCP server, self-describing
-  discovery — see `docs/AGENT-API.md`). Per-PR fork template `wrangler.pr.toml.tpl`.
+  discovery — see `docs/AGENT-API.md`). PR previews do **not** get an isolated per-PR
+  sync-worker/auth-worker fork — non-draft PRs deploy to the single shared, route-free
+  `aquilla-web-preview` Worker (`wrangler.toml` `[env.preview]`) and point at the shared
+  `development` API backend; see `docs/DEPLOYMENT-ENVIRONMENTS.md`.
 - **`agent-worker/`** — Worker `aquilla-agent-sandbox`: container-backed Durable Object for
   sandboxed agent code execution (see `docs/AGENT-SANDBOX.md`). Server-side only — auth-worker
   calls it via `AGENT_SANDBOX_URL` + shared `AGENT_SANDBOX_KEY`; no zone routes. Reads

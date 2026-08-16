@@ -16,6 +16,7 @@ import { EmptyState } from "@/components/ui/page"
 import { cn } from "@/lib/utils"
 import { MarkedSnippet } from "@/components/search/MarkedSnippet"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface SearchResultsViewProps {
   query: string
@@ -66,6 +67,7 @@ export function SearchResultsView({
   onJumpToResult,
   onClose,
 }: SearchResultsViewProps) {
+  const t = useT()
   const groups = useMemo<FileGroup[]>(() => {
     const map = new Map<string, FileGroup>()
     for (const r of results) {
@@ -85,22 +87,25 @@ export function SearchResultsView({
       <div className="flex items-center gap-2 border-b px-4 py-2 shrink-0">
         <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
         <span className="text-sm font-medium flex-1 truncate">
-          Search Results
+          {t("search.expanded.header")}
           {query && (
-            <span className="ml-2 text-xs font-normal text-muted-foreground">
-              for &ldquo;{query}&rdquo;
+            <span className="ms-2 text-xs font-normal text-muted-foreground">
+              {t("search.expanded.forQuery", { query })}
             </span>
           )}
         </span>
         <span className="text-xs text-muted-foreground shrink-0">
-          {results.length} result{results.length !== 1 ? "s" : ""} in {groups.length} file{groups.length !== 1 ? "s" : ""}
+          {t("search.expanded.summary", {
+            results: t("search.resultCount", { count: results.length }),
+            files: t("search.expanded.fileCount", { count: groups.length }),
+          })}
         </span>
         <Button
           type="button"
           variant="ghost"
           size="icon-sm"
           onClick={onClose}
-          aria-label="Close search results"
+          aria-label={t("search.expanded.close")}
         >
           <X />
         </Button>
@@ -113,7 +118,7 @@ export function SearchResultsView({
             variant="inline"
             className="h-full"
             icon={Search}
-            title="No results"
+            title={t("search.noResults")}
           />
         ) : (
           <div className="py-2">
@@ -147,7 +152,7 @@ function FileSection({
       <div className="flex items-center gap-1.5 px-4 py-1 text-xs font-medium text-muted-foreground sticky top-0 bg-background/95 backdrop-blur-sm border-b border-border/50">
         <ChevronRight className="h-3 w-3 shrink-0" />
         <span className="truncate">{group.fileName}</span>
-        <span className="ml-auto shrink-0 text-[10px] font-normal">
+        <span className="ms-auto shrink-0 text-[10px] font-normal">
           {group.results.length}
         </span>
       </div>
@@ -181,7 +186,7 @@ function ResultRow({
       type="button"
       onClick={() => onJump(result)}
       className={cn(
-        "w-full text-left px-6 py-1.5 hover:bg-accent transition-colors",
+        "w-full text-start px-6 py-1.5 hover:bg-accent transition-colors",
         "flex flex-col gap-0.5 group",
       )}
     >

@@ -10,6 +10,8 @@ interface Props {
   extraMenuItems?: OverflowMenuItem[]
   /** When set, renders Import in a button group beside the ⋯ overflow menu. */
   onImport?: () => void
+  /** When set, renders a Settings cog beside the Import group. */
+  onSettings?: () => void
   /**
    * AQU-428: When provided, the project name in the breadcrumb becomes a
    * clickable link to the project overview page (`/projects/:id`), giving
@@ -19,6 +21,11 @@ interface Props {
   overviewHref?: string
   /** Workspace surface (e.g. "Editor") — shown after the project name. */
   surfaceLabel?: string
+  /**
+   * When an overlay (Comments, Rules, …) was opened from the editor, link
+   * back to that editor URL as a crumb before `surfaceLabel`.
+   */
+  editorHref?: string
   /** Current book/chapter (e.g. "GEN 1") — trailing segment when known. */
   bookLabel?: string | null
 }
@@ -28,16 +35,19 @@ export function WorkspaceHeader({
   children,
   extraMenuItems,
   onImport,
+  onSettings,
   overviewHref,
   surfaceLabel,
+  editorHref,
   bookLabel,
 }: Props) {
   const items = extraMenuItems ?? []
   const trail: OrgBreadcrumbTrailSegment[] = []
+  if (editorHref) trail.push({ label: "Editor", to: editorHref })
   if (surfaceLabel) trail.push({ label: surfaceLabel })
   if (bookLabel) trail.push({ label: bookLabel })
   return (
-    <header className="relative z-30 flex h-full min-w-0 items-center justify-between gap-3 pr-4">
+    <header className="relative z-30 flex h-full min-w-0 items-center justify-between gap-3 pe-4">
       <div className="min-w-0 flex-1">
         <OrgBreadcrumb
           section={project.name}
@@ -49,7 +59,7 @@ export function WorkspaceHeader({
       <div className="flex shrink-0 items-center gap-1">
         {children}
         {onImport ? (
-          <WorkspaceHeaderActions onImport={onImport} menuItems={items} />
+          <WorkspaceHeaderActions onImport={onImport} onSettings={onSettings} menuItems={items} />
         ) : items.length > 0 ? (
           <OverflowMenu items={items} />
         ) : null}

@@ -28,6 +28,7 @@ interface AudioRowRaw {
   voice_id: string | null
   reference_audio_id: string | null
   duration_ms: number | null
+  label: string | null
   trim_start_ms: number | null
   trim_end_ms: number | null
   timings_json: string | null
@@ -43,6 +44,8 @@ interface AttachmentOut {
   voiceId: string | null
   referenceAudioId: string | null
   durationMs: number | null
+  /** AQU-646 round 8: the take's permanent display name. */
+  label: string | null
   trimStartMs: number | null
   trimEndMs: number | null
 }
@@ -85,7 +88,7 @@ export async function handleCellAudioReadRequest(
 
   const res = await env.AQUILLA_PG.prepare(
     `SELECT cell_id, audio_id, slot, url, mime_type, voice_id, reference_audio_id,
-            duration_ms, trim_start_ms, trim_end_ms, timings_json, selected, created_ts
+            duration_ms, label, trim_start_ms, trim_end_ms, timings_json, selected, created_ts
        FROM cell_audio
       WHERE project_id = ? AND file_id = ? AND deleted = 0
       ORDER BY created_ts ASC`,
@@ -113,6 +116,7 @@ export async function handleCellAudioReadRequest(
       voiceId: r.voice_id,
       referenceAudioId: r.reference_audio_id,
       durationMs: r.duration_ms,
+      label: r.label,
       trimStartMs: r.trim_start_ms,
       trimEndMs: r.trim_end_ms,
     }

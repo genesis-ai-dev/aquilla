@@ -71,7 +71,7 @@ export function computeContextReadiness(input: ReadinessInput): ContextReadiness
       conceptsWithDecisions === 0
         ? "No key terms have an approved rendering yet. Autopilot will translate them ad hoc, and each passage may word them differently."
         : `${conceptsWithDecisions} key ${conceptsWithDecisions === 1 ? "term has" : "terms have"} an approved rendering. Autopilot is told the ones that appear in each passage and must use them.`,
-    href: "settings/terminology",
+    href: "terminology",
   })
 
   // ── Translation brief ──
@@ -85,7 +85,8 @@ export function computeContextReadiness(input: ReadinessInput): ContextReadiness
       answered === 0 && !hasL1
         ? "No brief. Autopilot has to guess your audience, register, and how literal to be — the decisions that shape every sentence."
         : `${answered} of the brief's questions answered${hasL1 ? ", summarised for every passage" : ""}. Audience, register, and literalness ride in each draft prompt.`,
-    href: "settings/brief",
+        // The brief builder lives on Living Memory in project settings.
+        href: "settings/memory",
   })
 
   // ── Examples of your team's own work ──
@@ -96,8 +97,8 @@ export function computeContextReadiness(input: ReadinessInput): ContextReadiness
       validatedExamples === 0 ? "missing" : validatedExamples < MIN_EXAMPLES ? "partial" : "ready",
     detail:
       validatedExamples === 0
-        ? "No validated translations yet. Autopilot has no sample of your team's voice to imitate — validate a few passages first and the drafts will sound far more like you."
-        : `${validatedExamples} validated ${validatedExamples === 1 ? "passage" : "passages"} to imitate. This is where the drafts learn your team's voice.`,
+        ? "No validated translations yet. Autopilot has no sample of your team's voice to imitate — validate a few translations first and the drafts will sound far more like you."
+        : `${validatedExamples} validated ${validatedExamples === 1 ? "translation" : "translations"} to imitate. This is where the drafts learn your team's voice.`,
   })
 
   // ── Project rules ──
@@ -110,7 +111,7 @@ export function computeContextReadiness(input: ReadinessInput): ContextReadiness
       authored === 0
         ? "No hand-written checks. Key-term checks still run; add rules for punctuation, spelling, or formatting conventions you care about."
         : `${authored} ${authored === 1 ? "check runs" : "checks run"} on every draft before it reaches you.`,
-    href: "rules",
+    href: "settings/rules",
   })
 
   // ── Languages ──

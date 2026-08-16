@@ -333,4 +333,28 @@ describe("import — atomic bilingual target text (AQU-638)", () => {
     expect(captured[0].targets).toBeUndefined()
     expect(await peekOutboxBatch(100)).toHaveLength(0)
   })
+
+  it("stamps ctx.origins into importManifest.origin for the matching file", async () => {
+    await emitParsedFile(
+      {
+        name: "notes.md",
+        strings: [makeString("s1", "Hello", "g1")],
+      },
+      "md",
+      {
+        projectId: "p-1",
+        author: "alice",
+        getToken,
+        origins: new Map([
+          ["notes.md", { provider: "google-drive", driveFileId: "d42", mimeType: "text/markdown" }],
+        ]),
+      },
+    )
+    const withFile = captured.find((body) => body.file !== undefined)
+    expect(withFile?.file?.importManifest?.origin).toEqual({
+      provider: "google-drive",
+      driveFileId: "d42",
+      mimeType: "text/markdown",
+    })
+  })
 })

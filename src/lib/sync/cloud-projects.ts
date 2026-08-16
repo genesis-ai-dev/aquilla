@@ -24,6 +24,8 @@ export interface CloudFileSummary {
   targetTextDirection?: "ltr" | "rtl" | null
   /** Timeline editor: core video URL for the preview; absent/null ⇒ no video. */
   coreMediaUrl?: string | null
+  /** The file's audio timing mode; absent ⇒ the project default applies. */
+  timingMode?: "dubbing" | "audioFirst" | null
 }
 
 export interface CloudProjectSummary {
@@ -35,6 +37,9 @@ export interface CloudProjectSummary {
   /** AQU-473: the host org's display name, joined server-side by the list
    *  endpoint. Absent on the single-project endpoint or older servers. */
   orgName?: string | null
+  /** AQU-822: the org's effective termbase-edit floor. Returned by the
+   *  single-project endpoint; absent on the list endpoint / older servers. */
+  termbaseEditMinRole?: number | null
   /** Present on the single-project endpoint; list endpoint filters archived rows. */
   archivedAt?: string | null
   /** Present on the single-project endpoint; used to show "archived by X" in Trash. */
@@ -200,6 +205,39 @@ export async function fetchArchivedProjects(
   }
 }
 
+export interface OrgDeletedFile {
+  fileId: string
+  name: string
+  projectId: string
+  projectName: string
+  fileType: string
+  cellCount: number
+  deletedAt: number
+}
+
+/**
+ * GET /api/v2/orgs/:orgId/deleted-files — soft-deleted files across projects
+ * the caller can see. Powers the Archived page's Recently deleted tab.
+ * Returns [] on any error so the tab can still render an empty state.
+ */
+export async function fetchOrgDeletedFiles(
+  jwt: string,
+  orgId: number,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<OrgDeletedFile[]> {
+  try {
+    const res = await fetch(`${apiUrl}/api/v2/orgs/${orgId}/deleted-files`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${jwt}` },
+    })
+    if (!res.ok) return []
+    const body = (await res.json()) as { files?: OrgDeletedFile[] }
+    return body.files ?? []
+  } catch {
+    return []
+  }
+}
+
 /**
  * PATCH /api/v2/projects/:id/deadline — set (ISO date string) or clear (null)
  * a project's deadline. Maintainer+ only (server-enforced). Throws on failure.
@@ -297,6 +335,7 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
       ...(f.sourceTextDirection === "ltr" || f.sourceTextDirection === "rtl" ? { sourceTextDirection: f.sourceTextDirection } : {}),
       ...(f.targetTextDirection === "ltr" || f.targetTextDirection === "rtl" ? { targetTextDirection: f.targetTextDirection } : {}),
       ...(f.coreMediaUrl ? { coreMediaUrl: f.coreMediaUrl } : {}),
+      ...(f.timingMode === "dubbing" || f.timingMode === "audioFirst" ? { timingMode: f.timingMode } : {}),
     })),
     members: [],
     syncRole: {
@@ -317,6 +356,12 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
   // AD-9: propagate source link (null = no upstream; undefined = field absent)
   if (summary.sourceProjectId !== undefined) {
     record.sourceProjectId = summary.sourceProjectId
+  }
+  // AQU-822: propagate the org's termbase-edit floor when the server sent it.
+  // Absent (list endpoint / older server) leaves the field undefined, which
+  // callers read as the PROJECT_LEAD default.
+  if (summary.termbaseEditMinRole !== undefined) {
+    record.termbaseEditMinRole = summary.termbaseEditMinRole
   }
   // AQU-476/478: propagate link mode/consumes/gate/cursor when present.
   if (summary.sourceLinkMode !== undefined) record.sourceLinkMode = summary.sourceLinkMode

@@ -13,6 +13,7 @@ interface SeedChangesetArgs {
   status?: "staged" | "committed" | "discarded" | "stale" | "expired"
   digest?: string
   expiresAt?: Date
+  commands?: unknown[]
 }
 
 const DEFAULT_DIGEST = "sha256:deadbeef"
@@ -43,7 +44,7 @@ async function seedChangeset(args: SeedChangesetArgs): Promise<void> {
     `INSERT INTO changesets
         (id, project_id, created_by_user_id, credential_id, autonomy_mode, status,
          commands, preconditions, summary, digest, expires_at)
-     VALUES (?, ?, ?, ?, 'ask', ?, '[]'::jsonb, '[]'::jsonb, ?::jsonb, ?, ?)`,
+     VALUES (?, ?, ?, ?, 'ask', ?, ?::jsonb, '[]'::jsonb, ?::jsonb, ?, ?)`,
   )
     .bind(
       args.id,
@@ -51,9 +52,46 @@ async function seedChangeset(args: SeedChangesetArgs): Promise<void> {
       String(args.createdByUserId),
       args.credentialId,
       args.status ?? "staged",
+      JSON.stringify(args.commands ?? []),
       JSON.stringify({ translationsAdded: 3, translationsModified: 1, warnings: [] }),
       args.digest ?? DEFAULT_DIGEST,
       expiresAt.toISOString(),
+    )
+    .run()
+}
+
+async function seedFile(projectId: string, fileId: string, name: string): Promise<void> {
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO files (id, project_id, name, event_id) VALUES (?, ?, ?, ?)",
+  )
+    .bind(fileId, projectId, name, crypto.randomUUID())
+    .run()
+}
+
+async function seedCell(args: {
+  projectId: string
+  fileId: string
+  cellId: string
+  side: "source" | "target"
+  value: string
+  canonicalRef?: string
+  targetLang?: string
+}): Promise<void> {
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO cells
+        (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at, target_lang)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  )
+    .bind(
+      args.projectId,
+      args.fileId,
+      args.cellId,
+      args.side,
+      args.value,
+      args.canonicalRef ?? null,
+      crypto.randomUUID(),
+      NOW,
+      args.targetLang ?? "",
     )
     .run()
 }
@@ -115,6 +153,146 @@ describe("GET /api/v2/changesets/:id/approval", () => {
       digest: DEFAULT_DIGEST,
     })
     expect(body.summary.translationsAdded).toBe(3)
+  })
+
+  it("returns per-cell before/after changes for SetTranslation commands", async () => {
+    await seedUser(1, "alice")
+    await seedProject("proj-1", "Blackfoot", 1)
+    const credId = await seedCredential(1)
+    await seedFile("proj-1", "file-1", "Genesis")
+    // Cell A has an existing target (a modification); cell B has none (new).
+    await seedCell({ projectId: "proj-1", fileId: "file-1", cellId: "c-a", side: "source", value: "In the beginning", canonicalRef: "GEN 1:1" })
+    await seedCell({ projectId: "proj-1", fileId: "file-1", cellId: "c-a", side: "target", value: "Old draft" })
+    await seedCell({ projectId: "proj-1", fileId: "file-1", cellId: "c-b", side: "source", value: "And the earth", canonicalRef: "GEN 1:2" })
+    await seedChangeset({
+      id: "cs-1",
+      projectId: "proj-1",
+      createdByUserId: 1,
+      credentialId: credId,
+      commands: [
+        { kind: "SetTranslation", fileId: "file-1", cellId: "c-a", value: "New draft A" },
+        { kind: "SetTranslation", fileId: "file-1", cellId: "c-b", value: "New draft B" },
+      ],
+    })
+
+    const res = await app.request(
+      "/api/v2/changesets/cs-1/approval",
+      { method: "GET", headers: authHeader(await jwtFor("alice")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      changes: {
+        total: number
+        truncated: boolean
+        items: {
+          fileId: string
+          fileName: string | null
+          cellId: string
+          canonicalRef: string | null
+          source: string | null
+          before: string | null
+          after: string
+        }[]
+      }
+    }
+    expect(body.changes.total).toBe(2)
+    expect(body.changes.truncated).toBe(false)
+    expect(body.changes.items).toEqual([
+      {
+        fileId: "file-1",
+        fileName: "Genesis",
+        cellId: "c-a",
+        canonicalRef: "GEN 1:1",
+        source: "In the beginning",
+        before: "Old draft",
+        after: "New draft A",
+      },
+      {
+        fileId: "file-1",
+        fileName: "Genesis",
+        cellId: "c-b",
+        canonicalRef: "GEN 1:2",
+        source: "And the earth",
+        before: null,
+        after: "New draft B",
+      },
+    ])
+  })
+
+  it("lane-scopes the before value and reports laneId", async () => {
+    await seedUser(1, "alice")
+    await seedProject("proj-1", "Blackfoot", 1)
+    const credId = await seedCredential(1)
+    await seedFile("proj-1", "file-1", "Genesis")
+    await seedCell({ projectId: "proj-1", fileId: "file-1", cellId: "c-a", side: "source", value: "Source" })
+    await seedCell({ projectId: "proj-1", fileId: "file-1", cellId: "c-a", side: "target", value: "Default-lane draft" })
+    await seedCell({ projectId: "proj-1", fileId: "file-1", cellId: "c-a", side: "target", value: "Spanish draft", targetLang: "es" })
+    await seedChangeset({
+      id: "cs-1",
+      projectId: "proj-1",
+      createdByUserId: 1,
+      credentialId: credId,
+      commands: [{ kind: "SetTranslation", fileId: "file-1", cellId: "c-a", value: "Nuevo", laneId: "es" }],
+    })
+
+    const res = await app.request(
+      "/api/v2/changesets/cs-1/approval",
+      { method: "GET", headers: authHeader(await jwtFor("alice")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      changes: { items: { laneId?: string; before: string | null; after: string }[] }
+    }
+    expect(body.changes.items[0]).toMatchObject({
+      laneId: "es",
+      before: "Spanish draft",
+      after: "Nuevo",
+    })
+  })
+
+  it("returns a sample preview for a PlanImport command", async () => {
+    await seedUser(1, "alice")
+    await seedProject("proj-1", "Blackfoot", 1)
+    const credId = await seedCredential(1)
+    await seedChangeset({
+      id: "cs-1",
+      projectId: "proj-1",
+      createdByUserId: 1,
+      credentialId: credId,
+      commands: [
+        {
+          kind: "PlanImport",
+          fileName: "genesis.usfm",
+          fileType: "usfm",
+          cells: Array.from({ length: 25 }, (_, i) => ({
+            content: `Verse ${i + 1}`,
+            canonicalRef: `GEN 1:${i + 1}`,
+          })),
+        },
+      ],
+    })
+
+    const res = await app.request(
+      "/api/v2/changesets/cs-1/approval",
+      { method: "GET", headers: authHeader(await jwtFor("alice")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      importPreview: {
+        fileName: string
+        fileType: string
+        totalCells: number
+        sampleCells: { canonicalRef: string | null; content: string }[]
+      }
+    }
+    expect(body.importPreview.fileName).toBe("genesis.usfm")
+    expect(body.importPreview.fileType).toBe("usfm")
+    expect(body.importPreview.totalCells).toBe(25)
+    expect(body.importPreview.sampleCells).toHaveLength(10)
+    expect(body.importPreview.sampleCells[0]).toEqual({ canonicalRef: "GEN 1:1", content: "Verse 1" })
   })
 
   it("404s for an absent changeset", async () => {

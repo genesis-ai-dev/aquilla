@@ -41,6 +41,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { fetchAllFileCells } from "@/lib/sync/cells-read"
 import { generateLabelTemplate, parseCsvRows, splitCastName } from "@/lib/parsers/spreadsheet"
 import { emitCastAssign } from "@/lib/sync/events-emit"
@@ -86,6 +87,7 @@ export function LabelImportPanel({
   onImported,
   onCancel,
 }: LabelImportPanelProps) {
+  const t = useT()
   const [phase, setPhase] = useState<"idle" | "importing" | "done">("idle")
   const [error, setError] = useState<string | null>(null)
   const [preview, setPreview] = useState<{
@@ -115,7 +117,7 @@ export function LabelImportPanel({
     void (async () => {
       try {
         const token = await getToken(selectedFileId)
-        if (!token) throw new Error("Could not mint a sync token for this file.")
+        if (!token) throw new Error(t("importExport.labels.couldNotMintToken"))
         const rows = await fetchAllFileCells(projectId, selectedFileId, token, "source")
         if (cancelled) return
         setFileCells(
@@ -127,14 +129,14 @@ export function LabelImportPanel({
         )
       } catch (err) {
         if (!cancelled) {
-          setCellsError(err instanceof Error ? err.message : "Failed to load cells for this file")
+          setCellsError(err instanceof Error ? err.message : t("importExport.labels.failedToLoadCells"))
         }
       }
     })()
     return () => {
       cancelled = true
     }
-  }, [projectId, selectedFileId, getToken])
+  }, [projectId, selectedFileId, getToken, t])
 
   const refCount = fileCells?.filter((c) => c.canonicalRef).length ?? 0
 
@@ -164,12 +166,12 @@ export function LabelImportPanel({
     setPreview(null)
     setPendingFile(file)
     try {
-      if (file.size === 0) throw new Error("The label CSV is empty.")
-      if (file.size > MAX_UNKNOWN_TEXT_BYTES) throw new Error("The label CSV exceeds the 10 MB safety limit.")
+      if (file.size === 0) throw new Error(t("importExport.labels.emptyCsv"))
+      if (file.size > MAX_UNKNOWN_TEXT_BYTES) throw new Error(t("importExport.labels.csvTooLarge"))
       const text = decodeImportText(await file.arrayBuffer(), file.name)
       const rows = parseCsvRows(text)
       if (rows.length === 0) {
-        setError("No rows found in file.")
+        setError(t("importExport.labels.noRowsFound"))
         return
       }
       // Detect header: first row should have "ref" and "cast_name"
@@ -192,9 +194,9 @@ export function LabelImportPanel({
       }
       setPreview(entries)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to parse file")
+      setError(err instanceof Error ? err.message : t("importExport.errors.failedToParseFile"))
     }
-  }, [])
+  }, [t])
 
   /** Apply the cast labels via cast.assign events (AQU-438).
    *
@@ -241,7 +243,7 @@ export function LabelImportPanel({
     try {
       await Promise.all(emits)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to apply labels")
+      setError(err instanceof Error ? err.message : t("importExport.labels.failedToApply"))
       setPhase("idle")
       return
     }
@@ -260,22 +262,22 @@ export function LabelImportPanel({
   return (
     <div className="flex flex-col gap-4 py-2">
       <div>
-        <p className="text-sm font-medium">Cell Labels / Cast Import</p>
+        <p className="text-sm font-medium">{t("importExport.labels.title")}</p>
         <p className="text-xs text-muted-foreground">
-          Download a template with a file's cell references, fill in cast names, then re-upload.
+          {t("importExport.labels.description")}
         </p>
       </div>
 
       {/* Step 1: Pick file + download template */}
       <div className="rounded-lg border p-4 flex flex-col gap-2">
-        <p className="text-xs font-semibold">Step 1 — Choose file &amp; download template</p>
+        <p className="text-xs font-semibold">{t("importExport.labels.step1Heading")}</p>
         <Select
           items={files.map((f) => ({ value: f.id, label: f.name }))}
           value={selectedFileId}
           onValueChange={(v) => setSelectedFileId(v ?? "")}
         >
-          <SelectTrigger size="sm" className="w-full text-xs">
-            <SelectValue placeholder="Choose a file…" />
+          <SelectTrigger size="sm" className="text-xs">
+            <SelectValue placeholder={t("importExport.labels.choosePlaceholder")} />
           </SelectTrigger>
           <SelectContent>
             {files.map((f) => (
@@ -287,27 +289,29 @@ export function LabelImportPanel({
         </Select>
         <p className="text-xs text-muted-foreground">
           {fileCells === null && !cellsError
-            ? "Loading cells…"
-            : `${refCount} cells with references in ${selectedFile?.name ?? "this file"}.`}
+            ? t("importExport.labels.loadingCells")
+            : t("importExport.labels.refCellCount", {
+                count: refCount,
+                fileName: selectedFile?.name ?? t("importExport.labels.thisFileFallback"),
+              })}
         </p>
         {cellsError && <p className="text-xs text-destructive">{cellsError}</p>}
         <Button
           variant="outline"
-          size="sm"
           className="w-fit"
           onClick={handleDownloadTemplate}
           disabled={refCount === 0}
         >
-          Download CSV template
+          {t("importExport.labels.downloadTemplate")}
         </Button>
       </div>
 
       {/* Step 2: Upload filled template */}
       <div className="rounded-lg border p-4 flex flex-col gap-2">
-        <p className="text-xs font-semibold">Step 2 — Upload filled template</p>
+        <p className="text-xs font-semibold">{t("importExport.labels.step2Heading")}</p>
         <label>
           <span className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors">
-            Choose file
+            {t("editor.video.chooseFile")}
           </span>
           <input
             type="file"
@@ -325,15 +329,15 @@ export function LabelImportPanel({
       {preview && preview.length > 0 && (
         <div>
           <p className="mb-1.5 text-xs font-medium">
-            {preview.length} label{preview.length !== 1 ? "s" : ""} to import
+            {t("importExport.labels.previewLabelCount", { count: preview.length })}
           </p>
           <ScrollArea className="max-h-40 rounded-md border">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Ref</TableHead>
-                  <TableHead>Voice</TableHead>
-                  <TableHead>Camera</TableHead>
+                  <TableHead>{t("terminology.termDetail.columnRef")}</TableHead>
+                  <TableHead>{t("importExport.dialog.voiceLegend")}</TableHead>
+                  <TableHead>{t("importExport.labels.previewCameraHeader")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -348,7 +352,7 @@ export function LabelImportPanel({
             </Table>
           </ScrollArea>
           {preview.length > 20 && (
-            <p className="mt-1 text-xs text-muted-foreground">…and {preview.length - 20} more</p>
+            <p className="mt-1 text-xs text-muted-foreground">{t("importExport.dialog.andMore", { count: preview.length - 20 })}</p>
           )}
         </div>
       )}
@@ -357,17 +361,17 @@ export function LabelImportPanel({
 
       {/* Actions */}
       <div className="flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onCancel}>
-          Cancel
+        <Button variant="ghost" onClick={onCancel}>
+          {t("common.cancel")}
         </Button>
         {preview && preview.length > 0 && phase === "idle" && (
-          <Button size="sm" onClick={handleImport} disabled={fileCells === null}>
-            Import {preview.length} label{preview.length !== 1 ? "s" : ""}
+          <Button onClick={handleImport} disabled={fileCells === null}>
+            {t("importExport.labels.importLabelCount", { count: preview.length })}
           </Button>
         )}
         {phase === "importing" && (
-          <Button size="sm" disabled>
-            Importing…
+          <Button disabled>
+            {t("importExport.action.importing")}
           </Button>
         )}
       </div>

@@ -102,7 +102,7 @@ function reconcileTabs(
     next = [...next, { id: newTabId(), fileId: activeFileId }]
   }
 
-  return next.length === tabs.length && next.every((tab, index) => sameTab(tab, tabs[index]!))
+  return next.length === tabs.length && next.every((tab, index) => sameTab(tab, tabs[index]))
     ? tabs
     : next
 }

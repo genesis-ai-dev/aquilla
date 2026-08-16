@@ -60,6 +60,8 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'cell.audio.attach': ROLE.CONTRIBUTOR,
   'cell.audio.select': ROLE.CONTRIBUTOR,
   'cell.audio.remove': ROLE.CONTRIBUTOR,
+  'cell.audio.rename': ROLE.CONTRIBUTOR,
+  'cell.audio.measure': ROLE.CONTRIBUTOR,
   // AQU-508: approving/withdrawing approval of a cell's audio is a review
   // action — reviewer(300)+, mirroring the text-side cell.validate gate.
   'cell.audio.validate': ROLE.REVIEWER,
@@ -111,9 +113,14 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
 
   // Timeline editor: retiming a cell (move/stretch) is a translator-level edit.
   'cell.retime': ROLE.CONTRIBUTOR,
+  'cell.lane.retime': ROLE.CONTRIBUTOR,
   // Timeline editor: linking a core video to a file — contributor-level, like
   // file.rename (normal editing flow, not a structural change to the inventory).
   'file.video.set': ROLE.CONTRIBUTOR,
+  // The timing mode changes how the whole file lays out and plays for
+  // everyone — structural, so it keeps the clearance the setting had when it
+  // lived in Project Settings (the shared-settings maintainer floor).
+  'file.timing.set': ROLE.MAINTAINER,
 
   // AQU-476: mirror-engine kinds are server-emitted only (link-sync.ts calls
   // buildEventProjectionStmts directly in-process — never through the client

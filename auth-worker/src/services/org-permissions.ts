@@ -155,6 +155,7 @@ export async function getEffectiveOrgRole(
 export interface OrgMemberWithUser {
   userId: number
   username: string
+  email: string | null
   roleLevel: number
   /** ISO timestamp of last project-context activity, or NULL. */
   lastActiveAt: string | null
@@ -166,7 +167,7 @@ export async function listOrgMembersWithUsers(
   orgId: number,
 ): Promise<OrgMemberWithUser[]> {
   const result = await env.AQUILLA_PG.prepare(
-    `SELECT om.user_id AS user_id, u.username AS username,
+    `SELECT om.user_id AS user_id, u.username AS username, u.email AS email,
             om.role_level AS role_level, om.last_active_at AS last_active_at
      FROM org_members om
      INNER JOIN users u ON u.id = om.user_id
@@ -177,6 +178,7 @@ export async function listOrgMembersWithUsers(
     .all<{
       user_id: number
       username: string
+      email: string | null
       role_level: number
       last_active_at: string | null
     }>()
@@ -184,6 +186,7 @@ export async function listOrgMembersWithUsers(
   return (result.results ?? []).map((r) => ({
     userId: r.user_id,
     username: r.username,
+    email: r.email ?? null,
     roleLevel: r.role_level,
     lastActiveAt: r.last_active_at,
   }))
@@ -286,6 +289,8 @@ export interface SecondarySrc {
 export interface EffectiveMember {
   userId: number
   username: string
+  /** Account email when known; null only if the users row has none. */
+  email: string | null
   roleLevel: number
   /** Path that produced the user's max-wins role (AD-12). */
   source: "override" | "group" | "org" | "creator"
@@ -318,31 +323,37 @@ export async function listEffectiveProjectMembers(
   // Each path is fetched separately and merged via max-wins so attribution
   // is exact (a JOIN-based approach would lose per-user attribution).
   const direct = await env.AQUILLA_PG.prepare(
-    `SELECT pm.user_id AS user_id, u.username AS username, pm.role_level AS role_level
+    `SELECT pm.user_id AS user_id, u.username AS username, u.email AS email, pm.role_level AS role_level
      FROM project_members pm
      INNER JOIN users u ON u.id = pm.user_id
      WHERE pm.project_id = ?`,
   )
     .bind(projectId)
-    .all<{ user_id: number; username: string; role_level: number }>()
+    .all<{ user_id: number; username: string; email: string | null; role_level: number }>()
 
   // Collect ALL per-path contributions keyed by userId, then derive the
   // winner and secondarySources in a second pass.
   type PathEntry = { source: EffectiveMember["source"]; level: number; priority: number }
-  const allPaths = new Map<number, { username: string; paths: PathEntry[] }>()
+  const allPaths = new Map<number, { username: string; email: string | null; paths: PathEntry[] }>()
 
   const record = (
     userId: number,
     username: string,
+    email: string | null,
     source: EffectiveMember["source"],
     level: number,
   ): void => {
-    if (!allPaths.has(userId)) allPaths.set(userId, { username, paths: [] })
+    const existing = allPaths.get(userId)
+    if (!existing) {
+      allPaths.set(userId, { username, email, paths: [] })
+    } else if (!existing.email && email) {
+      existing.email = email
+    }
     allPaths.get(userId)!.paths.push({ source, level, priority: SOURCE_PRIORITY[source] })
   }
 
   for (const r of direct.results ?? []) {
-    record(r.user_id, r.username, "override", r.role_level)
+    record(r.user_id, r.username, r.email, "override", r.role_level)
   }
 
   // AD-12: surface every user who reaches the project via a group attached
@@ -351,51 +362,52 @@ export async function listEffectiveProjectMembers(
   const groupRows = await env.AQUILLA_PG.prepare(
     `SELECT gm.user_id AS user_id,
             u.username AS username,
+            u.email AS email,
             MAX(gpg.role_level) AS role_level
        FROM group_project_grants gpg
        JOIN group_members gm ON gm.group_id = gpg.group_id
        JOIN users u          ON u.id = gm.user_id
       WHERE gpg.project_id = ?
-      GROUP BY gm.user_id, u.username`,
+      GROUP BY gm.user_id, u.username, u.email`,
   )
     .bind(projectId)
-    .all<{ user_id: number; username: string; role_level: number | null }>()
+    .all<{ user_id: number; username: string; email: string | null; role_level: number | null }>()
 
   for (const r of groupRows.results ?? []) {
     if (r.role_level == null) continue
-    record(r.user_id, r.username, "group", r.role_level)
+    record(r.user_id, r.username, r.email, "group", r.role_level)
   }
 
   if (orgId != null) {
     const orgMembers = await env.AQUILLA_PG.prepare(
-      `SELECT om.user_id AS user_id, u.username AS username, om.role_level AS role_level
+      `SELECT om.user_id AS user_id, u.username AS username, u.email AS email, om.role_level AS role_level
        FROM org_members om
        INNER JOIN users u ON u.id = om.user_id
        WHERE om.org_id = ?`,
     )
       .bind(orgId)
-      .all<{ user_id: number; username: string; role_level: number }>()
+      .all<{ user_id: number; username: string; email: string | null; role_level: number }>()
 
     for (const r of orgMembers.results ?? []) {
       // AQU-435: only Maintainer+ org roles are an access path — a
       // sub-maintainer org member does NOT appear as having access via org.
       if (r.role_level < ORG_WIDE_ACCESS_FLOOR) continue
-      record(r.user_id, r.username, "org", r.role_level)
+      record(r.user_id, r.username, r.email, "org", r.role_level)
     }
   }
 
   const creatorRow = await env.AQUILLA_PG.prepare(
-    "SELECT id, username FROM users WHERE id = ?",
+    "SELECT id, username, email FROM users WHERE id = ?",
   )
     .bind(createdBy)
-    .first<{ id: number; username: string }>()
+    .first<{ id: number; username: string; email: string | null }>()
   if (creatorRow) {
-    record(creatorRow.id, creatorRow.username, "creator", 700)
+    record(creatorRow.id, creatorRow.username, creatorRow.email, "creator", 700)
   }
 
   // Derive winner + secondarySources for each user.
   const results: EffectiveMember[] = []
-  for (const [userId, { username, paths }] of allPaths) {
+  for (const [userId, { username, email, paths }] of allPaths) {
     // Sort paths: highest level first, ties broken by priority (higher wins).
     paths.sort((a, b) => b.level - a.level || b.priority - a.priority)
     const winner = paths[0]
@@ -406,6 +418,7 @@ export async function listEffectiveProjectMembers(
     results.push({
       userId,
       username,
+      email,
       roleLevel: winner.level,
       source: winner.source,
       secondarySources: secondary,
@@ -433,10 +446,10 @@ type PathEntry = { source: EffectiveMember["source"]; level: number; priority: n
  * on attribution semantics.
  */
 function deriveEffectiveMembers(
-  allPaths: Map<number, { username: string; paths: PathEntry[] }>,
+  allPaths: Map<number, { username: string; email?: string | null; paths: PathEntry[] }>,
 ): EffectiveMember[] {
   const results: EffectiveMember[] = []
-  for (const [userId, { username, paths }] of allPaths) {
+  for (const [userId, { username, email = null, paths }] of allPaths) {
     paths.sort((a, b) => b.level - a.level || b.priority - a.priority)
     const winner = paths[0]
     const secondary: SecondarySrc[] = paths
@@ -446,6 +459,7 @@ function deriveEffectiveMembers(
     results.push({
       userId,
       username,
+      email,
       roleLevel: winner.level,
       source: winner.source,
       secondarySources: secondary,
@@ -643,7 +657,8 @@ export interface OrgGroupDetail {
   id: number
   name: string
   description: string | null
-  members: Array<{ userId: number; username: string; roleLevel: number | null }>
+
+  members: Array<{ userId: number; username: string; email: string | null; roleLevel: number | null }>
   projects: Array<{ id: string; name: string; grantedRoleLevel: number }>
 }
 
@@ -661,7 +676,7 @@ export async function getOrgGroupDetail(
   if (!group) return null
 
   const members = await env.AQUILLA_PG.prepare(
-    `SELECT gm.user_id AS user_id, u.username AS username, om.role_level AS role_level
+    `SELECT gm.user_id AS user_id, u.username AS username, u.email AS email, om.role_level AS role_level
        FROM group_members gm
        JOIN users u ON u.id = gm.user_id
        LEFT JOIN org_members om ON om.org_id = ? AND om.user_id = gm.user_id
@@ -669,7 +684,7 @@ export async function getOrgGroupDetail(
       ORDER BY LOWER(u.username)`,
   )
     .bind(orgId, groupId)
-    .all<{ user_id: number; username: string; role_level: number | null }>()
+    .all<{ user_id: number; username: string; email: string | null; role_level: number | null }>()
 
   const projects = await env.AQUILLA_PG.prepare(
     `SELECT gpg.project_id AS id, p.name AS name, gpg.role_level AS granted
@@ -685,7 +700,12 @@ export async function getOrgGroupDetail(
     id: group.id,
     name: group.name,
     description: group.description ?? null,
-    members: (members.results ?? []).map((m) => ({ userId: m.user_id, username: m.username, roleLevel: m.role_level })),
+    members: (members.results ?? []).map((m) => ({
+      userId: m.user_id,
+      username: m.username,
+      email: m.email ?? null,
+      roleLevel: m.role_level,
+    })),
     projects: (projects.results ?? []).map((p) => ({ id: p.id, name: p.name, grantedRoleLevel: p.granted })),
   }
 }
@@ -806,6 +826,17 @@ export interface PortfolioLane {
 
 export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; sourceLanguage: string | null; targetLanguage: string | null; lanes: PortfolioLane[] }
 export interface OrgPortfolioRow extends PortfolioRow { orgId: number }
+
+/** Soft-deleted file in an org the caller can see (Archived → Recently deleted). */
+export interface OrgDeletedFile {
+  fileId: string
+  name: string
+  projectId: string
+  projectName: string
+  fileType: string
+  cellCount: number
+  deletedAt: number
+}
 
 interface PortfolioDbRow {
   org_id: number
@@ -1050,6 +1081,52 @@ export async function getOrgPortfolio(
   ).all<PortfolioDbRow>()
   const lanesByProject = await fetchPortfolioLanes(env, [orgId])
   return (rows.results ?? []).map((r) => mapPortfolioRow(r, lanesByProject))
+}
+
+/**
+ * Soft-deleted files across projects the caller can see in this org.
+ * Includes files whose parent project is archived — those still belong in
+ * Recently deleted, attributed via projectName. Same visibility predicate as
+ * the portfolio so a regular member cannot learn file names from projects
+ * they cannot open.
+ */
+export async function getOrgDeletedFiles(
+  env: Env,
+  orgId: number,
+  viewer: { userId: number; isAdmin: boolean },
+): Promise<OrgDeletedFile[]> {
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT f.id AS file_id, f.name AS name, f.project_id AS project_id,
+            p.name AS project_name, f.kind AS kind, f.role AS role,
+            f.cell_count AS cell_count, f.deleted_at AS deleted_at
+       FROM files f
+       JOIN projects p ON p.id = f.project_id
+      WHERE p.org_id = ?
+        AND f.deleted_at IS NOT NULL
+        AND ${PORTFOLIO_VISIBILITY_PREDICATE}
+      ORDER BY f.deleted_at DESC NULLS LAST, LOWER(f.name)`,
+  ).bind(
+    orgId,
+    viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId,
+  ).all<{
+    file_id: string
+    name: string
+    project_id: string
+    project_name: string
+    kind: string | null
+    role: string | null
+    cell_count: number | null
+    deleted_at: number | string
+  }>()
+  return (rows.results ?? []).map((r) => ({
+    fileId: r.file_id,
+    name: r.name,
+    projectId: r.project_id,
+    projectName: r.project_name,
+    fileType: r.kind ?? r.role ?? "codex",
+    cellCount: Number(r.cell_count) || 0,
+    deletedAt: Number(r.deleted_at),
+  }))
 }
 
 /** Batched portfolio rollup for all-org dashboard/list views. */
@@ -1390,3 +1467,58 @@ export function canViewMemberProgress(callerRoleLevel: number | null, progressMi
   if (callerRoleLevel == null) return false
   return callerRoleLevel >= progressMinRole
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-822: configurable termbase-edit floor
+//
+// Same org_settings permission-policy pattern as the read floors above, but
+// this one gates a WRITE: who may manage a project's termbase (add, edit,
+// delete, archive concepts). Requested by BGP so translators — Contributors
+// (400) — can own terminology on their own projects; other partners keep the
+// stricter default, hence an org-level setting rather than a global change.
+//
+// The default is PROJECT_LEAD (500), NOT the MAINTAINER default the read
+// floors use: 500 is the level the client has always shown the termbase
+// editor at (TERMBASE_EDIT_LEVEL in src/lib/terminology/glossary-view.ts).
+// Before this issue the only server-side gate on terminology was the generic
+// project-settings write floor (MAINTAINER 600), so a project_lead saw an
+// editor whose saves 403'd. Defaulting to 500 closes that divergence in
+// favour of the long-advertised client behavior.
+//
+// Lowering the floor grants FULL terminology management at that level — no
+// draft/suggestion/approval layer (decided 2026-08-07). It does NOT widen any
+// other project setting: enforcement is terminology-scoped, see the
+// `terminology`-only carve-out in routes/project-settings.ts.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Default floor for managing a project's termbase when the org hasn't set one. */
+export const DEFAULT_TERMBASE_EDIT_MIN_ROLE = 500 // ROLE.PROJECT_LEAD
+
+/**
+ * Resolve the effective termbase-edit floor for an org (falls back to the
+ * PROJECT_LEAD default when the org hasn't configured one, or configured a
+ * value outside the role ladder).
+ */
+export async function getTermbaseEditMinRole(env: Env, orgId: number): Promise<number> {
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  return extractRoleFloor(settings, "termbaseEditMinRole", DEFAULT_TERMBASE_EDIT_MIN_ROLE)
+}
+
+/**
+ * Resolve the termbase-edit floor that applies to a project, via its org.
+ * Projects with no org (personal / not-yet-attached) fall back to the same
+ * PROJECT_LEAD default — there is no org policy to consult.
+ */
+export async function getTermbaseEditMinRoleForProject(
+  env: Env,
+  projectId: string,
+): Promise<number> {
+  const project = await env.AQUILLA_PG.prepare(
+    "SELECT org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  if (!project?.org_id) return DEFAULT_TERMBASE_EDIT_MIN_ROLE
+  return getTermbaseEditMinRole(env, project.org_id)
+}
+

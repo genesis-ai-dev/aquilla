@@ -27,6 +27,7 @@ import {
   getSessionReplayUrl,
   type ReportContext,
 } from "@/lib/report-problem"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   open: boolean
@@ -36,6 +37,7 @@ interface Props {
 type State = "idle" | "submitted" | "copied"
 
 export function ReportProblemDialog({ open, onOpenChange }: Props) {
+  const t = useT()
   const { pathname } = useLocation()
   // Route-level params — may be undefined on non-project pages
   const params = useParams<{ id?: string; fileId?: string }>()
@@ -50,7 +52,7 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
     projectId: params.id,
     fileId: params.fileId,
   }
-  const descriptionError = !description.trim() ? "Description is required" : null
+  const descriptionError = !description.trim() ? t("nav.report.descriptionRequired") : null
 
   function handleSubmit() {
     setAttempted(true)
@@ -81,19 +83,19 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Report a problem</DialogTitle>
+          <DialogTitle>{t("nav.report.title")}</DialogTitle>
           <DialogDescription>
             {analyticsEnabled
-              ? "Describe what went wrong. Your report will be sent along with session context."
-              : "Analytics are off — your report won't be sent automatically. You can copy it to share manually."}
+              ? t("nav.report.descriptionEnabled")
+              : t("nav.report.descriptionDisabled")}
           </DialogDescription>
         </DialogHeader>
 
         {state === "submitted" ? (
           <div className="space-y-3 py-2 text-sm text-muted-foreground">
-            <p>Thanks — report received.</p>
+            <p>{t("nav.report.thanks")}</p>
             {getSessionReplayUrl() && (
-              <p className="text-xs">Session replay linked to the report.</p>
+              <p className="text-xs">{t("nav.report.replayLinked")}</p>
             )}
           </div>
         ) : (
@@ -101,11 +103,11 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
             <div className="flex flex-col gap-2 py-1">
               <Field data-invalid={attempted && !!descriptionError}>
                 <FieldLabel htmlFor="report-problem-description" className="sr-only">
-                  Description
+                  {t("nav.report.descriptionFieldLabel")}
                 </FieldLabel>
                 <Textarea
                   id="report-problem-description"
-                  placeholder="What went wrong?"
+                  placeholder={t("nav.report.placeholder")}
                   rows={4}
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
@@ -115,23 +117,22 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
                 {attempted && descriptionError && <FieldError>{descriptionError}</FieldError>}
               </Field>
               <p className="text-xs text-muted-foreground">
-                Captured context: <span className="font-mono">{pathname}</span>
+                {t("nav.report.capturedContext")} <span className="font-mono">{pathname}</span>
                 {params.id && (
                   <>
-                    {" "}· project <span className="font-mono">{params.id}</span>
+                    {" "}· {t("common.project")} <span className="font-mono">{params.id}</span>
                   </>
                 )}
                 {params.fileId && (
                   <>
-                    {" "}· file <span className="font-mono">{params.fileId}</span>
+                    {" "}· {t("common.file")} <span className="font-mono">{params.fileId}</span>
                   </>
                 )}
               </p>
 
               {!analyticsEnabled && (
                 <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-950/30 dark:text-amber-400">
-                  Usage data collection is off. Enable it in Preferences if you&apos;d like
-                  reports to be sent automatically — or use "Copy report" to share it manually.
+                  {t("nav.report.analyticsOffNotice")}
                 </p>
               )}
             </div>
@@ -142,7 +143,7 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
                   onClick={handleSubmit}
                   className="w-full sm:w-auto"
                 >
-                  Send report
+                  {t("nav.report.sendReport")}
                 </Button>
               ) : (
                 <Button
@@ -150,11 +151,11 @@ export function ReportProblemDialog({ open, onOpenChange }: Props) {
                   onClick={handleCopy}
                   className="w-full sm:w-auto"
                 >
-                  {state === "copied" ? "Copied!" : "Copy report"}
+                  {state === "copied" ? t("nav.report.copied") : t("nav.report.copyReport")}
                 </Button>
               )}
               <Button variant="ghost" onClick={handleClose} className="w-full sm:w-auto">
-                Cancel
+                {t("common.cancel")}
               </Button>
             </DialogFooter>
           </>

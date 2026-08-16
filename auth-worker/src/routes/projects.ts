@@ -50,9 +50,11 @@ import { getFileChapters, getMyAssignments, getProjectAssignmentRoster } from ".
 import {
   bumpOrgActivity,
   canViewRoster,
+  DEFAULT_TERMBASE_EDIT_MIN_ROLE,
   getEffectiveOrgRole,
   getOrCreateUserOrg,
   getRosterViewMinRole,
+  getTermbaseEditMinRole,
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
@@ -107,6 +109,14 @@ interface FileProjection {
   targetLanguage?: string
   sourceTextDirection?: "ltr" | "rtl"
   targetTextDirection?: "ltr" | "rtl"
+  /** Linked core video, read from files.meta like the fields above. AQU-646:
+   *  the client has mapped this since the timeline shipped, but it was never
+   *  sent — so a linked video never reached the app at all, and the editor's
+   *  video surface was dead on every cold load. */
+  coreMediaUrl?: string
+  /** The file's audio timing mode (file.timing.set), read from files.meta.
+   *  Omitted when unset → client falls back to the project-level default. */
+  timingMode?: "dubbing" | "audioFirst"
 }
 
 /**
@@ -149,10 +159,14 @@ async function loadFilesByProject(
     let sourceTextDirection: "ltr" | "rtl" | undefined
     let targetTextDirection: "ltr" | "rtl" | undefined
     let hasScriptureContent: boolean | undefined
+    let coreMediaUrl: string | undefined
+    let timingMode: "dubbing" | "audioFirst" | undefined
     if (f.meta) {
       try {
         const m = JSON.parse(f.meta) as {
           orderedBy?: string
+          coreMediaUrl?: unknown
+          timingMode?: unknown
           source_language?: string
           target_language?: string
           sourceLanguage?: string
@@ -169,6 +183,8 @@ async function loadFilesByProject(
         sourceTextDirection = normalizeTextDirection(m.source_text_direction ?? m.sourceTextDirection)
         targetTextDirection = normalizeTextDirection(m.target_text_direction ?? m.targetTextDirection)
         if (m.aquillaImport?.hasScriptureContent === true) hasScriptureContent = true
+        if (typeof m.coreMediaUrl === "string" && m.coreMediaUrl.trim()) coreMediaUrl = m.coreMediaUrl
+        if (m.timingMode === "dubbing" || m.timingMode === "audioFirst") timingMode = m.timingMode
       } catch {
         // malformed meta → leave orderedBy unset (client defaults to sequence)
       }
@@ -186,6 +202,8 @@ async function loadFilesByProject(
       ...(targetLanguage ? { targetLanguage } : {}),
       ...(sourceTextDirection ? { sourceTextDirection } : {}),
       ...(targetTextDirection ? { targetTextDirection } : {}),
+      ...(coreMediaUrl ? { coreMediaUrl } : {}),
+      ...(timingMode ? { timingMode } : {}),
     })
     byProject.set(f.project_id, list)
   }
@@ -517,10 +535,20 @@ projects.get("/:projectId", authMiddleware, async (c) => {
   const filesByProject = await loadFilesByProject(c.env, [projectId])
   const files = filesByProject.get(projectId) ?? []
 
+  // AQU-822: the org's effective termbase-edit floor travels with the project
+  // so the client can gate the terminology UI (and its settings write) without
+  // a second org-settings round trip. Server-authoritative either way — the
+  // project-settings route re-resolves it on every terminology write.
+  const termbaseEditMinRole =
+    row.org_id != null
+      ? await getTermbaseEditMinRole(c.env, row.org_id)
+      : DEFAULT_TERMBASE_EDIT_MIN_ROLE
+
   return c.json({
     id: row.id,
     name: row.name,
     orgId: row.org_id,
+    termbaseEditMinRole,
     archivedAt: row.archived_at,
     archivedBy: row.archived_by
       ? { id: row.archived_by, username: row.archived_by_username }
@@ -857,6 +885,7 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
     members: members.map((m) => ({
       userId: m.userId,
       username: m.username,
+      email: m.email,
       role: {
         level: m.roleLevel,
         name: roleNameFor(m.roleLevel),
@@ -1144,18 +1173,38 @@ projects.delete("/:projectId/files/:fileId", authMiddleware, async (c) => {
   }
 
   // Best-effort R2 cleanup via sync-worker's admin endpoint.
-  if (c.env.SYNC_WORKER_URL && c.env.SYNC_SECRET_KEY) {
+  //
+  // Prefer the dedicated ADMIN_SECRET, falling back to SYNC_SECRET_KEY, so
+  // this stays in step with sync-worker's `resolveAdminSecret` (OPS-2; see
+  // sync-worker/src/lib/admin-secret.ts). Both
+  // sides must be provisioned together: sync-worker stops accepting the
+  // signing key the moment its own ADMIN_SECRET is set, and because the call
+  // below only warns on failure, a one-sided rollout would 401 silently and
+  // leave every deleted file's blobs behind in R2.
+  //
+  // BOTH branches are trimmed to match `resolveAdminSecret`, which trims both.
+  // Sending an untrimmed fallback while the receiver compares a trimmed one
+  // means a `SYNC_SECRET_KEY` carrying a trailing newline — what
+  // `echo secret | wrangler secret put` stores, as against `printf %s` —
+  // authenticates nowhere, and fails down the same silent 401 path this
+  // comment is about.
+  const adminSecret = c.env.ADMIN_SECRET?.trim() || c.env.SYNC_SECRET_KEY?.trim()
+  if (c.env.SYNC_WORKER_URL && adminSecret) {
     try {
       const res = await fetch(
         `${c.env.SYNC_WORKER_URL.replace(/\/$/, "")}/admin/files/${encodeURIComponent(projectId)}/${encodeURIComponent(fileId)}`,
         {
           method: "DELETE",
-          headers: { Authorization: `Bearer ${c.env.SYNC_SECRET_KEY}` },
+          headers: { Authorization: `Bearer ${adminSecret}` },
         },
       )
       if (!res.ok) {
+        // 401 here means the two workers disagree about which secret guards
+        // /admin/*, not that the file was already gone — call it out by name
+        // so a half-finished migration is visible in the logs.
         console.warn(
-          `sync-worker R2 cleanup returned HTTP ${res.status} for ${projectId}/${fileId}`,
+          `sync-worker R2 cleanup returned HTTP ${res.status} for ${projectId}/${fileId}` +
+            (res.status === 401 ? " — ADMIN_SECRET mismatch between identity and sync" : ""),
         )
       }
     } catch (err) {

@@ -11,7 +11,7 @@
 
 import { errorResponse } from './errors'
 import { AUTH_HINT } from './discovery-route'
-import { handlePrepare } from './prepare'
+import { approvalUrlFor, handlePrepare } from './prepare'
 import { handleCommit } from './commit'
 import { loadChangeset, changesetToResponse } from './store'
 import { ROLE } from '../events/role-policy'
@@ -49,7 +49,7 @@ async function handleGet(
   if (!role || role.level < ROLE.VIEWER) {
     return errorResponse('permission_denied', 'no project membership')
   }
-  const approvalUrl = `${env.BASE_URL ?? ''}/approve/${cs.id}`
+  const approvalUrl = approvalUrlFor(env, cs.id)
   return Response.json({ changeset: changesetToResponse(cs), approvalUrl })
 }
 

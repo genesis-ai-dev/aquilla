@@ -556,6 +556,11 @@ CREATE TABLE cell_audio (
     created_ts         BIGINT NOT NULL,
     trim_start_ms      BIGINT,
     trim_end_ms        BIGINT,
+    -- AQU-646 round 8: a take's PERMANENT display name ("Take 3", or whatever
+    -- the user renamed it to). Never derived from list position — deleting a
+    -- take must not renumber the rest. Set at attach, changed by
+    -- cell.audio.rename only.
+    label              TEXT,
     -- AQU-508: audio validation, distinct from text validation (cells.validated).
     -- A reviewer approves the *selected* clip of a cell via cell.audio.validate;
     -- cell.audio.unvalidate clears it. The audio-validated rollup counts cells
@@ -1173,13 +1178,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS scene_briefs_live
   WHERE status='approved';
 CREATE INDEX IF NOT EXISTS scene_briefs_lookup
   ON scene_briefs(project_id, file_id, start_cell_id);
+CREATE INDEX IF NOT EXISTS scene_briefs_run_provenance_time
+  ON scene_briefs(project_id, (provenance ->> 'runId'), created_at DESC, id DESC);
 
 -- Contextual run engine (0071_contextual_runs.sql; pipeline design §8, slice D1).
 -- contextual_runs: one durable pipeline run; span_cursor {seeds, nextIndex}
 -- makes every tick resumable from Postgres. contextual_steering: the human
 -- steering inbox (consumed, never deleted). contextual_drafts: staged span
 -- drafts awaiting review (v1 deviation: NOT the changesets table); a
--- re-propose supersedes the old proposed row in the same batch.
+-- re-propose supersedes the old proposed row in the same batch. Each
+-- proposal carries target_lang so sibling language lanes keep independent
+-- review queues.
 CREATE TABLE IF NOT EXISTS contextual_runs (
   id text PRIMARY KEY,                  -- uuidv7 (time-ordered; client store compares lexicographically)
   project_id text NOT NULL,
@@ -1215,6 +1224,10 @@ CREATE INDEX IF NOT EXISTS contextual_runs_driver
 CREATE INDEX IF NOT EXISTS contextual_runs_scope_group
   ON contextual_runs(scope_group)
   WHERE scope_group IS NOT NULL;
+CREATE INDEX IF NOT EXISTS contextual_runs_project_time
+  ON contextual_runs(project_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS contextual_runs_project_lane_time
+  ON contextual_runs(project_id, file_id, target_lang, created_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS contextual_steering (
   id text PRIMARY KEY,                  -- uuidv7
@@ -1236,6 +1249,7 @@ CREATE TABLE IF NOT EXISTS contextual_drafts (
   project_id text NOT NULL,
   file_id text NOT NULL,
   cell_id text NOT NULL,
+  target_lang text NOT NULL DEFAULT '', -- lane ('' = project default); copied from the owning run
   scene_brief_id text,
   text text NOT NULL,
   verdicts jsonb,                       -- verifier verdict summary for the review card
@@ -1246,13 +1260,76 @@ CREATE TABLE IF NOT EXISTS contextual_drafts (
   reviewed_at timestamptz,
   reviewed_by text
 );
--- One live proposal per cell; a re-propose supersedes the old row first
--- (same batch) so this index never conflicts.
+-- One live proposal per cell per lane; a re-propose supersedes the old row
+-- first (same batch) so this index never conflicts. Sibling languages on the
+-- same cell keep independent review queues (0075).
 CREATE UNIQUE INDEX IF NOT EXISTS contextual_drafts_live
-  ON contextual_drafts(project_id, file_id, cell_id)
+  ON contextual_drafts(project_id, file_id, cell_id, target_lang)
   WHERE status = 'proposed';
 CREATE INDEX IF NOT EXISTS contextual_drafts_run
   ON contextual_drafts(run_id, status);
+CREATE INDEX IF NOT EXISTS contextual_drafts_project_status_run_time
+  ON contextual_drafts(project_id, status, run_id, created_at DESC, id DESC);
+
+-- Durable contextual-run activity (0074_contextual_run_events.sql; AQU-826).
+-- Append-only, bounded product telemetry: never prompts, draft text, model
+-- reasoning, or token deltas. The shared write primitive applies a strict
+-- per-kind detail allowlist before these database byte guards.
+CREATE TABLE IF NOT EXISTS contextual_run_events (
+  id text PRIMARY KEY,                  -- uuidv7
+  run_id text NOT NULL,
+  project_id text NOT NULL,
+  file_id text NOT NULL,
+  kind text NOT NULL CHECK (kind IN (
+    'run_created',
+    'run_state',
+    'span_started',
+    'phase',
+    'scene_ready',
+    'drafts_staged',
+    'span_outcome',
+    'steering_queued',
+    'draft_reviewed'
+  )),
+  span_id text,
+  span_label text,
+  status text,
+  phase text CHECK (phase IS NULL OR phase IN ('reading','drafting','checking','staging')),
+  summary text NOT NULL,
+  details jsonb NOT NULL DEFAULT '{}'::jsonb
+    CHECK (jsonb_typeof(details) = 'object')
+    CHECK (octet_length(details::text) <= 8192),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (char_length(id) = 36),
+  CHECK (octet_length(run_id) <= 512),
+  CHECK (octet_length(project_id) <= 512),
+  CHECK (octet_length(file_id) <= 512),
+  CHECK (span_id IS NULL OR octet_length(span_id) <= 512),
+  CHECK (status IS NULL OR octet_length(status) <= 64),
+  CHECK (octet_length(summary) <= 512),
+  CHECK (span_label IS NULL OR octet_length(span_label) <= 512)
+);
+CREATE INDEX IF NOT EXISTS contextual_run_events_run_time
+  ON contextual_run_events(run_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS contextual_run_events_project_time
+  ON contextual_run_events(project_id, created_at DESC, id DESC);
+
+-- Cross-isolate weighted capacity leases for project Autopilot waves (0074).
+-- Rows are ephemeral coordination state: every lease expires and is deleted
+-- on normal completion; project-row locking serializes capacity acquisition.
+CREATE TABLE IF NOT EXISTS contextual_project_leases (
+  id text PRIMARY KEY,
+  project_id text NOT NULL,
+  run_id text NOT NULL UNIQUE,
+  weight integer NOT NULL CHECK (weight BETWEEN 1 AND 1000),
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (char_length(id) = 36),
+  CHECK (octet_length(project_id) <= 512),
+  CHECK (octet_length(run_id) <= 512)
+);
+CREATE INDEX IF NOT EXISTS contextual_project_leases_project_expiry
+  ON contextual_project_leases(project_id, expires_at);
 
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new

@@ -44,10 +44,6 @@ export function setUserApiKey(purpose: ApiKeyPurpose, value: string | undefined)
   notify()
 }
 
-export function hasUserApiKey(purpose: ApiKeyPurpose): boolean {
-  return Boolean(getUserApiKey(purpose))
-}
-
 /**
  * Resolve an API key with project-takes-precedence semantics.
  *

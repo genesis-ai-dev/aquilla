@@ -7,6 +7,7 @@ import { Mic, MicOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   onOpenRecording: () => void
@@ -29,16 +30,19 @@ export function getUnsupportedReason(): string | null {
 }
 
 export function CellAudioRecordButton({ onOpenRecording, disabled, micDenied }: Props) {
+  const t = useT()
   const [showDeniedHelp, setShowDeniedHelp] = useState(false)
   const unsupportedReason = getUnsupportedReason()
   const blocked = disabled || unsupportedReason !== null || micDenied
+  // `unsupportedReason` is a browser-capability diagnostic produced outside any
+  // component, so it stays English (AQU-510) — only the frame around it is keyed.
   const tooltip = micDenied
-    ? "Microphone access blocked — click for help"
+    ? t("editor.audio.micBlockedTooltip")
     : unsupportedReason
       ? `Recording unavailable — ${unsupportedReason}`
       : disabled
-        ? "Recording disabled"
-        : "Record audio"
+        ? t("editor.audio.recordingDisabled")
+        : t("editor.audio.record")
 
   const handleClick = () => {
     if (micDenied) { setShowDeniedHelp((v) => !v); return }
@@ -76,17 +80,16 @@ export function CellAudioRecordButton({ onOpenRecording, disabled, micDenied }: 
           role="tooltip"
           className="absolute bottom-full left-1/2 z-50 mb-1 w-52 -translate-x-1/2 rounded-md border bg-popover px-3 py-2 text-[11px] leading-snug text-popover-foreground shadow-md"
         >
-          <strong className="block font-semibold">Microphone blocked</strong>
+          <strong className="block font-semibold">{t("editor.audio.micBlockedTitle")}</strong>
           <span className="mt-0.5 block text-muted-foreground">
-            Open your browser&apos;s site settings (🔒 in the address bar) and
-            allow microphone access, then reload the page.
+            {t("editor.audio.micBlockedHelp")}
           </span>
           <button
             type="button"
             onClick={() => setShowDeniedHelp(false)}
             className="mt-1.5 text-[10px] underline text-muted-foreground hover:text-foreground"
           >
-            Dismiss
+            {t("common.dismiss")}
           </button>
         </span>
       )}

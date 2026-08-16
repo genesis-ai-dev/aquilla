@@ -6,6 +6,7 @@
 // SWARM-TODO(export): lossy — inline markup (bold, italics, footnote markers)
 // is stripped; only plain text values are emitted.
 import type { CellData } from "@/hooks/useCells"
+import { effectiveSourceText } from "@/lib/cell-text"
 
 /**
  * Quote a TSV field per RFC-4180 if it contains any character that would
@@ -23,7 +24,7 @@ export function exportTsv(cells: CellData[]): Blob {
   const header = "id\tsource\ttarget"
   const rows = cells.map((c) => {
     const id = tsvField(c.group || c.id)
-    const src = tsvField(c.original)
+    const src = tsvField(effectiveSourceText(c))
     const tgt = tsvField(c.translated)
     return `${id}\t${src}\t${tgt}`
   })

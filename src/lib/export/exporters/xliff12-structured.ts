@@ -12,6 +12,7 @@
 //      convention — empty → "new", unvalidated → "translated",
 //      validated → "final".
 import type { CellData } from "@/hooks/useCells"
+import { effectiveSourceText } from "@/lib/cell-text"
 import { fragmentText, type XliffSegmentMeta } from "@/lib/parsers/xliff"
 
 const xmlEscape = (s: string): string =>
@@ -46,7 +47,7 @@ export function exportXliff12Structured(
     seen.set(id, (dup ?? 0) + 1)
     if (dup) id = `${id}-${dup + 1}` // XLIFF requires unique trans-unit ids per file
 
-    const sourceXml = meta?.sourceXml || xmlEscape(c.original)
+    const sourceXml = meta?.sourceXml || xmlEscape(effectiveSourceText(c))
     const translated = c.translated.trim()
     // A target whose text still matches the imported skeleton's text (or a
     // copy-source draft matching the source skeleton) re-emits that skeleton,

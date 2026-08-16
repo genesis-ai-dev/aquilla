@@ -2,9 +2,6 @@ import { useMemo, useState } from "react"
 import { Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
-import {
-  Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
 import {
@@ -14,8 +11,8 @@ import {
   ROLE,
   PROJECT_ROLE_OPTIONS,
   LINK_ROLE_OPTIONS,
-  roleName,
   roleDisplayText,
+  roleName,
   type RoleLevel,
 } from "@/lib/frontier/roles"
 import { addProjectMember, lookupUser } from "@/lib/frontier/members"
@@ -23,7 +20,7 @@ import { createServerInvite } from "@/lib/sync/invites"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead"
-import { RoleLabel } from "@/components/RoleLabel"
+import { RoleSelect } from "@/components/RoleSelect"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
 interface MultiProjectInviteDialogProps {
@@ -130,7 +127,7 @@ export function MultiProjectInviteDialog({
         const errors: Record<string, string> = {}
         const successes: Record<string, "ok"> = {}
         results.forEach((created, i) => {
-          const id = selectedIds[i]!
+          const id = selectedIds[i]
           if (created) {
             successes[id] = "ok"
           } else {
@@ -157,13 +154,13 @@ export function MultiProjectInviteDialog({
       // round-trip cost to be O(1) round-trips, not O(N).
       const results = await Promise.allSettled(
         selectedIds.map((projectId) =>
-          addProjectMember(session.jwt, projectId, target.username, selections[projectId]!)
+          addProjectMember(session.jwt, projectId, target.username, selections[projectId])
         )
       )
       const errors: Record<string, string> = {}
       const successes: Record<string, "ok"> = {}
       results.forEach((r, i) => {
-        const id = selectedIds[i]!
+        const id = selectedIds[i]
         if (r.status === "fulfilled") {
           successes[id] = "ok"
         } else {
@@ -284,7 +281,7 @@ export function MultiProjectInviteDialog({
                               type="button"
                               onClick={() => toggleProject(p.id)}
                               disabled={busy}
-                              className="min-w-0 truncate text-left hover:text-foreground disabled:opacity-50"
+                              className="min-w-0 truncate text-start hover:text-foreground disabled:opacity-50"
                             >
                               {p.name}
                             </button>
@@ -295,41 +292,24 @@ export function MultiProjectInviteDialog({
                             <Check className="h-3 w-3" /> {isEmailMode ? "invited" : "added"}
                           </span>
                         ) : isSelected ? (
-                          <Select
-                            items={roleChoices.map((r) => ({
-                              value: String(r.level),
-                              label: roleDisplayText(r.name),
-                            }))}
-                            value={String(selections[p.id])}
-                            onValueChange={(v) =>
-                              setProjectRole(p.id, Number(v ?? "") as RoleLevel)
+                          <RoleSelect
+                            options={roleChoices}
+                            value={selections[p.id]}
+                            onValueChange={(level) =>
+                              setProjectRole(p.id, level as RoleLevel)
                             }
                             disabled={busy}
-                          >
-                            <SelectTrigger
-                              size="sm"
-                              className="shrink-0 max-w-[8.5rem]"
-                              aria-label={`Role for ${p.name}`}
-                            >
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectGroup>
-                                {roleChoices.map((r) => (
-                                  <SelectItem key={r.level} value={String(r.level)}>
-                                    <RoleLabel name={r.name} />
-                                  </SelectItem>
-                                ))}
-                              </SelectGroup>
-                            </SelectContent>
-                          </Select>
+                            size="sm"
+                            className="shrink-0"
+                            aria-label={`Role for ${p.name}`}
+                          />
                         ) : (
                           <span aria-hidden className="w-0" />
                         )}
                       </div>
                       {errorMsg && (
                         <AppTooltip content={errorMsg} className="max-w-xs">
-                          <p className="mt-1 pl-7 text-[10px] text-destructive break-words">
+                          <p className="mt-1 ps-7 text-[10px] text-destructive break-words">
                             {errorMsg}
                           </p>
                         </AppTooltip>
@@ -345,7 +325,7 @@ export function MultiProjectInviteDialog({
                 {selectedIds.length > 1 && (
                   <>
                     {" "}— roles:{" "}
-                    {[...new Set(selectedIds.map((id) => selections[id]!))]
+                    {[...new Set(selectedIds.map((id) => selections[id]))]
                       .map((lvl) => roleDisplayText(roleName(lvl)))
                       .join(", ")}
                   </>
@@ -360,13 +340,13 @@ export function MultiProjectInviteDialog({
 
           <div className="flex justify-end gap-2 pt-2 border-t">
             <Button variant="outline" onClick={handleClose} disabled={busy}>
-              <X className="mr-1 h-4 w-4" />
+              <X className="me-1 h-4 w-4" />
               {done ? "Close" : "Cancel"}
             </Button>
             <Button onClick={handleInvite} disabled={!canSubmit}>
               {busy ? (
                 <>
-                  <Spinner className="mr-1" />
+                  <Spinner className="me-1" />
                   {isEmailMode ? "Sending…" : "Adding…"}
                 </>
               ) : isEmailMode ? (

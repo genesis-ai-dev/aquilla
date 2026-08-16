@@ -17,7 +17,7 @@
  */
 
 import { useMemo, useState } from "react"
-import { Check, ChevronDown, ChevronUp, MessageSquare, Pencil, ShieldCheck } from "lucide-react"
+import { Check, ChevronDown, ChevronUp, FileText, MessageSquare, Pencil, Plus, ShieldCheck } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -30,6 +30,10 @@ import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
 import { ValidationQueueCard } from "./cards/ValidationQueueCard"
 import { isValidationProposal } from "./cards/registry"
 import { canApply, isSupportedApplyKind } from "@/lib/agent/role-floors"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { translateRuleName } from "@/lib/lqa/builtin-resolver"
+import { formatInfractionMessage } from "@/lib/rules/format-infraction"
+import { InlineAiError } from "@/components/InlineAiError"
 
 // ── Lint ───────────────────────────────────────────────────────────────────
 
@@ -79,6 +83,7 @@ export function lintCellFor(
 const TRUNCATE_AT = 160
 
 function TruncatableText({ text, className }: { text: string; className?: string }) {
+  const t = useT()
   const [expanded, setExpanded] = useState(false)
   const needsTruncation = text.length > TRUNCATE_AT
   const shown = expanded || !needsTruncation ? text : `${text.slice(0, TRUNCATE_AT)}…`
@@ -89,12 +94,12 @@ function TruncatableText({ text, className }: { text: string; className?: string
         <button
           type="button"
           onClick={() => setExpanded((v) => !v)}
-          className="ml-1 inline-flex items-center align-baseline text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          className="ms-1 inline-flex items-center align-baseline text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
         >
           {expanded ? (
-            <>Show less <ChevronUp className="ml-0.5 h-2.5 w-2.5" /></>
+            <>{t("common.showLess")} <ChevronUp className="ms-0.5 h-2.5 w-2.5" /></>
           ) : (
-            <>Show more <ChevronDown className="ml-0.5 h-2.5 w-2.5" /></>
+            <>{t("common.showMore")} <ChevronDown className="ms-0.5 h-2.5 w-2.5" /></>
           )}
         </button>
       )}
@@ -104,17 +109,31 @@ function TruncatableText({ text, className }: { text: string; className?: string
 
 const KIND_META: Record<string, { label: string; Icon: typeof Pencil }> = {
   "target.cell.commit": { label: "Edit", Icon: Pencil },
+  // AQU-890: creates read as "new row" — the label names the lane so a source
+  // insertion is never mistaken for a translation.
+  "source.cell.create": { label: "New source row", Icon: Plus },
+  "target.cell.create": { label: "New target row", Icon: Plus },
   "comment.create": { label: "Comment", Icon: MessageSquare },
   "cell.validate": { label: "Validate", Icon: ShieldCheck },
+}
+
+/** True for the genesis kinds that mint a row rather than editing one. */
+function isCellCreateKind(kind: string): boolean {
+  return kind === "source.cell.create" || kind === "target.cell.create"
 }
 
 function StagedEventRow({
   ev,
   infractions,
+  ruleById,
 }: {
   ev: StagedEvent
   infractions: RuleInfraction[]
+  /** Rule lookup for the lint badges below — needed so a `builtin:` id
+   *  translates its check name instead of showing the raw id. */
+  ruleById: Map<string, TranslationRule>
 }) {
+  const t = useT()
   const meta = KIND_META[ev.kind]
 
   if (!meta) {
@@ -123,7 +142,7 @@ function StagedEventRow({
       <div className="space-y-1 rounded-md border border-dashed px-2 py-1.5">
         <div className="flex items-center gap-1.5 text-[11px]">
           <Badge variant="outline" className="px-1.5 py-0 font-mono text-[10px]">{ev.kind}</Badge>
-          <span className="text-muted-foreground">not supported yet — apply this kind in the app directly</span>
+          <span className="text-muted-foreground">{t("autopilot.proposal.unsupportedKind")}</span>
         </div>
         <pre className="overflow-x-auto font-mono text-[10px] leading-relaxed text-muted-foreground">
           {JSON.stringify(ev, null, 2)}
@@ -143,16 +162,31 @@ function StagedEventRow({
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
         <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
         <span className="font-medium">{label}</span>
+        {/* AQU-846: name the destination file on every row. The user approves
+            believing the change lands in the file they have open — say so
+            explicitly rather than leaving it to a bare verse ref. */}
+        {ev.display.fileName && (
+          <AppTooltip content={`This change lands in ${ev.display.fileName}`}>
+            <Badge variant="outline" className="max-w-[12rem] gap-1 px-1.5 py-0 text-[10px]">
+              <FileText className="h-2.5 w-2.5 shrink-0" />
+              <span className="truncate">{ev.display.fileName}</span>
+            </Badge>
+          </AppTooltip>
+        )}
         {ev.display.canonicalRef && (
           <Badge variant="secondary" className="px-1.5 py-0 font-mono text-[10px]">
             {ev.display.canonicalRef}
           </Badge>
         )}
-        {infractions.map((inf) => (
-          <Badge key={inf.ruleId} variant="destructive" className="px-1.5 py-0 text-[10px]">
-            {inf.message}
-          </Badge>
-        ))}
+        {infractions.map((inf) => {
+          const rule = ruleById.get(inf.ruleId)
+          const ruleName = rule ? translateRuleName(rule, t) : inf.ruleId
+          return (
+            <Badge key={inf.ruleId} variant="destructive" className="px-1.5 py-0 text-[10px]">
+              {formatInfractionMessage(inf, ruleName, t)}
+            </Badge>
+          )
+        })}
       </div>
 
       {ev.kind === "target.cell.commit" && (
@@ -162,10 +196,24 @@ function StagedEventRow({
               <TruncatableText text={ev.display.before} />
             </div>
           ) : (
-            <div className="text-[10px] italic text-muted-foreground">(currently empty)</div>
+            <div className="text-[10px] italic text-muted-foreground">{t("autopilot.proposal.currentlyEmpty")}</div>
           )}
           <div>
             <TruncatableText text={ev.display.after ?? ""} />
+          </div>
+        </div>
+      )}
+
+      {isCellCreateKind(ev.kind) && (
+        <div className="space-y-0.5 text-xs">
+          <div className="text-[10px] italic text-muted-foreground">{t("autopilot.proposal.newRow")}</div>
+          <div>
+            <TruncatableText
+              text={
+                ev.display.after ??
+                (typeof ev.payload.value === "string" ? ev.payload.value : "")
+              }
+            />
           </div>
         </div>
       )}
@@ -211,6 +259,7 @@ export function ProposalCard({
   applyContext,
   onApplied,
 }: ProposalCardProps) {
+  const t = useT()
   // Tier 2 (testimony): all-validation proposals get the per-item queue —
   // one Confirm per cell, no apply-all (agent-complete design §3/§6).
   // Before any hooks: a proposal's composition never changes, but React
@@ -221,7 +270,7 @@ export function ProposalCard({
         proposal={proposal}
         applyContext={applyContext}
         onApplied={onApplied}
-        canValidate={canApply("cell.validate", roleLevel).allowed}
+        canValidate={canApply(t, "cell.validate", roleLevel).allowed}
       />
     )
   }
@@ -237,16 +286,20 @@ function StagedProposalCard({
   applyContext,
   onApplied,
 }: ProposalCardProps) {
+  const t = useT()
   const [state, setState] = useState<CardState>("idle")
   const [applyError, setApplyError] = useState<string | null>(null)
 
   const enabledRules = useMemo(() => rules.filter((r) => r.enabled), [rules])
+  const ruleById = useMemo(() => new Map(rules.map((r) => [r.id, r])), [rules])
 
   // Deterministic lint on every commit's AFTER text, before any apply.
   const lintByIndex = useMemo(() => {
     const out = new Map<number, RuleInfraction[]>()
     proposal.events.forEach((ev, i) => {
-      if (ev.kind !== "target.cell.commit") return
+      // Rules run over TARGET text only — a new target row is draft text just
+      // like a commit, but source text must never be linted as a translation.
+      if (ev.kind !== "target.cell.commit" && ev.kind !== "target.cell.create") return
       if (enabledRules.length === 0) return
       const cell = lintCellFor(ev, resolveCell)
       out.set(i, checkRulesForCell(cell, ev.fileId ?? "", enabledRules))
@@ -257,11 +310,11 @@ function StagedProposalCard({
   const hasUnsupported = proposal.events.some((ev) => !isSupportedApplyKind(ev.kind))
   const roleBlock = useMemo(() => {
     for (const ev of proposal.events) {
-      const verdict = canApply(ev.kind, roleLevel)
+      const verdict = canApply(t, ev.kind, roleLevel)
       if (!verdict.allowed) return verdict
     }
     return null
-  }, [proposal.events, roleLevel])
+  }, [proposal.events, roleLevel, t])
 
   const blockedReason = hasUnsupported
     ? "Contains event kinds this app can't apply yet"
@@ -287,7 +340,7 @@ function StagedProposalCard({
   if (state === "discarded") {
     return (
       <div className="rounded-lg border border-dashed px-2.5 py-1.5 text-[11px] text-muted-foreground">
-        Discarded: {proposal.summary}
+        {t("autopilot.proposal.discarded", { summary: proposal.summary })}
       </div>
     )
   }
@@ -307,49 +360,48 @@ function StagedProposalCard({
             key={`${proposal.proposalId}-${i}`}
             ev={ev}
             infractions={lintByIndex.get(i) ?? []}
+            ruleById={ruleById}
           />
         ))}
       </div>
 
       {applyError && (
-        <div className="text-[11px] text-destructive">Apply failed: {applyError}</div>
+        <InlineAiError message={applyError} label={t("autopilot.proposal.applyFailed")} className="text-[11px]" />
       )}
 
       {state === "applied" ? (
         <div className="flex items-center gap-1 text-[11px] font-medium text-emerald-600">
-          <Check className="h-3 w-3" /> Applied
+          <Check className="h-3 w-3" /> {t("autopilot.evidence.status.applied")}
         </div>
       ) : (
         <div className="space-y-1">
           <div className="flex items-center justify-end gap-1.5">
             <Button
               variant="ghost"
-              size="sm"
               className="h-6 text-[11px]"
               onClick={() => setState("discarded")}
               disabled={state === "applying"}
             >
-              Discard
+              {t("common.discard")}
             </Button>
             <AppTooltip content={blockedReason ?? undefined} disabled={!blockedReason}>
               <Button
-                size="sm"
                 className="h-6 text-[11px]"
                 onClick={() => void handleApply()}
                 disabled={Boolean(blockedReason) || state === "applying"}
               >
               {state === "applying" ? (
                 <>
-                  <Spinner className="size-3" /> Applying…
+                  <Spinner className="size-3" /> {t("autopilot.proposal.applying")}
                 </>
               ) : (
-                "Apply"
+                t("autopilot.proposal.apply")
               )}
             </Button>
             </AppTooltip>
           </div>
           {blockedReason && (
-            <div className="text-right text-[10px] text-muted-foreground">{blockedReason}</div>
+            <div className="text-end text-[10px] text-muted-foreground">{blockedReason}</div>
           )}
         </div>
       )}

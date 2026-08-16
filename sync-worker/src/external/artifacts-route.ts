@@ -7,6 +7,9 @@
 //   GET  .../artifacts/:artifactId          → metadata
 //   GET  .../artifacts/:artifactId/content  → raw bytes
 //   GET  .../artifacts/:artifactId/inspect  → lightweight format detection
+//   POST .../artifacts/:artifactId/parse    → server-side parse with the SPA's
+//        built-in DOM-free parsers: preview, or (body {stage:true}) stage a
+//        PlanImport changeset linking this artifact — see import-parse.ts
 //
 // Auth on every route: an `aqk_` API credential (validateApiCredential), scoped
 // to this project (assertCredentialScope), with the caller's LIVE project role
@@ -17,6 +20,7 @@
 
 import { errorResponse, toErrorResponse } from './errors'
 import { AUTH_HINT } from './discovery-route'
+import { handleParseArtifact } from './import-parse'
 import { assertCredentialScope } from './token-bridge'
 import { uuidv7 } from './uuid'
 import { r2KeyPrefix, audioObjectKey } from '../audio'
@@ -47,7 +51,7 @@ const AUDIO_CONTENT_TYPES: Record<string, string> = {
 }
 
 const ROUTE_RE =
-  /^\/api\/v1\/external\/projects\/([^/]+)\/artifacts(?:\/([^/]+)(?:\/(content|inspect))?)?$/
+  /^\/api\/v1\/external\/projects\/([^/]+)\/artifacts(?:\/([^/]+)(?:\/(content|inspect|parse))?)?$/
 
 function bearer(request: Request): string | null {
   const h = request.headers.get('Authorization') ?? ''
@@ -63,10 +67,11 @@ interface AuthOk {
   cred: ApiCredentialContext
   role: number
 }
-type AuthResult = AuthOk | { ok: false; response: Response }
+export type AuthResult = AuthOk | { ok: false; response: Response }
 
-/** Credential → scope → live role. `minRole` gates the operation. */
-async function authArtifact(
+/** Credential → scope → live role. `minRole` gates the operation. Exported for
+ *  the sibling parse route (import-parse.ts), which shares this gate. */
+export async function authArtifact(
   request: Request,
   env: ExternalEnv,
   projectId: string,
@@ -91,7 +96,7 @@ async function authArtifact(
   return { ok: true, cred, role: resolved.level }
 }
 
-interface ArtifactRow {
+export interface ArtifactRow {
   id: string
   project_id: string
   uploaded_by_user_id: string
@@ -131,7 +136,7 @@ function rowToMeta(row: ArtifactRow): Record<string, unknown> {
   }
 }
 
-async function loadArtifact(
+export async function loadArtifact(
   db: AquillaDb,
   projectId: string,
   artifactId: string,
@@ -349,7 +354,7 @@ function zipMemberNames(bytes: Uint8Array): string[] {
   return names
 }
 
-function detectFormat(
+export function detectFormat(
   text: string,
   bytes: Uint8Array,
   name: string,
@@ -535,6 +540,10 @@ export async function handleExternalArtifactsRequest(
   if (sub === 'inspect') {
     if (request.method !== 'GET') return errorResponse('validation_failed', 'method not allowed')
     return handleInspect(request, env, projectId, artifactId)
+  }
+  if (sub === 'parse') {
+    if (request.method !== 'POST') return errorResponse('validation_failed', 'method not allowed')
+    return handleParseArtifact(request, env, projectId, artifactId)
   }
 
   // Item: GET → metadata.

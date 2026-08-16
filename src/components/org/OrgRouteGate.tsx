@@ -2,13 +2,26 @@
  * Gate for `/orgs/:orgId/...` — path is authoritative.
  * Unknown / inaccessible org ids stay on the URL with a not-found / no-access
  * state (no silent fallback to last-org localStorage).
+ *
+ * FRO-367: not-found / error chrome still mounts AccountSwitcher. Switching
+ * accounts in another tab can land this tab on an org the new account can't
+ * access; without the switcher the user has no way to see who they are or
+ * switch back without a reload (and the cross-tab account-menu assertion has
+ * nowhere to land). Loading must not use that header chrome — it flashes a
+ * second profile in the navbar before the destination sidebar switcher
+ * appears.
  */
+import type { ReactNode } from "react"
 import { Link, Navigate, Outlet, useLocation, useParams } from "react-router-dom"
 import { useActiveOrg } from "@/context/OrgContext"
 import { orgKeyFromParam, ALL_ORGS_PARAM, orgHomePath, parseOrgPath } from "@/lib/navigation/org-paths"
+import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { Button } from "@/components/ui/button"
+import { LoadingOverlay } from "@/components/ui/loading-overlay"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export function OrgRouteGate() {
+  const t = useT()
   const { orgId: orgIdParam } = useParams<{ orgId: string }>()
   const orgKey = orgKeyFromParam(orgIdParam)
   const { orgs, guestOrgs, isLoading, accessibleProjectsLoading, error } = useActiveOrg()
@@ -20,11 +33,7 @@ export function OrgRouteGate() {
   }
 
   if (isLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">
-        Loading…
-      </div>
-    )
+    return <LoadingOverlay label={t("org.routeGate.loading")} data-testid="org-route-loading" />
   }
 
   if (error) {
@@ -38,11 +47,7 @@ export function OrgRouteGate() {
     // directory. Until it loads we can't tell "not a guest org" from "directory
     // not fetched yet" — wait instead of flashing not-found on a guest reload.
     if (accessibleProjectsLoading) {
-      return (
-        <div className="flex h-screen items-center justify-center text-sm text-muted-foreground">
-          Loading…
-        </div>
-      )
+      return <LoadingOverlay label={t("org.routeGate.loading")} data-testid="org-route-loading" />
     }
     return <OrgAccessProblem reason="missing" orgId={orgKey} />
   }
@@ -67,28 +72,48 @@ function OrgAccessProblem({
   orgId?: number
   detail?: string
 }) {
+  const t = useT()
   const title =
     reason === "error"
-      ? "Couldn’t load organizations"
+      ? t("org.routeGate.errorTitle")
       : reason === "invalid"
-        ? "Invalid organization"
-        : "Organization not found"
+        ? t("org.routeGate.invalidTitle")
+        : t("org.routeGate.missingTitle")
   const body =
     reason === "error"
-      ? (detail ?? "Something went wrong loading your organizations.")
+      ? (detail ?? t("org.routeGate.errorFallbackBody"))
       : reason === "invalid"
-        ? "That organization URL isn’t valid."
-        : `You don’t have access to organization #${orgId}, or it doesn’t exist.`
+        ? t("org.routeGate.invalidBody")
+        : t("org.routeGate.missingBody", { orgId: orgId ?? "" })
 
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-4 px-6 text-center">
-      <div className="space-y-2">
-        <h1 className="text-lg font-medium">{title}</h1>
-        <p className="max-w-md text-sm text-muted-foreground">{body}</p>
+    <OrgGateChrome>
+      <div className="flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <div className="space-y-2">
+          <h1 className="text-lg font-medium">{title}</h1>
+          <p className="max-w-md text-sm text-muted-foreground">{body}</p>
+        </div>
+        <Button nativeButton={false} render={<Link to={orgHomePath(ALL_ORGS_PARAM)} />}>
+          {t("org.breadcrumb.allOrganizations")}
+        </Button>
       </div>
-      <Button nativeButton={false} render={<Link to={orgHomePath(ALL_ORGS_PARAM)} />}>
-        All organizations
-      </Button>
+    </OrgGateChrome>
+  )
+}
+
+/** Minimal chrome so not-found / error still expose the account menu.
+ *  Full OrgSidebar is wrong here — it would render member nav for an org
+ *  the caller cannot access. Loading uses LoadingOverlay instead so a
+ *  header profile does not flash before the destination sidebar. */
+function OrgGateChrome({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex h-screen flex-col">
+      <div className="flex justify-end border-b px-3 py-2">
+        <div className="w-64">
+          <AccountSwitcher variant="header" />
+        </div>
+      </div>
+      <div className="flex flex-1 flex-col items-center justify-center">{children}</div>
     </div>
   )
 }

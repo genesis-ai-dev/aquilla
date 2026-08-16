@@ -584,6 +584,15 @@ export async function handleEventsWriteRequest(
     /** Verified author (JWT claims, not the client-supplied event field) —
      * broadcast as `by` so clients can suppress own-write banners. */
     author: string
+    /** True when the write arrived on the external Agent API channel
+     * (token-bridge minted token, claims.src === 'external'). Broadcast as
+     * `via: 'external'` so the credential owner's OWN browser does NOT
+     * suppress the frame as an own-write echo — no outbox write happened
+     * client-side, so skipping the refetch would hide the agent's commit
+     * until a manual reload. Browser sync-tokens carry role-resolution
+     * paths in `src` ('override' | 'group' | 'org' | 'creator' |
+     * 'platform'), never 'external', so this is server-verified. */
+    viaExternal: boolean
     /** AD-2 chain slot claimed by this event (chain-mutating winners of the
      * pre-check only) — read back after commit to flag in-flight losers. */
     chainSlot?: ChainSlot
@@ -1072,6 +1081,7 @@ export async function handleEventsWriteRequest(
       eventFrame: outcome.result.eventFrame,
       dirtyEntry,
       author: authResult.event.claims.username,
+      viaExternal: authResult.event.claims.src === 'external',
       chainSlot: outcome.result.chainSlot,
       counterFile: outcome.result.counterFile,
     })
@@ -1333,6 +1343,10 @@ export async function handleEventsWriteRequest(
             // Verified author — lets the author's own client skip the
             // "changed elsewhere" banner when its write bounces back.
             by: entry.author,
+            // Agent-API channel marker — forces the credential owner's own
+            // browser to treat the frame as remote (no local outbox write
+            // exists to have already refetched). See PendingEntry.viaExternal.
+            ...(entry.viaExternal ? { via: 'external' as const } : {}),
           }
         })
         // PERF-8: ONE __broadcast subrequest per (project, request) — the

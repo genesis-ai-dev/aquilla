@@ -8,8 +8,8 @@ describe("feature flags registry", () => {
     // reachable only by someone who already knew to go looking for it.
     expect(FLAGS.contextualTranslation).toBeDefined()
     expect(FLAGS.contextualTranslation.default).toBe(true)
-    expect(FLAGS.contextualTranslation.label.length).toBeGreaterThan(0)
-    expect(FLAGS.contextualTranslation.description.length).toBeGreaterThan(0)
+    expect(FLAGS.contextualTranslation.labelKey).toBe("autopilot.settings.controlsLabel")
+    expect(FLAGS.contextualTranslation.descriptionKey).toBe("autopilot.settings.controlsDescription")
   })
 })
 
@@ -40,7 +40,11 @@ describe("isFlagEnabled", () => {
   })
 
   it("a default-on flag reads true when the record has no entry", () => {
-    FLAGS.__testDefaultOn = { label: "t", description: "t", default: true }
+    FLAGS.__testDefaultOn = {
+      labelKey: "autopilot.settings.controlsLabel",
+      descriptionKey: "autopilot.settings.controlsDescription",
+      default: true,
+    }
     expect(isFlagEnabled({}, "__testDefaultOn")).toBe(true)
     expect(isFlagEnabled({ experimentalFlags: { __testDefaultOn: false } }, "__testDefaultOn")).toBe(false)
   })

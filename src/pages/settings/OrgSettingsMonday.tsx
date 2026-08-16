@@ -24,6 +24,8 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDate } from "@/lib/i18n/format"
 import { ROLE } from "@/lib/frontier/roles"
 import {
   deleteMondayConnection,
@@ -35,6 +37,7 @@ import { ORG_SETTINGS_SECTION_DESCRIPTIONS, ORG_SETTINGS_SECTION_TITLES } from "
 import { OrgSettingsDetailPage } from "./OrgSettingsDetailPage"
 
 export function OrgSettingsMonday() {
+  const { locale } = useI18n()
   const { activeOrg, activeOrgId } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -113,7 +116,11 @@ export function OrgSettingsMonday() {
     // (No "noopener": we need the handle to set location; Monday is trusted.)
     const popup = window.open("about:blank", "_blank")
     try {
-      const { url } = await startMondayConnect(jwt, activeOrgId, "/settings/monday")
+      const { url } = await startMondayConnect(
+        jwt,
+        activeOrgId,
+        `/orgs/${activeOrgId}/settings/monday`,
+      )
       if (popup && !popup.closed) {
         popup.location.href = url
       } else {
@@ -221,7 +228,6 @@ export function OrgSettingsMonday() {
                   </span>
                   {canManage && (
                     <Button
-                      size="sm"
                       variant="outline"
                       className="shrink-0"
                       onClick={() => setAdminStepOpen(true)}
@@ -246,11 +252,7 @@ export function OrgSettingsMonday() {
                 {connection?.createdAt && (
                   <p className="text-xs text-muted-foreground">
                     Connected{" "}
-                    {new Date(connection.createdAt).toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })}
+                    {formatDate(connection.createdAt, locale, { month: "short", day: "numeric", year: "numeric" })}
                   </p>
                 )}
               </div>
@@ -309,7 +311,7 @@ export function OrgSettingsMonday() {
               type="button"
               onClick={() => void handleConnect()}
               disabled={busy}
-              className="w-full rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-accent disabled:opacity-50"
+              className="w-full rounded-lg border p-4 text-start transition-colors hover:border-primary hover:bg-accent disabled:opacity-50"
             >
               <span className="flex items-center gap-2 font-medium">
                 {busy ? <Spinner className="size-4" /> : <ExternalLink className="size-4" />}
@@ -342,7 +344,6 @@ export function OrgSettingsMonday() {
                 )}
                 <Button
                   variant="outline"
-                  size="sm"
                   className="shrink-0"
                   disabled={!connection?.installUrl}
                   onClick={() => {

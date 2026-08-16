@@ -54,7 +54,7 @@ export async function summarizeConstrual(deps: {
     system: `[[ctx:summarize]] Compress the following scene construal into a single plain-text scene brief of AT MOST ${L1_MAX_CHARS} characters. Keep: the situation, who is involved and their relationship, the sequence of moves, and every open question verbatim. Drop nothing a translator drafting this scene would need. Output the brief text only — no headings, no JSON, no preamble.`,
     user: l2,
     tier: "fast",
-    maxTokens: 800,
+    maxTokens: 2048,
     temperature: 0,
     label: "summarize",
   })

@@ -27,6 +27,7 @@ import { addLlmCall } from "@/lib/usage/record-usage"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import type { CompletionSettings, TranslationRule } from "@/lib/parsers/types"
 import type { RuleSuggestion } from "@/lib/rules/rule-suggester"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const FALLBACK_SETTINGS: CompletionSettings = {
   provider: "frontier",
@@ -49,7 +50,7 @@ interface Props {
    * detect repeated edits. This prop accepts both — repeated-edit detection will
    * just only see validated if that's all we get.
    */
-  cells?: { id?: string; original: string; translated: string; status: "empty" | "unvalidated" | "validated"; hasPendingEdit?: boolean }[]
+  cells?: { id?: string; original: string; translated: string; status: "empty" | "unvalidated" | "validated"; hasPendingEdit?: boolean; aiDrafted?: boolean }[]
   onAdd: (rule: Omit<TranslationRule, "id" | "createdAt">) => void | Promise<void>
   projectId?: string
 }
@@ -62,6 +63,7 @@ export function RuleSuggestFromEditsDialog({
   onAdd,
   projectId,
 }: Props) {
+  const t = useT()
   const { session } = useFrontierSession()
   const { available: frontierAvailable } = useFrontierHealth()
 
@@ -71,7 +73,7 @@ export function RuleSuggestFromEditsDialog({
   const [suggestions, setSuggestions] = useState<RuleSuggestion[]>([])
   const [evidence, setEvidence] = useState<string[]>([])
   const [committing, setCommitting] = useState(false)
-  const [miningStats, setMiningStats] = useState<{ repeated: number; recent: number; pairs: number } | null>(null)
+  const [miningStats, setMiningStats] = useState<{ repeated: number; recent: number; pairs: number; human: number } | null>(null)
 
   const provider = completionSettings ? resolveProvider(completionSettings) : "frontier"
   const isConfigured =
@@ -96,12 +98,12 @@ export function RuleSuggestFromEditsDialog({
       const repeated = candidates.filter((c) => c.kind === "repeated").length
       const recent = candidates.filter((c) => c.kind === "recent").length
       const pairs = candidates.filter((c) => c.kind === "validated-pair").length
-      setMiningStats({ repeated, recent, pairs })
+      // AQU-820: human-authored targets count too, even with no AI draft first.
+      const human = candidates.filter((c) => c.kind === "human-authored").length
+      setMiningStats({ repeated, recent, pairs, human })
 
       if (candidates.length === 0) {
-        setError(
-          "No edit patterns found. Translate some cells (validated pairs preferred) to generate suggestions.",
-        )
+        setError(t("rules.suggestFromEdits.noPatternsFound"))
         setStage("idle")
         return
       }
@@ -119,9 +121,7 @@ export function RuleSuggestFromEditsDialog({
       )
 
       if (result.suggestions.length === 0) {
-        setError(
-          "The LLM didn't find any testable patterns in your edits. Try validating more diverse translations.",
-        )
+        setError(t("rules.suggestFromEdits.noTestablePatterns"))
         setStage("idle")
         return
       }
@@ -130,7 +130,7 @@ export function RuleSuggestFromEditsDialog({
       setEvidence(result.evidence)
       setStage("review")
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Analysis failed")
+      setError(err instanceof Error ? err.message : t("rules.suggestFromEdits.analysisFailed"))
       setStage("idle")
     }
   }
@@ -140,7 +140,7 @@ export function RuleSuggestFromEditsDialog({
     try {
       // AQU-455: this loop calls onAdd (= useRules.addRule) once per accepted
       // suggestion, and correctness now depends on addRule fully awaiting its
-      // shared-settings (D1 project_settings) write before resolving — see
+      // shared-settings (Postgres project_settings) write before resolving — see
       // useRules.ts addRule for the fix. Previously addRule fired that write
       // fire-and-forget, so N concurrent in-flight PATCH requests could
       // resolve out of order and silently drop all but the last accepted
@@ -182,9 +182,10 @@ export function RuleSuggestFromEditsDialog({
   const miningLabel =
     miningStats
       ? [
-          miningStats.repeated > 0 && `${miningStats.repeated} repeated`,
-          miningStats.recent > 0 && `${miningStats.recent} recent`,
-          miningStats.pairs > 0 && `${miningStats.pairs} from pairs`,
+          miningStats.repeated > 0 && t("rules.suggestFromEdits.stats.repeated", { count: miningStats.repeated }),
+          miningStats.recent > 0 && t("rules.suggestFromEdits.stats.recent", { count: miningStats.recent }),
+          miningStats.pairs > 0 && t("rules.suggestFromEdits.stats.pairs", { count: miningStats.pairs }),
+          miningStats.human > 0 && t("rules.suggestFromEdits.stats.human", { count: miningStats.human }),
         ]
           .filter(Boolean)
           .join(", ")
@@ -195,8 +196,8 @@ export function RuleSuggestFromEditsDialog({
       <AppTooltip
         content={
           isConfigured
-            ? "Mine your edits for rule patterns"
-            : "Configure LLM in project settings first"
+            ? t("rules.suggestFromEdits.tooltip")
+            : t("rules.suggestFromEdits.tooltipUnconfigured")
         }
       >
         <span className="inline-flex">
@@ -204,13 +205,12 @@ export function RuleSuggestFromEditsDialog({
             render={
               <Button
                 variant="outline"
-                size="sm"
                 disabled={!isConfigured}
               />
             }
           >
-            <Sparkles className="mr-1 h-3.5 w-3.5" />
-            Suggest from edits
+            <Sparkles className="me-1 h-3.5 w-3.5" />
+            {t("rules.suggestFromEdits.triggerButton")}
           </DialogTrigger>
         </span>
       </AppTooltip>
@@ -219,26 +219,25 @@ export function RuleSuggestFromEditsDialog({
         <DialogHeader>
           <DialogTitle>
             {stage === "review"
-              ? `Review ${suggestions.length} suggested rule${suggestions.length !== 1 ? "s" : ""}`
-              : "Suggest rules from your edits"}
+              ? t("rules.suggestFromEdits.reviewTitle", { count: suggestions.length })
+              : t("rules.suggestFromEdits.title")}
           </DialogTitle>
         </DialogHeader>
 
         {stage === "idle" && (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Analyzes your repeated corrections, recent edits, and validated translations to
-              propose testable rules. You'll review each suggestion before anything is saved.
+              {t("rules.suggestFromEdits.description")}
             </p>
             {error && <p className="text-sm text-destructive">{error}</p>}
             {!isConfigured && (
               <p className="text-xs text-muted-foreground">
-                Configure your LLM endpoint in project settings first.
+                {t("rules.importDialog.configureLlmFirst")}
               </p>
             )}
             <Button onClick={handleAnalyze} disabled={!isConfigured} className="w-full">
-              <Sparkles className="mr-1 h-4 w-4" />
-              Analyze my edits
+              <Sparkles className="me-1 h-4 w-4" />
+              {t("rules.suggestFromEdits.analyzeButton")}
             </Button>
           </div>
         )}
@@ -246,7 +245,7 @@ export function RuleSuggestFromEditsDialog({
         {stage === "loading" && (
           <div className="flex flex-col items-center gap-2 py-6">
             <Spinner className="size-6 text-primary" />
-            <p className="text-sm text-muted-foreground">Mining edit patterns…</p>
+            <p className="text-sm text-muted-foreground">{t("rules.suggestFromEdits.miningLabel")}</p>
           </div>
         )}
 
@@ -254,7 +253,7 @@ export function RuleSuggestFromEditsDialog({
           <div className="space-y-1">
             {miningLabel && (
               <p className="text-xs text-muted-foreground mb-2">
-                Mined patterns: {miningLabel}
+                {t("rules.suggestFromEdits.minedPatterns", { patterns: miningLabel })}
               </p>
             )}
             <RuleImportReview

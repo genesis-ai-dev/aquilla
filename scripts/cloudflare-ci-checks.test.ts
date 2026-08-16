@@ -30,6 +30,9 @@ describe("Cloudflare parallel CI checks", () => {
     expect(commands).toContain("build:workers-build:identity")
     expect(commands).toContain("build:workers-build:sync")
     expect(commands).toContain("scripts/ci-build.sh")
+    // OPS-4: the root suite excludes worker packages, so the SPA Worker's own
+    // suite has to be named explicitly or it runs nowhere.
+    expect(commands).toContain("test:worker")
     expect(commands).not.toContain("playwright install")
   })
 

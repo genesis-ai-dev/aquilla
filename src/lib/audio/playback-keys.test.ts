@@ -46,4 +46,48 @@ describe("spacebarShouldToggle", () => {
     expect(spacebarShouldToggle(evt({ target: button }))).toBe(false)
     expect(spacebarShouldToggle(evt({ target: slider }))).toBe(false)
   })
+
+  it("refuses a role=button DIV (dropzones, voice cards)", () => {
+    const divButton = document.createElement("div")
+    divButton.setAttribute("role", "button")
+    expect(spacebarShouldToggle(evt({ target: divButton }))).toBe(false)
+  })
+
+  it("toggles on a role=button DIV that opts in as transport surface (timeline card)", () => {
+    // Click-a-verse-then-Space: the card is role="button" tabIndex=0, so the
+    // click FOCUSES it — Space must still play, not go dead.
+    const card = document.createElement("div")
+    card.setAttribute("role", "button")
+    card.setAttribute("data-spacebar-transport", "")
+    expect(spacebarShouldToggle(evt({ target: card }))).toBe(true)
+  })
+
+  it("still refuses a real <button> inside an opted-in card (mute, record)", () => {
+    const card = document.createElement("div")
+    card.setAttribute("role", "button")
+    card.setAttribute("data-spacebar-transport", "")
+    const mute = document.createElement("button")
+    card.appendChild(mute)
+    expect(spacebarShouldToggle(evt({ target: mute }))).toBe(false)
+  })
+
+  it("toggles on a real <button> that opts in as transport surface (dub chip)", () => {
+    // Click-a-chip-then-Space: the chip is a real <button>, so the click
+    // focuses it — Space must still play, not go dead.
+    const chip = document.createElement("button")
+    chip.setAttribute("data-spacebar-transport", "")
+    expect(spacebarShouldToggle(evt({ target: chip }))).toBe(true)
+  })
+
+  it("a control nested INSIDE an opted-in chip keeps its native Space (corner record)", () => {
+    // OWN-attribute rule: the chip's corner record button must not inherit
+    // the transport opt-in from its parent.
+    const chip = document.createElement("button")
+    chip.setAttribute("data-spacebar-transport", "")
+    const record = document.createElement("span")
+    record.setAttribute("role", "button")
+    record.tabIndex = 0
+    chip.appendChild(record)
+    expect(spacebarShouldToggle(evt({ target: record }))).toBe(false)
+  })
 })

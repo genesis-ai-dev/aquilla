@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
 import { Link, useLocation } from "react-router-dom"
 import { useActiveOrg } from "@/context/OrgContext"
 import { ALL_ORGS_PARAM, orgHomePath, parseOrgPath } from "@/lib/navigation/org-paths"
@@ -11,7 +11,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface OrgBreadcrumbParent {
   label: string
@@ -33,6 +33,16 @@ interface OrgBreadcrumbProps {
   orgId?: number | null
   /** Segments after section (e.g. open file, current book/chapter). Last is current page. */
   trail?: OrgBreadcrumbTrailSegment[]
+  /**
+   * The caller's `section` is the org-level projects landing page, so the
+   * crumb is redundant with the org crumb above it and should be omitted
+   * (unless a `parent` or `trail` makes it meaningful again). This used to be
+   * inferred by comparing `section` to the literal English string
+   * "Projects" — a display string doubling as control flow, which breaks
+   * the moment `section` is translated. Callers on the projects landing page
+   * must pass this explicitly instead.
+   */
+  isProjectsLanding?: boolean
 }
 
 interface Crumb {
@@ -43,17 +53,11 @@ interface Crumb {
   isRoot?: boolean
 }
 
-const SCROLL_EDGE_EPS = 1
-
-/** Solid edge fades — same approach as TabStrip against sidebar chrome. */
-const STRIP_EDGE_FADE =
-  "pointer-events-none absolute inset-y-0 z-20 w-8 transition-opacity duration-150"
-
 function CrumbLink({ crumb }: { crumb: Crumb }) {
   // Keep crumbs at natural width so the trail scrolls instead of truncating
   // away segments on narrow headers.
   const labelClass = "block shrink-0 cursor-default whitespace-nowrap rounded-md px-1.5 py-1"
-  // Tooltip still helps when a long label is partially under an edge fade.
+  // Tooltip still helps when a long label is partially under a scroll fade.
   if (crumb.isCurrent) {
     return (
       <AppTooltip content={crumb.label}>
@@ -93,7 +97,7 @@ function CrumbLink({ crumb }: { crumb: Crumb }) {
 function CrumbSeparator() {
   return (
     <BreadcrumbSeparator className="shrink-0">
-      <span className="text-muted-foreground">›</span>
+      <span className="inline-block text-muted-foreground rtl:-scale-x-100">›</span>
     </BreadcrumbSeparator>
   )
 }
@@ -106,13 +110,25 @@ function renderCrumbItem(crumb: Crumb, key: string) {
   )
 }
 
-export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }: OrgBreadcrumbProps) {
+export function OrgBreadcrumb({
+  parent,
+  section,
+  sectionTo,
+  orgId,
+  trail = [],
+  isProjectsLanding = false,
+}: OrgBreadcrumbProps) {
   const { activeOrgId, isAllOrgs, orgs, guestOrgs, setActiveOrg, setAllOrgs } = useActiveOrg()
   const location = useLocation()
+  const t = useT()
   const scrollRef = useRef<HTMLOListElement | null>(null)
-  const [canScrollLeft, setCanScrollLeft] = useState(false)
-  const [canScrollRight, setCanScrollRight] = useState(false)
-  const showSection = section !== "Projects" || parent != null
+  const parsed = parseOrgPath(location.pathname)
+  // Callers on a landing page whose section would duplicate the ancestor
+  // crumb above it pass `isProjectsLanding` explicitly (see the prop doc —
+  // comparing the display string to a literal English value breaks the
+  // moment `section` is translated). The dedicated `/orgs/:id/projects` page
+  // shows its own crumb "for free" under this model: it never opts in.
+  const showSection = (!isProjectsLanding || parent != null)
   const resolvedOrgId = orgId ?? (!isAllOrgs ? activeOrgId : null)
   const resolvedOrg = resolvedOrgId == null ? null : orgs.find((org) => org.id === resolvedOrgId) ?? null
   // AQU-790: a guest org (`/orgs/:guestId`) is not a membership, so it isn't in
@@ -122,12 +138,12 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
     resolvedOrg == null && resolvedOrgId != null
       ? guestOrgs.find((g) => g.id === resolvedOrgId) ?? null
       : null
-  const parsed = parseOrgPath(location.pathname)
   const isRootLanding =
     parsed?.orgKey === ALL_ORGS_PARAM && !showSection && resolvedOrg == null && resolvedGuestOrg == null
+  // Member org "home" is `/overview` (or bare index redirecting there).
   const isOrgLanding =
     typeof parsed?.orgKey === "number" &&
-    parsed.rest === "" &&
+    (parsed.rest === "" || parsed.rest === "/overview") &&
     !showSection &&
     resolvedOrg != null &&
     parsed.orgKey === resolvedOrg.id
@@ -143,7 +159,7 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
   }
 
   const crumbs: Crumb[] = [{
-    label: "All organizations",
+    label: t("org.breadcrumb.allOrganizations"),
     to: isRootLanding ? undefined : orgHomePath(ALL_ORGS_PARAM),
     onClick: isRootLanding ? undefined : handleAllOrgs,
     isCurrent: isRootLanding,
@@ -152,7 +168,7 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
 
   if (resolvedOrg) {
     crumbs.push({
-      label: resolvedOrg.name ?? "Organization",
+      label: resolvedOrg.name ?? t("org.breadcrumb.organizationFallback"),
       to: isOrgLanding ? undefined : orgHomePath(resolvedOrg.id),
       onClick: isOrgLanding ? undefined : () => setActiveOrg(resolvedOrg.id),
       isCurrent: isOrgLanding,
@@ -161,7 +177,7 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
     // AQU-790: link only (no setActiveOrg onClick) — the path drives the guest
     // scope; navigation keeps it a sibling of "All organizations".
     crumbs.push({
-      label: resolvedGuestOrg.name ?? "Organization",
+      label: resolvedGuestOrg.name ?? t("org.breadcrumb.organizationFallback"),
       to: isGuestOrgLanding ? undefined : orgHomePath(resolvedGuestOrg.id),
       isCurrent: isGuestOrgLanding,
     })
@@ -198,50 +214,21 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
   // Stable key so parent re-renders with a fresh `trail` array don't reset scroll.
   const crumbKey = crumbs.map((crumb) => crumb.label).join("\0")
 
-  const updateScrollEdges = useCallback(() => {
-    const el = scrollRef.current
-    if (!el) return
-    const { scrollLeft, scrollWidth, clientWidth } = el
-    setCanScrollLeft(scrollLeft > SCROLL_EDGE_EPS)
-    setCanScrollRight(scrollLeft + clientWidth < scrollWidth - SCROLL_EDGE_EPS)
-  }, [])
-
   useEffect(() => {
     const el = scrollRef.current
     if (!el) return
     // Prefer the current (trailing) crumb when the trail overflows.
     el.scrollLeft = el.scrollWidth
-    updateScrollEdges()
-    const ro = new ResizeObserver(updateScrollEdges)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [updateScrollEdges, crumbKey])
+  }, [crumbKey])
 
   return (
-    <Breadcrumb className="relative min-w-0 px-3">
+    <Breadcrumb className="min-w-0 px-3">
       <BreadcrumbList
         ref={scrollRef}
-        onScroll={updateScrollEdges}
-        className="min-w-0 flex-nowrap overflow-x-auto overscroll-x-contain whitespace-nowrap scrollbar-none"
+        className="min-w-0 scroll-fade-x scroll-fade-8 flex-nowrap overflow-x-auto overscroll-x-contain whitespace-nowrap scrollbar-none"
       >
         {items}
       </BreadcrumbList>
-      <span
-        aria-hidden
-        className={cn(
-          STRIP_EDGE_FADE,
-          "left-0 bg-linear-to-r from-sidebar from-30% to-transparent",
-          canScrollLeft ? "opacity-100" : "opacity-0",
-        )}
-      />
-      <span
-        aria-hidden
-        className={cn(
-          STRIP_EDGE_FADE,
-          "right-0 bg-linear-to-l from-sidebar from-30% to-transparent",
-          canScrollRight ? "opacity-100" : "opacity-0",
-        )}
-      />
     </Breadcrumb>
   )
 }

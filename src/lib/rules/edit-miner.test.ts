@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   mineRepeatedEdits,
   mineRecentEdits,
+  mineHumanAuthoredEdits,
   combineAndRankCandidates,
   validatedPairsToCandidate,
   mineCandidates,
@@ -154,5 +155,108 @@ describe("mineCandidates", () => {
     expect(result.length).toBeGreaterThan(0)
     // First result must be repeated (highest score)
     expect(result[0].kind).toBe("repeated")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// mineHumanAuthoredEdits — AQU-820
+// ---------------------------------------------------------------------------
+
+/** A hand-translated, never-AI-drafted, never-explicitly-validated cell. */
+function humanCell(original: string, translated: string): MinerCell {
+  return { original, translated, status: "unvalidated", hasPendingEdit: false }
+}
+
+describe("mineHumanAuthoredEdits (AQU-820)", () => {
+  it("mines human-authored targets that no other tier would catch", () => {
+    // Unique pairs (no repeats), nothing pending, nothing validated — every
+    // pre-AQU-820 tier returns zero on this shape.
+    const cells = [humanCell("In the beginning", "起初"), humanCell("God said", "神說")]
+    expect(mineRepeatedEdits(cells)).toHaveLength(0)
+    expect(mineRecentEdits(cells)).toHaveLength(0)
+
+    const result = mineHumanAuthoredEdits(cells)
+    expect(result).toHaveLength(2)
+    expect(result[0].kind).toBe("human-authored")
+    expect(result[0].sourceSample).toBe("In the beginning")
+    expect(result[0].targetSample).toBe("起初")
+  })
+
+  it("skips untouched AI drafts but keeps post-edited and legacy rows", () => {
+    const result = mineHumanAuthoredEdits([
+      { original: "a", translated: "A", status: "unvalidated", aiDrafted: true },
+      { original: "b", translated: "B", status: "unvalidated", aiDrafted: false },
+      { original: "c", translated: "C", status: "unvalidated" }, // legacy: flag absent
+    ])
+    expect(result.map((c) => c.sourceSample)).toEqual(["b", "c"])
+  })
+
+  it("skips empty and untranslated cells", () => {
+    const result = mineHumanAuthoredEdits([
+      { original: "a", translated: "", status: "empty" },
+      { original: "", translated: "B", status: "unvalidated" },
+      { original: "  ", translated: "  ", status: "unvalidated" },
+      humanCell("d", "D"),
+    ])
+    expect(result).toHaveLength(1)
+    expect(result[0].sourceSample).toBe("d")
+  })
+
+  it("caps output so a full New Testament doesn't flood the prompt", () => {
+    const many = Array.from({ length: 500 }, (_, i) => humanCell(`src ${i}`, `tgt ${i}`))
+    expect(mineHumanAuthoredEdits(many)).toHaveLength(40)
+    expect(mineHumanAuthoredEdits(many, 5)).toHaveLength(5)
+  })
+
+  it("marks validated human cells distinctly in their evidence string", () => {
+    const result = mineHumanAuthoredEdits([
+      humanCell("a", "A"),
+      { original: "b", translated: "B", status: "validated" },
+    ])
+    expect(result[0].evidence).toBe("Human-authored translation")
+    expect(result[1].evidence).toBe("Human-authored translation (validated)")
+  })
+})
+
+describe("mineCandidates — human-authored corpora (AQU-820)", () => {
+  it("produces candidates for a hand-translated project with no validated pairs", () => {
+    // The AQU-820 repro: a Codex-imported project translated entirely by hand.
+    // No AI pre-drafts, no repeats, no pending edits, no validation → this
+    // returned zero candidates before the human-authored tier existed.
+    const cells = Array.from({ length: 30 }, (_, i) =>
+      humanCell(`Verse ${i} source text`, `Verse ${i} 譯文`),
+    )
+    const result = mineCandidates(cells, [])
+    expect(result.length).toBeGreaterThan(0)
+    expect(result.every((c) => c.kind === "human-authored")).toBe(true)
+  })
+
+  it("no regression: post-edited AI drafts still rank above the human-authored tier", () => {
+    const cells: MinerCell[] = [
+      cell("God", "Dios"),
+      cell("God", "Dios"),
+      cell("Recent", "Reciente", "unvalidated", true),
+      humanCell("Plain", "Llano"),
+    ]
+    const pairs = [{ source: "Lord", target: "Señor" }]
+    const result = mineCandidates(cells, pairs)
+
+    expect(result[0].kind).toBe("repeated")
+    const kinds = result.map((c) => c.kind)
+    expect(kinds).toContain("recent")
+    expect(kinds).toContain("validated-pair")
+    // The new tier is last, and never outranks an established one.
+    const humanScores = result.filter((c) => c.kind === "human-authored").map((c) => c.score)
+    const otherScores = result.filter((c) => c.kind !== "human-authored").map((c) => c.score)
+    expect(Math.max(...humanScores)).toBeLessThan(Math.min(...otherScores))
+  })
+
+  it("does not double-count a cell already surfaced by a higher tier", () => {
+    // The same cell is both a validated pair and human-authored; dedupe by key
+    // must keep only the higher-ranked validated-pair entry.
+    const cells: MinerCell[] = [{ original: "Lord", translated: "Señor", status: "validated" }]
+    const result = mineCandidates(cells, [{ source: "Lord", target: "Señor" }])
+    expect(result).toHaveLength(1)
+    expect(result[0].kind).toBe("validated-pair")
   })
 })

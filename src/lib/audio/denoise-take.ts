@@ -87,8 +87,9 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
   // 4. Attach (records + selects the clip in its slot). Link back to the source
   //    take so the UI can revert. On emit failure, clean up the orphaned R2
   //    object and re-throw the original error.
+  let attachEventId: string
   try {
-    await emitCellAudioAttach({
+    attachEventId = await emitCellAudioAttach({
       projectId,
       fileId,
       cellId,
@@ -117,7 +118,7 @@ export async function denoiseTake(args: DenoiseTakeArgs): Promise<DenoiseTakeRes
     durationMs: Math.round(durationMs),
     trimStartMs: null,
     trimEndMs: null,
-  })
+  }, attachEventId)
   notifyAudioAttachmentsChanged(fileId)
 
   return { audioId: fullAudioId, url: result.url, durationMs }

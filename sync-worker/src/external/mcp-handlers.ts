@@ -15,9 +15,10 @@ import type { ExternalErrorCode } from './errors'
 import { ROLE } from '../events/role-policy'
 import { assertCredentialScope } from './token-bridge'
 import { loadChangeset } from './store'
-import { CHANGESET_TTL_MS } from './prepare'
+import { approvalUrlFor, CHANGESET_TTL_MS } from './prepare'
 import { PLAN_IMPORT_MAX_CELLS } from './commands'
-import { MAX_ARTIFACT_BYTES } from './artifacts-route'
+import { MAX_ARTIFACT_BYTES, handleExternalArtifactsRequest } from './artifacts-route'
+import { SERVER_PARSEABLE_FILE_TYPES, CLIENT_ONLY_FORMATS } from './import-parse'
 import { handleExternalReadRequest } from './read-routes'
 import { handleExternalChangesetsRequest } from './changesets-route'
 import { listProjectsForCredential } from './projects-list'
@@ -103,19 +104,42 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
       '4. prepare_translations — stage your writes as a changeset. Nothing is applied yet. Returns { changesetId, digest, summary, mode, approvalUrl? }.',
       '5. confirm_changeset with that changesetId + digest. act mode: applies immediately. ask mode: first show the approvalUrl to a human and wait for them to approve in their browser, then call confirm_changeset — until then it returns confirmation_required and applies nothing.',
     ],
-    // All five domain command kinds now ship (Agent API v1.1). PlanImport is
-    // the one holdout with no MCP staging tool (prepare_translations's
-    // `commands` argument does not accept it) — it stays REST-only (POST
-    // .../changesets). CreateProject / UpdateProjectSettings / LinkMedia stage
-    // through the SAME prepare_translations / confirm_changeset tools as
+    // All five domain command kinds now ship (Agent API v1.1). PlanImport
+    // stages via the dedicated preview_import / prepare_import tools (or raw
+    // REST PlanImport cells); prepare_translations's `commands` argument still
+    // does not accept it. CreateProject / UpdateProjectSettings / LinkMedia
+    // stage through the SAME prepare_translations / confirm_changeset tools as
     // SetTranslation, via that `commands` argument — see projectLifecycle and
     // linkMedia below for their per-kind rules.
     commandKinds: ['SetTranslation', 'PlanImport', 'CreateProject', 'UpdateProjectSettings', 'LinkMedia'],
     planImport: {
-      stagingChannels: ['rest'],
-      mcpStagingTool: null,
+      stagingChannels: ['rest', 'mcp'],
+      mcpStagingTool: 'prepare_import',
       maxCellsPerChangeset: PLAN_IMPORT_MAX_CELLS,
-      note: 'PlanImport is staged via REST only; no MCP staging tool exists yet.',
+      note:
+        'Stage file imports with prepare_import (server-side parsing of an uploaded ' +
+        'artifact — see importing below), or POST raw PlanImport cells to REST ' +
+        '.../changesets when you parsed the file yourself.',
+    },
+    importing: {
+      // The artifact-first import workflow (docs/AGENT-API.md §5): preserve the
+      // original bytes FIRST, then let the server's built-in parsers turn them
+      // into a staged, human-approvable changeset.
+      workflow: [
+        '1. Upload the ORIGINAL file bytes via REST: POST .../projects/:projectId/artifacts with headers "Authorization: Bearer aqk_..." and "x-artifact-name: <filename>" (body = raw bytes). Upload is REST-only — MCP JSON-RPC cannot carry binary; from Claude Code, curl it. This preserves the original in storage for round-trip export.',
+        '2. preview_import { projectId, artifactId } — the server parses with its built-in importers and returns totalCells + the first 10 cells, WITHOUT staging. Pass fileType to override detection.',
+        '3. prepare_import (same arguments) — parses again and stages a PlanImport changeset linking the artifact; returns { changesetId, digest, summary, mode, approvalUrl? }.',
+        '4. confirm_changeset as usual (ask mode: a human approves at the approvalUrl first).',
+      ],
+      serverParseableFormats: SERVER_PARSEABLE_FILE_TYPES,
+      clientOnlyFormats: CLIENT_ONLY_FORMATS,
+      notes:
+        'Formats in clientOnlyFormats need DOM/browser parsers and are not yet server-' +
+        'parseable — import those through the in-app Import dialog, or parse them yourself ' +
+        'and stage raw PlanImport cells over REST. Limits: artifact uploads max ' +
+        `${MAX_ARTIFACT_BYTES} bytes (25MB); imports max ${PLAN_IMPORT_MAX_CELLS} cells ` +
+        'per changeset. A multi-book USFM artifact parses into one file per book — stage ' +
+        'each book separately via resultIndex.',
     },
     projectLifecycle: {
       mcpStagingTool: 'prepare_translations',
@@ -143,6 +167,23 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'see limits.maxArtifactBytes for the size cap. Then stage LinkMedia via ' +
         'prepare_translations\'s `commands` argument. Multiple LinkMedia commands may share ' +
         'one changeset; LinkMedia cannot mix with any other command kind.',
+    },
+    multiLanguage: {
+      note:
+        'A project can hold MULTIPLE target languages at once via target-language lanes. A ' +
+        'lane is a language tag (e.g. "es", "pt") registered in the project\'s ' +
+        'settings.targetLanes array; every cell keeps one shared source plus one independent ' +
+        'target per lane. Omitting the lane everywhere uses the default lane (the project\'s ' +
+        'single targetLanguage) — existing single-language callers need no changes.',
+      workflow: [
+        '1. Register the lanes once: stage UpdateProjectSettings with settings.targetLanes: ["es", "pt"] (merge into the existing settings blob — the write replaces it — and pass the live ifMatchVersion).',
+        '2. Write per lane: each SetTranslation entry takes an optional laneId ("es" or "pt"). An unregistered laneId is rejected at prepare with validation_failed.',
+        '3. Read per lane: read_content takes an optional lane argument — target cells are filtered to that lane (source cells are always included). Omit it to get every lane (each target row carries its targetLang).',
+        '4. Importing a file can seed several lanes at once: PlanImport cells take variants: [{ laneId, content }] (REST-only).',
+      ],
+      preconditionScope:
+        'Preconditions and drift (plan_stale) are lane-scoped: concurrent edits to the SAME ' +
+        'cell in DIFFERENT lanes never invalidate each other\'s changesets.',
     },
     limits: {
       changesetExpirySeconds: CHANGESET_TTL_MS / 1000,
@@ -257,6 +298,9 @@ async function readContent(
   if (typeof args.limit === 'number') params.set('limit', String(args.limit))
   const cursor = str(args, 'cursor')
   if (cursor) params.set('cursor', cursor)
+  // AQU-538: optional target-language lane filter, forwarded to the cells read.
+  const lane = str(args, 'lane')
+  if (lane) params.set('lane', lane)
   const qs = params.toString() ? `?${params.toString()}` : ''
   const fileId = str(args, 'fileId')
   const path = fileId
@@ -308,6 +352,7 @@ async function prepareTranslations(
         cellId: t?.cellId,
         value: t?.value,
         ...(t?.valueHtml !== undefined ? { valueHtml: t.valueHtml } : {}),
+        ...(t?.laneId !== undefined ? { laneId: t.laneId } : {}),
       })),
     )
   }
@@ -347,6 +392,67 @@ async function prepareTranslations(
     summary: prep.summary,
     digest: prep.digest,
     mode,
+    ...(mode === 'ask'
+      ? {
+          approvalUrl: prep.approvalUrl,
+          nextStep:
+            'ask mode: show approvalUrl to a human, wait for approval, then call confirm_changeset with this changesetId and digest.',
+        }
+      : {
+          nextStep: 'act mode: call confirm_changeset with this changesetId and digest to commit.',
+        }),
+  })
+}
+
+// ── delegated import parsing (preview_import / prepare_import) ───────────────
+
+/** Shared argument marshalling for the two import tools: both delegate to the
+ *  REST parse route (artifacts-route → import-parse.ts) via a synthetic
+ *  in-process request, so format detection, the TranslatableString →
+ *  PlanImportCell mapping, and (for staging) the whole handlePrepare pipeline
+ *  come from ONE implementation. `stage` is the only difference. */
+async function runParseArtifact(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+  stage: boolean,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  const artifactId = str(args, 'artifactId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  if (!artifactId) return fail('validation_failed', 'artifactId is required')
+
+  const body: Record<string, unknown> = { stage }
+  for (const key of ['fileType', 'fileName', 'sourceLanguage', 'targetLanguage', 'changesetId'] as const) {
+    const v = str(args, key)
+    if (v) body[key] = v
+  }
+  if (typeof args.resultIndex === 'number') body.resultIndex = args.resultIndex
+  if (typeof args.excludeFrontMatter === 'boolean') body.excludeFrontMatter = args.excludeFrontMatter
+
+  const req = new Request(
+    `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/artifacts/${encodeURIComponent(artifactId)}/parse`,
+    {
+      method: 'POST',
+      headers: { ...bearer(token), 'Content-Type': 'application/json', ...MCP_CHANNEL_HEADER },
+      body: JSON.stringify(body),
+    },
+  )
+  const res = await handleExternalArtifactsRequest(req, env)
+  if (!res) return fail('not_found', 'artifacts route did not match')
+  if (!res.ok) return delegatedError(res)
+
+  if (!stage) return ok(await res.json())
+
+  // Staged: reshape like prepare_translations so agents branch identically.
+  const prep = (await res.json()) as PrepareBody & { parse: unknown }
+  const mode = prep.changeset.autonomyMode
+  return ok({
+    changesetId: prep.changeset.id,
+    summary: prep.summary,
+    digest: prep.digest,
+    mode,
+    parse: prep.parse,
     ...(mode === 'ask'
       ? {
           approvalUrl: prep.approvalUrl,
@@ -439,7 +545,7 @@ async function confirmChangeset(
   const parsed = JSON.parse(errResult.content[0].text) as { error: { code: string } }
   if (parsed.error.code === 'confirmation_required') {
     return fail('confirmation_required', 'ask-mode changeset requires a human approval first', {
-      approvalUrl: `${env.BASE_URL ?? ''}/approve/${changesetId}`,
+      approvalUrl: approvalUrlFor(env, changesetId),
     })
   }
   return errResult
@@ -499,6 +605,10 @@ export async function callTool(
       return readHistory(env, token, args)
     case 'prepare_translations':
       return prepareTranslations(env, token, args, ctx)
+    case 'preview_import':
+      return runParseArtifact(env, token, args, false)
+    case 'prepare_import':
+      return runParseArtifact(env, token, args, true)
     case 'get_changeset':
       return getChangeset(env, token, args)
     case 'confirm_changeset':

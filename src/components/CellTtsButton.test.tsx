@@ -50,3 +50,35 @@ describe("CellTtsButton hover label (AQU-360)", () => {
     expect(screen.getByRole("button").getAttribute("aria-label")).toContain("Kokoro")
   })
 })
+
+describe("CellTtsButton — round 5 (AQU-646)", () => {
+  it("an untranslated cell renders the button DISABLED with the reason, not hidden", () => {
+    render(<CellTtsButton cellId="c1" text="" projectTtsSettings={{}} />)
+    const btn = screen.getByRole("button")
+    expect(btn).toBeDisabled()
+    expect(btn.getAttribute("aria-label")).toBe("Translate this line first to generate voice")
+  })
+
+  it("SUB-35: the READY state is visibly tinted; the disabled state is washed out", () => {
+    const { unmount } = render(<CellTtsButton cellId="c1" text="Hello there" projectTtsSettings={{}} />)
+    expect(screen.getByRole("button").className).toContain("text-sky-600")
+    unmount()
+    render(<CellTtsButton cellId="c1" text="" projectTtsSettings={{}} />)
+    expect(screen.getByRole("button").className).toContain("text-muted-foreground/40")
+  })
+
+  it("the built-in Narrator follows the PROJECT engine — OmniVoice default, no pinned Gemini", () => {
+    // Fresh project: no custom voices, no provider set → resolved engine must
+    // be the OmniVoice default (previously the Narrator preset forced Gemini
+    // and demanded a Gemini key on every fresh project).
+    render(<CellTtsButton cellId="c1" text="Hello there" projectTtsSettings={{}} />)
+    const label = screen.getByRole("button").getAttribute("aria-label")
+    expect(label).toContain("Narrator")
+    expect(label).not.toContain("Gemini")
+  })
+
+  it("the Narrator speaks Gemini when the project engine IS Gemini", () => {
+    render(<CellTtsButton cellId="c1" text="Hello there" projectTtsSettings={{ provider: "gemini" }} />)
+    expect(screen.getByRole("button").getAttribute("aria-label")).toContain("Gemini")
+  })
+})

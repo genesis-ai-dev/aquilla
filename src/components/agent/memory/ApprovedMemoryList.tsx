@@ -88,7 +88,6 @@ export function ApprovedMemoryList({ memories, roleLevel, username, onEdit }: Ap
                 <div className="flex items-center justify-end">
                   <Button
                     variant="ghost"
-                    size="sm"
                     className="h-6 text-[11px]"
                     onClick={() => setEditing(memory)}
                   >

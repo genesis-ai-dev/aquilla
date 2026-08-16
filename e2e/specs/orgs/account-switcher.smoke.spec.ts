@@ -1,5 +1,7 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
-import { ensureAuthState, injectSessions } from "../../helpers/auth"
+import { ensureAuthState, injectAdditionalSession } from "../../helpers/auth"
+import { AccountSwitcherPage } from "../../helpers/page-objects/AccountSwitcher"
+import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * AccountSwitcher dropdown — sidebar username button.
@@ -14,12 +16,15 @@ import { ensureAuthState, injectSessions } from "../../helpers/auth"
  * renders and the dropdown opens.
  */
 test("account switcher dropdown opens with session info", async ({ alice }) => {
-  await alice.goto(orgRoute(alice))
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), {
+    name: `Preferences modal ${Date.now()}`,
+  })
+  await openSeededProject(alice, seeded)
   // The AccountSwitcher renders as a button showing the username.
   // Alice is seeded as "alice".
+  const switcher = new AccountSwitcherPage(alice)
+  await switcher.openMenu("alice")
   const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
-  await expect(accountBtn).toBeVisible({ timeout: 10_000 })
-  await accountBtn.click()
 
   // Dropdown opens showing the active account.
   await expect(alice.getByText(/alice/i).first()).toBeVisible({ timeout: 3_000 })
@@ -29,29 +34,37 @@ test("account switcher dropdown opens with session info", async ({ alice }) => {
     alice.getByRole("menuitem", { name: /Add another account/i })
   ).toBeVisible({ timeout: 3_000 })
 
-  // "Preferences" link is visible.
-  await expect(
-    alice.getByRole("menuitem", { name: /Preferences/i })
-  ).toBeVisible({ timeout: 3_000 })
+  // Preferences opens over the current app route, so changing a personal
+  // setting does not tear down the workspace behind it.
+  const preferencesItem = alice.getByRole("menuitem", { name: /Preferences/i })
+  await expect(preferencesItem).toBeVisible({ timeout: 3_000 })
+  const backgroundUrl = alice.url()
+  await preferencesItem.click()
+  await expect(alice).toHaveURL(/\/preferences$/)
+  const preferencesDialog = alice.getByTestId("preferences-dialog")
+  await expect(preferencesDialog).toBeVisible()
+  await expect(preferencesDialog.locator("h1").filter({ hasText: "Preferences" })).toBeVisible()
 
-  // Close by pressing Escape or clicking outside.
-  await alice.keyboard.press("Escape")
+  await preferencesDialog.getByRole("link", { name: /Workspace/i }).click()
+  await expect(alice).toHaveURL(/\/preferences\/workspace$/)
+  await expect(preferencesDialog.getByRole("heading", { name: "Workspace" })).toBeVisible()
+
+  await preferencesDialog.getByRole("button", { name: "Close" }).click()
+  await expect(alice).toHaveURL(backgroundUrl)
+  await expect(preferencesDialog).not.toBeVisible()
+  await expect(accountBtn).toBeVisible()
 })
 
 test("logging out promotes another signed-in account", async ({ alice }) => {
-  const [aliceSession, bobSession] = await Promise.all([
-    ensureAuthState("alice"),
-    ensureAuthState("bob"),
-  ])
-
+  // Alice is already the active session from the fixture. Merge bob in the
+  // same way the working cross-tab spec does — overwriting the envelope
+  // while the org page is live can lose the extra account to an in-flight
+  // session-store write, so the menu never lists bob.
+  const bobSession = await ensureAuthState("bob")
   await alice.goto(orgRoute(alice))
-  await injectSessions(alice, [aliceSession, bobSession], "alice")
+  await injectAdditionalSession(alice, bobSession)
 
-  const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
-  await expect(accountBtn).toBeVisible({ timeout: 10_000 })
-  await accountBtn.click()
-  await expect(alice.getByText("bob", { exact: true })).toBeVisible({ timeout: 3_000 })
-  await alice.getByRole("menuitem", { name: /^Log out$/i }).click()
+  await new AccountSwitcherPage(alice).logOutCurrentAccount("alice", "bob")
 
   // handleLogout is async: wait until alice is gone and bob is active. Still on
   // alice's org URL, OrgRouteGate shows not-found (no account switcher) — that

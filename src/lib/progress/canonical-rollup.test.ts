@@ -1,9 +1,12 @@
 import { describe, it, expect } from "vitest"
 import {
   buildCanonicalRollup,
+  formatFlatSectionKey,
   hasCanonicalReferences,
   parseCanonicalRef,
+  progressToCanonicalRollup,
 } from "./canonical-rollup"
+import type { FileProgressResponse } from "./file-progress-resource"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 
 /** Minimal CellRow builder — only the fields the rollup reads vary per call. */
@@ -171,5 +174,34 @@ describe("buildCanonicalRollup", () => {
     expect(books).toHaveLength(1)
     expect(books[0].book).toBe("OBS")
     expect(books[0].filledPct).toBe(100)
+  })
+})
+
+describe("formatFlatSectionKey (AQU-805)", () => {
+  it("renders time-bucket keys as jump-nav minute ranges", () => {
+    expect(formatFlatSectionKey("t:000000000000")).toBe("0–5m")
+    expect(formatFlatSectionKey("t:000000600000")).toBe("10–15m")
+    expect(formatFlatSectionKey("t:000001200000")).toBe("20–25m")
+  })
+
+  it("passes non-time keys through verbatim", () => {
+    expect(formatFlatSectionKey("Intro")).toBe("Intro")
+    expect(formatFlatSectionKey("GEN 1")).toBe("GEN 1")
+  })
+})
+
+describe("progressToCanonicalRollup with time sections (AQU-805)", () => {
+  it("returns null for time-bucket sections so callers fall back to the flat breakdown", () => {
+    const progress: FileProgressResponse = {
+      fileId: "f1",
+      revision: 1,
+      validationCount: 1,
+      file: { totalCount: 3, filledCount: 1, validatedCount: 0, validationLevels: [1] },
+      sections: [
+        { key: "t:000000000000", totalCount: 2, filledCount: 1, validatedCount: 0, validationLevels: [1] },
+        { key: "t:000000600000", totalCount: 1, filledCount: 0, validatedCount: 0, validationLevels: [0] },
+      ],
+    }
+    expect(progressToCanonicalRollup(progress)).toBeNull()
   })
 })

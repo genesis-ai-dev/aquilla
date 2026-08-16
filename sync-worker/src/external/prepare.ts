@@ -9,7 +9,7 @@ import { errorResponse, toErrorResponse } from './errors'
 import { AUTH_HINT } from './discovery-route'
 import {
   validateCommands,
-  cellKey,
+  laneCellKey,
   requiredRoleForCommand,
   PLAN_IMPORT_MAX_CELLS,
   type Command,
@@ -33,6 +33,18 @@ import { ROLE } from '../events/role-policy'
 /** Staged changesets live for one hour before they expire. Exported so the MCP
  *  adapter's get_capabilities can publish the real value (never invent limits). */
 export const CHANGESET_TTL_MS = 60 * 60 * 1000
+
+/** Fallback SPA host for the ask-mode approval deep link. BASE_URL (wrangler
+ *  vars) names the environment's app host; when it is unset or empty the
+ *  production host keeps the link ABSOLUTE — an agent handed a relative
+ *  "/approve/:id" cannot open it and (observed in the field) tells the human
+ *  to reconstruct the host themselves. */
+const DEFAULT_APP_BASE_URL = 'https://aquilla.app'
+
+/** Absolute approval-page deep link for a changeset. */
+export function approvalUrlFor(env: Pick<ExternalEnv, 'BASE_URL'>, changesetId: string): string {
+  return `${env.BASE_URL || DEFAULT_APP_BASE_URL}/approve/${changesetId}`
+}
 
 function bearer(request: Request): string | null {
   const h = request.headers.get('Authorization') ?? ''
@@ -159,32 +171,56 @@ export async function handlePrepare(
     (c): c is SetTranslationCommand => c.kind === 'SetTranslation',
   )
 
-  // De-dupe commands by target cell (last write wins); a dropped duplicate is a
+  // AQU-538 lanes: a SetTranslation naming a lane must target a lane the
+  // workspace can select — same rule (and same teaching message) as PlanImport
+  // variants. Settings are only loaded when a lane is actually named, so the
+  // lane-less common case costs no extra query.
+  if (setCommands.some((c) => c.laneId)) {
+    const projectSettings = await loadProjectSettings(db, projectId)
+    const registeredLanes = new Set(
+      Array.isArray(projectSettings.settings.targetLanes)
+        ? projectSettings.settings.targetLanes.filter((lane): lane is string => typeof lane === 'string')
+        : [],
+    )
+    for (const [index, c] of setCommands.entries()) {
+      if (c.laneId && !registeredLanes.has(c.laneId)) {
+        return errorResponse(
+          'validation_failed',
+          `commands[${index}] targets unregistered lane "${c.laneId}"; register it in the project's settings.targetLanes with UpdateProjectSettings first`,
+          { registeredLanes: [...registeredLanes] },
+        )
+      }
+    }
+  }
+
+  // De-dupe commands by target (cell, lane) — the same cell in two lanes is two
+  // independent slots (last write wins per lane); a dropped duplicate is a
   // warning, never a silent drop.
   const warnings: ChangesetWarning[] = []
   const byCell = new Map<string, SetTranslationCommand>()
   for (const c of setCommands) {
-    const key = cellKey(c.fileId, c.cellId)
+    const key = laneCellKey(c.fileId, c.cellId, c.laneId)
     if (byCell.has(key)) {
       warnings.push({
         code: 'duplicate_command',
         fileId: c.fileId,
         cellId: c.cellId,
-        message: 'duplicate command for this cell — later one supersedes the earlier',
+        message: 'duplicate command for this cell and lane — later one supersedes the earlier',
       })
     }
     byCell.set(key, c)
   }
   const commands = [...byCell.values()]
 
-  // Resolve live per-cell state and build committable preconditions + summary.
+  // Resolve live per-(cell, lane) state and build committable preconditions +
+  // summary.
   const states = await resolveCellStates(db, projectId, commands)
   const preconditions: CellPrecondition[] = []
   let translationsAdded = 0
   let translationsModified = 0
 
   for (const c of commands) {
-    const s = states.get(cellKey(c.fileId, c.cellId))
+    const s = states.get(laneCellKey(c.fileId, c.cellId, c.laneId))
     if (!s || (!s.sourceExists && !s.targetExists)) {
       warnings.push({
         code: 'missing_cell',
@@ -197,6 +233,7 @@ export async function handlePrepare(
     preconditions.push({
       fileId: c.fileId,
       cellId: c.cellId,
+      ...(c.laneId ? { laneId: c.laneId } : {}),
       targetHeadEventId: s.targetHeadEventId,
       sourceEventId: s.sourceEventId,
     })
@@ -217,6 +254,7 @@ export async function handlePrepare(
     setTranslation: preconditions.map((p) => ({
       fileId: p.fileId,
       cellId: p.cellId,
+      ...(p.laneId ? { laneId: p.laneId } : {}),
       eventId: uuidv7(),
     })),
   }
@@ -249,7 +287,7 @@ export async function handlePrepare(
   const stored = await loadChangeset(db, projectId, id)
   if (!stored) return errorResponse('job_failed', 'changeset insert did not persist')
 
-  const approvalUrl = `${env.BASE_URL ?? ''}/approve/${stored.id}`
+  const approvalUrl = approvalUrlFor(env, stored.id)
 
   return Response.json({
     changeset: changesetToResponse(stored),
@@ -451,7 +489,7 @@ async function preparePlanImport(
   const stored = await loadChangeset(db, projectId, id)
   if (!stored) return errorResponse('job_failed', 'changeset insert did not persist')
 
-  const approvalUrl = `${env.BASE_URL ?? ''}/approve/${stored.id}`
+  const approvalUrl = approvalUrlFor(env, stored.id)
   return Response.json({
     changeset: changesetToResponse(stored),
     summary: stored.summary,
@@ -526,7 +564,7 @@ async function stageReceiptOnlyChangeset(
   const stored = await loadChangeset(db, changesetProjectId, id)
   if (!stored) return errorResponse('job_failed', 'changeset insert did not persist')
 
-  const approvalUrl = `${env.BASE_URL ?? ''}/approve/${stored.id}`
+  const approvalUrl = approvalUrlFor(env, stored.id)
   return Response.json({
     changeset: changesetToResponse(stored),
     summary: stored.summary,
@@ -560,7 +598,9 @@ async function prepareLinkMedia(
   const plannedLinkMedia: NonNullable<PlannedEventIds['linkMedia']> = []
 
   for (const cmd of cmds) {
-    const s = cellStates.get(cellKey(cmd.fileId, cmd.cellId))
+    // LinkMedia is lane-independent — the default-lane state entry still
+    // reports source/any-lane-target existence for the cell.
+    const s = cellStates.get(laneCellKey(cmd.fileId, cmd.cellId))
     if (!s || (!s.sourceExists && !s.targetExists)) {
       return errorResponse(
         'validation_failed',
@@ -618,7 +658,7 @@ async function prepareLinkMedia(
   const stored = await loadChangeset(db, projectId, id)
   if (!stored) return errorResponse('job_failed', 'changeset insert did not persist')
 
-  const approvalUrl = `${env.BASE_URL ?? ''}/approve/${stored.id}`
+  const approvalUrl = approvalUrlFor(env, stored.id)
   return Response.json({
     changeset: changesetToResponse(stored),
     summary: stored.summary,

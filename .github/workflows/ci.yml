@@ -27,7 +27,7 @@ jobs:
       auth_base: ${{ steps.resolve.outputs.auth_base }}
       chat_base: ${{ steps.resolve.outputs.chat_base }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - id: resolve
         name: Resolve authorized deployment target
         run: bash scripts/resolve-deployment-target.sh
@@ -42,7 +42,7 @@ jobs:
       sync: ${{ steps.filter.outputs.sync }}
       agent: ${{ steps.filter.outputs.agent }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
       - id: filter
@@ -70,21 +70,33 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
+      # i18n context-catalog check (AQU-832): every message key needs coverage
+      # in src/lib/i18n/context.ts. Previously wired into `pnpm test` only; it
+      # had never run as its own CI step. Mirrors the lint lane in
+      # scripts/cloudflare-ci-checks.mjs, which is the gate that actually runs
+      # on pull requests (this workflow is workflow_dispatch-only). Keep the
+      # two in step.
+      - run: pnpm run i18n:check
+      # Credential guard (docs/OPSEC.md §5). Mirrors the lint lane in
+      # scripts/cloudflare-ci-checks.mjs, which is the gate that actually runs
+      # on pull requests (this workflow is workflow_dispatch-only). Keep the
+      # two in step.
+      - run: pnpm run scan:secrets
 
   typecheck:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: pnpm
@@ -94,14 +106,18 @@ jobs:
   unit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
+      # Mirrors the spa lane in scripts/cloudflare-ci-checks.mjs, which is the
+      # gate that actually runs on pull requests (this workflow is
+      # workflow_dispatch-only). Keep the two in step. OPS-4.
+      - run: pnpm test:worker
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:idml
 
@@ -116,9 +132,9 @@ jobs:
       VITE_AUTH_BASE: ${{ needs.target.outputs.auth_base }}
       VITE_CHAT_BASE: ${{ needs.target.outputs.chat_base }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: pnpm
@@ -130,7 +146,7 @@ jobs:
         run: rm -f dist/_redirects
       - name: Verify deployment artifact exclusion policy
         run: node scripts/verify-deployment-artifacts.mjs dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: aquilla-web-${{ needs.target.outputs.live_environment }}-${{ github.sha }}
           path: dist
@@ -141,9 +157,9 @@ jobs:
   schema-migrations:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: pnpm
@@ -155,9 +171,9 @@ jobs:
     if: needs.changes.outputs.auth == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: pnpm
@@ -177,9 +193,9 @@ jobs:
     if: needs.changes.outputs.sync == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@f520eceda224fe1a4aed5a2a27a194379a409996 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: pnpm
@@ -199,8 +215,8 @@ jobs:
     if: needs.changes.outputs.agent == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: npm
@@ -214,55 +230,12 @@ jobs:
       - run: docker build --tag aquilla-agent-sandbox:ci .
         working-directory: agent-worker
 
-  preview:
-    needs: [target, lint, typecheck, unit, build]
-    if: github.event_name == 'pull_request' && github.event.pull_request.draft != true
-    runs-on: ubuntu-latest
-    environment:
-      name: ${{ needs.target.outputs.github_environment }}
-    permissions:
-      contents: read
-      deployments: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - uses: actions/download-artifact@v4
-        with:
-          name: aquilla-web-${{ needs.target.outputs.live_environment }}-${{ github.sha }}
-          path: dist
-
-      - name: Upload aquilla-web preview (PR)
-        id: deploy_preview
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: 6a80496d1e59948a9cbaa3c643ba81d7
-        run: node scripts/cloudflare-pr-preview.mjs "${{ github.event.number }}" "${{ github.event.pull_request.head.sha }}"
-
-      - name: Verify aquilla-web preview environment
-        env:
-          PREVIEW_URL: ${{ steps.deploy_preview.outputs.url }}
-        run: node scripts/verify-live-environment.mjs development --surface=spa --app-origin="$PREVIEW_URL"
-
-      - name: Comment preview URL on PR
-        uses: marocchino/sticky-pull-request-comment@v3
-        with:
-          header: pages-preview
-          message: |
-            **Preview:** ${{ steps.deploy_preview.outputs.url }}
-
-            | | |
-            | --- | --- |
-            | Commit | `${{ github.event.pull_request.head.sha }}` |
-            | API | `api.dev.aquilla.app` (development) |
-
-            This route-free preview is refreshed for each non-draft PR update.
-            It targets development identity, sync, and chat services and cannot
-            alter production or development route traffic.
-
-            Draft PRs do not build a preview; mark the PR ready for review.
+  # NOTE: there is intentionally no `preview` job here. PR previews are owned
+  # by Cloudflare Workers Builds (scripts/cloudflare-pr-preview.mjs), not this
+  # workflow — see the AQU-564 note at the top of this file. A prior `preview`
+  # job gated on `github.event_name == 'pull_request'` could never actually
+  # run (this workflow has no `pull_request` trigger) but still carried
+  # `deployments: write` / `pull-requests: write` and CLOUDFLARE_API_TOKEN
+  # access. It was removed as dead weight so a future trigger change can't
+  # silently resurrect an unaudited privileged job. [Pen test] Infra security
+  # review, 2026-08-14.

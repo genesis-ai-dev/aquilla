@@ -26,6 +26,7 @@ vi.mock("@/lib/audio/play-queue", async (importActual) => {
 
 import { VoicePlaybackBar } from "./VoicePlaybackBar"
 import { startQueue } from "@/lib/audio/play-queue"
+import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -113,6 +114,38 @@ describe("VoicePlaybackBar", () => {
       )
       fireEvent.click(screen.getByLabelText("Play all"))
       expect(vi.mocked(startQueue).mock.calls[0][1]).toBe(0)
+    })
+
+    // MERGE 2026-07-27 (AQU-660 × SUB-44/SUB-52). The media timeline and the
+    // recording modal each claim Space for their own transport while on
+    // screen. This bar binds Space on `window`, so without a guard it fired
+    // as well: Space in the media lens toggled twice (net: nothing), and
+    // Space in the recorder started playback underneath it — the very bug
+    // SUB-52 fixed, re-entering from a new place.
+    describe("spacebar yields to whoever claimed the audio shortcut", () => {
+      const press = () =>
+        fireEvent.keyDown(document.body, { key: " ", code: "Space" })
+
+      it("toggles play/pause when nothing else has claimed it", () => {
+        render(
+          <VoicePlaybackBar cells={sections} projectId="p" session={session} settings={undefined} startCellId="s1" />,
+        )
+        press()
+        expect(startQueue).toHaveBeenCalledTimes(1)
+      })
+
+      it("stands down while the timeline or the recorder holds the claim", () => {
+        render(
+          <VoicePlaybackBar cells={sections} projectId="p" session={session} settings={undefined} startCellId="s1" />,
+        )
+        const release = pushAudioShortcutOverride()
+        press()
+        expect(startQueue).not.toHaveBeenCalled()
+        // …and takes it back the moment that claim is dropped.
+        release()
+        press()
+        expect(startQueue).toHaveBeenCalledTimes(1)
+      })
     })
   })
 })

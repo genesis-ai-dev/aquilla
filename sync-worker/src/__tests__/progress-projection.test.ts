@@ -194,3 +194,105 @@ describe('GET file progress', () => {
     expect(JSON.stringify(body)).not.toContain('cellId')
   })
 })
+
+// AQU-805: media / timeline files carry start_ms but no canonical_ref. The
+// projection buckets them into ~5-minute time sections so the project-overview
+// file breakdown mirrors the in-app jump navigation instead of showing a flat
+// cell count only.
+const MEDIA_FILE = 'file-media'
+
+function mediaSource(cellId: string, startMs: number) {
+  return {
+    project_id: PROJECT, file_id: MEDIA_FILE, cell_id: cellId, side: 'source',
+    value: `source ${cellId}`, canonical_ref: null, start_ms: startMs,
+    event_id: `source-${cellId}`, last_editor: 'alice', last_edit_at: 1,
+    validated: 0, endorsement_count: 0, word_count: 2,
+  }
+}
+
+function mediaTarget(cellId: string, value: string, endorsements: number) {
+  return {
+    project_id: PROJECT, file_id: MEDIA_FILE, cell_id: cellId, side: 'target',
+    value, canonical_ref: null, event_id: `target-${cellId}`,
+    last_editor: 'alice', last_edit_at: 2, validated: endorsements >= 2 ? 1 : 0,
+    endorsement_count: endorsements, word_count: value ? 1 : 0,
+  }
+}
+
+async function mediaFixture() {
+  return makeTestDb({
+    files: [{ id: MEDIA_FILE, project_id: PROJECT, name: 'Episode', event_id: 'file-event-media' }],
+    project_settings: [{
+      project_id: PROJECT,
+      settings: JSON.stringify({ validationCount: 2 }),
+      version: 1,
+    }],
+    cells: [
+      // Two cells inside the first 5-minute bucket, one filled+validated.
+      mediaSource('m1', 0), mediaTarget('m1', 'uno', 2),
+      mediaSource('m2', 60_000), mediaTarget('m2', '', 0),
+      // 10-minute bucket, filled but not yet validated.
+      mediaSource('m3', 600_000), mediaTarget('m3', 'tres', 1),
+      // 20-minute bucket — proves the zero-padded key sorts past "10".
+      mediaSource('m4', 1_200_000), mediaTarget('m4', '', 0),
+    ],
+  })
+}
+
+describe('file_section_progress time buckets (AQU-805)', () => {
+  it('groups media source cells into 5-minute time sections', async () => {
+    const { db, rows } = await mediaFixture()
+    await db.batch(fullProgressRecomputeStmts(db, PROJECT, MEDIA_FILE, 100))
+
+    const projected = await rows<{ scope: string; section_key: string; total_count: number; filled_count: number }>(
+      'file_section_progress',
+    )
+    const sections = projected.filter((row) => row.scope === 'section')
+    // Buckets: 0ms (m1,m2), 600000ms (m3), 1200000ms (m4).
+    expect(sections.map((row) => row.section_key).sort()).toEqual([
+      't:000000000000',
+      't:000000600000',
+      't:000001200000',
+    ])
+    expect(sections.find((row) => row.section_key === 't:000000000000')).toMatchObject({
+      total_count: 2,
+      filled_count: 1,
+    })
+    expect(projected.find((row) => row.scope === 'file')).toMatchObject({ total_count: 4, filled_count: 2 })
+  })
+
+  it('recomputes only the touched time section plus the file rollup', async () => {
+    const { db, pg, rows } = await mediaFixture()
+    await db.batch(fullProgressRecomputeStmts(db, PROJECT, MEDIA_FILE, 100))
+    await pg.query(
+      `UPDATE cells SET value = 'cuatro' WHERE project_id = $1 AND file_id = $2 AND cell_id = 'm4' AND side = 'target'`,
+      [PROJECT, MEDIA_FILE],
+    )
+    await db.batch([
+      fileProgressRecomputeStmt(db, PROJECT, MEDIA_FILE, 101),
+      sectionsProgressRecomputeStmt(db, PROJECT, MEDIA_FILE, 101, ['m4']),
+    ])
+    const projected = await rows<{ scope: string; section_key: string; filled_count: number }>('file_section_progress')
+    expect(projected.find((row) => row.section_key === 't:000001200000')?.filled_count).toBe(1)
+    expect(projected.find((row) => row.scope === 'file')?.filled_count).toBe(3)
+  })
+
+  it('serves time sections sorted in chronological (not lexical-broken) order', async () => {
+    const { db } = await mediaFixture()
+    await db.batch(fullProgressRecomputeStmts(db, PROJECT, MEDIA_FILE, 100))
+    const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: MEDIA_FILE })
+    const response = (await handleProgressReadRequest(new Request(
+      `https://worker/api/v1/projects/${PROJECT}/files/${MEDIA_FILE}/progress`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+    expect(response.status).toBe(200)
+    const body = await response.json() as FileProgressResponse
+    // 10-minute bucket must precede the 20-minute bucket despite the "10 < 5"
+    // lexical trap the zero-padding is there to avoid.
+    expect(body.sections.map((section) => section.key)).toEqual([
+      't:000000000000',
+      't:000000600000',
+      't:000001200000',
+    ])
+  })
+})

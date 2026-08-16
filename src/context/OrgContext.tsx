@@ -3,8 +3,10 @@ import { useLocation } from "react-router-dom"
 import { listMyOrgs, type OrgSummary } from "@/lib/frontier/orgs"
 import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { isJwtExpired } from "@/lib/frontier/auth"
 import { UserError } from "@/lib/errors/user-error"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import {
   ALL_ORGS_PARAM,
   ORG_STORAGE_KEY,
@@ -35,6 +37,16 @@ interface OrgContextValue {
   /** One app-wide project discovery result, shared by dashboard/sidebar users. */
   accessibleProjects: CloudProjectSummary[]
   accessibleProjectsLoading: boolean
+  /**
+   * AQU-883: the project-directory fetch failed. Tracked separately from
+   * `error` (the organizations fetch) because the two fail independently —
+   * orgs can load fine while the directory 401s/5xxs, and the directory is the
+   * *only* source of guest orgs and shared projects. Without this, every such
+   * failure collapsed into an empty list and read as "nothing is shared with
+   * you". Consumers surface it with a Retry that calls
+   * `refreshAccessibleProjects`.
+   */
+  accessibleProjectsError: string | null
   setActiveOrg: (id: number) => void
   setAllOrgs: () => void
   isLoading: boolean
@@ -43,6 +55,13 @@ interface OrgContextValue {
    *  that need the result immediately don't race against a stale closure. */
   refresh: () => Promise<OrgSummary[]>
   refreshAccessibleProjects: () => Promise<CloudProjectSummary[]>
+  /**
+   * AQU-882: recover from a failed organizations load in place. Re-issues the
+   * org fetch *and* the dependent project-directory fetch, so surfaces showing
+   * the failure (the `/orgs/all` dashboard, the sidebar switcher) can offer a
+   * Retry instead of forcing a full page reload.
+   */
+  retryOrgLoad: () => Promise<void>
 }
 
 const OrgContext = createContext<OrgContextValue | null>(null)
@@ -67,9 +86,16 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null)
   const [accessibleProjects, setAccessibleProjects] = useState<CloudProjectSummary[]>([])
   const [accessibleProjectsLoading, setAccessibleProjectsLoading] = useState(true)
+  const [accessibleProjectsError, setAccessibleProjectsError] = useState<string | null>(null)
   const [resolvedProjectsJwt, setResolvedProjectsJwt] = useState<string | null>(null)
   const orgRequestRef = useRef(0)
   const projectsRequestRef = useRef(0)
+  // Route changes update org scope in the dedicated effect below; they must
+  // not recreate `refresh` and refetch the membership directory. Keep the
+  // latest path in a ref so an explicit/account-driven refresh can still
+  // respect whichever URL is authoritative when its request resolves.
+  const pathnameRef = useRef(location.pathname)
+  pathnameRef.current = location.pathname
   const projectsInFlightRef = useRef<{
     jwt: string
     requestId: number
@@ -88,6 +114,19 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       setLoading(false)
       return []
     }
+    // AQU-885: the token's `exp` is knowable without a round-trip, so don't
+    // spend a doomed request (and a 401) on a session we already know is dead.
+    // Signal the expiry instead and let ExpiredSessionGate / the AQU-293 banner
+    // drive re-auth — the previous behavior rendered an empty all-orgs
+    // dashboard with no org picker and no explanation.
+    if (isJwtExpired(jwt)) {
+      setOrgs([])
+      setActiveOrgId(null)
+      setResolvedOrgJwt(jwt)
+      setLoading(false)
+      notifySessionExpired()
+      return []
+    }
     setLoading(true); setError(null)
     try {
       const list = await listMyOrgs(jwt)
@@ -96,7 +135,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       // When the URL already names an org, don't clamp away from it here —
       // OrgRouteGate owns unauthorized/missing UX. Only auto-pick when the
       // path isn't driving org context (project routes, etc.).
-      const fromPath = parseOrgPath(location.pathname)
+      const fromPath = parseOrgPath(pathnameRef.current)
       if (fromPath) return list
       setActiveOrgId((cur) =>
         list.length === 0 ? null
@@ -110,7 +149,9 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       setOrgs([])
       setActiveOrgId(null)
       if (e instanceof UserError && e.category === "session-expired") {
-        notifySessionExpired()
+        // Guarded: a 401 from a JWT that re-login has since replaced must not
+        // re-raise the banner (see lib/frontier/session-expiry.ts).
+        void notifySessionExpiredIfCurrent(jwt)
       }
       setError(e instanceof Error ? e.message : String(e))
       return []
@@ -120,7 +161,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
         setLoading(false)
       }
     }
-  }, [jwt, location.pathname, sessionLoading])
+  }, [jwt, sessionLoading])
 
   useEffect(() => { void refresh() }, [refresh])
 
@@ -136,7 +177,20 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       projectsRequestRef.current += 1
       projectsInFlightRef.current = null
       setAccessibleProjects([])
+      setAccessibleProjectsError(null)
       setResolvedProjectsJwt(null)
+      setAccessibleProjectsLoading(false)
+      return []
+    }
+    // AQU-885: same short-circuit as the org fetch — an expired token can only
+    // produce a 401 here, and swallowing that 401 is what made the directory
+    // look empty rather than unauthenticated.
+    if (isJwtExpired(jwt)) {
+      projectsRequestRef.current += 1
+      projectsInFlightRef.current = null
+      setAccessibleProjects([])
+      setAccessibleProjectsError(null)
+      setResolvedProjectsJwt(jwt)
       setAccessibleProjectsLoading(false)
       return []
     }
@@ -149,14 +203,24 @@ export function OrgProvider({ children }: { children: ReactNode }) {
 
     const requestId = ++projectsRequestRef.current
     setAccessibleProjectsLoading(true)
+    // AQU-883: clear the previous failure up front so a retry drops consumers
+    // back through their loading state instead of leaving a stale error card
+    // on screen next to a spinner.
+    setAccessibleProjectsError(null)
     const promise = (async () => {
       try {
         const projects = await fetchAccessibleProjects(jwt)
         if (projectsRequestRef.current !== requestId) return []
         setAccessibleProjects(projects)
         return projects
-      } catch {
-        if (projectsRequestRef.current === requestId) setAccessibleProjects([])
+      } catch (e) {
+        // AQU-883: this used to swallow every failure into an empty list, so a
+        // blocked/401/5xx directory fetch was indistinguishable from "you have
+        // no shared projects" — guest orgs and shared projects just vanished.
+        if (projectsRequestRef.current === requestId) {
+          setAccessibleProjects([])
+          setAccessibleProjectsError(e instanceof Error ? e.message : String(e))
+        }
         return []
       } finally {
         if (projectsInFlightRef.current?.requestId === requestId) {
@@ -173,6 +237,13 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   }, [jwt, sessionLoading])
 
   useEffect(() => { void refreshAccessibleProjects() }, [refreshAccessibleProjects])
+
+  // AQU-882: `refresh()` clears `error` before re-fetching, so a retry drops
+  // consumers back through their loading state rather than leaving the stale
+  // failure on screen next to a spinner.
+  const retryOrgLoad = useCallback(async (): Promise<void> => {
+    await Promise.all([refresh(), refreshAccessibleProjects()])
+  }, [refresh, refreshAccessibleProjects])
 
   // AQU-473: derive guest orgs from the shared project directory instead of
   // refetching it whenever the member-org list changes.
@@ -256,12 +327,14 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       guestOrgs,
       accessibleProjects,
       accessibleProjectsLoading: accessibleProjectsLoading || !projectsReady,
+      accessibleProjectsError,
       setActiveOrg,
       setAllOrgs,
       isLoading: isLoading || !orgsReady,
       error,
       refresh,
       refreshAccessibleProjects,
+      retryOrgLoad,
     }}>
       {children}
     </OrgContext.Provider>

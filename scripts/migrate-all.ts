@@ -49,7 +49,7 @@ import { buildOidIndex, planCellAudio, buildCellAudioEvents } from "../src/lib/m
 import { discoverPointers } from "../src/lib/migrate/gitlab/lfs"
 import { R2Client, gitlabLfsKey, audioDestKey } from "../src/lib/migrate/r2-s3"
 import { mapComments } from "../src/lib/migrate/comments"
-import { buildCastAdditions } from "../src/lib/import/cast-from-speakers"
+import { buildCastAdditions, castLikeSpeakers } from "../src/lib/import/cast-from-speakers"
 import type { ProjectTtsSettings } from "../src/lib/parsers/types"
 import type { IngestEvent } from "../src/lib/migrate/types"
 import type { CodexNotebookFile } from "../src/lib/codex-editor/types"
@@ -376,7 +376,9 @@ async function ingest(
 }
 
 async function applyCast(projectId: string, pairs: FilePairInput[]): Promise<number> {
-  const speakers = pairs.flatMap((p) => collectSpeakers(p))
+  // AQU-813: judge cast-ness across the whole project's labels — a project whose
+  // clips carry no voice labels must not mint a phantom voice per clip.
+  const speakers = castLikeSpeakers(pairs.flatMap((p) => collectSpeakers(p)))
   if (speakers.length === 0) return 0
   const settings = (await getSettings(projectId)) as { ttsSettings?: ProjectTtsSettings }
   const tts = settings.ttsSettings
@@ -467,7 +469,7 @@ async function doProject(
       /* skip bad comments */
     }
   }
-  const speakerCount = new Set(pairs.flatMap((x) => collectSpeakers(x)).map((s) => s.speaker)).size
+  const speakerCount = new Set(castLikeSpeakers(pairs.flatMap((x) => collectSpeakers(x))).map((s) => s.speaker)).size
 
   console.log(
     `  → aquilla ${projectId}  org_id=${org.id}${team ? ` team_id=${team.id}` : " (no team)"}  files=${pairs.length} events=${events.length} characters=${speakerCount}`,

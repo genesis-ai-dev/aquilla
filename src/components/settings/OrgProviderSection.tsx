@@ -7,9 +7,8 @@
 // Precedence at synthesis time:
 //   project key > user (localStorage) key > org key (this section)
 
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { useForm } from "@tanstack/react-form"
-import { Check } from "lucide-react"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { Button } from "@/components/ui/button"
 import { Field, FieldError, FieldGroup } from "@/components/ui/field"
@@ -34,7 +33,6 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
 
   const keys = orgProviderKeys ?? {}
   const currentGeminiKey = keys["gemini-tts"] ?? ""
-  const [saved, setSaved] = useState(false)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
 
   const form = useForm({
@@ -50,10 +48,7 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
           "gemini-tts": trimmed || undefined,
         },
       })
-      if (result.kind === "ok") {
-        setSaved(true)
-        setTimeout(() => setSaved(false), 2500)
-      } else if (result.kind === "blocked" || result.kind === "forbidden") {
+      if (result.kind === "blocked" || result.kind === "forbidden") {
         setSubmitError("Only org maintainers and owners can set org-level API keys.")
       } else if (result.kind === "error") {
         setSubmitError(result.message ?? "Save failed")
@@ -69,7 +64,9 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
     return (
       <SettingsGroup label="Provider keys">
         <SettingsRow label="Gemini TTS API key" block>
-          <p className="text-xs text-muted-foreground">Loading…</p>
+          <div className="flex items-center text-muted-foreground">
+            <Spinner className="size-3.5" />
+          </div>
         </SettingsRow>
       </SettingsGroup>
     )
@@ -126,14 +123,13 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
 
           {canEditOrgKeys && (
             <div className="flex gap-2">
-              <Button type="submit" form="org-provider-form" size="sm">
+              <Button type="submit" form="org-provider-form">
                 {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
                 {form.state.isSubmitting ? "Saving…" : "Save key"}
               </Button>
               {currentGeminiKey && (
                 <Button
                   type="button"
-                  size="sm"
                   variant="outline"
                   onClick={() => form.setFieldValue("geminiKey", "")}
                 >
@@ -144,11 +140,6 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
           )}
           {submitError && (
             <FieldError className="text-xs">{submitError}</FieldError>
-          )}
-          {saved && (
-            <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400" role="status" data-testid="org-key-saved">
-              <Check className="size-3.5" /> Saved
-            </p>
           )}
         </form>
       </SettingsRow>

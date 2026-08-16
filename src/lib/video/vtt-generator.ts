@@ -49,12 +49,6 @@ export function generateVttFromCells(cells: CellData[]): string {
   )
 }
 
-// Build a Blob URL for a VTT string. Caller owns the URL and must revoke it.
-export function createVttBlobUrl(vtt: string): string {
-  const blob = new Blob([vtt], { type: "text/vtt" })
-  return URL.createObjectURL(blob)
-}
-
 export interface CueForOverlay {
   start: number
   end: number

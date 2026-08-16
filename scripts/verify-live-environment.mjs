@@ -19,21 +19,25 @@ const ENVIRONMENTS = {
 }
 
 const VALID_SURFACES = new Set(["all", "auth", "sync", "spa"])
+const DEFAULT_MAX_JAVASCRIPT_ASSETS = 10_000
+// A newly promoted Worker and its asset manifest can reach Cloudflare edges
+// more than a minute apart. Retry only the lagging request for a bounded
+// three-minute window before declaring a healthy deploy bad (AQU-824).
+const DEFAULT_ATTEMPTS = 90
+const DEFAULT_RETRY_DELAY_MS = 2_000
 
-// The bare origin serves the prerendered marketing homepage (worker/index.ts),
+class NonRetryableVerificationError extends Error {}
+
+// The bare origin is owned by the independently deployed marketing Worker,
 // whose small JS graph never imports the sync client or the chat completion
 // service — crawling it can't prove the SPA targets the right environment
-// (AQU-779). Any non-marketing path falls through to the assets binding's
-// single-page-application fallback and serves the real SPA shell; /app is a
-// stable route in the App.tsx route table.
+// (AQU-779). /app is a stable SPA route served by the app Worker's catch-all.
 const SPA_SHELL_PATH = "/app"
 
-// Cookie-independent static marketing pages mapped by worker/index.ts
-// STATIC_PAGES. A deploy that publishes the Worker but drops these HTML entries
-// from the asset bundle makes each path miss env.ASSETS.fetch() and fall
-// through the single-page-application not-found handler to the SPA index shell
-// — a silent, partner-facing 404 (the homepage footer links straight here).
-// This is exactly the AQU-798 recurrence.
+// Canonical public pages owned by the aquilla-marketing Worker. Post-promotion
+// environment verification still checks these cross-repo routes because they
+// share the public origin. Immutable app previews skip them: they intentionally
+// contain no marketing documents after AQU-918.
 //
 // The tell is the served document's og:url: each case-study page hardcodes its
 // own canonical og:url, while the index shell carries the bare-origin og:url
@@ -42,8 +46,14 @@ const SPA_SHELL_PATH = "/app"
 // canonical production URL baked into the source HTML, so it's identical across
 // environments (production/staging/dev/preview all serve the same asset bundle).
 const STATIC_MARKETING_PAGES = [
-  { path: "/case-studies/biblica", ogUrl: "https://aquilla.app/case-studies/biblica" },
-  { path: "/case-studies/come-and-see", ogUrl: "https://aquilla.app/case-studies/come-and-see" },
+  {
+    path: "/case-studies/biblica",
+    ogUrl: "https://aquilla.app/case-studies/biblica",
+  },
+  {
+    path: "/case-studies/come-and-see",
+    ogUrl: "https://aquilla.app/case-studies/come-and-see",
+  },
 ]
 
 function delay(milliseconds) {
@@ -72,8 +82,10 @@ async function requestWithRetry(url, init, verify, options) {
       return
     } catch (error) {
       lastError = error
+      if (error instanceof NonRetryableVerificationError) throw error
       if (attempt < attempts) {
-        log(`[verify-live] retrying ${url} (${attempt}/${attempts})`)
+        const reason = error instanceof Error ? error.message : String(error)
+        log(`[verify-live] retrying ${url} after ${reason} (${attempt}/${attempts})`)
         await delay(retryDelayMs)
       }
     }
@@ -87,12 +99,13 @@ async function operationWithRetry(description, operation, options) {
 
   for (let attempt = 1; attempt <= options.attempts; attempt += 1) {
     try {
-      await operation()
-      return
+      return await operation()
     } catch (error) {
       lastError = error
+      if (error instanceof NonRetryableVerificationError) throw error
       if (attempt < options.attempts) {
-        options.log(`[verify-live] retrying ${description} (${attempt}/${options.attempts})`)
+        const reason = error instanceof Error ? error.message : String(error)
+        options.log(`[verify-live] retrying ${description} after ${reason} (${attempt}/${options.attempts})`)
         await delay(options.retryDelayMs)
       }
     }
@@ -169,28 +182,84 @@ function scriptSources(html) {
   return [...html.matchAll(/<script[^>]+src=["']([^"']+\.js)["']/gi)].map((match) => match[1])
 }
 
-function javascriptReferences(source) {
-  return [...source.matchAll(/["'`]([^"'`]+\.js)["'`]/g)].map((match) => match[1])
+export function javascriptReferences(source) {
+  const references = new Set()
+  const collect = (pattern) => {
+    for (const match of source.matchAll(pattern)) references.add(match[2])
+  }
+
+  // Follow executable ESM edges, not every quoted string ending in `.js`.
+  // Large dependencies (notably Transformers.js) embed hundreds of source
+  // module filenames as data; treating those as imports made a healthy 142-
+  // chunk production build look like an unbounded graph (AQU-824).
+  collect(/\bimport\s*\(\s*(["'`])([^"'`]+\.js)\1\s*\)/g)
+  collect(/\bfrom\s*(["'])([^"']+\.js)\1/g)
+  collect(/\bimport\s*(["'])([^"']+\.js)\1/g)
+
+  // Vite's __vite__mapDeps preload table is data by design, but each entry is
+  // a real deployed chunk that the application may load. Inspect only the
+  // table initializer—not arbitrary assets/*.js strings elsewhere in bundles.
+  for (const table of source.matchAll(
+    /__vite__mapDeps\s*=\s*\([^[]*?\[([\s\S]*?)\]\s*\)\s*\)/g,
+  )) {
+    for (const match of table[1].matchAll(/(["'`])(assets\/[^"'`]+\.js)\1/g)) {
+      references.add(match[2])
+    }
+  }
+
+  return [...references]
 }
 
 async function fetchJavascriptGraph(appOrigin, entrySources, options) {
-  const pending = entrySources.map((source) => new URL(source, appOrigin).href)
-  const visited = new Set()
+  const pending = []
+  const discovered = new Set()
   const bodies = []
 
+  const schedule = (url) => {
+    if (discovered.has(url)) return
+    discovered.add(url)
+    if (discovered.size > options.maxJavascriptAssets) {
+      throw new Error(
+        `SPA references more than ${options.maxJavascriptAssets} JavaScript assets; `
+        + "refusing an unbounded crawl",
+      )
+    }
+    pending.push(url)
+  }
+
+  entrySources.forEach((source) => schedule(new URL(source, appOrigin).href))
+
   while (pending.length > 0) {
-    const batch = pending.splice(0, 12).filter((url) => !visited.has(url))
-    if (batch.length === 0) continue
-    batch.forEach((url) => visited.add(url))
+    const batch = pending.splice(0, 12)
 
     const results = await Promise.all(batch.map(async (url) => {
       const parsed = new URL(url)
       if (parsed.origin !== appOrigin || !parsed.pathname.endsWith(".js")) {
         throw new Error(`refusing to inspect unexpected script URL ${url}`)
       }
-      const response = await options.fetchImpl(url)
-      assertResponse(response, 200, `SPA asset ${parsed.pathname}`)
-      return { url, source: await response.text() }
+      return operationWithRetry(`SPA asset ${parsed.pathname}`, async () => {
+        const response = await options.fetchImpl(url, {
+          headers: {
+            Accept: "application/javascript, text/javascript;q=0.9, */*;q=0.1",
+            "Cache-Control": "no-cache",
+          },
+        })
+        assertResponse(response, 200, `SPA asset ${parsed.pathname}`)
+        const contentType = response.headers.get("content-type")?.toLowerCase() ?? ""
+        const source = await response.text()
+        if (
+          contentType.includes("text/html")
+          || /^\s*(?:<!doctype\s+html|<html\b)/i.test(source)
+        ) {
+          const message =
+            `SPA asset ${parsed.pathname} returned HTML instead of JavaScript; `
+            + "the deployed asset is missing or fell back to the SPA shell"
+          throw options.retryAssetFallbacks
+            ? new Error(message)
+            : new NonRetryableVerificationError(message)
+        }
+        return { url, source }
+      }, options)
     }))
 
     for (const { url, source } of results) {
@@ -204,13 +273,9 @@ async function fetchJavascriptGraph(appOrigin, entrySources, options) {
           ? new URL(`/${reference}`, appOrigin)
           : new URL(reference, url)
         if (referencedUrl.origin === appOrigin && referencedUrl.pathname.endsWith(".js")) {
-          pending.push(referencedUrl.href)
+          schedule(referencedUrl.href)
         }
       }
-    }
-
-    if (visited.size > 300) {
-      throw new Error("SPA references more than 300 JavaScript assets; refusing an unbounded crawl")
     }
   }
 
@@ -219,11 +284,13 @@ async function fetchJavascriptGraph(appOrigin, entrySources, options) {
 
 async function verifySpa(config, options) {
   const appUrl = new URL(SPA_SHELL_PATH, config.appOrigin).href
-  const response = await options.fetchImpl(appUrl, {
-    headers: { Accept: "text/html" },
-  })
-  assertResponse(response, 200, "SPA entrypoint")
-  const html = await response.text()
+  const html = await operationWithRetry(appUrl, async () => {
+    const response = await options.fetchImpl(appUrl, {
+      headers: { Accept: "text/html" },
+    })
+    assertResponse(response, 200, "SPA entrypoint")
+    return response.text()
+  }, options)
   const entries = scriptSources(html)
   if (entries.length === 0) {
     throw new Error("SPA entrypoint contains no JavaScript module")
@@ -248,9 +315,8 @@ async function verifySpa(config, options) {
   options.log(`[verify-live] SPA at ${appUrl} targets only the expected live environment`)
 }
 
-// Reads a <meta property="…" content="…"> value. The marketing HTML is
-// hand-authored with a stable attribute order (property before content), and
-// prerender-marketing only injects body content, so a targeted regex is safe.
+// Reads a <meta property="…" content="…"> value. The marketing HTML has a
+// stable attribute order (property before content), so a targeted regex is safe.
 function metaContent(html, property) {
   const escaped = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   const match = html.match(
@@ -259,10 +325,8 @@ function metaContent(html, property) {
   return match?.[1]
 }
 
-// AQU-798 regression guard: prove the case-study static pages resolve to their
-// dedicated documents rather than the SPA index-shell fallback. Runs post-deploy
-// as part of the spa surface, so a bundle that silently omits the case-study
-// HTML fails the deploy instead of shipping a partner-facing 404.
+// AQU-798 regression guard: prove the marketing Worker's case-study routes
+// resolve to their dedicated documents rather than the app Worker's SPA shell.
 async function verifyStaticPages(config, options) {
   for (const page of STATIC_MARKETING_PAGES) {
     const pageUrl = new URL(page.path, config.appOrigin).href
@@ -276,8 +340,8 @@ async function verifyStaticPages(config, options) {
         if (ogUrl !== page.ogUrl) {
           throw new Error(
             `${page.path} served the wrong document (og:url ${JSON.stringify(ogUrl)}; `
-            + `expected ${JSON.stringify(page.ogUrl)}). The case-study HTML is likely missing `
-            + `from the deployed asset bundle, so the path fell back to the SPA index shell.`,
+            + `expected ${JSON.stringify(page.ogUrl)}). The marketing route likely fell `
+            + `through to the app Worker's SPA shell.`,
           )
         }
       },
@@ -317,8 +381,11 @@ export async function verifyLiveEnvironment(environment, {
   appOrigin,
   fetchImpl = fetch,
   lookup = dnsLookup,
-  attempts = 5,
-  retryDelayMs = 1_000,
+  attempts = DEFAULT_ATTEMPTS,
+  retryDelayMs = DEFAULT_RETRY_DELAY_MS,
+  maxJavascriptAssets = DEFAULT_MAX_JAVASCRIPT_ASSETS,
+  retryAssetFallbacks = true,
+  verifyMarketingRoutes = true,
   log = console.log,
 } = {}) {
   const environmentConfig = ENVIRONMENTS[environment]
@@ -328,17 +395,29 @@ export async function verifyLiveEnvironment(environment, {
   if (!VALID_SURFACES.has(surface)) {
     throw new Error(`unknown surface ${JSON.stringify(surface)}; expected all, auth, sync, or spa`)
   }
+  if (!Number.isInteger(maxJavascriptAssets) || maxJavascriptAssets < 1) {
+    throw new Error("maxJavascriptAssets must be a positive integer")
+  }
   const config = withAppOrigin(environmentConfig, appOrigin, surface)
 
-  const options = { fetchImpl, lookup, attempts, retryDelayMs, log }
+  const options = {
+    fetchImpl,
+    lookup,
+    attempts,
+    retryDelayMs,
+    maxJavascriptAssets,
+    retryAssetFallbacks,
+    verifyMarketingRoutes,
+    log,
+  }
   if (surface === "all" || surface === "auth" || surface === "sync") {
     await verifyApiDns(config, options)
   }
   if (surface === "all" || surface === "auth") await verifyAuth(config, options)
   if (surface === "all" || surface === "sync") await verifySync(config, options)
   if (surface === "all" || surface === "spa") {
-    await operationWithRetry(config.appOrigin, () => verifySpa(config, options), options)
-    await verifyStaticPages(config, options)
+    await verifySpa(config, options)
+    if (verifyMarketingRoutes) await verifyStaticPages(config, options)
   }
 
   log(`[verify-live] ${environment}/${surface} verification passed`)

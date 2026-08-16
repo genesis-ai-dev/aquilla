@@ -142,7 +142,7 @@ function ErrorFallback({
             : "An unexpected error occurred. Your work is saved locally — reload to continue."}
         </p>
         <div className="mt-2">
-          <Button type="button" size="sm" variant="outline" onClick={onReload}>
+          <Button type="button" variant="outline" onClick={onReload}>
             Reload
           </Button>
         </div>

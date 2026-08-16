@@ -1,7 +1,10 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, act } from "@testing-library/react"
-import { MemoryRouter } from "react-router-dom"
+import { MemoryRouter, useNavigate } from "react-router-dom"
 import { OrgProvider, useActiveOrg } from "./OrgContext"
+import { UserError } from "@/lib/errors/user-error"
+import { clearSessionExpired, onSessionExpired } from "@/lib/errors/session-expired-signal"
+import { clearSession, saveSession } from "@/lib/frontier/session-store"
 
 // This vitest/happy-dom env doesn't provide localStorage (the reason this
 // suite was red before FRO-367 added the shim). OrgContext reads/writes it
@@ -38,7 +41,11 @@ vi.mock("@/lib/sync/cloud-projects", () => ({
 }))
 
 function Probe() {
-  const { orgs, activeOrg, activeGuestOrg, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs } = useActiveOrg()
+  const {
+    orgs, activeOrg, activeGuestOrg, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs,
+    error, isLoading, retryOrgLoad,
+    accessibleProjectsError, refreshAccessibleProjects,
+  } = useActiveOrg()
   return (
     <div>
       <span data-testid="count">{orgs.length}</span>
@@ -47,8 +54,26 @@ function Probe() {
       <span data-testid="all">{isAllOrgs ? "yes" : "no"}</span>
       <span data-testid="guest-count">{guestOrgs.length}</span>
       <span data-testid="guest-names">{guestOrgs.map((g) => g.name ?? `#${g.id}`).join(",")}</span>
+      {/* AQU-882: a failed load must be distinguishable from an empty list. */}
+      <span data-testid="error">{error ?? "none"}</span>
+      <span data-testid="loading">{isLoading ? "yes" : "no"}</span>
+      {/* AQU-883: the project-directory failure is tracked separately. */}
+      <span data-testid="projects-error">{accessibleProjectsError ?? "none"}</span>
       <button onClick={() => setActiveOrg(2)}>switch</button>
       <button onClick={() => setAllOrgs()}>all</button>
+      <button onClick={() => { void retryOrgLoad() }}>retry</button>
+      <button onClick={() => { void refreshAccessibleProjects() }}>retry-projects</button>
+    </div>
+  )
+}
+
+function RouteProbe() {
+  const navigate = useNavigate()
+  const { isLoading } = useActiveOrg()
+  return (
+    <div>
+      <span data-testid="loading">{isLoading ? "yes" : "no"}</span>
+      <button onClick={() => navigate("/orgs/1/settings")}>settings</button>
     </div>
   )
 }
@@ -63,6 +88,26 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe("OrgProvider", () => {
+  it("keeps resolved organization state across client-side route changes", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "A", role: { level: 700, name: "owner" } },
+    ])
+
+    render(
+      <MemoryRouter initialEntries={["/orgs/1"]}>
+        <OrgProvider><RouteProbe /></OrgProvider>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => expect(screen.getByTestId("loading").textContent).toBe("no"))
+    expect(listMyOrgs).toHaveBeenCalledTimes(1)
+
+    await act(async () => { screen.getByText("settings").click() })
+
+    expect(screen.getByTestId("loading").textContent).toBe("no")
+    expect(listMyOrgs).toHaveBeenCalledTimes(1)
+  })
+
   it("loads the shared project directory once while organization state resolves", async () => {
     listMyOrgs.mockResolvedValue([
       { id: 1, name: "A", role: { level: 700, name: "owner" } },
@@ -255,5 +300,169 @@ describe("OrgProvider", () => {
     await waitFor(() => expect(screen.getByTestId("all").textContent).toBe("yes"))
     expect(screen.getByTestId("active").textContent).toBe("none")
     expect(localStorage.getItem("org:active")).toBe("all")
+  })
+
+  // AQU-882: a failed org load must stay distinguishable from "zero orgs", and
+  // must be recoverable in place rather than only by a full page reload.
+  describe("org load failure (AQU-882)", () => {
+    it("records an error a failed load can be told apart by, and leaves the org list empty", async () => {
+      listMyOrgs.mockRejectedValue(new Error("network down"))
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByTestId("error").textContent).toBe("network down"))
+      expect(screen.getByTestId("count").textContent).toBe("0")
+      expect(screen.getByTestId("loading").textContent).toBe("no")
+    })
+
+    it("leaves error null when the fetch succeeds with an empty list", async () => {
+      listMyOrgs.mockResolvedValue([])
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByTestId("loading").textContent).toBe("no"))
+      expect(screen.getByTestId("count").textContent).toBe("0")
+      expect(screen.getByTestId("error").textContent).toBe("none")
+    })
+
+    it("retryOrgLoad re-issues both the org and project-directory fetches and clears the error", async () => {
+      listMyOrgs.mockRejectedValueOnce(new Error("network down"))
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByTestId("error").textContent).toBe("network down"))
+      expect(listMyOrgs).toHaveBeenCalledTimes(1)
+      const directoryCallsBeforeRetry = fetchAccessibleProjects.mock.calls.length
+
+      // Backend is reachable again.
+      listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
+      await act(async () => { screen.getByText("retry").click() })
+
+      await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"))
+      expect(screen.getByTestId("error").textContent).toBe("none")
+      expect(listMyOrgs).toHaveBeenCalledTimes(2)
+      // The dependent project directory is re-fetched too, not just the orgs.
+      expect(fetchAccessibleProjects.mock.calls.length).toBeGreaterThan(directoryCallsBeforeRetry)
+    })
+
+    it("still signals session-expired on a 401 (AQU-293 path intact)", async () => {
+      // The guarded notifier (AQU-884 race fix) checks the session store, so
+      // the store must hold the same JWT the provider is fetching with.
+      await saveSession({ jwt: "jwt", username: "anna", createdAt: "x" })
+      const expired = vi.fn()
+      const unsubscribe = onSessionExpired(expired)
+      listMyOrgs.mockRejectedValue(new UserError(401, "token expired"))
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(expired).toHaveBeenCalledTimes(1))
+      // Still an error state — the banner and the retry affordance coexist.
+      expect(screen.getByTestId("error").textContent).not.toBe("none")
+      unsubscribe()
+      await clearSession()
+      clearSessionExpired()
+    })
+
+    // AQU-884 race fix: a 401 from a JWT the session store no longer holds
+    // (re-login replaced it while the request was in flight or React state
+    // lagged) must NOT signal — it would re-latch the banner over a healthy
+    // dashboard.
+    it("does not signal when the failing JWT is no longer the active credential", async () => {
+      await saveSession({ jwt: "jwt-fresh", username: "anna", createdAt: "x" })
+      const expired = vi.fn()
+      const unsubscribe = onSessionExpired(expired)
+      // The provider still fetches with the mocked hook's stale "jwt".
+      listMyOrgs.mockRejectedValue(new UserError(401, "token expired"))
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+      // Wait for the failure to surface, then flush the guard's async check.
+      await waitFor(() => expect(screen.getByTestId("error").textContent).not.toBe("none"))
+      await act(async () => {})
+      expect(expired).not.toHaveBeenCalled()
+      unsubscribe()
+      await clearSession()
+      clearSessionExpired()
+    })
+  })
+
+  // AQU-885: the stored JWT's `exp` is knowable before any request goes out.
+  // Booting on an already-expired token used to fire both fetches anyway, take
+  // two 401s, and land the user on an empty all-orgs dashboard.
+  describe("already-expired stored token at boot (AQU-885)", () => {
+    /** Fake JWT with an `exp` claim `secondsFromNow` out (isJwtExpired is real). */
+    function fakeJwt(secondsFromNow: number): string {
+      const exp = Math.floor(Date.now() / 1000) + secondsFromNow
+      return `h.${btoa(JSON.stringify({ exp }))}.s`
+    }
+
+    afterEach(() => {
+      sessionState.session = { jwt: "jwt", username: "anna", createdAt: "x" }
+    })
+
+    it("issues no org or project-directory request, and signals session-expired", async () => {
+      sessionState.session = { jwt: fakeJwt(-60), username: "anna", createdAt: "x" }
+      const expired = vi.fn()
+      const unsubscribe = onSessionExpired(expired)
+
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+
+      await waitFor(() => expect(expired).toHaveBeenCalled())
+      await waitFor(() => expect(screen.getByTestId("loading").textContent).toBe("no"))
+      expect(listMyOrgs).not.toHaveBeenCalled()
+      expect(fetchAccessibleProjects).not.toHaveBeenCalled()
+      unsubscribe()
+    })
+
+    it("still fetches normally for a valid unexpired token", async () => {
+      sessionState.session = { jwt: fakeJwt(3600), username: "anna", createdAt: "x" }
+      listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
+
+      render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+
+      await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"))
+      expect(fetchAccessibleProjects).toHaveBeenCalled()
+    })
+  })
+})
+
+// AQU-883: the project directory is the ONLY source of guest orgs and shared
+// projects. Its fetch used to swallow every failure into an empty list, so a
+// blocked/401/5xx directory read was indistinguishable from "nothing is shared
+// with you" — with no error recorded anywhere for a consumer to surface.
+describe("OrgProvider — project-directory load failure (AQU-883)", () => {
+  it("records a distinct error instead of reporting an empty directory", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockRejectedValue(new Error("Failed to fetch"))
+
+    render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+
+    // Orgs still load — the two fetches fail independently.
+    await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"))
+    await waitFor(() =>
+      expect(screen.getByTestId("projects-error").textContent).toBe("Failed to fetch"),
+    )
+    expect(screen.getByTestId("guest-count").textContent).toBe("0")
+  })
+
+  it("clears the error and restores guest orgs on a successful retry", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockRejectedValueOnce(new Error("Failed to fetch"))
+
+    render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+    await waitFor(() =>
+      expect(screen.getByTestId("projects-error").textContent).toBe("Failed to fetch"),
+    )
+
+    // Backend recovers; retry re-issues the directory fetch in place.
+    fetchAccessibleProjects.mockResolvedValue([
+      { id: "p9", name: "Shared", orgId: 42, orgName: "Alice Co", role: { level: 100, name: "viewer", source: "project" } },
+    ])
+    await act(async () => { screen.getByText("retry-projects").click() })
+
+    await waitFor(() => expect(screen.getByTestId("projects-error").textContent).toBe("none"))
+    await waitFor(() => expect(screen.getByTestId("guest-count").textContent).toBe("1"))
+    expect(screen.getByTestId("guest-names").textContent).toBe("Alice Co")
+  })
+
+  it("leaves the error null when the directory genuinely comes back empty", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+
+    await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"))
+    expect(screen.getByTestId("projects-error").textContent).toBe("none")
+    expect(screen.getByTestId("guest-count").textContent).toBe("0")
   })
 })

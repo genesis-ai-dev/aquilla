@@ -21,10 +21,7 @@ import { extractJsonStrings } from "./json-i18n"
 import { extractPoStrings } from "./po"
 import { extractPropertiesStrings } from "./properties"
 import { extractSbvStrings } from "./sbv"
-import type { TranslatableString } from "./types"
-// Type-only import — erased by the bundler, so this does NOT pull import.ts (or
-// its DOMParser-using parsers) into the worker bundle.
-import type { ImportResult } from "../import"
+import type { ParsedTextFileResult, TranslatableString } from "./core-types"
 
 /** DOM-free file types handled by this module (and therefore the parse worker). */
 export type TextParseFileType = "txt" | "md" | "json" | "po" | "properties" | "obs" | "vtt" | "srt" | "sbv" | "csv" | "tsv" | "usfm"
@@ -115,12 +112,13 @@ export function usfmSectionToStrings(
 }
 
 /**
- * Parse a DOM-free import format into ImportResult[]. Pure and worker-safe.
- * Mirrors the corresponding branches of parseFile() exactly — the only
- * difference is that the raw text is supplied directly instead of read from a
- * File (so this can run off the main thread).
+ * Parse a DOM-free import format into ParsedTextFileResult[] (assignable to
+ * ImportResult[] — see types.ts). Pure and worker-safe. Mirrors the
+ * corresponding branches of parseFile() exactly — the only difference is that
+ * the raw text is supplied directly instead of read from a File (so this can
+ * run off the main thread, and inside the sync-worker's Agent API).
  */
-export function parseTextFormat(req: TextParseRequest): ImportResult[] {
+export function parseTextFormat(req: TextParseRequest): ParsedTextFileResult[] {
   const { fileType, text, name, excludeFrontMatter } = req
   switch (fileType) {
     case "txt":

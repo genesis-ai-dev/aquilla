@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest"
 import app from "../index"
 import {
   LOGIN_MAX_FAILURES_PER_IDENTIFIER,
+  PASSWORD_RESET_ATTEMPT_MAX_FAILURES,
   RESET_REQUEST_MAX_PER_IDENTIFIER,
 } from "../utils/rate-limit"
 
@@ -90,3 +91,98 @@ describe("password-reset request throttling", () => {
     expect(tokens!.n).toBeLessThanOrEqual(RESET_REQUEST_MAX_PER_IDENTIFIER)
   })
 })
+
+// [Pen test] Auth & session mgmt (2026-08-10): /password-reset/verify and
+// /password-reset/reset were the only two auth endpoints with no attempt
+// limiting at all. Guard the throttle so a caller who repeatedly submits a
+// wrong token for the same username gets locked out, and so a legitimate
+// user's own successful reset is never affected by someone else's failures.
+describe("password-reset verify/reset attempt throttling", () => {
+  it("locks out further verify attempts after too many wrong tokens for the same username", async () => {
+    await register("rl5", "rl5@example.com", "correct-password-1")
+
+    for (let i = 0; i < PASSWORD_RESET_ATTEMPT_MAX_FAILURES; i++) {
+      const res = await reqJson("/api/v2/auth/password-reset/verify", {
+        username: "rl5",
+        token: "not-a-real-token",
+      })
+      expect(res.status).toBe(400)
+    }
+
+    // Next attempt is throttled even with a real, valid token.
+    await seedToken("rl5", "rl5-real-token", soon())
+    const throttled = await reqJson("/api/v2/auth/password-reset/verify", {
+      username: "rl5",
+      token: "rl5-real-token",
+    })
+    expect(throttled.status).toBe(429)
+  })
+
+  it("locks out further reset attempts after too many wrong tokens for the same username", async () => {
+    await register("rl6", "rl6@example.com", "correct-password-1")
+
+    for (let i = 0; i < PASSWORD_RESET_ATTEMPT_MAX_FAILURES; i++) {
+      const res = await reqJson("/api/v2/auth/password-reset/reset", {
+        username: "rl6",
+        token: "not-a-real-token",
+        new_password: "new-password-1",
+      })
+      expect(res.status).toBe(400)
+    }
+
+    await seedToken("rl6", "rl6-real-token", soon())
+    const throttled = await reqJson("/api/v2/auth/password-reset/reset", {
+      username: "rl6",
+      token: "rl6-real-token",
+      new_password: "new-password-1",
+    })
+    expect(throttled.status).toBe(429)
+  })
+
+  it("does not throttle a user who only fails a couple of verify attempts", async () => {
+    await register("rl7", "rl7@example.com", "correct-password-1")
+    await reqJson("/api/v2/auth/password-reset/verify", { username: "rl7", token: "wrong" })
+    await reqJson("/api/v2/auth/password-reset/verify", { username: "rl7", token: "wrong" })
+
+    await seedToken("rl7", "rl7-real-token", soon())
+    const res = await reqJson("/api/v2/auth/password-reset/verify", {
+      username: "rl7",
+      token: "rl7-real-token",
+    })
+    expect(res.status).toBe(200)
+  })
+
+  it("throttling one username does not lock out a different username", async () => {
+    await register("rl8", "rl8@example.com", "correct-password-1")
+    await register("rl8b", "rl8b@example.com", "correct-password-1")
+
+    for (let i = 0; i < PASSWORD_RESET_ATTEMPT_MAX_FAILURES; i++) {
+      await reqJson("/api/v2/auth/password-reset/verify", { username: "rl8", token: "wrong" })
+    }
+    const throttled = await reqJson("/api/v2/auth/password-reset/verify", {
+      username: "rl8",
+      token: "wrong",
+    })
+    expect(throttled.status).toBe(429)
+
+    await seedToken("rl8b", "rl8b-real-token", soon())
+    const other = await reqJson("/api/v2/auth/password-reset/verify", {
+      username: "rl8b",
+      token: "rl8b-real-token",
+    })
+    expect(other.status).toBe(200)
+  })
+})
+
+async function seedToken(username: string, token: string, expiresAt: string): Promise<void> {
+  const u = await env.AQUILLA_PG.prepare("SELECT id FROM users WHERE username = ?")
+    .bind(username)
+    .first<{ id: number }>()
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)",
+  )
+    .bind(u!.id, token, expiresAt)
+    .run()
+}
+
+const soon = () => new Date(Date.now() + 3600_000).toISOString()

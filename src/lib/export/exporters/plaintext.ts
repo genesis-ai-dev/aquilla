@@ -3,6 +3,7 @@
 // translated text value of each cell is emitted; USFM markers, poetry layout,
 // and other structural markup are all lost.
 import type { CellData } from "@/hooks/useCells"
+import { effectiveSourceText } from "@/lib/cell-text"
 
 export function exportPlainText(cells: CellData[]): Blob {
   const lines = cells
@@ -22,7 +23,7 @@ export function exportPlainTextStructured(cells: CellData[]): Blob {
   const paragraphs: string[] = []
   let currentGroup: string | null = null
   for (const c of cells) {
-    const text = (c.translated || c.original || "").trim()
+    const text = (c.translated || effectiveSourceText(c) || "").trim()
     if (!text) continue
     if (c.group && c.group === currentGroup && paragraphs.length > 0) {
       paragraphs[paragraphs.length - 1] += ` ${text}`

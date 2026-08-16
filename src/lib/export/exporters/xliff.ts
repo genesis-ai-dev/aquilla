@@ -3,6 +3,7 @@
 // not expressed as XLIFF <g>/<x> elements; plain-text values only. A proper
 // round-trip would require inline-element extraction from the source markup.
 import type { CellData } from "@/hooks/useCells"
+import { effectiveSourceText } from "@/lib/cell-text"
 
 function xmlEscape(s: string): string {
   return s
@@ -16,7 +17,7 @@ function xmlEscape(s: string): string {
 export function exportXliff(cells: CellData[], sourceLanguage = "und", targetLanguage = "und"): Blob {
   const transUnits = cells.map((c) => {
     const id = xmlEscape(c.group || c.id)
-    const src = xmlEscape(c.original)
+    const src = xmlEscape(effectiveSourceText(c))
     const tgt = xmlEscape(c.translated)
     const state = c.status === "validated" ? "final" : c.translated.trim() ? "translated" : "new"
     return [

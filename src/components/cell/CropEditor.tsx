@@ -11,6 +11,7 @@ import { CellWaveform } from "@/components/CellWaveform"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import type { UseCellAudioResult } from "@/hooks/useCellAudio"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n))
 
@@ -33,6 +34,7 @@ export function CropButton({
   trim: CropTrim
   onChange: (start: number | null, end: number | null) => void
 }) {
+  const t = useT()
   const trimmed = trim.start != null || trim.end != null
   return (
     <Popover>
@@ -42,7 +44,7 @@ export function CropButton({
             type="button"
             variant="ghost"
             size="icon-sm"
-            aria-label="Crop audio"
+            aria-label={t("editor.crop.open")}
             className={cn("shrink-0", trimmed ? "text-foreground" : undefined)}
           >
             <Scissors className="h-3.5 w-3.5" />
@@ -61,6 +63,7 @@ function CropPanel({ controller, trim, onChange }: {
   trim: CropTrim
   onChange: (start: number | null, end: number | null) => void
 }) {
+  const t = useT()
   const { duration, isPlaying, play, pause } = controller
   const boxRef = useRef<HTMLDivElement | null>(null)
   const dur = duration > 0 ? duration : 0
@@ -106,14 +109,14 @@ function CropPanel({ controller, trim, onChange }: {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium">Crop</span>
+        <span className="text-xs font-medium">{t("editor.crop.title")}</span>
         <button
           type="button"
           onClick={() => onChange(null, null)}
-          aria-label="Reset to full clip"
+          aria-label={t("editor.crop.reset")}
           className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent/50 hover:text-foreground"
         >
-          <RotateCcw className="h-3 w-3" /> Reset
+          <RotateCcw className="h-3 w-3" /> {t("common.reset")}
         </button>
       </div>
 
@@ -134,7 +137,7 @@ function CropPanel({ controller, trim, onChange }: {
         <div
           {...handleProps(moveStart)}
           role="slider"
-          aria-label="Crop start"
+          aria-label={t("editor.crop.start")}
           aria-valuemin={0}
           aria-valuemax={Math.round(dur)}
           aria-valuenow={Math.round(start)}
@@ -146,7 +149,7 @@ function CropPanel({ controller, trim, onChange }: {
         <div
           {...handleProps(moveEnd)}
           role="slider"
-          aria-label="Crop end"
+          aria-label={t("editor.crop.end")}
           aria-valuemin={0}
           aria-valuemax={Math.round(dur)}
           aria-valuenow={Math.round(end)}
@@ -165,7 +168,7 @@ function CropPanel({ controller, trim, onChange }: {
           onClick={() => { if (isPlaying) pause(); else void play() }}
         >
           {isPlaying ? <Pause className="h-3 w-3" /> : <Play className="h-3 w-3" />}
-          {isPlaying ? "Pause" : "Preview"}
+          {isPlaying ? t("common.pause") : t("common.preview")}
         </Button>
         <span className="text-[10px] tabular-nums text-muted-foreground">
           {fmt(start)} – {dur > 0 ? fmt(end) : "–:––"} · {fmt(Math.max(0, end - start))}

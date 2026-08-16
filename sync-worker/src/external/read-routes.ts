@@ -352,8 +352,9 @@ async function handleExternalFileCells(
   const authed = await authenticateAndScope(request, env, projectId)
   if (!authed.ok) return authed.response
 
-  // since/limit/cursor (and the cellIds fast-path param) are supported
-  // natively by the internal cells route — forward the querystring as-is.
+  // since/limit/cursor (and the cellIds fast-path param and the AQU-538
+  // lane=<tag> target-lane filter) are supported natively by the internal
+  // cells route — forward the querystring as-is.
   const token = await mintInternalToken(env, authed.ctx, projectId, fileId)
   const internalUrl = new URL(request.url)
   internalUrl.pathname = `/api/v1/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/cells`

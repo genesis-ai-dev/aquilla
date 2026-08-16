@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import {
   fetchAccessibleProjects,
+  fetchOrgDeletedFiles,
   minimalProjectRecord,
   renameProject,
   resolveCloudProject,
@@ -329,5 +330,36 @@ describe("renameProject", () => {
     await expect(renameProject("jwt", "p-1", "X", API)).rejects.toMatchObject({ status: 403 })
     // and it is specifically a UserError so callers can branch on the type
     await expect(renameProject("jwt", "p-1", "X", API)).rejects.toBeInstanceOf(UserError)
+  })
+})
+
+describe("fetchOrgDeletedFiles", () => {
+  afterEach(() => { global.fetch = originalFetch })
+
+  it("GETs /api/v2/orgs/:id/deleted-files and returns the parsed list", async () => {
+    const fetchMock = mockFetch(200, {
+      files: [
+        {
+          fileId: "f-del",
+          name: "EXO.usfm",
+          projectId: "pa",
+          projectName: "John",
+          fileType: "usfm",
+          cellCount: 20,
+          deletedAt: 1700000000000,
+        },
+      ],
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+    const files = await fetchOrgDeletedFiles("jwt", 7, API)
+    expect(fetchMock.mock.calls[0][0]).toBe(`${API}/api/v2/orgs/7/deleted-files`)
+    expect(files).toHaveLength(1)
+    expect(files[0].name).toBe("EXO.usfm")
+    expect(files[0].projectName).toBe("John")
+  })
+
+  it("returns [] when the request fails", async () => {
+    global.fetch = mockFetch(403, { error: "not an org member" }) as unknown as typeof fetch
+    await expect(fetchOrgDeletedFiles("jwt", 7, API)).resolves.toEqual([])
   })
 })

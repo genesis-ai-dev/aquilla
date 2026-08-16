@@ -9,13 +9,18 @@
 // blob is the converted clip, fetched back from R2).
 
 import { synthesizeForCell } from "./tts"
+import { canEncodeOpus, encodeMonoToWebmOpus } from "./opus-encode"
+import { decodeToMono48k, TARGET_RATE } from "./decode-mono"
+import { audioCachePutBlob } from "./bytes-cache"
 import { resolveVoice } from "./voices"
 import { resolveTtsProvider } from "./tts-providers"
 import { buildAudioId, uploadCellAudio, fetchCellAudio } from "./upload"
+import { uploadLosslessSiblingBestEffort } from "./lossless-sibling"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
 import { convertToCloneVoice } from "./voice-clone"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
-import { notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
+import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
+import { probeDurationMsSafe } from "@/lib/import"
 import { synthesizeCellTts } from "@/lib/sync/tts"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
@@ -33,6 +38,8 @@ export interface GenerateAndAttachArgs {
   session: FrontierSession
   /** Frontier username — author of the cell.audio.attach event. */
   username: string
+  /** Round 8c: TTS is a TAKE — its permanent name, set at birth. */
+  label?: string
   diffusionSteps?: number
   onProgress?: SynthOptions["onProgress"]
 }
@@ -72,7 +79,7 @@ export async function generateAndAttachCellVoice(
       },
       getSyncToken,
     )
-    await emitCellAudioAttach({
+    const attachEventId = await emitCellAudioAttach({
       projectId: args.projectId,
       fileId: args.fileId,
       cellId: args.cellId,
@@ -83,8 +90,23 @@ export async function generateAndAttachCellVoice(
       mimeType: "audio/wav",
       voiceId: voice.id,
       ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
+      ...(args.label ? { label: args.label } : {}),
       author: args.username,
     })
+    // Round 8: shadow-inject so the sparkle chip appears at its real length
+    // instantly — the notify's refetch would otherwise read pre-flush state.
+    injectOptimisticAudioAttachment(args.fileId, args.cellId, {
+      audioId: result.objectName,
+      url: result.url,
+      slot: "generatedVoice",
+      mimeType: "audio/wav",
+      voiceId: voice.id,
+      referenceAudioId: voice.referenceAudioId ?? null,
+      durationMs: Math.round(result.durationSeconds * 1000),
+      label: args.label ?? null,
+      trimStartMs: null,
+      trimEndMs: null,
+    }, attachEventId)
     notifyAudioAttachmentsChanged(args.fileId)
     const bytes = await fetchCellAudio({
       projectId: args.projectId,
@@ -112,6 +134,11 @@ export async function generateAndAttachCellVoice(
   let ext: string
   let url: string
   let playable: Blob
+  // Clone conversions come back from the worker as WAV; the plain-TTS branch
+  // overrides this when it compresses.
+  let generatedMimeType = "audio/wav"
+  /** Sample-exact duration from the opus encoder, when that path ran. */
+  let encodedDurationMs: number | null = null
 
   if (voice.referenceAudioId) {
     // 2a. Clone: re-voice TTS output into the reference timbre. The worker
@@ -137,37 +164,102 @@ export async function generateAndAttachCellVoice(
     })
     playable = new Blob([bytes as BlobPart], { type: "audio/wav" })
   } else {
-    // 2b. Plain TTS: upload the blob as-is.
+    // 2b. Plain TTS. Smooth-playback round: compress before upload — raw WAV
+    // is ~14× the size of the webm/opus mic takes already use, and generated
+    // voices were the single biggest reason projects grew heavy. WebCodecs
+    // encodes many× realtime; where it's unavailable (or the clip defeats
+    // decode) fall back to uploading the WAV as before — a size regression,
+    // never a broken generation. Existing WAV clips are untouched.
     const baseId = buildAudioId(args.cellId)
+    let uploadBlob = ttsBlob
+    let uploadMime = "audio/wav"
     ext = "wav"
+    if (canEncodeOpus()) {
+      try {
+        const samples = await decodeToMono48k(new Uint8Array(await ttsBlob.arrayBuffer()))
+        const encoded = await encodeMonoToWebmOpus(samples, TARGET_RATE)
+        uploadBlob = encoded.blob
+        uploadMime = encoded.mimeType
+        ext = encoded.ext
+        // FORTIFY: the encoder's duration is sample-exact — re-probing the
+        // blob with a media element (which can time out and leave the chip
+        // "length unknown") threw away a value we had in hand.
+        encodedDurationMs = encoded.durationMs
+      } catch (e) {
+        // FORTIFY: never silent — a browser whose AudioEncoder rejects the
+        // opus config would otherwise fall back to WAV on EVERY generation,
+        // invisibly, forever.
+        console.warn("[generate-voice] opus compress failed; uploading WAV", e)
+      }
+    }
     const res = await uploadCellAudio({
       projectId: args.projectId,
       fileId: args.fileId,
       audioId: baseId,
       ext,
-      blob: ttsBlob,
+      blob: uploadBlob,
       getSyncToken,
     })
     audioId = res.audioId
     url = res.url
-    playable = ttsBlob
+    playable = uploadBlob
+    generatedMimeType = uploadMime
+    // Meeting note (2026-08-05): the original WAV stays obtainable — uploaded
+    // best-effort under the SAME id with ext "wav", unattached (a second
+    // attachment row would read as a duplicate take). Lossless export and the
+    // original-quality playback toggle find it by ext-swap convention. Only
+    // when the primary went out compressed; fire-and-forget so the attach is
+    // never delayed and a sibling failure never fails the generation.
+    if (ext === "webm") {
+      void uploadLosslessSiblingBestEffort({
+        projectId: args.projectId,
+        fileId: args.fileId,
+        audioId: baseId,
+        wavBlob: ttsBlob,
+        getSyncToken,
+      })
+    }
   }
+
+  // FORTIFY: local-first parity with mic and denoised takes — the exact
+  // playable bytes are in hand, so stock the byte cache. Without this, the
+  // very first Media-lens playback / peaks / transcription of a just-generated
+  // clip re-downloaded from R2 (and parked the verse in "loading" for it).
+  void audioCachePutBlob(audioId, ext, playable)
 
   // 3. Attach durably (generatedVoice slot). The bus poke surfaces it via the
   // per-file read; the WS broadcast does the same for collaborators.
+  // Round 6: probe the clip's duration so its Target-track chip renders at
+  // the generated audio's real length (best-effort).
   const objectName = `${audioId}.${ext}`
-  await emitCellAudioAttach({
+  const generatedDurationMs = encodedDurationMs ?? (await probeDurationMsSafe(playable))
+  const attachEventId = await emitCellAudioAttach({
     projectId: args.projectId,
     fileId: args.fileId,
     cellId: args.cellId,
     audioId: objectName,
     url,
     slot: "generatedVoice",
-    mimeType: "audio/wav",
+    mimeType: generatedMimeType,
     voiceId: voice.id,
     ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
+    ...(generatedDurationMs != null ? { durationMs: generatedDurationMs } : {}),
+    ...(args.label ? { label: args.label } : {}),
     author: args.username,
   })
+  // Round 8: shadow-inject (see the omnivoice branch's comment).
+  injectOptimisticAudioAttachment(args.fileId, args.cellId, {
+    audioId: objectName,
+    url,
+    slot: "generatedVoice",
+    mimeType: generatedMimeType,
+    voiceId: voice.id,
+    referenceAudioId: voice.referenceAudioId ?? null,
+    durationMs: generatedDurationMs ?? null,
+    label: args.label ?? null,
+    trimStartMs: null,
+    trimEndMs: null,
+  }, attachEventId)
   notifyAudioAttachmentsChanged(args.fileId)
 
   return { audioId: objectName, url, blob: playable }

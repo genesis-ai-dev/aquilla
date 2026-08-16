@@ -43,9 +43,9 @@ export interface AgentDockPanelProps {
   onPendingChipConsumed?: () => void
   /** Org agent-credit gauge in the header (maintainer+ only; self-hides). */
   credits?: CreditsDialProps | null
-  /** Opens the full-screen workbench (same session — nothing is lost). */
+  /** Opens the agent workbench as an editor tab (same session — nothing is lost). */
   onExpand?: () => void
-  /** True while the workbench route is showing the same session in the center.
+  /** True while the workbench is showing the same session in an editor tab.
    *  The dock then renders a pointer back to it instead of a second chat. */
   expanded?: boolean
 }
@@ -86,19 +86,19 @@ export function AgentDockPanel({
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <Bot className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-xs font-medium">AI Agent</span>
-        <span className="ml-auto flex items-center gap-1">
+        <span className="ms-auto flex items-center gap-1">
           {/* When the workbench owns the session, its header shows the dial —
               a second copy here would compete for the same click/popover. */}
           {credits && !expanded && <CreditsDial {...credits} />}
           {onExpand && !expanded && (
-            <AppTooltip content="Open full-screen workbench">
+            <AppTooltip content="Open in editor tab">
               <Button
                 type="button"
                 variant="ghost"
                 size="icon-xs"
                 onClick={onExpand}
                 className="text-muted-foreground"
-                aria-label="Open full-screen workbench"
+                aria-label="Open agent in editor tab"
               >
                 <Maximize2 />
               </Button>
@@ -108,12 +108,12 @@ export function AgentDockPanel({
       </div>
 
       {expanded ? (
-        // The workbench route is rendering this same session in the center —
+        // The workbench is rendering this same session in an editor tab —
         // a second live chat here would double the composer and confuse focus.
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-4 text-center">
           <Bot className="h-6 w-6 text-muted-foreground" />
           <p className="text-xs text-muted-foreground">
-            The agent is open in the full-screen workbench.
+            The agent is open in an editor tab.
           </p>
         </div>
       ) : (

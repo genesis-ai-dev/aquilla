@@ -47,7 +47,11 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'project.link-source': { sourceProjectId: 'upstream-proj-1' },
     'cast.assign': { castName: 'Narrator' },
     'cell.retime': { startMs: 0, endMs: 1000 },
+    'cell.audio.rename': { audioId: 'audio-1.wav', label: 'Take 3' },
+    'cell.audio.measure': { audioId: 'audio-1.wav', durationMs: 1000 },
+    'cell.lane.retime': { subtitleStartMs: 0, subtitleEndMs: 1000 },
     'file.video.set': { coreMediaUrl: 'https://cdn/v.mp4' },
+    'file.timing.set': { timingMode: 'audioFirst' },
     'source.cell.mirror': {
       value: 'x',
       upstream: { projectId: 'proj-up', cellId: 'cell-1', eventId: 'evt-up-1', seq: 1, side: 'source', contentHash: 'abc' },

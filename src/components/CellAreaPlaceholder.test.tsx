@@ -16,13 +16,29 @@ describe("CellAreaPlaceholder", () => {
     )
 
     const status = screen.getByRole("status", {
-      name: "Syncing file from the cloud",
+      name: "Loading file from the cloud",
     })
     expect(status).toHaveAttribute("aria-busy", "true")
-    expect(within(status).getByText("Syncing file from the cloud…")).toBeInTheDocument()
+    expect(within(status).getByText("Loading file from the cloud…")).toBeInTheDocument()
     expect(status.querySelector("[data-slot='spinner']")).not.toBeNull()
     expect(status.querySelectorAll("[data-slot='skeleton']")).toHaveLength(32)
     expect(screen.queryByText(/0 cells/i)).not.toBeInTheDocument()
+  })
+
+  // AQU-819: a plain read is loading, not syncing. "Syncing" is reserved for
+  // edits actually being flushed to the server (the outbox indicator).
+  it("never calls the initial file read 'syncing'", () => {
+    render(
+      <CellAreaPlaceholder
+        state={{ kind: "syncing-empty" }}
+        fileName="GEN"
+        hasFiles
+        filesLoaded
+      />,
+    )
+
+    expect(screen.queryByText(/sync/i)).not.toBeInTheDocument()
+    expect(screen.getByRole("status")).toHaveAccessibleName(/^Loading\b/)
   })
 
   it("shows a recoverable load error instead of claiming the file is empty", () => {

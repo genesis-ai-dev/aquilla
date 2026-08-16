@@ -121,6 +121,46 @@ describe("useProject — thin-client fetch (Phase 2c-β)", () => {
     })
   })
 
+  it("overlays a device-local Autopilot opt-out even without completion settings", async () => {
+    global.fetch = vi.fn<typeof fetch>(async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url
+      if (url === `${API}/api/v2/projects/p-1`) {
+        return new Response(
+          JSON.stringify({
+            id: "p-1",
+            name: "Alpha",
+            gitlabProjectId: null,
+            archivedAt: null,
+            archivedBy: null,
+            role: { level: 700, name: "owner", source: "creator" },
+            files: [],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        )
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as unknown as typeof fetch
+    mockedGetProject.mockResolvedValueOnce({
+      id: "p-1",
+      name: "Alpha",
+      sourceLanguage: "",
+      targetLanguage: "",
+      createdAt: "2026-06-14T00:00:00Z",
+      files: [],
+      members: [],
+      experimentalFlags: { contextualTranslation: false },
+    })
+
+    const { result } = renderHook(() => useProject("p-1"))
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+
+    // ProjectOverview consumes this exact record through isFlagEnabled; the
+    // false value must survive the real IDB -> useProject producer boundary.
+    expect(result.current.project?.experimentalFlags).toEqual({
+      contextualTranslation: false,
+    })
+  })
+
   it("falls back to the list endpoint when the single-project endpoint 404s", async () => {
     global.fetch = vi.fn<typeof fetch>(async (input) => {
       const url = typeof input === "string" ? input : (input as Request).url

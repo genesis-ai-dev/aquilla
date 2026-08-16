@@ -29,6 +29,10 @@ vi.mock("@/lib/sync/outbox-flush", () => ({
   flushOutboxBatch: vi.fn(),
 }))
 
+// SUB-48: the wake-on-enqueue path is driven through the outbox subscription,
+// so the harness captures subscribers instead of touching fake IDB.
+const outboxHarness = vi.hoisted(() => ({ subscribers: new Set<() => void>() }))
+
 vi.mock("@/lib/sync/outbox", async (importOriginal) => {
   const orig = await importOriginal<typeof import("@/lib/sync/outbox")>()
   return {
@@ -36,6 +40,10 @@ vi.mock("@/lib/sync/outbox", async (importOriginal) => {
     outboxPendingCount: vi.fn().mockResolvedValue(0),
     outboxFailedCount: vi.fn().mockResolvedValue(0),
     requeueTransientlyFailedOutboxEvents: vi.fn().mockResolvedValue(undefined),
+    subscribeToOutbox: (cb: () => void) => {
+      outboxHarness.subscribers.add(cb)
+      return () => outboxHarness.subscribers.delete(cb)
+    },
   }
 })
 
@@ -64,6 +72,7 @@ let originalLocks: PropertyDescriptor | undefined
 
 beforeEach(() => {
   vi.useFakeTimers()
+  outboxHarness.subscribers.clear()
   mockFlush.mockReset()
   mockFlush.mockResolvedValue(NOTHING)
   mockPendingCount.mockReset()
@@ -609,4 +618,93 @@ describe("useOutboxFlusher", () => {
       expect(mockFlush.mock.calls.length).toBe(callsBefore + 1)
     },
   )
+})
+
+// ---------------------------------------------------------------------------
+// SUB-48 — wake on new work
+//
+// Enqueuing never used to wake the loop: an event saved just after a tick sat
+// idle for a full interval, and up to the 60s backoff cap once failures had
+// stretched it. That is how a just-recorded take stayed unsent for minutes.
+// ---------------------------------------------------------------------------
+
+describe("useOutboxFlusher — wake on enqueue (SUB-48)", () => {
+  const fireOutboxNotification = async () => {
+    await act(async () => {
+      outboxHarness.subscribers.forEach((cb) => cb())
+      await vi.advanceTimersByTimeAsync(0)
+    })
+  }
+
+  it("flushes promptly when the queue GROWS, without waiting out the interval", async () => {
+    Object.defineProperty(navigator, "locks", { value: undefined, configurable: true })
+    mockFlush.mockResolvedValue(NOTHING)
+
+    renderHook(() => useOutboxFlusher({ enabled: true, getTokenForFile: TOKEN_FN }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) }) // mount tick
+    mockFlush.mockClear()
+
+    // A recording is saved one tick after the last cycle.
+    mockPendingCount.mockResolvedValue(1)
+    await fireOutboxNotification()
+
+    // No timer advance beyond the microtask drain: the wake did it.
+    expect(mockFlush).toHaveBeenCalled()
+  })
+
+  it("does NOT wake on acks, attempt stamps or quarantines (queue did not grow)", async () => {
+    Object.defineProperty(navigator, "locks", { value: undefined, configurable: true })
+    mockFlush.mockResolvedValue(NOTHING)
+
+    // Start with work already queued so a later notification can leave the
+    // count flat (stamp) or lower it (ack) without ever growing it.
+    mockPendingCount.mockResolvedValue(2)
+    renderHook(() => useOutboxFlusher({ enabled: true, getTokenForFile: TOKEN_FN }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    mockFlush.mockClear()
+
+    mockPendingCount.mockResolvedValue(2) // attempt stamped — same size
+    await fireOutboxNotification()
+    expect(mockFlush).not.toHaveBeenCalled()
+
+    mockPendingCount.mockResolvedValue(0) // batch acked — records removed
+    await fireOutboxNotification()
+    expect(mockFlush).not.toHaveBeenCalled()
+  })
+
+  it("the wake earns ONE attempt but does not reset backoff (locks path)", async () => {
+    // Had the wake reset backoff, the queue would resume hammering a failing
+    // server every 5s — the very thing the exponential delay exists to stop.
+    Object.defineProperty(navigator, "onLine", { value: true, configurable: true, writable: true })
+    Object.defineProperty(navigator, "locks", {
+      value: {
+        request: async (_n: string, _o: { signal: AbortSignal }, cb: () => Promise<void>) => { await cb() },
+      },
+      configurable: true,
+    })
+    mockFlush.mockResolvedValue(FAIL)
+
+    const { result } = renderHook(() =>
+      useOutboxFlusher({ enabled: true, getTokenForFile: TOKEN_FN }),
+    )
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })  // exp → 1
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) }) // exp → 2, next sleep 20s
+    expect(result.current.failureStreak).toBe(2)
+
+    // New work lands mid-backoff: exactly one prompt attempt.
+    const before = mockFlush.mock.calls.length
+    mockPendingCount.mockResolvedValue(1)
+    await fireOutboxNotification()
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+    expect(mockFlush.mock.calls.length).toBe(before + 1)
+    expect(result.current.failureStreak).toBe(3) // never reset to 0 by the wake
+
+    // …and the protection clock is still long (exp=3 → 40s), not back to 5s.
+    const afterWake = mockFlush.mock.calls.length
+    await act(async () => { await vi.advanceTimersByTimeAsync(39_000) })
+    expect(mockFlush.mock.calls.length).toBe(afterWake)
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000) })
+    expect(mockFlush.mock.calls.length).toBe(afterWake + 1)
+  })
 })

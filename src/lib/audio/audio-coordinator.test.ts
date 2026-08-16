@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   type ActiveAudioController,
-  clearActiveAudioIf, getActiveAudio, isInEditableContext, setActiveAudio,
-  subscribeActiveAudio, togglePlayActive,
+  __resetAudioShortcutOverridesForTests,
+  clearActiveAudioIf, getActiveAudio, isAudioShortcutOverridden,
+  isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride,
+  setActiveAudio, subscribeActiveAudio, togglePlayActive,
 } from "./audio-coordinator"
 
 function makeController(initial = false): ActiveAudioController & {
@@ -103,5 +105,52 @@ describe("audio-coordinator setActiveAudio dedup", () => {
     setActiveAudio(c)
     sub()
     expect(listener).toHaveBeenCalledTimes(1)
+  })
+})
+
+// FORTIFY: the shortcut-owner stack has two tiers. The playback bar claims
+// "base" at mount so the global last-clip handler stands down while the bar is
+// visible — but the bar must never outrank the timeline or the recording
+// modal, even though it MOUNTS after them in the media lens.
+describe("audio shortcut owner tiers", () => {
+  afterEach(() => __resetAudioShortcutOverridesForTests())
+
+  it("a base claim counts as an override and is top while alone", () => {
+    const bar = pushAudioShortcutOverride("base")
+    expect(isAudioShortcutOverridden()).toBe(true)
+    expect(isTopAudioShortcutOwner(bar.owner)).toBe(true)
+    bar()
+    expect(isAudioShortcutOverridden()).toBe(false)
+  })
+
+  it("a normal claim outranks a base claim even when the base claim came later", () => {
+    const timeline = pushAudioShortcutOverride()
+    const bar = pushAudioShortcutOverride("base") // bar mounts after the timeline
+    expect(isTopAudioShortcutOwner(timeline.owner)).toBe(true)
+    expect(isTopAudioShortcutOwner(bar.owner)).toBe(false)
+    timeline()
+    expect(isTopAudioShortcutOwner(bar.owner)).toBe(true)
+  })
+
+  it("normal claims keep mount order among themselves (modal above timeline)", () => {
+    const bar = pushAudioShortcutOverride("base")
+    const timeline = pushAudioShortcutOverride()
+    const modal = pushAudioShortcutOverride()
+    expect(isTopAudioShortcutOwner(modal.owner)).toBe(true)
+    expect(isTopAudioShortcutOwner(timeline.owner)).toBe(false)
+    modal()
+    expect(isTopAudioShortcutOwner(timeline.owner)).toBe(true)
+    timeline()
+    expect(isTopAudioShortcutOwner(bar.owner)).toBe(true)
+  })
+
+  it("release is idempotent and order-independent", () => {
+    const a = pushAudioShortcutOverride()
+    const b = pushAudioShortcutOverride()
+    a() // released out of order
+    a() // double release is a no-op
+    expect(isTopAudioShortcutOwner(b.owner)).toBe(true)
+    b()
+    expect(isAudioShortcutOverridden()).toBe(false)
   })
 })

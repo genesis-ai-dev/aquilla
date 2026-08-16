@@ -32,6 +32,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { ColumnMapping, SpreadsheetSheet } from "@/lib/parsers/spreadsheet"
 
 export interface ColumnMappingPanelProps {
@@ -66,23 +67,27 @@ function ColSelect({
   onChange: (v: number | null) => void
   required?: boolean
 }) {
+  const t = useT()
   // items on the root so the closed trigger renders the label, not the value.
   const items = [
-    { value: "", label: "— ignore —" },
-    ...headers.map((h, i) => ({ value: String(i), label: h || `Column ${i + 1}` })),
+    { value: "", label: t("importExport.columnMapping.ignoreOption") },
+    ...headers.map((h, i) => ({
+      value: String(i),
+      label: h || t("importExport.columnMapping.columnFallbackName", { index: i + 1 }),
+    })),
   ]
   return (
     <div className="flex items-center gap-3">
       <span className="w-40 shrink-0 text-xs font-medium text-foreground/80">
         {label}
-        {required && <span className="ml-0.5 text-destructive">*</span>}
+        {required && <span className="ms-0.5 text-destructive">*</span>}
       </span>
       <Select
         items={items}
         value={value === null ? "" : String(value)}
         onValueChange={(v) => onChange(v === "" || v == null ? null : parseInt(v, 10))}
       >
-        <SelectTrigger size="sm" className="flex-1 text-xs">
+        <SelectTrigger size="sm" className="text-xs">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -100,13 +105,16 @@ function ColSelect({
 }
 
 export function ColumnMappingPanel({ sheet, onConfirm, onCancel, mode = "create" }: ColumnMappingPanelProps) {
+  const t = useT()
   const targetMode = mode === "target"
   const rows = sheet.rows
   const firstRow = rows[0] ?? []
   const [hasHeader, setHasHeader] = useState(true)
+  const columnFallback = (index: number) =>
+    t("importExport.columnMapping.columnFallbackName", { index: index + 1 })
   const headers: string[] = hasHeader
-    ? firstRow.map((h, i) => h || `Column ${i + 1}`)
-    : firstRow.map((_, i) => `Column ${i + 1}`)
+    ? firstRow.map((h, i) => h || columnFallback(i))
+    : firstRow.map((_, i) => columnFallback(i))
 
   // Auto-detect common header names
   function autoDetect(names: string[]): number | null {
@@ -147,11 +155,11 @@ export function ColumnMappingPanel({ sheet, onConfirm, onCancel, mode = "create"
   return (
     <div className="flex flex-col gap-4 py-2">
       <div>
-        <p className="text-sm font-medium">Map columns</p>
+        <p className="text-sm font-medium">{t("importExport.columnMapping.mapColumns")}</p>
         <p className="text-xs text-muted-foreground">
           {targetMode
-            ? "Pick the column with the translations. Map a ref column to match by reference; leave it unmapped to match rows to cells in order."
-            : 'Tell us which column contains each piece of data. Only "Source text" is required.'}
+            ? t("importExport.columnMapping.targetModeHint")
+            : t("importExport.columnMapping.createModeHint")}
         </p>
       </div>
 
@@ -161,14 +169,14 @@ export function ColumnMappingPanel({ sheet, onConfirm, onCancel, mode = "create"
           checked={hasHeader}
           onCheckedChange={(checked) => setHasHeader(checked === true)}
         />
-        First row is a header
+        {t("importExport.columnMapping.firstRowIsHeader")}
       </label>
 
       {/* Column selectors */}
       <div className="flex flex-col gap-2">
         {!targetMode && (
           <ColSelect
-            label="Source text"
+            label={t("importExport.columnMapping.sourceColumnLabel")}
             headers={headers}
             value={mapping.sourceCol}
             onChange={(v) => set("sourceCol", v)}
@@ -176,14 +184,14 @@ export function ColumnMappingPanel({ sheet, onConfirm, onCancel, mode = "create"
           />
         )}
         <ColSelect
-          label="Target translation"
+          label={t("importExport.columnMapping.targetColumnLabel")}
           headers={headers}
           value={mapping.targetCol}
           onChange={(v) => set("targetCol", v)}
           required={targetMode}
         />
         <ColSelect
-          label="Cell label / ref"
+          label={t("importExport.columnMapping.labelColumnLabel")}
           headers={headers}
           value={mapping.labelCol}
           onChange={(v) => set("labelCol", v)}
@@ -191,25 +199,25 @@ export function ColumnMappingPanel({ sheet, onConfirm, onCancel, mode = "create"
         {!targetMode && (
           <>
             <ColSelect
-              label="Content type"
+              label={t("importExport.columnMapping.typeColumnLabel")}
               headers={headers}
               value={mapping.typeCol ?? null}
               onChange={(v) => set("typeCol", v)}
             />
             <ColSelect
-              label="Cast / character"
+              label={t("importExport.columnMapping.castColumnLabel")}
               headers={headers}
               value={mapping.castCol}
               onChange={(v) => set("castCol", v)}
             />
             <ColSelect
-              label="Start timestamp"
+              label={t("importExport.columnMapping.startColumnLabel")}
               headers={headers}
               value={mapping.startCol}
               onChange={(v) => set("startCol", v)}
             />
             <ColSelect
-              label="End timestamp"
+              label={t("importExport.columnMapping.endColumnLabel")}
               headers={headers}
               value={mapping.endCol}
               onChange={(v) => set("endCol", v)}
@@ -221,7 +229,7 @@ export function ColumnMappingPanel({ sheet, onConfirm, onCancel, mode = "create"
       {/* Data preview table */}
       {previewRows.length > 0 && (
         <div>
-          <p className="mb-1.5 text-xs font-medium text-foreground/70">Preview (first {previewRows.length} data rows)</p>
+          <p className="mb-1.5 text-xs font-medium text-foreground/70">{t("importExport.columnMapping.previewRowsHeading", { count: previewRows.length })}</p>
           <ScrollArea className="max-h-40 rounded-md border">
             <Table>
               <TableHeader>
@@ -249,15 +257,14 @@ export function ColumnMappingPanel({ sheet, onConfirm, onCancel, mode = "create"
 
       {/* Actions */}
       <div className="flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onCancel}>
-          Cancel
+        <Button variant="ghost" onClick={onCancel}>
+          {t("common.cancel")}
         </Button>
         <Button
-          size="sm"
           disabled={!canConfirm}
           onClick={() => onConfirm(mapping, hasHeader)}
         >
-          Map columns
+          {t("importExport.columnMapping.mapColumns")}
         </Button>
       </div>
     </div>

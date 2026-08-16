@@ -1,15 +1,24 @@
 import { useState } from "react"
-import { Navigate, useParams } from "react-router-dom"
-import { Cpu, Gauge, KeyRound, Palette, PanelLeft, ShieldCheck, UserRound } from "lucide-react"
+import { Navigate, useLocation, useNavigate, useParams, type Location } from "react-router-dom"
+import { Cpu, Gauge, KeyRound, PanelLeft, UserRound } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { Switch } from "@/components/ui/switch"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Page, PageHeader, SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { NavList, NavRow, BackLink } from "@/components/ui/nav-list"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { useThemeMode, type ThemeMode } from "@/branding/ThemeMode"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
@@ -17,7 +26,6 @@ import { PersonalProviderSection } from "@/components/settings/PersonalProviderS
 import { LocalModelsSection } from "@/components/ProjectSettings/LocalModelsSection"
 import { UsageSection } from "@/components/settings/UsageSection"
 import { ApiTokensSection } from "@/components/settings/ApiTokensSection"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { DockRailPosition } from "@/lib/dock-rail-position"
 import { useSkipReplaceConfirm, setSkipReplaceConfirm } from "@/lib/store/replace-confirm-pref"
 import {
@@ -31,17 +39,18 @@ import {
  * these are reachable by EVERY signed-in user (via the AccountSwitcher), not
  * just org admins — /settings is now an org-level surface gated to managers.
  *
- * Rather than stacking every form onto one long page, `/preferences` is an
- * index of navigation rows (grouped, with a hint showing the current value);
- * each row opens a focused detail sub-page at `/preferences/:section`. Both
- * routes render this same component — it branches on the `section` param.
+ * `/preferences` shows a General card inline (theme, UI language, analytics,
+ * and a Workspace nav row in the same group); heavier sections stay as
+ * navigation rows into `/preferences/:section`. Both routes render this
+ * same component — it branches on the `section` param.
  *
  * Detail pages match the org-settings layout: page-sized title via PageHeader,
  * then floating SettingsGroup headers with content cards for the controls.
+ * Return to the index via the breadcrumb.
  */
 const RAIL_OPTIONS: { id: DockRailPosition; label: string }[] = [
-  { id: "left", label: "Left rail" },
   { id: "top", label: "Top bar" },
+  { id: "left", label: "Left rail" },
 ]
 
 const THEME_OPTIONS: { id: ThemeMode; label: string }[] = [
@@ -72,7 +81,7 @@ const PROFILE_KEYS: (keyof TranslatorProfile)[] = [
 ]
 
 /**
- * Sidebar tab layout — Files/Chat/Search as a left rail or a top bar.
+ * Editor sidebar tab layout — Files/Chat/Search as a left rail or a top bar.
  * Self-contained so it can render on its own detail page.
  */
 function WorkspaceSection() {
@@ -82,24 +91,35 @@ function WorkspaceSection() {
   return (
     <SettingsGroup label="Workspace">
       <SettingsRow
-        label="Sidebar tab layout"
+        label="Editor sidebar tab layout"
         description="Show Files, Chat, and Search as a vertical rail on the left or a horizontal bar across the top of the sidebar."
-        block
-      >
-        <Tabs
-          value={railPosition}
-          onValueChange={(value) => setRailPosition(value as DockRailPosition)}
-          className="gap-0"
-        >
-          <TabsList aria-label="Sidebar tab layout">
-            {RAIL_OPTIONS.map(({ id, label }) => (
-              <TabsTrigger key={id} value={id}>
-                {label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-      </SettingsRow>
+        control={
+          <Select
+            items={RAIL_OPTIONS.map((opt) => ({ value: opt.id, label: opt.label }))}
+            value={railPosition}
+            onValueChange={(value) => {
+              if (value === "left" || value === "top") setRailPosition(value)
+            }}
+          >
+            <SelectTrigger
+              id="sidebar-tab-layout"
+              aria-label="Editor sidebar tab layout"
+              className="w-36 bg-background"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {RAIL_OPTIONS.map(({ id, label }) => (
+                  <SelectItem key={id} value={id}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        }
+      />
       <SettingsRow
         label={
           <label htmlFor="confirm-replace">Confirm before replacing a translation</label>
@@ -118,42 +138,92 @@ function WorkspaceSection() {
 }
 
 /**
- * Appearance settings stay device-scoped and deliberately separate from the
- * source/target text direction and other project-specific display settings.
+ * Device-scoped General card on the Preferences index — theme, UI language,
+ * analytics consent, plus Workspace as a connected nav row into its detail page.
  */
-function AppearanceSection() {
+function GeneralSection({
+  workspaceHint,
+  backgroundLocation,
+}: {
+  workspaceHint: string
+  backgroundLocation?: Location
+}) {
   const { mode, setMode } = useThemeMode()
+  const { locale, locales, setLocale, t } = useI18n()
+  const { enabled, setEnabled } = useAnalyticsConsent()
+  const languageItems = locales.map((l) => ({ value: l.code, label: l.nativeName }))
 
   return (
-    <SettingsGroup label="Theme">
+    <SettingsGroup label="General">
       <SettingsRow
         label="Theme"
         description="Follow your system appearance or choose a theme for this device."
-        block
-      >
-        <Tabs
-          value={mode}
-          onValueChange={(value) => setMode(value as ThemeMode)}
-          className="gap-0"
-        >
-          <TabsList aria-label="Theme">
-            {THEME_OPTIONS.map(({ id, label }) => (
-              <TabsTrigger key={id} value={id}>
-                {label}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-      </SettingsRow>
-    </SettingsGroup>
-  )
-}
-
-/** Analytics consent toggle. Self-contained for its detail page. */
-function PrivacySection() {
-  const { enabled, setEnabled } = useAnalyticsConsent()
-  return (
-    <SettingsGroup label="Analytics">
+        control={
+          <Select
+            items={THEME_OPTIONS.map((opt) => ({ value: opt.id, label: opt.label }))}
+            value={mode}
+            onValueChange={(value) => {
+              if (value === "system" || value === "light" || value === "dark") {
+                setMode(value)
+              }
+            }}
+          >
+            <SelectTrigger
+              id="theme-mode"
+              aria-label="Theme"
+              className="w-36 bg-background"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {THEME_OPTIONS.map(({ id, label }) => (
+                  <SelectItem key={id} value={id}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        }
+      />
+      <SettingsRow
+        label="UI language"
+        description="The language the app's own interface (menus, buttons, messages) is shown in."
+        control={
+          <Select
+            items={languageItems}
+            value={locale}
+            onValueChange={(value) => {
+              if (value != null) setLocale(value)
+            }}
+          >
+            <SelectTrigger
+              id="ui-language"
+              aria-label={t("language.switcher.settingsRow")}
+              className="w-44 bg-background"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {locales.map((l) => (
+                  <SelectItem
+                    key={l.code}
+                    value={l.code}
+                    // Endonym alone for sighted users; tag lang/dir so the
+                    // browser shapes the script correctly (incl. RTL Arabic).
+                    lang={l.code}
+                    dir={l.dir}
+                  >
+                    {l.nativeName}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        }
+      />
       <SettingsRow
         label="Share usage data"
         description={
@@ -176,6 +246,13 @@ function PrivacySection() {
           />
         }
       />
+      <NavRow
+        to="/preferences/workspace"
+        state={backgroundLocation ? { backgroundLocation, preferencesModalDepth: 2 } : undefined}
+        icon={PanelLeft}
+        title="Workspace"
+        hint={workspaceHint}
+      />
     </SettingsGroup>
   )
 }
@@ -196,38 +273,34 @@ function TranslatorProfileSection() {
 
   return (
     <SettingsGroup label="About you">
+      {PROFILE_TEXT_FIELDS.map(({ key, label, placeholder }) => (
+        <SettingsRow
+          key={key}
+          label={<label htmlFor={`profile-${key}`}>{label}</label>}
+          control={
+            <Input
+              id={`profile-${key}`}
+              value={form[key] ?? ""}
+              onChange={(e) => update(key, e.target.value)}
+              placeholder={placeholder}
+              className="w-56 bg-background"
+            />
+          }
+        />
+      ))}
       <SettingsRow
-        label="Profile fields"
-        description="All fields are optional. Stored on this device and sent to the AI to tailor your summaries."
+        label={<label htmlFor="profile-otherInfo">Other relevant information</label>}
+        description="Anything else that should shape the summaries you get. All fields are optional and stored on this device."
         block
       >
-        <FieldGroup className="grid gap-4 sm:grid-cols-2">
-          {PROFILE_TEXT_FIELDS.map(({ key, label, placeholder }) => (
-            <Field key={key}>
-              <FieldLabel htmlFor={`profile-${key}`} className="text-sm font-medium">
-                {label}
-              </FieldLabel>
-              <Input
-                id={`profile-${key}`}
-                value={form[key] ?? ""}
-                onChange={(e) => update(key, e.target.value)}
-                placeholder={placeholder}
-              />
-            </Field>
-          ))}
-        </FieldGroup>
-        <Field className="mt-4">
-          <FieldLabel htmlFor="profile-otherInfo" className="text-sm font-medium">
-            Other relevant information
-          </FieldLabel>
-          <Textarea
-            id="profile-otherInfo"
-            value={form.otherInfo ?? ""}
-            onChange={(e) => update("otherInfo", e.target.value)}
-            placeholder="Anything else that should shape the summaries you get"
-            rows={3}
-          />
-        </Field>
+        <Textarea
+          id="profile-otherInfo"
+          value={form.otherInfo ?? ""}
+          onChange={(e) => update("otherInfo", e.target.value)}
+          placeholder="Anything else that should shape the summaries you get"
+          rows={3}
+          className="bg-background"
+        />
       </SettingsRow>
     </SettingsGroup>
   )
@@ -243,6 +316,9 @@ interface PreferenceSection {
   render: () => React.ReactNode
 }
 
+/** Former nested slugs now inlined on the index — keep redirecting for bookmarks. */
+const INLINE_PREFERENCE_SLUGS = new Set(["appearance", "language", "privacy"])
+
 const PREFERENCE_SECTIONS: PreferenceSection[] = [
   {
     slug: "workspace",
@@ -251,22 +327,6 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
     group: "General",
     icon: PanelLeft,
     render: () => <WorkspaceSection />,
-  },
-  {
-    slug: "appearance",
-    title: "Appearance",
-    description: "How the workspace looks on this device.",
-    group: "General",
-    icon: Palette,
-    render: () => <AppearanceSection />,
-  },
-  {
-    slug: "privacy",
-    title: "Privacy",
-    description: "Control what's shared with us about how you use the app.",
-    group: "General",
-    icon: ShieldCheck,
-    render: () => <PrivacySection />,
   },
   {
     slug: "profile",
@@ -313,63 +373,80 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
   },
 ]
 
-const PREFERENCE_GROUPS = ["General", "AI & personalization", "Account"] as const
+/** Nested nav groups after the inline General card. */
+const PREFERENCE_GROUPS = ["AI & personalization", "Account"] as const
 
-/** The index: grouped navigation rows, each hinting its current value. */
-function PreferencesIndex() {
-  const { enabled } = useAnalyticsConsent()
+/** The index: inline General card + grouped navigation rows for nested sections. */
+function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boolean; backgroundLocation?: Location }) {
   const { position } = useDockRailPosition()
-  const { mode } = useThemeMode()
 
   const profile = getTranslatorProfile()
   const profileFilled = PROFILE_KEYS.filter((k) => (profile[k] ?? "").trim().length > 0).length
 
   const hints: Record<string, string> = {
     workspace: RAIL_OPTIONS.find((o) => o.id === position)?.label ?? "",
-    appearance: mode === "system" ? "System" : mode === "dark" ? "Dark" : "Light",
-    privacy: enabled ? "Sharing on" : "Sharing off",
     profile: profileFilled > 0 ? `${profileFilled}/${PROFILE_KEYS.length} set` : "Not set",
     "provider-keys": "Personal",
     "local-models": "On-device",
     usage: "This week",
   }
 
+  const content = (
+    <Page>
+      <PageHeader
+        title="Preferences"
+        description="Personal preferences that apply to you across all projects on this device."
+      />
+      <div className="flex flex-col gap-12">
+        <GeneralSection workspaceHint={hints.workspace} backgroundLocation={backgroundLocation} />
+        {PREFERENCE_GROUPS.map((group) => (
+          <NavList key={group} label={group}>
+            {PREFERENCE_SECTIONS.filter((s) => s.group === group).map((s) => (
+              <NavRow
+                key={s.slug}
+                to={`/preferences/${s.slug}`}
+                state={backgroundLocation ? { backgroundLocation, preferencesModalDepth: 2 } : undefined}
+                icon={s.icon}
+                title={s.title}
+                hint={hints[s.slug]}
+              />
+            ))}
+          </NavList>
+        ))}
+      </div>
+    </Page>
+  )
+
+  if (modal) return content
   return (
     <AppShell
       sidebar={<OrgSidebar />}
       header={<OrgBreadcrumb section="Preferences" />}
       statusBar={null}
-      main={
-        <Page>
-          <PageHeader
-            title="Preferences"
-            description="Personal preferences that apply to you across all projects on this device."
-          />
-          <div className="space-y-6">
-            {PREFERENCE_GROUPS.map((group) => (
-              <NavList key={group} label={group}>
-                {PREFERENCE_SECTIONS.filter((s) => s.group === group).map((s) => (
-                  <NavRow
-                    key={s.slug}
-                    to={`/preferences/${s.slug}`}
-                    icon={s.icon}
-                    title={s.title}
-                    hint={hints[s.slug]}
-                  />
-                ))}
-              </NavList>
-            ))}
-          </div>
-        </Page>
-      }
+      main={content}
     />
   )
 }
 
 /** A single section, rendered on its own page with a back breadcrumb. */
-function PreferencesDetail({ slug }: { slug: string }) {
+function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: boolean }) {
+  const navigate = useNavigate()
+  if (INLINE_PREFERENCE_SLUGS.has(slug)) return <Navigate to="/preferences" replace />
   const section = PREFERENCE_SECTIONS.find((s) => s.slug === slug)
   if (!section) return <Navigate to="/preferences" replace />
+  if (modal) {
+    // In the route-modal there is no breadcrumb, so the BackLink is the way
+    // back to the index; it pops history to keep the dialog's depth intact.
+    return (
+      <Page>
+        <div className="space-y-6">
+          <BackLink to="/preferences" onClick={() => navigate(-1)} label="Preferences" />
+          <PageHeader title={section.title} description={section.description} />
+          {section.render()}
+        </div>
+      </Page>
+    )
+  }
   return (
     <AppShell
       sidebar={<OrgSidebar />}
@@ -377,9 +454,8 @@ function PreferencesDetail({ slug }: { slug: string }) {
       statusBar={null}
       main={
         <Page>
-          <div className="space-y-6">
-            <BackLink to="/preferences" label="Preferences" />
-            <PageHeader title={section.title} description={section.description} />
+          <div className="flex flex-col gap-12">
+            <PageHeader title={section.title} description={section.description} className="mb-0" />
             {section.render()}
           </div>
         </Page>
@@ -391,4 +467,37 @@ function PreferencesDetail({ slug }: { slug: string }) {
 export function Preferences() {
   const { section } = useParams<{ section?: string }>()
   return section ? <PreferencesDetail slug={section} /> : <PreferencesIndex />
+}
+
+/** Route-modal presentation used by in-app entry points. Direct URLs continue
+ * to render the full-page Preferences surface above. */
+export function PreferencesDialog() {
+  const { section } = useParams<{ section?: string }>()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const modalState = location.state as {
+    backgroundLocation?: Location
+    preferencesModalDepth?: number
+  } | null
+  const backgroundLocation = modalState?.backgroundLocation
+  const modalDepth = modalState?.preferencesModalDepth ?? 1
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) navigate(-modalDepth) }}>
+      <DialogContent
+        className="h-[min(90dvh,56rem)] max-w-[min(72rem,calc(100%-2rem))] gap-0 p-0 sm:max-w-[min(72rem,calc(100%-2rem))]"
+        data-testid="preferences-dialog"
+      >
+        <DialogHeader className="sr-only">
+          <DialogTitle>Preferences</DialogTitle>
+          <DialogDescription>Personal preferences that apply across projects.</DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          {section
+            ? <PreferencesDetail slug={section} modal />
+            : <PreferencesIndex modal backgroundLocation={backgroundLocation} />}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
 }

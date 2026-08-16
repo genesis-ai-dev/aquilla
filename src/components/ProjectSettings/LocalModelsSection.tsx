@@ -112,16 +112,15 @@ function ModelRow({ meta }: { meta: ModelMeta }) {
 
       <div className="flex shrink-0 items-center gap-2">
         {isError ? (
-          <Button size="sm" variant="outline" onClick={download} disabled={isDownloading}>
+          <Button variant="outline" onClick={download} disabled={isDownloading}>
             <RotateCw /> Retry
           </Button>
         ) : isReady ? (
           <>
-            <Button size="sm" variant="ghost" onClick={download} disabled={isDownloading}>
+            <Button variant="ghost" onClick={download} disabled={isDownloading}>
               <Download /> Re-download
             </Button>
             <Button
-              size="sm"
               variant="ghost"
               onClick={clear}
               disabled={isDownloading}
@@ -131,7 +130,7 @@ function ModelRow({ meta }: { meta: ModelMeta }) {
             </Button>
           </>
         ) : (
-          <Button size="sm" variant="outline" onClick={download} disabled={isDownloading}>
+          <Button variant="outline" onClick={download} disabled={isDownloading}>
             {isDownloading ? <Spinner /> : <Download />}
             {isDownloading ? "Downloading…" : "Download"}
           </Button>
@@ -187,7 +186,7 @@ function DownloadBar({ loaded, total }: { loaded: number; total: number }) {
           style={{ width: `${pct ?? 8}%` }}
         />
       </div>
-      {pct != null && <span className="w-8 text-right text-[10px] tabular-nums text-muted-foreground">{pct}%</span>}
+      {pct != null && <span className="w-8 text-end text-[10px] tabular-nums text-muted-foreground">{pct}%</span>}
     </div>
   )
 }

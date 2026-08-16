@@ -38,6 +38,8 @@ export type OutboxEventKind =
   | "cell.audio.attach"
   | "cell.audio.select"
   | "cell.audio.remove"
+  | "cell.audio.rename"
+  | "cell.audio.measure"
   // Back-translation (contributor-level; non-chain-mutating).
   | "cell.backtranslation.set"
   // File lifecycle.
@@ -64,8 +66,10 @@ export type OutboxEventKind =
   // Timeline editor: retime a cell (move/stretch). Non-chain-mutating — updates
   // start_ms/end_ms on both sides without moving cells.event_id.
   | "cell.retime"
+  | "cell.lane.retime"
   // Timeline editor: set/clear a file's core video URL (stored in files.meta).
   | "file.video.set"
+  | "file.timing.set"
   // AQU-478: "accept upstream change as-is" (repin). Non-chain-mutating —
   // updates ONLY the target row's source_event_id; validated/endorsement
   // state and value are untouched. Guarded server-side by
@@ -121,6 +125,10 @@ export interface OutboxEventPayloads {
   "source.cell.commit": {
     value: string
     valueHtml?: string
+    /** AQU-847: corrected source text for a MEDIA section. An imported media
+     *  cell's `value` is the import filename, so the user's edit lands here —
+     *  the field `effectiveSourceText` (and therefore export + AI) reads. */
+    transcription?: string
   }
   "source.cell.delete": Record<string, never>
   "source.cell.reorder": {
@@ -249,6 +257,8 @@ export interface OutboxEventPayloads {
     voiceId?: string
     referenceAudioId?: string
     durationMs?: number
+    /** AQU-646 round 8: the take's permanent display name. */
+    label?: string
     /** Non-destructive playback trim window into the clip, in ms. */
     trimStartMs?: number
     trimEndMs?: number
@@ -263,6 +273,18 @@ export interface OutboxEventPayloads {
   }
   "cell.audio.remove": {
     audioId: string
+  }
+  // AQU-646 round 8: rename a take — label only, never selection/trims.
+  "cell.audio.rename": {
+    audioId: string
+    label: string | null
+  }
+  // Duration backfill for takes that predate duration capture. The server
+  // fills only a NULL duration_ms — never selection/url/slot/trims — so
+  // measuring an arbitrary take can never change which take is active.
+  "cell.audio.measure": {
+    audioId: string
+    durationMs: number
   }
 
   /**
@@ -369,6 +391,20 @@ export interface OutboxEventPayloads {
   "cell.retime": {
     startMs: number
     endMs: number
+  }
+  // AQU-646 round 6: per-LANE presentation timing (subtitle span / target-audio
+  // start) merged into source-side metadata. number sets, null clears,
+  // undefined = untouched. Absolute file ms.
+  "cell.lane.retime": {
+    subtitleStartMs?: number | null
+    subtitleEndMs?: number | null
+    targetStartMs?: number | null
+  }
+  // The file's audio timing mode (Original vs Free); null clears back to the
+  // project-level default. Maintainer floor — structural, like the setting
+  // it replaces in Project Settings.
+  "file.timing.set": {
+    timingMode: "dubbing" | "audioFirst" | null
   }
   // Timeline editor: set/clear a file's core video URL (timeline preview).
   "file.video.set": {

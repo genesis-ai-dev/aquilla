@@ -19,6 +19,8 @@ export interface GenerateCellVoiceArgs {
   username: string
   /** Voice to use. Falls back to the cell's, then the project default. */
   voiceId?: string
+  /** Round 8c: the TTS take's permanent name (unset → backfilled later). */
+  label?: string
   diffusionSteps?: number
 }
 
@@ -28,7 +30,7 @@ export interface GenerateCellVoiceArgs {
  * (status is surfaced via the per-cell tts badge, not thrown).
  */
 export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<boolean> {
-  const { project, cell, session, username, voiceId, diffusionSteps } = args
+  const { project, cell, session, username, voiceId, label, diffusionSteps } = args
   const text = cell.translated?.trim()
   if (!text) return false
   if (!session?.jwt) return false
@@ -63,6 +65,7 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
       session,
       username,
       diffusionSteps,
+      ...(label ? { label } : {}),
       onProgress,
     })
     setTtsStatus(statusKey, { kind: "idle" })

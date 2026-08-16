@@ -19,6 +19,8 @@ import { Button } from "@/components/ui/button"
 import type { ImportResult } from "@/lib/import"
 import { formatBytesProgress } from "@/lib/format-bytes"
 import { usfmDisplayText } from "@/lib/parsers/usfm-display"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
+import { formatNumber } from "@/lib/i18n/format"
 
 /**
  * Live upload progress surfaced from the importer. `count`/`total` are cells;
@@ -61,6 +63,8 @@ export interface PreviewPanelProps {
 const PREVIEW_LIMIT = 20
 
 export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, uploadProgress, error }: PreviewPanelProps) {
+  const { locale } = useI18n()
+  const t = useT()
   const [confirming, setConfirming] = useState(false)
 
   const totalCells = results.reduce((n, r) => n + r.strings.length, 0)
@@ -79,7 +83,7 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
   // never mistaken for doing nothing (the preview cell list disappears, replaced
   // by phase text + optional progress bar).
   if (confirming) {
-    const phase = uploadPhase || "Uploading…"
+    const phase = uploadPhase || t("common.uploading")
     const hasProgress = uploadProgress && uploadProgress.total > 0
     return (
       <div className="flex flex-col items-center gap-4 py-8 text-center">
@@ -94,19 +98,22 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              {uploadProgress.count.toLocaleString()} / {uploadProgress.total.toLocaleString()} cells
+              {t("importExport.upload.cellsProgress", {
+                count: formatNumber(uploadProgress.count, locale),
+                total: formatNumber(uploadProgress.total, locale),
+              })}
               {uploadProgress.bytesTotal ? (
                 <>
                   {" · "}
                   <span data-testid="preview-upload-bytes">
-                    {formatBytesProgress(uploadProgress.bytesReceived, uploadProgress.bytesTotal)}
+                    {formatBytesProgress(uploadProgress.bytesReceived, uploadProgress.bytesTotal, locale)}
                   </span>
                 </>
               ) : null}
             </p>
           </>
         ) : (
-          <p className="text-xs text-muted-foreground">Working…</p>
+          <p className="text-xs text-muted-foreground">{t("importExport.action.working")}</p>
         )}
       </div>
     )
@@ -116,10 +123,13 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
     <div className="flex flex-col gap-4 py-2">
       <div>
         <p className="text-sm font-medium">
-          Preview — {totalCells.toLocaleString()} cell{totalCells !== 1 ? "s" : ""} across {results.length} file{results.length !== 1 ? "s" : ""}
+          {t("importExport.preview.headerSummary", {
+            cells: t("common.cellCount", { count: formatNumber(totalCells, locale) }),
+            files: t("search.expanded.fileCount", { count: results.length }),
+          })}
         </p>
         <p className="text-xs text-muted-foreground">
-          Review what will be imported, then click Confirm to upload.
+          {t("importExport.preview.instructions")}
         </p>
       </div>
 
@@ -138,37 +148,39 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
             <div key={ri} className="p-3">
               <p className="mb-2 text-xs font-semibold text-foreground/80">
                 {r.name}
-                <span className="ml-2 font-normal normal-case text-muted-foreground">
-                  {r.strings.length.toLocaleString()} cells
+                <span className="ms-2 font-normal normal-case text-muted-foreground">
+                  {t("common.cellCount", { count: formatNumber(r.strings.length, locale) })}
                 </span>
               </p>
               {r.importClassification ? (
                 <div className="mb-3 rounded-md border bg-muted/40 px-3 py-2 text-xs" data-testid="ai-import-classification">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium">AI-assisted structure</span>
+                    <span className="font-medium">{t("importExport.preview.aiAssistedStructure")}</span>
                     <Badge variant="outline">
                       {r.importClassification.category}
                     </Badge>
                     <span className="text-muted-foreground">
-                      {Math.round(r.importClassification.confidence * 100)}% confidence
+                      {t("importExport.preview.confidencePercent", {
+                        percent: Math.round(r.importClassification.confidence * 100),
+                      })}
                     </span>
                     {r.importClassification.confidence < 0.7 ? (
-                      <Badge variant="destructive">Needs careful review</Badge>
+                      <Badge variant="destructive">{t("importExport.preview.needsCarefulReview")}</Badge>
                     ) : null}
                   </div>
                   <p className="mt-1 text-muted-foreground">{r.importClassification.explanation}</p>
                   <p className="mt-1 text-muted-foreground">
-                    Recipe: {r.importClassification.recipe.name}. The original is preserved; translated round-trip is not yet verified.
+                    {t("importExport.preview.recipeNote", { name: r.importClassification.recipe.name })}
                   </p>
                 </div>
               ) : null}
               {r.importNotices?.length ? (
                 <div className="mb-3 flex flex-col gap-1.5 rounded-md border bg-muted/40 px-3 py-2 text-xs" data-testid="import-preview-notices">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium">Review before importing</span>
+                    <span className="font-medium">{t("importExport.preview.reviewBeforeImporting")}</span>
                     <Badge variant="outline">{r.importNotices.length}</Badge>
                   </div>
-                  <ul className="flex list-disc flex-col gap-1 pl-4 text-muted-foreground">
+                  <ul className="flex list-disc flex-col gap-1 ps-4 text-muted-foreground">
                     {r.importNotices.map((notice, index) => (
                       <li key={`${notice.code}-${index}`}>{notice.message}</li>
                     ))}
@@ -179,7 +191,7 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
                 {r.strings.slice(0, PREVIEW_LIMIT).map((s, i) => (
                   <li key={i} className="flex items-start gap-2 text-xs">
                     {s.type === "heading" || s.type === "paratext" ? (
-                      <span className="shrink-0 font-mono text-muted-foreground w-20 truncate" aria-label="Structural content">
+                      <span className="shrink-0 font-mono text-muted-foreground w-20 truncate" aria-label={t("importExport.preview.structuralContentAriaLabel")}>
                         —
                       </span>
                     ) : s.globalReferences?.[0] ? (
@@ -192,13 +204,15 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
                       </span>
                     )}
                     <span className="truncate text-foreground/80">
-                      {previewText(s.original) || <span className="italic text-muted-foreground">(empty)</span>}
+                      {previewText(s.original) || <span className="italic text-muted-foreground">{t("editor.note.empty")}</span>}
                     </span>
                   </li>
                 ))}
                 {r.strings.length > PREVIEW_LIMIT && (
                   <li className="text-xs text-muted-foreground italic">
-                    … and {(r.strings.length - PREVIEW_LIMIT).toLocaleString()} more
+                    {t("importExport.dialog.andMore", {
+                      count: formatNumber(r.strings.length - PREVIEW_LIMIT, locale),
+                    })}
                   </li>
                 )}
               </ul>
@@ -214,16 +228,16 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
           role="alert"
           data-testid="preview-commit-error"
         >
-          Import failed: {error}
+          {t("importExport.preview.commitFailed", { error })}
         </p>
       )}
 
       <div className="flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onCancel} disabled={confirming}>
-          Cancel
+        <Button variant="ghost" onClick={onCancel} disabled={confirming}>
+          {t("common.cancel")}
         </Button>
-        <Button size="sm" onClick={handleConfirm} disabled={confirming}>
-          Confirm import
+        <Button onClick={handleConfirm} disabled={confirming}>
+          {t("importExport.preview.confirmImport")}
         </Button>
       </div>
     </div>

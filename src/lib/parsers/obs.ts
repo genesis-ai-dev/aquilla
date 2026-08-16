@@ -11,7 +11,7 @@
 // Deterministic and fully offline: this only parses an in-memory markdown
 // string. Network fetching (door43) lives in import.ts's importObs().
 
-import type { TranslatableString } from "./types"
+import type { TranslatableString } from "./core-types"
 
 /** One parsed OBS frame's attachment image, normalized for `metadata.attachments`. */
 interface ObsImageAttachment {
@@ -143,18 +143,4 @@ export function parseObsStories(markdown: string, fileName?: string): Translatab
   flush()
 
   return frames
-}
-
-/**
- * Multi-file convenience: parse several OBS story markdown files into one flat
- * list of frame cells, in the given order. Used by the door43 import path.
- */
-export function parseObsStoriesMulti(
-  files: Array<{ name: string; content: string }>,
-): TranslatableString[] {
-  const out: TranslatableString[] = []
-  for (const file of files) {
-    out.push(...parseObsStories(file.content, file.name))
-  }
-  return out
 }

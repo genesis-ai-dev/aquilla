@@ -22,7 +22,7 @@ import { projectIdFor, fileIdFor } from "../src/lib/migrate/ids"
 import { mapFilePairToEvents, collectSpeakers, type FilePairInput, type MapOptions } from "../src/lib/migrate/map"
 import { mapComments } from "../src/lib/migrate/comments"
 import { collectCellAudio, audioAttachEvent } from "../src/lib/migrate/audio"
-import { buildCastAdditions } from "../src/lib/import/cast-from-speakers"
+import { buildCastAdditions, castLikeSpeakers } from "../src/lib/import/cast-from-speakers"
 import type { ProjectTtsSettings } from "../src/lib/parsers/types"
 import type { IngestEvent } from "../src/lib/migrate/types"
 import { randomUUID } from "node:crypto"
@@ -220,8 +220,10 @@ async function importAudio(
 // speaker; buildCastAdditions mints one Voice per distinct character (reusing
 // existing ones by name → idempotent) + a cellId→voiceId map, merged into the
 // synced project TTS settings via PATCH /settings (mirrors the live import).
+// AQU-813: `castLikeSpeakers` first drops label sets that are per-cell
+// identifiers rather than a cast, so label-less audio imports as one voice.
 async function importCast(projectId: string, pairs: FilePairInput[], jwt: string): Promise<void> {
-  const speakers = pairs.flatMap((p) => collectSpeakers(p))
+  const speakers = castLikeSpeakers(pairs.flatMap((p) => collectSpeakers(p)))
   if (speakers.length === 0) return
   const getRes = await fetch(`${AUTH}/api/v2/projects/${projectId}/settings`, {
     headers: { Authorization: `Bearer ${jwt}` },

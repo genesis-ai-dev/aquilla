@@ -514,4 +514,29 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     expect(screen.getByRole("tooltip", { name: /microphone blocked/i })).toBeInTheDocument()
     expect(micButton.closest("[data-grid-row]")).toHaveClass("z-30", "overflow-visible")
   })
+  // ── 2026-08-07 (wire b): a plain row click points the timeline at the cell ──
+
+  it("a plain row click calls the context's onMediaRowActivate with the cell id", async () => {
+    const onMediaRowActivate = vi.fn()
+    renderTable({ onMediaRowActivate })
+    const row = (await screen.findByText("bonjour")).closest("[data-grid-row]")!
+    fireEvent.click(row)
+    expect(onMediaRowActivate).toHaveBeenCalledWith("cell-1")
+  })
+
+  it("cmd-click is multi-select, never a timeline activate", async () => {
+    const onMediaRowActivate = vi.fn()
+    renderTable({ onMediaRowActivate })
+    const row = (await screen.findByText("bonjour")).closest("[data-grid-row]")!
+    fireEvent.click(row, { metaKey: true })
+    expect(onMediaRowActivate).not.toHaveBeenCalled()
+  })
+
+  it("clicking an interactive control inside the row does not activate the timeline", async () => {
+    const onMediaRowActivate = vi.fn()
+    renderTable({ onOpenComments: vi.fn(), onMediaRowActivate })
+    const button = await screen.findByRole("button", { name: "Add comment" })
+    fireEvent.click(button)
+    expect(onMediaRowActivate).not.toHaveBeenCalled()
+  })
 })

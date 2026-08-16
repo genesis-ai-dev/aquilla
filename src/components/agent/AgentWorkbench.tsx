@@ -28,6 +28,9 @@ import {
   type WorkingSetRow,
 } from "@/lib/agent/working-set"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
+import { formatInfractionMessage } from "@/lib/rules/format-infraction"
+import { translateRuleName } from "@/lib/lqa/builtin-resolver"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { AgentDockView, type AgentDockViewProps } from "./AgentDockView"
 import { CreditsDial, type CreditsDialProps } from "./CreditsDial"
 import { lintCellFor } from "./ProposalCard"
@@ -47,13 +50,14 @@ export interface AgentWorkbenchProps {
   agent: Omit<AgentDockViewProps, "suggestedActions" | "pendingPrompt" | "onPendingPromptConsumed" | "pendingChip" | "onPendingChipConsumed">
   /** Org agent-credit gauge in the header (maintainer+ only; self-hides). */
   credits?: CreditsDialProps | null
-  /** Leave the workbench (back to the editor). */
+  /** Minimize to the dock and dismiss the editor Agent tab. */
   onClose: () => void
   /** Jump the editor to a cell ("open" on a working-set row). */
   onJumpToCell?: (fileId: string, cellId: string) => void
 }
 
 export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentWorkbenchProps) {
+  const t = useT()
   const { state, stop, reset, decide } = useAgentSession(agent.projectId)
   // Decisions per proposal row (key: proposalId:cellId) live in the SESSION
   // store, not here — closing/reopening the workbench must not forget what
@@ -96,15 +100,18 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
 
   // ── Rule lint (same engine as the editor / ProposalCard) ────────────────
   const enabledRules = useMemo(() => agent.rules.filter((r) => r.enabled), [agent.rules])
+  const ruleById = useMemo(() => new Map(agent.rules.map((r) => [r.id, r])), [agent.rules])
   const lintRow = useCallback(
     (row: WorkingSetRow, text: string): string[] => {
       if (!row.stagedEvent || enabledRules.length === 0) return []
       const cell = lintCellFor(row.stagedEvent, agent.resolveCell, text)
-      return checkRulesForCell(cell, row.stagedEvent.fileId ?? row.fileId ?? "", enabledRules).map(
-        (inf) => inf.message,
-      )
+      return checkRulesForCell(cell, row.stagedEvent.fileId ?? row.fileId ?? "", enabledRules).map((inf) => {
+        const rule = ruleById.get(inf.ruleId)
+        const ruleName = rule ? translateRuleName(rule, t) : inf.ruleId
+        return formatInfractionMessage(inf, ruleName, t)
+      })
     },
-    [enabledRules, agent.resolveCell],
+    [enabledRules, ruleById, agent.resolveCell, t],
   )
 
   // ── Accept / reject ──────────────────────────────────────────────────────
@@ -224,10 +231,10 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Job header */}
-      <div className="flex items-center gap-2 border-b px-3 py-1.5">
-        <Bot className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm font-medium">Agent</span>
+      {/* In-main toolbar — matches Rules/Glossary height */}
+      <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
+        <Bot className="h-5 w-5 text-muted-foreground" aria-hidden />
+        <h1 className="text-base font-semibold">Agent</h1>
         {activeRun && (
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
             <Spinner className="h-3 w-3" />
@@ -237,41 +244,40 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
         {state.queued.length > 0 && (
           <span className="text-[11px] text-muted-foreground">{state.queued.length} queued</span>
         )}
-        <span className="ml-auto flex items-center gap-1">
+        <span className="ms-auto flex items-center gap-1">
           {credits && <CreditsDial {...credits} />}
           {state.isStreaming && (
-            <Button type="button" variant="outline" size="sm" className="h-6 text-[11px]" onClick={stop}>
+            <Button type="button" variant="outline" onClick={stop}>
               <Square data-icon="inline-start" />
               Stop
             </Button>
           )}
-          <AppTooltip content="Drop this conversation and start a fresh session">
+          <AppTooltip content="New session">
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              className="h-6 text-[11px] text-muted-foreground"
+              size="icon-xs"
+              className="text-muted-foreground"
               onClick={reset}
+              aria-label="New session"
             >
-              <RotateCcw data-icon="inline-start" />
-              New session
+              <RotateCcw />
             </Button>
           </AppTooltip>
-          <AppTooltip content="Back to the editor">
+          <AppTooltip content="Minimize to sidebar">
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              className="h-6 text-[11px] text-muted-foreground"
+              size="icon-xs"
+              className="text-muted-foreground"
               onClick={onClose}
               aria-label="Close workbench"
             >
-              <Minimize2 data-icon="inline-start" />
-              Editor
+              <Minimize2 />
             </Button>
           </AppTooltip>
         </span>
-      </div>
+      </header>
 
       <Tabs
         value={tab}
@@ -292,7 +298,7 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
           <div className="flex min-h-0 flex-1">
             {hasReviewWork ? (
               <>
-                <div className="flex w-[380px] min-w-[320px] flex-none flex-col border-r">
+                <div className="flex w-[380px] min-w-[320px] flex-none flex-col border-e">
                   <AgentDockView
                     {...agent}
                     renderProposalOverride={renderProposalOverride}

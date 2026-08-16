@@ -20,6 +20,32 @@ vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 vi.mock("@/components/HelpMenu", () => ({ HelpMenu: () => null }))
 vi.mock("@/hooks/usePlatformAdmin", () => ({ usePlatformAdmin: () => ({ isAdmin: false, loading: false }) }))
 
+const rosterSettings = vi.hoisted(() => ({ canViewRoster: true }))
+vi.mock("@/hooks/useOrgSettings", () => ({
+  useOrgSettings: () => ({
+    canViewRoster: rosterSettings.canViewRoster,
+    hasFetched: true,
+    rosterViewMinRole: 600,
+    canViewMemberProgress: true,
+    memberProgressViewMinRole: 600,
+    canEdit: true,
+    canEditOrgKeys: true,
+    orgProviderKeys: {},
+    canExport: true,
+    exportMinRole: null,
+    settings: {},
+    orgRules: [],
+    promotionRequests: [],
+    canRequestPromotion: false,
+    version: 1,
+    allowSelfAssignment: false,
+    termbaseEditMinRole: 500,
+    refresh: vi.fn(async () => null),
+    patch: vi.fn(async () => ({ kind: "ok" as const })),
+    requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
+  }),
+}))
+
 const listMyOrgs = vi.fn()
 vi.mock("@/lib/frontier/orgs", () => ({
   listMyOrgs: (...a: unknown[]) => listMyOrgs(...a),
@@ -30,9 +56,9 @@ vi.mock("@/lib/sync/cloud-projects", () => ({
   fetchAccessibleProjects: (...a: unknown[]) => fetchAccessibleProjects(...a),
 }))
 
-function renderSidebar() {
+function renderSidebar(path = "/") {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[path]}>
       <OrgProvider>
         <OrgSidebar />
       </OrgProvider>
@@ -44,6 +70,7 @@ beforeEach(() => {
   localStorage.clear()
   listMyOrgs.mockReset()
   fetchAccessibleProjects.mockReset()
+  rosterSettings.canViewRoster = true
 })
 afterEach(() => vi.clearAllMocks())
 
@@ -119,11 +146,31 @@ describe("OrgSidebar in a guest org (AQU-790)", () => {
     await screen.findByRole("link", { name: "Shared with you" })
     expect(screen.getByRole("link", { name: "Projects" })).toHaveAttribute("href", "/orgs/2")
     // Member-only actions are gone (they previously linked into the owned org).
+    // Guest keeps "Projects" (not Overview) — only member orgs and all-orgs use Overview.
+    expect(screen.queryByRole("link", { name: "Overview" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Members" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Archived" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Assigned to me" })).not.toBeInTheDocument()
+  })
+})
+
+describe("OrgSidebar all-organizations scope", () => {
+  it("shows Overview (not Projects) as the sole portfolio home link", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+      { id: 2, name: "Beta", role: { level: 700, name: "owner" } },
+    ])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    renderSidebar("/orgs/all")
+
+    const overview = await screen.findByRole("link", { name: "Overview" })
+    expect(overview).toHaveAttribute("href", "/orgs/all")
+    expect(overview).toHaveAttribute("data-tour", "nav-overview")
+    expect(screen.queryByRole("link", { name: "Projects" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument()
   })
 })
 
@@ -170,5 +217,28 @@ describe("OrgSidebar 'New' badge on the Shared-with-you entry (AQU-696)", () => 
     const link = await screen.findByRole("link", { name: "Shared with you" })
     expect(link).toBeInTheDocument()
     expect(screen.queryByTestId("new-shared-nav-badge")).not.toBeInTheDocument()
+  })
+})
+
+describe("OrgSidebar Members nav — AQU-485 roster visibility", () => {
+  it("hides Members when the caller is below the roster floor, even if they are an org owner", async () => {
+    rosterSettings.canViewRoster = false
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    renderSidebar("/orgs/1")
+
+    await waitFor(() => expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument())
+    expect(screen.queryByRole("link", { name: "Members" })).not.toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Archived" })).toBeInTheDocument()
+  })
+
+  it("shows Members when the roster floor allows it", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    renderSidebar("/orgs/1")
+
+    expect(await screen.findByRole("link", { name: "Members" })).toHaveAttribute("href", "/orgs/1/members")
   })
 })

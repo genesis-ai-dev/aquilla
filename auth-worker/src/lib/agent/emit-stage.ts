@@ -40,7 +40,9 @@ export interface StagedEvent {
   cellId?: string
   parentId?: string
   payload: Record<string, unknown>
-  display: { canonicalRef?: string; before?: string; after?: string }
+  /** AQU-846: fileName is what the approval UI names, so the user can see
+   *  WHICH file a proposed cell lands in before they click Apply. */
+  display: { canonicalRef?: string; fileName?: string; before?: string; after?: string }
 }
 
 // ── Inputs ──────────────────────────────────────────────────────────────────
@@ -72,6 +74,10 @@ export interface EmitStageResult {
 
 // Kinds whose payload writes the target chain → need parent/source resolution.
 const TARGET_CHAIN_KINDS = new Set(["target.cell.commit"])
+
+// AQU-890: genesis kinds — they mint a row instead of advancing a chain, so
+// they take the opposite staging path (no parent, no `before`, id must be free).
+const CELL_CREATE_KINDS = new Set(["source.cell.create", "target.cell.create"])
 
 /** Resolve ':file' / ':cell' / '#c1'-style references in an id-ish string. */
 function resolveRef(
@@ -201,7 +207,58 @@ async function stageOne(
   const needsCell =
     kind.startsWith("target.cell.") || kind.startsWith("source.cell.") ||
     kind.startsWith("cell.")
-  if (needsCell || kind === "comment.create") {
+
+  if (CELL_CREATE_KINDS.has(kind)) {
+    // AQU-890. A create MINTS a row, so it inverts every assumption the
+    // chain-advancing branch below makes: there is no parent, no `before`, and
+    // an id that already resolves is a collision rather than the target.
+    if (!fileId) return { kind: "rejected", reason: `${kind} needs fileId` }
+    if (typeof payload.value !== "string") {
+      return { kind: "rejected", reason: `${kind} payload needs a string \`value\`` }
+    }
+
+    // The anchor is the EXISTING row the new one lands after (null = first).
+    // Validating it here is what keeps a mis-anchored row from being staged
+    // into a silently wrong position.
+    const anchor = payload.anchorCellId
+    if (anchor !== undefined && anchor !== null) {
+      if (typeof anchor !== "string") {
+        return { kind: "rejected", reason: "anchorCellId must be a string or null" }
+      }
+      const anchorPair = await fetchCellPair(db, ctx.projectId, fileId, anchor)
+      if (!anchorPair.source && !anchorPair.target) {
+        return {
+          kind: "rejected",
+          reason: `anchorCellId ${ctx.aliases.alias(anchor, "c")} does not exist in that file — re-read it`,
+        }
+      }
+    } else {
+      payload.anchorCellId = null
+    }
+
+    if (cellId) {
+      const pair = await fetchCellPair(db, ctx.projectId, fileId, cellId)
+      const occupied = kind === "source.cell.create" ? pair.source : pair.target
+      if (occupied) {
+        const commitKind = kind === "source.cell.create" ? "source.cell.commit" : "target.cell.commit"
+        return {
+          kind: "rejected",
+          reason: `a ${kind === "source.cell.create" ? "source" : "target"} cell already exists at that id — use ${commitKind} to change it`,
+        }
+      }
+    } else {
+      // The model has no way to know a free id, so it does not have to supply
+      // one; the client's apply path repeats this id into the payload.
+      cellId = crypto.randomUUID()
+    }
+    payload.cellId = cellId
+
+    if (typeof payload.canonicalRef === "string") display.canonicalRef = payload.canonicalRef
+    display.after = payload.value
+    // Provenance injection (AQU-292), same as target.cell.commit.
+    payload.ai_suggestion = true
+    payload.agent_run_id = ctx.runId
+  } else if (needsCell || kind === "comment.create") {
     if (needsCell && (!fileId || !cellId)) {
       return { kind: "rejected", reason: `${kind} needs fileId and cellId` }
     }
@@ -284,6 +341,27 @@ async function stageOne(
   return { kind: "staged", event, sourceValue }
 }
 
+/**
+ * AQU-846: resolve display names for every file the batch touches, so both the
+ * proposal card and the summary line can say where the changes land. Names are
+ * cosmetic — a lookup failure must never fail the staging.
+ */
+async function resolveFileNames(
+  db: AquillaDb,
+  projectId: string,
+  fileIds: string[],
+): Promise<Map<string, string>> {
+  const names = new Map<string, string>()
+  if (fileIds.length === 0) return names
+  const placeholders = fileIds.map(() => "?").join(", ")
+  const { results } = await db
+    .prepare(`SELECT id, name FROM files WHERE project_id = ? AND id IN (${placeholders})`)
+    .bind(projectId, ...fileIds)
+    .all<{ id: string; name: string }>()
+  for (const row of results ?? []) names.set(row.id, row.name)
+  return names
+}
+
 function summarize(events: StagedEvent[]): string {
   const byKind = new Map<string, StagedEvent[]>()
   for (const e of events) {
@@ -296,7 +374,13 @@ function summarize(events: StagedEvent[]): string {
     const refs = list.map((e) => e.display.canonicalRef).filter(Boolean) as string[]
     const span =
       refs.length === 0 ? "" : refs.length === 1 ? ` (${refs[0]})` : ` (${refs[0]} – ${refs[refs.length - 1]})`
-    parts.push(`${list.length}× ${kind}${span}`)
+    // AQU-846: name the destination file(s) — the summary is the headline the
+    // user reads before approving, and "12× target.cell.commit (GEN 1:1 – 1:12)"
+    // never said which file those refs live in.
+    const files = [...new Set(list.map((e) => e.display.fileName).filter(Boolean) as string[])]
+    const where =
+      files.length === 0 ? "" : files.length === 1 ? ` in ${files[0]}` : ` in ${files.join(", ")}`
+    parts.push(`${list.length}× ${kind}${span}${where}`)
   }
   return `Stage ${events.length} event${events.length === 1 ? "" : "s"}: ${parts.join(", ")}`
 }
@@ -355,6 +439,21 @@ export async function stageEvents(
       ...lintLines,
       "Fix the NEEDS REVIEW drafts and re-emit them (same cellIds) — the corrected versions replace these in the proposal.",
     )
+  }
+
+  // AQU-846: stamp each staged event with its file's display name before the
+  // proposal leaves the server — the approval UI has only what `display` carries.
+  if (staged.length > 0) {
+    try {
+      const fileIds = [...new Set(staged.map((e) => e.fileId).filter(Boolean) as string[])]
+      const names = await resolveFileNames(db, ctx.projectId, fileIds)
+      for (const event of staged) {
+        const name = event.fileId ? names.get(event.fileId) : undefined
+        if (name) event.display.fileName = name
+      }
+    } catch {
+      /* naming is cosmetic — never fail a staged batch over it */
+    }
   }
 
   lines.push(

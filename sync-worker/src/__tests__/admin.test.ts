@@ -84,6 +84,62 @@ function seedFile(env: any, projectId: string, fileId: string, tails: number) {
   env.SNAPSHOTS._seed(`${prefix}/checkpoints/ckp-1.bin`, new Uint8Array([9, 9]))
 }
 
+// OPS-2 — the admin routes used to accept the token-signing key as their
+// bearer. ADMIN_SECRET replaces it; SYNC_SECRET_KEY stays valid only while an
+// environment has not been provisioned yet, so the rollout can be staged.
+describe("admin bearer precedence (OPS-2)", () => {
+  const del = (env: any, token: string) =>
+    handleAdminRequest(
+      new Request("https://worker/admin/files/p/f", {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env,
+    ) as Promise<Response>
+
+  it("accepts ADMIN_SECRET when it is set", async () => {
+    const env = makeEnv("signing-key")
+    env.ADMIN_SECRET = "dedicated-admin"
+    seedFile(env, "p", "f", 1)
+    expect((await del(env, "dedicated-admin")).status).toBe(200)
+  })
+
+  it("stops accepting SYNC_SECRET_KEY once ADMIN_SECRET is set", async () => {
+    // The whole point of the change: provisioning the dedicated secret must
+    // NARROW what is accepted, not widen it. If this ever goes green for the
+    // signing key, the old ops habit survives the migration.
+    const env = makeEnv("signing-key")
+    env.ADMIN_SECRET = "dedicated-admin"
+    seedFile(env, "p", "f", 1)
+    expect((await del(env, "signing-key")).status).toBe(401)
+    expect(env.SNAPSHOTS._size()).toBeGreaterThan(0)
+  })
+
+  it("falls back to SYNC_SECRET_KEY while ADMIN_SECRET is unset", async () => {
+    const env = makeEnv("signing-key")
+    seedFile(env, "p", "f", 1)
+    expect((await del(env, "signing-key")).status).toBe(200)
+  })
+
+  it("treats a whitespace-only ADMIN_SECRET as unset rather than as a secret", async () => {
+    const env = makeEnv("signing-key")
+    env.ADMIN_SECRET = "   "
+    seedFile(env, "p", "f", 1)
+    expect((await del(env, "signing-key")).status).toBe(200)
+  })
+
+  it("fails closed when neither secret is configured", async () => {
+    const env = makeEnv("signing-key")
+    delete env.SYNC_SECRET_KEY
+    seedFile(env, "p", "f", 1)
+    expect((await del(env, "anything")).status).toBe(401)
+    // An unconfigured environment must not accept the literal string that a
+    // template-interpolation bug would produce.
+    expect((await del(env, "undefined")).status).toBe(401)
+    expect(env.SNAPSHOTS._size()).toBeGreaterThan(0)
+  })
+})
+
 describe("DELETE /admin/files/:projectId/:fileId", () => {
   it("requires an Authorization header matching SYNC_SECRET_KEY", async () => {
     const env = makeEnv("right")

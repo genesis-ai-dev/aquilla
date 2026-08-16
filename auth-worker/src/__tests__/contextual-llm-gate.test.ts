@@ -119,7 +119,7 @@ describe("makeLlmCall capacity retry", () => {
       return new Response("bad model", { status: 400 })
     })
     const llm = makeLlmCall({ url: URL_, apiKey: "k", models: MODELS })
-    await expect(llm(req())).rejects.toThrow(/openrouter_error 400/)
+    await expect(llm(req())).rejects.toThrow(/provider_http_error status=400/)
     expect(n).toBe(1)
   })
 
@@ -130,7 +130,49 @@ describe("makeLlmCall capacity retry", () => {
       return new Response("busy", { status: 429 })
     })
     const llm = makeLlmCall({ url: URL_, apiKey: "k", models: MODELS })
-    await expect(llm(req())).rejects.toThrow(/openrouter_error 429/)
+    await expect(llm(req())).rejects.toThrow(/provider_http_error status=429/)
     expect(n).toBe(5)
   }, 30_000)
+
+  it("categorizes an invalid success body without persisting its contents", async () => {
+    vi.stubGlobal("fetch", async () => new Response(
+      "Authorization: Bearer opaque-invalid-json user material",
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ))
+    const llm = makeLlmCall({ url: URL_, apiKey: "k", models: MODELS })
+    await expect(llm(req())).rejects.toThrow(/^provider_invalid_response status=200$/)
+  })
+})
+
+describe("makeLlmCall OpenRouter extras", () => {
+  it("sends reasoning.effort and usage.include on OpenRouter", async () => {
+    let body: Record<string, unknown> | undefined
+    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>
+      return new Response(okBody(), { status: 200 })
+    })
+    const llm = makeLlmCall({
+      url: "https://openrouter.ai/api/v1",
+      apiKey: "k",
+      models: MODELS,
+    })
+    await llm(req())
+    expect(body).toMatchObject({
+      usage: { include: true },
+      reasoning: { effort: "none" },
+    })
+  })
+
+  it("omits vendor fields on a non-OpenRouter upstream", async () => {
+    let body: Record<string, unknown> | undefined
+    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>
+      return new Response(okBody(), { status: 200 })
+    })
+    const llm = makeLlmCall({ url: URL_, apiKey: "k", models: MODELS })
+    await llm(req())
+    expect(body).toBeDefined()
+    expect(body).not.toHaveProperty("usage")
+    expect(body).not.toHaveProperty("reasoning")
+  })
 })

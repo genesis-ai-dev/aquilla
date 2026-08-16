@@ -32,6 +32,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import type { PostEditMetrics, WeekBucket, UserBucket } from "@/lib/metrics/post-edit-metrics"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDate } from "@/lib/i18n/format"
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -55,10 +57,10 @@ function nedColor(ned: number): string {
   return "bg-red-500"
 }
 
-function formatWeek(weekStart: string): string {
+function formatWeek(weekStart: string, locale: string): string {
   // "2024-01-08" → "Jan 8"
   const d = new Date(weekStart + "T00:00:00Z")
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })
+  return formatDate(d, locale, { month: "short", day: "numeric", timeZone: "UTC" })
 }
 
 function formatDuration(ms: number): string {
@@ -72,6 +74,7 @@ function formatDuration(ms: number): string {
 // ── Bar chart (weekly trend) ──────────────────────────────────────────────────
 
 function WeeklyChart({ weeks }: { weeks: WeekBucket[] }) {
+  const { locale } = useI18n()
   if (weeks.length === 0) return null
   const maxCount = Math.max(...weeks.map((w) => w.count), 1)
 
@@ -79,23 +82,23 @@ function WeeklyChart({ weeks }: { weeks: WeekBucket[] }) {
     <div className="mt-3 space-y-1">
       {weeks.map((w) => (
         <div key={w.weekStart} className="flex items-center gap-2 text-xs">
-          <span className="w-14 shrink-0 text-muted-foreground">{formatWeek(w.weekStart)}</span>
+          <span className="w-14 shrink-0 text-muted-foreground">{formatWeek(w.weekStart, locale)}</span>
           {/* NED bar */}
           <div className="relative h-5 flex-1 rounded bg-muted/40">
             <div
               className={`h-full rounded ${nedColor(w.avgNed)} opacity-80 transition-all`}
               style={{ width: `${Math.max(2, w.avgNed * 100)}%` }}
             />
-            <span className="absolute inset-0 flex items-center pl-2 text-[11px] font-medium leading-none text-foreground/80">
+            <span className="absolute inset-0 flex items-center ps-2 text-[11px] font-medium leading-none text-foreground/80">
               {pct(w.avgNed)} avg NED
             </span>
           </div>
           {/* Count pill */}
-          <span className="w-16 shrink-0 text-right text-muted-foreground">
+          <span className="w-16 shrink-0 text-end text-muted-foreground">
             {w.count} {w.count === 1 ? "edit" : "edits"}
             {/* Tiny bar proportional to count */}
             <span
-              className="ml-1 inline-block h-1.5 rounded bg-muted-foreground/40 align-middle"
+              className="ms-1 inline-block h-1.5 rounded bg-muted-foreground/40 align-middle"
               style={{ width: `${Math.round((w.count / maxCount) * 32)}px` }}
             />
           </span>
@@ -120,8 +123,8 @@ function UserTable({ users, activeUser, onSelectUser }: {
         <TableHeader>
           <TableRow>
             <TableHead>Reviewer</TableHead>
-            <TableHead className="text-right">Approvals</TableHead>
-            <TableHead className="text-right">Avg edit distance</TableHead>
+            <TableHead className="text-end">Approvals</TableHead>
+            <TableHead className="text-end">Avg edit distance</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -134,8 +137,8 @@ function UserTable({ users, activeUser, onSelectUser }: {
                 onClick={() => onSelectUser(isActive ? null : u.author)}
               >
                 <TableCell className="font-mono text-xs">{u.author}</TableCell>
-                <TableCell className="text-right text-muted-foreground">{u.count}</TableCell>
-                <TableCell className="text-right">
+                <TableCell className="text-end text-muted-foreground">{u.count}</TableCell>
+                <TableCell className="text-end">
                   <span className="inline-flex items-center gap-1.5">
                     <span
                       className={`inline-block size-2 rounded-lg ${nedColor(u.avgNed)}`}
@@ -323,7 +326,7 @@ export function PostEditMetricsSection({
                 <h4 className="text-xs font-medium text-muted-foreground">
                   Weekly trend
                   {activeUser && (
-                    <span className="ml-1 normal-case font-normal">
+                    <span className="ms-1 normal-case font-normal">
                       — filtered to <span className="font-mono">{activeUser}</span>
                       {" "}
                       <button
@@ -348,7 +351,7 @@ export function PostEditMetricsSection({
                 <div className="mt-5">
                   <h4 className="text-xs font-medium text-muted-foreground">
                     By reviewer
-                    <span className="ml-1 normal-case font-normal text-muted-foreground">
+                    <span className="ms-1 normal-case font-normal text-muted-foreground">
                       (click a row to filter the trend above)
                     </span>
                   </h4>

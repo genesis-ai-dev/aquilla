@@ -6,6 +6,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 function FieldSet({ className, ...props }: React.ComponentProps<"fieldset">) {
   return (
@@ -135,7 +136,7 @@ function FieldDescription({ className, ...props }: React.ComponentProps<"p">) {
     <p
       data-slot="field-description"
       className={cn(
-        "text-left text-sm leading-normal font-normal text-muted-foreground group-has-data-horizontal/field:text-balance [[data-variant=legend]+&]:-mt-1.5",
+        "text-start text-sm leading-normal font-normal text-muted-foreground group-has-data-horizontal/field:text-balance [[data-variant=legend]+&]:-mt-1.5",
         "last:mt-0 nth-last-2:-mt-1",
         "[&>a]:underline [&>a]:underline-offset-4 [&>a:hover]:text-primary",
         className
@@ -201,7 +202,7 @@ function FieldError({
     }
 
     return (
-      <ul className="ml-4 flex list-disc flex-col gap-1">
+      <ul className="ms-4 flex list-disc flex-col gap-1">
         {uniqueErrors.map(
           (error, index) =>
             error?.message && <li key={index}>{error.message}</li>
@@ -226,6 +227,16 @@ function FieldError({
   )
 }
 
+/** Grayed “(optional)” suffix for field labels — matches AI provider keys. */
+function OptionalMark({ className }: { className?: string }) {
+  const t = useT()
+  return (
+    <span className={cn("font-normal text-muted-foreground/70", className)}>
+      {t("common.optionalFieldNote")}
+    </span>
+  )
+}
+
 export {
   Field,
   FieldLabel,
@@ -237,4 +248,5 @@ export {
   FieldSet,
   FieldContent,
   FieldTitle,
+  OptionalMark,
 }

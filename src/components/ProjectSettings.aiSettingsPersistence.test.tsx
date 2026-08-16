@@ -183,11 +183,11 @@ describe("ProjectSettings — AI Settings persistence (AQU-408)", () => {
 
     fireEvent.change(screen.getByLabelText(/examples retrieved/i), { target: { value: "17" } })
     await pickSelectOption(/context window/i, /large — chapter/i)
-    const approvedOnly = screen.getByRole("checkbox", { name: /approved examples only/i })
-    expect(approvedOnly.getAttribute("aria-checked")).toBe("true")
-    expect(
-      approvedOnly.hasAttribute("data-disabled") || approvedOnly.getAttribute("aria-disabled") === "true",
-    ).toBe(true)
+    const approvedOnly = screen.getByRole("switch", { name: /approved examples only/i })
+    // Base UI Switch: checked + locked via data-* (not the native disabled prop).
+    expect(approvedOnly).toHaveAttribute("aria-checked", "true")
+    expect(approvedOnly).toHaveAttribute("data-disabled")
+    expect(approvedOnly).toHaveAttribute("data-checked")
 
     const saveBtn = screen.getByRole("button", { name: /save changes/i })
     fireEvent.click(saveBtn)

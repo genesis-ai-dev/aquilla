@@ -1,0 +1,52 @@
+# Dedicated-box e2e. GitHub is the webhook + job queue; a self-hosted runner
+# on Hetzner is the compute. Dispatch-only until a runner shows Idle — a
+# pull_request trigger with no runner queues every PR forever.
+#
+# Enable on PRs only after: bootstrap.sh → ensure-e2e-runtime.sh →
+# install-runners.sh, and a successful workflow_dispatch of this file.
+# See docs/runbooks/hetzner-ci.md.
+
+name: E2E (Hetzner)
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-hetzner
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: [self-hosted, hetzner, e2e]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Ensure Docker Postgres (aquilla-dev-pg)
+        run: bash scripts/hetzner-ci/ensure-e2e-runtime.sh
+
+      - name: Install workspace dependencies
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir auth-worker install --frozen-lockfile
+          pnpm --dir sync-worker install --frozen-lockfile
+
+      - name: Install Playwright Chromium (cached on the box after first run)
+        run: pnpm exec playwright install chromium
+
+      - name: Smoke e2e
+        run: pnpm test:e2e:smoke
+
+      - name: Upload e2e logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-logs-${{ github.run_id }}
+          path: |
+            .e2e-logs*/
+            test-results/
+          if-no-files-found: ignore
+          retention-days: 7

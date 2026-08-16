@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 import "./bar-spinner.css"
 
 const BAR_COUNT = 10
@@ -11,10 +12,11 @@ type BarSpinnerProps = React.ComponentProps<"div"> & {
 }
 
 function BarSpinner({ className, visible = true, ...props }: BarSpinnerProps) {
+  const t = useT()
   return (
     <div
       role="status"
-      aria-label="Loading"
+      aria-label={t("common.loadingSpinner")}
       className={cn("bar-spinner size-3.5 shrink-0", className)}
       data-visible={visible}
       {...props}

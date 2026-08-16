@@ -19,6 +19,14 @@
 // a dumb store, the client owns the shape. The spec note about
 // `targetLanguage` left unset identifying a source-only project (AD-9) is
 // purely a downstream interpretation.
+//
+// AQU-822: ONE key is permission-scoped rather than dumb-stored —
+// `terminology` (the project's termbase concepts). A write whose only
+// *changed* key is `terminology` is gated by the org's configurable
+// `termbaseEditMinRole` floor (default project_lead 500) instead of the
+// maintainer floor below, so an org can let its translators own terminology
+// without also handing them AI config, health thresholds, or languages.
+// Everything else keeps the maintainer gate, unchanged.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -26,6 +34,7 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
+import { getTermbaseEditMinRoleForProject } from "../services/org-permissions"
 import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
 import { loadProjectSettings, updateProjectSettingsShared } from "../../../db/shared/projects"
 
@@ -35,6 +44,34 @@ const projectSettings = new Hono<AuthHonoEnv>()
 // (project-configuration stories: name-and-configure-project,
 // customize-ai-settings, monitor-project-health, validate-translation).
 const SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER
+
+/** The one settings key with its own (org-configurable) write floor. */
+const TERMINOLOGY_KEY = "terminology"
+
+/**
+ * Top-level settings keys whose value differs between the stored blob and an
+ * incoming write. Compared on the CHANGE, not on presence: the client patch
+ * is a whole-object read-modify-write, so every write echoes back every key
+ * it didn't touch — treating presence as a change would make the
+ * terminology carve-out below unreachable in practice.
+ *
+ * Values are compared by JSON serialization. Echoed keys round-trip through
+ * `JSON.parse` of the stored blob, so nested key order is preserved and this
+ * is stable for the read-modify-write path; a re-ordered nested object would
+ * read as "changed" and simply fall back to the maintainer gate (fail-safe,
+ * never fail-open).
+ */
+export function changedSettingsKeys(
+  current: Record<string, unknown>,
+  next: Record<string, unknown>,
+): string[] {
+  const keys = new Set([...Object.keys(current), ...Object.keys(next)])
+  const changed: string[] = []
+  for (const key of keys) {
+    if (JSON.stringify(current[key]) !== JSON.stringify(next[key])) changed.push(key)
+  }
+  return changed
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // GET /api/v2/projects/:projectId/settings
@@ -90,10 +127,29 @@ projectSettings.on(
     const role = await resolveProjectRole(c.env, user, projectId)
     if (!role) return c.json({ error: "no access to project" }, 403)
     if (role.level < SETTINGS_WRITE_MIN_ROLE) {
-      return c.json(
-        { error: `role >= maintainer (${SETTINGS_WRITE_MIN_ROLE}) required` },
-        403,
-      )
+      // AQU-822: below the maintainer floor, the ONLY write allowed is a
+      // terminology-only one, and only when the org's configured
+      // termbaseEditMinRole permits it. Any other changed key falls through
+      // to the maintainer 403 — lowering the termbase floor must never widen
+      // write access to AI config, health, languages, or anything else.
+      const stored = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
+      const changed = changedSettingsKeys(stored.settings, body.settings)
+      const terminologyOnly = changed.every((key) => key === TERMINOLOGY_KEY)
+      if (!terminologyOnly) {
+        return c.json(
+          { error: `role >= maintainer (${SETTINGS_WRITE_MIN_ROLE}) required` },
+          403,
+        )
+      }
+      const termbaseFloor = await getTermbaseEditMinRoleForProject(c.env, projectId)
+      if (role.level < termbaseFloor) {
+        return c.json(
+          {
+            error: `role >= ${termbaseFloor} required to manage this project's termbase (org termbaseEditMinRole)`,
+          },
+          403,
+        )
+      }
     }
 
     const queryVersion = parseIntOrNull(c.req.query("ifMatchVersion"))

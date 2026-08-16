@@ -8,7 +8,7 @@ import "fake-indexeddb/auto"
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest"
 import { createOpfsFs } from "@/lib/fs/opfs-fs"
 import { MemoryDirectoryHandle } from "@/lib/fs/__test__/mem-fs-handles"
-import { __setRootForTests, audioCachePut, audioCacheGet } from "./bytes-cache"
+import { __setRootForTests, __flushAudioCacheForTests, audioCachePut, audioCacheGet } from "./bytes-cache"
 import { __resetOpfsAvailabilityForTests } from "@/lib/storage/opfs-availability"
 import { transcribeCell, slicePcmToTrim, __setTranscribeAudioForTests } from "./transcribe"
 import { getTranscribeStatus, clearTranscribeStatus } from "./transcribe-status"
@@ -100,7 +100,9 @@ describe("transcribeCell — local-first bytes (FRO-355)", () => {
     expect(n).toBe(1)
     expect(fetchCellAudio).toHaveBeenCalledOnce()
     expect(getTranscribeStatus(FULL_ID).kind).toBe("done")
-    // write-through: the fetched bytes are now cached
+    // write-through: the fetched bytes are now cached (the put is
+    // fire-and-forget behind the index chain — flush it first)
+    await __flushAudioCacheForTests()
     expect(await audioCacheGet(AUDIO_ID, EXT)).not.toBeNull()
   })
 
@@ -234,6 +236,39 @@ describe("transcribeCell — imported media segments (AQU-646)", () => {
 
     const opts = (impl.mock.calls[0] as unknown[])[1] as import("./transcribe").TranscriptionOptions
     expect(opts.trim).toBeUndefined()
+  })
+})
+
+// ── AQU-783: the attach emit must be AWAITED before transcribeCell resolves ──
+// The transcript/timings only surface after a completion handler flushes the
+// outbox and revalidates the cell. If the emit were fire-and-forget, that flush
+// could run before the event reached IDB — nothing to push, so the result would
+// only appear after a manual page refresh (the reported bug).
+describe("transcribeCell — durable attach before resolve (AQU-783)", () => {
+  it("does not resolve until the cell.audio.attach emit settles", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    __setTranscribeAudioForTests(fakeTranscribe(["bonjour", "monde"]))
+
+    let releaseEmit: (v: string) => void = () => {}
+    emitCellAudioAttach.mockImplementationOnce(
+      () => new Promise<string>((resolve) => { releaseEmit = resolve }),
+    )
+
+    let settled = false
+    const p = transcribeCell({ cell: makeMediaCell(), session, projectId: "proj-1", language: "fra" })
+      .then((n) => { settled = true; return n })
+
+    // Flush all pending microtasks/timers: execution should now be parked on the
+    // still-pending attach emit, so transcribeCell must NOT have resolved yet.
+    await new Promise((r) => setTimeout(r, 0))
+    expect(emitCellAudioAttach).toHaveBeenCalledOnce()
+    expect(settled).toBe(false)
+
+    releaseEmit("evt-1")
+    const words = await p
+    expect(settled).toBe(true)
+    expect(words).toBe(2)
+    expect(getTranscribeStatus(FULL_ID).kind).toBe("done")
   })
 })
 

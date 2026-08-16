@@ -5,7 +5,7 @@
  * calls onElevated on success.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
 import { AdminElevationGate } from "./AdminElevationGate"
 
 vi.mock("@/lib/frontier/admin", () => ({
@@ -17,7 +17,14 @@ const mockRequest = vi.mocked(requestAdminElevation)
 const mockVerify = vi.mocked(verifyAdminElevation)
 
 beforeEach(() => vi.clearAllMocks())
-afterEach(() => vi.restoreAllMocks())
+afterEach(async () => {
+  cleanup()
+  // AQU-919: input-otp leaves 0/10/50 ms callbacks pending after unmount.
+  // Let them settle before happy-dom removes `window`, otherwise the root
+  // suite can finish all assertions and still exit non-zero on the leak.
+  await new Promise((resolve) => setTimeout(resolve, 60))
+  vi.restoreAllMocks()
+})
 
 describe("AdminElevationGate", () => {
   it("requests a code, then verifies it and calls onElevated", async () => {
@@ -29,13 +36,11 @@ describe("AdminElevationGate", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /email me a code/i }))
 
-    // Phase 2: the 6 code inputs appear.
-    const inputs = await screen.findAllByLabelText(/digit/i)
-    expect(inputs).toHaveLength(6)
+    const input = await screen.findByLabelText(/verification code/i)
     expect(mockRequest).toHaveBeenCalledWith("jwt")
 
-    // Typing/pasting the whole code into the first box auto-fills + submits.
-    fireEvent.change(inputs[0], { target: { value: "123456" } })
+    // Single OTP input — paste/type the full code; onComplete submits.
+    fireEvent.input(input, { target: { value: "123456" } })
 
     await waitFor(() => expect(mockVerify).toHaveBeenCalledWith("jwt", "123456"))
     await waitFor(() => expect(onElevated).toHaveBeenCalled())
@@ -48,8 +53,8 @@ describe("AdminElevationGate", () => {
 
     render(<AdminElevationGate jwt="jwt" email={null} onElevated={onElevated} />)
     fireEvent.click(screen.getByRole("button", { name: /email me a code/i }))
-    const inputs = await screen.findAllByLabelText(/digit/i)
-    fireEvent.change(inputs[0], { target: { value: "999999" } })
+    const input = await screen.findByLabelText(/verification code/i)
+    fireEvent.input(input, { target: { value: "999999" } })
 
     expect(await screen.findByText(/invalid or has expired/i)).toBeInTheDocument()
     expect(onElevated).not.toHaveBeenCalled()

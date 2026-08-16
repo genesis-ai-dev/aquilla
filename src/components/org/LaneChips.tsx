@@ -12,6 +12,8 @@ import { laneTranslatedPct, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { cn } from "@/lib/utils"
 import { laneChipLabel, safePct } from "./project-lanes"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { useFormat, bidiIsolate } from "@/lib/i18n/format"
 
 export interface LaneChipsProps {
   projectId: string
@@ -35,21 +37,29 @@ function LaneChip({
   lane: PortfolioLane
   defaultLaneLabel: string
 }) {
+  const t = useT()
+  const { count } = useFormat()
   const pct = safePct(laneTranslatedPct(lane))
+  const pctPlain = `${count(pct)}%`
+  // Isolate only what is SEEN. The bidi isolates keep "40%" from reordering
+  // beside RTL text, but they are invisible control characters: in an
+  // accessible name they are noise a screen reader linearises away anyway, and
+  // they leak into any assertion on that name.
+  const pctDisplay = bidiIsolate(pctPlain)
   const label = laneChipLabel(lane.lane, defaultLaneLabel)
-  const tooltip = `${label} — ${pct}% translated`
+  const tooltip = t("org.laneChips.tooltip", { label, pct: pctDisplay })
   return (
     <AppTooltip content={tooltip}>
       <span
         data-testid={`lane-chip-${projectId}-${lane.lane}`}
         className="inline-flex min-w-0 max-w-full items-center gap-1 overflow-hidden rounded border bg-card px-1.5 py-0.5 text-xs"
-        aria-label={`${label}: ${pct}% translated`}
+        aria-label={t("org.laneChips.ariaLabel", { label, pct: pctPlain })}
       >
         <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
         <span className="h-1.5 w-8 shrink-0 overflow-hidden rounded-full bg-muted" aria-hidden>
           <span className="block h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
         </span>
-        <span className="shrink-0 tabular-nums text-muted-foreground">{pct}%</span>
+        <span className="shrink-0 tabular-nums text-muted-foreground">{pctDisplay}</span>
       </span>
     </AppTooltip>
   )

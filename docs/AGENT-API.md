@@ -143,7 +143,7 @@ This gives "human provenance" a precise, two-tier meaning rather than a vague cl
 
 Trusted provenance never lives solely inside caller-controlled business payloads. The
 server stamps an envelope on every externally-originated event
-(`events.provenance` JSONB on Postgres; JSON column via the shim on D1):
+(`events.provenance` JSONB on Postgres):
 
 ```json
 {
@@ -208,6 +208,32 @@ Initial command set:
 - `SetTranslation` (batch; compiled to `target.cell.commit` chained per AD-9 —
   pinned to `sourceEventId`, parented on the prior target event)
 - `LinkMedia` (attach audio/alignment relationships)
+
+### Multi-language projects: target-language lanes
+
+A project can hold several target languages at once via AQU-538 **lanes** — a lane is
+a language tag (e.g. `es`, `pt`) registered in the project settings array
+`settings.targetLanes`; every cell keeps one shared source plus one independent
+target row/chain per lane. The external surface is lane-aware end to end:
+
+1. **Register lanes** (once): `UpdateProjectSettings` writing `settings.targetLanes:
+   ["es", "pt"]` (merge into the existing blob; pass the live `ifMatchVersion`).
+2. **Write per lane**: `SetTranslation` takes an optional `laneId` — the compiled
+   `target.cell.commit` is stamped `payload.targetLang` and lands on that lane's row
+   and chain slot. An unregistered `laneId` is rejected at prepare
+   (`validation_failed`). Omitted `laneId` = the default lane (unchanged behavior).
+3. **Read per lane**: `GET .../files/:fileId/cells?lane=es` (and the MCP
+   `read_content` `lane` argument) filters target cells to one lane; source cells are
+   always included. Without `lane`, every lane's targets are returned, each carrying
+   its `targetLang`.
+4. **Import several lanes at once**: each `PlanImport` cell takes
+   `variants: [{ laneId, languageTag?, content, contentHtml? }]` sharing that cell's
+   source.
+
+Preconditions and drift are lane-scoped — the same cell edited concurrently in two
+different lanes never triggers `plan_stale` across lanes. The self-discovery
+surfaces teach this workflow: `GET /api/v1/external` (`multiLanguage` section) and
+the MCP `get_capabilities` tool (`multiLanguage` field).
 
 ### Changesets: immutable execution plans
 
@@ -304,7 +330,7 @@ CRUD surface with MCP bolted on.
 | Discovery | `get_capabilities`, `get_identity_and_scope` |
 | Projects | `list_projects`, `get_project`, `create_project`, `update_project` |
 | Artifacts | `create_artifact_upload`, `inspect_artifact` |
-| Ingestion | `preview_import`, `prepare_import` |
+| Ingestion | `preview_import`, `prepare_import` — **implemented**: both parse an already-uploaded source artifact server-side with the built-in DOM-free parsers (txt, md, json, po, properties, obs, vtt, srt, sbv, csv, tsv, usfm; 5000-cell cap) — preview returns cells without staging, prepare stages a `PlanImport` changeset linking the artifact. Upload stays REST-only (`POST …/artifacts`, 25MB). REST equivalent: `POST …/artifacts/:artifactId/parse` (body `{ "stage": true }` to stage). DOM-bound formats (docx, pptx, html, xliff, tmx, usx, idml) are not yet server-parseable. |
 | Reading | `search_project`, `read_content`, `read_history` |
 | Translation | `prepare_translations` |
 | Verification | `run_checks` — structured, actionable failures (e.g. `"term 'covenant' rendered 3 ways: [refs]"`), never a bare 400 |
@@ -332,12 +358,9 @@ passable: an agent must be able to learn what it may do before trying to do it.
 
 ### Storage decisions
 
-- **Changesets, jobs, credentials → Postgres (Neon).** These are greenfield tables:
-  starting them on Postgres avoids a later migration and D1's single-writer ceiling
-  for large plans and job bookkeeping. Dependency note: if the Postgres migration
-  isn't production-ready when AQU-533 builds, the identical schema runs through the
-  existing D1-compatible shim (`db/shim/d1-postgres.ts`) as a stopgap — this decision
-  must not silently block the API on the migration finishing.
+- **Changesets, jobs, credentials → Postgres (Neon).** These are greenfield tables,
+  avoiding a later migration off D1's single-writer ceiling for large plans and job
+  bookkeeping.
 - **Uploaded source artifacts and large immutable manifests → R2** (object storage),
   referenced by digest.
 
@@ -345,7 +368,9 @@ passable: an agent must be able to learn what it may do before trying to do it.
 
 ## 5. Ingestion and artifact model
 
-Aquilla's parsers largely run client-side today; the server import endpoint receives
+Aquilla's DOM-bound parsers run client-side; the worker-safe text parse core
+(`src/lib/parsers/parse-text-formats.ts`) now ALSO runs server-side behind
+`preview_import` / `prepare_import`, and the raw import endpoint still accepts
 already-parsed cells. A magical server-side `import_file` would overpromise. Ingestion
 is instead an **explicit workflow** the agent drives:
 
@@ -442,7 +467,7 @@ path.
 | D6 | Provenance is a server-stamped envelope; verified vs caller-declared fields are distinguished |
 | D7 | Reads and agent telemetry go to a bounded-retention audit ledger, not the event log |
 | D8 | v1 event-provenance promise limited to event-backed operations; non-event ops get receipts + audit coverage |
-| D9 | Changesets/jobs/credentials on Postgres (D1-shim fallback if migration timing forces it); artifacts/manifests on R2 |
+| D9 | Changesets/jobs/credentials on Postgres; artifacts/manifests on R2 |
 | D10 | Binary transfer via signed URLs, never MCP message bodies |
 | D11 | Ingestion is an explicit workflow with mapping recipes; no magical server-side `import_file` |
 | D12 | PATs for developer preview; OAuth 2.1 for remote MCP distribution |

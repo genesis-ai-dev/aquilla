@@ -49,6 +49,11 @@ export class Workspace {
     await this.confirmImportPreview()
   }
 
+  async importPayload(payload: FilePayload): Promise<void> {
+    await this.previewImportPayload(payload)
+    await this.confirmImportPreview()
+  }
+
   /** Select a spreadsheet through the normal Upload files card, accept the
    * auto-detected column mapping, and stop at the shared human-review preview. */
   async previewMappedSpreadsheet(filePath: string): Promise<void> {
@@ -273,11 +278,14 @@ export class Workspace {
     throw new Error("Import dialog did not open")
   }
 
-  /** Click a file row in the sidebar, identified by a substring of its name. */
+  /** Click a file row in the sidebar, identified by a substring of its name.
+   * Anchored to the file rows themselves: sidebar chrome (e.g. the history
+   * arrows) embeds the current file's name in its accessible labels, so a
+   * bare role+name match inside <aside> can grab the wrong button. */
   async openFileBySubstring(nameSubstring: string): Promise<void> {
     await this.page
-      .locator("aside")
-      .getByRole("button", { name: new RegExp(nameSubstring, "i") })
+      .locator('aside [data-showcase="sidebar.file"]')
+      .filter({ hasText: new RegExp(nameSubstring, "i") })
       .first()
       .click()
   }

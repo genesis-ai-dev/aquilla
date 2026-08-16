@@ -12,6 +12,7 @@
 import { errorResponse, toErrorResponse } from './errors'
 import {
   cellKey,
+  laneCellKey,
   requiredRoleForCommand,
   type CreateProjectCommand,
   type LinkMediaCommand,
@@ -158,7 +159,7 @@ export async function handleCommit(
     const liveStates = await resolveCellStates(db, projectId, cs.preconditions)
     const drift: { fileId: string; cellId: string }[] = []
     for (const pre of cs.preconditions) {
-      const s = liveStates.get(cellKey(pre.fileId, pre.cellId))
+      const s = liveStates.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId))
       const liveHead = s?.targetHeadEventId ?? null
       const liveSource = s?.sourceEventId ?? null
       if (liveHead !== pre.targetHeadEventId || liveSource !== pre.sourceEventId) {
@@ -260,7 +261,7 @@ export async function handleCommit(
   const commandByCell = new Map<string, SetTranslationCommand>()
   for (const c of cs.commands) {
     if (c.kind !== 'SetTranslation') continue
-    commandByCell.set(cellKey(c.fileId, c.cellId), c)
+    commandByCell.set(laneCellKey(c.fileId, c.cellId, c.laneId), c)
   }
 
   // W1-B: consume the event ids minted at prepare, so a crash-retry re-posts
@@ -269,16 +270,16 @@ export async function handleCommit(
   // a jsonb object key). Fall back to minting for changesets staged before the
   // planned-id ledger existed (backward compat).
   const plannedSet = new Map(
-    (cs.plannedIds?.setTranslation ?? []).map((p) => [cellKey(p.fileId, p.cellId), p.eventId]),
+    (cs.plannedIds?.setTranslation ?? []).map((p) => [laneCellKey(p.fileId, p.cellId, p.laneId), p.eventId]),
   )
   const eventsByFile = new Map<string, RawEvent<'target.cell.commit'>[]>()
   const allEventIds: string[] = []
   const clientTs = Date.now()
   for (const pre of cs.preconditions) {
-    const cmd = commandByCell.get(cellKey(pre.fileId, pre.cellId))
+    const cmd = commandByCell.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId))
     if (!cmd) continue
     const ev: RawEvent<'target.cell.commit'> = {
-      id: plannedSet.get(cellKey(pre.fileId, pre.cellId)) ?? uuidv7(),
+      id: plannedSet.get(laneCellKey(pre.fileId, pre.cellId, pre.laneId)) ?? uuidv7(),
       schemaVersion: 1,
       kind: 'target.cell.commit',
       projectId,
@@ -289,6 +290,9 @@ export async function handleCommit(
       payload: {
         value: cmd.value,
         ...(cmd.valueHtml !== undefined ? { valueHtml: cmd.valueHtml } : {}),
+        // AQU-538: stamp the lane so the projection lands the commit on its
+        // own (cell, target_lang) row and chain slot.
+        ...(cmd.laneId ? { targetLang: cmd.laneId } : {}),
         sourceEventId: pre.sourceEventId,
       },
       clientTs,
@@ -952,9 +956,10 @@ async function commitLinkMedia(
       )
     }
 
-    // Re-check the target cell still exists.
+    // Re-check the target cell still exists (lane-independent — the
+    // default-lane entry reports source/any-lane-target existence).
     const cellStates = await resolveCellStates(db, projectId, [cmd])
-    const s = cellStates.get(cellKey(cmd.fileId, cmd.cellId))
+    const s = cellStates.get(laneCellKey(cmd.fileId, cmd.cellId))
     if (!s || (!s.sourceExists && !s.targetExists)) {
       await db
         .prepare(`UPDATE changesets SET status = 'stale' WHERE id = ? AND status IN ('staged','committing')`)

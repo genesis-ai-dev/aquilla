@@ -85,14 +85,15 @@ describe("cell-audio projection", () => {
     expect(a[7]).toBe("voice-clone-1")
     expect(a[8]).toBe("ref-1.webm")
     expect(a[9]).toBe(5108)
-    expect(a[10]).toBeNull() // trim_start_ms (unset)
-    expect(a[11]).toBeNull() // trim_end_ms (unset)
-    expect(a[12]).toBe(JSON.stringify([{ word: "hi", t0: 0, t1: 0.5, start: 0, end: 2 }]))
-    expect(a[13]).toBe("evt-audio-1") // event_id
-    expect(a[14]).toBe(100) // created_ts = serverTs
+    expect(a[10]).toBeNull() // label (unset — COALESCE keeps any existing name)
+    expect(a[11]).toBeNull() // trim_start_ms (unset)
+    expect(a[12]).toBeNull() // trim_end_ms (unset)
+    expect(a[13]).toBe(JSON.stringify([{ word: "hi", t0: 0, t1: 0.5, start: 0, end: 2 }]))
+    expect(a[14]).toBe("evt-audio-1") // event_id
+    expect(a[15]).toBe(100) // created_ts = serverTs
   })
 
-  it("attach: nulls optional fields when omitted", () => {
+  it("attach: binds NULL for optional fields the payload omits", () => {
     const { db, recorded } = makeRecordingDb()
     const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(
@@ -109,7 +110,52 @@ describe("cell-audio projection", () => {
     expect(a[7]).toBeNull() // voice_id
     expect(a[8]).toBeNull() // reference_audio_id
     expect(a[9]).toBeNull() // duration_ms
-    expect(a[10]).toBeNull() // timings_json
+    expect(a[11]).toBeNull() // timings_json (label took index 10 in round 8)
+  })
+
+  // SUB-49 — a re-attach may only ADD to what we know about a clip.
+  //
+  // Transcription re-attaches carrying ONLY its timings, and a trim carrying
+  // only trims. While these columns were plain `excluded.x` assignments, a
+  // NULL bind meant "erase", so finishing a transcription silently wiped a
+  // recording's duration (its chip lost its length and fell back to the
+  // section's width), its mime type and its voice — and the later re-attach
+  // that restored the duration wiped the transcription's timings straight
+  // back. Verified in the event log on a real take before this fix.
+  it("attach: a partial re-attach PRESERVES the clip's descriptive fields", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent("cell.audio.attach", {
+        audioId: "rec.webm",
+        url: "frontier-audio://rec.webm",
+        slot: "recording",
+        timings: [{ word: "hi", t0: 0, t1: 0.5, start: 0, end: 2 }],
+      }),
+      [],
+    )
+    const sql = recorded.find((s) => s.sql.includes("INSERT INTO cell_audio"))!.sql
+    for (const col of ["duration_ms", "mime_type", "voice_id", "reference_audio_id", "timings_json", "label"]) {
+      expect(sql).toContain(`${col} = COALESCE(excluded.${col}, cell_audio.${col})`)
+    }
+  })
+
+  it("attach: trims stay a plain overwrite so dragging to the clip edge still CLEARS them", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent("cell.audio.attach", {
+        audioId: "rec.webm",
+        url: "frontier-audio://rec.webm",
+        slot: "recording",
+      }),
+      [],
+    )
+    const sql = recorded.find((s) => s.sql.includes("INSERT INTO cell_audio"))!.sql
+    expect(sql).toContain("trim_start_ms = excluded.trim_start_ms")
+    expect(sql).toContain("trim_end_ms = excluded.trim_end_ms")
+    expect(sql).not.toContain("COALESCE(excluded.trim_start_ms")
+    expect(sql).not.toContain("COALESCE(excluded.trim_end_ms")
   })
 
   it("select: deselects siblings then selects the target", () => {

@@ -1,7 +1,23 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import "fake-indexeddb/auto";
-import { login, redeemAccessLink, FrontierAuthError, AUTH_BASE } from "./auth";
+import {
+  login,
+  register,
+  redeemAccessLink,
+  requestPasswordReset,
+  verifyResetToken,
+  verifyEmail,
+  resetPassword,
+  FrontierAuthError,
+  AUTH_BASE,
+} from "./auth";
 import { clearSession, loadSession } from "./session-store";
+import {
+  clearSessionExpired,
+  isSessionExpired,
+  notifySessionExpired,
+} from "@/lib/errors/session-expired-signal";
+import { notifySessionExpiredIfCurrent } from "./session-expiry";
 
 describe("login", () => {
   beforeEach(async () => { await clearSession(); vi.restoreAllMocks(); });
@@ -73,6 +89,56 @@ describe("login", () => {
     );
     await expect(login({ username: "x", password: "y" })).rejects.toBeInstanceOf(FrontierAuthError);
   });
+
+  // AQU-884: the banner no longer clears itself on navigation, so a successful
+  // re-login is what has to lower the flag. finalizeSession() owns that, which
+  // is why every auth entry point (login/register/devLogin/redeemAccessLink)
+  // gets it for free.
+  it("clears the session-expired flag once the new session is persisted", async () => {
+    notifySessionExpired();
+    expect(isSessionExpired()).toBe(true);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        access_token: "jwt-fresh",
+        token_type: "bearer",
+      }), { status: 200 })
+    );
+    await login({ username: "alice", password: "pw" });
+    expect(isSessionExpired()).toBe(false);
+  });
+
+  it("leaves the session-expired flag set when the re-login fails", async () => {
+    notifySessionExpired();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ detail: "bad creds" }), { status: 401 })
+    );
+    await expect(login({ username: "x", password: "y" })).rejects.toBeInstanceOf(FrontierAuthError);
+    expect(isSessionExpired()).toBe(true);
+    clearSessionExpired();
+  });
+
+  // AQU-884 race: components whose React state lags the session store fire
+  // requests with the pre-login JWT for a few renders after re-login; their
+  // 401s land AFTER finalizeSession() lowered the flag. The guarded notifier
+  // must drop them — and still honor a genuine expiry of the new session.
+  it("a straggler 401 from the replaced JWT cannot re-raise the banner after re-login", async () => {
+    notifySessionExpired();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        access_token: "jwt-fresh",
+        token_type: "bearer",
+      }), { status: 200 })
+    );
+    await login({ username: "alice", password: "pw" });
+    expect(isSessionExpired()).toBe(false);
+
+    await notifySessionExpiredIfCurrent("jwt-dead"); // straggler from before re-login
+    expect(isSessionExpired()).toBe(false);
+
+    await notifySessionExpiredIfCurrent("jwt-fresh"); // the new session expiring later
+    expect(isSessionExpired()).toBe(true);
+    clearSessionExpired();
+  });
 });
 
 describe("redeemAccessLink (AQU-626)", () => {
@@ -111,6 +177,110 @@ describe("redeemAccessLink (AQU-626)", () => {
     });
     // No session written on failure.
     expect(await loadSession()).toBeNull();
+  });
+
+  // AQU-820 regression: the server used to be able to put arbitrary text in
+  // front of the user by varying its `error` body — which both bypassed i18n
+  // (raw, unlocalized English) and broke the "every failure looks the same"
+  // no-oracle guarantee this flow depends on. Assert our fixed, keyed message
+  // wins even when the server sends something completely different.
+  it("never surfaces server-supplied body text, even if the server varies it", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "PIN incorrect for this link" }), { status: 401 })
+    );
+    await expect(redeemAccessLink("tok", "0000")).rejects.toMatchObject({
+      status: 401,
+      message: "This link is invalid or has expired.",
+    });
+  });
+
+  it("uses a fixed, translated message for a fetch-level failure (server unreachable)", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("Failed to fetch"));
+    await expect(redeemAccessLink("tok", "0000")).rejects.toMatchObject({
+      status: 0,
+      message: "Couldn't reach the server. Check your connection and try again.",
+    });
+  });
+  // ^ reuses auth.join.networkError's English text (see no-duplicates guard).
+});
+
+// AQU-820: register/reset/verify used to lift `body.error` / `body.detail`
+// straight from the server response and throw it verbatim — raw, unlocalized
+// English regardless of the active UI locale, unlike login() (above), which
+// has always thrown its own fixed messages. These assert the raw server body
+// text no longer wins.
+describe("register — AQU-820 (server detail composed into a translated frame)", () => {
+  beforeEach(() => { vi.restoreAllMocks(); });
+
+  it("weaves a validation/conflict detail into our own sentence, not verbatim", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "username already taken" }), { status: 409 })
+    );
+    await expect(
+      register({ username: "bob", email: "bob@example.com", password: "pw123456" }),
+    ).rejects.toMatchObject({
+      status: 409,
+      message: "Couldn't create your account: username already taken",
+    });
+  });
+
+  it("falls back to a fully generic translated message when the server gives no detail", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 500 }));
+    await expect(
+      register({ username: "bob", email: "bob@example.com", password: "pw123456" }),
+    ).rejects.toMatchObject({
+      status: 500,
+      message: "Couldn't create your account. Please try again.",
+    });
+  });
+});
+
+describe("password reset + verify-email — AQU-820 (no raw server body)", () => {
+  beforeEach(() => { vi.restoreAllMocks(); });
+
+  it("requestPasswordReset drops server body.error/detail", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "no such account on file" }), { status: 404 })
+    );
+    await expect(requestPasswordReset("nobody@example.com")).rejects.toMatchObject({
+      message: "Failed to send reset email",
+    });
+  });
+
+  it("verifyResetToken drops server body.error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "Token expired" }), { status: 400 })
+    );
+    await expect(verifyResetToken("tok", "alice")).rejects.toMatchObject({
+      message: "This reset link is no longer valid. Please request a new one.",
+    });
+  });
+
+  it("verifyEmail drops server body.error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "already used" }), { status: 404 })
+    );
+    await expect(verifyEmail("tok")).rejects.toMatchObject({
+      message: "Verification failed.",
+    });
+  });
+
+  it("resetPassword maps a 400 to the token-invalid message, not the raw body", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "Invalid token" }), { status: 400 })
+    );
+    await expect(resetPassword("tok", "alice", "NewSecret99!")).rejects.toMatchObject({
+      message: "This reset link is no longer valid. Please request a new one.",
+    });
+  });
+
+  it("resetPassword maps a 500 to the generic reset-failed message, not the raw body", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "Failed to reset password" }), { status: 500 })
+    );
+    await expect(resetPassword("tok", "alice", "NewSecret99!")).rejects.toMatchObject({
+      message: "Failed to reset password",
+    });
   });
 });
 

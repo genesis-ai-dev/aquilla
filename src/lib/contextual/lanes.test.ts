@@ -13,12 +13,18 @@
 
 import { describe, it, expect, beforeEach } from "vitest"
 import {
-  applyRemoteFrame,
+  applyRemoteFrame as applyFrame,
+  attachContextualRun,
   getContextualRunState,
   resetContextualRunStore,
+  type ContextualFrame,
 } from "./run-store"
 
 const RUN = "01920000-0000-7000-8000-000000000001"
+
+function applyRemoteFrame(frame: ContextualFrame): void {
+  applyFrame("p1", frame)
+}
 
 const start = (spanId: string, spanLabel: string) =>
   ({ type: "contextual.span.start" as const, runId: RUN, fileId: "file-1", spanId, spanLabel })
@@ -37,8 +43,9 @@ const done = (spanId: string) =>
     verdictSummary: "complete",
   })
 
-beforeEach(() => {
+beforeEach(async () => {
   resetContextualRunStore()
+  await attachContextualRun("p1", "file-1")
 })
 
 describe("lane tracking", () => {
@@ -64,7 +71,17 @@ describe("lane tracking", () => {
   })
 
   it("opens a lane from a phase frame when span.start was lost", () => {
-    // Frames are best-effort; a dropped open must not make live work invisible.
+    // The file-scoped run frame establishes provenance. Subsequent file-less
+    // frames are best-effort; a dropped span.start must not hide live work.
+    applyRemoteFrame({
+      type: "contextual.run.state",
+      runId: RUN,
+      fileId: "file-1",
+      targetLang: "",
+      status: "running",
+      done: 0,
+      total: 1,
+    })
     applyRemoteFrame(phase("s9", "checking"))
     expect(getContextualRunState().lanes).toMatchObject([{ spanId: "s9", phase: "checking" }])
   })
@@ -123,6 +140,7 @@ describe("lane tracking", () => {
       type: "contextual.run.state",
       runId: RUN,
       fileId: "file-1",
+      targetLang: "",
       status: "parked",
       done: 4,
       total: 4,
@@ -140,6 +158,7 @@ describe("lane tracking", () => {
       type: "contextual.run.state",
       runId: RUN,
       fileId: "file-1",
+      targetLang: "",
       status: "running",
       done: 1,
       total: 4,
@@ -156,6 +175,7 @@ describe("lane tracking", () => {
       type: "contextual.run.state",
       runId: NEWER,
       fileId: "file-1",
+      targetLang: "",
       status: "running",
       done: 0,
       total: 3,

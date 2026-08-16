@@ -307,17 +307,28 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
       // to the local outbox and can throw a role-gate error, so swallow it:
       // transcription itself succeeded, and the timings re-emit on a manual
       // re-transcribe. author falls back to "local".
-      void emitCellAudioAttach({
+      //
+      // AQU-783: AWAIT the attach so the event is durably in the outbox before
+      // transcribeCell resolves. The per-cell / timeline / batch completion
+      // handlers flush the outbox and revalidate the cell the moment this
+      // promise settles; a fire-and-forget emit let that flush race ahead of
+      // the IDB write, so the transcript only surfaced after a manual refresh.
+      await emitCellAudioAttach({
         projectId,
         fileId: cell.fileId,
         cellId: cell.id,
         audioId,
         url: attachmentUrl,
-        slot: "recording",
+        // SUB-49: a generated-voice clip must not be relocated into the
+        // recording slot by transcribing it (the upsert assigns `slot`
+        // outright, and the sibling-deselect above it would drop the real
+        // take). Follow the clip's own slot.
+        slot: audioId === cell.selectedGeneratedVoiceAudioId ? "generatedVoice" : "recording",
         timings,
         // Preserve attachment fields the projection UPSERT would otherwise
-        // null out (excluded.* overwrite) — the trim window is load-bearing
-        // for imported segments (defines the cell's slice of the shared clip).
+        // null out — belt and braces now that the projection COALESCEs them
+        // too (SUB-49). The trim window is load-bearing for imported segments
+        // (it defines the cell's slice of the shared clip).
         ...(attachment?.trimStartMs != null ? { trimStartMs: attachment.trimStartMs } : {}),
         ...(attachment?.trimEndMs != null ? { trimEndMs: attachment.trimEndMs } : {}),
         ...(attachment?.durationMs != null ? { durationMs: attachment.durationMs } : {}),

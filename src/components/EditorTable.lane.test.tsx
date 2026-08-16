@@ -8,7 +8,7 @@
  * lock in the byte-identical N=1 wire.
  */
 
-import { describe, it, expect, vi } from "vitest"
+import { afterEach, describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
@@ -19,14 +19,20 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import { ROLE } from "@/lib/frontier/roles"
 import type { MemberScope } from "@/lib/sync/member-scopes"
+import {
+  attachContextualDrafts,
+  hydrateContextualDrafts,
+  resetContextualDraftsStore,
+} from "@/lib/contextual/drafts-store"
 
 // Capture target-side emits without touching IndexedDB / posthog. Every helper
 // EditorTable imports must be present so the module resolves. `vi.hoisted`
 // lets the spies exist before the hoisted `vi.mock` factory runs.
-const { emitCellValidate, emitCellUnvalidate, emitTargetCellCommit } = vi.hoisted(() => ({
+const { emitCellValidate, emitCellUnvalidate, emitTargetCellCommit, reviewContextualDraft } = vi.hoisted(() => ({
   emitCellValidate: vi.fn(() => Promise.resolve("validate-event")),
   emitCellUnvalidate: vi.fn(() => Promise.resolve("unvalidate-event")),
   emitTargetCellCommit: vi.fn(() => Promise.resolve("commit-event")),
+  reviewContextualDraft: vi.fn(() => Promise.resolve()),
 }))
 vi.mock("@/lib/sync/events-emit", () => ({
   emitCellValidate,
@@ -36,6 +42,7 @@ vi.mock("@/lib/sync/events-emit", () => ({
   emitCellWaive: vi.fn(() => Promise.resolve("waive-event")),
   emitCellUnwaive: vi.fn(() => Promise.resolve("unwaive-event")),
 }))
+vi.mock("@/lib/contextual/transport", () => ({ reviewContextualDraft }))
 
 // happy-dom has no layout engine — replace the virtualized list with a trivial
 // "render every row" stand-in (same shim as EditorTable.editorActions.test).
@@ -83,22 +90,27 @@ const project: ProjectRecord = {
   syncRole: { level: ROLE.PROJECT_LEAD, name: "test", source: "server", fetchedAt: "2026-01-01T00:00:00Z" },
 }
 
-function makeRows(id: string): CellRow[] {
+function makeRows(
+  id: string,
+  targetValue = "bonjour",
+  sourceMetadata?: Record<string, unknown>,
+): CellRow[] {
   return [
     {
       cellId: id, side: "source", value: "hello", valueHtml: null, type: "text",
       canonicalRef: "GEN 1:1", anchorCellId: null, eventId: `${id}-source`,
       sourceEventId: null, lastEditor: null, lastEditAt: 1, validated: false, wordCount: 1,
+      ...(sourceMetadata ? { metadata: sourceMetadata } : {}),
     },
     {
-      cellId: id, side: "target", value: "bonjour", valueHtml: null, type: "text",
+      cellId: id, side: "target", value: targetValue, valueHtml: null, type: "text",
       canonicalRef: "GEN 1:1", anchorCellId: null, eventId: `${id}-target`,
       sourceEventId: `${id}-source`, lastEditor: "tester", lastEditAt: 2, validated: false, wordCount: 1,
     },
   ]
 }
 
-function makeStore(cellId: string): CellStore {
+function makeStore(cellId: string, targetValue?: string, sourceMetadata?: Record<string, unknown>): CellStore {
   const store = new CellStore()
   store.setRuntime({
     projectId: project.id,
@@ -107,18 +119,23 @@ function makeStore(cellId: string): CellStore {
     requiredValidations: 1,
     auditStats: new Map(),
   })
-  store.replaceRows(makeRows(cellId), { full: true, maxServerSeq: 1 })
+  store.replaceRows(makeRows(cellId, targetValue, sourceMetadata), { full: true, maxServerSeq: 1 })
   return store
 }
 
-function renderTable(activeLane: string, myScopes: MemberScope[] = []) {
+function renderTable(
+  activeLane: string,
+  myScopes: MemberScope[] = [],
+  targetValue?: string,
+  sourceMetadata?: Record<string, unknown>,
+) {
   const qc = new QueryClient()
   return render(
     <QueryClientProvider client={qc}>
       <EditorActionsProvider value={{ myScopes }}>
         <EditorTable
           project={project}
-          cellStore={makeStore("cell-1")}
+          cellStore={makeStore("cell-1", targetValue, sourceMetadata)}
           username="tester"
           activeLane={activeLane}
           isCompletionConfigured={false}
@@ -139,6 +156,10 @@ function renderTable(activeLane: string, myScopes: MemberScope[] = []) {
     </QueryClientProvider>,
   )
 }
+
+afterEach(() => {
+  resetContextualDraftsStore()
+})
 
 describe("EditorTable — active lane threads into target-side emits", () => {
   it("carries the active lane as targetLang on validate", async () => {
@@ -171,5 +192,49 @@ describe("EditorTable — active lane threads into target-side emits", () => {
     expect(button).toBeDisabled()
     fireEvent.click(button)
     expect(emitCellValidate).not.toHaveBeenCalled()
+  })
+
+  it("never renders a default-lane Autopilot draft inside a multilingual editor lane", () => {
+    hydrateContextualDrafts(attachContextualDrafts(project.id, "file-1", ""), [
+      { draftId: "draft-default", cellId: "cell-1", text: "Default-lane proposal" },
+    ])
+
+    renderTable("fr", [], "")
+
+    expect(screen.queryByText("Default-lane proposal")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Use this translation" })).not.toBeInTheDocument()
+    expect(emitTargetCellCommit).not.toHaveBeenCalled()
+  })
+
+  it("keeps and does not report a draft when the real editor enqueue fails", async () => {
+    emitTargetCellCommit.mockRejectedValueOnce(new Error("Outbox unavailable"))
+    reviewContextualDraft.mockClear()
+    hydrateContextualDrafts(attachContextualDrafts(project.id, "file-1", ""), [
+      { draftId: "draft-default", cellId: "cell-1", text: "Proposal must survive" },
+    ])
+    renderTable("", [], "")
+
+    fireEvent.click(screen.getByRole("button", { name: "Use this translation" }))
+
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Use this translation" })).not.toBeDisabled())
+    expect(screen.getByText("Proposal must survive")).toBeInTheDocument()
+    expect(screen.getByText("Outbox unavailable")).toBeInTheDocument()
+    expect(reviewContextualDraft).not.toHaveBeenCalled()
+  })
+
+  it("keeps and does not report a draft when the IDML commit guard refuses it synchronously", async () => {
+    emitTargetCellCommit.mockClear()
+    reviewContextualDraft.mockClear()
+    hydrateContextualDrafts(attachContextualDrafts(project.id, "file-1", ""), [
+      { draftId: "draft-idml", cellId: "cell-1", text: "Plain text cannot replace IDML anchors" },
+    ])
+    renderTable("", [], "", { idml: null })
+
+    fireEvent.click(screen.getByRole("button", { name: "Use this translation" }))
+
+    await vi.waitFor(() => expect(screen.getByRole("button", { name: "Use this translation" })).not.toBeDisabled())
+    expect(screen.getByText("Plain text cannot replace IDML anchors")).toBeInTheDocument()
+    expect(emitTargetCellCommit).not.toHaveBeenCalled()
+    expect(reviewContextualDraft).not.toHaveBeenCalled()
   })
 })

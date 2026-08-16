@@ -20,6 +20,10 @@ vi.mock("@/context/OrgContext", () => ({
   useActiveOrg: () => orgContext,
 }))
 
+vi.mock("@/components/AccountSwitcher", () => ({
+  AccountSwitcher: () => <div data-testid="account-switcher" />,
+}))
+
 function LocationProbe() {
   const location = useLocation()
   return <output data-testid="location">{location.pathname}</output>
@@ -80,12 +84,26 @@ describe("OrgRouteGate (AQU-790 guest orgs)", () => {
     orgContext.accessibleProjectsLoading = true
     renderGate("/orgs/2")
     expect(screen.queryByText(/not found/i)).not.toBeInTheDocument()
-    expect(screen.getByText("Loading…")).toBeInTheDocument()
+    expect(screen.getByRole("status", { name: "Loading organization" })).toBeInTheDocument()
+    expect(screen.queryByTestId("account-switcher")).not.toBeInTheDocument()
   })
 
   it("shows not-found once the directory has loaded and the org is unknown", () => {
     orgContext.accessibleProjectsLoading = false
     renderGate("/orgs/999")
     expect(screen.getByText("Organization not found")).toBeInTheDocument()
+  })
+
+  it("keeps the account switcher on not-found so a cross-tab account switch is visible (FRO-367)", () => {
+    orgContext.accessibleProjectsLoading = false
+    renderGate("/orgs/999")
+    expect(screen.getByTestId("account-switcher")).toBeInTheDocument()
+  })
+
+  it("does not flash a header account switcher while orgs are loading", () => {
+    orgContext.isLoading = true
+    renderGate("/orgs/7")
+    expect(screen.getByRole("status", { name: "Loading organization" })).toBeInTheDocument()
+    expect(screen.queryByTestId("account-switcher")).not.toBeInTheDocument()
   })
 })

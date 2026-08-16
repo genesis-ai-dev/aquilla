@@ -7,6 +7,7 @@ import {
   FieldError,
   FieldGroup,
   FieldLabel,
+  OptionalMark,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
@@ -18,6 +19,8 @@ import { optionalString, requiredString } from "@/lib/forms/schemas"
 import { useSubmitError } from "@/lib/forms/submit-error"
 import posthog from "@/lib/posthog"
 import { ORG_CREATED, INVITE_SENT } from "@/lib/event-names"
+import { ChevronLeft } from "lucide-react"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const formSchema = z.object({
   name: requiredString("Organization name"),
@@ -39,6 +42,7 @@ export function OrgStep({
   onCreated: (orgId: number) => void
   onBack: () => void
 }) {
+  const t = useT()
   const { session } = useFrontierSession()
   const { refresh, setActiveOrg } = useActiveOrg()
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
@@ -49,7 +53,7 @@ export function OrgStep({
     onSubmit: async ({ value }) => {
       clearSubmitError()
       if (!session?.jwt) {
-        setSubmitError("Sign in to create an organization.")
+        setSubmitError(t("onboarding.step.org.signInRequired"))
         return
       }
       try {
@@ -78,7 +82,7 @@ export function OrgStep({
         setActiveOrg(org.id)
         onCreated(org.id)
       } catch (err) {
-        setSubmitError(err instanceof Error ? err.message : "Couldn't create your organization.")
+        setSubmitError(err instanceof Error ? err.message : t("org.createDialog.genericError"))
       }
     },
   })
@@ -86,13 +90,14 @@ export function OrgStep({
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2 text-center">
-        <h2 className="text-2xl font-semibold">Set up your organization</h2>
+        <h2 className="text-2xl font-semibold">{t("onboarding.step.org.heading")}</h2>
         <p className="text-sm text-muted-foreground">
-          Give your team a home, and invite collaborators to get started together.
+          {t("onboarding.step.org.description")}
         </p>
       </div>
       <form
         id="org-step-form"
+        autoComplete="off"
         onSubmit={(e) => {
           e.preventDefault()
           void form.handleSubmit()
@@ -106,14 +111,19 @@ export function OrgStep({
               const invalid = isFieldInvalid(field)
               return (
                 <Field data-invalid={invalid}>
-                  <FieldLabel htmlFor="org-name">Organization name</FieldLabel>
+                  <FieldLabel htmlFor="org-name">{t("org.createDialog.nameLabel")}</FieldLabel>
                   <Input
                     id="org-name"
-                    name={field.name}
+                    // Avoid DOM name="name" — Chrome contact autofill heuristic.
+                    name="aquilla-org-name"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
-                    placeholder="Acme Bible Translation"
+                    placeholder={t("org.createDialog.namePlaceholder")}
                     aria-invalid={invalid}
                     autoFocus
                   />
@@ -126,17 +136,25 @@ export function OrgStep({
             name="emails"
             children={(field) => (
               <Field>
-                <FieldLabel htmlFor="org-emails">Invite teammates (optional)</FieldLabel>
+                <FieldLabel htmlFor="org-emails">
+                  {t("onboarding.step.org.inviteLabel")} <OptionalMark />
+                </FieldLabel>
                 <Input
                   id="org-emails"
-                  name={field.name}
+                  name="aquilla-org-invite-emails"
+                  type="text"
+                  inputMode="email"
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
                   value={field.state.value}
                   onBlur={field.handleBlur}
                   onChange={(e) => field.handleChange(e.target.value)}
                   placeholder="alex@example.com, sam@example.com"
                 />
                 <FieldDescription>
-                  Comma- or space-separated emails. They'll get a link to join.
+                  {t("onboarding.step.org.inviteDescription")}
                 </FieldDescription>
               </Field>
             )}
@@ -147,11 +165,12 @@ export function OrgStep({
         )}
         <Button type="submit" form="org-step-form" size="lg" className="w-full">
           {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-          {form.state.isSubmitting ? "Creating…" : "Create organization"}
+          {form.state.isSubmitting ? t("common.creating") : t("org.createDialog.title")}
         </Button>
       </form>
       <Button variant="ghost" size="sm" onClick={onBack} className="w-full">
-        ← Back
+        <ChevronLeft className="h-4 w-4 rtl:rotate-180" />
+        {t("common.back")}
       </Button>
     </div>
   )

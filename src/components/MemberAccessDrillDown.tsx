@@ -12,10 +12,13 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { EmptyState } from "@/components/ui/page"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useMemberAccess } from "@/hooks/useMemberAccess"
 import type { ProjectAccessBreakdown } from "@/lib/frontier/orgs"
-import { roleName, roleDisplayText } from "@/lib/frontier/roles"
+import { resolveRoleName } from "@/lib/frontier/roles"
 import { RoleLevelLabel } from "@/components/RoleLabel"
+import { useT } from "@/lib/i18n/I18nProvider"
+import type { TFunction } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   orgId: number
@@ -28,12 +31,12 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
   const state = useMemberAccess(orgId, userId)
 
   return (
-    <div className="flex flex-col h-full border-l bg-background">
+    <div className="flex flex-col h-full border-s bg-background">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b">
         <div>
-          <p className="text-sm font-semibold">{username}</p>
-          <p className="text-xs text-muted-foreground">Project access breakdown</p>
+          <UsernameWithAvatar username={username} nameClassName="text-sm font-semibold" />
+          <p className="mt-0.5 text-xs text-muted-foreground">Project access breakdown</p>
         </div>
         <Button
           type="button"
@@ -101,8 +104,9 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
 }
 
 function ProjectRow({ breakdown }: { breakdown: ProjectAccessBreakdown }) {
-  const resolvedRole = roleDisplayText(roleName(breakdown.resolved))
-  const paths = grantPaths(breakdown)
+  const t = useT()
+  const resolvedRole = resolveRoleName(t, breakdown.resolved)
+  const paths = grantPaths(t, breakdown)
 
   return (
     <div className="rounded-md border px-3 py-2 space-y-1">
@@ -130,24 +134,24 @@ function ProjectRow({ breakdown }: { breakdown: ProjectAccessBreakdown }) {
 }
 
 /** Enumerate the contributing grant paths for a project breakdown row. */
-function grantPaths(b: ProjectAccessBreakdown): { label: string; detail: string }[] {
+function grantPaths(t: TFunction, b: ProjectAccessBreakdown): { label: string; detail: string }[] {
   const paths: { label: string; detail: string }[] = []
 
   if (b.direct != null) {
     paths.push({
-      label: `direct · ${roleDisplayText(roleName(b.direct))}`,
+      label: `direct · ${resolveRoleName(t, b.direct)}`,
       detail: "Explicitly added to this project (direct grant / override)",
     })
   }
   for (const g of b.groups) {
     paths.push({
-      label: `group "${g.name}" · ${roleDisplayText(roleName(g.roleLevel))}`,
+      label: `group "${g.name}" · ${resolveRoleName(t, g.roleLevel)}`,
       detail: `Member of group "${g.name}" which has a project grant`,
     })
   }
   if (b.org != null) {
     paths.push({
-      label: `org-level · ${roleDisplayText(roleName(b.org))}`,
+      label: `org-level · ${resolveRoleName(t, b.org)}`,
       detail: "Org-level membership applies to all projects in this org",
     })
   }

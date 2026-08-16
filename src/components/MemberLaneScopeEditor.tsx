@@ -101,7 +101,7 @@ export function MemberLaneScopeEditor({
           <button
             type="button"
             data-testid={`matrix-scope-trigger-${userId}-${projectId}`}
-            className="mt-0.5 block w-full truncate text-left text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
+            className="mt-0.5 block w-full truncate text-start text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
             aria-label={`Edit ${username}'s lane scopes on this project`}
           />
         }
@@ -115,8 +115,8 @@ export function MemberLaneScopeEditor({
       >
         <p className="font-medium">{username}'s scopes</p>
         {loading ? (
-          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-            <Spinner className="size-3" /> Loading…
+          <div className="flex items-center text-muted-foreground">
+            <Spinner className="size-3" />
           </div>
         ) : (
           <>
@@ -149,7 +149,6 @@ export function MemberLaneScopeEditor({
                 className="h-7 text-[11px]"
               />
               <Button
-                size="sm"
                 variant="outline"
                 className="h-7 px-2 text-[11px]"
                 onClick={addLane}
@@ -158,8 +157,8 @@ export function MemberLaneScopeEditor({
                 Add
               </Button>
             </div>
-            <Button size="sm" className="w-full" onClick={handleSave} disabled={saving}>
-              {saving && <Spinner className="mr-1.5 size-3.5" />}
+            <Button className="w-full" onClick={handleSave} disabled={saving}>
+              {saving && <Spinner className="me-1.5 size-3.5" />}
               Save scopes
             </Button>
             {error && <p className="text-destructive">{error}</p>}

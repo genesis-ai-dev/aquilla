@@ -52,6 +52,16 @@ const DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE = ROLE.MAINTAINER
 const ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE = ROLE.OWNER
 const DEFAULT_ALLOW_SELF_ASSIGNMENT = false
 
+// AQU-822: termbaseEditMinRole is the same OWNER-only permission-policy key
+// shape as the floors above, but it gates a WRITE (managing a project's
+// termbase) and its default is PROJECT_LEAD, not MAINTAINER — 500 is the level
+// the terminology UI has always shown the editor at. See
+// DEFAULT_TERMBASE_EDIT_MIN_ROLE in src/lib/terminology/glossary-view.ts (the
+// gate itself) and in auth-worker/src/services/org-permissions.ts (the server
+// default) — all three must agree.
+const TERMBASE_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
+const DEFAULT_TERMBASE_EDIT_MIN_ROLE = ROLE.PROJECT_LEAD
+
 export interface UseOrgSettings {
   /** Current org settings (rules, etc). Always defined (empty when unloaded). */
   settings: OrgWideSettings
@@ -135,6 +145,15 @@ export interface UseOrgSettings {
    * `sync-worker/src/events/assignment-authority.ts`.
    */
   allowSelfAssignment: boolean
+  /**
+   * AQU-822: effective termbase-edit floor — the minimum role allowed to
+   * manage a project's termbase in this org. Explicit org setting, or
+   * PROJECT_LEAD (500) when unset. Server-enforced per write; the terminology
+   * UI reads the same value off the project record
+   * (`ProjectRecord.termbaseEditMinRole`), so this is here for the org
+   * Settings surface rather than for project-level gating.
+   */
+  termbaseEditMinRole: number
   /** Force a re-GET. */
   refresh: () => Promise<OrgSettingsResponse | null>
   /** Patch org settings (adds/replaces top-level keys). Blocked if !canEdit —
@@ -228,6 +247,14 @@ export function useOrgSettings(
     const raw = server?.settings?.memberProgressViewMinRole
     if (typeof raw === "number" && Number.isFinite(raw) && raw >= 100 && raw <= 700) return raw
     return DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE
+  })()
+
+  // AQU-822: effective termbase-edit floor — explicit org setting, or the
+  // PROJECT_LEAD default when unset / out of the role ladder.
+  const termbaseEditMinRole = (() => {
+    const raw = server?.settings?.termbaseEditMinRole
+    if (typeof raw === "number" && Number.isFinite(raw) && raw >= 100 && raw <= 700) return raw
+    return DEFAULT_TERMBASE_EDIT_MIN_ROLE
   })()
 
   // AQU-496: effective self-assignment authority — explicit org setting, or
@@ -346,6 +373,7 @@ export function useOrgSettings(
     canViewMemberProgress,
     memberProgressViewMinRole,
     allowSelfAssignment,
+    termbaseEditMinRole,
     refresh,
     patch,
     requestPromotion,
@@ -369,4 +397,14 @@ export function canEditRosterProgressFloor(callerRoleLevel: number | null | unde
  */
 export function canEditAssignmentAuthority(callerRoleLevel: number | null | undefined): boolean {
   return (callerRoleLevel ?? 0) >= ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE
+}
+
+/**
+ * AQU-822: True when `callerRoleLevel` is allowed to CHANGE the
+ * termbaseEditMinRole floor (OWNER-only, same rationale as the helpers above —
+ * a maintainer must not be able to hand out termbase management on their own
+ * authority).
+ */
+export function canEditTermbaseFloor(callerRoleLevel: number | null | undefined): boolean {
+  return (callerRoleLevel ?? 0) >= TERMBASE_FLOOR_WRITE_MIN_ROLE
 }

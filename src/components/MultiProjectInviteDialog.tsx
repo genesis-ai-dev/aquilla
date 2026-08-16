@@ -22,6 +22,7 @@ import { toUserFacingError } from "@/lib/errors/user-error"
 import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead"
 import { RoleSelect } from "@/components/RoleSelect"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 interface MultiProjectInviteDialogProps {
   open: boolean
@@ -59,6 +60,7 @@ export function MultiProjectInviteDialog({
   projects,
   onSuccess,
 }: MultiProjectInviteDialogProps) {
+  const { t } = useI18n()
   const { session } = useFrontierSession()
   const [recipient, setRecipient] = useState<RecipientValue>({
     mode: "username",
@@ -213,7 +215,7 @@ export function MultiProjectInviteDialog({
     <Dialog open={open} onOpenChange={(v) => (v ? onOpenChange(v) : handleClose())}>
       <DialogContent className="w-full max-w-xl overflow-hidden">
         <DialogHeader>
-          <DialogTitle>Add to projects</DialogTitle>
+          <DialogTitle>{t("org.membersPage.orgPage.addToProjectsButton")}</DialogTitle>
           <DialogDescription>
             {recipient.mode === "email"
               ? "Invite someone by email to multiple projects in one step. Each selected project sends its own single-use invite link — no Aquilla account needed yet."
@@ -224,7 +226,7 @@ export function MultiProjectInviteDialog({
         <div className="min-w-0 space-y-4">
           <Field>
             <FieldLabel htmlFor="invite-recipient" className="text-xs">
-              Recipient
+              {t("org.multiProjectInviteDialog.recipientLabel")}
             </FieldLabel>
             <UsernameTypeahead
               value={recipient}
@@ -235,16 +237,18 @@ export function MultiProjectInviteDialog({
             />
             {recipient.mode === "email" && (
               <FieldDescription className="text-[10px]">
-                They&apos;ll receive one email per selected project with a single-use invite link.
+                {t("org.multiProjectInviteDialog.emailModeHint")}
               </FieldDescription>
             )}
           </Field>
 
           <Field>
-            <FieldLabel className="text-xs">Projects</FieldLabel>
+            <FieldLabel className="text-xs">
+              {t("org.multiProjectInviteDialog.projectsFieldLabel")}
+            </FieldLabel>
             {projects.length === 0 ? (
               <p className="text-xs text-muted-foreground py-2">
-                No projects available — create one first or check back when sync completes.
+                {t("org.multiProjectInviteDialog.noProjectsAvailable")}
               </p>
             ) : (
               <ul className="mt-1.5 max-h-64 overflow-y-auto overflow-x-hidden rounded border divide-y">
@@ -321,15 +325,15 @@ export function MultiProjectInviteDialog({
             )}
             {selectedIds.length > 0 && (
               <p className="mt-1 text-[10px] text-muted-foreground">
-                {selectedIds.length} project{selectedIds.length === 1 ? "" : "s"} selected
-                {selectedIds.length > 1 && (
-                  <>
-                    {" "}— roles:{" "}
-                    {[...new Set(selectedIds.map((id) => selections[id]))]
+                {t("org.multiProjectInviteDialog.projectsSelectedCount", {
+                  count: selectedIds.length,
+                })}
+                {selectedIds.length > 1 &&
+                  t("org.multiProjectInviteDialog.rolesSuffix", {
+                    roles: [...new Set(selectedIds.map((id) => selections[id]))]
                       .map((lvl) => roleDisplayText(roleName(lvl)))
-                      .join(", ")}
-                  </>
-                )}
+                      .join(", "),
+                  })}
               </p>
             )}
           </Field>
@@ -350,9 +354,9 @@ export function MultiProjectInviteDialog({
                   {isEmailMode ? "Sending…" : "Adding…"}
                 </>
               ) : isEmailMode ? (
-                <>Send invites</>
+                <>{t("org.multiProjectInviteDialog.sendInvitesButton")}</>
               ) : (
-                <>Add to projects</>
+                <>{t("org.membersPage.orgPage.addToProjectsButton")}</>
               )}
             </Button>
           </div>

@@ -243,7 +243,7 @@ export function OverviewLaneTable({
         ? [{
             id: "actions",
             enableSorting: false,
-            header: () => <span className="sr-only">Actions</span>,
+            header: () => <span className="sr-only">{t("org.overviewLaneTable.actionsColumn")}</span>,
             meta: { align: "right" as const, className: "w-10" },
             cell: ({ row }: { row: { original: PortfolioLane } }) => {
               const tagId = laneTagId(row.original.lane)
@@ -272,7 +272,7 @@ export function OverviewLaneTable({
                         data-testid={`overview-lane-staff-${tagId}`}
                         className="sr-only"
                       >
-                        Staff {label}
+                        {t("org.staffLanePopover.staffLaneHeading", { lane: label })}
                       </span>
                     }
                     onDone={() => { void refreshMembers(); onChanged?.() }}
@@ -301,7 +301,7 @@ export function OverviewLaneTable({
     <Section
       data-testid="overview-lane-table"
       title={t("fileDetails.languages")}
-      description="Progress, people, and actions for each target language on this project."
+      description={t("org.overviewLaneTable.sectionDescription")}
       headerClassName={ADMIN_TABLE_SECTION_HEADER}
       contentClassName={ADMIN_TABLE_SECTION_CONTENT}
       action={

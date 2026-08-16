@@ -383,7 +383,9 @@ function ChapterRow({
         aria-expanded={open}
       >
         <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
-        <span className="w-10 shrink-0 text-muted-foreground">Ch {chapter.chapterLabel}</span>
+        <span className="w-10 shrink-0 text-muted-foreground">
+          {t("org.projectOverview.chapterAbbrevLabel", { chapter: chapter.chapterLabel })}
+        </span>
         <MiniRollupBar filledPct={chapter.filledPct} approvedPct={chapter.approvedPct} />
         <span className="text-[10px] tabular-nums text-muted-foreground">
           {chapter.filledCount}/{chapter.approvedCount}/{chapter.cellCount}
@@ -1030,7 +1032,7 @@ export function ProjectOverview() {
                     {id && (
                       <Link
                         to={projectSettingsPath(id)}
-                        aria-label="Project settings"
+                        aria-label={t("editor.navTitle.projectSettings")}
                         data-testid="overview-project-settings"
                         className={cn(buttonVariants({ variant: "outline", size: "icon-sm" }), "shrink-0")}
                       >
@@ -1099,7 +1101,7 @@ export function ProjectOverview() {
                 <ConfirmActionDialog
                   open={archiveConfirmOpen}
                   onOpenChange={setArchiveConfirmOpen}
-                  title="Archive project"
+                  title={t("org.projectOverview.archiveDialogTitle")}
                   description={
                     project?.name
                       ? `Archive "${project.name}"? It will be hidden from the active projects list. Data is kept and owners can restore it anytime from Archived projects.`
@@ -1184,7 +1186,7 @@ export function ProjectOverview() {
                       <SegmentTabs
                         value={laneTagToTab(selectedLaneTag)}
                         onValueChange={(next) => setSelectedLaneTag(tabToLaneTag(next))}
-                        aria-label="Filter progress by language"
+                        aria-label={t("org.projectOverview.filterProgressByLanguageAriaLabel")}
                         options={laneTabOptions}
                       />
                     </div>

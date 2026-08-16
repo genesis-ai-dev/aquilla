@@ -9,6 +9,18 @@ See also the older `docs/swarm/I18N-TRACES.md` from the AQU-511/AQU-832 waves; i
 
 ## BLOCKERS (surface to user)
 
+- [OPEN] (flaky-teamslist) `src/components/org/TeamsList.test.tsx` is **machine-speed flaky and
+  was already flaky before this swarm**. Evidence: checked out the untouched base commit
+  `38a9fcd0` in a detached worktree and ran the file three times — 14/14, 14/14, then
+  13/14. The failing case MOVES between runs ("shows New team for an org admin" in one tree,
+  "hides New team for a non-admin" in another), which is the signature of async/ordering
+  flakiness, not an assertion that has gone stale. It surfaces as a `getByRole("button",
+  { name: /new team/i })` miss while the org-settings fetch 401s in the background.
+  This violates `AGENTS.md` rules 11 and 15 (a retry is diagnostic, not a pass; machine speed
+  must not decide correctness). NOT fixed here — it is unrelated to i18n and fixing it is
+  outside what this task asked for — but it WILL intermittently redden any gate that runs it,
+  so whoever owns the org surfaces should make it wait on observable state.
+
 <!-- [OPEN] (id) description — blocker / how-to-fix — file:line -->
 
 ## Detector blind spots (WS-SCAN owns closing these)

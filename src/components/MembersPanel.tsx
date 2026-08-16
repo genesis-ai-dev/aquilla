@@ -9,6 +9,7 @@ import { RoleSelect } from "@/components/RoleSelect";
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar";
 import { MemberMultiAddRow, type MemberAddOutcome } from "@/components/MemberMultiAddRow";
 import type { UserSearchResult } from "@/hooks/useUserSearch";
+import { useI18n } from "@/lib/i18n/I18nProvider";
 
 export type { MemberAddOutcome } from "@/components/MemberMultiAddRow";
 
@@ -129,6 +130,7 @@ export function MembersPanel({
   suggestions,
   emptySuggestionsHint,
 }: MembersPanelProps) {
+  const { t } = useI18n();
   // AQU-553: the scopes editor is shown only when project context is supplied
   // AND the caller is a lead+ (500). Leads themselves are never scopable, so
   // per-row the editor is further gated on the member being below 500.
@@ -160,13 +162,19 @@ export function MembersPanel({
               <UsernameWithAvatar username={m.username} className="min-w-0" />
               <RoleLabel name={m.roleName} className="text-xs text-muted-foreground" />
               {m.source === "org" && (
-                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">via org</span>
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  {t("org.membersPage.sourceViaOrg")}
+                </span>
               )}
               {m.source === "group" && (
-                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">via group</span>
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  {t("org.membersPanel.sourceViaGroup")}
+                </span>
               )}
               {m.source === "creator" && (
-                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">creator</span>
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  {t("org.memberAccessPanel.creatorGrantLabel")}
+                </span>
               )}
               <LastActiveChip lastActiveAt={m.lastActiveAt} />
               <div className="ms-auto flex items-center gap-2">
@@ -181,7 +189,7 @@ export function MembersPanel({
                     value={m.roleLevel}
                     onValueChange={(level) => void onChangeRole(m.username, level)}
                     size="sm"
-                    aria-label="Change role"
+                    aria-label={t("org.membersPage.changeRoleAria")}
                   />
                 )}
                 {!m.isLocked && !isSelf ? (
@@ -266,6 +274,7 @@ function MemberScopesEditor({
   config: MembersPanelScopeConfig;
   current: MemberScopeValue[];
 }) {
+  const { t } = useI18n();
   const initialLanes = new Set(
     current.filter((s) => s.kind === "lane").map((s) => s.value),
   );
@@ -330,7 +339,9 @@ function MemberScopesEditor({
           }`}
           aria-hidden
         />
-        <span className="font-medium text-muted-foreground">Scopes</span>
+        <span className="font-medium text-muted-foreground">
+          {t("org.membersPanel.scopesToggleLabel")}
+        </span>
         <span className="ms-auto truncate text-muted-foreground">
           {scopeSummary(savedLaneCount, savedFileCount)}
         </span>
@@ -338,12 +349,12 @@ function MemberScopesEditor({
       {expanded && (
         <div id={bodyId} className="border-t px-2 pb-2 pt-2">
           <p className="mb-1.5 font-normal text-muted-foreground">
-            Leave empty for full access.
+            {t("org.membersPanel.leaveEmptyForFullAccess")}
           </p>
           {config.lanes.length > 0 && (
             <fieldset className="mb-2">
               <legend className="mb-1 text-[10px] text-muted-foreground">
-                Lanes
+                {t("org.membersPanel.lanesLegend")}
               </legend>
               <div className="flex flex-wrap gap-x-3 gap-y-1">
                 {config.lanes.map((lane) => (
@@ -362,7 +373,7 @@ function MemberScopesEditor({
           {config.files.length > 0 && (
             <fieldset className="mb-2">
               <legend className="mb-1 text-[10px] text-muted-foreground">
-                Files
+                {t("nav.dock.filesTab")}
               </legend>
               <div className="flex max-h-32 flex-col gap-1 overflow-y-auto">
                 {config.files.map((file) => (

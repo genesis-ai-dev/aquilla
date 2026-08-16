@@ -40,6 +40,7 @@ import {
   ADMIN_TABLE_SECTION_HEADER,
 } from "@/components/admin/shared"
 import { cn } from "@/lib/utils"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 const ATTENTION_PREVIEW = 6
 
@@ -90,6 +91,7 @@ function OverviewLoadingTemplate() {
  * on `/orgs/:id/projects`.
  */
 export function OrgOverview() {
+  const { t } = useI18n()
   const { activeOrg, activeOrgId, accessibleProjects, isLoading: orgLoading } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -129,7 +131,7 @@ export function OrgOverview() {
       {
         id: "project",
         accessorFn: (r) => r.project.name.toLowerCase(),
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Project" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.project")} />,
         cell: ({ row }) => (
           <span className="font-medium text-foreground">{row.original.project.name}</span>
         ),
@@ -137,13 +139,17 @@ export function OrgOverview() {
       {
         id: "validated",
         accessorFn: (r) => validatedPct(r.project),
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Validated" />,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title={t("org.orgHome.table.validatedHeaderLabel")} />
+        ),
         cell: ({ row }) => <ValidatedBar fraction={validatedPct(row.original.project)} />,
       },
       {
         id: "status",
         accessorFn: (r) => r.score,
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title={t("org.orgHome.projectsPanel.statusLabel")} />
+        ),
         cell: ({ row }) => (
           <ProjectStatus
             archived={false}
@@ -153,7 +159,7 @@ export function OrgOverview() {
         ),
       },
     ],
-    [],
+    [t],
   )
 
   if (!sessionLoading && !jwt) {
@@ -164,16 +170,15 @@ export function OrgOverview() {
         statusBar={null}
         main={
           <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-            <p className="text-lg font-medium">Sign in to see your workspace</p>
+            <p className="text-lg font-medium">{t("org.orgHome.signedOut.heading")}</p>
             <p className="max-w-xs text-sm text-muted-foreground">
-              Your session has ended or you are not signed in. Sign in to access your projects and
-              translation data.
+              {t("org.orgHome.signedOut.description")}
             </p>
             <Link
               to={`/login?next=${encodeURIComponent("/")}`}
               className={cn(buttonVariants())}
             >
-              Sign in
+              {t("auth.login.submitDefault")}
             </Link>
           </div>
         }
@@ -185,7 +190,7 @@ export function OrgOverview() {
 
   if (isPageLoading) {
     return (
-      <LoadingOverlay label="Loading overview" data-testid="org-overview-loading">
+      <LoadingOverlay label={t("org.overview.loadingLabel")} data-testid="org-overview-loading">
         <OverviewLoadingTemplate />
       </LoadingOverlay>
     )
@@ -210,7 +215,9 @@ export function OrgOverview() {
             <div className="space-y-6">
               {pendingInvites.length > 0 && (
                 <section data-testid="pending-invitations" className="space-y-2">
-                  <h2 className="text-sm font-medium text-muted-foreground">Pending invitations</h2>
+                  <h2 className="text-sm font-medium text-muted-foreground">
+                    {t("org.orgHome.pendingInvitations.heading")}
+                  </h2>
                   <div className="divide-y rounded-lg border">
                     {pendingInvites.map((inv) => (
                       <div key={inv.token} className="flex flex-wrap items-center gap-3 p-4">
@@ -219,7 +226,8 @@ export function OrgOverview() {
                             {inv.projects.map((p) => p.projectName).join(", ")}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            Invited by {inv.createdBy} as <RoleLabel name={inv.role.name} />
+                            {t("org.orgHome.pendingInvitations.invitedByAs", { username: inv.createdBy })}{" "}
+                            <RoleLabel name={inv.role.name} />
                             {inv.expiresAt
                               ? ` · expires ${new Date(inv.expiresAt).toLocaleDateString()}`
                               : ""}
@@ -229,7 +237,7 @@ export function OrgOverview() {
                           to={`/join/${inv.token}`}
                           className={cn(buttonVariants(), "shrink-0")}
                         >
-                          Review &amp; accept
+                          {t("org.orgHome.pendingInvitations.reviewAccept")}
                         </Link>
                       </div>
                     ))}
@@ -247,22 +255,22 @@ export function OrgOverview() {
               )}
 
               <div className={STAT_TILE_GRID}>
-                <StatTile label="Projects" value={portfolio.projects.length} />
+                <StatTile label={t("nav.projects")} value={portfolio.projects.length} />
                 <StatTile
-                  label="Avg translated"
+                  label={t("org.orgHome.avgTranslated")}
                   value={`${Math.round(portfolio.avgTranslatedPct * 100)}%`}
                 />
                 <StatTile
-                  label="Avg validated"
+                  label={t("org.orgHome.avgValidated")}
                   value={`${Math.round(portfolio.avgValidatedPct * 100)}%`}
                 />
                 <StatTile
-                  label="Avg audio"
+                  label={t("org.orgHome.avgAudio")}
                   value={`${Math.round(portfolio.avgAudioPct * 100)}%`}
                 />
-                <StatTile label="Stalled" value={portfolio.stalledCount} />
+                <StatTile label={t("org.orgHome.stalled")} value={portfolio.stalledCount} />
                 <StatTile
-                  label="Overdue"
+                  label={t("org.orgHome.overdue")}
                   value={
                     <span className={portfolio.overdueCount > 0 ? "text-destructive" : undefined}>
                       {portfolio.overdueCount}
@@ -273,8 +281,8 @@ export function OrgOverview() {
               </div>
 
               <Section
-                title="Needs attention"
-                description="Active projects that are overdue, due soon, or stalled."
+                title={t("org.overview.needsAttentionHeading")}
+                description={t("org.overview.needsAttentionDescription")}
                 headerClassName={ADMIN_TABLE_SECTION_HEADER}
                 contentClassName={ADMIN_TABLE_SECTION_CONTENT}
                 action={
@@ -305,8 +313,8 @@ export function OrgOverview() {
                       variant="inline"
                       className="py-6"
                       icon={ShieldAlert}
-                      title="All clear"
-                      description="No active project is overdue, due soon, or stalled right now."
+                      title={t("org.overview.allClearTitle")}
+                      description={t("org.overview.allClearDescription")}
                     />
                   }
                 />
@@ -335,7 +343,7 @@ export function OrgOverview() {
                           onChangeMinRole={async (next) => {
                             await orgSettings.patch({ memberProgressViewMinRole: next })
                           }}
-                          description="Who can see each teammate's assignment progress on this org's overview."
+                          description={t("org.orgHome.workloadVisibilityDescription")}
                         />
                       }
                     />
@@ -365,7 +373,7 @@ export function OrgOverview() {
                           onChangeMinRole={async (next) => {
                             await orgSettings.patch({ memberProgressViewMinRole: next })
                           }}
-                          description="Who can see each teammate's usage on this org's overview."
+                          description={t("org.orgHome.usageVisibilityDescription")}
                         />
                       }
                     />

@@ -33,6 +33,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { listTeams, createTeam, type TeamSummary } from "@/lib/frontier/teams"
 import { orgPath } from "@/lib/navigation/org-paths"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 const createTeamSchema = z.object({
   name: requiredString("Team name"),
@@ -64,13 +65,14 @@ function VisibilitySelect({
   value: Visibility
   onValueChange: (value: Visibility) => void
 }) {
+  const { t } = useI18n()
   return (
     <Select
       items={VISIBILITY_OPTIONS}
       value={value}
       onValueChange={(v) => onValueChange((v as Visibility) ?? "internal")}
     >
-      <SelectTrigger aria-label="Filter teams by visibility" className="w-[11rem] bg-card">
+      <SelectTrigger aria-label={t("org.teamsList.visibilityFilterAriaLabel")} className="w-[11rem] bg-card">
         <SelectValue />
       </SelectTrigger>
       <SelectContent align="start">
@@ -87,6 +89,7 @@ function VisibilitySelect({
 }
 
 export function TeamsList() {
+  const { t } = useI18n()
   const { activeOrgId, activeOrg } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -163,16 +166,16 @@ export function TeamsList() {
       {
         id: "name",
         accessorFn: (t) => t.name.toLowerCase(),
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Team" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("editor.navTitle.team")} />,
         meta: { className: "min-w-0" },
         cell: ({ row }) => {
-          const t = row.original
+          const row_ = row.original
           return (
             <div className="flex min-w-0 items-center gap-2">
-              <TeamWithAvatar name={t.name} size="xs" nameClassName="font-normal" className="min-w-0" />
+              <TeamWithAvatar name={row_.name} size="xs" nameClassName="font-normal" className="min-w-0" />
               <span className="flex shrink-0 flex-wrap gap-1">
-                {!t.isInternal && <Badge variant="secondary">Public</Badge>}
-                {t.viewerIsMember && <Badge variant="secondary">Member</Badge>}
+                {!row_.isInternal && <Badge variant="secondary">{t("org.teamsList.publicBadge")}</Badge>}
+                {row_.viewerIsMember && <Badge variant="secondary">{t("org.teamsList.memberBadge")}</Badge>}
               </span>
             </div>
           )
@@ -181,7 +184,7 @@ export function TeamsList() {
       {
         accessorKey: "memberCount",
         header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Members" className="justify-end" />
+          <DataTableColumnHeader column={column} title={t("editor.navTitle.members")} className="justify-end" />
         ),
         meta: { className: "w-[6.5rem]" },
         cell: ({ row }) => (
@@ -193,7 +196,7 @@ export function TeamsList() {
       {
         accessorKey: "projectCount",
         header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Projects" className="justify-end" />
+          <DataTableColumnHeader column={column} title={t("nav.projects")} className="justify-end" />
         ),
         meta: { className: "w-[6.5rem]" },
         cell: ({ row }) => (
@@ -203,7 +206,7 @@ export function TeamsList() {
         ),
       },
     ],
-    [],
+    [t],
   )
 
   return (
@@ -214,8 +217,8 @@ export function TeamsList() {
       main={
         <Page size="wide">
           <PageHeader
-            title="Teams"
-            description="Group members and grant project access together."
+            title={t("editor.navTitle.teams")}
+            description={t("org.teamsList.pageDescription")}
             inset={false}
           />
 
@@ -226,7 +229,7 @@ export function TeamsList() {
             >
               <DialogContent className="max-w-md">
                 <DialogHeader>
-                  <DialogTitle>New team</DialogTitle>
+                  <DialogTitle>{t("org.teamsList.newTeamButton")}</DialogTitle>
                 </DialogHeader>
                 <form
                   id="create-team-form"
@@ -243,7 +246,7 @@ export function TeamsList() {
                         const invalid = isFieldInvalid(field)
                         return (
                           <Field data-invalid={invalid}>
-                            <FieldLabel htmlFor="create-team-name">Team name</FieldLabel>
+                            <FieldLabel htmlFor="create-team-name">{t("org.teamForm.nameLabel")}</FieldLabel>
                             <Input
                               id="create-team-name"
                               // Avoid DOM name="name" — Chrome contact autofill heuristic.
@@ -255,7 +258,7 @@ export function TeamsList() {
                               value={field.state.value}
                               onBlur={field.handleBlur}
                               onChange={(e) => field.handleChange(e.target.value)}
-                              placeholder="Team name"
+                              placeholder={t("org.teamForm.nameLabel")}
                               aria-invalid={invalid}
                               autoFocus
                             />
@@ -269,7 +272,7 @@ export function TeamsList() {
                       children={(field) => (
                         <Field>
                           <FieldLabel htmlFor="create-team-desc">
-                            Description <OptionalMark />
+                            {t("nav.report.descriptionFieldLabel")} <OptionalMark />
                           </FieldLabel>
                           <Textarea
                             id="create-team-desc"
@@ -278,7 +281,7 @@ export function TeamsList() {
                             value={field.state.value}
                             onBlur={field.handleBlur}
                             onChange={(e) => field.handleChange(e.target.value)}
-                            placeholder="Description"
+                            placeholder={t("nav.report.descriptionFieldLabel")}
                             rows={3}
                           />
                         </Field>
@@ -293,7 +296,7 @@ export function TeamsList() {
                 </form>
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => setCreating(false)}>
-                    Cancel
+                    {t("common.cancel")}
                   </Button>
                   <Button type="submit" form="create-team-form">
                     {createTeamForm.state.isSubmitting && <Spinner data-icon="inline-start" />}
@@ -307,8 +310,8 @@ export function TeamsList() {
           {activeOrgId == null ? (
             <EmptyState
               icon={NAV_PAGE_ICONS.teams}
-              title="Select an organization"
-              description="Teams are managed within a single organization. Choose one from the switcher to continue."
+              title={t("org.teamsList.selectOrgTitle")}
+              description={t("org.teamsList.selectOrgDescription")}
             />
           ) : loading ? (
             <div className="h-48 animate-pulse rounded-lg border bg-card" />
@@ -335,7 +338,7 @@ export function TeamsList() {
                       className="ml-auto shrink-0"
                       onClick={() => setCreating(true)}
                     >
-                      New team
+                      {t("org.teamsList.newTeamButton")}
                     </Button>
                   ) : null}
                 </>
@@ -348,7 +351,7 @@ export function TeamsList() {
                       variant="inline"
                       className="flex-none py-12"
                       icon={NAV_PAGE_ICONS.teams}
-                      title="No teams in this org yet."
+                      title={t("org.teamsList.noTeamsTitle")}
                       description={
                         isAdmin
                           ? "Create a team to group members and grant project access together."
@@ -375,7 +378,7 @@ export function TeamsList() {
                           variant="outline"
                           onClick={() => setVisibility("all")}
                         >
-                          Clear
+                          {t("common.clear")}
                         </Button>
                       }
                     />
@@ -384,13 +387,13 @@ export function TeamsList() {
                 return (
                   <div className="flex flex-col items-center gap-3 py-10">
                     <p className="text-center text-sm text-muted-foreground">
-                      No teams match your search.
+                      {t("org.teamsList.noTeamsMatchSearch")}
                     </p>
                     <Button
                       variant="outline"
                       onClick={() => table.setGlobalFilter("")}
                     >
-                      Clear
+                      {t("common.clear")}
                     </Button>
                   </div>
                 )

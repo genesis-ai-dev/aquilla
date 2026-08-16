@@ -109,7 +109,11 @@ export function MemberActivityPanel({ projectId, username, getToken, onClose }: 
                   <li key={f.fileId} className="flex items-center justify-between gap-2 text-xs">
                     <span className="truncate font-medium">{f.fileName}</span>
                     <span className="shrink-0 tabular-nums text-muted-foreground">
-                      {f.cellsTouched} cells · {f.wordCount} words · {formatTimestamp(f.lastActivityAt, locale)}
+                      {t("org.memberActivityPanel.fileRollupSummary", {
+                        cells: f.cellsTouched,
+                        words: f.wordCount,
+                        timestamp: formatTimestamp(f.lastActivityAt, locale),
+                      })}
                     </span>
                   </li>
                 ))}

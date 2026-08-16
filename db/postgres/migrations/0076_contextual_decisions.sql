@@ -54,6 +54,23 @@ CREATE INDEX IF NOT EXISTS contextual_decisions_run
   ON contextual_decisions(run_id)
   WHERE status IN ('open','researching');
 
+-- Project-scoped, same as the rest of the contextual pipeline: `reason` is
+-- user-authored text about translation content, so it gets the same
+-- app_contextual_project_scope backstop as scene_briefs (0074) rather than
+-- relying solely on route-level authorization.
+ALTER TABLE contextual_decisions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE contextual_decisions FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS rls_contextual_decisions_select ON contextual_decisions;
+CREATE POLICY rls_contextual_decisions_select ON contextual_decisions FOR SELECT TO app_runtime
+  USING (app_contextual_project_scope(project_id));
+DROP POLICY IF EXISTS rls_contextual_decisions_insert ON contextual_decisions;
+CREATE POLICY rls_contextual_decisions_insert ON contextual_decisions FOR INSERT TO app_runtime
+  WITH CHECK (app_contextual_project_scope(project_id));
+DROP POLICY IF EXISTS rls_contextual_decisions_update ON contextual_decisions;
+CREATE POLICY rls_contextual_decisions_update ON contextual_decisions FOR UPDATE TO app_runtime
+  USING (app_contextual_project_scope(project_id))
+  WITH CHECK (app_contextual_project_scope(project_id));
+
 -- `waiting` = something left to do, but it needs a human. Distinct from
 -- `parked` (nothing left to do). A waiting run is ACTIVE, so it participates
 -- in the one-active-run-per-lane unique index below.

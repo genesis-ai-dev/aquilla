@@ -34,9 +34,11 @@ Closing 1–3 is WS-SCAN's job; it is the "scan the entire app" half of the requ
 
 ## §1 STOP checklist
 
-- [ ] WS-SCAN has produced `docs/swarm/I18N-COVERAGE-SCAN.md`: a complete inventory of raw
+- [x] WS-SCAN has produced `docs/swarm/I18N-COVERAGE-SCAN.md`: a complete inventory of raw
       UI-facing strings across `src/**` including all four blind-spot classes, each row
       classified `key-it` / `exempt-<reason>` / `already-keyed`
+- [ ] The 339 `key-it` findings from that scan are keyed (wave 2 — blocked on wave 1, whose
+      agents own the consumer components of the `src/lib/**` call sites)
 - [ ] The 1,261 suppressed `.tsx` strings are keyed or explicitly exempted with a reason
 - [ ] `eslint-suppressions.json` is pruned; `npx eslint src` reports 0 errors and a strictly
       smaller suppression count than the 1,261 baseline
@@ -81,7 +83,7 @@ Closing 1–3 is WS-SCAN's job; it is the "scan the entire app" half of the requ
 
 | ID | Namespace owned (write) | Strings | Files | Status |
 | --- | --- | --- | --- | --- |
-| WS-SCAN | *(none — read-only + `scripts/i18n-scan.ts`)* | — | — | dispatched |
+| WS-SCAN | *(none — read-only + `scripts/i18n-scan.ts`)* | — | — | **merged** |
 | WS-A | `org` | 328 | 25 | dispatched |
 | WS-B | `projectSettings` | 243 | 9 | dispatched |
 | WS-F | `workspace` (new) | 246 | 48 | dispatched |
@@ -99,3 +101,4 @@ Closing 1–3 is WS-SCAN's job; it is the "scan the entire app" half of the requ
 | pre-wire | orchestrator | `settings`/`agent`/`workspace` namespaces registered + barrels wired; 143 tests still green |
 | tooling | orchestrator | `scripts/i18n-todo.ts` + `pnpm i18n:todo`. Emits per-locale packets of ONLY untranslated/stale leaves. Measured pre-wave: `th` 229, `my` 234, `mfa` 249, `ar` 303 (Arabic higher — six plural categories) = **1,015 leaves**. Round-trip verified: importing an unfilled packet leaves `messages/th.ts` byte-identical. |
 | wave 1 | orchestrator | all 7 workstreams dispatched concurrently (WS-C/WS-E are disjoint from WS-A/B/D/F in both files and namespaces, so serializing them into a second wave bought nothing) |
+| merged | WS-SCAN | `swarm/ws-scan` @ `cef5a8be`. build ✅ · vitest 14 files/164 tests ✅ (i18n 143 + scan 21). Delivered `scripts/i18n-scan.ts`, `scripts/i18n-scan.test.ts`, `docs/swarm/I18N-COVERAGE-SCAN.md`. **571 findings, 339 `key-it` / 232 policy-exempt.** Orchestrator fixed one TS7053 in its own `i18n-todo.ts` that `tsx` had not caught. |

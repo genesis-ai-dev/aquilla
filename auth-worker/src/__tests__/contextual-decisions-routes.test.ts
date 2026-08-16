@@ -7,7 +7,7 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
-import { raiseDecision } from "../../../db/shared/contextual-decisions"
+import { raiseDecision, getDecision } from "../../../db/shared/contextual-decisions"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
 const db = env.AQUILLA_PG
@@ -123,5 +123,38 @@ describe("POST /contextual/decisions/:id/:action", () => {
       { method: "POST", body: JSON.stringify({ answer: "b" }) },
     )
     expect(res.status).toBe(409)
+  })
+
+  // Guards against a cross-project write (IDOR): answering/dismissing must
+  // not be reachable through a project a caller isn't a member of, even if
+  // they know (or guess — decision ids are time-ordered uuidv7) a decision id
+  // that belongs to someone else's project. A status-code-only assertion
+  // here would NOT catch a handler that mutates the row and then reports 404
+  // after the fact — the write already landed by then. Re-reading the
+  // decision and asserting it is untouched is the part that actually proves
+  // the fix. Do not simplify this to a status-code check.
+  it("404s a cross-project decision id without mutating it", async () => {
+    const projectA = `proj-a-${Date.now()}`
+    const projectB = `proj-b-${Date.now()}`
+    const jwtA = await seedProjectMember(projectA) // CONTRIBUTOR on A only
+    await seedProjectMember(projectB) // seeds B's own member/JWT, unused here
+
+    const decisionInB = await raiseDecision(db, {
+      projectId: projectB,
+      runId: null,
+      fileId: "f1",
+      reason: "Which rendering?",
+    })
+
+    const res = await request(
+      `/api/v2/projects/${projectA}/contextual/decisions/${decisionInB.id}/answer`,
+      jwtA,
+      { method: "POST", body: JSON.stringify({ answer: "smuggled" }) },
+    )
+    expect(res.status).toBe(404)
+
+    const after = await getDecision(db, decisionInB.id)
+    expect(after?.status).toBe("open")
+    expect(after?.resolution).toBeNull()
   })
 })

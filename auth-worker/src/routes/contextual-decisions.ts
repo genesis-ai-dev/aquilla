@@ -15,6 +15,7 @@ import { errorJson, requireRole } from "./_contextual-helpers"
 import {
   listOpenDecisions,
   countOpenDecisions,
+  getDecision,
   answerDecision,
   dismissDecision,
   assignDecision,
@@ -55,6 +56,20 @@ decisions.post(
     }
     const gate = await requireRole(c, projectId, ROLE.CONTRIBUTOR)
     if (!gate.ok) return gate.res
+
+    // Scope BEFORE mutating: answerDecision/dismissDecision/assignDecision
+    // guard their UPDATE by id + status only, not project_id, so a caller who
+    // is a CONTRIBUTOR on `projectId` but supplies a decisionId belonging to
+    // a different project must be rejected here — before any transition runs
+    // — not after. Same 404 body for "does not exist" and "exists in another
+    // project": this must not become an existence oracle for other projects'
+    // decision ids. Mirrors the scope-then-mutate shape of the sibling
+    // POST /:projectId/contextual/drafts/:draftId/review route above.
+    const existing = await getDecision(c.env.AQUILLA_PG, decisionId)
+    if (!existing || existing.projectId !== projectId) {
+      const { body, status } = errorJson("not_found", `decision ${decisionId} not found`, 404)
+      return c.json(body, status)
+    }
 
     let result: DecisionTransition
     if (action === "answer") {
@@ -98,10 +113,6 @@ decisions.post(
         "decision is already closed",
         409,
       )
-      return c.json(body, status)
-    }
-    if (result.decision.projectId !== projectId) {
-      const { body, status } = errorJson("not_found", `decision ${decisionId} not found`, 404)
       return c.json(body, status)
     }
     return c.json({ decision: result.decision })

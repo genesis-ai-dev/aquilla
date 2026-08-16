@@ -37,6 +37,9 @@ import { importExport } from "../namespaces/importExport"
 import { projectSettings } from "../namespaces/projectSettings"
 import { rules } from "../namespaces/rules"
 import { terminology } from "../namespaces/terminology"
+import { settings } from "../namespaces/settings"
+import { agent } from "../namespaces/agent"
+import { workspace } from "../namespaces/workspace"
 import type { MessageValue } from "../plurals"
 
 export const en = {
@@ -58,6 +61,9 @@ export const en = {
   ...projectSettings.keys,
   ...rules.keys,
   ...terminology.keys,
+  ...settings.keys,
+  ...agent.keys,
+  ...workspace.keys,
 } as const
 
 export type MessageKey = keyof typeof en

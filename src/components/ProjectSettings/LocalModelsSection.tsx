@@ -22,6 +22,7 @@ import {
 } from "@/lib/audio/prefetch"
 import { clearStoredConsent } from "@/lib/audio/ai-consent"
 import { DEFAULT_MMS_LANGUAGE } from "@/lib/audio/tts-providers"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface ModelMeta {
   id: ModelId
@@ -52,6 +53,7 @@ const MODELS: ModelMeta[] = [
 ]
 
 export function LocalModelsSection() {
+  const t = useT()
   // Derive ready-state from Cache Storage on mount so the section reflects
   // what's actually downloaded, not just what was fetched this session.
   useEffect(() => {
@@ -60,7 +62,7 @@ export function LocalModelsSection() {
 
   return (
     <div id="local-models">
-      <SettingsGroup label="On-device models">
+      <SettingsGroup label={t("projectSettings.localModels.onDeviceLabel")}>
         {MODELS.map((meta) => (
           <ModelRow key={meta.id} meta={meta} />
         ))}
@@ -70,6 +72,7 @@ export function LocalModelsSection() {
 }
 
 function ModelRow({ meta }: { meta: ModelMeta }) {
+  const t = useT()
   const status = useModelStatus(meta.id)
   const [busy, setBusy] = useState(false)
 
@@ -113,7 +116,7 @@ function ModelRow({ meta }: { meta: ModelMeta }) {
       <div className="flex shrink-0 items-center gap-2">
         {isError ? (
           <Button variant="outline" onClick={download} disabled={isDownloading}>
-            <RotateCw /> Retry
+            <RotateCw /> {t("common.retry")}
           </Button>
         ) : isReady ? (
           <>
@@ -126,7 +129,7 @@ function ModelRow({ meta }: { meta: ModelMeta }) {
               disabled={isDownloading}
               className="text-muted-foreground hover:text-destructive"
             >
-              <Trash2 /> Clear
+              <Trash2 /> {t("common.clear")}
             </Button>
           </>
         ) : (
@@ -147,11 +150,12 @@ function StatusBadge({
   status: ReturnType<typeof useModelStatus>
   sizeMb: number
 }) {
+  const t = useT()
   if (status.kind === "ready") {
     return (
       <Badge variant="secondary">
         <CheckCircle2 data-icon="inline-start" />
-        Downloaded
+        {t("projectSettings.localModels.downloadedBadge")}
       </Badge>
     )
   }
@@ -159,7 +163,7 @@ function StatusBadge({
     return (
       <Badge variant="destructive">
         <AlertCircle data-icon="inline-start" />
-        Failed
+        {t("onboarding.checklist.aiModels.statusFailed")}
       </Badge>
     )
   }
@@ -167,12 +171,12 @@ function StatusBadge({
     return (
       <Badge variant="secondary">
         <Spinner data-icon="inline-start" />
-        Downloading
+        {t("onboarding.checklist.aiModels.statusDownloading")}
       </Badge>
     )
   }
   return (
-    <Badge variant="outline">{sizeMb} MB · not downloaded</Badge>
+    <Badge variant="outline">{t("projectSettings.localModels.notDownloadedBadge", { size: sizeMb })}</Badge>
   )
 }
 

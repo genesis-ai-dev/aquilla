@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react"
 import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import {
   isProjectEditorPath,
@@ -92,7 +92,8 @@ import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
-import { humanRoleName, ROLE } from "@/lib/frontier/roles"
+import { humanRoleName, resolveRoleName, ROLE } from "@/lib/frontier/roles"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { renameProject } from "@/lib/sync/cloud-projects"
 import { UserError } from "@/lib/errors/user-error"
 import { usePostEditMetrics } from "@/lib/metrics/use-post-edit-metrics"
@@ -129,6 +130,38 @@ const CUSTOM_PRESETS: { id: string; label: string; endpoint: string; requiresKey
   { id: "deepseek", label: "DeepSeek", endpoint: "https://api.deepseek.com/v1", requiresKey: true },
   { id: "custom", label: "Other (enter URL manually)", endpoint: "", requiresKey: false },
 ]
+
+/**
+ * Re-wraps already-known literal substrings of a translated sentence in inline
+ * styling — `t()` only ever returns a plain string, so a template whose English
+ * source embeds a `<code>`/`<strong>` fragment (a domain name, a translated
+ * sub-label) needs its rendered result split back apart at those exact
+ * substrings to restore the styling. Each `term` is inserted into the
+ * translated string verbatim (as literal data or as an already-translated
+ * value), so splitting on it survives localization.
+ */
+function withStyledTerms(
+  text: string,
+  terms: { text: string; as: "code" | "strong" | "mono" }[],
+): ReactNode {
+  const nonEmpty = terms.filter((term) => term.text.length > 0)
+  if (nonEmpty.length === 0) return text
+  const pattern = new RegExp(
+    `(${nonEmpty.map((term) => term.text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`,
+    "g",
+  )
+  return text.split(pattern).map((part, i) => {
+    const match = nonEmpty.find((term) => term.text === part)
+    if (!match) return part
+    if (match.as === "code") {
+      return <code key={i} className="rounded bg-muted px-1">{part}</code>
+    }
+    if (match.as === "mono") {
+      return <span key={i} className="font-mono">{part}</span>
+    }
+    return <strong key={i}>{part}</strong>
+  })
+}
 
 function presetIdForEndpoint(endpoint: string): string {
   const trimmed = endpoint.trim().replace(/\/+$/, "").toLowerCase()
@@ -232,6 +265,7 @@ function decayEqual(a: DecaySettings | undefined, b: DecaySettings | undefined):
 }
 
 export function ProjectSettings() {
+  const t = useT()
   const { id, section: sectionParam } = useParams<{ id: string; section?: string }>()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -1183,7 +1217,7 @@ export function ProjectSettings() {
             ) : (
               <Save data-icon="inline-start" />
             )}
-            Save changes
+            {t("common.saveChanges")}
           </Button>
           <ButtonGroupSeparator />
           <DropdownMenu>
@@ -1192,7 +1226,7 @@ export function ProjectSettings() {
                 <Button
                   size="icon-sm"
                   disabled={saving}
-                  aria-label="More save options"
+                  aria-label={t("projectSettings.moreSaveOptionsAriaLabel")}
                 >
                   <ChevronDown />
                 </Button>
@@ -1201,10 +1235,10 @@ export function ProjectSettings() {
             <DropdownMenuContent align="end" className="min-w-56">
               <DropdownMenuGroup>
                 <DropdownMenuItem onClick={handleSaveAndClose}>
-                  Save and close
+                  {t("projectSettings.saveAndClose")}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setDiscardOpen(true)}>
-                  Close without saving
+                  {t("projectSettings.closeWithoutSaving")}
                 </DropdownMenuItem>
               </DropdownMenuGroup>
             </DropdownMenuContent>
@@ -1212,7 +1246,7 @@ export function ProjectSettings() {
         </ButtonGroup>
       ) : null}
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        {isDirty && !saving && <span>Unsaved changes</span>}
+        {isDirty && !saving && <span>{t("projectSettings.unsavedChanges")}</span>}
         {!isDirty && savedMessage && (
           <span
             role="status"
@@ -1260,7 +1294,7 @@ export function ProjectSettings() {
         statusBar={null}
         main={
           <Page size={pageSize}>
-            <LoadingPanel label="Loading project settings" />
+            <LoadingPanel label={t("projectSettings.loadingLabel")} />
           </Page>
         }
       />
@@ -1311,7 +1345,7 @@ export function ProjectSettings() {
             ) : null}
 
             {showIndex && lowerQuery && sectionsToRender.length === 0 ? (
-              <p className="px-2 py-1.5 text-sm text-muted-foreground">No matching settings.</p>
+              <p className="px-2 py-1.5 text-sm text-muted-foreground">{t("projectSettings.noMatchingSettings")}</p>
             ) : null}
 
         {(permissionBlocked || roleBlocked) && (
@@ -1328,10 +1362,10 @@ export function ProjectSettings() {
             role="alert"
             className="flex items-start justify-between gap-3 rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
           >
-            <span>Settings changed elsewhere — refresh to reapply.</span>
+            <span>{t("projectSettings.settingsChangedElsewhere")}</span>
             <button
               type="button"
-              aria-label="Dismiss conflict notice"
+              aria-label={t("projectSettings.dismissConflictAriaLabel")}
               onClick={dismissConflict}
               className="shrink-0 text-amber-700 hover:text-amber-900 dark:text-amber-400 dark:hover:text-amber-200"
             >
@@ -1369,9 +1403,9 @@ export function ProjectSettings() {
         {searchGroupLabel("section-project-info")}
         {sectionsToRender.some((s) => s.id === "section-project-info") && (
           <div id="section-project-info">
-            <SettingsGroup label="Project info">
+            <SettingsGroup label={t("projectSettings.section.projectInfo")}>
               <SettingsRow
-                label={<label htmlFor="pname">Project title</label>}
+                label={<label htmlFor="pname">{t("projectSettings.info.titleLabel")}</label>}
                 description={
                   sharedUpdatedBy && sharedUpdatedAt && sharedVersion != null && sharedVersion > 0
                     ? `Last edited by ${sharedUpdatedBy.username} · ${new Date(sharedUpdatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`
@@ -1391,7 +1425,7 @@ export function ProjectSettings() {
                       }}
                       disabled={!canRenameProject || saving}
                       aria-invalid={nameError ? true : undefined}
-                      aria-label="Project title"
+                      aria-label={t("projectSettings.info.titleLabel")}
                       className="w-56 bg-background"
                     />
                   </DisabledFieldTooltip>
@@ -1407,7 +1441,7 @@ export function ProjectSettings() {
                 </p>
               ) : null}
               <SettingsRow
-                label={<label htmlFor="sl">Source language</label>}
+                label={<label htmlFor="sl">{t("projectSettings.info.sourceLanguageLabel")}</label>}
                 control={
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
                     <Input
@@ -1415,14 +1449,14 @@ export function ProjectSettings() {
                       value={sourceLanguage}
                       onChange={(e) => setSourceLanguage(e.target.value)}
                       disabled={!canEditShared}
-                      aria-label="Source language"
+                      aria-label={t("projectSettings.info.sourceLanguageLabel")}
                       className="w-40 bg-background"
                     />
                   </DisabledFieldTooltip>
                 }
               />
               <SettingsRow
-                label={<label htmlFor="tl">Target language</label>}
+                label={<label htmlFor="tl">{t("projectSettings.info.targetLanguageLabel")}</label>}
                 control={
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
                     <Input
@@ -1430,7 +1464,7 @@ export function ProjectSettings() {
                       value={targetLanguage}
                       onChange={(e) => setTargetLanguage(e.target.value)}
                       disabled={!canEditShared}
-                      aria-label="Target language"
+                      aria-label={t("projectSettings.info.targetLanguageLabel")}
                       className="w-40 bg-background"
                     />
                   </DisabledFieldTooltip>
@@ -1455,20 +1489,20 @@ export function ProjectSettings() {
         {searchGroupLabel("section-bible-resources")}
         {sectionsToRender.some((s) => s.id === "section-bible-resources") && (
           <div id="section-bible-resources">
-            <SettingsGroup label="Bible resources">
+            <SettingsGroup label={t("projectSettings.section.bibleResources")}>
               <SettingsRow
-                label={<label htmlFor="bible-resources-enabled">Enable Bible resources</label>}
+                label={<label htmlFor="bible-resources-enabled">{t("projectSettings.bible.enableLabel")}</label>}
                 description={
                   <>
-                    Scholarly reference data from bibletranslation.org in Search and the agent.
+                    {t("projectSettings.bible.description")}
                     {bibleResourcesEnabled === undefined && projectHasScriptureFiles(project?.files) ? (
-                      <span className="mt-1 block">Available by default for scripture projects — turn off to disable.</span>
+                      <span className="mt-1 block">{t("projectSettings.bible.scriptureDefaultHint")}</span>
                     ) : null}
                     {bibleResourcesEnabled === undefined && !projectHasScriptureFiles(project?.files) ? (
-                      <span className="mt-1 block">Off by default for non-scripture projects — turn on to enable.</span>
+                      <span className="mt-1 block">{t("projectSettings.bible.nonScriptureDefaultHint")}</span>
                     ) : null}
                     {bibleResourcesEnabled === false ? (
-                      <span className="mt-1 block">Turned off for this project. This is always respected, even for scripture projects.</span>
+                      <span className="mt-1 block">{t("projectSettings.bible.disabledHint")}</span>
                     ) : null}
                   </>
                 }
@@ -1479,7 +1513,7 @@ export function ProjectSettings() {
                       checked={resolveBibleResourcesEnabled(bibleResourcesEnabled, projectHasScriptureFiles(project?.files))}
                       onCheckedChange={(checked) => setBibleResourcesEnabled(checked)}
                       disabled={!canEditShared}
-                      aria-label="Enable Bible resources"
+                      aria-label={t("projectSettings.bible.enableLabel")}
                     />
                   </DisabledFieldTooltip>
                 }
@@ -1491,10 +1525,10 @@ export function ProjectSettings() {
         {searchGroupLabel("section-import")}
         {sectionsToRender.some((s) => s.id === "section-import") && (
           <div id="section-import">
-            <SettingsGroup label="Import">
+            <SettingsGroup label={t("projectSettings.section.import")}>
               <SettingsRow
-                label={<label htmlFor="import-exclude-front-matter">Exclude USFM front matter</label>}
-                description="When on, USFM imports drop the book name, running header, TOC, main title, and introduction paragraphs. Section headings and Psalm titles still import. Off (the default) imports front matter as translatable cells."
+                label={<label htmlFor="import-exclude-front-matter">{t("projectSettings.import.excludeFrontMatterLabel")}</label>}
+                description={t("projectSettings.import.excludeFrontMatterDescription")}
                 control={
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
                     <Switch
@@ -1502,7 +1536,7 @@ export function ProjectSettings() {
                       checked={importExcludeFrontMatter}
                       onCheckedChange={(checked) => setImportExcludeFrontMatter(checked)}
                       disabled={!canEditShared}
-                      aria-label="Exclude USFM front matter"
+                      aria-label={t("projectSettings.import.excludeFrontMatterLabel")}
                     />
                   </DisabledFieldTooltip>
                 }
@@ -1514,17 +1548,17 @@ export function ProjectSettings() {
         {searchGroupLabel("section-user")}
         {sectionsToRender.some((s) => s.id === "section-user") && (
           <div id="section-user">
-            <SettingsGroup label="User">
+            <SettingsGroup label={t("projectSettings.section.user")}>
               <SettingsRow
-                label={<label htmlFor="un">Username</label>}
-                description="Used as author name in translation history."
+                label={<label htmlFor="un">{t("projectSettings.user.usernameLabel")}</label>}
+                description={t("projectSettings.user.usernameDescription")}
                 control={
                   <Input
                     id="un"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder="local"
-                    aria-label="Username"
+                    placeholder={t("projectSettings.user.usernamePlaceholder")}
+                    aria-label={t("projectSettings.user.usernameLabel")}
                     className="w-40 bg-background"
                   />
                 }
@@ -1557,14 +1591,17 @@ export function ProjectSettings() {
           <div id="section-system-prompt">
             <SettingsGroup>
               <SettingsRow
-                label={<label htmlFor="sp">System prompt</label>}
-                description={
-                  <>
-                    Describe what this project is producing and how translations should read — the AI uses this on every
-                    completion. Use <code className="rounded bg-muted px-1">{"{sourceLanguage}"}</code> and{" "}
-                    <code className="rounded bg-muted px-1">{"{targetLanguage}"}</code> as placeholders.
-                  </>
-                }
+                label={<label htmlFor="sp">{t("projectSettings.systemPrompt.label")}</label>}
+                description={withStyledTerms(
+                  t("projectSettings.ai.instructionsHelp", {
+                    sourceVar: "{sourceLanguage}",
+                    targetVar: "{targetLanguage}",
+                  }),
+                  [
+                    { text: "{sourceLanguage}", as: "code" },
+                    { text: "{targetLanguage}", as: "code" },
+                  ],
+                )}
                 block
               >
                 <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
@@ -1576,7 +1613,7 @@ export function ProjectSettings() {
                     disabled={!canEditShared}
                     className="min-h-[28rem] bg-background font-mono text-sm leading-relaxed"
                     placeholder={DEFAULT_SYSTEM_PROMPT}
-                    aria-label="System prompt"
+                    aria-label={t("projectSettings.systemPrompt.label")}
                   />
                 </DisabledFieldTooltip>
               </SettingsRow>
@@ -1592,8 +1629,8 @@ export function ProjectSettings() {
               <NavList>
                 <NavRow
                   to={settingsHref("system-prompt")}
-                  title="System prompt"
-                  description="What this project is producing and how translations should read"
+                  title={t("projectSettings.systemPrompt.label")}
+                  description={t("projectSettings.systemPrompt.navDescription")}
                   hint={
                     systemPrompt.trim() && systemPrompt !== DEFAULT_SYSTEM_PROMPT
                       ? "Custom"
@@ -1602,10 +1639,10 @@ export function ProjectSettings() {
                 />
               </NavList>
             ) : null}
-            <SettingsGroup label="AI instructions">
+            <SettingsGroup label={t("projectSettings.section.aiInstructions")}>
               <SettingsRow
-                label={<label htmlFor="top-k">Examples retrieved (top_k)</label>}
-                description="How many reference examples the AI retrieves per translation (1–20). Default: 5."
+                label={<label htmlFor="top-k">{t("projectSettings.ai.topKLabel")}</label>}
+                description={t("projectSettings.ai.topKDescription")}
                 control={
                   <Input
                     id="top-k"
@@ -1614,14 +1651,14 @@ export function ProjectSettings() {
                     max={20}
                     value={topK}
                     onChange={(e) => setTopK(Math.max(1, Math.min(20, Number(e.target.value))))}
-                    aria-label="Examples retrieved (top_k)"
+                    aria-label={t("projectSettings.ai.topKLabel")}
                     className="w-24 bg-background"
                   />
                 }
               />
               <SettingsRow
-                label={<label htmlFor="completion-batch-size">AI completions batch size</label>}
-                description={`How many untranslated cells one "Run AI completions" package drafts (1–50). Run again to advance further. Default: ${MAX_BATCH_COMPLETIONS}.`}
+                label={<label htmlFor="completion-batch-size">{t("projectSettings.ai.completionBatchSizeLabel")}</label>}
+                description={t("projectSettings.ai.completionBatchSizeDescription", { defaultSize: MAX_BATCH_COMPLETIONS })}
                 control={
                   <Input
                     id="completion-batch-size"
@@ -1632,20 +1669,19 @@ export function ProjectSettings() {
                     onChange={(e) =>
                       setCompletionBatchSize(Math.max(1, Math.min(50, Number(e.target.value) || 1)))
                     }
-                    aria-label="AI completions batch size"
+                    aria-label={t("projectSettings.ai.completionBatchSizeLabel")}
                     className="w-24 bg-background"
                   />
                 }
               />
               <SettingsRow
-                label={<label htmlFor="validation-batch-size">Batch validation size</label>}
-                description={
-                  <>
-                    How many eligible cells one &quot;Batch validate&quot; run approves (0–500).{" "}
-                    <strong>0 validates all eligible cells</strong> (default); set a cap to
-                    validate in bounded batches.
-                  </>
-                }
+                label={<label htmlFor="validation-batch-size">{t("projectSettings.ai.validationBatchSizeLabel")}</label>}
+                description={withStyledTerms(
+                  t("projectSettings.ai.validationBatchSizeHelp", {
+                    zeroNote: t("projectSettings.ai.validationBatchSizeZeroNote"),
+                  }),
+                  [{ text: t("projectSettings.ai.validationBatchSizeZeroNote"), as: "strong" }],
+                )}
                 control={
                   <Input
                     id="validation-batch-size"
@@ -1656,82 +1692,82 @@ export function ProjectSettings() {
                     onChange={(e) =>
                       setValidationBatchSize(Math.max(0, Math.min(500, Number(e.target.value) || 0)))
                     }
-                    aria-label="Batch validation size"
+                    aria-label={t("projectSettings.ai.validationBatchSizeLabel")}
                     className="w-24 bg-background"
                   />
                 }
               />
               <SettingsRow
-                label={<label htmlFor="context-size">Context window</label>}
-                description="Controls how much surrounding passage context is included."
+                label={<label htmlFor="context-size">{t("projectSettings.ai.contextWindowLabel")}</label>}
+                description={t("projectSettings.ai.contextWindowDescription")}
                 control={
                   <Select
                     items={{
-                      small: "Small — tight window",
-                      medium: "Medium — paragraph (default)",
-                      large: "Large — chapter",
+                      small: t("projectSettings.ai.contextWindowSmall"),
+                      medium: t("projectSettings.ai.contextWindowMedium"),
+                      large: t("projectSettings.ai.contextWindowLarge"),
                     }}
                     value={contextSize}
                     onValueChange={(value) => setContextSize(value as ContextSize)}
                   >
-                    <SelectTrigger id="context-size" aria-label="Context window" className="w-56 bg-background">
+                    <SelectTrigger id="context-size" aria-label={t("projectSettings.ai.contextWindowLabel")} className="w-56 bg-background">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        <SelectItem value="small">Small — tight window</SelectItem>
-                        <SelectItem value="medium">Medium — paragraph (default)</SelectItem>
-                        <SelectItem value="large">Large — chapter</SelectItem>
+                        <SelectItem value="small">{t("projectSettings.ai.contextWindowSmall")}</SelectItem>
+                        <SelectItem value="medium">{t("projectSettings.ai.contextWindowMedium")}</SelectItem>
+                        <SelectItem value="large">{t("projectSettings.ai.contextWindowLarge")}</SelectItem>
                       </SelectGroup>
                     </SelectContent>
                   </Select>
                 }
               />
               <SettingsRow
-                label={<label htmlFor="main-chat-language">Assistant language</label>}
-                description="Language the AI assistant uses in chat responses. Independent of the UI locale."
+                label={<label htmlFor="main-chat-language">{t("projectSettings.ai.assistantLanguageLabel")}</label>}
+                description={t("projectSettings.ai.assistantLanguageDescription")}
                 control={
                   <Input
                     id="main-chat-language"
                     value={mainChatLanguage}
                     onChange={(e) => setMainChatLanguage(e.target.value)}
-                    placeholder="e.g. English, Français, Español…"
-                    aria-label="Assistant language"
+                    placeholder={t("projectSettings.ai.assistantLanguagePlaceholder")}
+                    aria-label={t("projectSettings.ai.assistantLanguageLabel")}
                     className="w-56 bg-background"
                   />
                 }
               />
               <SettingsRow
-                label={<label htmlFor="validated-only">Approved examples only</label>}
-                description="Drafting always retrieves human-validated project translations. Raw machine drafts never enter the trusted example pool."
+                label={<label htmlFor="validated-only">{t("projectSettings.ai.approvedExamplesOnlyLabel")}</label>}
+                description={t("projectSettings.ai.approvedExamplesOnlyDescription")}
                 control={
                   <Switch
                     id="validated-only"
                     checked
                     disabled
-                    aria-label="Approved examples only"
+                    aria-label={t("projectSettings.ai.approvedExamplesOnlyLabel")}
                   />
                 }
               />
               <SettingsRow
-                label={<label htmlFor="few-shot-example-format">Reference example format</label>}
-                description='"Target only" shows only the target text of each example, useful when source alignment is unavailable or undesirable. The model is told these are reference translations to imitate.'
+                label={<label htmlFor="few-shot-example-format">{t("projectSettings.ai.referenceExampleFormatLabel")}</label>}
+                description={t("projectSettings.ai.referenceExampleFormatDescription")}
                 control={
                   <Select
                     items={{
-                      "source-and-target": "Source + target (default)",
-                      "target-only": "Target only",
+                      "source-and-target": t("projectSettings.ai.referenceExampleFormatSourceAndTarget"),
+                      "target-only": t("projectSettings.ai.referenceExampleFormatTargetOnly"),
                     }}
                     value={fewShotExampleFormat}
                     onValueChange={(value) => setFewShotExampleFormat(value as "source-and-target" | "target-only")}
                   >
-                    <SelectTrigger id="few-shot-example-format" aria-label="Reference example format" className="w-56 bg-background">
+                    <SelectTrigger id="few-shot-example-format" aria-label={t("projectSettings.ai.referenceExampleFormatLabel")} className="w-56 bg-background">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        <SelectItem value="source-and-target">Source + target (default)</SelectItem>
-                        <SelectItem value="target-only">Target only</SelectItem>
+                        <SelectItem value="source-and-target">{t("projectSettings.ai.referenceExampleFormatSourceAndTarget")}</SelectItem>
+                        <SelectItem value="target-only">{t("projectSettings.ai.referenceExampleFormatTargetOnly")}</SelectItem>
                       </SelectGroup>
                     </SelectContent>
                   </Select>
@@ -1744,10 +1780,12 @@ export function ProjectSettings() {
         {searchGroupLabel("section-draft-context")}
         {sectionsToRender.some((s) => s.id === "section-draft-context") && (
           <div id="section-draft-context">
-            <SettingsGroup label="Draft context">
+            <SettingsGroup label={t("projectSettings.section.draftContext")}>
               <SettingsRow
-                label={<label htmlFor="preceding-target-cells">Preceding committed-target cells</label>}
-                description={`How many immediately preceding committed target cells to include as discourse left-context when drafting. 0 disables preceding-context. Default: ${DEFAULT_DRAFT_CONTEXT.precedingTargetCells}.`}
+                label={<label htmlFor="preceding-target-cells">{t("projectSettings.draftContext.precedingCellsLabel")}</label>}
+                description={t("projectSettings.draftContext.precedingCellsDescription", {
+                  defaultCount: DEFAULT_DRAFT_CONTEXT.precedingTargetCells,
+                })}
                 control={
                   <Input
                     id="preceding-target-cells"
@@ -1760,7 +1798,7 @@ export function ProjectSettings() {
                         Math.max(0, Math.min(10, Number(e.target.value))),
                       )
                     }
-                    aria-label="Preceding committed-target cells"
+                    aria-label={t("projectSettings.draftContext.precedingCellsLabel")}
                     className="w-24 bg-background"
                   />
                 }
@@ -1782,7 +1820,7 @@ export function ProjectSettings() {
                 </span>
               }
             >
-              <SettingsRow label="Provider" block>
+              <SettingsRow label={t("projectSettings.advancedLlm.providerLabel")} block>
                 <RadioGroup
                   name="provider"
                   value={provider}
@@ -1792,15 +1830,27 @@ export function ProjectSettings() {
                   <label className="flex items-start gap-2 text-sm">
                     <RadioGroupItem value="frontier" className="mt-1" />
                     <span>
-                      <strong>Frontier</strong> (recommended) — calls <code className="rounded bg-muted px-1">api.frontierrnd.com</code>{" "}
-                      using your Frontier login. Works out of the box.
+                      {withStyledTerms(
+                        t("projectSettings.advancedLlm.providerFrontier", {
+                          name: t("projectSettings.advancedLlm.providerFrontierName"),
+                          domain: "api.frontierrnd.com",
+                        }),
+                        [
+                          { text: t("projectSettings.advancedLlm.providerFrontierName"), as: "strong" },
+                          { text: "api.frontierrnd.com", as: "code" },
+                        ],
+                      )}
                     </span>
                   </label>
                   <label className="flex items-start gap-2 text-sm">
                     <RadioGroupItem value="custom" className="mt-1" />
                     <span>
-                      <strong>Custom endpoint</strong> — localhost, self-hosted, or a third-party OpenAI-compatible
-                      API (OpenRouter, OpenAI, Groq, Together, ...). Bring your own key.
+                      {withStyledTerms(
+                        t("projectSettings.advancedLlm.providerCustom", {
+                          name: t("projectSettings.advancedLlm.providerCustomName"),
+                        }),
+                        [{ text: t("projectSettings.advancedLlm.providerCustomName"), as: "strong" }],
+                      )}
                     </span>
                   </label>
                 </RadioGroup>
@@ -1809,14 +1859,14 @@ export function ProjectSettings() {
               {provider === "custom" && (
                 <>
                   <SettingsRow
-                    label={<label htmlFor="preset">Provider preset</label>}
+                    label={<label htmlFor="preset">{t("projectSettings.advancedLlm.presetLabel")}</label>}
                     control={
                       <Select
                         items={CUSTOM_PRESETS.map((p) => ({ value: p.id, label: p.label }))}
                         value={presetId}
                         onValueChange={(value) => handlePresetChange(value ?? "")}
                       >
-                        <SelectTrigger id="preset" aria-label="Provider preset" className="w-56 bg-background">
+                        <SelectTrigger id="preset" aria-label={t("projectSettings.advancedLlm.presetLabel")} className="w-56 bg-background">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -1830,13 +1880,17 @@ export function ProjectSettings() {
                     }
                   />
                   <SettingsRow
-                    label={<label htmlFor="ep">Endpoint URL</label>}
-                    description={
-                      <>
-                        Base URL. Trailing <code className="rounded bg-muted px-1">/v1</code> or{" "}
-                        <code className="rounded bg-muted px-1">/chat/completions</code> is accepted.
-                      </>
-                    }
+                    label={<label htmlFor="ep">{t("projectSettings.advancedLlm.endpointLabel")}</label>}
+                    description={withStyledTerms(
+                      t("projectSettings.advancedLlm.endpointHelp", {
+                        v1Path: "/v1",
+                        chatCompletionsPath: "/chat/completions",
+                      }),
+                      [
+                        { text: "/v1", as: "code" },
+                        { text: "/chat/completions", as: "code" },
+                      ],
+                    )}
                     block
                   >
                     <div className="flex gap-2">
@@ -1853,13 +1907,13 @@ export function ProjectSettings() {
                         }}
                         placeholder="http://localhost:8000"
                         className="flex-1 bg-background"
-                        aria-label="Endpoint URL"
+                        aria-label={t("projectSettings.advancedLlm.endpointLabel")}
                       />
                       <Button onClick={handleConnect} disabled={connecting}>
                         {connecting ? <Spinner /> : "Connect"}
                       </Button>
                     </div>
-                    {connected && <p className="mt-1 flex items-center gap-1 text-xs text-green-600"><CheckCircle className="h-3 w-3" /> Connected — {models.length} model(s)</p>}
+                    {connected && <p className="mt-1 flex items-center gap-1 text-xs text-green-600"><CheckCircle className="h-3 w-3" /> {t("projectSettings.advancedLlm.connectedStatus", { count: models.length })}</p>}
                     {connectionError && <p className="mt-1 flex items-center gap-1 text-xs text-destructive"><XCircle className="h-3 w-3" /> {connectionError}</p>}
                   </SettingsRow>
                   <SettingsRow
@@ -1868,11 +1922,11 @@ export function ProjectSettings() {
                         "API key *"
                       ) : (
                         <>
-                          API key <OptionalMark />
+                          {t("projectSettings.field.apiKey")} <OptionalMark />
                         </>
                       )
                     }
-                    description="Stays on this device — not shared with collaborators."
+                    description={t("projectSettings.advancedLlm.apiKeyDeviceOnlyNote")}
                     block
                   >
                     <ApiKeyField
@@ -1881,7 +1935,7 @@ export function ProjectSettings() {
                           "API key *"
                         ) : (
                           <>
-                            API key <OptionalMark />
+                            {t("projectSettings.field.apiKey")} <OptionalMark />
                           </>
                         )
                       }
@@ -1895,10 +1949,10 @@ export function ProjectSettings() {
                   </SettingsRow>
                   {models.length > 0 && (
                     <SettingsRow
-                      label={<label htmlFor="mdl">Model</label>}
+                      label={<label htmlFor="mdl">{t("projectSettings.advancedLlm.modelLabel")}</label>}
                       control={
                         <Select value={model} onValueChange={(value) => setModel(value ?? "")}>
-                          <SelectTrigger id="mdl" aria-label="Model" className="w-56 bg-background">
+                          <SelectTrigger id="mdl" aria-label={t("projectSettings.advancedLlm.modelLabel")} className="w-56 bg-background">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -1912,19 +1966,18 @@ export function ProjectSettings() {
                   )}
                   {models.length === 0 && (
                     <SettingsRow
-                      label={<label htmlFor="mdl-manual">Model (if not listed)</label>}
-                      description={
-                        <>
-                          Click Connect to discover models, or type one manually (required for providers that don&apos;t expose <code className="rounded bg-muted px-1">/models</code>).
-                        </>
-                      }
+                      label={<label htmlFor="mdl-manual">{t("projectSettings.advancedLlm.modelManualLabel")}</label>}
+                      description={withStyledTerms(
+                        t("projectSettings.advancedLlm.modelManualHelp", { modelsPath: "/models" }),
+                        [{ text: "/models", as: "code" }],
+                      )}
                       control={
                         <Input
                           id="mdl-manual"
                           value={model}
                           onChange={(e) => setModel(e.target.value)}
                           placeholder={presetId === "openrouter" ? "anthropic/claude-3.5-sonnet" : "Type a model id"}
-                          aria-label="Model (if not listed)"
+                          aria-label={t("projectSettings.advancedLlm.modelManualLabel")}
                           className="w-56 bg-background"
                         />
                       }
@@ -1937,21 +1990,20 @@ export function ProjectSettings() {
                 <SettingsRow
                   label={
                     <label htmlFor="mdl-frontier">
-                      Model override <OptionalMark />
+                      {t("projectSettings.advancedLlm.modelOverrideName")} <OptionalMark />
                     </label>
                   }
-                  description={
-                    <>
-                      Optionally specify an OpenRouter model (e.g. <code className="rounded bg-muted px-1">anthropic/claude-3.5-sonnet</code>).
-                    </>
-                  }
+                  description={withStyledTerms(
+                    t("projectSettings.advancedLlm.modelOverrideHelp", { example: "anthropic/claude-3.5-sonnet" }),
+                    [{ text: "anthropic/claude-3.5-sonnet", as: "code" }],
+                  )}
                   control={
                     <Input
                       id="mdl-frontier"
                       value={model}
                       onChange={(e) => setModel(e.target.value)}
-                      placeholder="Leave blank for Frontier's default"
-                      aria-label="Model override"
+                      placeholder={t("projectSettings.advancedLlm.modelOverridePlaceholder")}
+                      aria-label={t("projectSettings.advancedLlm.modelOverrideName")}
                       className="w-56 bg-background"
                     />
                   }
@@ -1959,14 +2011,14 @@ export function ProjectSettings() {
               )}
 
               <SettingsRow
-                label={<label htmlFor="mt">Max tokens</label>}
+                label={<label htmlFor="mt">{t("projectSettings.advancedLlm.maxTokensLabel")}</label>}
                 control={
                   <Input
                     id="mt"
                     type="number"
                     value={maxTokens}
                     onChange={(e) => setMaxTokens(Number(e.target.value))}
-                    aria-label="Max tokens"
+                    aria-label={t("projectSettings.advancedLlm.maxTokensLabel")}
                     className="w-24 bg-background"
                   />
                 }
@@ -1987,7 +2039,7 @@ export function ProjectSettings() {
               />
               <SettingsRow
                 label={`LLM health penalty (${Math.round(llmHealthPenalty * 100)}%)`}
-                description="LLM translations are penalized by this amount in health calculations. 0% = full trust, 50% = heavy penalty. Default: 10%."
+                description={t("projectSettings.advancedLlm.healthPenaltyDescription")}
                 control={
                   <div className="w-40">
                     <Slider
@@ -2007,31 +2059,31 @@ export function ProjectSettings() {
         {searchGroupLabel("section-voice")}
         {sectionsToRender.some((s) => s.id === "section-voice") && (
           <div id="section-voice">
-            <SettingsGroup label="Voice">
+            <SettingsGroup label={t("projectSettings.section.voice")}>
               <SettingsRow
                 label="Gemini TTS"
-                description="Used for Gemini-powered text-to-speech. Get a key at aistudio.google.com/apikey. Sent directly to Google; never uploaded to Frontier."
+                description={t("projectSettings.voice.geminiKeyHelp")}
                 block
               >
                 <ApiKeyField
-                  label="Gemini API key"
-                  placeholder="AIza..."
+                  label={t("projectSettings.voice.geminiKeyLabel")}
+                  placeholder={t("projectSettings.voice.geminiKeyPlaceholder")}
                   projectKey={geminiApiKey}
                   userKey={geminiUserKey}
                   onProjectKeyChange={setGeminiApiKey}
                   onUserKeyChange={(v) => setUserApiKey("gemini-tts", v)}
-                  help="Used for Gemini-powered text-to-speech. Get a key at aistudio.google.com/apikey. Sent directly to Google; never uploaded to Frontier."
+                  help={t("projectSettings.voice.geminiKeyHelp")}
                 />
               </SettingsRow>
               <SettingsRow
-                label="Voice Studio"
-                description="Voice library and cast assignments live in the Voice Studio."
+                label={t("projectSettings.voice.studioLabel")}
+                description={t("projectSettings.voice.libraryNote")}
                 control={
                   <Button variant="outline" onClick={() => {
                     try { window.localStorage.setItem(`codex:editorLens:${id}`, "audio") } catch { /* ignore */ }
                     requestNavigate(`/project/${id}/editor`)
                   }}>
-                    Open Voice Studio
+                    {t("projectSettings.voice.openStudioButton")}
                   </Button>
                 }
               />
@@ -2042,16 +2094,16 @@ export function ProjectSettings() {
         {searchGroupLabel("section-local-models")}
         {sectionsToRender.some((s) => s.id === "section-local-models") && (
           <div id="section-local-models">
-            <SettingsGroup label="Local AI models">
+            <SettingsGroup label={t("projectSettings.section.localModels")}>
               <SettingsRow
-                label="On-device models"
-                description="Whisper transcription and the local voices run in your browser and are shared across every project on this device. Manage downloads in your personal preferences."
+                label={t("projectSettings.localModels.onDeviceLabel")}
+                description={t("projectSettings.localModels.description")}
                 control={
                   <Button
                     variant="outline"
                     onClick={() => requestNavigate("/preferences")}
                   >
-                    Manage models
+                    {t("projectSettings.localModels.manageButton")}
                   </Button>
                 }
               />
@@ -2081,28 +2133,34 @@ export function ProjectSettings() {
               }}
             />
             {/* AQU-186: Harmonization settings — harmonize_min_role floor. */}
-            <SettingsGroup label="Harmonization">
+            <SettingsGroup label={t("projectSettings.harmonization.title")}>
               <SettingsRow
-                label={<label htmlFor="harmonize-min-role">Minimum role to run a harmonization sweep</label>}
-                description="Only users with at least this role can open a harmonization sweep on this project. The floor cannot be lowered below Project Lead (hard floor per spec)."
+                label={<label htmlFor="harmonize-min-role">{t("projectSettings.harmonization.minRoleLabel")}</label>}
+                description={t("projectSettings.harmonization.description")}
                 control={
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
                     <Select
                       items={{
-                        project_lead: "Project Lead (default)",
-                        maintainer: "Maintainer",
+                        project_lead: t("projectSettings.harmonization.defaultRoleSuffix", {
+                          role: resolveRoleName(t, "project_lead"),
+                        }),
+                        maintainer: resolveRoleName(t, "maintainer"),
                       }}
                       disabled={!canEditShared}
                       value={harmonizeMinRole}
                       onValueChange={(value) => setHarmonizeMinRole(value as "project_lead" | "maintainer")}
                     >
-                      <SelectTrigger id="harmonize-min-role" aria-label="Minimum role to run a harmonization sweep" className="w-56 bg-background">
+                      <SelectTrigger id="harmonize-min-role" aria-label={t("projectSettings.harmonization.minRoleLabel")} className="w-56 bg-background">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectGroup>
-                          <SelectItem value="project_lead">Project Lead (default)</SelectItem>
-                          <SelectItem value="maintainer">Maintainer</SelectItem>
+                          <SelectItem value="project_lead">
+                            {t("projectSettings.harmonization.defaultRoleSuffix", {
+                              role: resolveRoleName(t, "project_lead"),
+                            })}
+                          </SelectItem>
+                          <SelectItem value="maintainer">{resolveRoleName(t, "maintainer")}</SelectItem>
                         </SelectGroup>
                       </SelectContent>
                     </Select>
@@ -2136,19 +2194,22 @@ export function ProjectSettings() {
         {searchGroupLabel("section-git-sync")}
         {project?.origin?.kind === "git" && sectionsToRender.some((s) => s.id === "section-git-sync") && (
           <div id="section-git-sync">
-            <SettingsGroup label="Git Sync">
+            <SettingsGroup label={t("projectSettings.section.gitSync")}>
               <SettingsRow
-                label="Origin"
-                description={
-                  <>
-                    <span className="font-mono">{project.origin.cloneUrl}</span>
-                    {" "}(branch: <span className="font-mono">{project.origin.branch}</span>)
-                  </>
-                }
+                label={withStyledTerms(
+                  t("projectSettings.gitSync.originLabel", {
+                    url: project.origin.cloneUrl,
+                    branch: project.origin.branch,
+                  }),
+                  [
+                    { text: project.origin.cloneUrl, as: "mono" },
+                    { text: project.origin.branch, as: "mono" },
+                  ],
+                )}
               />
               <SettingsRow
                 label={<label htmlFor="auto-sync">Auto-sync</label>}
-                description="Interval is floored at 1 minute. Sync will only push when there are local changes."
+                description={t("projectSettings.gitSync.intervalNote")}
                 control={
                   <div className="flex items-center gap-2">
                     <Switch
@@ -2164,9 +2225,9 @@ export function ProjectSettings() {
                       className="h-8 w-20 bg-background"
                       value={autoSyncInterval}
                       onChange={(e) => setAutoSyncInterval(Math.max(1, Number(e.target.value) || 1))}
-                      aria-label="Auto-sync interval minutes"
+                      aria-label={t("projectSettings.gitSync.autoSyncIntervalAriaLabel")}
                     />
-                    <span className="text-sm text-muted-foreground">min</span>
+                    <span className="text-sm text-muted-foreground">{t("projectSettings.gitSync.minutesAbbrev")}</span>
                   </div>
                 }
               />
@@ -2176,13 +2237,13 @@ export function ProjectSettings() {
         {searchGroupLabel("section-terminology")}
         {sectionsToRender.some((s) => s.id === "section-terminology") && (
           <div id="section-terminology">
-            <SettingsGroup label="Terminology">
+            <SettingsGroup label={t("projectSettings.section.terminology")}>
               <SettingsRow
-                label="Terminology library"
-                description="Manage approved terms, renderings, and the project glossary (term base)."
+                label={t("projectSettings.terminology.title")}
+                description={t("projectSettings.terminology.description")}
                 control={
                   <Button variant="outline" onClick={() => requestNavigate(`/project/${id}/terminology`)}>
-                    Open Terminology Library
+                    {t("projectSettings.terminology.openButton")}
                   </Button>
                 }
               />
@@ -2235,14 +2296,14 @@ export function ProjectSettings() {
       <Dialog open={discardOpen} onOpenChange={(open) => (open ? setDiscardOpen(true) : handleDiscardCancel())}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Discard changes?</DialogTitle>
+            <DialogTitle>{t("projectSettings.discardDialogTitle")}</DialogTitle>
             <DialogDescription>
-              You have unsaved changes to project settings. They will be lost if you leave now.
+              {t("projectSettings.discardDialogDescription")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="ghost" onClick={handleDiscardCancel}>Keep editing</Button>
-            <Button variant="destructive" onClick={handleDiscardConfirm}>Discard</Button>
+            <Button variant="ghost" onClick={handleDiscardCancel}>{t("projectSettings.keepEditing")}</Button>
+            <Button variant="destructive" onClick={handleDiscardConfirm}>{t("common.discard")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -17,8 +17,10 @@ import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import type { RuleInfraction } from "@/lib/parsers/types"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { RulesSurface } from "@/components/RulesSurface"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export function RulesSettingsSection({ projectId }: { projectId: string }) {
+  const t = useT()
   const [editingRuleId, setEditingRuleId] = useState<string | "new" | null>(null)
   const { project, loading, refresh, patchSettings, roleLevel } = useProject(projectId)
   const { session } = useFrontierSession()
@@ -82,7 +84,7 @@ export function RulesSettingsSection({ projectId }: { projectId: string }) {
   }, [cells, enabledRules])
 
   if (loading || !project) {
-    return <LoadingPanel label="Loading rules" />
+    return <LoadingPanel label={t("projectSettings.rules.loadingLabel")} />
   }
 
   return (

@@ -17,6 +17,7 @@ import { useState } from "react"
 import { FieldError } from "@/components/ui/field"
 import { SettingsRow } from "@/components/ui/page"
 import { Switch } from "@/components/ui/switch"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 
 interface AssignmentAuthoritySectionProps {
@@ -26,6 +27,7 @@ interface AssignmentAuthoritySectionProps {
 }
 
 export function AssignmentAuthoritySection({ orgSettings, canEdit }: AssignmentAuthoritySectionProps) {
+  const { t } = useI18n()
   const { allowSelfAssignment, patch } = orgSettings
 
   const [busy, setBusy] = useState(false)
@@ -45,8 +47,8 @@ export function AssignmentAuthoritySection({ orgSettings, canEdit }: AssignmentA
 
   return (
     <SettingsRow
-      label="Allow self-assignment"
-      description="When on, a member (contributor and above) can claim a book/chapter/take for themselves from the assign-work picker — they still can't assign work to anyone else. Leads and maintainers can always assign, to anyone, regardless of this setting."
+      label={t("settings.assignmentAuthority.label")}
+      description={t("settings.assignmentAuthority.description")}
       control={
         <div className="flex min-w-44 flex-col items-end gap-1">
           <Switch
@@ -54,7 +56,7 @@ export function AssignmentAuthoritySection({ orgSettings, canEdit }: AssignmentA
             checked={allowSelfAssignment}
             onCheckedChange={(checked) => void handleChange(checked)}
             disabled={!canEdit || busy}
-            aria-label="Allow self-assignment"
+            aria-label={t("settings.assignmentAuthority.label")}
           />
           {error && <FieldError className="text-xs">{error}</FieldError>}
         </div>

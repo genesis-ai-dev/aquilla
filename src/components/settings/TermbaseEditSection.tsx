@@ -29,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { ROLE } from "@/lib/frontier/roles"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 
@@ -45,6 +46,7 @@ const TERMBASE_ROLE_OPTIONS = [
 ]
 
 export function TermbaseEditSection({ orgSettings, canEdit }: TermbaseEditSectionProps) {
+  const { t } = useI18n()
   const { termbaseEditMinRole, patch } = orgSettings
 
   const [busy, setBusy] = useState(false)
@@ -64,8 +66,8 @@ export function TermbaseEditSection({ orgSettings, canEdit }: TermbaseEditSectio
 
   return (
     <SettingsRow
-      label="Who can manage terminology"
-      description="Minimum role required to add, edit, delete, and archive terms in a project's term base. Below this role the term base is read-only. This setting covers terminology only — every other project setting still requires Maintainer."
+      label={t("settings.termbase.label")}
+      description={t("settings.termbase.description")}
       control={
         <div className="flex min-w-44 flex-col items-end gap-1">
           <Select
@@ -77,7 +79,7 @@ export function TermbaseEditSection({ orgSettings, canEdit }: TermbaseEditSectio
             onValueChange={(v) => { if (v) void handleChange(Number(v)) }}
             disabled={!canEdit || busy}
           >
-            <SelectTrigger id="termbase-min-role" aria-label="Who can manage terminology" className="w-44">
+            <SelectTrigger id="termbase-min-role" aria-label={t("settings.termbase.label")} className="w-44">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

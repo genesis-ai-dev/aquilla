@@ -32,6 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { ROLE } from "@/lib/frontier/roles"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 
@@ -50,6 +51,7 @@ const ROSTER_PROGRESS_ROLE_OPTIONS = [
 ]
 
 export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSectionProps) {
+  const { t } = useI18n()
   const { rosterViewMinRole, memberProgressViewMinRole, patch } = orgSettings
 
   const [rosterBusy, setRosterBusy] = useState(false)
@@ -83,16 +85,16 @@ export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSe
 
   return (
     <SettingsGroup
-      label="Visibility"
-      description="Who can see the member roster and per-member progress. Both default to Maintainer."
+      label={t("settings.rosterProgress.groupLabel")}
+      description={t("settings.rosterProgress.groupDescription")}
     >
       <SettingsRow
-        label="Who can view the roster"
-        description="Minimum role required to see the member list and member count, on both the org Members page and each project's Members tab. Below this role, the roster and count are hidden entirely — not shown empty, just absent."
+        label={t("settings.rosterProgress.rosterLabel")}
+        description={t("settings.rosterProgress.rosterDescription")}
         control={
           <FloorSelect
             id="roster-min-role"
-            ariaLabel="Who can view the roster"
+            ariaLabel={t("settings.rosterProgress.rosterLabel")}
             value={rosterViewMinRole}
             disabled={!canEdit || rosterBusy}
             error={rosterError}
@@ -101,12 +103,12 @@ export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSe
         }
       />
       <SettingsRow
-        label="Who can view member progress"
-        description="Minimum role required to see per-member progress/productivity. Independent of roster visibility — a role can see who's on the team without seeing their progress, or vice versa."
+        label={t("settings.rosterProgress.progressLabel")}
+        description={t("settings.rosterProgress.progressDescription")}
         control={
           <FloorSelect
             id="progress-min-role"
-            ariaLabel="Who can view member progress"
+            ariaLabel={t("settings.rosterProgress.progressLabel")}
             value={memberProgressViewMinRole}
             disabled={!canEdit || progressBusy}
             error={progressError}

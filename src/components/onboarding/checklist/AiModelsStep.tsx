@@ -478,7 +478,7 @@ function SizeOrStatus({
     )
   }
   if (status.kind === "downloading") {
-    const { pct } = describeModelDownload(status, meta.sizeMb)
+    const { pct } = describeModelDownload(status, meta.sizeMb, t)
     return (
       <span className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground tabular-nums">
         <Spinner className="h-3 w-3" />
@@ -501,7 +501,8 @@ function DownloadBar({
   status: Extract<ReturnType<typeof useModelStatus>, { kind: "downloading" }>
   sizeMb: number
 }) {
-  const { pct, label } = describeModelDownload(status, sizeMb)
+  const t = useT()
+  const { pct, label } = describeModelDownload(status, sizeMb, t)
   return (
     <div className="mt-1 space-y-0.5">
       <div className="h-1 overflow-hidden rounded-full bg-muted">

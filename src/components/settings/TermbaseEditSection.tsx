@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/select"
 import { ROLE } from "@/lib/frontier/roles"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 
@@ -39,10 +40,12 @@ interface TermbaseEditSectionProps {
   canEdit: boolean
 }
 
-const TERMBASE_ROLE_OPTIONS = [
-  { level: ROLE.CONTRIBUTOR, label: "Contributor (400) — translators manage terms" },
-  { level: ROLE.PROJECT_LEAD, label: "Project lead (500) — default" },
-  { level: ROLE.MAINTAINER, label: "Maintainer (600) — most restrictive" },
+// The closed-trigger text comes from FLOOR_LABEL (short); labelKey is the
+// fuller sentence shown in the open dropdown list, below.
+const TERMBASE_ROLE_OPTIONS: { level: number; labelKey: MessageKey }[] = [
+  { level: ROLE.CONTRIBUTOR, labelKey: "settings.termbase.optionContributor" },
+  { level: ROLE.PROJECT_LEAD, labelKey: "settings.termbase.optionProjectLead" },
+  { level: ROLE.MAINTAINER, labelKey: "settings.termbase.optionMaintainer" },
 ]
 
 export function TermbaseEditSection({ orgSettings, canEdit }: TermbaseEditSectionProps) {
@@ -73,7 +76,7 @@ export function TermbaseEditSection({ orgSettings, canEdit }: TermbaseEditSectio
           <Select
             items={TERMBASE_ROLE_OPTIONS.map((opt) => ({
               value: String(opt.level),
-              label: FLOOR_LABEL[opt.level] ?? opt.label,
+              label: FLOOR_LABEL[opt.level] ?? t(opt.labelKey),
             }))}
             value={String(termbaseEditMinRole)}
             onValueChange={(v) => { if (v) void handleChange(Number(v)) }}
@@ -86,7 +89,7 @@ export function TermbaseEditSection({ orgSettings, canEdit }: TermbaseEditSectio
               <SelectGroup>
                 {TERMBASE_ROLE_OPTIONS.map((opt) => (
                   <SelectItem key={opt.level} value={String(opt.level)}>
-                    {opt.label}
+                    {t(opt.labelKey)}
                   </SelectItem>
                 ))}
               </SelectGroup>

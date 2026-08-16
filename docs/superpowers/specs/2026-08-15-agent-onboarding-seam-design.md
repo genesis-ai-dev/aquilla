@@ -117,7 +117,7 @@ count toward `blockingGaps` because they change the *wording*.
 |---|---|
 | Compute readiness for a project with no run history | Onboarding needs it before any run exists. Today it is only assembled on the overview endpoint's run-bearing path. |
 | Add per-item `filledBy: "human" \| "agent-proposed" \| "imported"` | The ledger must distinguish what the team decided from what the agent proposed, and human edits are already protected from agent overwrite (§4.3). |
-| Expose readiness at org scope (aggregate across projects) | The manager surface (§5) needs "which projects aren't ready," not one project's checklist. |
+| A cheap per-project `autopilotReady` boolean on the projects list | The manager surface (§5) shows a small not-ready icon per project — no aggregate score, no ranking. **Cost constraint:** `computeContextReadiness` needs a full `ProjectContext` (concepts, brief, rules — `project-context.ts` is ~400 lines), so computing it per row is an N+1. This needs a denormalized flag on the project row or one narrow batch query, refreshed when terminology / brief / validated-example counts change. |
 
 `blockingGaps` semantics do **not** change. Adding items to the blocking set later is a
 product decision, not a refactor.
@@ -140,9 +140,11 @@ export interface Mandate {
     | { kind: "schedule"; cron: string }
     | { kind: "on-import" }
     | { kind: "on-approval"; of: "decision" | "memory" }
-  /** Ceiling per cycle. Exhaustion is reported, never silently truncated —
-   *  the same contract RunBudget already honours. */
-  budget: { unitsPerCycle: number; maxSpansPerCycle: number }
+  /** Ceiling per CYCLE (§4.4: 4 weeks, billing-aligned). Exhaustion is
+   *  reported, never silently truncated — the same contract RunBudget honours. */
+  budget: { unitsPerCycle: number }
+  /** Pacing per WAKE (§4.4: one supervisor wake-up). */
+  pacing: { maxSpansPerWake: number }
   /** What it may do alone vs. what must be asked. Staged drafts are already
    *  gated by the changeset approval flow; this governs the tier above. */
   authority: {
@@ -155,8 +157,13 @@ export interface Mandate {
   }
   /** Who receives a Decision Required card. Falls back to project leads. */
   escalateTo: { userIds: number[] } | { role: "project_lead" | "maintainer" }
-  /** Measured, not aspirational. Surfaced next to the mandate itself. */
-  observed: { cyclesRun: number; cyclesEscalated: number }
+  /** Measured, not aspirational. Surfaced next to the mandate itself (§4.4). */
+  observed: {
+    wakes: number
+    wakesEscalated: number
+    decisionsRaised: number
+    decisionsDismissed: number
+  }
 }
 ```
 
@@ -165,9 +172,11 @@ export interface Mandate {
 - A **human-initiated** run needs no mandate. Pressing play stays exactly as it is today.
 - A **supervised** run needs readiness to be honest with the operator, but is not blocked.
 - An **unattended routine** needs `enabled && mode === "act"` and a non-zero budget.
-- `observed.cyclesEscalated / observed.cyclesRun` is the <10% bar from the routine
-  doctrine, displayed wherever the mandate is. A supervisor that escalates on the median
-  cycle has failed its own contract and the number says so.
+- **Two metrics, measuring two different failures** (§4.4). `wakesEscalated / wakes` is the
+  doctrine's <10% bar — how *often* it interrupts. `decisionsDismissed / decisionsRaised`
+  is the quality of those interruptions: a card dismissed without action was make-work by
+  definition. The second is the one that catches "it suggests ten things and half need
+  ignoring, and the decision to ignore is still load on the user."
 - **The "Autopilot Routines" chips** (the Cursor quick-action pattern) are scoped mandates.
   Switching one on grants a specific standing authority; switching it off is the kill
   switch. This is how the feature gets flexed without a settings screen.
@@ -236,6 +245,71 @@ supervisor promoting the right subset of these into Decisions is doing selection
 invention. **Selectivity is the whole game** — the failure mode is ten cards the user must
 mentally discard, which is why the escalation rate is measured on the mandate.
 
+### 4.4 Time units: cycle vs. wake
+
+Two words, because one number is a spending ceiling and the other is a quality bar, and
+they run on different clocks.
+
+| Term | Length | Carries |
+|---|---|---|
+| **Cycle** | 4 weeks, aligned to the planned billing period (usage is already tracked weekly, so 4 weeks is a clean rollup) | `budget.unitsPerCycle` |
+| **Wake** | One supervisor wake-up, processing a wave of spans | `pacing.maxSpansPerWake`; the escalation-rate denominator |
+
+**Why they must not be the same word.** The routine doctrine's bar is "escalates on <10% of
+runs." Measured per *cycle*, a supervisor could raise 200 decision cards inside one 4-week
+period and still score 0% escalation — the metric goes inert exactly where it is supposed
+to bite. Measured per *wake*, it means what it says.
+
+### 4.5 Run status state machine
+
+The engine already has **two orthogonal axes**, and they stay orthogonal:
+
+- **Span phase** — `reading → drafting → checking → staging`, documented at
+  [`types.ts:196`](../../../auth-worker/src/lib/contextual/types.ts:196) as *"live UI only —
+  never a control signal,"* with every phase potentially terminal. Per-span progress.
+- **Run status** — the control axis, on `contextual_runs.status`.
+
+The supervisor does **not** get a third state machine. Its one new state, `waiting`, belongs
+on the run-status axis.
+
+```
+                  ┌──────────────────────────────────────┐
+                  ▼                                      │
+  (start) ──► running ──► pausing ──► paused ────────────┤ resume
+               │  ▲ │                                    │
+     no work   │  │ │  blocking decision raised          │
+     left      │  │ └────────► waiting ──────────────────┘ decision resolved
+               │  │                 │                      (mandate on-approval)
+               ▼  │ cursor has      │ unanswered > N days
+            parked┘ work left       ▼
+               │                  parked
+               ▼
+        done │ failed │ terminated     (terminal; terminate reachable from any state)
+```
+
+| Status | Meaning | Exists? |
+|---|---|---|
+| `running` | A driver holds it; ticks execute | Yes |
+| `pausing` | Pause requested; confirms at the next tick boundary | Yes |
+| `paused` | Human paused it; resumes on human action | Yes |
+| `parked` | **Nothing left to do.** Stays live so drafts remain reviewable | Yes |
+| `waiting` | **Something left to do, but it needs a human.** Blocked on an open Decision | **New** |
+| `done` / `failed` / `terminated` | Terminal | Yes |
+
+**The distinction that matters:** `parked` means nothing left to do; `waiting` means
+something left to do that needs a person. Both are idle; only one is blocked. Conflating
+them is how a blocked run silently looks finished.
+
+**`waiting` is safe to add.** `claimStrandedRuns`
+([`contextual-runs.ts:1726`](../../../db/shared/contextual-runs.ts:1726)) adopts only
+`status = 'running' OR (status = 'parked' AND the cursor has remaining work)`. Because the
+predicate names statuses explicitly, a `waiting` run is not adopted, so it cannot be
+re-ticked in a loop while it waits. **Nothing may add `waiting` to that predicate.**
+
+**`waiting → running`** is the mandate's `{ kind: "on-approval"; of: "decision" }` trigger —
+no new mechanism. **`waiting → parked`** on timeout, so an unanswered decision releases the
+lease and leaves drafts reviewable rather than failing the run. Timeout length is open (§11).
+
 ---
 
 ## 5. Role segmentation
@@ -254,7 +328,7 @@ The fork becomes three roles, each with a different **primary surface** and a di
 |---|---|---|---|
 | **Does the work** (translator) | "it drafts like me" | Editor, with readiness and the same-passage re-run loop | languages; examples via a real validate-eight step |
 | **Runs a project** (operator) | "it runs itself and tells me what it decided" | Ledger + mandate | brief and terminology from org sources; examples routed out |
-| **Manages a team** (manager) | "I can see where everything stands and who's blocked" | Progress + routed decisions across projects | org-scope readiness aggregate |
+| **Manages a team** (manager) | "I can see where everything stands and who's blocked" | Progress + routed decisions across projects | none directly; sees the per-project not-ready icon (§4.1) |
 
 **The eight-approved-examples floor is unavoidable and should be used.** `MIN_EXAMPLES = 8`
 is the threshold below which the performer is imitating almost nothing. A brand-new org has
@@ -387,6 +461,10 @@ excludes worker packages.
   carrying the decision context. Escalation-rate accounting deserves a test that would fail
   if a supervisor started escalating on every cycle, because that is the failure the
   <10% bar exists to catch.
+- **Run status** — the `waiting` transitions from §4.5, and one regression test asserting
+  `claimStrandedRuns` does **not** adopt a `waiting` run. That test encodes why the status
+  exists: without it, a run blocked on a human gets re-adopted and re-ticked, burning budget
+  while achieving nothing.
 - **E2E** — one journey per role from §5, ending at `blockingGaps === 0`. Note the
   single-stack constraint in `e2e/JOURNEYS.md` and the seeded-project helper.
 
@@ -397,11 +475,19 @@ excludes worker packages.
 1. **Who owns a mandate?** Project-scoped as written. An org-level default that projects
    inherit is plausible but adds an inheritance model; deferred until a second project
    needs it.
-2. **What is a "cycle"?** §4.2 assumes cycle = one supervisor wake-up, which may span
-   several spans. The escalation-rate denominator depends on this, so it must be fixed
-   before the metric means anything.
-3. **Does `parked` become the routine's resting state?** A run parks when work is exhausted
-   so drafts stay reviewable, and the sweeper already adopts `running`/`parked` work. Reusing
-   `parked` for "waiting for the next scheduled cycle" is tempting and may overload it.
-4. **Org-scope readiness aggregation** — is it the min, the mean, or a count of projects
-   with blocking gaps? The manager surface needs one answer.
+2. **How long until an unanswered decision times out?** §4.5 decays `waiting → parked` so
+   the lease is released and drafts stay reviewable. The duration is a product call, and it
+   interacts with the escalation metrics: a decision that times out should probably count
+   as neither answered nor dismissed.
+3. **Does a routed decision re-open if the invitee never accepts?** The `routed` resolution
+   marks a decision handled, but an unaccepted invite means nobody is actually on it.
+
+**Resolved 2026-08-15:**
+
+- *What is a cycle?* → §4.4. Cycle is 4 weeks (billing-aligned); the escalation denominator
+  is the **wake**, a separate unit, because a 4-week denominator makes the <10% bar inert.
+- *Does `parked` become the resting state?* → No. §4.5 keeps `parked` as "nothing left to
+  do" and adds `waiting` for "blocked on a human." `claimStrandedRuns` already excludes
+  anything not named in its predicate, so the addition is safe.
+- *Org-scope readiness aggregation?* → No aggregation. A per-project not-ready icon, with
+  the N+1 cost constraint noted in §4.1.

@@ -75,6 +75,23 @@ See also the older `docs/swarm/I18N-TRACES.md` from the AQU-511/AQU-832 waves; i
 - [OPEN] (admin) ~50 strings in `src/components/admin/**`. SKIP: staff-only operational jargon.
 - [OPEN] (server-contract) 91 API error sentences need a code+params contract change server-side.
 
+## Known hazards for any agent in this repo
+
+- [OPEN] (git-stash-shared) **`git stash` is NOT worktree-local.** `refs/stash` is shared
+  across every worktree backed by the same `.git` dir, so with N concurrent swarm agents a
+  `git stash pop` can return ANOTHER agent's stash. WS-E hit this against WS-C mid-task and
+  recovered only by locating its own unreachable stash commit via `git fsck --unreachable` and
+  matching it by file list. **Do not use `git stash` in a swarm worktree** — commit a WIP
+  instead, or use `git worktree`-local checkouts.
+- [OPEN] (case-fold-copy-drift) `no-duplicates.test.ts` case-folds before comparing (deliberate:
+  three of the four target locales have no letter case, so a case-only split is pure duplicate
+  work). Resolving a collision therefore sometimes means **changing visible English copy** to
+  match an existing key. Landed instances: "Project info"→"Project Info", "Draft context"→
+  "Draft Context", "Terminology library"→"Terminology Library", "Project Lead"→"Project lead",
+  "Downloading"→"downloading" (WS-B); "Create Translation Rule"/"Rule Name"/"Create Rule"→
+  sentence case (WS-E); `ProposalReceipt` "done"→"Done" (WS-D). Each is defensible individually;
+  collectively they are unreviewed copy drift and deserve a human read-through.
+
 ## Quality / polish
 
 <!-- [OPEN] (id) description — file:line -->

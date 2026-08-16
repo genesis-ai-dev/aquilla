@@ -85,11 +85,11 @@ Closing 1–3 is WS-SCAN's job; it is the "scan the entire app" half of the requ
 | --- | --- | --- | --- | --- |
 | WS-SCAN | *(none — read-only + `scripts/i18n-scan.ts`)* | — | — | **merged** |
 | WS-A | `org` | 328 | 25 | dispatched |
-| WS-B | `projectSettings` | 243 | 9 | dispatched |
+| WS-B | `projectSettings` | 243 | 9 | **merged** |
 | WS-F | `workspace` (new) | 246 | 48 | dispatched |
-| WS-D | `agent` (new) | 190 | 23 | dispatched |
+| WS-D | `agent` (new) | 190 | 23 | **merged** |
 | WS-C | `settings` (new) | 137 | 14 | dispatched |
-| WS-E | `rules` + `terminology` | 117 | 7 | dispatched |
+| WS-E | `rules` + `terminology` | 117 | 7 | **merged** |
 | WS-T-{th,my,mfa,ar} | *(none — emits JSON)* | full catalogue | — | wave 3 |
 
 ## §4 Merge log
@@ -102,3 +102,8 @@ Closing 1–3 is WS-SCAN's job; it is the "scan the entire app" half of the requ
 | tooling | orchestrator | `scripts/i18n-todo.ts` + `pnpm i18n:todo`. Emits per-locale packets of ONLY untranslated/stale leaves. Measured pre-wave: `th` 229, `my` 234, `mfa` 249, `ar` 303 (Arabic higher — six plural categories) = **1,015 leaves**. Round-trip verified: importing an unfilled packet leaves `messages/th.ts` byte-identical. |
 | wave 1 | orchestrator | all 7 workstreams dispatched concurrently (WS-C/WS-E are disjoint from WS-A/B/D/F in both files and namespaces, so serializing them into a second wave bought nothing) |
 | merged | WS-SCAN | `swarm/ws-scan` @ `cef5a8be`. build ✅ · vitest 14 files/164 tests ✅ (i18n 143 + scan 21). Delivered `scripts/i18n-scan.ts`, `scripts/i18n-scan.test.ts`, `docs/swarm/I18N-COVERAGE-SCAN.md`. **571 findings, 339 `key-it` / 232 policy-exempt.** Orchestrator fixed one TS7053 in its own `i18n-todo.ts` that `tsx` had not caught. |
+| merged | WS-D | `swarm/ws-d` @ `0daf5f48`. 100 keys in `agent.*`, all 190 strings; ~25 resolved by reuse. Used `RichMessage` for 3 mixed-markup sentences rather than gluing fragments. build ✅ · i18n 143 ✅ · 16 component suites 110 ✅ |
+| merged | WS-B | `swarm/ws-b` @ `48eb8ef3`. ~73 keys in `projectSettings.*` (Monday.com trio had zero prior coverage), all 243 strings. build ✅ · i18n 143 ✅ · 67 targeted tests ✅ |
+| merged | WS-E | `swarm/ws-e` @ `f5106cec`. 26 `rules.*` + 40 `terminology.*`, all 117 strings; ~35 by reuse. build ✅ · i18n 143 ✅ · 27 targeted ✅ |
+| conflict | orchestrator | `duplicate-exceptions.ts` — three agents appended independent entries. Resolved as a **union** (both sides kept), per §5 of the skill. |
+| **cross-agent dup** | orchestrator | WS-B `projectSettings.rules.loadingLabel` and WS-E `rules.page.loadingLabel` both minted "Loading rules" — invisible to each other in separate worktrees. Same data, same `LoadingPanel`, so **consolidated to one container-neutral `rules.loadingLabel`** rather than filed as a duplicate exception. This is the predicted cross-worktree collision class; the `no-duplicates` test caught it at integration exactly as designed. |

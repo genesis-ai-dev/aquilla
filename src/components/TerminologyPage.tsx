@@ -61,6 +61,7 @@ import { TerminologyViolationsInbox } from "@/components/TerminologyViolationsIn
 import { TerminologyReviewQueue } from "@/components/TerminologyReviewQueue"
 import { TerminologyMergeDialog } from "@/components/TerminologyMergeDialog"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 // ────────────────────────────────────────────────────────────────────────────
 // Rendering status chip helpers
@@ -138,11 +139,12 @@ interface RenderingRowProps {
 }
 
 function RenderingRow({ rendering, index, onChange, onRemove }: RenderingRowProps) {
+  const { t } = useI18n()
   return (
     <div className="flex items-center gap-2">
       <Input
         value={rendering.rendering}
-        placeholder="rendering"
+        placeholder={t("terminology.conceptDialog.renderingPlaceholder")}
         aria-label={`Rendering ${index + 1} text`}
         className="flex-1"
         onChange={(e) =>
@@ -200,6 +202,7 @@ interface ConceptDialogProps {
 }
 
 function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogProps) {
+  const { t } = useI18n()
   const [sourceTerm, setSourceTerm] = useState(initial?.sourceTerm ?? "")
   const [renderings, setRenderings] = useState<TermRendering[]>(
     initial?.renderings ?? [{ rendering: "", status: "preferred" }],
@@ -276,18 +279,18 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
 
         <FieldGroup className="space-y-4 py-1">
           <Field>
-            <FieldLabel htmlFor="concept-source-term">Source term</FieldLabel>
+            <FieldLabel htmlFor="concept-source-term">{t("terminology.editor.sourceTermLabel")}</FieldLabel>
             <Input
               id="concept-source-term"
               value={sourceTerm}
               onChange={(e) => setSourceTerm(e.target.value)}
-              placeholder="e.g. πνεῦμα"
+              placeholder="e.g. πνεῦμα" // i18n-exempt illustrative source-term example, independent of UI language
               autoFocus
             />
           </Field>
 
           <Field>
-            <FieldLabel>Target renderings</FieldLabel>
+            <FieldLabel>{t("terminology.conceptDialog.targetRenderingsLabel")}</FieldLabel>
             <div className="space-y-2">
               {renderings.map((r, i) => (
                 <RenderingRow
@@ -305,24 +308,24 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
               className="mt-1"
             >
               <Plus className="mr-1 h-3.5 w-3.5" />
-              Add rendering
+              {t("terminology.row.addRendering")}
             </Button>
           </Field>
 
           <Field>
             <FieldLabel htmlFor="concept-notes">
-              Notes <OptionalMark />
+              {t("terminology.common.notesLabel")} <OptionalMark />
             </FieldLabel>
             <Input
               id="concept-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Contextual notes for translators"
+              placeholder={t("terminology.row.notesPlaceholder")}
             />
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="concept-status">Status</FieldLabel>
+            <FieldLabel htmlFor="concept-status">{t("terminology.common.statusLabel")}</FieldLabel>
             <Select
               items={CONCEPT_STATUS_OPTIONS}
               value={status}
@@ -375,6 +378,7 @@ function TermbaseImportDialog({
   onOpenChange,
   onImported,
 }: TermbaseImportDialogProps) {
+  const { t } = useI18n()
   const [tab, setTab] = useState<"csv" | "tbx">("csv")
   const [error, setError] = useState<string | null>(null)
   const [parsing, setParsing] = useState(false)
@@ -415,7 +419,7 @@ function TermbaseImportDialog({
     <Dialog open={open} onOpenChange={(next) => { if (!next) handleClose() }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Import term base</DialogTitle>
+          <DialogTitle>{t("terminology.importDialog.title")}</DialogTitle>
         </DialogHeader>
 
         {/* Format tab strip */}
@@ -450,18 +454,18 @@ function TermbaseImportDialog({
           }}
         >
           {parsing ? (
-            <p className="text-sm text-muted-foreground">Parsing…</p>
+            <p className="text-sm text-muted-foreground">{t("terminology.importDialog.parsing")}</p>
           ) : (
             <>
               <p className="mb-3 text-sm text-muted-foreground">
-                Drop a .{tab} file here, or
+                {t("terminology.importDialog.dropZoneText", { format: tab })}
               </p>
               <Button
                 variant="outline"
                 nativeButton={false}
                 render={<label />}
               >
-                Choose {tab.toUpperCase()} file
+                {t("terminology.importDialog.chooseFileButton", { format: tab.toUpperCase() })}
                 <input
                   type="file"
                   className="hidden"
@@ -471,13 +475,12 @@ function TermbaseImportDialog({
               </Button>
               {tab === "csv" && (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Columns: source_lemma · target_lemma · target_status ·
-                  definition (optional)
+                  {t("terminology.importDialog.csvColumnsHint")}
                 </p>
               )}
               {tab === "tbx" && (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  TBX-Basic and TBX-Min dialects supported
+                  {t("terminology.importDialog.tbxDialectsHint")}
                 </p>
               )}
             </>
@@ -577,6 +580,7 @@ interface LibraryStatsHeaderProps {
 }
 
 function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
+  const { t } = useI18n()
   const stats = useMemo(
     () => computeTerminologyStats(concepts, cells),
     [concepts, cells],
@@ -589,9 +593,9 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
     <div className="rounded-lg border bg-card p-4">
       <div className="mb-3 flex items-center gap-2">
         <BookOpen className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm font-semibold">Library Overview</span>
+        <span className="text-sm font-semibold">{t("terminology.libraryStats.heading")}</span>
         {!hasData && (
-          <span className="text-xs text-muted-foreground">(no active concepts)</span>
+          <span className="text-xs text-muted-foreground">{t("terminology.libraryStats.noActiveConcepts")}</span>
         )}
       </div>
 
@@ -599,7 +603,7 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
         {/* Total active concepts */}
         <div className="rounded-md bg-muted/40 px-3 py-2">
           <p className="text-xs text-muted-foreground">
-            Active concepts
+            {t("terminology.libraryStats.activeConceptsLabel")}
           </p>
           <p className="mt-0.5 text-xl font-bold tabular-nums">{activeConcepts}</p>
         </div>
@@ -607,7 +611,7 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
         {/* % Enforced */}
         <div className="rounded-md bg-muted/40 px-3 py-2">
           <p className="text-xs text-muted-foreground">
-            Enforced
+            {t("terminology.libraryStats.enforcedLabel")}
           </p>
           <p className={cn(
             "mt-0.5 text-xl font-bold tabular-nums",
@@ -626,7 +630,7 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
         {/* % Infringed */}
         <div className="rounded-md bg-muted/40 px-3 py-2">
           <p className="text-xs text-muted-foreground">
-            Infringed
+            {t("terminology.libraryStats.infringedLabel")}
           </p>
           <p className={cn(
             "mt-0.5 text-xl font-bold tabular-nums",
@@ -647,7 +651,7 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
         {/* Cells analyzed */}
         <div className="rounded-md bg-muted/40 px-3 py-2">
           <p className="text-xs text-muted-foreground">
-            Cells analyzed
+            {t("terminology.libraryStats.cellsAnalyzedLabel")}
           </p>
           <p className="mt-0.5 text-xl font-bold tabular-nums text-muted-foreground">
             {stats.totalCells}
@@ -659,7 +663,7 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
       {stats.top5Infringed.length > 0 && (
         <div className="mt-3 border-t pt-3">
           <p className="mb-2 text-xs text-muted-foreground">
-            Most infringed
+            {t("terminology.libraryStats.mostInfringedLabel")}
           </p>
           <div className="flex flex-wrap gap-2">
             {stats.top5Infringed.map((s) => (
@@ -719,6 +723,7 @@ function GatedButton({ allowed, tip, children, ...props }: GatedButtonProps) {
 }
 
 export function TerminologyPage() {
+  const { t } = useI18n()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
 
@@ -1075,7 +1080,7 @@ export function TerminologyPage() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (loading) {
-    return <LoadingPanel label="Loading terminology" className="min-h-screen" />
+    return <LoadingPanel label={t("terminology.page.loadingLabel")} className="min-h-screen" />
   }
 
   // Drill-down view: overlay the detail panel when a concept is selected.
@@ -1103,7 +1108,7 @@ export function TerminologyPage() {
       {/* Header */}
       <header className="flex items-center gap-4 border-b px-4 py-2">
         <BookOpen className="h-4 w-4 text-muted-foreground" />
-        <h2 className="font-semibold">Terminology</h2>
+        <h2 className="font-semibold">{t("nav.sidebarSection.terminology")}</h2>
         <div className="flex-1" />
 
         {/* Export controls */}
@@ -1114,7 +1119,7 @@ export function TerminologyPage() {
             variant="outline"
             onClick={handleExportCsv}
             disabled={concepts.length === 0}
-            aria-label="Export CSV"
+            aria-label={t("terminology.editor.exportCsv")}
           >
             <Download className="mr-1 h-3.5 w-3.5" />
             CSV
@@ -1125,7 +1130,7 @@ export function TerminologyPage() {
             variant="outline"
             onClick={handleExportTbx}
             disabled={concepts.length === 0}
-            aria-label="Export TBX"
+            aria-label={t("terminology.editor.exportTbx")}
           >
             <Download className="mr-1 h-3.5 w-3.5" />
             TBX
@@ -1140,7 +1145,7 @@ export function TerminologyPage() {
           onClick={() => setImportOpen(true)}
         >
           <Upload className="mr-1 h-3.5 w-3.5" />
-          Import
+          {t("nav.workspaceActions.import")}
         </GatedButton>
 
         {/* Add concept */}
@@ -1150,7 +1155,7 @@ export function TerminologyPage() {
           onClick={() => setAddOpen(true)}
         >
           <Plus className="mr-1 h-3.5 w-3.5" />
-          Add concept
+          {t("terminology.page.addConceptButton")}
         </GatedButton>
       </header>
 
@@ -1206,10 +1211,10 @@ export function TerminologyPage() {
             <Button
               variant="outline"
               onClick={() => setMergeOpen(true)}
-              aria-label="Merge duplicate concepts"
+              aria-label={t("terminology.mergeDialog.title")}
               data-testid="merge-duplicates-btn"
             >
-              Merge duplicates
+              {t("terminology.page.mergeDuplicatesButton")}
             </Button>
           )}
         </div>
@@ -1225,7 +1230,7 @@ export function TerminologyPage() {
         ) : tab === "queue" ? (
           <Card>
             <CardHeader>
-              <CardTitle>Review queue</CardTitle>
+              <CardTitle>{t("terminology.page.reviewQueueHeading")}</CardTitle>
             </CardHeader>
             <CardContent>
               <TerminologyReviewQueue
@@ -1239,25 +1244,24 @@ export function TerminologyPage() {
         ) : tab === "candidates" ? (
           <Card>
             <CardHeader>
-              <CardTitle>Candidate terms</CardTitle>
+              <CardTitle>{t("terminology.page.candidateTermsHeading")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <p className="text-xs text-muted-foreground">
-                Mined from{" "}
-                {candidatesReady ? minedCount : Math.min(candidateCorpus.length, CANDIDATE_CORPUS_CEILING)}{" "}
-                source/WIP cell text
-                {(candidatesReady ? minedCount : candidateCorpus.length) === 1 ? "" : "s"}
-                {candidateCorpus.length > CANDIDATE_CORPUS_CEILING
-                  ? ` (capped at the first ${CANDIDATE_CORPUS_CEILING} of ${candidateCorpus.length} loaded cells — corpus exceeds the safety ceiling)`
-                  : " — the full loaded project"}
-                . Mining runs off the main thread. Keyness (G²) uses a derived
-                rest-of-corpus baseline. Promoting adds a suggested concept you
-                can then give renderings.
+                {t("terminology.candidates.minedFromSummary", {
+                  count: candidatesReady ? minedCount : Math.min(candidateCorpus.length, CANDIDATE_CORPUS_CEILING),
+                  note: candidateCorpus.length > CANDIDATE_CORPUS_CEILING
+                    ? t("terminology.candidates.corpusScopeCapped", {
+                        ceiling: CANDIDATE_CORPUS_CEILING,
+                        total: candidateCorpus.length,
+                      })
+                    : t("terminology.candidates.corpusScopeFull"),
+                })}
               </p>
               {candidatesLoading && !candidatesReady ? (
                 <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
                   <Spinner className="size-4" />
-                  Mining candidate terms…
+                  {t("terminology.candidates.miningLabel")}
                 </div>
               ) : (
                 <CandidateTermsPanel
@@ -1271,16 +1275,16 @@ export function TerminologyPage() {
         <Card>
           <CardHeader>
             <CardTitle>
-              Concepts ({concepts.length})
+              {t("terminology.page.conceptsHeading", { count: concepts.length })}
             </CardTitle>
           </CardHeader>
           <CardContent>
             {concepts.length === 0 ? (
               <div className="flex flex-col items-center gap-3 py-12 text-center text-muted-foreground">
                 <BookOpen className="h-8 w-8 opacity-40" />
-                <p className="text-sm">No concepts yet.</p>
+                <p className="text-sm">{t("terminology.page.noConceptsTitle")}</p>
                 <p className="text-xs">
-                  Add a concept manually or import a CSV / TBX file.
+                  {t("terminology.page.noConceptsDescription")}
                 </p>
                 <GatedButton
                   allowed={canManageTermbase}
@@ -1289,17 +1293,17 @@ export function TerminologyPage() {
                   onClick={() => setAddOpen(true)}
                 >
                   <Plus className="mr-1 h-3.5 w-3.5" />
-                  Add first concept
+                  {t("terminology.page.addFirstConceptButton")}
                 </GatedButton>
               </div>
             ) : (
               <>
                 {/* Column header */}
                 <div className="mb-2 hidden items-center gap-3 text-xs text-muted-foreground md:flex">
-                  <span className="w-36 shrink-0">Source term</span>
-                  <span className="flex-1">Renderings</span>
-                  <span className="w-32 shrink-0">Notes</span>
-                  <span className="w-20 shrink-0">Status</span>
+                  <span className="w-36 shrink-0">{t("terminology.editor.sourceTermLabel")}</span>
+                  <span className="flex-1">{t("terminology.page.renderingsColumnHeader")}</span>
+                  <span className="w-32 shrink-0">{t("terminology.common.notesLabel")}</span>
+                  <span className="w-20 shrink-0">{t("terminology.common.statusLabel")}</span>
                   <span className="w-14 shrink-0" />
                 </div>
                 <div className="max-h-[60vh] overflow-y-auto">
@@ -1362,7 +1366,7 @@ export function TerminologyPage() {
       <ConfirmActionDialog
         open={pendingDeleteConceptId !== null}
         onOpenChange={(v) => { if (!v) setPendingDeleteConceptId(null) }}
-        title="Delete concept"
+        title={t("terminology.page.deleteConceptDialogTitle")}
         description={
           pendingDeleteConcept
             ? `Delete "${pendingDeleteConcept.sourceTerm}"? This removes the concept and all its renderings for everyone in the project and cannot be undone.`

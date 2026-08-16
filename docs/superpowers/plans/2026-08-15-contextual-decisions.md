@@ -375,9 +375,9 @@ interface DecisionRow {
   assigned_user_id: number | null
   assigned_invite_id: string | null
   resolution: unknown
-  created_at: string
-  updated_at: string
-  resolved_at: string | null
+  created_at: unknown
+  updated_at: unknown
+  resolved_at: unknown
 }
 
 function parseJson<T>(value: unknown, fallback: T): T {
@@ -390,6 +390,15 @@ function parseJson<T>(value: unknown, fallback: T): T {
     }
   }
   return value as T
+}
+
+/** PGlite (tests) returns timestamptz as a Date; postgres.js (production)
+ *  returns a string. Normalize so the declared `string` type is not a lie.
+ *  Duplicated from contextual-runs.ts:257 on purpose, same as uuidv7. */
+function toIso(v: unknown): string {
+  if (v == null) return ""
+  if (v instanceof Date) return v.toISOString()
+  return new Date(v as string).toISOString()
 }
 
 function mapRow(row: DecisionRow): ContextualDecision {
@@ -408,9 +417,11 @@ function mapRow(row: DecisionRow): ContextualDecision {
     assignedUserId: row.assigned_user_id,
     assignedInviteId: row.assigned_invite_id,
     resolution: parseJson<DecisionResolution | null>(row.resolution, null),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    resolvedAt: row.resolved_at,
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+    // Nullable on purpose: callers distinguish "not resolved" from
+    // "resolved at an unknown time", so this must not collapse to "".
+    resolvedAt: row.resolved_at == null ? null : toIso(row.resolved_at),
   }
 }
 
@@ -437,7 +448,8 @@ export async function raiseDecision(
       input.runId,
       input.fileId,
       input.spanId ?? null,
-      JSON.stringify(input.cellIds ?? []),
+      // NOT JSON.stringify — see the jsonb note on answerDecision in Task 3.
+      input.cellIds ?? [],
       reason,
       input.readinessItem ?? null,
       input.conceptId ?? null,
@@ -657,7 +669,12 @@ export async function answerDecision(
             resolved_at = now(), updated_at = now()
       WHERE id = ? AND status IN ('open','researching')
       RETURNING ${DECISION_COLS}`,
-    [JSON.stringify(resolution), id],
+    // Pass the object, NOT JSON.stringify(resolution). postgres.js learns the
+    // parameter's jsonb type from `?::jsonb` and applies its own serializer;
+    // pre-stringifying makes it encode a second time, storing a jsonb scalar
+    // string instead of an object. See db/shared/contextual-runs.ts:718-721,
+    // and migration 0074, which exists partly to repair rows written that way.
+    [resolution, id],
   )
 }
 

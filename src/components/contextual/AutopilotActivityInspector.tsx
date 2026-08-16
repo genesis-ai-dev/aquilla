@@ -1184,6 +1184,7 @@ export function AutopilotActivityInspector({
                     void Promise.all([
                       loadRuns(),
                       selectedRun?.runId ? loadActivity(selectedRun.runId) : Promise.resolve(),
+                      loadDecisions(),
                     ])
                   }}
                   disabled={loadingRuns || loadingActivity}

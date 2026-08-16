@@ -447,12 +447,12 @@ describe("fetchContextualDecisions", () => {
 describe("actOnContextualDecision", () => {
   it("POSTs the decision action route with the payload", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true }))
-    await actOnContextualDecision(PROJECT_ID, "d1", "answer", { text: "Use formal register" })
+    await actOnContextualDecision(PROJECT_ID, "d1", "answer", { answer: "Use formal register" })
     const { url, init } = lastRequest()
     expect(url).toContain("/api/v2/projects/proj%2F1/contextual/decisions/d1/answer")
     expect(init.method).toBe("POST")
     expect(init.headers).toMatchObject({ Authorization: "Bearer jwt-token" })
-    expect(JSON.parse(init.body as string)).toEqual({ text: "Use formal register" })
+    expect(JSON.parse(init.body as string)).toEqual({ answer: "Use formal register" })
   })
 
   it("defaults to an empty payload when none is given", async () => {

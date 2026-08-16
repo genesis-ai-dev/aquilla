@@ -12,6 +12,7 @@ import {
   listOpenDecisions,
   countOpenDecisions,
   DECISION_REASON_MAX_BYTES,
+  DECISION_ANSWER_MAX_BYTES,
   answerDecision,
   dismissDecision,
   assignDecision,
@@ -166,6 +167,24 @@ describe("decision transitions", () => {
     expect((await answerDecision(db, "nope", "x", 1)).status).toBe("not_found")
   })
 
+  // WHY: mirrors the multibyte reason test above. The route's zod schema
+  // caps the answer at 2000 CHARACTERS, not bytes, so this module's own
+  // byte bound is the only guarantee a non-route caller can rely on. An
+  // all-ASCII answer cannot distinguish a byte limit from a character limit;
+  // "日" is 3 bytes in UTF-8, so 700 repeats is 700 characters but 2100
+  // bytes — over DECISION_ANSWER_MAX_BYTES only if bytes are what's counted.
+  it("rejects an over-long answer measured in bytes, not characters", async () => {
+    const d = await seed()
+    const multiByte = "日".repeat(700)
+    expect(multiByte.length).toBeLessThan(DECISION_ANSWER_MAX_BYTES)
+    await expect(answerDecision(db, d.id, multiByte, 1)).rejects.toThrow(/answer/i)
+
+    // Rejected, so the decision must still be open and unanswered.
+    const read = await getDecision(db, d.id)
+    expect(read?.status).toBe("open")
+    expect(read?.resolution).toBeNull()
+  })
+
   // The invariant the whole design rests on: routing must NOT close anything,
   // or a queue of unanswered questions reports as handled work.
   it("assigning leaves the decision open so anyone can still answer it", async () => {
@@ -181,6 +200,25 @@ describe("decision transitions", () => {
     expect(await countOpenDecisions(db, project)).toBe(1)
     const answered = await answerDecision(db, d.id, "settled", 99)
     expect(answered.status).toBe("ok")
+  })
+
+  // WHY: previously deferred on the belief that the shared `transition()`
+  // helper covered this. It does not — `transition()` only executes the SQL
+  // string it is handed, and the `AND status IN ('open','researching')`
+  // guard is written separately at each call site. Assigning a closed
+  // decision must not silently "succeed" and leave a routing record pointing
+  // at a question nobody can still answer.
+  it("refuses to assign an already-closed decision", async () => {
+    const d = await seed()
+    const dismissed = await dismissDecision(db, d.id)
+    expect(dismissed.status).toBe("ok")
+
+    const t = await assignDecision(db, d.id, { userId: 7 })
+    expect(t.status).toBe("invalid_state")
+
+    const read = await getDecision(db, d.id)
+    expect(read?.status).toBe("dismissed")
+    expect(read?.assignedUserId).toBeNull()
   })
 
   it("supersedes only open decisions and reports how many it closed", async () => {

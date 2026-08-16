@@ -43,6 +43,35 @@ async function seedBareUser(): Promise<string> {
   return jwtFor(username)
 }
 
+/** A member with VIEWER-level access on an EXISTING project — clears the GET
+ *  route's VIEWER floor but not the act route's CONTRIBUTOR floor. Unlike
+ *  seedBareUser, this proves the role gate itself rejects a real member at
+ *  too low a level, not just an unrelated stranger.
+ *
+ *  Owned by a SEPARATE user: resolveProjectRole gives the project's
+ *  `created_by` an implicit level-700 "creator" contribution that wins over
+ *  any lower project_members row (max-wins), so a viewer who also created
+ *  the project would silently resolve to owner-level and this test would
+ *  prove nothing about the gate. */
+async function seedProjectViewer(projectId: string): Promise<string> {
+  const ownerId = ++userSeq
+  await seedUser(ownerId, `owner-${ownerId}`)
+  const userId = ++userSeq
+  const username = `viewer-${userId}`
+  await seedUser(userId, username)
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO projects (id, name, created_by) VALUES (?, ?, ?)",
+  )
+    .bind(projectId, projectId, ownerId)
+    .run()
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, ?, ?, ?)",
+  )
+    .bind(projectId, userId, 100, ownerId)
+    .run()
+  return jwtFor(username)
+}
+
 async function request(path: string, jwt: string, init?: RequestInit): Promise<Response> {
   return app.request(
     path,
@@ -123,6 +152,34 @@ describe("POST /contextual/decisions/:id/:action", () => {
       { method: "POST", body: JSON.stringify({ answer: "b" }) },
     )
     expect(res.status).toBe(409)
+  })
+
+  // WHY: the file header claims "`answer` must be role-gated", but until now
+  // no test actually asserted a 403 — the one bare-user test above hits the
+  // unknown-action branch, which short-circuits before requireRole runs, so
+  // it proves nothing about the gate. This seeds a REAL project member below
+  // the CONTRIBUTOR floor (VIEWER, 100 — sufficient for the GET route but not
+  // this one) and checks both the response and that the row was untouched.
+  it("viewer-level member → 403 on answer, decision unchanged", async () => {
+    const project = `proj-viewer-${Date.now()}`
+    const jwt = await seedProjectViewer(project)
+    const d = await raiseDecision(db, {
+      projectId: project,
+      runId: null,
+      fileId: "f1",
+      reason: "Which rendering?",
+    })
+
+    const res = await request(
+      `/api/v2/projects/${project}/contextual/decisions/${d.id}/answer`,
+      jwt,
+      { method: "POST", body: JSON.stringify({ answer: "council" }) },
+    )
+    expect(res.status).toBe(403)
+
+    const after = await getDecision(db, d.id)
+    expect(after?.status).toBe("open")
+    expect(after?.resolution).toBeNull()
   })
 
   // Guards against a cross-project write (IDOR): answering/dismissing must

@@ -56,6 +56,21 @@ describe("DecisionCard", () => {
     expect(actOnContextualDecision).not.toHaveBeenCalled()
   })
 
+  it("disables Answer on an empty or whitespace-only textarea, and enables it once text is entered", async () => {
+    render(<DecisionCard decision={decision} projectId="p1" onResolved={() => {}} />)
+    const answerButton = screen.getByRole("button", { name: /answer/i })
+    expect(answerButton).toBeDisabled()
+
+    await userEvent.type(screen.getByRole("textbox"), "   ")
+    expect(answerButton).toBeDisabled()
+
+    await userEvent.type(screen.getByRole("textbox"), "Use 'council'")
+    expect(answerButton).not.toBeDisabled()
+
+    // Dismiss must never be gated the same way — it always has something to do.
+    expect(screen.getByRole("button", { name: /not needed/i })).not.toBeDisabled()
+  })
+
   it("offers dismiss as a first-class action", async () => {
     const { actOnContextualDecision } = await import("@/lib/contextual/transport")
     vi.mocked(actOnContextualDecision).mockClear()

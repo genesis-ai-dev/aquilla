@@ -73,6 +73,13 @@ export const OPEN_DECISION_SURFACE_CAP = 3
  *  than truncate: a card cut mid-sentence is worse than no card. */
 export const DECISION_REASON_MAX_BYTES = 2000
 
+/** Same charter as DECISION_REASON_MAX_BYTES, applied to the human's answer.
+ *  Byte-bounded, not character-bounded — the route's zod schema caps
+ *  characters (2000), which is not the same bound for multi-byte text, so
+ *  this is the only guarantee a non-route caller (e.g. the tick executor)
+ *  can rely on. */
+export const DECISION_ANSWER_MAX_BYTES = 2000
+
 const DECISION_COLS = `id, project_id, run_id, file_id, span_id, cell_ids, reason,
   readiness_item, concept_id, blast_radius, status, assigned_user_id,
   assigned_invite_id, resolution, created_at, updated_at, resolved_at`
@@ -273,6 +280,9 @@ export async function answerDecision(
 ): Promise<DecisionTransition> {
   const trimmed = answer.trim()
   if (!trimmed) throw new Error("answer is required")
+  if (new TextEncoder().encode(trimmed).length > DECISION_ANSWER_MAX_BYTES) {
+    throw new Error(`answer exceeds ${DECISION_ANSWER_MAX_BYTES} bytes`)
+  }
   const resolution: DecisionResolution = { kind: "answered", answer: trimmed, byUserId }
   return transition(
     db,

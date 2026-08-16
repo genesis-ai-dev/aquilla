@@ -67,7 +67,7 @@ export function DecisionCard({ decision, projectId, onResolved }: DecisionCardPr
         <Button
           type="button"
           size="sm"
-          disabled={busy}
+          disabled={busy || !answer.trim()}
           onClick={() => {
             const trimmed = answer.trim()
             if (!trimmed) return

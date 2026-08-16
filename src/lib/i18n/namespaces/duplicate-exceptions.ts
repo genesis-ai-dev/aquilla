@@ -709,6 +709,28 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "audiences and often take different phrasing (e.g. a visible label can be " +
     "terser since layout already implies context; an sr-only label must stand " +
     "alone).",
+  "audio.voice.clear":
+    "One of a fixed set of one-word Gemini TTS voice tone descriptions (see " +
+    "audio.voice.bright) — an ADJECTIVE describing how a voice sounds ('distinct, " +
+    "easy to make out'). common.clear is the imperative 'Clear' BUTTON that resets " +
+    "a filter, search box, or field. Adjective vs. imperative verb read " +
+    "differently in most target languages, so one shared string would be wrong " +
+    "for one of the two roles.",
+  "audio.voice.forward":
+    "One of the same fixed set of Gemini TTS voice tone descriptions as " +
+    "audio.voice.clear above — an ADJECTIVE describing a voice's personality " +
+    "('direct, confident'). nav.historyControls.forward is the accessible name of " +
+    "the browser-style forward-navigation arrow button — a NAVIGATION COMMAND, " +
+    "unrelated in meaning. Several target languages would not use the same word " +
+    "for 'go forward' and 'a forward manner of speaking'.",
+  "audio.aiError.unknownTitle":
+    "Fallback popover heading from categorizeAiError()'s heuristic AI-error " +
+    "classifier (TTS/transcription/drafting failures), shown inline beside a " +
+    "retry affordance. error.generic.title is the heading of a full-page error-" +
+    "boundary screen shown when the whole app crashes. Distinct registers — an " +
+    "inline popover heading and a full failure-screen title — mirroring the " +
+    "audio.recordingModal.genericError vs error.generic.title split this " +
+    "namespace's own context notes already document.",
   "org.teamDetail.teamSettingsAriaLabel":
     "Accessible NAME of an icon-only gear Link on the team-detail header that " +
     "NAVIGATES to the team-settings page — a screen reader announces it as the " +

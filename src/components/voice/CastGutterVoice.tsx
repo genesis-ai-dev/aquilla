@@ -41,9 +41,9 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
   // detail, the name is the answer to "who is this circle?".
   const tooltip = explicit
     ? castName && castName !== voice.name
-      ? `${castName} — voiced by ${voice.name}`
+      ? t("audio.castGutter.namedTooltip", { castName, voiceName: voice.name })
       : voice.name
-    : `${voice.name} — default (no one cast yet)`
+    : t("audio.castGutter.defaultTooltip", { voiceName: voice.name })
   const trigger = (
     <span
       className={cn(
@@ -73,7 +73,7 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
               type="button"
               data-testid="gutter-voice"
               data-explicit={String(explicit)}
-              aria-label={`${tooltip}. Choose a character`}
+              aria-label={t("audio.castGutter.chooseCharacterAriaLabel", { tooltip })}
               className="rounded-full opacity-90 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1"
             />
           }

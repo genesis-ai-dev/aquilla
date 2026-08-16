@@ -1474,20 +1474,28 @@ git commit -m "feat(decisions): client transport for the decision channel"
 
 - [ ] **Step 1: Add i18n keys**
 
-In `src/lib/i18n/namespaces/autopilot.ts`, add keys alongside the existing `autopilot.inspector.*` group. Follow that file's existing shape exactly:
+In `src/lib/i18n/namespaces/autopilot.ts`, add these inside the existing `defineNamespace({ keys: { … } })` object, alongside the `autopilot.inspector.*` group. **Interpolation in this codebase is `{count}` (single braces), and count-bearing keys use `plural({ one, other })`** — `plural` is already imported at the top of the file:
 
-```
-autopilot.decisions.heading            → "Needs your decision"
-autopilot.decisions.empty              → "Nothing needs you right now."
-autopilot.decisions.held               → "{{count}} more held until these are settled"
-autopilot.decisions.blastRadius        → "Affects {{count}} later passages"
-autopilot.decisions.answer             → "Answer"
-autopilot.decisions.answerPlaceholder  → "Your decision…"
-autopilot.decisions.dismiss            → "Not needed"
-autopilot.decisions.assign             → "Ask someone else"
+```ts
+"autopilot.decisions.heading": "Needs your decision",
+"autopilot.decisions.empty": "Nothing needs you right now.",
+"autopilot.decisions.held": plural({
+  one: "{count} more question is held until these are settled.",
+  other: "{count} more questions are held until these are settled.",
+}),
+"autopilot.decisions.blastRadius": plural({
+  one: "Affects {count} later passage.",
+  other: "Affects {count} later passages.",
+}),
+"autopilot.decisions.answer": "Answer",
+"autopilot.decisions.answerPlaceholder": "Your decision…",
+"autopilot.decisions.dismiss": "Not needed",
+"autopilot.decisions.assign": "Ask someone else",
 ```
 
-Locale files (`src/lib/i18n/messages/ar.ts`, `my.ts`, `th.ts`) carry translations for existing keys — add the new keys there too, or leave them to fall back if that is this project's convention. Check how the most recent `autopilot.*` key addition was handled and match it.
+`MessageKey` is derived from `src/lib/i18n/messages/en.ts`, which spreads this namespace — so `t()` calls are type-checked automatically once the keys land here. **No change to `en.ts` is needed.** Other locales (`messages/ar.ts`, `my.ts`, `th.ts`) are `Partial` catalogs that fall back to English; leave them alone.
+
+There are namespace guard tests (`src/lib/i18n/namespaces/no-duplicates.test.ts`, `types.test.ts`, `common.test.ts`). Run `pnpm test src/lib/i18n` after this step and before writing the component — a key-shape mistake should surface here, not in the component test.
 
 - [ ] **Step 2: Write the failing test**
 

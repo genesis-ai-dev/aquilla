@@ -18,6 +18,13 @@ import {
   supersedeDecisions,
   expireDecisionsOlderThan,
 } from "../../../db/shared/contextual-decisions"
+import {
+  createRun,
+  getRun,
+  claimStrandedRuns,
+  blockRunOnDecision,
+  unblockRun,
+} from "../../../db/shared/contextual-runs"
 
 const db = env.AQUILLA_PG
 
@@ -196,5 +203,64 @@ describe("decision transitions", () => {
     const future = new Date(Date.now() + 60_000).toISOString()
     expect(await expireDecisionsOlderThan(db, project, future)).toBe(1)
     expect((await getDecision(db, fresh.id))?.status).toBe("expired")
+  })
+})
+
+async function newRun(projectId: string, fileId = "f1") {
+  const created = await createRun(db, { projectId, fileId, targetLang: "" })
+  if (created.status !== "ok") throw new Error(`createRun: ${created.status}`)
+  return created.run
+}
+
+describe("waiting run status", () => {
+  it("blocks a running run on a decision and unblocks it again", async () => {
+    const project = `proj-wait-${Date.now()}`
+    const run = await newRun(project)
+    const d = await seed({ projectId: project, runId: run.id })
+
+    const blocked = await blockRunOnDecision(db, run.id, d.id)
+    expect(blocked.status).toBe("ok")
+    expect((await getRun(db, run.id))?.status).toBe("waiting")
+
+    const unblocked = await unblockRun(db, run.id)
+    expect(unblocked.status).toBe("ok")
+    expect((await getRun(db, run.id))?.status).toBe("running")
+  })
+
+  // THE regression test for §4.5. A waiting run adopted by the sweeper gets
+  // flipped to running and re-ticked forever — burning budget while the human
+  // it is waiting for never gets asked again. The predicate must name statuses
+  // explicitly and must never include 'waiting'.
+  // A waiting run holds its lane, so starting another run on the same file
+  // must report `active_exists` — NOT surface a raw unique-violation error
+  // from Postgres. See Step 3 item 6.
+  it("reports active_exists rather than throwing when a waiting run holds the lane", async () => {
+    const project = `proj-lane-${Date.now()}`
+    const run = await newRun(project)
+    const d = await seed({ projectId: project, runId: run.id })
+    await blockRunOnDecision(db, run.id, d.id)
+
+    const second = await createRun(db, { projectId: project, fileId: "f1", targetLang: "" })
+    expect(second.status).toBe("active_exists")
+    if (second.status !== "active_exists") throw new Error("unreachable")
+    expect(second.runId).toBe(run.id)
+  })
+
+  it("is never adopted by the stranded-run sweeper", async () => {
+    const project = `proj-sweep-${Date.now()}`
+    const run = await newRun(project)
+    const d = await seed({ projectId: project, runId: run.id })
+    await blockRunOnDecision(db, run.id, d.id)
+
+    // Backdate well past any staleness threshold so the ONLY thing keeping it
+    // out of the sweep is its status.
+    await db
+      .prepare(`UPDATE contextual_runs SET updated_at = now() - interval '1 day' WHERE id = ?`)
+      .bind(run.id)
+      .run()
+
+    const claimed = await claimStrandedRuns(db, 50)
+    expect(claimed.map((r) => r.id)).not.toContain(run.id)
+    expect((await getRun(db, run.id))?.status).toBe("waiting")
   })
 })

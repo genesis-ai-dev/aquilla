@@ -177,6 +177,13 @@ export interface Mandate {
   is the quality of those interruptions: a card dismissed without action was make-work by
   definition. The second is the one that catches "it suggests ten things and half need
   ignoring, and the decision to ignore is still load on the user."
+- **Accounting rules for those metrics**, so neither can be gamed by a status change:
+  - **Routing counts as nothing.** An assigned decision is still open (§4.3), so it neither
+    raises nor lowers the dismissal rate until someone actually answers it.
+  - **Expired counts as neither.** A decision that ages out was not answered and was not
+    judged make-work, so it is excluded from both the numerator and the denominator of the
+    dismissal rate. It is worth reporting on its own — a rising expiry count means questions
+    are being asked of people who are not there.
 - **The "Autopilot Routines" chips** (the Cursor quick-action pattern) are scoped mandates.
   Switching one on grants a specific standing authority; switching it off is the kill
   switch. This is how the feature gets flexed without a settings screen.
@@ -201,25 +208,31 @@ export interface Decision {
   reason: string
   /** Which readiness item this gap belongs to, when it maps to one. */
   readinessItem?: "terminology" | "brief" | "examples" | "rules" | "languages"
-  status: "open" | "answered" | "routed" | "researching" | "resolved" | "dismissed"
+  status: "open" | "researching" | "resolved" | "dismissed" | "expired"
+  /** Routing is an ASSIGNMENT, not a resolution — see below. A decision with an
+   *  assignee is still `open`. Absent means "whoever gets to it first." */
+  assignedTo?: { userId?: number; inviteId?: string }
   resolution?: DecisionResolution
 }
 
 export type DecisionResolution =
-  /** The recipient answered it. Feeds back as steering and, where it is a
-   *  durable fact, as a memory proposal. */
+  /** Someone answered it. Feeds back as steering and, where it is a durable
+   *  fact, as a memory proposal. */
   | { kind: "answered"; answer: string; byUserId: number }
-  /** Routed to someone who can answer — an existing member, or an invite that
-   *  carries this decision as its context. */
-  | { kind: "routed"; toUserId?: number; inviteId?: string }
-  /** The agent spends budget researching and proposes a memory (requires
+  /** The agent spent budget researching and proposed a memory (requires
    *  mandate.authority.research). */
   | { kind: "researched"; memoryProposalId: string }
 ```
 
-**The three resolutions are the design.** "Answer it" serves the person doing the work.
-"Route it" serves the manager and is where invite-at-point-of-need lives. "Let the agent
-research it" is what keeps escalation rate under the bar.
+**Two resolutions and one assignment.** A decision closes exactly two ways: a human
+**answers** it, or the agent **researches** it into a memory proposal. **Routing does not
+close anything** — it names who is expected to answer, and the decision stays `open` until
+someone does. If the assignee never shows up, anyone else who joins can still take it, and
+it ages out through the `expired` path like any other unanswered decision.
+
+This is the honest model: routing does not make an interruption go away, it moves who is
+interrupted. Treating it as a resolution would let the escalation metrics report a queue of
+unanswered questions as handled work.
 
 **Routing is the invite trigger.** When a project runner hits a terminology decision they
 personally cannot settle, the card offers to route it to a language expert — and the
@@ -457,10 +470,12 @@ excludes worker packages.
 - **Mandate** — the meaningful tests are authority-boundary tests: a supervisor with
   `research: false` must never call `proposeAgentMemory`; `mode: "record"` must never stage.
   These encode *why* the gate exists, not just that a flag is read.
-- **Decision** — the three resolutions, and specifically that `routed` produces an invite
-  carrying the decision context. Escalation-rate accounting deserves a test that would fail
-  if a supervisor started escalating on every cycle, because that is the failure the
-  <10% bar exists to catch.
+- **Decision** — the two resolutions, plus the assignment case: a routed decision must still
+  read as `open`, and a second user must be able to answer one assigned to someone else.
+  The accounting rules in §4.2 want tests of their own — routing must not move the
+  dismissal rate, and an expired decision must leave it unchanged in both terms. These
+  encode *why* the metrics exist: a supervisor whose queue of unanswered questions reported
+  as handled work would pass the <10% bar while failing the user completely.
 - **Run status** — the `waiting` transitions from §4.5, and one regression test asserting
   `claimStrandedRuns` does **not** adopt a `waiting` run. That test encodes why the status
   exists: without it, a run blocked on a human gets re-adopted and re-ticked, burning budget
@@ -475,12 +490,9 @@ excludes worker packages.
 1. **Who owns a mandate?** Project-scoped as written. An org-level default that projects
    inherit is plausible but adds an inheritance model; deferred until a second project
    needs it.
-2. **How long until an unanswered decision times out?** §4.5 decays `waiting → parked` so
-   the lease is released and drafts stay reviewable. The duration is a product call, and it
-   interacts with the escalation metrics: a decision that times out should probably count
-   as neither answered nor dismissed.
-3. **Does a routed decision re-open if the invitee never accepts?** The `routed` resolution
-   marks a decision handled, but an unaccepted invite means nobody is actually on it.
+2. **How long until an unanswered decision expires?** §4.5 decays `waiting → parked` so the
+   lease is released and drafts stay reviewable. The *duration* is still a product call;
+   how it is counted is settled (§4.2: neither answered nor dismissed).
 
 **Resolved 2026-08-15:**
 
@@ -491,3 +503,8 @@ excludes worker packages.
   anything not named in its predicate, so the addition is safe.
 - *Org-scope readiness aggregation?* → No aggregation. A per-project not-ready icon, with
   the N+1 cost constraint noted in §4.1.
+- *Does a routed decision re-open if the invitee never accepts?* → The question dissolves:
+  routing never closed it. §4.3 makes routing an assignment, so the decision stays `open`
+  and anyone who joins can answer it.
+- *How is a timed-out decision counted?* → Neither answered nor dismissed (§4.2), reported
+  on its own as an expiry count.

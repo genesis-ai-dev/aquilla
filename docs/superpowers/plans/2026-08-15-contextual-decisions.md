@@ -1286,6 +1286,18 @@ decisions.post(
     const gate = await requireRole(c, projectId, ROLE.CONTRIBUTOR)
     if (!gate.ok) return gate.res
 
+    // SCOPE BEFORE MUTATING. Verify the decision belongs to this project
+    // *before* calling any transition — the transitions guard on id + status
+    // only, so acting first and checking after lets a contributor on project A
+    // resolve project B's decision and merely receive a 404 afterwards. Return
+    // the same 404 for "missing" and "other project" so this cannot become an
+    // existence oracle for another project's decision ids.
+    const existing = await getDecision(c.env.AQUILLA_PG, decisionId)
+    if (!existing || existing.projectId !== projectId) {
+      const { body, status } = errorJson("not_found", `decision ${decisionId} not found`, 404)
+      return c.json(body, status)
+    }
+
     let result: DecisionTransition
     if (action === "answer") {
       const parsed = answerSchema.safeParse(await c.req.json().catch(() => ({})))
@@ -1323,15 +1335,14 @@ decisions.post(
       return c.json(body, status)
     }
     if (result.status === "invalid_state") {
+      // Still reachable after the scope check above: someone else may close the
+      // decision between our read and our write. That race is exactly what the
+      // guarded UPDATE exists to catch.
       const { body, status } = errorJson(
         "invalid_state",
         "decision is already closed",
         409,
       )
-      return c.json(body, status)
-    }
-    if (result.decision.projectId !== projectId) {
-      const { body, status } = errorJson("not_found", `decision ${decisionId} not found`, 404)
       return c.json(body, status)
     }
     return c.json({ decision: result.decision })

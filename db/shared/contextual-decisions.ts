@@ -108,9 +108,9 @@ interface DecisionRow {
   assigned_user_id: number | null
   assigned_invite_id: string | null
   resolution: unknown
-  created_at: string
-  updated_at: string
-  resolved_at: string | null
+  created_at: string | Date
+  updated_at: string | Date
+  resolved_at: string | Date | null
 }
 
 function parseJson<T>(value: unknown, fallback: T): T {
@@ -123,6 +123,16 @@ function parseJson<T>(value: unknown, fallback: T): T {
     }
   }
   return value as T
+}
+
+/** postgres.js (production) returns timestamptz as a string; PGlite (tests)
+ *  returns it as a native Date. Deliberately duplicated from
+ *  contextual-runs.ts rather than cross-imported, same as uuidv7 — these
+ *  modules stay independently loadable. */
+function toIso(v: unknown): string {
+  if (v == null) return ""
+  if (v instanceof Date) return v.toISOString()
+  return new Date(v as string).toISOString()
 }
 
 function mapRow(row: DecisionRow): ContextualDecision {
@@ -141,9 +151,9 @@ function mapRow(row: DecisionRow): ContextualDecision {
     assignedUserId: row.assigned_user_id,
     assignedInviteId: row.assigned_invite_id,
     resolution: parseJson<DecisionResolution | null>(row.resolution, null),
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-    resolvedAt: row.resolved_at,
+    createdAt: toIso(row.created_at),
+    updatedAt: toIso(row.updated_at),
+    resolvedAt: row.resolved_at == null ? null : toIso(row.resolved_at),
   }
 }
 
@@ -170,7 +180,13 @@ export async function raiseDecision(
       input.runId,
       input.fileId,
       input.spanId ?? null,
-      JSON.stringify(input.cellIds ?? []),
+      // Pass the structured array across the adapter boundary. postgres.js
+      // learns the parameter's jsonb type from `?::jsonb` and applies its
+      // own JSON serializer; pre-stringifying here would make that
+      // serializer encode the string a second time, producing a jsonb
+      // scalar instead of an array (contextual-runs.ts documents the same
+      // trap; 0074's repair block exists because of it).
+      input.cellIds ?? [],
       reason,
       input.readinessItem ?? null,
       input.conceptId ?? null,

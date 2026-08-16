@@ -1,11 +1,17 @@
+import type { MessageKey } from "@/lib/i18n/messages/en"
+
 export type BriefGroup = "purpose" | "standards"
 export type BriefStatus = "none" | "draft" | "complete"
 
 export interface BriefField {
   id: string
-  label: string
+  /** i18n key for the interview-step/field label — resolve with `t()` at
+   *  render time (BriefBuilder) or `t()` from standalone at call time
+   *  (brief.ts, brief-generator.ts). Never call `t()` at module scope. */
+  labelKey: MessageKey
   group: BriefGroup
-  helperText: string
+  /** i18n key for the field's helper text, same resolution rule as labelKey. */
+  helperTextKey: MessageKey
 }
 
 export interface TranslationBrief {

@@ -3,6 +3,7 @@ import { complete } from "@/lib/completion/completion-service"
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { UsageCallback } from "@/lib/rules/rule-suggester"
+import { t } from "@/lib/i18n/standalone"
 import { assembleL2Markdown } from "./brief"
 import { BRIEF_FIELDS, L1_MAX_CHARS } from "./schema"
 import type { TranslationBrief } from "./types"
@@ -42,13 +43,21 @@ export async function generateL1Summary(
   return text.length > L1_MAX_CHARS ? text.slice(0, L1_MAX_CHARS).trimEnd() : text
 }
 
-const EXTRACT_SYSTEM_PROMPT = `You read an existing translation brief or project-guidelines document and map its content onto a fixed set of fields.
+/**
+ * Built at call time (never module scope) so a locale switch is picked up on
+ * the next extraction — `t()` from standalone resolves the active locale
+ * fresh on every call, but freezes whatever was active at import if hoisted
+ * into a module-level constant.
+ */
+function buildExtractSystemPrompt(): string {
+  return `You read an existing translation brief or project-guidelines document and map its content onto a fixed set of fields.
 
 Output a single JSON object whose keys are ONLY from this list (omit any field the document does not address):
-${BRIEF_FIELDS.map((f) => `- "${f.id}": ${f.label} — ${f.helperText}`).join("\n")}
+${BRIEF_FIELDS.map((f) => `- "${f.id}": ${t(f.labelKey)} — ${t(f.helperTextKey)}`).join("\n")}
 
 Each value is a concise plain-text answer drawn from the document.
 Output ONLY valid JSON — no markdown, no code fences, no commentary.`
+}
 
 const FIELD_IDS = new Set(BRIEF_FIELDS.map((f) => f.id))
 
@@ -81,7 +90,7 @@ export async function extractBriefFromDocument(
     settings: { ...settings, maxTokens: Math.min(settings.maxTokens, 2048), temperature: 0.1 },
     session,
     messages: [
-      { role: "system", content: EXTRACT_SYSTEM_PROMPT },
+      { role: "system", content: buildExtractSystemPrompt() },
       { role: "user", content: `Extract brief fields from this document:\n\n${docText}` },
     ],
   })
@@ -101,17 +110,18 @@ export async function draftField(
   if (!field) return ""
   const known = BRIEF_FIELDS
     .filter((f) => f.id !== fieldId && (draft.parameters[f.id] ?? "").trim())
-    .map((f) => `- ${f.label}: ${draft.parameters[f.id].trim()}`)
+    .map((f) => `- ${t(f.labelKey)}: ${draft.parameters[f.id].trim()}`)
     .join("\n")
+  const fieldLabel = t(field.labelKey)
   const sys = `You are helping a Bible-translation project lead write one section of their translation brief.
 
-Section: ${field.label}
-What it should cover: ${field.helperText}
+Section: ${fieldLabel}
+What it should cover: ${t(field.helperTextKey)}
 
 Write a concise, concrete answer for this section only. No preamble, no heading — just the answer text.`
   const user = known
-    ? `What the lead has said about other sections:\n${known}\n\nNow draft the "${field.label}" section.`
-    : `Draft the "${field.label}" section for a typical project. Keep it concise and editable.`
+    ? `What the lead has said about other sections:\n${known}\n\nNow draft the "${fieldLabel}" section.`
+    : `Draft the "${fieldLabel}" section for a typical project. Keep it concise and editable.`
   const response = await complete({
     settings: { ...settings, maxTokens: Math.min(settings.maxTokens, 512), temperature: 0.4 },
     session,

@@ -94,7 +94,9 @@ export function ValidationQueueCard({ proposal, applyContext, onApplied, canVali
                     className="h-5 shrink-0 px-1.5 text-[10px]"
                     disabled={!canValidate || state === "applying"}
                     onClick={() => void confirm(ev, idx)}
-                    aria-label={`Validate ${ev.display.canonicalRef ?? ev.cellId ?? "cell"}`}
+                    aria-label={t("agent.validation.confirmAriaLabel", {
+                      ref: ev.display.canonicalRef ?? ev.cellId ?? "cell",
+                    })}
                   >
                   {state === "applying" ? (
                     <Spinner className="size-3" />

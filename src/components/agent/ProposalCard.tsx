@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
@@ -107,14 +108,14 @@ function TruncatableText({ text, className }: { text: string; className?: string
   )
 }
 
-const KIND_META: Record<string, { label: string; Icon: typeof Pencil }> = {
-  "target.cell.commit": { label: "Edit", Icon: Pencil },
+const KIND_META: Record<string, { labelKey: MessageKey; Icon: typeof Pencil }> = {
+  "target.cell.commit": { labelKey: "agent.proposal.kind.edit", Icon: Pencil },
   // AQU-890: creates read as "new row" — the label names the lane so a source
   // insertion is never mistaken for a translation.
-  "source.cell.create": { label: "New source row", Icon: Plus },
-  "target.cell.create": { label: "New target row", Icon: Plus },
-  "comment.create": { label: "Comment", Icon: MessageSquare },
-  "cell.validate": { label: "Validate", Icon: ShieldCheck },
+  "source.cell.create": { labelKey: "agent.proposal.kind.newSourceRow", Icon: Plus },
+  "target.cell.create": { labelKey: "agent.proposal.kind.newTargetRow", Icon: Plus },
+  "comment.create": { labelKey: "agent.proposal.kind.comment", Icon: MessageSquare },
+  "cell.validate": { labelKey: "agent.proposal.kind.validate", Icon: ShieldCheck },
 }
 
 /** True for the genesis kinds that mint a row rather than editing one. */
@@ -151,7 +152,8 @@ function StagedEventRow({
     )
   }
 
-  const { label, Icon } = meta
+  const { labelKey, Icon } = meta
+  const label = t(labelKey)
   const body =
     ev.kind === "comment.create" && typeof ev.payload.body === "string"
       ? ev.payload.body
@@ -166,7 +168,7 @@ function StagedEventRow({
             believing the change lands in the file they have open — say so
             explicitly rather than leaving it to a bare verse ref. */}
         {ev.display.fileName && (
-          <AppTooltip content={`This change lands in ${ev.display.fileName}`}>
+          <AppTooltip content={t("agent.proposal.landsInFile", { fileName: ev.display.fileName })}>
             <Badge variant="outline" className="max-w-[12rem] gap-1 px-1.5 py-0 text-[10px]">
               <FileText className="h-2.5 w-2.5 shrink-0" />
               <span className="truncate">{ev.display.fileName}</span>

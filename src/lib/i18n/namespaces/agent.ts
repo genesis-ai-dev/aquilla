@@ -33,6 +33,7 @@ export const agent = defineNamespace({
     "agent.dock.composerPlaceholder": "Ask the agent… (/draft, /check, /find, /status)",
     "agent.dock.attachFileAriaLabel": "Attach file",
     "agent.dock.attachFileTitle": "Attach a file for the agent",
+    "agent.dock.removeAttachmentAriaLabel": "Remove {fileName}",
 
     // ── Rename-suggestions banner (SuggestionBanner) — unrelated feature
     //    (Bible-book / episode file naming), keyed here because this agent
@@ -58,6 +59,16 @@ export const agent = defineNamespace({
     "agent.run.stepFailed": "Step failed",
     "agent.run.capped": "Run hit its step/token cap — results may be partial.",
     "agent.run.tokenUsage": "{promptTokens} prompt + {completionTokens} completion tokens",
+
+    // ── Run timeline tool-chip labels (AgentRunView's TOOL_LABEL) ────────
+    "agent.run.tool.sql": "sql",
+    "agent.run.tool.stage": "stage",
+    "agent.run.tool.docs": "docs",
+    "agent.run.tool.bibleReference": "Bible reference",
+    "agent.run.tool.read": "read",
+    "agent.run.tool.examples": "examples",
+    "agent.run.tool.search": "search",
+    "agent.run.tool.draft": "draft",
 
     // ── Full-screen workbench (AgentWorkbench) ──────────────────────────
     "agent.workbench.newSessionAriaLabel": "New session",
@@ -103,6 +114,14 @@ export const agent = defineNamespace({
     "agent.changeset.changesHeading": "Changes ({count})",
     "agent.changeset.warnings": "Warnings",
     "agent.changeset.digestLabel": "Digest:",
+
+    // ── Staged proposal rows (ProposalCard's KIND_META + destination badge) ──
+    "agent.proposal.kind.edit": "Edit",
+    "agent.proposal.kind.newSourceRow": "New source row",
+    "agent.proposal.kind.newTargetRow": "New target row",
+    "agent.proposal.kind.comment": "Comment",
+    "agent.proposal.kind.validate": "Validate",
+    "agent.proposal.landsInFile": "This change lands in {fileName}",
 
     // ── Sandboxed code activity (CodeActivityBlock) ─────────────────────
     "agent.code.runningAriaLabel": "Code running",
@@ -185,6 +204,14 @@ export const agent = defineNamespace({
     "agent.workingSet.editTooltip": "Edit this draft (or just start typing)",
     "agent.workingSet.editingHelp": "Enter accept & next · Esc revert to draft · Shift+Enter newline",
     "agent.workingSet.draftDiscarded": "draft discarded — cell left untranslated",
+    "agent.workingSet.inFileTooltip": "In {fileName}",
+    "agent.workingSet.editDraftAriaLabel": "Edit draft for {ref}",
+    "agent.workingSet.acceptDraftAriaLabel": "Accept draft for {ref}",
+    "agent.workingSet.rejectDraftAriaLabel": "Reject draft for {ref}",
+    "agent.workingSet.outcome.accepted": "✓ accepted",
+    "agent.workingSet.outcome.edited": "✓ edited & accepted",
+    "agent.workingSet.outcome.rejected": "rejected",
+    "agent.workingSet.outcome.undone": "↩ undone",
 
     // ── Inline passage view (PassageCard) ────────────────────────────────
     "agent.passage.loadingChapterAriaLabel": "Loading chapter",
@@ -198,6 +225,16 @@ export const agent = defineNamespace({
     "agent.validation.confirmedCount": "{done}/{total} confirmed",
     "agent.validation.testimonyNotice":
       "Validation is your testimony — confirm each line yourself. There is no confirm-all.",
+    "agent.validation.confirmAriaLabel": "Validate {ref}",
+
+    // ── Composer slash commands (slash-commands.ts, shown in AgentEmptyState's
+    //    shortcuts list). The /draft, /check, /find, /status TOKENS themselves
+    //    are typed literals the parser matches — never translated; only their
+    //    descriptions below are. ────────────────────────────────────────────
+    "agent.slashCommands.draftDescription": "Draft the untranslated cells in a scope",
+    "agent.slashCommands.checkDescription": "Review translated cells against their source",
+    "agent.slashCommands.findDescription": "Search the project and summarize usage",
+    "agent.slashCommands.statusDescription": "Progress summary for the open file",
 
     // ── Translation-brief interview + summary card (BriefBuilder,
     //    BriefSection) ───────────────────────────────────────────────────
@@ -214,6 +251,45 @@ export const agent = defineNamespace({
     "agent.brief.createBrief": "Create brief",
     "agent.brief.noSummaryYet": "No summary generated yet.",
     "agent.brief.editBrief": "Edit brief",
+
+    // ── Interview field schema (src/lib/brief/schema.ts's BRIEF_FIELDS) —
+    //    field labels + helper text rendered by BriefBuilder, one interview
+    //    step per field, and also read (via t() at call time, never at module
+    //    scope) into the L2 markdown assembly and the brief-generator LLM
+    //    prompts that name each field. ────────────────────────────────────
+    "agent.brief.field.purpose.label": "Purpose / skopos",
+    "agent.brief.field.purpose.helperText":
+      "Why this translation exists and its intended function(s): e.g. evangelistic, liturgical, study, devotional, first Scripture in this language, or a revision.",
+    "agent.brief.field.audience.label": "Audience / addressees",
+    "agent.brief.field.audience.helperText":
+      "Who will use it — age range, literacy level, churched vs. unchurched, and whether they are bilingual with a language of wider communication.",
+    "agent.brief.field.useAndMedium.label": "Intended use & medium",
+    "agent.brief.field.useAndMedium.helperText":
+      "How it will be encountered: read aloud, personal study, liturgy, audio/oral, print, or app. The medium shapes sentence length and naturalness.",
+    "agent.brief.field.motiveSponsor.label": "Motive & sponsor",
+    "agent.brief.field.motiveSponsor.helperText":
+      "Who commissioned the work and the denominational or institutional context behind it. Records the brief's 'motive' in skopos terms.",
+    "agent.brief.field.sourceTexts.label": "Source & base texts",
+    "agent.brief.field.sourceTexts.helperText":
+      "The original-language editions and any front/model translations the team works from.",
+    "agent.brief.field.targetVariety.label": "Target language & variety",
+    "agent.brief.field.targetVariety.helperText":
+      "The specific dialect/variety and any orthography decisions (spelling system, script, punctuation conventions).",
+    "agent.brief.field.registerNaturalness.label": "Register & naturalness",
+    "agent.brief.field.registerNaturalness.helperText":
+      "Formal vs. informal register, and how strongly the team prefers natural target-language phrasing over concordance with the source.",
+    "agent.brief.field.literalness.label": "Level of literalness",
+    "agent.brief.field.literalness.helperText":
+      "Where the translation sits on the formal ↔ functional equivalence spectrum, and when adaptation is acceptable.",
+    "agent.brief.field.keyTerms.label": "Key terms & theological tradition",
+    "agent.brief.field.keyTerms.helperText":
+      "Key-term strategy, denominational constraints, and whether to transliterate or use indigenous terms for difficult concepts.",
+    "agent.brief.field.constraints.label": "Constraints & sensitivities",
+    "agent.brief.field.constraints.helperText":
+      "Cultural, political, or religious taboos and any renderings that must be avoided.",
+    "agent.brief.field.qualityBar.label": "Quality bar",
+    "agent.brief.field.qualityBar.helperText":
+      "What 'good' and 'done' mean for this project — the standard a draft must meet before it is acceptable.",
   },
   context: {
     _context: {
@@ -250,6 +326,13 @@ export const agent = defineNamespace({
           "Native `title` attribute (browser tooltip) on the same attach-file button as " +
           "agent.dock.attachFileAriaLabel — a fuller sentence than the aria-label, shown " +
           "on hover only.",
+      },
+      "agent.dock.removeAttachmentAriaLabel": {
+        description:
+          "Accessible name for the small 'x' icon button that removes one pending " +
+          "file attachment chip from the composer before sending, naming the file " +
+          "being removed.",
+        placeholders: { fileName: "Display name of the attached file being removed." },
       },
       "agent.rename.bannerSuffix": {
         description:
@@ -388,6 +471,13 @@ export const agent = defineNamespace({
           "the total change count in parentheses.",
         placeholders: { count: "Total number of changes in the changeset (may exceed how many are listed below it)." },
       },
+      "agent.proposal.landsInFile": {
+        description:
+          "Tooltip on the destination-file badge of one staged event row in a " +
+          "proposal card (AQU-846), naming the file the change will land in when " +
+          "applied.",
+        placeholders: { fileName: "Display name of the destination file, e.g. 'Genesis.usfm'." },
+      },
       "agent.code.runningAriaLabel": {
         description:
           "Accessible name for the spinner shown while a sandboxed code-execution step " +
@@ -515,6 +605,30 @@ export const agent = defineNamespace({
           "'Esc', and 'Shift+Enter' are literal key names — keep them untranslated, in " +
           "Latin script; translate only the words describing what each key does.",
       },
+      "agent.workingSet.inFileTooltip": {
+        description:
+          "Tooltip on a working-set row's destination-file name (AQU-846), naming " +
+          "the file the accepted draft will land in.",
+        placeholders: { fileName: "Display name of the destination file." },
+      },
+      "agent.workingSet.editDraftAriaLabel": {
+        description:
+          "Accessible name for the inline textarea editing one working-set row's " +
+          "draft text in place.",
+        placeholders: { ref: "The row's canonical reference, or its cell id when no reference is known." },
+      },
+      "agent.workingSet.acceptDraftAriaLabel": {
+        description:
+          "Accessible name for the per-row Accept button in the working-set grid, " +
+          "naming which row it accepts.",
+        placeholders: { ref: "The row's canonical reference, or its cell id when no reference is known." },
+      },
+      "agent.workingSet.rejectDraftAriaLabel": {
+        description:
+          "Accessible name for the per-row Reject button in the working-set grid, " +
+          "naming which row it rejects.",
+        placeholders: { ref: "The row's canonical reference, or its cell id when no reference is known." },
+      },
       "agent.passage.loadingChapterAriaLabel": {
         description:
           "Accessible name for the spinner shown while an inline passage card is " +
@@ -541,6 +655,15 @@ export const agent = defineNamespace({
         placeholders: {
           done: "How many validations have been confirmed so far.",
           total: "Total number of validations staged in this queue.",
+        },
+      },
+      "agent.validation.confirmAriaLabel": {
+        description:
+          "Accessible name for the per-row Confirm/Validate button in the " +
+          "validation queue, naming which cell it validates — one human click per " +
+          "row, deliberately no confirm-all.",
+        placeholders: {
+          ref: "The row's canonical reference, a truncated cell id, or the literal fallback word 'cell' when neither is known — not translated.",
         },
       },
     },

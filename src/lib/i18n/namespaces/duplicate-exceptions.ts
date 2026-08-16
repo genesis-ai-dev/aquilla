@@ -709,6 +709,56 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "audiences and often take different phrasing (e.g. a visible label can be " +
     "terser since layout already implies context; an sr-only label must stand " +
     "alone).",
+  "agent.workingSet.outcome.rejected":
+    "Lower-case state-stripe label on a decided working-set row (WorkingSetPanel), " +
+    "sibling of its own '✓ accepted'/'✓ edited & accepted'/'↩ undone' outcome labels " +
+    "on the identical stripe — a per-row record of what the reviewer just did with " +
+    "one draft cell. autopilot.evidence.status.rejected is a capitalized value of the " +
+    "unrelated, fixed evidence-review lifecycle enum (Proposed/Applied/Rejected/" +
+    "Superseded/Approved/Archived/Unknown) badging a piece of AI-gathered evidence in " +
+    "the Autopilot readiness inspector — the same heading/badge-vs-lowercase-status " +
+    "split already documented elsewhere in this file (e.g. org.projectOverview." +
+    "columnApproved vs autopilot.evidence.status.approved).",
+  "agent.run.tool.stage":
+    "Lower-case, font-mono technical label naming the 'emit' TOOL the agent called in " +
+    "one run-timeline chip (AgentRunView) — staging draft events for review, sibling " +
+    "of the equally terse 'sql'/'docs'/'read'/'examples'/'draft' tool-kind labels on " +
+    "identical chips, the same class of split already documented for agent.run.tool." +
+    "search/draft just below. importExport.dcs.stageFilterLabel is a capitalized " +
+    "form-field LABEL above a picker choosing a DCS repository RELEASE MATURITY " +
+    "(Latest/Pre-release/Production) in the import flow — an unrelated content-" +
+    "pipeline concept that happens to share the English word.",
+  "agent.run.tool.draft":
+    "Lower-case, font-mono technical label naming which TOOL the agent called in one " +
+    "run-timeline chip (AgentRunView), sibling of the equally terse 'sql'/'docs'/" +
+    "'read'/'examples'/'search' tool-kind labels on identical chips — the same class " +
+    "of split already documented for agent.run.tool.search just below. " +
+    "autopilot.inspector.review.draftTitle is a capitalized panel/section TITLE " +
+    "heading a single AI-drafted cell proposal in the Autopilot review inspector. A " +
+    "lower-case technical chip label and a capitalized section heading take " +
+    "different forms in most languages.",
+  "agent.run.tool.search":
+    "Lower-case, font-mono technical label naming which TOOL the agent called in one " +
+    "run-timeline chip (AgentRunView), sibling of the equally terse 'sql'/'docs'/" +
+    "'read'/'examples'/'draft' tool-kind labels on identical chips. nav.search is the " +
+    "capitalized nav-sidebar destination and dock tab-rail label that opens the " +
+    "project's search feature — a navigation entry, not a tool-call badge. Case and " +
+    "register both differ for the same reason: one names a place you navigate to, the " +
+    "other names a machine-readable kind on a technical chip.",
+  "agent.proposal.kind.edit":
+    "Badge naming the KIND of a staged agent-authored proposal row ('target.cell." +
+    "commit') in ProposalCard, a noun-phrase operation name read alongside sibling " +
+    "kind badges 'New source row'/'New target row'/'Comment'/'Validate' on the same " +
+    "row. common.edit is the imperative Edit button that starts editing a cell. The " +
+    "same operation-name-vs-imperative-button split already documented for " +
+    "nav.outbox.eventEdit above — a different feature (the outbox diagnostics feed) " +
+    "with the identical register distinction.",
+  "agent.proposal.kind.validate":
+    "Badge naming the KIND of a staged agent-authored proposal row ('cell.validate') " +
+    "in ProposalCard, the same noun-phrase operation-name register as its sibling " +
+    "kind badges on that row ('Edit', 'Comment', …). editor.selection.validate is " +
+    "the imperative toolbar button that performs the sign-off action itself. The " +
+    "same split already documented for nav.outbox.eventValidate above.",
   "org.teamDetail.teamSettingsAriaLabel":
     "Accessible NAME of an icon-only gear Link on the team-detail header that " +
     "NAVIGATES to the team-settings page — a screen reader announces it as the " +

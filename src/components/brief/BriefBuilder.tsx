@@ -71,8 +71,8 @@ export function BriefBuilder(props: BriefBuilderProps) {
 
         {field ? (
           <div className="space-y-2">
-            <div className="text-sm font-medium">{field.label}</div>
-            <p className="text-xs text-muted-foreground">{field.helperText}</p>
+            <div className="text-sm font-medium">{t(field.labelKey)}</div>
+            <p className="text-xs text-muted-foreground">{t(field.helperTextKey)}</p>
             <Textarea
               value={params[field.id] ?? ""}
               readOnly={!canEdit}

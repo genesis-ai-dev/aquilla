@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import { pendingRows, proposalRowKey, type WorkingSetRow } from "@/lib/agent/working-set"
 
 const STATUS_STYLE: Record<string, string> = {
@@ -274,11 +275,11 @@ interface RowViewProps {
   onJumpToCell?: (fileId: string, cellId: string) => void
 }
 
-const OUTCOME_LABEL: Record<string, string> = {
-  accepted: "✓ accepted",
-  edited: "✓ edited & accepted",
-  rejected: "rejected",
-  undone: "↩ undone",
+const OUTCOME_LABEL_KEY: Record<string, MessageKey> = {
+  accepted: "agent.workingSet.outcome.accepted",
+  edited: "agent.workingSet.outcome.edited",
+  rejected: "agent.workingSet.outcome.rejected",
+  undone: "agent.workingSet.outcome.undone",
 }
 
 const WorkingSetRowView = memo(function WorkingSetRowView({
@@ -305,8 +306,9 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
     }
   }, [editing])
 
-  const stateLabel = row.outcome
-    ? OUTCOME_LABEL[row.outcome]
+  const outcomeLabelKey = row.outcome ? OUTCOME_LABEL_KEY[row.outcome] : undefined
+  const stateLabel = outcomeLabelKey
+    ? t(outcomeLabelKey)
     : isPending
       ? "draft"
       : row.status
@@ -342,7 +344,7 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
         {/* AQU-846: the destination file, so an accept never lands somewhere
             the user didn't expect. */}
         {row.fileName && (
-          <AppTooltip content={`In ${row.fileName}`}>
+          <AppTooltip content={t("agent.workingSet.inFileTooltip", { fileName: row.fileName })}>
             <span className="max-w-full truncate text-[10px] text-muted-foreground">
               {row.fileName}
             </span>
@@ -397,7 +399,7 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
                     e.stopPropagation()
                   }
                 }}
-                aria-label={`Edit draft for ${row.ref ?? row.cellId}`}
+                aria-label={t("agent.workingSet.editDraftAriaLabel", { ref: row.ref ?? row.cellId })}
                 className="w-full resize-none rounded-md border border-sky-400 bg-background px-2 py-1.5 text-xs leading-relaxed shadow-[0_0_0_3px_rgba(56,189,248,0.12)] outline-none"
               />
             ) : (
@@ -435,7 +437,7 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
                   className="h-5 px-1.5 text-[10px]"
                   disabled={busy || !onAccept}
                   onClick={onAccept}
-                  aria-label={`Accept draft for ${row.ref ?? row.cellId}`}
+                  aria-label={t("agent.workingSet.acceptDraftAriaLabel", { ref: row.ref ?? row.cellId })}
                 >
                   <Check data-icon="inline-start" />
                   {t("agent.accept")}
@@ -446,7 +448,7 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
                   className="h-5 px-1.5 text-[10px] text-muted-foreground"
                   disabled={!onReject}
                   onClick={onReject}
-                  aria-label={`Reject draft for ${row.ref ?? row.cellId}`}
+                  aria-label={t("agent.workingSet.rejectDraftAriaLabel", { ref: row.ref ?? row.cellId })}
                 >
                   <X data-icon="inline-start" />
                   {t("agent.reject")}

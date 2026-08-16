@@ -37,6 +37,11 @@ const CATALOG: AdminBillingPlans = {
     talkToUsWordsPerYear: 25_000_000,
     stripePriceField: "price_field",
     stripePriceAddon: "price_addon",
+    wordsPerCredit: 100,
+    exploreCreditsPerCycle: 100,
+    fieldCreditsPerCycle: 1_000,
+    addonCredits: 1_000,
+    enterpriseCreditsPerLanguagePerYear: 10_000,
   },
   version: 1,
   stripeConfigured: false,
@@ -56,6 +61,15 @@ const ORG: AdminBillingOrg = {
   hardCapWords: null,
   periodStart: null,
   periodEnd: null,
+  creditsUsed: 120,
+  allowanceCredits: 1_000,
+  remainingCredits: 880,
+  complimentaryCredits: 0,
+  includedCredits: 1_000,
+  languageCount: 1,
+  includedCreditsOverride: null,
+  billedLanguageCountOverride: null,
+  wordsPerCredit: 100,
 }
 
 beforeEach(() => {
@@ -72,7 +86,7 @@ describe("AdminBillingSection", () => {
     render(<AdminBillingSection jwt="jwt" />)
     expect(await screen.findByTestId("admin-billing")).toBeDefined()
     expect(screen.getByTestId("save-field-plan")).toBeDefined()
-    expect(screen.getByTestId("admin-words-1").textContent).toMatch(/12,000/)
+    expect(screen.getByTestId("admin-words-1").textContent).toMatch(/120/)
   })
 
   it("saves catalog amounts as cents", async () => {
@@ -83,7 +97,8 @@ describe("AdminBillingSection", () => {
     expect(mockSave.mock.calls[0][1]).toMatchObject({
       ifMatchVersion: 1,
       priceCents: 50_000,
-      includedWords: 100_000,
+      fieldCreditsPerCycle: 1_000,
+      wordsPerCredit: 100,
     })
   })
 

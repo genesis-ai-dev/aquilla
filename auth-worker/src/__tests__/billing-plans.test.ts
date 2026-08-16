@@ -3,10 +3,16 @@ import { subscriptionFromStripeObject } from "../lib/billing/apply"
 import {
   FIELD_PLAN,
   checkWordAllowance,
+  countDistinctTargetLanes,
   countWords,
+  creditsToWords,
+  enterpriseCycleCredits,
   fieldAllowanceWords,
+  normalizeBillingPlan,
+  periodAllowanceCredits,
   periodAllowanceWords,
   shouldTalkToUs,
+  wordsToCredits,
 } from "../lib/billing/plans"
 
 describe("Field Plan math", () => {
@@ -20,8 +26,8 @@ describe("Field Plan math", () => {
     expect(fieldAllowanceWords(1)).toBe(200_000)
   })
 
-  it("does not cap unpaid orgs", () => {
-    expect(periodAllowanceWords({ plan: "none", addonPacks: 0, hardCapWords: null })).toBeNull()
+  it("gives Explore a 10,000-word cycle allowance and still allows unpaid math through a null cap", () => {
+    expect(periodAllowanceWords({ plan: "none", addonPacks: 0, hardCapWords: null })).toBe(10_000)
     expect(checkWordAllowance(9_999_999, null, "none").ok).toBe(true)
   })
 
@@ -37,6 +43,42 @@ describe("Field Plan math", () => {
 
   it("counts words in source text", () => {
     expect(countWords("In the beginning God created the heavens")).toBe(7)
+  })
+})
+
+describe("agent credits (APW is internal)", () => {
+  it("converts at 100 agent-processed words per credit", () => {
+    expect(wordsToCredits(100)).toBe(1)
+    expect(wordsToCredits(10_000)).toBe(100)
+    expect(creditsToWords(1_000)).toBe(100_000)
+  })
+
+  it("gives Explore 100 credits/cycle, Field 1,000, Enterprise 769 per language", () => {
+    expect(normalizeBillingPlan("none")).toBe("explore")
+    expect(periodAllowanceCredits({ plan: "explore", addonPacks: 0, languageCount: 1 })).toBe(100)
+    expect(periodAllowanceCredits({ plan: "field", addonPacks: 1, languageCount: 1 })).toBe(2_000)
+    expect(enterpriseCycleCredits(1)).toBe(769)
+    expect(periodAllowanceCredits({ plan: "enterprise", addonPacks: 0, languageCount: 2 })).toBe(1_538)
+  })
+
+  it("honors a per-org included-credits override", () => {
+    expect(
+      periodAllowanceCredits({
+        plan: "field",
+        addonPacks: 0,
+        languageCount: 1,
+        includedCreditsOverride: 50,
+      }),
+    ).toBe(50)
+  })
+
+  it("counts distinct active target-language lanes", () => {
+    expect(
+      countDistinctTargetLanes([
+        { targetLanguage: "fr", targetLanes: ["es"], archivedLanes: ["es"] },
+        { targetLanguage: "fr", targetLanes: ["pt"] },
+      ]),
+    ).toBe(2)
   })
 })
 

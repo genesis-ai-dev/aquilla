@@ -22,7 +22,7 @@ describe("BillingUsagePanel", () => {
     expect(screen.queryByTestId("billing-usage-panel")).toBeNull()
   })
 
-  it("renders word usage for a maintainer", async () => {
+  it("renders agent-credit usage for a maintainer", async () => {
     mockGet.mockResolvedValueOnce({
       plan: "field",
       status: "active",
@@ -36,6 +36,11 @@ describe("BillingUsagePanel", () => {
       remainingWords: 75000,
       hardCapWords: null,
       talkToUs: false,
+      creditsUsed: 250,
+      allowanceCredits: 1000,
+      remainingCredits: 750,
+      includedCredits: 1000,
+      wordsPerCredit: 100,
       canSubscribe: false,
       canBuyAddon: true,
       canManage: true,
@@ -48,6 +53,8 @@ describe("BillingUsagePanel", () => {
         addonWords: 100000,
         addonPriceCents: 20000,
         talkToUsWordsPerYear: 25000000,
+        fieldCreditsPerCycle: 1000,
+        addonCredits: 1000,
       },
     })
     render(
@@ -56,6 +63,7 @@ describe("BillingUsagePanel", () => {
       </MemoryRouter>,
     )
     await waitFor(() => expect(screen.getByTestId("billing-usage-panel")).toBeDefined())
-    expect(screen.getByText(/25,000/)).toBeDefined()
+    expect(screen.getByText(/250/)).toBeDefined()
+    expect(screen.queryByText(/25,000/)).toBeNull()
   })
 })

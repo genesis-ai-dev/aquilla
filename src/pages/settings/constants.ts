@@ -39,7 +39,7 @@ export const ORG_SETTINGS_SECTION_DESCRIPTIONS: Record<OrgSettingsSection, strin
   security:
     "Who can see members and who can export, assign, and manage terms.",
   billing:
-    "Field Plan subscription, AI word allowance, and add-on packs for this organization.",
+    "Explore / Field / Enterprise agent credits for this organization.",
   providers:
     "Org-level keys act as a baseline for everyone in this organization. Projects or individuals can override with their own.",
   monday:

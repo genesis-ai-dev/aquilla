@@ -2,9 +2,9 @@ import { defineNamespace } from "./types"
 
 export const billing = defineNamespace({
   keys: {
-    "billing.usage.aiWords": "AI words",
+    "billing.usage.aiWords": "Agent credits",
     "billing.usage.open": "Billing",
-    "billing.usage.words": "words",
+    "billing.usage.words": "credits",
     "billing.loading": "Loading billing…",
     "billing.maintainersOnly": "Billing is visible to organization maintainers.",
     "billing.plan.group": "Plan",
@@ -12,10 +12,10 @@ export const billing = defineNamespace({
     "billing.plan.field": "Field Plan",
     "billing.plan.manage": "Manage",
     "billing.plan.manageHelp": "Update the card, invoices, or cancel in Stripe.",
-    "billing.usage.period": "AI words this period",
+    "billing.usage.period": "Agent credits this period",
     "billing.usage.label": "Usage",
-    "billing.usage.unpaidHelp": "Unpaid orgs are not capped. Subscribe to get a 100,000-word allowance every four weeks.",
-    "billing.addon.prompt": "Need more words?",
+    "billing.usage.unpaidHelp": "Explore includes a cycle of agent credits. Field Plan checkout is coming soon.",
+    "billing.addon.prompt": "Need more credits?",
     "billing.contact.prompt": "Talk to us",
     "billing.contact.email": "Email support",
     "billing.settings.title": "Organization settings",
@@ -33,7 +33,7 @@ export const billing = defineNamespace({
   },
   context: {
     _context: {
-      description: "Organization billing, word usage, plan controls, and the organization-settings navigation that exposes them.",
+      description: "Organization billing, agent-credit usage, plan controls, and the organization-settings navigation that exposes them.",
     },
   },
   surfaces: [],

@@ -284,6 +284,11 @@ export interface AdminFieldPlan {
   talkToUsWordsPerYear: number
   stripePriceField: string | null
   stripePriceAddon: string | null
+  wordsPerCredit: number
+  exploreCreditsPerCycle: number
+  fieldCreditsPerCycle: number
+  addonCredits: number
+  enterpriseCreditsPerLanguagePerYear: number
 }
 
 export interface AdminBillingPlans {
@@ -296,7 +301,7 @@ export interface AdminBillingPlans {
 export interface AdminBillingOrg {
   orgId: number
   orgName: string | null
-  plan: "none" | "field" | "enterprise"
+  plan: "none" | "explore" | "field" | "enterprise"
   status: string
   wordsUsed: number
   allowanceWords: number | null
@@ -306,6 +311,15 @@ export interface AdminBillingOrg {
   hardCapWords: number | null
   periodStart: string | null
   periodEnd: string | null
+  creditsUsed: number
+  allowanceCredits: number
+  remainingCredits: number
+  complimentaryCredits: number
+  includedCredits: number
+  languageCount: number
+  includedCreditsOverride: number | null
+  billedLanguageCountOverride: number | null
+  wordsPerCredit: number
 }
 
 export interface FieldPlanPatch {
@@ -314,6 +328,11 @@ export interface FieldPlanPatch {
   includedWords?: number
   addonWords?: number
   talkToUsWordsPerYear?: number
+  wordsPerCredit?: number
+  exploreCreditsPerCycle?: number
+  fieldCreditsPerCycle?: number
+  addonCredits?: number
+  enterpriseCreditsPerLanguagePerYear?: number
   ifMatchVersion: number
 }
 
@@ -345,7 +364,13 @@ export async function getAdminBillingOrgs(jwt: string): Promise<AdminBillingOrg[
 export async function patchAdminBillingOrg(
   jwt: string,
   orgId: number,
-  patch: { plan?: AdminBillingOrg["plan"]; complimentaryWords?: number; hardCapWords?: number | null },
+  patch: {
+    plan?: AdminBillingOrg["plan"]
+    complimentaryWords?: number
+    hardCapWords?: number | null
+    includedCredits?: number | null
+    billedLanguageCount?: number | null
+  },
 ): Promise<void> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/billing/org/${encodeURIComponent(String(orgId))}`, {
     method: "PATCH",

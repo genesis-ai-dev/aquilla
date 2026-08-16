@@ -23,21 +23,27 @@ vi.mock("@/lib/sync/billing", () => ({
 const mockGet = vi.mocked(getOrgBilling)
 
 const unpaid: OrgBilling = {
-  plan: "none",
+  plan: "explore",
   status: "none",
   periodStart: null,
   periodEnd: null,
   wordsUsed: 1200,
   trailingYearWords: 1200,
   addonPacks: 0,
-  includedWords: 0,
-  allowanceWords: null,
-  remainingWords: null,
+  includedWords: 10_000,
+  allowanceWords: 10_000,
+  remainingWords: 8_800,
   hardCapWords: null,
   talkToUs: false,
+  creditsUsed: 12,
+  allowanceCredits: 100,
+  remainingCredits: 88,
+  includedCredits: 100,
+  wordsPerCredit: 100,
   canSubscribe: true,
   canBuyAddon: false,
   canManage: false,
+  checkoutEnabled: false,
   stripeConfigured: true,
   fieldPlan: {
     name: "Field Plan",
@@ -47,6 +53,11 @@ const unpaid: OrgBilling = {
     addonWords: 100_000,
     addonPriceCents: 20_000,
     talkToUsWordsPerYear: 25_000_000,
+    wordsPerCredit: 100,
+    exploreCreditsPerCycle: 100,
+    fieldCreditsPerCycle: 1_000,
+    addonCredits: 1_000,
+    enterpriseCreditsPerLanguagePerYear: 10_000,
   },
 }
 
@@ -66,12 +77,16 @@ function renderBilling() {
 }
 
 describe("OrgSettingsBilling", () => {
-  it("shows the Field Plan subscribe CTA for an unpaid org", async () => {
+  it("shows Explore plus a Coming soon Field Plan button", async () => {
     mockGet.mockResolvedValueOnce(unpaid)
     renderBilling()
-    expect(await screen.findByTestId("subscribe-field-plan")).toBeDefined()
-    expect(screen.getByTestId("billing-plan").textContent).toMatch(/No paid plan/i)
-    expect(screen.getByTestId("billing-usage").textContent).toMatch(/1,200/)
+    const subscribe = await screen.findByTestId("subscribe-field-plan")
+    expect(subscribe).toBeDefined()
+    expect((subscribe as HTMLButtonElement).disabled).toBe(true)
+    expect(subscribe.textContent).toMatch(/Coming soon/i)
+    expect(screen.getByTestId("billing-plan").textContent).toMatch(/Explore/i)
+    expect(screen.getByTestId("billing-usage").textContent).toMatch(/12/)
+    expect(screen.getByTestId("billing-usage").textContent).not.toMatch(/1,200/)
   })
 
   it("shows add-on + portal controls on an active Field Plan", async () => {
@@ -83,6 +98,10 @@ describe("OrgSettingsBilling", () => {
       allowanceWords: 100_000,
       remainingWords: 20_000,
       includedWords: 100_000,
+      creditsUsed: 800,
+      allowanceCredits: 1_000,
+      remainingCredits: 200,
+      includedCredits: 1_000,
       canSubscribe: false,
       canBuyAddon: true,
       canManage: true,

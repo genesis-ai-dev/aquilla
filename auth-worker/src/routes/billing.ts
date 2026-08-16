@@ -54,7 +54,7 @@ billing.get("/orgs/:orgId/billing", authMiddleware, async (c) => {
   const catalog = resolveFieldPlan((await loadPlatformSettings(c.env)).settings.fieldPlan, c.env)
   const snapshot = await readWordSnapshot(c.env.AQUILLA_PG, orgId, catalog)
   return c.json({
-    plan: snapshot.plan,
+    plan: snapshot.plan === "none" ? "explore" : snapshot.plan,
     status: snapshot.status,
     periodStart: snapshot.periodStart,
     periodEnd: snapshot.periodEnd,
@@ -67,9 +67,17 @@ billing.get("/orgs/:orgId/billing", authMiddleware, async (c) => {
     remainingWords: snapshot.remaining,
     hardCapWords: snapshot.hardCapWords,
     talkToUs: snapshot.talkToUs,
-    canSubscribe: snapshot.plan === "none" && stripeConfigured(c.env),
+    creditsUsed: snapshot.creditsUsed,
+    allowanceCredits: snapshot.allowanceCredits,
+    remainingCredits: snapshot.remainingCredits,
+    complimentaryCredits: snapshot.complimentaryCredits,
+    includedCredits: snapshot.includedCredits,
+    languageCount: snapshot.languageCount,
+    wordsPerCredit: snapshot.wordsPerCredit,
+    canSubscribe: (snapshot.plan === "none" || snapshot.plan === "explore") && stripeConfigured(c.env),
     canBuyAddon: snapshot.plan === "field" && !snapshot.talkToUs && stripeConfigured(c.env),
     canManage: Boolean(snapshot.stripeCustomerId) && stripeConfigured(c.env),
+    checkoutEnabled: false,
     stripeConfigured: stripeConfigured(c.env),
     fieldPlan: {
       name: catalog.name,
@@ -79,6 +87,11 @@ billing.get("/orgs/:orgId/billing", authMiddleware, async (c) => {
       addonWords: catalog.addonWords,
       addonPriceCents: catalog.addonPriceCents,
       talkToUsWordsPerYear: catalog.talkToUsWordsPerYear,
+      wordsPerCredit: catalog.wordsPerCredit,
+      exploreCreditsPerCycle: catalog.exploreCreditsPerCycle,
+      fieldCreditsPerCycle: catalog.fieldCreditsPerCycle,
+      addonCredits: catalog.addonCredits,
+      enterpriseCreditsPerLanguagePerYear: catalog.enterpriseCreditsPerLanguagePerYear,
     },
   })
 })

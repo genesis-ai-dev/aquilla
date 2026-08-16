@@ -16,7 +16,7 @@ import {
   retrievePrice,
   stripeConfigured,
 } from "../lib/billing/stripe"
-import { readWordSnapshot, resetWordUsage } from "../lib/billing/words"
+import { readWordSnapshot, resetWordUsage, writeOrgBillingOverrides } from "../lib/billing/words"
 import { grantCredits, resetCreditUsage } from "../lib/credits"
 import { loadPlatformSettings, savePlatformSettings } from "../lib/platform-settings"
 
@@ -49,6 +49,11 @@ function publicPlan(plan: ReturnType<typeof resolveFieldPlan>) {
     talkToUsWordsPerYear: plan.talkToUsWordsPerYear,
     stripePriceField: plan.stripePriceField,
     stripePriceAddon: plan.stripePriceAddon,
+    wordsPerCredit: plan.wordsPerCredit,
+    exploreCreditsPerCycle: plan.exploreCreditsPerCycle,
+    fieldCreditsPerCycle: plan.fieldCreditsPerCycle,
+    addonCredits: plan.addonCredits,
+    enterpriseCreditsPerLanguagePerYear: plan.enterpriseCreditsPerLanguagePerYear,
   }
 }
 
@@ -72,6 +77,11 @@ const fieldPlanPatchSchema = z.object({
   addonWords: z.number().int().min(1).max(100_000_000).optional(),
   talkToUsWordsPerYear: z.number().int().min(0).max(1_000_000_000).optional(),
   intervalDays: z.number().int().min(1).max(365).optional(),
+  wordsPerCredit: z.number().int().min(1).max(10_000).optional(),
+  exploreCreditsPerCycle: z.number().int().min(0).max(10_000_000).optional(),
+  fieldCreditsPerCycle: z.number().int().min(0).max(10_000_000).optional(),
+  addonCredits: z.number().int().min(1).max(10_000_000).optional(),
+  enterpriseCreditsPerLanguagePerYear: z.number().int().min(0).max(10_000_000).optional(),
   ifMatchVersion: z.number().int().nonnegative(),
 })
 
@@ -149,16 +159,27 @@ adminBilling.get("/billing/orgs", async (c) => {
       hardCapWords: snap.hardCapWords,
       periodStart: snap.periodStart,
       periodEnd: snap.periodEnd,
+      creditsUsed: snap.creditsUsed,
+      allowanceCredits: snap.allowanceCredits,
+      remainingCredits: snap.remainingCredits,
+      complimentaryCredits: snap.complimentaryCredits,
+      includedCredits: snap.includedCredits,
+      languageCount: snap.languageCount,
+      includedCreditsOverride: snap.includedCreditsOverride,
+      billedLanguageCountOverride: snap.billedLanguageCountOverride,
+      wordsPerCredit: snap.wordsPerCredit,
     })
   }
   return c.json({ orgs, plan: publicPlan(catalog) })
 })
 
 const orgPatchSchema = z.object({
-  plan: z.enum(["none", "field", "enterprise"]).optional(),
+  plan: z.enum(["none", "explore", "field", "enterprise"]).optional(),
   complimentaryWords: z.number().int().min(0).max(100_000_000).optional(),
   hardCapWords: z.number().int().min(0).max(1_000_000_000).nullable().optional(),
   addonPacks: z.number().int().min(0).max(500).optional(),
+  includedCredits: z.number().int().min(0).max(10_000_000).nullable().optional(),
+  billedLanguageCount: z.number().int().min(0).max(10_000).nullable().optional(),
 })
 
 adminBilling.patch("/billing/org/:orgId", zValidator("json", orgPatchSchema), async (c) => {
@@ -167,16 +188,27 @@ adminBilling.patch("/billing/org/:orgId", zValidator("json", orgPatchSchema), as
   if (!(await orgExists(c.env.AQUILLA_PG, orgId))) return c.json({ error: "not_found" }, 404)
 
   const patch = c.req.valid("json")
+  const storedPlan = patch.plan === "explore" ? "none" : patch.plan
   const status =
-    patch.plan === "none" ? "none" : patch.plan === "enterprise" || patch.plan === "field" ? "active" : undefined
+    storedPlan === "none"
+      ? "none"
+      : storedPlan === "enterprise" || storedPlan === "field"
+        ? "active"
+        : undefined
   await upsertOrgBilling(c.env.AQUILLA_PG, {
     orgId,
-    plan: patch.plan as BillingPlan | undefined,
+    plan: storedPlan as BillingPlan | undefined,
     status,
     complimentaryWords: patch.complimentaryWords,
     hardCapWords: patch.hardCapWords,
     addonPacks: patch.addonPacks,
   })
+  if (patch.includedCredits !== undefined || patch.billedLanguageCount !== undefined) {
+    await writeOrgBillingOverrides(c.env.AQUILLA_PG, orgId, {
+      includedCredits: patch.includedCredits,
+      billedLanguageCount: patch.billedLanguageCount,
+    })
+  }
   await audit(c.env.AQUILLA_PG, c.get("user").id, "billing.org.update", { orgId, patch })
   const rec = await loadPlatformSettings(c.env)
   const snap = await readWordSnapshot(c.env.AQUILLA_PG, orgId, resolveFieldPlan(rec.settings.fieldPlan, c.env))
@@ -188,6 +220,10 @@ adminBilling.patch("/billing/org/:orgId", zValidator("json", orgPatchSchema), as
     addonPacks: snap.addonPacks,
     allowanceWords: snap.allowanceWords,
     wordsUsed: snap.wordsUsed,
+    allowanceCredits: snap.allowanceCredits,
+    creditsUsed: snap.creditsUsed,
+    includedCreditsOverride: snap.includedCreditsOverride,
+    billedLanguageCountOverride: snap.billedLanguageCountOverride,
   })
 })
 

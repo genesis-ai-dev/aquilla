@@ -3,12 +3,19 @@ import {
   FIELD_PLAN,
   annualizedWords,
   checkWordAllowance,
+  countDistinctTargetLanes,
   countWords,
+  creditsToWords,
+  enterpriseCycleCredits,
   fieldAllowanceWords,
+  formatAgentCredits,
   formatUsdFromCents,
+  normalizeBillingPlan,
+  periodAllowanceCredits,
   periodAllowanceWords,
   remainingWords,
   shouldTalkToUs,
+  wordsToCredits,
 } from "./plans"
 
 describe("fieldAllowanceWords", () => {
@@ -28,8 +35,8 @@ describe("fieldAllowanceWords", () => {
 })
 
 describe("periodAllowanceWords", () => {
-  it("does not cap unpaid orgs — existing workspaces keep working", () => {
-    expect(periodAllowanceWords({ plan: "none", addonPacks: 0, hardCapWords: null })).toBeNull()
+  it("gives Explore (formerly unpaid) a 10,000-word / 100-credit cycle allowance", () => {
+    expect(periodAllowanceWords({ plan: "none", addonPacks: 0, hardCapWords: null })).toBe(10_000)
   })
 
   it("uses included + add-ons for Field", () => {
@@ -42,10 +49,10 @@ describe("periodAllowanceWords", () => {
     ).toBe(150_000)
   })
 
-  it("uses the configured hard cap for Enterprise, defaulting to the 25M/yr routing line", () => {
+  it("uses the configured hard cap for Enterprise, otherwise credits × languages", () => {
     expect(periodAllowanceWords({ plan: "enterprise", addonPacks: 0, hardCapWords: 5_000_000 })).toBe(5_000_000)
-    expect(periodAllowanceWords({ plan: "enterprise", addonPacks: 99, hardCapWords: null })).toBe(
-      FIELD_PLAN.talkToUsWordsPerYear,
+    expect(periodAllowanceWords({ plan: "enterprise", addonPacks: 99, hardCapWords: null, languageCount: 1 })).toBe(
+      76_900,
     )
   })
 })
@@ -101,5 +108,71 @@ describe("annualizedWords / remainingWords / countWords", () => {
   it("formats the Field Plan price as dollars", () => {
     expect(formatUsdFromCents(FIELD_PLAN.priceCents)).toBe("$500")
     expect(formatUsdFromCents(FIELD_PLAN.addonPriceCents)).toBe("$200")
+  })
+})
+
+describe("agent credits (APW is internal)", () => {
+  it("converts at 100 agent-processed words per credit", () => {
+    expect(wordsToCredits(100)).toBe(1)
+    expect(wordsToCredits(1)).toBe(1)
+    expect(wordsToCredits(10_000)).toBe(100)
+    expect(creditsToWords(100)).toBe(10_000)
+    expect(creditsToWords(1_000)).toBe(100_000)
+  })
+
+  it("retunes when the words-per-credit rate changes", () => {
+    expect(wordsToCredits(10_000, 50)).toBe(200)
+    expect(creditsToWords(100, 50)).toBe(5_000)
+  })
+
+  it("treats unpaid none as Explore", () => {
+    expect(normalizeBillingPlan("none")).toBe("explore")
+    expect(normalizeBillingPlan("explore")).toBe("explore")
+  })
+
+  it("gives Explore 100 credits per cycle and Field 1,000", () => {
+    expect(periodAllowanceCredits({ plan: "none", addonPacks: 0, languageCount: 1 })).toBe(100)
+    expect(periodAllowanceCredits({ plan: "explore", addonPacks: 0, languageCount: 1 })).toBe(100)
+    expect(periodAllowanceCredits({ plan: "field", addonPacks: 0, languageCount: 1 })).toBe(1_000)
+    expect(periodAllowanceCredits({ plan: "field", addonPacks: 1, languageCount: 1 })).toBe(2_000)
+  })
+
+  it("multiplies Enterprise by target-language lanes, 10,000 credits/year each", () => {
+    expect(enterpriseCycleCredits(1)).toBe(769)
+    expect(enterpriseCycleCredits(2)).toBe(1_538)
+    expect(periodAllowanceCredits({ plan: "enterprise", addonPacks: 0, languageCount: 2 })).toBe(1_538)
+  })
+
+  it("lets a per-org included-credits override replace the tier formula", () => {
+    expect(
+      periodAllowanceCredits({
+        plan: "explore",
+        addonPacks: 0,
+        languageCount: 1,
+        includedCreditsOverride: 250,
+      }),
+    ).toBe(250)
+    expect(
+      periodAllowanceCredits({
+        plan: "enterprise",
+        addonPacks: 0,
+        languageCount: 9,
+        includedCreditsOverride: 400,
+      }),
+    ).toBe(400)
+  })
+
+  it("counts distinct active target-language lanes across projects", () => {
+    expect(
+      countDistinctTargetLanes([
+        { targetLanguage: "fr", targetLanes: ["es", "pt-BR"], archivedLanes: ["es"] },
+        { targetLanguage: "fr", targetLanes: ["pt-br"] },
+        { targetLanguage: "", targetLanes: [] },
+      ]),
+    ).toBe(2)
+  })
+
+  it("formats agent credits for people, never APW", () => {
+    expect(formatAgentCredits(1300)).toBe("1,300")
   })
 })

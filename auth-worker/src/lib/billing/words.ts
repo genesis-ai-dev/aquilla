@@ -5,13 +5,17 @@ import {
   type BillingPlan,
   type BillingStatus,
   type ResolvedFieldPlan,
+  type TargetLaneProject,
   type WordBlockReason,
   FIELD_PLAN,
   checkWordAllowance,
+  countDistinctTargetLanes,
+  periodAllowanceCredits,
   periodAllowanceWords,
   periodDaysBetween,
   remainingWords,
   shouldTalkToUs,
+  wordsToCredits,
 } from "./plans"
 
 export type WordRail = "llm" | "agent" | "tts"
@@ -27,6 +31,11 @@ export interface OrgBillingRow {
   addon_packs: number
   complimentary_words: number
   hard_cap_words: number | null
+}
+
+export interface OrgBillingOverrides {
+  includedCredits: number | null
+  billedLanguageCount: number | null
 }
 
 export interface OrgWordSnapshot {
@@ -45,6 +54,15 @@ export interface OrgWordSnapshot {
   talkToUs: boolean
   stripeCustomerId: string | null
   stripeSubscriptionId: string | null
+  wordsPerCredit: number
+  creditsUsed: number
+  complimentaryCredits: number
+  includedCredits: number
+  allowanceCredits: number
+  remainingCredits: number
+  languageCount: number
+  includedCreditsOverride: number | null
+  billedLanguageCountOverride: number | null
 }
 
 function isMissingTableError(err: unknown): boolean {
@@ -192,17 +210,134 @@ export async function resetWordUsage(db: AquillaDb, orgId: number, since?: strin
   }
 }
 
+function parseLaneList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string")
+  if (typeof value === "string") {
+    try {
+      const parsed: unknown = JSON.parse(value)
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []
+    } catch {
+      return []
+    }
+  }
+  return []
+}
+
+export async function readOrgBillingOverrides(db: AquillaDb, orgId: number): Promise<OrgBillingOverrides> {
+  const empty: OrgBillingOverrides = { includedCredits: null, billedLanguageCount: null }
+  try {
+    const row = await db
+      .prepare(`SELECT settings FROM org_settings WHERE org_id = ?`)
+      .bind(orgId)
+      .first<{ settings: string }>()
+    if (!row?.settings) return empty
+    const parsed = JSON.parse(row.settings) as Record<string, unknown>
+    const billing = parsed.billing
+    if (!billing || typeof billing !== "object" || Array.isArray(billing)) return empty
+    const blob = billing as Record<string, unknown>
+    return {
+      includedCredits: typeof blob.includedCredits === "number" ? Math.floor(blob.includedCredits) : null,
+      billedLanguageCount:
+        typeof blob.billedLanguageCount === "number" ? Math.max(0, Math.floor(blob.billedLanguageCount)) : null,
+    }
+  } catch {
+    return empty
+  }
+}
+
+export async function writeOrgBillingOverrides(
+  db: AquillaDb,
+  orgId: number,
+  patch: Partial<OrgBillingOverrides>,
+): Promise<void> {
+  const current = await readOrgBillingOverrides(db, orgId)
+  const next: OrgBillingOverrides = {
+    includedCredits: patch.includedCredits === undefined ? current.includedCredits : patch.includedCredits,
+    billedLanguageCount:
+      patch.billedLanguageCount === undefined ? current.billedLanguageCount : patch.billedLanguageCount,
+  }
+  try {
+    const row = await db
+      .prepare(`SELECT settings FROM org_settings WHERE org_id = ?`)
+      .bind(orgId)
+      .first<{ settings: string }>()
+    const parsed = row?.settings ? (JSON.parse(row.settings) as Record<string, unknown>) : {}
+    const billing =
+      parsed.billing && typeof parsed.billing === "object" && !Array.isArray(parsed.billing)
+        ? { ...(parsed.billing as Record<string, unknown>) }
+        : {}
+    if (next.includedCredits == null) delete billing.includedCredits
+    else billing.includedCredits = next.includedCredits
+    if (next.billedLanguageCount == null) delete billing.billedLanguageCount
+    else billing.billedLanguageCount = next.billedLanguageCount
+    const settings = JSON.stringify({ ...parsed, billing })
+    await db
+      .prepare(
+        `INSERT INTO org_settings (org_id, settings, version, updated_at)
+         VALUES (?, ?, 1, now())
+         ON CONFLICT (org_id) DO UPDATE SET
+           settings = EXCLUDED.settings,
+           updated_at = now()`,
+      )
+      .bind(orgId, settings)
+      .run()
+  } catch (err) {
+    if (isMissingTableError(err)) return
+    console.error("[billing] writeOrgBillingOverrides error:", err)
+  }
+}
+
+export async function countOrgTargetLanes(db: AquillaDb, orgId: number): Promise<number> {
+  try {
+    const { results } = await db
+      .prepare(
+        `SELECT ps.target_language,
+                ps.target_lanes,
+                (ps.settings::jsonb)->'archivedLanes' AS archived_lanes
+           FROM project_settings ps
+           JOIN projects p ON p.id = ps.project_id
+          WHERE p.org_id = ? AND p.archived_at IS NULL`,
+      )
+      .bind(orgId)
+      .all<{ target_language: string | null; target_lanes: unknown; archived_lanes: unknown }>()
+    const projects: TargetLaneProject[] = (results ?? []).map((row) => ({
+      targetLanguage: row.target_language,
+      targetLanes: parseLaneList(row.target_lanes),
+      archivedLanes: parseLaneList(row.archived_lanes),
+    }))
+    return countDistinctTargetLanes(projects)
+  } catch (err) {
+    if (isMissingTableError(err)) return 0
+    console.error("[billing] countOrgTargetLanes error:", err)
+    return 0
+  }
+}
+
 export async function readWordSnapshot(
   db: AquillaDb,
   orgId: number,
-  catalog?: Pick<ResolvedFieldPlan, "includedWords" | "addonWords" | "talkToUsWordsPerYear">,
+  catalog?: Pick<
+    ResolvedFieldPlan,
+    | "includedWords"
+    | "addonWords"
+    | "talkToUsWordsPerYear"
+    | "wordsPerCredit"
+    | "exploreCreditsPerCycle"
+    | "fieldCreditsPerCycle"
+    | "addonCredits"
+    | "enterpriseCreditsPerLanguagePerYear"
+  >,
 ): Promise<OrgWordSnapshot> {
   const billing = await readOrgBilling(db, orgId)
   const periodStart = periodStartDate(billing)
-  const [wordsUsed, trailingYearWords] = await Promise.all([
+  const [wordsUsed, trailingYearWords, overrides, autoLanguageCount] = await Promise.all([
     sumWordsSince(db, orgId, periodStart),
     sumWordsSince(db, orgId, nDaysAgoUtc(364)),
+    readOrgBillingOverrides(db, orgId),
+    countOrgTargetLanes(db, orgId),
   ])
+  const wordsPerCredit = catalog?.wordsPerCredit ?? 100
+  const languageCount = overrides.billedLanguageCount ?? autoLanguageCount
   const includedWords = catalog?.includedWords ?? FIELD_PLAN.includedWords
   const addonWords = catalog?.addonWords ?? FIELD_PLAN.addonWords
   const allowanceWords = periodAllowanceWords({
@@ -212,8 +347,33 @@ export async function readWordSnapshot(
     complimentaryWords: billing.complimentary_words,
     includedWords,
     addonWords,
+    languageCount,
+    includedCreditsOverride: overrides.includedCredits,
+    wordsPerCredit,
+    exploreCreditsPerCycle: catalog?.exploreCreditsPerCycle,
+    fieldCreditsPerCycle: catalog?.fieldCreditsPerCycle,
+    enterpriseCreditsPerLanguagePerYear: catalog?.enterpriseCreditsPerLanguagePerYear,
   })
+  const complimentaryCredits = wordsToCredits(billing.complimentary_words, wordsPerCredit)
+  const allowanceCredits = periodAllowanceCredits({
+    plan: billing.plan,
+    addonPacks: billing.addon_packs,
+    languageCount,
+    complimentaryCredits,
+    includedCreditsOverride: overrides.includedCredits,
+    exploreCreditsPerCycle: catalog?.exploreCreditsPerCycle,
+    fieldCreditsPerCycle: catalog?.fieldCreditsPerCycle,
+    fieldAddonCredits: catalog?.addonCredits,
+    enterpriseCreditsPerLanguagePerYear: catalog?.enterpriseCreditsPerLanguagePerYear,
+  })
+  const creditsUsed = wordsToCredits(wordsUsed, wordsPerCredit)
   const periodDays = periodDaysBetween(billing.current_period_start, billing.current_period_end)
+  const resolvedIncludedCredits =
+    billing.plan === "field"
+      ? (catalog?.fieldCreditsPerCycle ?? wordsToCredits(includedWords, wordsPerCredit))
+      : billing.plan === "enterprise"
+        ? allowanceCredits - complimentaryCredits
+        : (catalog?.exploreCreditsPerCycle ?? 100)
   return {
     plan: billing.plan,
     status: billing.status,
@@ -223,7 +383,7 @@ export async function readWordSnapshot(
     trailingYearWords,
     addonPacks: billing.addon_packs,
     complimentaryWords: billing.complimentary_words,
-    includedWords: billing.plan === "field" ? includedWords : 0,
+    includedWords: billing.plan === "field" ? includedWords : creditsToWordsForPlan(billing.plan, catalog, wordsPerCredit),
     allowanceWords,
     remaining: remainingWords(wordsUsed, allowanceWords),
     hardCapWords: billing.hard_cap_words,
@@ -236,7 +396,26 @@ export async function readWordSnapshot(
     }),
     stripeCustomerId: billing.stripe_customer_id,
     stripeSubscriptionId: billing.stripe_subscription_id,
+    wordsPerCredit,
+    creditsUsed,
+    complimentaryCredits,
+    includedCredits: Math.max(0, resolvedIncludedCredits),
+    allowanceCredits,
+    remainingCredits: Math.max(0, allowanceCredits - creditsUsed),
+    languageCount,
+    includedCreditsOverride: overrides.includedCredits,
+    billedLanguageCountOverride: overrides.billedLanguageCount,
   }
+}
+
+function creditsToWordsForPlan(
+  plan: BillingPlan,
+  catalog: Pick<ResolvedFieldPlan, "exploreCreditsPerCycle" | "fieldCreditsPerCycle"> | undefined,
+  wordsPerCredit: number,
+): number {
+  if (plan === "field") return (catalog?.fieldCreditsPerCycle ?? 1000) * wordsPerCredit
+  if (plan === "enterprise") return 0
+  return (catalog?.exploreCreditsPerCycle ?? 100) * wordsPerCredit
 }
 
 export interface WordGuardResult {
@@ -246,27 +425,21 @@ export interface WordGuardResult {
 }
 
 /**
- * Pre-flight word-allowance check. Unpaid orgs always pass (record-only).
- * Paid Field / Enterprise orgs block at their allowance / hard cap.
- * Never throws — degrade to allow if the ledger is missing.
+ * Pre-flight word-allowance check. Enforcement is off until checkout launches:
+ * we still record usage and compute the allowance, but never block.
  */
 export async function wordGuard(db: AquillaDb, orgId: number): Promise<WordGuardResult> {
-  let snapshot: OrgWordSnapshot
   try {
-    snapshot = await readWordSnapshot(db, orgId)
+    const snapshot = await readWordSnapshot(db, orgId)
+    const check = checkWordAllowance(snapshot.wordsUsed, snapshot.allowanceWords, snapshot.plan)
+    if (!check.ok) {
+      console.warn(
+        `[billing] org ${orgId} over ${check.reason} on plan=${snapshot.plan} (log-only)`,
+        { wordsUsed: snapshot.wordsUsed, allowance: snapshot.allowanceWords },
+      )
+    }
   } catch {
     return { ok: true }
-  }
-
-  if (snapshot.plan === "none") return { ok: true }
-
-  const check = checkWordAllowance(snapshot.wordsUsed, snapshot.allowanceWords, snapshot.plan)
-  if (!check.ok) {
-    console.warn(
-      `[billing] org ${orgId} over ${check.reason} on plan=${snapshot.plan}`,
-      { wordsUsed: snapshot.wordsUsed, allowance: snapshot.allowanceWords },
-    )
-    return { ok: false, status: 429, reason: check.reason }
   }
   return { ok: true }
 }

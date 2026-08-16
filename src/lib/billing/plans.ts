@@ -5,18 +5,28 @@
 // "talk to us" (Enterprise). Enterprise pricing is out of scope; Enterprise
 // orgs only get a hard usage cap.
 
+export const WORDS_PER_CREDIT_DEFAULT = 100
+export const CYCLES_PER_YEAR = 13
+
+export const TIER_CREDITS = {
+  explore: { creditsPerCycle: 100 },
+  field: { creditsPerCycle: 1_000 },
+  enterprise: { creditsPerLanguagePerYear: 10_000 },
+} as const
+
 export const FIELD_PLAN = {
   id: "field",
   name: "Field Plan",
   intervalDays: 28,
   priceCents: 50_000,
-  includedWords: 100_000,
-  addonWords: 100_000,
+  includedWords: TIER_CREDITS.field.creditsPerCycle * WORDS_PER_CREDIT_DEFAULT,
+  addonWords: TIER_CREDITS.field.creditsPerCycle * WORDS_PER_CREDIT_DEFAULT,
   addonPriceCents: 20_000,
   talkToUsWordsPerYear: 25_000_000,
 } as const
 
-export type BillingPlan = "none" | "field" | "enterprise"
+export type BillingPlan = "none" | "explore" | "field" | "enterprise"
+export type ResolvedBillingPlan = "explore" | "field" | "enterprise"
 
 export type BillingStatus =
   | "none"
@@ -28,6 +38,94 @@ export type BillingStatus =
   | "unpaid"
   | "paused"
 
+export function wordsToCredits(words: number, wordsPerCredit: number = WORDS_PER_CREDIT_DEFAULT): number {
+  const rate = wordsPerCredit > 0 ? wordsPerCredit : WORDS_PER_CREDIT_DEFAULT
+  const n = Math.max(0, Math.floor(words))
+  if (n <= 0) return 0
+  return Math.ceil(n / rate)
+}
+
+export function creditsToWords(credits: number, wordsPerCredit: number = WORDS_PER_CREDIT_DEFAULT): number {
+  const rate = wordsPerCredit > 0 ? wordsPerCredit : WORDS_PER_CREDIT_DEFAULT
+  return Math.max(0, Math.floor(credits)) * rate
+}
+
+export function normalizeBillingPlan(plan: BillingPlan): ResolvedBillingPlan {
+  if (plan === "field" || plan === "enterprise" || plan === "explore") return plan
+  return "explore"
+}
+
+export function enterpriseCycleCredits(
+  languageCount: number,
+  creditsPerLanguagePerYear: number = TIER_CREDITS.enterprise.creditsPerLanguagePerYear,
+): number {
+  const langs = Math.max(0, Math.floor(languageCount))
+  const perYear = Math.max(0, Math.floor(creditsPerLanguagePerYear))
+  return Math.round(perYear / CYCLES_PER_YEAR) * langs
+}
+
+export function periodAllowanceCredits(args: {
+  plan: BillingPlan
+  addonPacks: number
+  languageCount: number
+  complimentaryCredits?: number
+  includedCreditsOverride?: number | null
+  exploreCreditsPerCycle?: number
+  fieldCreditsPerCycle?: number
+  fieldAddonCredits?: number
+  enterpriseCreditsPerLanguagePerYear?: number
+}): number {
+  const extra = Math.max(0, Math.floor(args.complimentaryCredits ?? 0))
+  if (typeof args.includedCreditsOverride === "number" && Number.isFinite(args.includedCreditsOverride)) {
+    return Math.max(0, Math.floor(args.includedCreditsOverride)) + extra
+  }
+  const resolved = normalizeBillingPlan(args.plan)
+  if (resolved === "explore") {
+    return (args.exploreCreditsPerCycle ?? TIER_CREDITS.explore.creditsPerCycle) + extra
+  }
+  if (resolved === "enterprise") {
+    return (
+      enterpriseCycleCredits(
+        args.languageCount,
+        args.enterpriseCreditsPerLanguagePerYear ?? TIER_CREDITS.enterprise.creditsPerLanguagePerYear,
+      ) + extra
+    )
+  }
+  const included = args.fieldCreditsPerCycle ?? TIER_CREDITS.field.creditsPerCycle
+  const addon = args.fieldAddonCredits ?? TIER_CREDITS.field.creditsPerCycle
+  return included + Math.max(0, Math.floor(args.addonPacks)) * addon + extra
+}
+
+export interface TargetLaneProject {
+  targetLanguage?: string | null
+  targetLanes?: readonly string[] | null
+  archivedLanes?: readonly string[] | null
+}
+
+function normalizeLaneTag(raw: string | null | undefined): string {
+  return (raw ?? "").trim().toLowerCase()
+}
+
+export function countDistinctTargetLanes(projects: readonly TargetLaneProject[]): number {
+  const tags = new Set<string>()
+  for (const project of projects) {
+    const archived = new Set((project.archivedLanes ?? []).map(normalizeLaneTag).filter(Boolean))
+    const primary = normalizeLaneTag(project.targetLanguage)
+    if (primary) tags.add(primary)
+    for (const lane of project.targetLanes ?? []) {
+      const tag = normalizeLaneTag(lane)
+      if (!tag || archived.has(tag)) continue
+      tags.add(tag)
+    }
+  }
+  return tags.size
+}
+
+export function formatAgentCredits(n: number): string {
+  const value = Number.isFinite(n) ? n : 0
+  return Math.round(value).toLocaleString("en-US")
+}
+
 export function fieldAllowanceWords(
   addonPacks: number,
   includedWords: number = FIELD_PLAN.includedWords,
@@ -36,7 +134,7 @@ export function fieldAllowanceWords(
   return includedWords + Math.max(0, Math.floor(addonPacks)) * addonWords
 }
 
-/** Paid allowance for the current period. `null` = no paid cap (plan none). */
+/** Period allowance in APW. Explore/none now have a credit-derived allowance. */
 export function periodAllowanceWords(args: {
   plan: BillingPlan
   addonPacks: number
@@ -44,13 +142,40 @@ export function periodAllowanceWords(args: {
   complimentaryWords?: number
   includedWords?: number
   addonWords?: number
-}): number | null {
+  languageCount?: number
+  includedCreditsOverride?: number | null
+  wordsPerCredit?: number
+  exploreCreditsPerCycle?: number
+  fieldCreditsPerCycle?: number
+  enterpriseCreditsPerLanguagePerYear?: number
+}): number {
   const extra = Math.max(0, Math.floor(args.complimentaryWords ?? 0))
-  if (args.plan === "none") return null
-  if (args.plan === "enterprise") {
-    return (args.hardCapWords ?? FIELD_PLAN.talkToUsWordsPerYear) + extra
+  const rate = args.wordsPerCredit ?? WORDS_PER_CREDIT_DEFAULT
+  if (typeof args.includedCreditsOverride === "number" && Number.isFinite(args.includedCreditsOverride)) {
+    return creditsToWords(args.includedCreditsOverride, rate) + extra
   }
-  return fieldAllowanceWords(args.addonPacks, args.includedWords, args.addonWords) + extra
+  if (args.plan === "enterprise" && args.hardCapWords != null) {
+    return args.hardCapWords + extra
+  }
+  const fieldCredits =
+    args.fieldCreditsPerCycle ??
+    (args.includedWords != null ? wordsToCredits(args.includedWords, rate) : TIER_CREDITS.field.creditsPerCycle)
+  const addonCredits =
+    args.addonWords != null ? wordsToCredits(args.addonWords, rate) : TIER_CREDITS.field.creditsPerCycle
+  return (
+    creditsToWords(
+      periodAllowanceCredits({
+        plan: args.plan,
+        addonPacks: args.addonPacks,
+        languageCount: args.languageCount ?? 1,
+        exploreCreditsPerCycle: args.exploreCreditsPerCycle,
+        fieldCreditsPerCycle: fieldCredits,
+        fieldAddonCredits: addonCredits,
+        enterpriseCreditsPerLanguagePerYear: args.enterpriseCreditsPerLanguagePerYear,
+      }),
+      rate,
+    ) + extra
+  )
 }
 
 export function remainingWords(used: number, allowance: number | null): number | null {

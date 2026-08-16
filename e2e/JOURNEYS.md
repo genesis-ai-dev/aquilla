@@ -22,7 +22,7 @@ not a micro-spec farm.
 | Orgs | Add member to org, member sees it | `e2e/specs/orgs/members.smoke.spec.ts` |
 | Orgs | Account switcher sessions | `e2e/specs/orgs/account-switcher.smoke.spec.ts` |
 | Orgs | Preferences persist across reload | `e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts` |
-| Orgs | Billing & usage shows the Field Plan CTA and word meter | `e2e/specs/orgs/org-settings-billing.smoke.spec.ts` |
+| Orgs | Billing & usage shows the Field Plan CTA and agent-credit meter | `e2e/specs/orgs/org-settings-billing.smoke.spec.ts` |
 | Auth | First-login / account-setup status (sentinel) | `e2e/specs/auth/login-account-setup-status.smoke.spec.ts` |
 | Editor | Import markdown, edit cell, persists across reload | `e2e/specs/editor/import-and-edit.smoke.spec.ts` |
 | Editor | Import EPUB package, preserve spine order, commit source bytes | `e2e/specs/editor/import-epub.smoke.spec.ts` |
@@ -46,7 +46,7 @@ not a micro-spec farm.
 | Collab | Cross-user validate | `e2e/specs/collab/cross-user-validate.smoke.spec.ts` |
 | Sharing | Invite link → join → dashboard visibility (surface) | `e2e/specs/projects/share-invite.smoke.spec.ts` |
 | Terminology | Wildcard term chip (domain sentinel) | `e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts` |
-| Admin | Billing catalog and organization usage grants | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
+| Admin | Billing credit catalog and organization usage grants | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
 
 ## Journeys moved to another repository
 

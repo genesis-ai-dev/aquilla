@@ -51,6 +51,9 @@ const ProjectWorkspace = lazy(() =>
 const ProjectSettings = lazy(() =>
   import("@/components/ProjectSettings").then((m) => ({ default: m.ProjectSettings })),
 )
+const ProjectSettingsDialog = lazy(() =>
+  import("@/components/ProjectSettings").then((m) => ({ default: m.ProjectSettingsDialog })),
+)
 // AQU-254: CommentsPage / LivingMemoryPage / TerminologyPage are now rendered
 // inside ProjectWorkspace shell (lazy-imported there). The routes below all
 // point to ProjectWorkspace; the shell detects the path suffix and swaps only
@@ -318,6 +321,8 @@ function AppRoutes() {
         <Routes>
           <Route path="/preferences" element={<PreferencesDialog />} />
           <Route path="/preferences/:section" element={<PreferencesDialog />} />
+          <Route path="/project/:id/settings" element={<LazyRoute><ProjectSettingsDialog /></LazyRoute>} />
+          <Route path="/project/:id/settings/:section" element={<LazyRoute><ProjectSettingsDialog /></LazyRoute>} />
         </Routes>
       ) : null}
     </>

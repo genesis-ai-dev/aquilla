@@ -41,6 +41,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { Concept, TermRendering, RenderingStatus } from "@/lib/terminology/types"
+import { renderingStatusLabelKey } from "@/lib/terminology/types"
 import { addConcept, updateConcept, deleteConcept, mergeConcepts, approveConcept, rejectConcept } from "@/lib/terminology/store"
 import { importConceptsCsv, exportConceptsCsv } from "@/lib/terminology/csv"
 import { importConceptsTbx, exportConceptsTbx } from "@/lib/terminology/tbx"
@@ -62,24 +63,27 @@ import { TerminologyReviewQueue } from "@/components/TerminologyReviewQueue"
 import { TerminologyMergeDialog } from "@/components/TerminologyMergeDialog"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import type { TFunction } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 // ────────────────────────────────────────────────────────────────────────────
 // Rendering status chip helpers
 // ────────────────────────────────────────────────────────────────────────────
 
-const statusLabel: Record<RenderingStatus, string> = {
-  preferred: "required",
-  admitted: "alternate",
-  forbidden: "forbidden",
+const RENDERING_STATUSES: RenderingStatus[] = ["preferred", "admitted", "forbidden"]
+
+/** Options for the per-rendering status `<Select>`, resolved at render time
+ *  off the shared `terminology.status.*` vocabulary (see
+ *  `renderingStatusLabelKey()` in `@/lib/terminology/types`) — mirrors
+ *  `renderingStatusOptions()` in `GlossaryRow.tsx` so the two glossary
+ *  surfaces never drift apart. `t()` must never be called at module scope,
+ *  so this stays a plain function called from within a component body. */
+function renderingStatusOptions(t: TFunction): { value: RenderingStatus; label: string }[] {
+  return RENDERING_STATUSES.map((value) => ({ value, label: t(renderingStatusLabelKey(value)) }))
 }
 
-const RENDERING_STATUS_OPTIONS: { value: RenderingStatus; label: string }[] = [
-  { value: "preferred", label: "required" },
-  { value: "admitted", label: "alternate" },
-  { value: "forbidden", label: "forbidden" },
-]
-
 function RenderingChip({ rendering }: { rendering: TermRendering }) {
+  const { t } = useI18n()
   const chipClass = cn(
     "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium",
     rendering.status === "preferred" &&
@@ -92,7 +96,7 @@ function RenderingChip({ rendering }: { rendering: TermRendering }) {
   return (
     <span className={chipClass}>
       {rendering.rendering}
-      <span className="opacity-60">·{statusLabel[rendering.status]}</span>
+      <span className="opacity-60">·{t(renderingStatusLabelKey(rendering.status))}</span>
     </span>
   )
 }
@@ -101,19 +105,32 @@ function RenderingChip({ rendering }: { rendering: TermRendering }) {
 // Concept status badge
 // ────────────────────────────────────────────────────────────────────────────
 
-const conceptStatusLabel: Record<Concept["status"], string> = {
-  active: "approved",
-  draft: "suggested",
-  deprecated: "old",
+const CONCEPT_STATUSES: Concept["status"][] = ["draft", "active", "deprecated"]
+
+/** MessageKey for a concept's review-status label — reuses the
+ *  `terminology.common.status*` vocabulary already keyed for
+ *  TerminologyTermDetail.tsx rather than minting a duplicate string (see
+ *  `no-duplicates.test.ts`). Returns a key, never a translated string, so
+ *  it's safe to call from a module-scope table (`CONCEPT_STATUSES` above). */
+function conceptStatusLabelKey(status: Concept["status"]): MessageKey {
+  switch (status) {
+    case "active":
+      return "terminology.common.statusApproved"
+    case "draft":
+      return "terminology.common.statusSuggested"
+    case "deprecated":
+      return "terminology.common.statusOld"
+  }
 }
 
-const CONCEPT_STATUS_OPTIONS: { value: Concept["status"]; label: string }[] = [
-  { value: "draft", label: "suggested" },
-  { value: "active", label: "approved" },
-  { value: "deprecated", label: "old" },
-]
+/** Options for the concept-status `<Select>` in ConceptDialog, resolved at
+ *  render time — same pattern as `renderingStatusOptions()` above. */
+function conceptStatusOptions(t: TFunction): { value: Concept["status"]; label: string }[] {
+  return CONCEPT_STATUSES.map((value) => ({ value, label: t(conceptStatusLabelKey(value)) }))
+}
 
 function ConceptStatusBadge({ status }: { status: Concept["status"] }) {
+  const { t } = useI18n()
   const variant =
     status === "active"
       ? "default"
@@ -122,7 +139,7 @@ function ConceptStatusBadge({ status }: { status: Concept["status"] }) {
         : "secondary"
   return (
     <Badge variant={variant} className="text-[10px]">
-      {conceptStatusLabel[status]}
+      {t(conceptStatusLabelKey(status))}
     </Badge>
   )
 }
@@ -140,19 +157,20 @@ interface RenderingRowProps {
 
 function RenderingRow({ rendering, index, onChange, onRemove }: RenderingRowProps) {
   const { t } = useI18n()
+  const statusOptions = renderingStatusOptions(t)
   return (
     <div className="flex items-center gap-2">
       <Input
         value={rendering.rendering}
         placeholder={t("terminology.conceptDialog.renderingPlaceholder")}
-        aria-label={`Rendering ${index + 1} text`}
+        aria-label={t("terminology.row.renderingTextAria", { position: index + 1 })}
         className="flex-1"
         onChange={(e) =>
           onChange(index, { ...rendering, rendering: e.target.value })
         }
       />
       <Select
-        items={RENDERING_STATUS_OPTIONS}
+        items={statusOptions}
         value={rendering.status}
         onValueChange={(v) =>
           onChange(index, {
@@ -162,14 +180,14 @@ function RenderingRow({ rendering, index, onChange, onRemove }: RenderingRowProp
         }
       >
         <SelectTrigger
-          aria-label={`Rendering ${index + 1} status`}
+          aria-label={t("terminology.row.renderingStatusAria", { position: index + 1 })}
           className="text-xs"
         >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           <SelectGroup>
-            {RENDERING_STATUS_OPTIONS.map((o) => (
+            {statusOptions.map((o) => (
               <SelectItem key={o.value} value={o.value}>
                 {o.label}
               </SelectItem>
@@ -180,7 +198,7 @@ function RenderingRow({ rendering, index, onChange, onRemove }: RenderingRowProp
       <Button
         variant="ghost"
         size="icon-sm"
-        aria-label={`Remove rendering ${index + 1}`}
+        aria-label={t("terminology.row.removeRenderingAria", { position: index + 1 })}
         onClick={() => onRemove(index)}
       >
         <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
@@ -203,6 +221,7 @@ interface ConceptDialogProps {
 
 function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogProps) {
   const { t } = useI18n()
+  const conceptStatusOpts = conceptStatusOptions(t)
   const [sourceTerm, setSourceTerm] = useState(initial?.sourceTerm ?? "")
   const [renderings, setRenderings] = useState<TermRendering[]>(
     initial?.renderings ?? [{ rendering: "", status: "preferred" }],
@@ -327,7 +346,7 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
           <Field>
             <FieldLabel htmlFor="concept-status">{t("terminology.common.statusLabel")}</FieldLabel>
             <Select
-              items={CONCEPT_STATUS_OPTIONS}
+              items={conceptStatusOpts}
               value={status}
               onValueChange={(v) =>
                 setStatus((v ?? "draft") as Concept["status"])
@@ -338,7 +357,7 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  {CONCEPT_STATUS_OPTIONS.map((o) => (
+                  {conceptStatusOpts.map((o) => (
                     <SelectItem key={o.value} value={o.value}>
                       {o.label}
                     </SelectItem>
@@ -510,6 +529,7 @@ interface ConceptRowProps {
 }
 
 function ConceptRow({ concept, onEdit, onDelete, onDrillDown, canManage }: ConceptRowProps) {
+  const { t } = useI18n()
   return (
     <li
       data-testid="concept-row"
@@ -549,7 +569,7 @@ function ConceptRow({ concept, onEdit, onDelete, onDrillDown, canManage }: Conce
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label={`Edit concept ${concept.sourceTerm}`}
+            aria-label={t("terminology.page.editConceptAria", { term: concept.sourceTerm })}
             onClick={() => onEdit(concept)}
           >
             <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
@@ -557,7 +577,7 @@ function ConceptRow({ concept, onEdit, onDelete, onDrillDown, canManage }: Conce
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label={`Delete concept ${concept.sourceTerm}`}
+            aria-label={t("terminology.page.deleteConceptAria", { term: concept.sourceTerm })}
             onClick={() => onDelete(concept.id)}
           >
             <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
@@ -1174,34 +1194,34 @@ export function TerminologyPage() {
         <div className="flex items-center gap-2">
           <div className="inline-flex rounded-md border p-0.5 text-sm">
             {([
-              { key: "concepts", label: `Concepts (${concepts.length})` },
+              { key: "concepts", label: t("terminology.page.conceptsHeading", { count: concepts.length }) },
               {
                 key: "queue",
                 label:
                   draftConcepts.length > 0
-                    ? `Review queue (${draftConcepts.length})`
-                    : "Review queue",
+                    ? t("terminology.page.reviewQueueCountLabel", { count: draftConcepts.length })
+                    : t("terminology.page.reviewQueueHeading"),
               },
               {
                 key: "candidates",
                 label: candidatesReady
-                  ? `Candidate terms (${candidates.length})`
-                  : "Candidate terms",
+                  ? t("terminology.page.candidateTermsCountLabel", { count: candidates.length })
+                  : t("terminology.page.candidateTermsHeading"),
               },
-              { key: "violations", label: "Violations" },
-            ] as const).map((t) => (
+              { key: "violations", label: t("terminology.violations.title") },
+            ] as const).map((tab_) => (
               <button
-                key={t.key}
+                key={tab_.key}
                 type="button"
-                onClick={() => setTab(t.key)}
+                onClick={() => setTab(tab_.key)}
                 className={cn(
                   "rounded px-3 py-1 transition-colors",
-                  tab === t.key
+                  tab === tab_.key
                     ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                {t.label}
+                {tab_.label}
               </button>
             ))}
           </div>

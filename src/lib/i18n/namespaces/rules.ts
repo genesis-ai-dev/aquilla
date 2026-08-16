@@ -379,6 +379,7 @@ export const rules = defineNamespace({
     "rules.page.rulesCardTitle": "Rules ({count})",
     "rules.page.noRulesYet": "No rules defined yet.",
     "rules.page.deleteRuleDialogTitle": "Delete rule",
+    "rules.page.deleteRuleAriaLabel": "Delete rule: {name}",
 
     // ── FixReviewPanel (harmonize / bulk-fix review sheet) ──────────────────
     "rules.fixReview.modeCachedRegex": "Cached regex",
@@ -828,6 +829,12 @@ export const rules = defineNamespace({
       },
       "rules.page.deleteRuleDialogTitle": {
         description: "Title of the checkbox-confirm dialog shown before permanently deleting a rule.",
+      },
+      "rules.page.deleteRuleAriaLabel": {
+        description:
+          "Accessible name for the trash button opening the delete-rule confirm dialog on a " +
+          "standalone Rules page row.",
+        placeholders: { name: "The rule's own name — content, never translated." },
       },
       "rules.editor.wouldBeFlagged": {
         description:

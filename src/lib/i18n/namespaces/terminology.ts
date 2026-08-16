@@ -329,6 +329,18 @@ export const terminology = defineNamespace({
     "terminology.conceptDialog.renderingPlaceholder": "rendering",
     "terminology.conceptDialog.targetRenderingsLabel": "Target renderings",
 
+    // ── TerminologyPage.tsx: ConceptRow (main concepts table row) ───────────
+    "terminology.page.editConceptAria": "Edit concept {term}",
+    "terminology.page.deleteConceptAria": "Delete concept {term}",
+
+    // ── TerminologyPage.tsx: tab strip (counted variants of the tab labels
+    // below reuse terminology.page.conceptsHeading / reviewQueueHeading /
+    // candidateTermsHeading / terminology.violations.title for the bare and
+    // "Concepts (N)" forms — these two are only for the "N pending" forms
+    // those keys don't cover) ────────────────────────────────────────────
+    "terminology.page.reviewQueueCountLabel": "Review queue ({count})",
+    "terminology.page.candidateTermsCountLabel": "Candidate terms ({count})",
+
     // ── TerminologyPage.tsx: TermbaseImportDialog ────────────────────────────
     "terminology.importDialog.title": "Import term base",
     "terminology.importDialog.parsing": "Parsing…",
@@ -717,6 +729,32 @@ export const terminology = defineNamespace({
           "concept dialog — each rendering is one approved/alternate/forbidden " +
           "translation of the source term.",
       },
+      "terminology.page.editConceptAria": {
+        description:
+          "Accessible name for the pencil button opening the edit-concept dialog on a " +
+          "concepts-table row; {term} is the concept's own source headword (not translated).",
+        placeholders: { term: "The concept's source headword, verbatim (not translated)." },
+      },
+      "terminology.page.deleteConceptAria": {
+        description:
+          "Accessible name for the trash button opening the delete-concept confirm dialog " +
+          "on a concepts-table row; {term} is the concept's own source headword (not translated).",
+        placeholders: { term: "The concept's source headword, verbatim (not translated)." },
+      },
+      "terminology.page.reviewQueueCountLabel": {
+        description:
+          "Tab-strip button label for the review-queue tab once it has at least one draft " +
+          "concept awaiting review; falls back to the bare terminology.page.reviewQueueHeading " +
+          "text when the count is zero.",
+        placeholders: { count: "Number of draft concepts awaiting review." },
+      },
+      "terminology.page.candidateTermsCountLabel": {
+        description:
+          "Tab-strip button label for the candidate-terms tab once mining has produced " +
+          "results; falls back to the bare terminology.page.candidateTermsHeading text " +
+          "before mining has run.",
+        placeholders: { count: "Number of mined candidate terms." },
+      },
       "terminology.importDialog.title": {
         description:
           "Title of the dialog for bulk-importing terms into the project's term base " +
@@ -840,13 +878,21 @@ export const terminology = defineNamespace({
           "accessible name (terminology.mergeDialog.title, reused here since identical).",
       },
       "terminology.page.reviewQueueHeading": {
-        description: "Card heading over the review-queue tab's content (draft concepts awaiting approval).",
+        description:
+          "Card heading over the review-queue tab's content (draft concepts awaiting " +
+          "approval); also the tab-strip button's own label when there are zero pending " +
+          "concepts (see terminology.page.reviewQueueCountLabel for the counted form).",
       },
       "terminology.page.candidateTermsHeading": {
-        description: "Card heading over the candidate-terms tab's content (mined term suggestions).",
+        description:
+          "Card heading over the candidate-terms tab's content (mined term suggestions); " +
+          "also the tab-strip button's own label before mining has produced results (see " +
+          "terminology.page.candidateTermsCountLabel for the counted form).",
       },
       "terminology.page.conceptsHeading": {
-        description: "Card heading over the main concepts list/table, with the total concept count.",
+        description:
+          "Card heading over the main concepts list/table, with the total concept count; " +
+          "also reused verbatim as the tab-strip button's own label for the same tab.",
         placeholders: { count: "Total number of concepts in the project's term base." },
       },
       "terminology.page.noConceptsTitle": {

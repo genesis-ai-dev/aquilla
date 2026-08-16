@@ -234,7 +234,7 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
       {/* In-main toolbar — matches Rules/Glossary height */}
       <header className="flex shrink-0 items-center gap-2 border-b px-4 py-3">
         <Bot className="h-5 w-5 text-muted-foreground" aria-hidden />
-        <h1 className="text-base font-semibold">Agent</h1>
+        <h1 className="text-base font-semibold">{t("nav.dock.agentTab")}</h1>
         {activeRun && (
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground" role="status">
             <Spinner className="h-3 w-3" />
@@ -242,36 +242,38 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
           </span>
         )}
         {state.queued.length > 0 && (
-          <span className="text-[11px] text-muted-foreground">{state.queued.length} queued</span>
+          <span className="text-[11px] text-muted-foreground">
+            {t("agent.workbench.queuedCount", { count: state.queued.length })}
+          </span>
         )}
         <span className="ms-auto flex items-center gap-1">
           {credits && <CreditsDial {...credits} />}
           {state.isStreaming && (
             <Button type="button" variant="outline" onClick={stop}>
               <Square data-icon="inline-start" />
-              Stop
+              {t("common.stop")}
             </Button>
           )}
-          <AppTooltip content="New session">
+          <AppTooltip content={t("agent.workbench.newSessionAriaLabel")}>
             <Button
               type="button"
               variant="ghost"
               size="icon-xs"
               className="text-muted-foreground"
               onClick={reset}
-              aria-label="New session"
+              aria-label={t("agent.workbench.newSessionAriaLabel")}
             >
               <RotateCcw />
             </Button>
           </AppTooltip>
-          <AppTooltip content="Minimize to sidebar">
+          <AppTooltip content={t("agent.workbench.minimizeTooltip")}>
             <Button
               type="button"
               variant="ghost"
               size="icon-xs"
               className="text-muted-foreground"
               onClick={onClose}
-              aria-label="Close workbench"
+              aria-label={t("agent.workbench.closeAriaLabel")}
             >
               <Minimize2 />
             </Button>
@@ -284,9 +286,9 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
         onValueChange={(next) => setTab(next as WorkbenchTab)}
         className="flex min-h-0 flex-1 flex-col gap-0"
       >
-        <TabsList variant="line" className="mx-3 mt-1.5 w-fit" aria-label="Agent workbench sections">
-          <TabsTrigger value="sessions">Sessions</TabsTrigger>
-          <TabsTrigger value="memory">Memory</TabsTrigger>
+        <TabsList variant="line" className="mx-3 mt-1.5 w-fit" aria-label={t("agent.workbench.tabsAriaLabel")}>
+          <TabsTrigger value="sessions">{t("agent.workbench.sessionsTab")}</TabsTrigger>
+          <TabsTrigger value="memory">{t("nav.sidebarSection.memory")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="sessions" className="flex min-h-0 flex-1 flex-col">
@@ -337,7 +339,7 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell }: AgentW
             fallback={
               <div className="flex items-center justify-center gap-1.5 p-6 text-xs text-muted-foreground">
                 <Spinner className="h-3.5 w-3.5" />
-                Loading memory…
+                {t("agent.workbench.loadingMemory")}
               </div>
             }
           >

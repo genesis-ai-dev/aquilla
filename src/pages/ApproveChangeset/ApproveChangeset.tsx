@@ -16,8 +16,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { messageForStatus } from "@/lib/errors/user-error"
 import { AUTH_BASE } from "@/lib/frontier/auth"
-import { t } from "@/lib/i18n/standalone"
-import { useI18n } from "@/lib/i18n/I18nProvider"
+import { t as standaloneT } from "@/lib/i18n/standalone"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatDateTime } from "@/lib/i18n/format"
 import {
   ChangeList,
@@ -78,13 +78,14 @@ function humanizeKey(key: string): string {
  * diagnostic. The status alone distinguishes the three cases worth naming.
  */
 async function parseErrorMessage(res: Response): Promise<string> {
-  if (res.status === 403) return t("error.changeset.notAuthorized")
-  if (res.status === 404) return t("error.changeset.notFound")
-  if (res.status === 409) return t("error.changeset.notApprovable")
+  if (res.status === 403) return standaloneT("error.changeset.notAuthorized")
+  if (res.status === 404) return standaloneT("error.changeset.notFound")
+  if (res.status === 409) return standaloneT("error.changeset.notApprovable")
   return messageForStatus(res.status, "", "changeset").message
 }
 
 export function ApproveChangeset() {
+  const t = useT()
   const { changesetId } = useParams<{ changesetId: string }>()
   const { session, loading: sessionLoading } = useFrontierSession()
   const [load, setLoad] = useState<LoadState>({ phase: "loading" })
@@ -159,7 +160,7 @@ export function ApproveChangeset() {
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-2xl">
         <CardHeader>
-          <CardTitle className="text-lg">Approve agent changes</CardTitle>
+          <CardTitle className="text-lg">{t("agent.changeset.approveAgentChanges")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           {sessionLoading ? (
@@ -169,17 +170,17 @@ export function ApproveChangeset() {
           ) : isSignedOut ? (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
-                Sign in to review and approve this changeset.
+                {t("agent.changeset.signInNotice")}
               </p>
               <a href={`/login?next=${encodeURIComponent(window.location.pathname)}`}>
-                <Button className="w-full">Sign in</Button>
+                <Button className="w-full">{t("auth.login.submitDefault")}</Button>
               </a>
             </div>
           ) : action.phase === "approved" ? (
             <div className="flex flex-col items-center gap-2 py-4 text-center">
               <CheckCircle2 className="h-8 w-8 text-emerald-600" />
               <p className="text-sm font-medium">
-                Approved — return to your agent, it can now commit.
+                {t("agent.changeset.approvedFull")}
               </p>
               <BackToProjectLink data={load.phase === "loaded" ? load.data : null} />
             </div>
@@ -187,14 +188,14 @@ export function ApproveChangeset() {
             <div className="flex flex-col items-center gap-2 py-4 text-center">
               <XCircle className="h-8 w-8 text-muted-foreground" />
               <p className="text-sm font-medium">
-                Rejected — the changeset was discarded.
+                {t("agent.changeset.rejectedFull")}
               </p>
               <BackToProjectLink data={load.phase === "loaded" ? load.data : null} />
             </div>
           ) : load.phase === "loading" ? (
             <div className="flex items-center gap-2 py-1">
               <Spinner className="text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Loading changeset…</p>
+              <p className="text-sm text-muted-foreground">{t("agent.changeset.loading")}</p>
             </div>
           ) : load.phase === "error" ? (
             <div className="space-y-1">
@@ -222,6 +223,7 @@ export function ApproveChangeset() {
  *  full-screen page with only the browser back button (Joel's feedback) —
  *  always offer the way back into the project. */
 function BackToProjectLink({ data }: { data: ApprovalData | null }) {
+  const t = useT()
   if (!data) return null
   return (
     <Link
@@ -229,7 +231,7 @@ function BackToProjectLink({ data }: { data: ApprovalData | null }) {
       className="mt-1 inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:underline"
     >
       <ArrowLeft className="h-3 w-3" />
-      Back to {data.projectName ?? "project"}
+      {t("agent.changeset.backTo", { projectName: data.projectName ?? "project" })}
     </Link>
   )
 }
@@ -247,7 +249,7 @@ function ApprovalSummaryView({
   onApprove: () => void
   onReject: () => void
 }) {
-  const { locale } = useI18n()
+  const { locale, t } = useI18n()
   const { warnings, settingsChanges, ...facts } = data.summary
   const factEntries = Object.entries(facts).filter(([, v]) => typeof v === "number" || typeof v === "string")
   const settingsEntries =
@@ -260,20 +262,20 @@ function ApprovalSummaryView({
   return (
     <div className="space-y-4">
       <div className="space-y-1">
-        <p className="text-sm text-muted-foreground">Project</p>
+        <p className="text-sm text-muted-foreground">{t("common.project")}</p>
         <p className="text-sm font-medium">{data.projectName ?? data.projectId}</p>
       </div>
 
       {notStaged && (
         <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-          This changeset is currently {data.status} and can no longer be approved.
+          {t("agent.changeset.notStagedNotice", { status: data.status })}
         </p>
       )}
 
       <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
-        <p className="text-sm font-medium">What will be applied</p>
+        <p className="text-sm font-medium">{t("agent.changeset.whatWillBeApplied")}</p>
         {factEntries.length === 0 && settingsEntries.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No changes summarized.</p>
+          <p className="text-xs text-muted-foreground">{t("agent.changeset.noChangesSummarized")}</p>
         ) : (
           <ul className="space-y-0.5 text-xs text-muted-foreground">
             {factEntries.map(([key, value]) => (
@@ -285,7 +287,7 @@ function ApprovalSummaryView({
         )}
         {settingsEntries.length > 0 && (
           <div className="space-y-0.5 pt-1">
-            <p className="text-xs font-medium">Settings changes</p>
+            <p className="text-xs font-medium">{t("agent.changeset.settingsChanges")}</p>
             <ul className="space-y-0.5 text-xs text-muted-foreground">
               {settingsEntries.map(([key, value]) => (
                 <li key={key}>
@@ -301,7 +303,7 @@ function ApprovalSummaryView({
       {data.changes && data.changes.items.length > 0 && (
         <div className="space-y-1.5">
           <p className="text-sm font-medium">
-            Changes ({data.changes.total})
+            {t("agent.changeset.changesHeading", { count: data.changes.total })}
           </p>
           <div className="max-h-96 space-y-1.5 overflow-y-auto rounded-md border bg-muted/30 p-2">
             <ChangeList changes={data.changes} />
@@ -311,7 +313,7 @@ function ApprovalSummaryView({
 
       {data.importPreview && (
         <div className="space-y-1.5">
-          <p className="text-sm font-medium">Import preview</p>
+          <p className="text-sm font-medium">{t("importExport.dialog.titlePreview")}</p>
           <div className="max-h-96 space-y-1.5 overflow-y-auto rounded-md border bg-muted/30 p-2">
             <ImportPreviewView preview={data.importPreview} />
           </div>
@@ -320,7 +322,7 @@ function ApprovalSummaryView({
 
       {warnings && warnings.length > 0 && (
         <div className="rounded-md border border-amber-300/50 bg-amber-50 p-3 space-y-1 dark:bg-amber-950/20">
-          <p className="text-sm font-medium">Warnings</p>
+          <p className="text-sm font-medium">{t("agent.changeset.warnings")}</p>
           <ul className="list-disc space-y-0.5 ps-4 text-xs text-muted-foreground">
             {warnings.map((w, i) => (
               <li key={i}>{w.message}</li>
@@ -330,8 +332,8 @@ function ApprovalSummaryView({
       )}
 
       <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span>Digest: <span className="font-mono">{data.digest.slice(0, 16)}…</span></span>
-        <span>Expires {formatDateTime(data.expiresAt, locale)}</span>
+        <span>{t("agent.changeset.digestLabel")} <span className="font-mono">{data.digest.slice(0, 16)}…</span></span>
+        <span>{t("common.expiresOn", { date: formatDateTime(data.expiresAt, locale) })}</span>
       </div>
 
       {actionError && (
@@ -344,7 +346,7 @@ function ApprovalSummaryView({
       <div className="flex gap-2">
         <Button className="flex-1" onClick={onApprove} disabled={working || notStaged}>
           {working ? <Spinner data-icon="inline-start" /> : null}
-          Approve
+          {t("agent.approve")}
         </Button>
         <Button
           variant="outline"
@@ -352,7 +354,7 @@ function ApprovalSummaryView({
           onClick={onReject}
           disabled={working || notStaged}
         >
-          Reject
+          {t("agent.reject")}
         </Button>
       </div>
 

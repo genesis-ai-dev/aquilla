@@ -13,9 +13,11 @@ import { ChevronRight, TerminalSquare } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { CodeActivityItem } from "@/lib/agent/run-state"
 
 export function CodeActivityBlock({ item }: { item: CodeActivityItem }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const settled = item.durationMs !== undefined
   const hasOutput = Boolean(item.stdout) || Boolean(item.stderr)
@@ -42,7 +44,7 @@ export function CodeActivityBlock({ item }: { item: CodeActivityItem }) {
         {settled ? (
           <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{item.durationMs}ms</span>
         ) : (
-          <Spinner className="size-3 shrink-0 text-muted-foreground" aria-label="Code running" />
+          <Spinner className="size-3 shrink-0 text-muted-foreground" aria-label={t("agent.code.runningAriaLabel")} />
         )}
       </button>
       {open && (
@@ -54,6 +56,7 @@ export function CodeActivityBlock({ item }: { item: CodeActivityItem }) {
             <>
               {item.stdout ? (
                 <div>
+                  {/* i18n-exempt stdout is the standard stream name, not translated */}
                   <div className="text-[10px] font-medium text-muted-foreground">stdout</div>
                   <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-relaxed">
                     {item.stdout}
@@ -62,21 +65,22 @@ export function CodeActivityBlock({ item }: { item: CodeActivityItem }) {
               ) : null}
               {item.stderr ? (
                 <div>
+                  {/* i18n-exempt stderr is the standard stream name, not translated */}
                   <div className="text-[10px] font-medium text-destructive">stderr</div>
                   <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-[10px] leading-relaxed text-destructive">
                     {item.stderr}
                   </pre>
                 </div>
               ) : null}
-              {!hasOutput && <div className="text-[10px] italic text-muted-foreground">(no output)</div>}
+              {!hasOutput && <div className="text-[10px] italic text-muted-foreground">{t("agent.code.noOutput")}</div>}
               {item.truncated && (
                 <div className="text-[10px] text-amber-600 dark:text-amber-400">
-                  Output truncated — the sandbox caps stdout/stderr at 64KB each.
+                  {t("agent.code.outputTruncated")}
                 </div>
               )}
             </>
           ) : (
-            <div className="text-[10px] italic text-muted-foreground">Running…</div>
+            <div className="text-[10px] italic text-muted-foreground">{t("agent.code.runningEllipsis")}</div>
           )}
         </div>
       )}

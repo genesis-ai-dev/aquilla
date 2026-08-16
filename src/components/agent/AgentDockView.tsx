@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Bot, Paperclip, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { ChatComposer, type ChatComposerHandle, type SuggestedAction } from "@/components/chat/ChatComposer"
 import { ChatContextPin } from "@/components/chat/ChatContextPin"
 import { InputGroupButton } from "@/components/ui/input-group"
@@ -99,6 +100,7 @@ export function AgentDockView({
   renderProposalOverride,
   onReviewMemory,
 }: AgentDockViewProps) {
+  const t = useT()
   const { state, send, stop, noteActivity } = useAgentSession(projectId)
   const [includeContext, setIncludeContext] = useState(true)
   const composerRef = useRef<ChatComposerHandle>(null)
@@ -216,7 +218,7 @@ export function AgentDockView({
         ) : (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 px-3 text-center text-muted-foreground">
             <Bot className="h-5 w-5" />
-            <p className="text-xs">Sign in to use the agent.</p>
+            <p className="text-xs">{t("agent.dock.signInNotice")}</p>
           </div>
         )
       ) : (
@@ -288,7 +290,7 @@ export function AgentDockView({
         compact
         suggestedActions={suggestedActions}
         queueWhileStreaming
-        placeholder="Ask the agent… (/draft, /check, /find, /status)"
+        placeholder={t("agent.dock.composerPlaceholder")}
         attachmentBar={
           attachments.length > 0 || attachError ? (
             <div className="flex flex-col gap-1">
@@ -341,8 +343,8 @@ export function AgentDockView({
               variant="ghost"
               size="icon-sm"
               disabled={!jwt || uploading}
-              aria-label="Attach file"
-              title="Attach a file for the agent"
+              aria-label={t("agent.dock.attachFileAriaLabel")}
+              title={t("agent.dock.attachFileTitle")}
               onClick={() => fileInputRef.current?.click()}
             >
               {uploading ? <Spinner /> : <Paperclip />}

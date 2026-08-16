@@ -541,6 +541,38 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "run wrote into. One describes an input's language, the other identifies a " +
     "destination track; languages that mark that difference with case or an " +
     "adposition cannot share a single rendering.",
+  "agent.approve":
+    "Imperative button that accepts a translation agent's staged, human-gated " +
+    "proposal (a changeset, a memory, or a brief update) — reused across the " +
+    "agent workbench, the changeset approval gate, and the memory/brief review " +
+    "queues, all the same act. rules.surface.approveButton is the unrelated " +
+    "button that promotes a project-level translation rule up to org scope. Two " +
+    "independent human-gate actions that happen to share the English verb " +
+    "'Approve'.",
+  "agent.memory.tabApproved":
+    "Tab-trigger heading over the list of already-approved agent-authored " +
+    "memories, in the translation-agent's Memory tab (paired with sibling tabs " +
+    "'Proposed' / 'Project brief') — the counterpart split to agent.memory." +
+    "tabProposed just below, against the same unrelated autopilot evidence-" +
+    "status enum documented at org.projectOverview.columnApproved above.",
+  "agent.memory.tabProposed":
+    "Tab-trigger heading over the queue of agent-authored memories awaiting human " +
+    "review, in the translation-agent's Memory tab (paired with sibling tabs " +
+    "'Approved' / 'Project brief'). autopilot.evidence.status.proposed is one " +
+    "value of the fixed, unrelated evidence-review lifecycle enum (Proposed/" +
+    "Applied/Rejected/Superseded/Approved/Archived/Unknown) in the autopilot " +
+    "readiness inspector, the same kind of split already documented for " +
+    "terminology.common.statusApproved vs autopilot.evidence.status.approved " +
+    "above. A tab heading naming a queue and one fixed value of an unrelated " +
+    "status enum happen to share one English participle.",
+  "agent.workingSet.openLink":
+    "Lower-case imperative LINK text in the agent workbench's working-set row that " +
+    "jumps the editor to that cell ('open' — a shortened 'open in editor'). " +
+    "comments.status.open is a lower-case adjectival status badge on a comment " +
+    "thread ('this thread is open'), the same split already documented for " +
+    "org.overviewLaneTable.openAction above. Imperative verb vs. adjectival status " +
+    "take different forms in most languages, so one shared string would be wrong " +
+    "for one of the two roles.",
   "importExport.columnMapping.sourceColumnLabel":
     "Labels the SOURCE-TEXT column picker in the spreadsheet column-mapping " +
     "step during import — a form-field label naming which uploaded column " +

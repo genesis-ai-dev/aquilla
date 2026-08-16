@@ -113,3 +113,21 @@ Closing 1–3 is WS-SCAN's job; it is the "scan the entire app" half of the requ
 | **orchestrator error** | — | One `git merge swarm/ws-c` ran in the ROOT worktree instead of integration, fast-forwarding the delivery branch past the integration branch. Caught immediately, `git reset --hard 38a9fcd0` restored it exactly (clean tree, pure FF, nothing pushed), merge redone in integration. Cause: shell cwd reset between tool calls. Mitigation: every command now carries an explicit absolute `cd`. |
 | **5 cross-agent dups** | orchestrator | Worktree isolation means agents cannot see each other's new keys, so same-string collisions surface only at integration — where `no-duplicates.test.ts` caught **all five**. Four were genuinely one string and were **consolidated** (`rules.loadingLabel`, `projectSettings.monday.connectButton`, `workspace.trash.empty`, `projectSettings.info.titleLabel`, `terminology.loadingLabel`); **one** was a real register split (icon-link aria-name vs destination page heading) and got a documented exception. |
 | gate | orchestrator | Post-merge on all 7: `npm run build` ✅ · `pnpm test src/lib/i18n` 143/143 ✅ · `i18n:check` **4,140 keys** covered ✅ · 123 targeted component tests ✅ · **0 unexcused collision groups** |
+| **ratchet drained** | orchestrator | `npx eslint src --prune-suppressions` → **0 errors, 0 active, 0 suppressed**. `eslint-suppressions.json` held *only* this rule (1,608 entries = 1,261 live + 347 already-fixed-but-unpruned) and is now `{}`. The 80 suppressions ESLint still reports are inline `eslint-disable` directives for unrelated rules, untouched. Catalog **3,523 → 4,141 keys**. |
+| **full suite** | orchestrator | `npx vitest run` on the integrated result: **804 files / 7,500 tests passed, exit 0**. The known-flaky `org/TeamsList.test.tsx` passed this run (see its trace — still flaky, still pre-existing). |
+| wave 2 | orchestrator | 5 agents dispatched on WS-SCAN's 337 remaining `key-it` findings, partitioned by namespace so ownership stays disjoint: WS-G `audio` (65) · WS-H `rules`+`terminology` (41) · WS-I `agent` (50) · WS-J `settings`+`projectSettings`+`onboarding` (56) · WS-K `org`+`workspace`+`importExport`+`editor`+`nav` (119). |
+
+## §5 The `src/lib/**` design rule (wave 2's central correction)
+
+`docs/swarm/I18N-ORCHESTRATION.md` (the AQU-511 wave) forbade calling `t()` from `src/lib/**`
+on the grounds that it is a hook, and declared the whole area out of scope. **That note is
+stale**: `src/lib/i18n/standalone.ts` post-dates it and exists precisely for non-React modules.
+The 160 `non-tsx` findings are the largest actionable class in the scan, so the area is back in
+scope — under a rule that is not optional:
+
+| Shape | Correct pattern | Why the other one is a BUG |
+| --- | --- | --- |
+| Module-scope `const` table (`GEMINI_TTS_VOICES`, `BUILTIN_CHECKS`, `brief/schema.ts` fields, Preferences option tables) | Store a `MessageKey` in the data; resolve with `t(row.labelKey)` at the render site | `standalone.t()` reads the locale **at call time**. Called at module scope it runs once at import and freezes that locale forever — the app looks translated until the user switches language, then silently doesn't. |
+| Function called per render/event (`ai-error.ts`'s categorizer, `permissions/denial.ts`) | `import { t } from "@/lib/i18n/standalone"` | Fine here: the value is recomputed per call. Its documented limitation (no re-render on locale change) only bites values computed once. |
+
+When in doubt: keys-in-data is always correct, just more plumbing.

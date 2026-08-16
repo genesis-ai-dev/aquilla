@@ -93,7 +93,8 @@ import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
 import { humanRoleName, resolveRoleName, ROLE } from "@/lib/frontier/roles"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import { renameProject } from "@/lib/sync/cloud-projects"
 import { UserError } from "@/lib/errors/user-error"
 import { usePostEditMetrics } from "@/lib/metrics/use-post-edit-metrics"
@@ -119,17 +120,29 @@ import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSect
  */
 const SHOW_TERMBASE_SHARING_IN_SETTINGS = false
 
-// Well-known OpenAI-compatible providers.
-const CUSTOM_PRESETS: { id: string; label: string; endpoint: string; requiresKey: boolean; keyHint?: string }[] = [
-  { id: "local", label: "Local / self-hosted (no key)", endpoint: "http://localhost:8000", requiresKey: false },
+// Well-known OpenAI-compatible providers. Exactly one of `label`/`labelKey` is
+// set per entry: `labelKey` for the two real English descriptions ("Local /
+// self-hosted…", "Other…"), translated at render via presetLabel() below.
+// The rest are brand names — i18n-exempt, left untranslated in every locale
+// like any other product/company name (OpenRouter and OpenAI are already in
+// ATOMIC_TERMS; Groq/Together AI/Mistral/DeepSeek aren't yet, but are the
+// same kind of string).
+const CUSTOM_PRESETS: { id: string; label?: string; labelKey?: MessageKey; endpoint: string; requiresKey: boolean; keyHint?: string }[] = [
+  { id: "local", labelKey: "projectSettings.advancedLlm.presetLocalLabel", endpoint: "http://localhost:8000", requiresKey: false },
   { id: "openrouter", label: "OpenRouter", endpoint: "https://openrouter.ai/api/v1", requiresKey: true, keyHint: "sk-or-..." },
   { id: "openai", label: "OpenAI", endpoint: "https://api.openai.com/v1", requiresKey: true, keyHint: "sk-..." },
   { id: "groq", label: "Groq", endpoint: "https://api.groq.com/openai/v1", requiresKey: true, keyHint: "gsk_..." },
   { id: "together", label: "Together AI", endpoint: "https://api.together.xyz/v1", requiresKey: true },
   { id: "mistral", label: "Mistral", endpoint: "https://api.mistral.ai/v1", requiresKey: true },
   { id: "deepseek", label: "DeepSeek", endpoint: "https://api.deepseek.com/v1", requiresKey: true },
-  { id: "custom", label: "Other (enter URL manually)", endpoint: "", requiresKey: false },
+  { id: "custom", labelKey: "projectSettings.advancedLlm.presetCustomLabel", endpoint: "", requiresKey: false },
 ]
+
+/** Resolves a CUSTOM_PRESETS entry's display label: translated when `labelKey`
+ * is set, else the literal (untranslated brand name). */
+function presetLabel(t: TFunction, preset: { label?: string; labelKey?: MessageKey }): string {
+  return preset.labelKey ? t(preset.labelKey) : (preset.label ?? "")
+}
 
 /**
  * Re-wraps already-known literal substrings of a translated sentence in inline
@@ -780,7 +793,9 @@ export function ProjectSettings() {
         if (out.kind === "conflict") {
           toast.add({
             type: "warning",
-            title: `Synced settings update from ${out.latest.updatedBy?.username ?? "another collaborator"}.`,
+            title: t("projectSettings.save.conflictToast", {
+              username: out.latest.updatedBy?.username ?? t("projectSettings.save.conflictFallbackUsername"),
+            }),
           })
           setSaveError("Someone else updated shared settings. Refresh to reapply your edits.")
           return false
@@ -1866,7 +1881,7 @@ export function ProjectSettings() {
                     label={<label htmlFor="preset">{t("projectSettings.advancedLlm.presetLabel")}</label>}
                     control={
                       <Select
-                        items={CUSTOM_PRESETS.map((p) => ({ value: p.id, label: p.label }))}
+                        items={CUSTOM_PRESETS.map((p) => ({ value: p.id, label: presetLabel(t, p) }))}
                         value={presetId}
                         onValueChange={(value) => handlePresetChange(value ?? "")}
                       >
@@ -1876,7 +1891,7 @@ export function ProjectSettings() {
                         <SelectContent>
                           <SelectGroup>
                             {CUSTOM_PRESETS.map((p) => (
-                              <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>
+                              <SelectItem key={p.id} value={p.id}>{presetLabel(t, p)}</SelectItem>
                             ))}
                           </SelectGroup>
                         </SelectContent>
@@ -2028,7 +2043,7 @@ export function ProjectSettings() {
                 }
               />
               <SettingsRow
-                label={`Temperature (${temperature})`}
+                label={t("projectSettings.advancedLlm.temperatureLabel", { value: temperature })}
                 control={
                   <div className="w-40">
                     <Slider
@@ -2042,7 +2057,7 @@ export function ProjectSettings() {
                 }
               />
               <SettingsRow
-                label={`LLM health penalty (${Math.round(llmHealthPenalty * 100)}%)`}
+                label={t("projectSettings.advancedLlm.healthPenaltyLabel", { percent: Math.round(llmHealthPenalty * 100) })}
                 description={t("projectSettings.advancedLlm.healthPenaltyDescription")}
                 control={
                   <div className="w-40">

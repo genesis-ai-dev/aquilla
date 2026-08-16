@@ -34,6 +34,8 @@ interface ModelMeta {
 const MODELS: ModelMeta[] = [
   {
     id: "whisper",
+    // i18n-exempt: model/product name, same treatment as the sibling "Kokoro"
+    // and "MMS" labels below (already atomic — untranslated in every locale).
     label: "Whisper",
     sizeMb: 140,
     blurb: "Transcribes recordings and adds word-level timing for karaoke playback.",

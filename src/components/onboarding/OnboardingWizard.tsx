@@ -18,7 +18,10 @@ import {
 } from "@/lib/event-names"
 import { useT } from "@/lib/i18n/I18nProvider"
 
-// Human-readable label for each wizard step number.
+// i18n-exempt: analytics discriminator, not UI copy. Sent verbatim as the
+// `step_label` property on the ONBOARDING_STEP_VIEWED PostHog event (see the
+// capture() call below) — never rendered to a user, so it stays a stable
+// English identifier across all locales like any other analytics event name.
 const STEP_LABELS: Record<number, string> = {
   1: "welcome",
   2: "privacy",

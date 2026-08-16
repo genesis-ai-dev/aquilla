@@ -53,12 +53,17 @@ import {
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
-const SOURCE_LABELS: Record<string, string> = {
-  override: "direct invite",
-  group: "via team",
-  org: "via org",
-  creator: "project creator",
+// Access-source annotation shown under a member's name — how they got access
+// to this project. Reuses org.membersPage.source* (org.ts) rather than
+// minting duplicates: the same four grant paths are already named there for
+// the org-level Members page this table mirrors.
+const SOURCE_LABEL_KEYS: Record<string, MessageKey> = {
+  override: "org.membersPage.sourceDirectInvite",
+  group: "org.membersPage.sourceViaTeam",
+  org: "org.membersPage.sourceViaOrg",
+  creator: "org.membersPage.sourceProjectCreator",
 }
 
 type AccessFilter = "all" | "project" | "org"
@@ -172,10 +177,11 @@ export function MembersSection({ projectId }: { projectId: string }) {
         meta: { className: "min-w-0 w-[50%]" },
         cell: ({ row }) => {
           const m = row.original
+          const sourceKey = SOURCE_LABEL_KEYS[m.role.source]
           return (
             <UsernameWithAvatar username={m.username}>
               <span className="truncate text-xs font-normal text-muted-foreground">
-                {SOURCE_LABELS[m.role.source] ?? m.role.source}
+                {sourceKey ? t(sourceKey) : m.role.source}
               </span>
             </UsernameWithAvatar>
           )
@@ -211,7 +217,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
           const m = row.original
           return (
             <DataTableRowActionsButton
-              label={`Actions for ${m.username}`}
+              label={t("projectSettings.members.actionsForRow", { username: m.username })}
               revealOnHover
             />
           )

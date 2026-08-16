@@ -76,6 +76,16 @@ export const settings = defineNamespace({
       "Minimum role required to see per-member progress/productivity. " +
       "Independent of roster visibility — a role can see who's on the team " +
       "without seeing their progress, or vice versa.",
+    // Open-dropdown option text for the roster/progress floor selects. FLOOR_LABEL
+    // (src/pages/settings/constants.ts) supplies the short closed-trigger text; these
+    // are the fuller sentences shown once the dropdown is open. The role name +
+    // numeric level are fixed per option (not a runtime placeholder) — same
+    // treatment as settings.termbase.option* below.
+    "settings.rosterProgress.optionViewer": "Viewer (100) — anyone with access",
+    "settings.rosterProgress.optionContributor": "Contributor (400)",
+    "settings.rosterProgress.optionProjectLead": "Project lead (500)",
+    "settings.rosterProgress.optionMaintainer": "Maintainer (600) — default",
+    "settings.rosterProgress.optionOwner": "Owner (700) — most restrictive",
 
     // ── TermbaseEditSection (org settings → security) ──
     "settings.termbase.label": "Who can manage terminology",
@@ -84,6 +94,11 @@ export const settings = defineNamespace({
       "project's term base. Below this role the term base is read-only. This " +
       "setting covers terminology only — every other project setting still " +
       "requires Maintainer.",
+    // Open-dropdown option text for the termbase-edit floor select; see the
+    // roster/progress options above for why the level number is baked in.
+    "settings.termbase.optionContributor": "Contributor (400) — translators manage terms",
+    "settings.termbase.optionProjectLead": "Project lead (500) — default",
+    "settings.termbase.optionMaintainer": "Maintainer (600) — most restrictive",
 
     // ── UsageSection (Preferences → Usage) ──
     "settings.usage.historyLabel": "7-day audio history",

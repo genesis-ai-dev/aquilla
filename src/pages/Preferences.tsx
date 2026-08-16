@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import { useThemeMode, type ThemeMode } from "@/branding/ThemeMode"
 import { useAnalyticsConsent } from "@/hooks/useAnalyticsConsent"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
@@ -48,30 +49,33 @@ import {
  * then floating SettingsGroup headers with content cards for the controls.
  * Return to the index via the breadcrumb.
  */
-const RAIL_OPTIONS: { id: DockRailPosition; label: string }[] = [
-  { id: "top", label: "Top bar" },
-  { id: "left", label: "Left rail" },
+// Module-scope option tables store MessageKeys, never call t() here — t() is a
+// hook and can't run outside a component. Resolved with t(opt.labelKey) at
+// each render site below.
+const RAIL_OPTIONS: { id: DockRailPosition; labelKey: MessageKey }[] = [
+  { id: "top", labelKey: "onboarding.preferences.rail.top" },
+  { id: "left", labelKey: "onboarding.preferences.rail.left" },
 ]
 
-const THEME_OPTIONS: { id: ThemeMode; label: string }[] = [
-  { id: "system", label: "System" },
-  { id: "light", label: "Light" },
-  { id: "dark", label: "Dark" },
+const THEME_OPTIONS: { id: ThemeMode; labelKey: MessageKey }[] = [
+  { id: "system", labelKey: "onboarding.preferences.theme.system" },
+  { id: "light", labelKey: "onboarding.preferences.theme.light" },
+  { id: "dark", labelKey: "onboarding.preferences.theme.dark" },
 ]
 
 /** Single-line fields rendered as text inputs, in render order. */
 const PROFILE_TEXT_FIELDS: {
   key: Exclude<keyof TranslatorProfile, "otherInfo">
-  label: string
-  placeholder: string
+  labelKey: MessageKey
+  placeholderKey: MessageKey
 }[] = [
-  { key: "responseLanguage", label: "Assistant language", placeholder: "e.g. Tagalog — the AI replies in this language" },
-  { key: "age", label: "Age", placeholder: "e.g. 32" },
-  { key: "gender", label: "Gender", placeholder: "e.g. Female" },
-  { key: "educationLevel", label: "Level of education", placeholder: "e.g. High school" },
-  { key: "religiousBackground", label: "Religious background", placeholder: "e.g. Christian" },
-  { key: "translationExperience", label: "Translation experience", placeholder: "e.g. 2 years" },
-  { key: "geographicalSetting", label: "Geographical setting", placeholder: "e.g. Rural, Asia" },
+  { key: "responseLanguage", labelKey: "onboarding.preferences.profile.responseLanguage.label", placeholderKey: "onboarding.preferences.profile.responseLanguage.placeholder" },
+  { key: "age", labelKey: "onboarding.preferences.profile.age.label", placeholderKey: "onboarding.preferences.profile.age.placeholder" },
+  { key: "gender", labelKey: "onboarding.preferences.profile.gender.label", placeholderKey: "onboarding.preferences.profile.gender.placeholder" },
+  { key: "educationLevel", labelKey: "onboarding.preferences.profile.educationLevel.label", placeholderKey: "onboarding.preferences.profile.educationLevel.placeholder" },
+  { key: "religiousBackground", labelKey: "onboarding.preferences.profile.religiousBackground.label", placeholderKey: "onboarding.preferences.profile.religiousBackground.placeholder" },
+  { key: "translationExperience", labelKey: "onboarding.preferences.profile.translationExperience.label", placeholderKey: "onboarding.preferences.profile.translationExperience.placeholder" },
+  { key: "geographicalSetting", labelKey: "onboarding.preferences.profile.geographicalSetting.label", placeholderKey: "onboarding.preferences.profile.geographicalSetting.placeholder" },
 ]
 
 /** All translator-profile keys, used to count how many fields are filled in. */
@@ -96,7 +100,7 @@ function WorkspaceSection() {
         description={t("onboarding.preferences.workspace.railDescription")}
         control={
           <Select
-            items={RAIL_OPTIONS.map((opt) => ({ value: opt.id, label: opt.label }))}
+            items={RAIL_OPTIONS.map((opt) => ({ value: opt.id, label: t(opt.labelKey) }))}
             value={railPosition}
             onValueChange={(value) => {
               if (value === "left" || value === "top") setRailPosition(value)
@@ -111,9 +115,9 @@ function WorkspaceSection() {
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                {RAIL_OPTIONS.map(({ id, label }) => (
+                {RAIL_OPTIONS.map(({ id, labelKey }) => (
                   <SelectItem key={id} value={id}>
-                    {label}
+                    {t(labelKey)}
                   </SelectItem>
                 ))}
               </SelectGroup>
@@ -163,7 +167,7 @@ function GeneralSection({
         description={t("onboarding.preferences.appearance.themeDescription")}
         control={
           <Select
-            items={THEME_OPTIONS.map((opt) => ({ value: opt.id, label: opt.label }))}
+            items={THEME_OPTIONS.map((opt) => ({ value: opt.id, label: t(opt.labelKey) }))}
             value={mode}
             onValueChange={(value) => {
               if (value === "system" || value === "light" || value === "dark") {
@@ -180,9 +184,9 @@ function GeneralSection({
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                {THEME_OPTIONS.map(({ id, label }) => (
+                {THEME_OPTIONS.map(({ id, labelKey }) => (
                   <SelectItem key={id} value={id}>
-                    {label}
+                    {t(labelKey)}
                   </SelectItem>
                 ))}
               </SelectGroup>
@@ -276,16 +280,16 @@ function TranslatorProfileSection() {
 
   return (
     <SettingsGroup label={t("onboarding.preferences.profileSection.groupLabel")}>
-      {PROFILE_TEXT_FIELDS.map(({ key, label, placeholder }) => (
+      {PROFILE_TEXT_FIELDS.map(({ key, labelKey, placeholderKey }) => (
         <SettingsRow
           key={key}
-          label={<label htmlFor={`profile-${key}`}>{label}</label>}
+          label={<label htmlFor={`profile-${key}`}>{t(labelKey)}</label>}
           control={
             <Input
               id={`profile-${key}`}
               value={form[key] ?? ""}
               onChange={(e) => update(key, e.target.value)}
-              placeholder={placeholder}
+              placeholder={t(placeholderKey)}
               className="w-56 bg-background"
             />
           }
@@ -311,11 +315,14 @@ function TranslatorProfileSection() {
   )
 }
 
-/** One preference section: its route slug, index-row presentation, and body. */
+/** One preference section: its route slug, index-row presentation, and body.
+ * title/description are MessageKeys, resolved with t() at each render site
+ * (PreferencesIndex's NavRow, PreferencesDetail's PageHeader/OrgBreadcrumb) —
+ * this table stays module scope, so no t() call here. */
 interface PreferenceSection {
   slug: string
-  title: string
-  description: string
+  titleKey: MessageKey
+  descriptionKey: MessageKey
   group: string
   icon: React.ComponentType<{ className?: string }>
   render: () => React.ReactNode
@@ -327,51 +334,50 @@ const INLINE_PREFERENCE_SLUGS = new Set(["appearance", "language", "privacy"])
 const PREFERENCE_SECTIONS: PreferenceSection[] = [
   {
     slug: "workspace",
-    title: "Workspace",
-    description: "Layout and editing behavior for the project workspace.",
+    // Title text is identical to onboarding.preferences.workspace.groupLabel
+    // (the in-page SettingsGroup heading) — reused rather than re-minted.
+    titleKey: "onboarding.preferences.workspace.groupLabel",
+    descriptionKey: "onboarding.preferences.section.workspace.description",
     group: "General",
     icon: PanelLeft,
     render: () => <WorkspaceSection />,
   },
   {
     slug: "profile",
-    title: "Translator profile",
-    description:
-      "Tell the AI about yourself so its summaries and answers fit your context — and so it replies in your language.",
+    titleKey: "onboarding.preferences.section.profile.title",
+    descriptionKey: "onboarding.preferences.section.profile.description",
     group: "AI & personalization",
     icon: UserRound,
     render: () => <TranslatorProfileSection />,
   },
   {
     slug: "provider-keys",
-    title: "AI provider keys",
-    description: "Optional personal AI provider override for this device only.",
+    titleKey: "onboarding.preferences.section.providerKeys.title",
+    descriptionKey: "onboarding.preferences.section.providerKeys.description",
     group: "AI & personalization",
     icon: KeyRound,
     render: () => <PersonalProviderSection />,
   },
   {
     slug: "local-models",
-    title: "Local models",
-    description:
-      "Whisper transcription and Kokoro / MMS voices run entirely in your browser — stored once and shared across all projects on this device.",
+    titleKey: "onboarding.preferences.section.localModels.title",
+    descriptionKey: "onboarding.preferences.section.localModels.description",
     group: "AI & personalization",
     icon: Cpu,
     render: () => <LocalModelsSection />,
   },
   {
     slug: "usage",
-    title: "Usage",
-    description: "Your audio and AI activity. No pricing is shown here.",
+    titleKey: "onboarding.preferences.section.usage.title",
+    descriptionKey: "onboarding.preferences.section.usage.description",
     group: "Account",
     icon: Gauge,
     render: () => <UsageSection />,
   },
   {
     slug: "api-tokens",
-    title: "API tokens",
-    description:
-      "Personal access tokens for the Agent API. Anyone holding a token can act with your access, up to its scope — treat it like a password.",
+    titleKey: "onboarding.preferences.section.apiTokens.title",
+    descriptionKey: "onboarding.preferences.section.apiTokens.description",
     group: "Account",
     icon: KeyRound,
     render: () => <ApiTokensSection />,
@@ -389,12 +395,16 @@ function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boole
   const profile = getTranslatorProfile()
   const profileFilled = PROFILE_KEYS.filter((k) => (profile[k] ?? "").trim().length > 0).length
 
+  const workspaceRailOption = RAIL_OPTIONS.find((o) => o.id === position)
   const hints: Record<string, string> = {
-    workspace: RAIL_OPTIONS.find((o) => o.id === position)?.label ?? "",
-    profile: profileFilled > 0 ? `${profileFilled}/${PROFILE_KEYS.length} set` : "Not set",
-    "provider-keys": "Personal",
-    "local-models": "On-device",
-    usage: "This week",
+    workspace: workspaceRailOption ? t(workspaceRailOption.labelKey) : "",
+    profile:
+      profileFilled > 0
+        ? t("onboarding.preferences.hint.profileSet", { filled: profileFilled, total: PROFILE_KEYS.length })
+        : t("onboarding.preferences.hint.notSet"),
+    "provider-keys": t("onboarding.preferences.hint.personal"),
+    "local-models": t("onboarding.preferences.hint.onDevice"),
+    usage: t("onboarding.timeWindow.thisWeek"),
   }
 
   const content = (
@@ -413,7 +423,7 @@ function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boole
                 to={`/preferences/${s.slug}`}
                 state={backgroundLocation ? { backgroundLocation, preferencesModalDepth: 2 } : undefined}
                 icon={s.icon}
-                title={s.title}
+                title={t(s.titleKey)}
                 hint={hints[s.slug]}
               />
             ))}
@@ -448,7 +458,7 @@ function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: bool
       <Page>
         <div className="space-y-6">
           <BackLink to="/preferences" onClick={() => navigate(-1)} label={t("nav.account.preferences")} />
-          <PageHeader title={section.title} description={section.description} />
+          <PageHeader title={t(section.titleKey)} description={t(section.descriptionKey)} />
           {section.render()}
         </div>
       </Page>
@@ -457,12 +467,12 @@ function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: bool
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb parent={{ label: "Preferences", to: "/preferences" }} section={section.title} />}
+      header={<OrgBreadcrumb parent={{ label: "Preferences", to: "/preferences" }} section={t(section.titleKey)} />}
       statusBar={null}
       main={
         <Page>
           <div className="flex flex-col gap-12">
-            <PageHeader title={section.title} description={section.description} className="mb-0" />
+            <PageHeader title={t(section.titleKey)} description={t(section.descriptionKey)} className="mb-0" />
             {section.render()}
           </div>
         </Page>

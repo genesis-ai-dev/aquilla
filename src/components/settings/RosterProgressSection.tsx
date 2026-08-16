@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/select"
 import { ROLE } from "@/lib/frontier/roles"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 
@@ -42,12 +43,14 @@ interface RosterProgressSectionProps {
   canEdit: boolean
 }
 
-const ROSTER_PROGRESS_ROLE_OPTIONS = [
-  { level: ROLE.VIEWER, label: "Viewer (100) — anyone with access" },
-  { level: ROLE.CONTRIBUTOR, label: "Contributor (400)" },
-  { level: ROLE.PROJECT_LEAD, label: "Project lead (500)" },
-  { level: ROLE.MAINTAINER, label: "Maintainer (600) — default" },
-  { level: ROLE.OWNER, label: "Owner (700) — most restrictive" },
+// The closed-trigger text comes from FLOOR_LABEL (short); labelKey is the
+// fuller sentence shown in the open dropdown list — see FloorSelect below.
+const ROSTER_PROGRESS_ROLE_OPTIONS: { level: number; labelKey: MessageKey }[] = [
+  { level: ROLE.VIEWER, labelKey: "settings.rosterProgress.optionViewer" },
+  { level: ROLE.CONTRIBUTOR, labelKey: "settings.rosterProgress.optionContributor" },
+  { level: ROLE.PROJECT_LEAD, labelKey: "settings.rosterProgress.optionProjectLead" },
+  { level: ROLE.MAINTAINER, labelKey: "settings.rosterProgress.optionMaintainer" },
+  { level: ROLE.OWNER, labelKey: "settings.rosterProgress.optionOwner" },
 ]
 
 export function RosterProgressSection({ orgSettings, canEdit }: RosterProgressSectionProps) {
@@ -135,12 +138,13 @@ function FloorSelect({
   error: string | null
   onChange: (level: number) => void
 }) {
+  const { t } = useI18n()
   return (
     <div className="flex min-w-44 flex-col items-end gap-1">
       <Select
         items={ROSTER_PROGRESS_ROLE_OPTIONS.map((opt) => ({
           value: String(opt.level),
-          label: FLOOR_LABEL[opt.level] ?? opt.label,
+          label: FLOOR_LABEL[opt.level] ?? t(opt.labelKey),
         }))}
         value={String(value)}
         onValueChange={(v) => { if (v) onChange(Number(v)) }}
@@ -153,7 +157,7 @@ function FloorSelect({
           <SelectGroup>
             {ROSTER_PROGRESS_ROLE_OPTIONS.map((opt) => (
               <SelectItem key={opt.level} value={String(opt.level)}>
-                {opt.label}
+                {t(opt.labelKey)}
               </SelectItem>
             ))}
           </SelectGroup>

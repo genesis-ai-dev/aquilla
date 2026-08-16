@@ -246,6 +246,9 @@ export const onboarding = defineNamespace({
     "onboarding.checklist.aiModels.geminiKeyInvalid":
       "That doesn’t look like a Gemini key — they start with “AIza”. Double-check and paste again.",
     "onboarding.checklist.aiModels.downloadNotice": "~{size} MB to download",
+    "onboarding.checklist.aiModels.downloadProgress": "{pct}% · {loaded} / {total}",
+    "onboarding.checklist.aiModels.downloadPartial": "{loaded} of ~{size} MB",
+    "onboarding.checklist.aiModels.downloadStarting": "Starting download… (~{size} MB)",
     "onboarding.checklist.aiModels.downloadWarning":
       "Large downloads can take several minutes on slow or metered connections. The download keeps going in the background — you can keep working.",
     "onboarding.checklist.aiModels.nothingSelected": "Nothing selected",
@@ -555,6 +558,28 @@ export const onboarding = defineNamespace({
         description:
           "Small notice above the download button in the voice/transcription checklist step, stating the total pending download size.",
         placeholders: { size: "Total megabytes to download for every currently-selected, not-yet-ready model. A plain number." },
+      },
+      "onboarding.checklist.aiModels.downloadProgress": {
+        description:
+          "Per-model progress read-out shown while a model download is in flight and the server sent a Content-Length, so percent complete is known.",
+        placeholders: {
+          pct: "Whole-number percent complete (0-100).",
+          loaded: "Bytes downloaded so far, already formatted as a megabyte string (e.g. '70 MB').",
+          total: "Total download size, already formatted as a megabyte string (e.g. '140 MB').",
+        },
+      },
+      "onboarding.checklist.aiModels.downloadPartial": {
+        description:
+          "Per-model progress read-out shown while a download is in flight but the server omitted Content-Length, so only bytes-so-far (not percent) is known.",
+        placeholders: {
+          loaded: "Bytes downloaded so far, already formatted as a megabyte string (e.g. '20 MB').",
+          size: "The model's advertised (fallback) download size in megabytes. A plain number.",
+        },
+      },
+      "onboarding.checklist.aiModels.downloadStarting": {
+        description:
+          "Per-model progress read-out shown the instant a download starts, before any bytes have landed yet.",
+        placeholders: { size: "The model's advertised download size in megabytes. A plain number." },
       },
       "onboarding.checklist.aiModels.downloadButtonWithSize": {
         description:

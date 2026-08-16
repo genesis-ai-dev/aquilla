@@ -560,6 +560,7 @@ export const projectSettings = defineNamespace({
     "projectSettings.members.noActionsAvailable": "No actions available",
     "projectSettings.members.addDialogDescription":
       "Grant access from your organization, or create a shareable invite link.",
+    "projectSettings.members.actionsForRow": "Actions for {username}",
 
     // ── Monday.com integration (MondayIntegrationSection / MondayLinkedView /
     //    MondayMappingEditor / MondaySetupWizard) — SWARM-TODO(AQU-832, i18n)
@@ -1068,6 +1069,14 @@ export const projectSettings = defineNamespace({
         description:
           "Accessible name of the numeric minutes input beside the auto-sync toggle — " +
           "no separate visible label, just the enable switch, this input, and a trailing 'min' unit.",
+      },
+      "projectSettings.members.actionsForRow": {
+        description:
+          "Accessible name of the icon-only row-actions button in the last column " +
+          "of the project Members table, naming which member's row it opens.",
+        placeholders: {
+          username: "The row's member username (data, not translated).",
+        },
       },
     },
   },

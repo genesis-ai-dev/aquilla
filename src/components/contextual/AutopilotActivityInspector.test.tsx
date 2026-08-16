@@ -6,6 +6,7 @@ import { CATALOGS } from "@/lib/i18n/messages"
 import type { Catalog } from "@/lib/i18n/messages/en"
 import { LOCALE_STORAGE_KEY } from "@/lib/i18n/store"
 import type {
+  ContextualDecisionsPage,
   ContextualOverview,
   ContextualRunActivity,
   ContextualRunActivityOptions,
@@ -109,6 +110,10 @@ beforeAll(() => {
   })
 })
 
+const decisionsMock = vi.fn(async (
+  _projectId: string,
+): Promise<ContextualDecisionsPage> => ({ decisions: [], openCount: 0, cap: 3 }))
+
 vi.mock("@/lib/contextual/transport", () => ({
   fetchContextualRuns: (projectId: string, options?: ContextualRunListOptions) => runsMock(projectId, options),
   fetchContextualRunActivity: (
@@ -119,6 +124,7 @@ vi.mock("@/lib/contextual/transport", () => ({
   commandContextualRun: (projectId: string, runId: string, command: string) => commandMock(projectId, runId, command),
   startFileContextualRun: (projectId: string, fileId: string, targetLang?: string) =>
     retryMock(projectId, fileId, targetLang),
+  fetchContextualDecisions: (projectId: string) => decisionsMock(projectId),
 }))
 
 beforeEach(() => {
@@ -132,6 +138,8 @@ beforeEach(() => {
   commandMock.mockResolvedValue({ ...run, status: "paused" })
   retryMock.mockReset()
   retryMock.mockResolvedValue({ runId: "new-run" })
+  decisionsMock.mockReset()
+  decisionsMock.mockResolvedValue({ decisions: [], openCount: 0, cap: 3 })
 })
 
 afterEach(() => {

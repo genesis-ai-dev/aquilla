@@ -36,8 +36,10 @@ import { cn } from "@/lib/utils"
 import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { draftReviewHref } from "@/components/project-workspace-lane-deeplink"
+import { DecisionCard } from "@/components/contextual/DecisionCard"
 import {
   commandContextualRun,
+  fetchContextualDecisions,
   fetchContextualRunActivity,
   fetchContextualRuns,
   startFileContextualRun,
@@ -45,6 +47,7 @@ import {
   type ContextualActivityDraft,
   type ContextualActivityEvent,
   type ContextualActivitySceneBrief,
+  type ContextualDecisionView,
   type ContextualDraftCursor,
   type ContextualOverview,
   type ContextualRunActivity,
@@ -734,7 +737,10 @@ export function AutopilotActivityInspector({
   const [technicalOpen, setTechnicalOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [actionMessage, setActionMessage] = useState<InspectorNotice | null>(null)
+  const [decisions, setDecisions] = useState<ContextualDecisionView[]>([])
+  const [decisionsOpenCount, setDecisionsOpenCount] = useState(0)
   const seqRef = useRef(0)
+  const decisionsSeqRef = useRef(0)
   const activitySeqRef = useRef(0)
   const activityRef = useRef<ContextualRunActivity | null>(null)
   const activityRunRef = useRef<string | null>(null)
@@ -845,6 +851,20 @@ export function AutopilotActivityInspector({
     }
   }, [loadingOlderRuns, nextRunCursor, projectId])
 
+  const loadDecisions = useCallback(async () => {
+    const seq = ++decisionsSeqRef.current
+    try {
+      const page = await fetchContextualDecisions(projectId)
+      if (seq !== decisionsSeqRef.current) return
+      setDecisions(page.decisions)
+      setDecisionsOpenCount(page.openCount)
+    } catch {
+      // Decisions are one signal among several in this panel; a failed fetch
+      // here must not block the run history/activity the rest of the sheet
+      // already shows. Leave the last-known list in place.
+    }
+  }, [projectId])
+
   const loadActivity = useCallback(async (runId: string) => {
     const seq = ++activitySeqRef.current
     setLoadingActivity(true)
@@ -926,8 +946,11 @@ export function AutopilotActivityInspector({
     const openingRunId = focusRunId ?? preferredRun(fallbackRuns, initialSection)?.runId ?? null
     selectedRunRef.current = openingRunId
     setSelectedRunId(openingRunId)
+    setDecisions([])
+    setDecisionsOpenCount(0)
     void loadRuns()
-  }, [fallbackRuns, focusRunId, initialSection, loadRuns, open])
+    void loadDecisions()
+  }, [fallbackRuns, focusRunId, initialSection, loadDecisions, loadRuns, open])
 
   useEffect(() => {
     if (!open || !selectedRun?.runId) return
@@ -1235,6 +1258,33 @@ export function AutopilotActivityInspector({
               {runsTruncated && !nextRunCursor && (
                 <p className="text-xs text-muted-foreground">
                   {t("autopilot.inspector.recentRunsOnly")}
+                </p>
+              )}
+            </section>
+
+            <section aria-label={t("autopilot.decisions.heading")} className="flex flex-col gap-2">
+              <h3 className="text-sm font-medium">{t("autopilot.decisions.heading")}</h3>
+              {decisions.length > 0 ? (
+                <div className="flex flex-col gap-2">
+                  {decisions.map((decision) => (
+                    <DecisionCard
+                      key={decision.id}
+                      decision={decision}
+                      projectId={projectId}
+                      onResolved={() => void loadDecisions()}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {t("autopilot.decisions.empty")}
+                </p>
+              )}
+              {decisionsOpenCount > decisions.length && (
+                <p className="text-xs text-muted-foreground">
+                  {t("autopilot.decisions.held", {
+                    count: decisionsOpenCount - decisions.length,
+                  })}
                 </p>
               )}
             </section>

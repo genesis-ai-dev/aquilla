@@ -450,6 +450,22 @@ export const autopilot = defineNamespace({
     "autopilot.inspector.technical.copySpanId": "Copy span ID",
     "autopilot.inspector.technical.spanIdCopied": "Span ID copied.",
 
+    // — Inspector: decisions (human-in-the-loop question channel) ————————
+    "autopilot.decisions.heading": "Needs your decision",
+    "autopilot.decisions.empty": "Nothing needs you right now.",
+    "autopilot.decisions.held": plural({
+      one: "{count} more question is held until these are settled.",
+      other: "{count} more questions are held until these are settled.",
+    }),
+    "autopilot.decisions.blastRadius": plural({
+      one: "Affects {count} later passage.",
+      other: "Affects {count} later passages.",
+    }),
+    "autopilot.decisions.answer": "Answer",
+    "autopilot.decisions.answerPlaceholder": "Your decision…",
+    "autopilot.decisions.dismiss": "Not needed",
+    "autopilot.decisions.assign": "Ask someone else",
+
     // — Stable evidence/readiness enums (raw unknown values remain evidence) —
     "autopilot.evidence.status.proposed": "Proposed",
     "autopilot.evidence.status.applied": "Applied",
@@ -786,6 +802,14 @@ export const autopilot = defineNamespace({
           sourceLanguage: "Configured source-language name; do not translate the substituted value.",
           targetLanguage: "Configured target-language name; do not translate the substituted value.",
         },
+      ),
+      "autopilot.decisions.held": withPlaceholders(
+        "Note below the shown decision cards reporting how many further open decisions are withheld rather than lost.",
+        { count: "Number of additional open decisions not shown, beyond the ones displayed." },
+      ),
+      "autopilot.decisions.blastRadius": withPlaceholders(
+        "Decision-card detail giving how many later passages the answer will affect, so the question reads as worth answering rather than as generic review.",
+        { count: "Number of later passages this decision's answer affects." },
       ),
     },
   },

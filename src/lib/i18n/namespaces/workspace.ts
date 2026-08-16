@@ -24,6 +24,17 @@ export const workspace = defineNamespace({
     "workspace.status.notFound": "Project not found, or you don't have access. {backLink}.",
     "workspace.backToDashboard": "Back to dashboard",
 
+    // -- hooks/useProjectSettings: patch() error fallback when called with no
+    // signed-in session or no resolved project id (guards a race at mount,
+    // not a normal user-reachable path) --
+    "workspace.projectSettingsHook.noSessionError": "No session or project — sign in and try again.",
+
+    // -- lib/forms/schemas (requiredString): shared cross-app form-field
+    // validation, used from org, auth, onboarding, rules and settings forms
+    // alike — there's no single feature namespace this belongs to more than
+    // another, so it lives here as generic shared chrome. --
+    "workspace.forms.requiredField": "{label} is required",
+
     // -- ProjectWorkspace: AppShell chrome --
     "workspace.sidebar.collapse": "Collapse sidebar",
     "workspace.readOnlyGitBanner": "Read-only — imported from git. Push is coming in Phase 2.",
@@ -129,6 +140,11 @@ export const workspace = defineNamespace({
     // -- App.tsx: SyncFreezeOverlay --
     "workspace.syncFreezeOverlay": "Merging incoming changes…",
 
+    // -- AgentDockPanel: "Summarize book/chapter" quick-action buttons above
+    // the dock's agent chat, shown only for scripture files --
+    "workspace.agentDockPanel.summarizeBookTitle":
+      "Summarize {book} using vetted Bible resources, in your profile language",
+
     // -- AiModelConsentDialog --
     "workspace.aiConsent.downloadTitle": "Download {model}?",
     "workspace.aiConsent.downloadProgressNote":
@@ -160,11 +176,19 @@ export const workspace = defineNamespace({
     // -- CellAiStatusPopover --
     "workspace.aiStatusPopover.technicalDetail": "Technical detail",
 
+    // -- InlineAiError --
+    "workspace.inlineAiError.showDetailsAriaLabel": "Show error details: {line}",
+
     // -- CellTranscribeBadge --
     "workspace.transcribeBadge.loadShort": "load",
     "workspace.transcribeBadge.transcribingTooltip": "Transcribing audio…",
     "workspace.transcribeBadge.transcribingPill": "transcribing",
     "workspace.transcribeBadge.failed": "Transcription failed",
+    // {words} is a pre-pluralized fragment (reuses the identical
+    // terminology.candidates.ngramLength "{count} word(s)" plural form) —
+    // not re-pluralized here.
+    "workspace.transcribeBadge.doneTooltip": "Transcribed {words} in {secs}s",
+    "workspace.transcribeBadge.doneTooltipClickable": "Transcribed {words} in {secs}s; click to view",
 
     // -- CellTranscriptPreview --
     "workspace.transcriptPreview.retranscribeTooltip":
@@ -202,12 +226,32 @@ export const workspace = defineNamespace({
       "translated cells. Confirm correct pairs to teach the glosser; reject wrong ones to penalize " +
       "them. Both actions improve future back-translations. Only high-confidence suggestions are shown.",
     "workspace.alignment.needsConfirmation": "Needs confirmation ({count})",
+    "workspace.alignment.confirmTooltip":
+      "Confirm: mark \"{srcToken} -> {tgtToken}\" as a correct word-level alignment. Confirmed " +
+      "pairs teach the statistical glosser and improve future back-translations.",
+    "workspace.alignment.confirmAriaLabel":
+      "Confirm alignment: {srcToken} translates as {tgtToken}. This teaches the glosser.",
+    "workspace.alignment.rejectTooltip":
+      "Reject: mark \"{srcToken} -> {tgtToken}\" as an incorrect alignment. Rejected pairs are " +
+      "penalized so this suggestion won't appear again.",
+    "workspace.alignment.rejectAriaLabel":
+      "Reject alignment: {srcToken} does not translate as {tgtToken}. This penalizes the glosser " +
+      "suggestion.",
 
     // -- OfflineBanner --
     "workspace.offlineBanner.message": "You're offline — changes are queued and will sync when you reconnect.",
 
+    // -- PeerPresence: live-collaborator avatar stack --
+    "workspace.peerPresence.onlineCount": plural({ one: "{count} online", other: "{count} online" }),
+    "workspace.peerPresence.collaboratorsOnlineTooltip": plural({
+      one: "{count} collaborator online",
+      other: "{count} collaborators online",
+    }),
+
     // -- ProjectAssignedToMe --
     "workspace.assignedToMe.heading": "My assignments",
+    "workspace.assignedToMe.jumpToTooltip": "Jump to {scope}",
+    "workspace.assignedToMe.jumpToWithNoteTooltip": "Jump to {scope}: {note}",
     "workspace.assignedToMe.cellsProgress": plural(
       { one: "{done}/{total} cell", other: "{done}/{total} cells" },
       "total",
@@ -234,6 +278,29 @@ export const workspace = defineNamespace({
 
     // -- UpdateBanner --
     "workspace.updateBanner.updateAvailable": "Update available",
+
+    // -- ProjectWorkspace: legacy-measure batch toast (pre-merge takes with
+    // no captured duration; "Measure all" runs a fix-it batch) --
+    "workspace.legacyMeasure.partialSuccessToast": plural(
+      {
+        one: "Measured {measured} recording; {failed} could not be measured — re-record to fix those.",
+        other: "Measured {measured} recordings; {failed} could not be measured — re-record to fix those.",
+      },
+      "measured",
+    ),
+    "workspace.legacyMeasure.successToast": plural(
+      { one: "Measured {measured} recording.", other: "Measured {measured} recordings." },
+      "measured",
+    ),
+
+    // -- ProjectWorkspace: CSV cast/character label-picker import toasts --
+    "workspace.labelPicker.noLabelsAppliedToast":
+      "No labels applied — the CSV doesn't match {fileName}. Re-download the template and try again.",
+    "workspace.labelPicker.partiallyAppliedToast": "Applied {applied} of {total} labels to {fileName}.",
+    "workspace.labelPicker.appliedToast": plural(
+      { one: "Applied {applied} label to {fileName}.", other: "Applied {applied} labels to {fileName}." },
+      "applied",
+    ),
 
     // -- WorkspaceSkeleton --
     "workspace.skeleton.loadingProject": "Loading project",
@@ -294,11 +361,22 @@ export const workspace = defineNamespace({
     "workspace.chipStrip.eitherOverlapTooltip": "This target audio sounds over a neighbouring verse's target audio",
     "workspace.chipStrip.overlapValue": "Overlap: −{sec}s",
     "workspace.chipStrip.speakerLabel": "Speaker",
+    "workspace.chipStrip.durationDiffTooltip": "Source duration − target duration",
+    "workspace.chipStrip.durationDiffTooltipWithDetail": "Source duration − target duration · {detail}",
+    "workspace.chipStrip.diffStartDetail": "Start: {value}",
+    "workspace.chipStrip.diffEndDetail": "End: {value}",
 
     // -- timeline/TargetAudioLane --
     "workspace.targetAudioLane.overlapsNext": "Overlaps the next dub",
     "workspace.targetAudioLane.overlapsPrevious": "Overlaps the previous dub",
     "workspace.targetAudioLane.recordAudio": "Record audio for this line",
+    "workspace.targetAudioLane.runsPastSectionTooltip": "Runs {sec}s past the section",
+    "workspace.targetAudioLane.drawnShortNeighboringDubsStay":
+      "Drawn short at rest so the neighbouring dubs stay reachable",
+    "workspace.targetAudioLane.drawnShortPreviousDubStays":
+      "Drawn short at rest so the previous dub stays reachable",
+    "workspace.targetAudioLane.drawnShortNextDubStays":
+      "Drawn short at rest so the next dub stays reachable",
 
     // -- ui/data-table --
     "workspace.dataTable.noResults": "No results.",
@@ -308,6 +386,12 @@ export const workspace = defineNamespace({
 
     // -- hooks/useOpenWorkspace --
     "workspace.openWorkspace.openingProject": "Opening project",
+
+    // -- lib/progress/file-sort (per-file breakdown sort-mode picker on
+    // ProjectOverview) --
+    "workspace.fileSort.lastUpdated": "Last updated",
+    "workspace.fileSort.canonical": "Canonical order",
+    "workspace.fileSort.alphabetical": "Alphabetical",
   },
   context: {
     _context: {
@@ -355,6 +439,31 @@ export const workspace = defineNamespace({
           "back to the project list. Reused by the not-on-device, forbidden, not-" +
           "found and trashed-project screens so every 'return to safety' exit reads " +
           "identically.",
+      },
+      "workspace.projectSettingsHook.noSessionError": {
+        description:
+          "Error result surfaced in place of a save-confirmation when useProjectSettings' " +
+          "patch() is called with no signed-in session or no resolved project id — a " +
+          "mount-order race, not a normal user action. Rare in practice; callers that " +
+          "show it should also offer a retry.",
+      },
+      "workspace.forms.requiredField": {
+        description:
+          "Generic required-field validation error shown under a text input across many " +
+          "different forms (team name, source term, username/email, rule name, …). " +
+          "{label} names the specific field, as a short noun phrase — do not translate it " +
+          "here; it is passed in as data by each call site.",
+        placeholders: {
+          label: "The field's short name (e.g. 'Team name') — not translated as part of this key.",
+        },
+      },
+      "workspace.agentDockPanel.summarizeBookTitle": {
+        description:
+          "Tooltip/title on the 'Summarize book' quick-action button above the agent " +
+          "dock's chat, shown only when a scripture file is open. Queues an agent prompt " +
+          "that summarizes the book using vetted resources, replying in the reader's own " +
+          "profile language (not necessarily the UI language).",
+        placeholders: { book: "The open book's display name (e.g. 'Genesis') — not translated." },
       },
       "workspace.sidebar.collapse": {
         description:
@@ -854,6 +963,16 @@ export const workspace = defineNamespace({
           "revealing the raw provider error message below it.",
       },
 
+      "workspace.inlineAiError.showDetailsAriaLabel": {
+        description:
+          "Accessible name for the info-icon button beside an inline AI-failure line " +
+          "(draft, batch completion, back-translation, agent apply, …), which opens the " +
+          "full error in a popover. {line} is the same short line already shown inline — " +
+          "already localized/composed upstream (an optional operation label plus a " +
+          "categorized, human-readable summary) — do not translate it again.",
+        placeholders: { line: "The inline error summary already visible next to this button — not translated here." },
+      },
+
       "workspace.transcribeBadge.loadShort": {
         description:
           "Ultra-compact gutter-pill text shown while the Whisper model is " +
@@ -873,6 +992,27 @@ export const workspace = defineNamespace({
       "workspace.transcribeBadge.failed": {
         description: "Gutter-pill button text when transcription errored; clicking it opens the error popover.",
         maxLength: 24,
+      },
+      "workspace.transcribeBadge.doneTooltip": {
+        description:
+          "Tooltip on the gutter pill's brief post-transcription success flash, when the " +
+          "pill isn't clickable (no jump-to-transcript handler wired). {words} is already " +
+          "a fully-formed, pre-pluralized phrase — do not translate it again or wrap it.",
+        placeholders: {
+          words: "Pre-pluralized '{count} word'/'{count} words' phrase — already localized upstream.",
+          secs: "Transcription duration in seconds, one decimal place, as a plain number.",
+        },
+      },
+      "workspace.transcribeBadge.doneTooltipClickable": {
+        description:
+          "Same as workspace.transcribeBadge.doneTooltip, with a trailing clause added " +
+          "when the pill IS clickable (jumps to the transcript). Keep both variants in " +
+          "sync but do not merge them — the trailing clause must not appear when the pill " +
+          "isn't interactive.",
+        placeholders: {
+          words: "Pre-pluralized '{count} word'/'{count} words' phrase — already localized upstream.",
+          secs: "Transcription duration in seconds, one decimal place, as a plain number.",
+        },
       },
 
       "workspace.transcriptPreview.retranscribeTooltip": {
@@ -981,6 +1121,43 @@ export const workspace = defineNamespace({
           "count sits in parentheses and does not change the surrounding words.",
         placeholders: { count: "How many amber-band links are waiting for confirmation." },
       },
+      "workspace.alignment.confirmTooltip": {
+        description:
+          "Tooltip on the checkmark button beside one word-alignment link, explaining " +
+          "what confirming it does before the click.",
+        placeholders: {
+          srcToken: "The source-language word/token — not translated.",
+          tgtToken: "The target-language word/token (the translator's own text) — not translated.",
+        },
+      },
+      "workspace.alignment.confirmAriaLabel": {
+        description:
+          "Accessible name for the same checkmark confirm button as " +
+          "workspace.alignment.confirmTooltip — read by a screen reader in place of the " +
+          "icon-only button.",
+        placeholders: {
+          srcToken: "The source-language word/token — not translated.",
+          tgtToken: "The target-language word/token (the translator's own text) — not translated.",
+        },
+      },
+      "workspace.alignment.rejectTooltip": {
+        description:
+          "Tooltip on the X button beside one word-alignment link, explaining what " +
+          "rejecting it does before the click.",
+        placeholders: {
+          srcToken: "The source-language word/token — not translated.",
+          tgtToken: "The target-language word/token (the translator's own text) — not translated.",
+        },
+      },
+      "workspace.alignment.rejectAriaLabel": {
+        description:
+          "Accessible name for the same X reject button as workspace.alignment." +
+          "rejectTooltip — read by a screen reader in place of the icon-only button.",
+        placeholders: {
+          srcToken: "The source-language word/token — not translated.",
+          tgtToken: "The target-language word/token (the translator's own text) — not translated.",
+        },
+      },
 
       "workspace.offlineBanner.message": {
         description:
@@ -994,6 +1171,34 @@ export const workspace = defineNamespace({
           "Collapsible section heading in the workspace sidebar listing the " +
           "signed-in user's own open work assignments within this project.",
         screenshot: "workspace-nav",
+      },
+      "workspace.assignedToMe.jumpToTooltip": {
+        description:
+          "Tooltip on one assignment row in the 'My assignments' sidebar list, when the " +
+          "assignment carries no note. Clicking the row jumps the editor to that scope.",
+        placeholders: { scope: "The assignment's scope label (e.g. a book/chapter range) — not translated." },
+      },
+      "workspace.assignedToMe.jumpToWithNoteTooltip": {
+        description:
+          "Same as workspace.assignedToMe.jumpToTooltip, with the assignment's note " +
+          "appended after a colon when one was left for this assignment.",
+        placeholders: {
+          scope: "The assignment's scope label (e.g. a book/chapter range) — not translated.",
+          note: "Free-text note left on the assignment — not translated.",
+        },
+      },
+      "workspace.peerPresence.onlineCount": {
+        description:
+          "Accessible name for the live-collaborators popover, stating how many peers are " +
+          "currently viewing/editing this project. English text is invariant across " +
+          "count, but the plural form still lets other locales inflect it correctly.",
+        placeholders: { count: "How many peers are currently online on this project." },
+      },
+      "workspace.peerPresence.collaboratorsOnlineTooltip": {
+        description:
+          "Tooltip on the collapsed avatar-stack trigger button, before the popover " +
+          "opens, stating how many collaborators are currently online.",
+        placeholders: { count: "How many peers are currently online on this project." },
       },
       "workspace.assignedToMe.cellsProgress": {
         description:
@@ -1091,6 +1296,48 @@ export const workspace = defineNamespace({
           "Floating pill shown when a new build of the app has been " +
           "deployed; clicking it reloads the page to pick it up.",
         maxLength: 24,
+      },
+      "workspace.legacyMeasure.partialSuccessToast": {
+        description:
+          "Warning toast after the 'Measure all' legacy-takes fix-it batch finishes with " +
+          "at least one failure. Plural agrees with {measured}, the count that " +
+          "successfully got a captured duration; {failed} is reported as a plain number " +
+          "regardless of its own count.",
+        placeholders: {
+          measured: "How many recordings were successfully measured; also selects the plural form.",
+          failed: "How many recordings could not be measured.",
+        },
+      },
+      "workspace.legacyMeasure.successToast": {
+        description:
+          "Success toast after the 'Measure all' legacy-takes fix-it batch finishes with " +
+          "zero failures.",
+        placeholders: { measured: "How many recordings were successfully measured; also selects the plural form." },
+      },
+      "workspace.labelPicker.noLabelsAppliedToast": {
+        description:
+          "Warning toast after importing a cast/character CSV whose rows matched none of " +
+          "the file's speaker labels at all.",
+        placeholders: { fileName: "Name of the file the CSV was checked against — not translated." },
+      },
+      "workspace.labelPicker.partiallyAppliedToast": {
+        description:
+          "Warning toast after importing a cast/character CSV that matched some but not " +
+          "all rows against the file's speaker labels.",
+        placeholders: {
+          applied: "How many labels were successfully applied.",
+          total: "Total labels attempted (applied + unmatched).",
+          fileName: "Name of the file the labels were applied to — not translated.",
+        },
+      },
+      "workspace.labelPicker.appliedToast": {
+        description:
+          "Success toast after importing a cast/character CSV that matched every row " +
+          "against the file's speaker labels.",
+        placeholders: {
+          applied: "How many labels were applied; also selects the plural form.",
+          fileName: "Name of the file the labels were applied to — not translated.",
+        },
       },
 
       "workspace.skeleton.loadingProject": {
@@ -1275,6 +1522,34 @@ export const workspace = defineNamespace({
           "previewCameraHeader's 'Camera' pill, which reuses that key).",
         maxLength: 10,
       },
+      "workspace.chipStrip.durationDiffTooltip": {
+        description:
+          "Tooltip on the 'Diff:' pill (workspace.chipStrip.diffLabel) in the chip stats " +
+          "strip, naming what the diff figure measures, for a dub with no per-edge detail " +
+          "to add. 'Source duration' and 'target duration' here are generic nouns, not the " +
+          "same as workspace.chipStrip.sourceLabel/targetLabel's colon-suffixed pill labels.",
+      },
+      "workspace.chipStrip.durationDiffTooltipWithDetail": {
+        description:
+          "Same as workspace.chipStrip.durationDiffTooltip, with a start/end breakdown " +
+          "appended after the header. {detail} is one or both of workspace.chipStrip." +
+          "diffStartDetail/diffEndDetail, already translated and joined with ' · ' — do " +
+          "not translate it again.",
+        placeholders: {
+          detail: "One or both already-translated 'Start: …'/'End: …' fragments, joined with ' · '.",
+        },
+      },
+      "workspace.chipStrip.diffStartDetail": {
+        description:
+          "One fragment inside workspace.chipStrip.durationDiffTooltipWithDetail's " +
+          "{detail}, naming the duration difference at the clip's start edge specifically.",
+        placeholders: { value: "Already-formatted signed seconds (e.g. '+0.3s') — not translated." },
+      },
+      "workspace.chipStrip.diffEndDetail": {
+        description:
+          "Same as workspace.chipStrip.diffStartDetail, for the clip's end edge.",
+        placeholders: { value: "Already-formatted signed seconds (e.g. '+0.3s') — not translated." },
+      },
 
       "workspace.targetAudioLane.overlapsNext": {
         description:
@@ -1292,6 +1567,31 @@ export const workspace = defineNamespace({
           "Tooltip/accessible name for the small record-button affordance on " +
           "the target-audio timeline lane — both the corner mic button on an " +
           "existing chip and the button that fills an empty (undubbed) slot.",
+      },
+      "workspace.targetAudioLane.runsPastSectionTooltip": {
+        description:
+          "Tooltip line on a dub chip that runs slightly past its section's boundary — " +
+          "a soft overflow, not a hard overlap with a neighbor.",
+        placeholders: { sec: "Overflow duration in seconds, one decimal place, as a plain number." },
+      },
+      "workspace.targetAudioLane.drawnShortNeighboringDubsStay": {
+        description:
+          "Tooltip line on a dub chip drawn shorter than its actual recording so both " +
+          "the previous AND next neighboring dubs stay reachable at rest (both edges cut). " +
+          "One of three near-identical variants (see the sibling " +
+          "drawnShortPreviousDubStays/drawnShortNextDubStays keys) picked by which edge(s) " +
+          "were cut — keep the three grammatically parallel if you change the wording.",
+      },
+      "workspace.targetAudioLane.drawnShortPreviousDubStays": {
+        description:
+          "Same shape as workspace.targetAudioLane.drawnShortNeighboringDubsStay, for the " +
+          "case where only the chip's head (start) was cut, so the previous dub stays " +
+          "reachable.",
+      },
+      "workspace.targetAudioLane.drawnShortNextDubStays": {
+        description:
+          "Same shape as workspace.targetAudioLane.drawnShortNeighboringDubsStay, for the " +
+          "case where only the chip's tail (end) was cut, so the next dub stays reachable.",
       },
 
       "workspace.dataTable.noResults": {
@@ -1316,6 +1616,20 @@ export const workspace = defineNamespace({
           "Accessible label on the full-viewport blocking overlay shown " +
           "while navigating into a project workspace (a lazy-loaded route), " +
           "so the click doesn't read as unresponsive.",
+      },
+
+      "workspace.fileSort.lastUpdated": {
+        description:
+          "One option in the per-file breakdown's sort-mode dropdown (ProjectOverview) " +
+          "— sorts most-recently-progressed files first. Default mode.",
+      },
+      "workspace.fileSort.canonical": {
+        description:
+          "Sort-mode dropdown option: orders files by Bible reading order " +
+          "(Genesis → Revelation) rather than recency or name.",
+      },
+      "workspace.fileSort.alphabetical": {
+        description: "Sort-mode dropdown option: plain A-Z name order.",
       },
     },
   },

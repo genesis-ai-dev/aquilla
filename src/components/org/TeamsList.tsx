@@ -34,6 +34,7 @@ import { listTeams, createTeam, type TeamSummary } from "@/lib/frontier/teams"
 import { orgPath } from "@/lib/navigation/org-paths"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 const createTeamSchema = z.object({
   name: requiredString("Team name"),
@@ -46,10 +47,16 @@ const createTeamSchema = z.object({
 // still holds — they remain reachable via "all"/"public".
 type Visibility = "all" | "internal" | "public"
 
-const VISIBILITY_OPTIONS: { value: Visibility; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "internal", label: "Internal only" },
-  { value: "public", label: "Public only" },
+/**
+ * Catalog keys, not display strings — resolved with `t()` at render time in
+ * `VisibilitySelect` below. `internal`/`public` reuse this component's own
+ * previously-unwired org.teamsList.visibility*Label keys; `all` reuses the
+ * identical-text key from OrgHome's status filter.
+ */
+const VISIBILITY_OPTIONS: { value: Visibility; labelKey: MessageKey }[] = [
+  { value: "all", labelKey: "org.orgHome.statusFilter.all" },
+  { value: "internal", labelKey: "org.teamsList.visibilityInternalLabel" },
+  { value: "public", labelKey: "org.teamsList.visibilityPublicLabel" },
 ]
 
 function filterByVisibility(teams: TeamSummary[], visibility: Visibility): TeamSummary[] {
@@ -66,9 +73,10 @@ function VisibilitySelect({
   onValueChange: (value: Visibility) => void
 }) {
   const { t } = useI18n()
+  const items = VISIBILITY_OPTIONS.map((opt) => ({ value: opt.value, label: t(opt.labelKey) }))
   return (
     <Select
-      items={VISIBILITY_OPTIONS}
+      items={items}
       value={value}
       onValueChange={(v) => onValueChange((v as Visibility) ?? "internal")}
     >
@@ -77,7 +85,7 @@ function VisibilitySelect({
       </SelectTrigger>
       <SelectContent align="start">
         <SelectGroup>
-          {VISIBILITY_OPTIONS.map((opt) => (
+          {items.map((opt) => (
             <SelectItem key={opt.value} value={opt.value}>
               {opt.label}
             </SelectItem>

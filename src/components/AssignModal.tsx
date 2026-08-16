@@ -606,10 +606,14 @@ export function AssignModal({
                 {fileGroups.map((group) => {
                   const groupFileIds = group.files.map((f) => f.id)
                   const allSelected = groupFileIds.every((id) => selectedFileIds.has(id))
+                  // group.label is the stable identity string (compared/keyed
+                  // on below); group.labelKey, set only on the synthetic
+                  // "Ungrouped" bucket, is what's actually shown to the user.
+                  const displayLabel = group.labelKey ? t(group.labelKey) : group.label
                   return (
                     <div key={group.label}>
                       <div className="flex items-center justify-between px-1 py-0.5">
-                        <span className="text-xs font-medium text-muted-foreground">{group.label}</span>
+                        <span className="text-xs font-medium text-muted-foreground">{displayLabel}</span>
                         {group.label !== "Ungrouped" && groupFileIds.length > 1 && (
                           <button
                             type="button"

@@ -251,7 +251,7 @@ export function OverviewLaneTable({
               return (
                 <span className="inline-flex items-center justify-end gap-0.5">
                   <DataTableRowActionsButton
-                    label={`Actions for ${label}`}
+                    label={t("org.rowActionsAriaLabel", { name: label })}
                     data-testid={`overview-lane-actions-${tagId}`}
                     revealOnHover
                   />

@@ -4,6 +4,7 @@ import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
 import type { ProjectPresencePeer } from "@/lib/sync/presence-store"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface PeerPresenceProps {
   peers: ProjectPresencePeer[]
@@ -11,6 +12,7 @@ interface PeerPresenceProps {
 }
 
 export function PeerPresence({ peers, onJumpToPeer }: PeerPresenceProps) {
+  const t = useT()
   const [showPopover, setShowPopover] = useState(false)
 
   if (peers.length === 0) return null
@@ -18,11 +20,13 @@ export function PeerPresence({ peers, onJumpToPeer }: PeerPresenceProps) {
   const visible = peers.slice(0, 5)
   const overflow = peers.length - 5
   const firstPeer = peers[0]
-  const label = peers.length === 1 && firstPeer ? firstPeer.username : `${peers.length} online`
+  const label = peers.length === 1 && firstPeer
+    ? firstPeer.username
+    : t("workspace.peerPresence.onlineCount", { count: peers.length })
 
   return (
     <Popover open={showPopover} onOpenChange={setShowPopover}>
-      <AppTooltip content={`${peers.length} collaborator${peers.length !== 1 ? "s" : ""} online`}>
+      <AppTooltip content={t("workspace.peerPresence.collaboratorsOnlineTooltip", { count: peers.length })}>
         <PopoverTrigger
           render={
             <button
@@ -54,7 +58,7 @@ export function PeerPresence({ peers, onJumpToPeer }: PeerPresenceProps) {
         align="end"
         sideOffset={8}
         className="w-56 gap-0 p-2"
-        aria-label={`${peers.length} online`}
+        aria-label={t("workspace.peerPresence.onlineCount", { count: peers.length })}
       >
         <ul className="flex flex-col gap-1">
           {peers.map((peer) => (

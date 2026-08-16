@@ -42,7 +42,7 @@ const ORG_ITEM_CLASS =
 const ORG_META_CLASS = "text-xs text-muted-foreground!"
 
 type OrgSwitcherItem =
-  | { kind: "all"; key: "all"; label: "All organizations" }
+  | { kind: "all"; key: "all"; label: string }
   | {
       kind: "member"
       key: `member:${number}`
@@ -56,12 +56,6 @@ type OrgSwitcherItem =
       id: number
       label: string
     }
-
-const ALL_ORGS_ITEM: Extract<OrgSwitcherItem, { kind: "all" }> = {
-  kind: "all",
-  key: "all",
-  label: "All organizations",
-}
 
 function orgMatchesSearch(name: string, query: string): boolean {
   const normalized = query.trim().toLocaleLowerCase()
@@ -314,16 +308,16 @@ export function OrgSwitcher() {
   const title = guestSelected
     ? selectedGuest.name ?? `Org #${selectedGuest.id}`
     : isAllOrgs
-      ? "All organizations"
+      ? t("org.breadcrumb.allOrganizations")
       : activeOrg?.name ?? "Workspace"
 
   const items = useMemo<OrgSwitcherItem[]>(() => {
     const next: OrgSwitcherItem[] = []
-    if (showAllOrgs) next.push(ALL_ORGS_ITEM)
+    if (showAllOrgs) next.push({ kind: "all", key: "all", label: t("org.breadcrumb.allOrganizations") })
     for (const org of sortedOrgs) next.push(memberItem(org))
     for (const org of sortedGuestOrgs) next.push(guestItem(org))
     return next
-  }, [showAllOrgs, sortedOrgs, sortedGuestOrgs])
+  }, [showAllOrgs, sortedOrgs, sortedGuestOrgs, t])
 
   const selectedItem = useMemo((): OrgSwitcherItem | null => {
     if (guestSelected && selectedGuestOrgId != null) {
@@ -467,7 +461,7 @@ export function OrgSwitcher() {
           render={
             <button
               type="button"
-              aria-label={`Organization switcher: ${title}`}
+              aria-label={t("org.switcher.triggerAriaLabel", { org: title })}
               className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-sm hover:bg-accent [&>svg:last-child]:ml-auto [&>svg:last-child]:opacity-50"
             />
           }

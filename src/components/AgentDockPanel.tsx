@@ -67,7 +67,7 @@ export function AgentDockPanel({
     if (bookName) {
       actions.push({
         label: "Summarize book",
-        title: `Summarize ${bookName} using vetted Bible resources, in your profile language`,
+        title: t("workspace.agentDockPanel.summarizeBookTitle", { book: bookName }),
         onClick: () => setPendingAgentPrompt(bookSummaryPrompt(bookName)),
       })
     }

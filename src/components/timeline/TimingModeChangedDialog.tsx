@@ -34,8 +34,8 @@ export function TimingModeChangedDialog({ ack, onAcknowledge }: Props) {
             <RichMessage
               k="workspace.timingModeChanged.description"
               values={{
-                from: <b>{AUDIO_TIMING_MODE_LABELS[ack.from].name}</b>,
-                to: <b>{AUDIO_TIMING_MODE_LABELS[ack.to].name}</b>,
+                from: <b>{t(AUDIO_TIMING_MODE_LABELS[ack.from].nameKey)}</b>,
+                to: <b>{t(AUDIO_TIMING_MODE_LABELS[ack.to].nameKey)}</b>,
               }}
             />
           </DialogDescription>

@@ -6,6 +6,9 @@ export const honeycombData: BrandData = {
     name: "Honeycomb Studio",
     shortName: "Honeycomb",
     tagline: "Built for the sentences that matter.",
+    // i18n-exempt brand asset — build-time SEO <meta name="description">/OG-alt
+    // text (scripts/vite-html-branding.ts), baked into index.html per brand
+    // before the app or its locale system ever runs. Not a runtime UI string.
     description: "Translation is human work. Honeycomb is where that work happens.",
     htmlTitle: "Honeycomb Studio",
   },

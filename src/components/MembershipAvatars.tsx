@@ -19,7 +19,7 @@ export function MembershipAvatars({ members, maxVisible = 4 }: MembershipAvatars
   return (
     <AvatarGroup
       className="-space-x-1.5 *:data-[slot=avatar]:ring-background"
-      aria-label={`${members.length} member${members.length !== 1 ? "s" : ""}`}
+      aria-label={t("org.teamsList.memberCount", { count: members.length })}
     >
       {visible.map((m) => (
         <AppTooltip key={m.userId} content={`${m.username} (${resolveRoleName(t, m.role.name)})`}>

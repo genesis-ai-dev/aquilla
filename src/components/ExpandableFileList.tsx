@@ -133,6 +133,10 @@ export function ExpandableFileList({
             </p>
           )}
           {groups.map((group) => {
+            // group.label is the stable identity string (compared/keyed on
+            // below); group.labelKey, set only on the synthetic "Ungrouped"
+            // bucket, is what's actually shown to the user.
+            const displayLabel = group.labelKey ? t(group.labelKey) : group.label
             const showHeader = groups.length > 1 || group.label !== "Ungrouped"
             const isCollapsed = showHeader && collapsed.has(group.label)
             const canEditCorpus =
@@ -149,8 +153,8 @@ export function ExpandableFileList({
                       aria-expanded={!isCollapsed}
                       aria-label={
                         isCollapsed
-                          ? t("nav.fileList.expandGroup", { group: group.label })
-                          : t("nav.fileList.collapseGroup", { group: group.label })
+                          ? t("nav.fileList.expandGroup", { group: displayLabel })
+                          : t("nav.fileList.collapseGroup", { group: displayLabel })
                       }
                     >
                       <ChevronDown
@@ -174,15 +178,15 @@ export function ExpandableFileList({
                           className="flex-1 rounded-lg bg-background px-1.5 text-[11px] normal-case tracking-normal outline-none"
                         />
                       ) : (
-                        <span>{group.label}</span>
+                        <span>{displayLabel}</span>
                       )}
                     </button>
                     {canEditCorpus && !isEditingCorpus && (
-                      <AppTooltip content={t("nav.fileList.renameGroup", { group: group.label })} side="right">
+                      <AppTooltip content={t("nav.fileList.renameGroup", { group: displayLabel })} side="right">
                         <button
                           className="rounded-md p-0.5 opacity-0 transition-shadow group-hover/corpus:opacity-100"
                           onClick={(e) => { e.stopPropagation(); setEditingCorpus(group.label) }}
-                          aria-label={t("nav.fileList.renameGroup", { group: group.label })}
+                          aria-label={t("nav.fileList.renameGroup", { group: displayLabel })}
                         >
                           <Pencil className="h-3 w-3" />
                         </button>

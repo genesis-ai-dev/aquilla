@@ -118,7 +118,7 @@ function AlignmentRow({
       </AppTooltip>
 
       {/* Confidence pill */}
-      <AppTooltip content={`${pct}% confidence`}>
+      <AppTooltip content={t("importExport.preview.confidencePercent", { percent: pct })}>
         <span
           className={cn(
             "shrink-0 rounded-md px-1.5 py-px text-[9px] font-medium",
@@ -136,7 +136,7 @@ function AlignmentRow({
         <>
           {/* AQU-240: tooltip/aria-label explains that confirming teaches the glosser */}
           <AppTooltip
-            content={`Confirm: mark "${link.srcToken} -> ${link.tgtToken}" as a correct word-level alignment. Confirmed pairs teach the statistical glosser and improve future back-translations.`}
+            content={t("workspace.alignment.confirmTooltip", { srcToken: link.srcToken, tgtToken: link.tgtToken })}
             className="max-w-xs"
           >
             <Button
@@ -145,14 +145,14 @@ function AlignmentRow({
               size="icon-xs"
               onClick={onConfirm}
               className="shrink-0 text-muted-foreground hover:bg-emerald-500/20 hover:text-emerald-700 dark:hover:text-emerald-300"
-              aria-label={`Confirm alignment: ${link.srcToken} translates as ${link.tgtToken}. This teaches the glosser.`}
+              aria-label={t("workspace.alignment.confirmAriaLabel", { srcToken: link.srcToken, tgtToken: link.tgtToken })}
             >
               <Check />
             </Button>
           </AppTooltip>
           {/* AQU-240: tooltip/aria-label explains that invalidating penalizes incorrect suggestions */}
           <AppTooltip
-            content={`Reject: mark "${link.srcToken} -> ${link.tgtToken}" as an incorrect alignment. Rejected pairs are penalized so this suggestion won't appear again.`}
+            content={t("workspace.alignment.rejectTooltip", { srcToken: link.srcToken, tgtToken: link.tgtToken })}
             className="max-w-xs"
           >
             <Button
@@ -161,7 +161,7 @@ function AlignmentRow({
               size="icon-xs"
               onClick={onInvalidate}
               className="shrink-0 text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
-              aria-label={`Reject alignment: ${link.srcToken} does not translate as ${link.tgtToken}. This penalizes the glosser suggestion.`}
+              aria-label={t("workspace.alignment.rejectAriaLabel", { srcToken: link.srcToken, tgtToken: link.tgtToken })}
             >
               <X />
             </Button>

@@ -353,7 +353,7 @@ function TargetAudioChip({
       )
     }
   } else if (overflow === "soft") {
-    tipLines.push(<div key="soft">{`Runs ${overflowSec.toFixed(1)}s past the section`}</div>)
+    tipLines.push(<div key="soft">{t("workspace.targetAudioLane.runsPastSectionTooltip", { sec: overflowSec.toFixed(1) })}</div>)
   } else {
     tipLines.push(<div key="kind">{lengthNote ? `${kindTitle} · ${lengthNote}` : kindTitle}</div>)
   }
@@ -366,14 +366,14 @@ function TargetAudioChip({
   // is what opens this tooltip and hovering is also what restores full length,
   // so a line keyed on `truncated` could never actually be read.
   if (headCutSec != null || tailCutSec != null) {
-    const who =
+    const drawnShortKey =
       headCutSec != null && tailCutSec != null
-        ? "the neighbouring dubs stay"
+        ? "workspace.targetAudioLane.drawnShortNeighboringDubsStay"
         : headCutSec != null
-          ? "the previous dub stays"
-          : "the next dub stays"
+          ? "workspace.targetAudioLane.drawnShortPreviousDubStays"
+          : "workspace.targetAudioLane.drawnShortNextDubStays"
     tipLines.push(
-      <div key="truncated" className="text-muted-foreground">{`Drawn short at rest so ${who} reachable`}</div>,
+      <div key="truncated" className="text-muted-foreground">{t(drawnShortKey)}</div>,
     )
   }
   const tooltipContent = <div className="flex flex-col gap-0.5">{tipLines}</div>

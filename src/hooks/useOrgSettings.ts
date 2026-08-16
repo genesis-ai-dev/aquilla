@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { ROLE } from "@/lib/frontier/roles"
 import {
   fetchOrgSettings,
@@ -179,6 +180,7 @@ export function useOrgSettings(
 ): UseOrgSettings {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
+  const t = useT()
 
   const [server, setServer] = useState<OrgSettingsResponse | null>(null)
   const [hasFetched, setHasFetched] = useState(false)
@@ -284,7 +286,7 @@ export function useOrgSettings(
 
   const patch = useCallback(
     async (partial: OrgWideSettings): Promise<OrgPatchResult | { kind: "blocked" }> => {
-      if (!orgId || !jwt) return { kind: "error" as const, status: 0, message: "no session or org" }
+      if (!orgId || !jwt) return { kind: "error" as const, status: 0, message: t("org.orgSettings.noSessionError") }
       if (!canEdit) return { kind: "blocked" }
 
       return runSerialized(async () => {
@@ -316,7 +318,7 @@ export function useOrgSettings(
         return result
       })
     },
-    [orgId, jwt, canEdit, runSerialized, writeServer, refresh],
+    [orgId, jwt, canEdit, runSerialized, writeServer, refresh, t],
   )
 
   const canRequestPromotion =
@@ -324,14 +326,14 @@ export function useOrgSettings(
 
   const requestPromotion = useCallback(
     async (rule: TranslationRule, sourceProjectId: string): Promise<PromotionRequestResult | { kind: "blocked" }> => {
-      if (!orgId || !jwt) return { kind: "error" as const, status: 0, message: "no session or org" }
+      if (!orgId || !jwt) return { kind: "error" as const, status: 0, message: t("org.orgSettings.noSessionError") }
       if (!canRequestPromotion) return { kind: "blocked" }
       const result = await postPromotionRequest(jwt, orgId, rule, sourceProjectId)
       // On success, refresh so pending requests panel updates immediately.
       if (result.kind === "ok") void refresh()
       return result
     },
-    [orgId, jwt, canRequestPromotion, refresh],
+    [orgId, jwt, canRequestPromotion, refresh, t],
   )
 
   const settings = server?.settings ?? {}

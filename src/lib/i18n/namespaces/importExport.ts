@@ -594,6 +594,26 @@ export const importExport = defineNamespace({
     "importExport.errors.notAParatextProject":
       "That doesn't look like a Paratext project — no Settings.xml (or .ssf) with USFM books was found.",
 
+    // — Import preview notices: src/lib/import.ts — non-fatal, shown in the
+    //   PreviewPanel's "Review before importing" list alongside the row count
+    //   badge. Keyed via the standalone t() since import.ts runs outside React.
+    "importExport.notices.basicParserFallback":
+      "Aquilla could not verify this structured layout with AI, so it used the basic parser. Check " +
+      "the preview carefully before importing.",
+
+    // — Manifest normalization warnings: src/lib/import/normalized-manifest.ts —
+    //   Per-unit diagnostics attached to NormalizedImportFile.warnings. Not
+    //   yet surfaced by any panel (the array is currently read only for its
+    //   `.code` tallies) — keyed now via the standalone t() so the text is
+    //   ready the moment a review UI reads `.message`, and so it never drifts
+    //   from the catalog like every other lib-authored diagnostic here.
+    "importExport.manifestWarnings.emptySource": "The unit has no source text.",
+    "importExport.manifestWarnings.missingVerseReference":
+      "A verse unit has no parseable canonical Scripture reference.",
+    "importExport.manifestWarnings.duplicateCanonicalRef":
+      "Canonical reference {ref} occurs more than once.",
+    "importExport.manifestWarnings.invalidTiming": "Cue end time must be after its start time.",
+
     // — Thrown-error triage: src/lib/sync/source-upload.ts —
     "importExport.errors.sourceUploadEmpty": "Source upload failed: the original file is empty.",
     "importExport.errors.sourceUploadTooLarge": "Source upload failed: the original file exceeds the {maxSize} limit.",
@@ -1367,6 +1387,14 @@ export const importExport = defineNamespace({
         description:
           "Thrown when binding an already-uploaded artifact to another file fails at the network level. {detail} is the raw underlying error, interpolated as data.",
         placeholders: { detail: "Raw network-error message — not translated." },
+      },
+      "importExport.manifestWarnings.duplicateCanonicalRef": {
+        description:
+          "Per-unit manifest-normalization warning when the same canonical Scripture " +
+          "reference (e.g. 'GEN 1:1') is assigned to more than one imported unit — not " +
+          "yet surfaced by any panel, see the section note above `keys.importExport." +
+          "manifestWarnings.emptySource`.",
+        placeholders: { ref: "The duplicated canonical reference (e.g. 'GEN 1:1') — not translated." },
       },
       "importExport.dialog.finishSaveFailed": {
         description:

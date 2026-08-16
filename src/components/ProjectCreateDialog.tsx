@@ -904,7 +904,7 @@ function TargetLanguageChips({
             {lang}
             <button
               type="button"
-              aria-label={`Remove ${lang}`}
+              aria-label={t("projectSettings.create.extraLanguagesRemoveAriaLabel", { lang })}
               className="-ml-0.5 inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground opacity-50 hover:opacity-100"
               onClick={() => removeChip(lang)}
             >

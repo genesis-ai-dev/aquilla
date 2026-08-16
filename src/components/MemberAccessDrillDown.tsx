@@ -86,7 +86,7 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
                 variant="inline"
                 className="bg-muted/30 py-8"
                 icon={FolderX}
-                title={`${username} has no access to any project in this org.`}
+                title={t("org.memberAccessDrillDown.noAccessEmptyTitle", { username })}
               />
             ) : (
               <div className="space-y-2">
@@ -145,19 +145,19 @@ function grantPaths(t: TFunction, b: ProjectAccessBreakdown): { label: string; d
 
   if (b.direct != null) {
     paths.push({
-      label: `direct · ${resolveRoleName(t, b.direct)}`,
+      label: t("org.memberAccessDrillDown.pathDirect", { role: resolveRoleName(t, b.direct) }),
       detail: "Explicitly added to this project (direct grant / override)",
     })
   }
   for (const g of b.groups) {
     paths.push({
-      label: `group "${g.name}" · ${resolveRoleName(t, g.roleLevel)}`,
+      label: t("org.memberAccessDrillDown.pathGroup", { group: g.name, role: resolveRoleName(t, g.roleLevel) }),
       detail: `Member of group "${g.name}" which has a project grant`,
     })
   }
   if (b.org != null) {
     paths.push({
-      label: `org-level · ${resolveRoleName(t, b.org)}`,
+      label: t("org.memberAccessDrillDown.pathOrgLevel", { role: resolveRoleName(t, b.org) }),
       detail: "Org-level membership applies to all projects in this org",
     })
   }

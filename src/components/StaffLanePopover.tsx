@@ -195,7 +195,7 @@ export function StaffLanePopover({
                 ? "sr-only"
                 : "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs hover:bg-muted",
             )}
-            aria-label={`Staff ${laneLabel}`}
+            aria-label={t("org.staffLanePopover.staffLaneHeading", { lane: laneLabel })}
           />
         }
       >

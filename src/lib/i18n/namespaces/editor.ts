@@ -644,6 +644,17 @@ export const editor = defineNamespace({
       "re-import the IDML.",
     "editor.idml.caretOutsideSlot":
       "Place the caret inside an InDesign text slot before adding a line break.",
+    "editor.idml.invalidMetadataError":
+      "This IDML cell has invalid formatting metadata and must be repaired or re-imported.",
+    "editor.idml.missingSourceHtmlError":
+      "This IDML cell is missing its protected source HTML and must be re-imported.",
+    "editor.idml.plainTextNoAnchorsError":
+      "This translated IDML cell has plain text but no formatting anchors. Re-import or " +
+      "repair it before editing.",
+    "editor.idml.editWouldChangeStructureError":
+      "This edit would change the protected IDML document structure.",
+    "editor.idml.editWouldChangeFormattingError":
+      "This edit would change protected IDML formatting.",
 
     // — Text-to-speech status badge on a row ————————————————————————
     "editor.tts.translatingBeforeVoicing": "Translating before voicing",
@@ -3211,6 +3222,41 @@ export const editor = defineNamespace({
           "be inserted. Imperative — it tells the user where to put the cursor. " +
           "'InDesign' is the product name and stays as-is; 'text slot' is the " +
           "translatable frame in the layout.",
+      },
+      "editor.idml.invalidMetadataError": {
+        description:
+          "Inline error (role=alert) replacing the whole editor when an IDML cell's " +
+          "persisted formatting metadata fails validation on load — a corrupt import, " +
+          "not something the user did in this session. 'IDML' is the file-format name " +
+          "and stays as-is.",
+      },
+      "editor.idml.missingSourceHtmlError": {
+        description:
+          "Inline error (role=alert) replacing the whole editor when an IDML cell's " +
+          "protected source HTML is absent from its metadata — a corrupt or partial " +
+          "import. 'IDML' is the file-format name and stays as-is.",
+      },
+      "editor.idml.plainTextNoAnchorsError": {
+        description:
+          "Inline error (role=alert) shown when a translated IDML cell holds plain " +
+          "text but none of the formatting anchors that plain text should be " +
+          "distributed across — likely edited before IDML support existed. Two " +
+          "sentences: what's wrong, then the two ways out. 'IDML' is the " +
+          "file-format name and stays as-is.",
+      },
+      "editor.idml.editWouldChangeStructureError": {
+        description:
+          "Rejection message (role=alert, via reportIdmlError) for an in-progress " +
+          "edit that would restructure the protected IDML document — the edit is " +
+          "refused before it lands, distinct from editor.idml.structureChanged which " +
+          "reports a structural break already detected on commit. 'IDML' is the " +
+          "file-format name and stays as-is.",
+      },
+      "editor.idml.editWouldChangeFormattingError": {
+        description:
+          "Rejection message (role=alert, via reportIdmlError) for an in-progress " +
+          "edit that would alter protected IDML formatting anchors — the edit is " +
+          "refused before it lands. 'IDML' is the file-format name and stays as-is.",
       },
       "editor.tts.translatingBeforeVoicing": {
         description:

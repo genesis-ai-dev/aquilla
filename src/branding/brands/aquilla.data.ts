@@ -12,6 +12,9 @@ export const aquillaData: BrandData = {
     name: "Aquilla",
     shortName: "Aquilla",
     tagline: "Translators, lifted.",
+    // i18n-exempt brand asset — build-time SEO <meta name="description">/OG-alt
+    // text (scripts/vite-html-branding.ts), baked into index.html per brand
+    // before the app or its locale system ever runs. Not a runtime UI string.
     description: "Aquilla — translators, lifted.",
     htmlTitle: "Aquilla",
   },

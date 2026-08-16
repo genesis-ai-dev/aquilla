@@ -10,6 +10,7 @@ import {
   type RoundTripFidelity,
 } from "../../../shared/import-contract"
 import { planImportMilestones } from "./milestones"
+import { t } from "@/lib/i18n/standalone"
 
 export {
   NORMALIZED_IMPORT_VERSION,
@@ -399,7 +400,7 @@ export function normalizeTranslatableStrings(
     if (value.original.trim() === "") {
       warnings.push({
         code: "empty-source",
-        message: "The unit has no source text.",
+        message: t("importExport.manifestWarnings.emptySource"),
         unitKey,
         physicalOrder,
       })
@@ -407,7 +408,7 @@ export function normalizeTranslatableStrings(
     if (kind === "verse" && described.address.scheme !== "scripture") {
       warnings.push({
         code: "missing-verse-reference",
-        message: "A verse unit has no parseable canonical Scripture reference.",
+        message: t("importExport.manifestWarnings.missingVerseReference"),
         unitKey,
         physicalOrder,
       })
@@ -418,7 +419,7 @@ export function normalizeTranslatableStrings(
       if (seen > 0) {
         warnings.push({
           code: "duplicate-canonical-ref",
-          message: `Canonical reference ${ref} occurs more than once.`,
+          message: t("importExport.manifestWarnings.duplicateCanonicalRef", { ref: String(ref) }),
           unitKey,
           physicalOrder,
         })
@@ -432,7 +433,7 @@ export function normalizeTranslatableStrings(
     ) {
       warnings.push({
         code: "invalid-timing",
-        message: "Cue end time must be after its start time.",
+        message: t("importExport.manifestWarnings.invalidTiming"),
         unitKey,
         physicalOrder,
       })

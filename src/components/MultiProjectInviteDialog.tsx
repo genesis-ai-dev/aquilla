@@ -268,7 +268,7 @@ export function MultiProjectInviteDialog({
                           type="button"
                           role="checkbox"
                           aria-checked={isSelected}
-                          aria-label={`Select ${p.name}`}
+                          aria-label={t("org.multiProjectInviteDialog.selectProjectAriaLabel", { name: p.name })}
                           onClick={() => toggleProject(p.id)}
                           disabled={busy}
                           className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:opacity-50 ${
@@ -305,7 +305,7 @@ export function MultiProjectInviteDialog({
                             disabled={busy}
                             size="sm"
                             className="shrink-0"
-                            aria-label={`Role for ${p.name}`}
+                            aria-label={t("org.teamDetail.roleForAriaLabel", { name: p.name })}
                           />
                         ) : (
                           <span aria-hidden className="w-0" />

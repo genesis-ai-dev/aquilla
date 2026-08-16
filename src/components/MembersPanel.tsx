@@ -196,7 +196,7 @@ export function MembersPanel({
                   <Button
                     size="icon"
                     variant="ghost"
-                    aria-label={`Remove ${m.username}`}
+                    aria-label={t("org.teamDetail.removeAriaLabel", { name: m.username })}
                     onClick={() => onRemove(m.userId)}
                   >
                     <Trash2 className="h-4 w-4" />
@@ -362,7 +362,7 @@ function MemberScopesEditor({
                     <Checkbox
                       checked={lanes.has(lane.value)}
                       onCheckedChange={() => setLanes((s) => toggle(s, lane.value))}
-                      aria-label={`Lane ${lane.label}`}
+                      aria-label={t("org.membersPanel.laneCheckboxAriaLabel", { lane: lane.label })}
                     />
                     <span>{lane.label}</span>
                   </label>
@@ -381,7 +381,7 @@ function MemberScopesEditor({
                     <Checkbox
                       checked={files.has(file.id)}
                       onCheckedChange={() => setFiles((s) => toggle(s, file.id))}
-                      aria-label={`File ${file.name}`}
+                      aria-label={t("comments.scope.file", { file: file.name })}
                     />
                     <span className="truncate">{file.name}</span>
                   </label>

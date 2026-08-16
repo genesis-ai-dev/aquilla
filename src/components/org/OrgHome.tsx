@@ -485,21 +485,21 @@ export function ProjectTable({
                 <span
                   data-testid="project-table-translated-value"
                   className="justify-self-start text-start font-medium tabular-nums text-foreground"
-                  aria-label={`${tpct}% translated`}
+                  aria-label={t("org.orgHome.pctTranslated", { pct: tpct })}
                 >
                   {tpct}%
                 </span>
                 <span
                   data-testid="project-table-validated-value"
                   className="justify-self-start text-start tabular-nums text-muted-foreground"
-                  aria-label={`${pct}% validated`}
+                  aria-label={t("org.orgHome.pctValidated", { pct })}
                 >
                   {pct}%
                 </span>
                 <span
                   data-testid="project-table-audio-value"
                   className="hidden justify-self-start text-start tabular-nums text-muted-foreground @md/project-table:block"
-                  aria-label={`${apct}% audio`}
+                  aria-label={t("org.orgHome.table.audioPctAria", { pct: apct })}
                 >
                   {apct}%
                 </span>

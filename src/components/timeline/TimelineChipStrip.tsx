@@ -166,13 +166,21 @@ export function TimelineChipStrip({ cell, chipStats, audioMissing }: TimelineChi
             // keeps the halves for anyone who needs to know WHERE it differs
             // (2026-08-08).
             const parts = [
-              chipStats.startDiffSec != null ? `Start: ${signedSec(chipStats.startDiffSec)}` : null,
-              chipStats.endDiffSec != null ? `End: ${signedSec(chipStats.endDiffSec)}` : null,
-            ].filter(Boolean)
+              chipStats.startDiffSec != null
+                ? t("workspace.chipStrip.diffStartDetail", { value: signedSec(chipStats.startDiffSec) })
+                : null,
+              chipStats.endDiffSec != null
+                ? t("workspace.chipStrip.diffEndDetail", { value: signedSec(chipStats.endDiffSec) })
+                : null,
+            ].filter((part): part is string => part !== null)
             return (
               <Pill>
                 <AppTooltip
-                  content={`Source duration − target duration${parts.length > 0 ? ` · ${parts.join(" · ")}` : ""}`}
+                  content={
+                    parts.length > 0
+                      ? t("workspace.chipStrip.durationDiffTooltipWithDetail", { detail: parts.join(" · ") })
+                      : t("workspace.chipStrip.durationDiffTooltip")
+                  }
                 >
                   <span data-testid="tl-detail-diff" className="font-mono tabular-nums">
                     {t("workspace.chipStrip.diffLabel")} {signedSec(chipStats.durationDiffSec)}

@@ -192,7 +192,7 @@ export function ArchivedProjects() {
           const p = row.original
           return (
             <DataTableRowActionsButton
-              label={`More actions for ${p.name}`}
+              label={t("org.orgProjectsDataTable.moreActionsAriaLabel", { name: p.name })}
               data-testid={`archived-row-actions-${p.id}`}
               revealOnHover
               disabled={restoringId != null}
@@ -250,7 +250,7 @@ export function ArchivedProjects() {
           const f = row.original
           return (
             <DataTableRowActionsButton
-              label={`More actions for ${f.name}`}
+              label={t("org.orgProjectsDataTable.moreActionsAriaLabel", { name: f.name })}
               data-testid={`deleted-file-row-actions-${f.fileId}`}
               revealOnHover
               disabled={restoringId != null}

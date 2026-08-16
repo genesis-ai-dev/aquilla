@@ -91,7 +91,14 @@ export function ProjectAssignedToMe({
             assignments.map((a) => {
               const pct = a.cellsTotal > 0 ? Math.round((a.cellsDone / a.cellsTotal) * 100) : 0
               return (
-                <AppTooltip key={a.assignmentId} content={`Jump to ${a.scopeLabel}${a.note ? `: ${a.note}` : ""}`}>
+                <AppTooltip
+                  key={a.assignmentId}
+                  content={
+                    a.note
+                      ? t("workspace.assignedToMe.jumpToWithNoteTooltip", { scope: a.scopeLabel, note: a.note })
+                      : t("workspace.assignedToMe.jumpToTooltip", { scope: a.scopeLabel })
+                  }
+                >
                   <button
                     type="button"
                     onClick={() => handleRowClick(a)}

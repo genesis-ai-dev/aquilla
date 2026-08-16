@@ -228,7 +228,7 @@ export function OrgProjectsDataTable({
               <div
                 data-testid="project-table-translated-value"
                 className="text-right tabular-nums text-muted-foreground"
-                aria-label={`${pct}% translated`}
+                aria-label={t("org.orgHome.pctTranslated", { pct })}
               >
                 {pct}%
               </div>
@@ -253,7 +253,7 @@ export function OrgProjectsDataTable({
               <div
                 data-testid="project-table-validated-value"
                 className="text-right tabular-nums text-muted-foreground"
-                aria-label={`${pct}% validated`}
+                aria-label={t("org.orgHome.pctValidated", { pct })}
               >
                 {pct}%
               </div>
@@ -278,7 +278,7 @@ export function OrgProjectsDataTable({
               <div
                 data-testid="project-table-audio-value"
                 className="text-right tabular-nums text-muted-foreground"
-                aria-label={`${pct}% audio`}
+                aria-label={t("org.orgHome.table.audioPctAria", { pct })}
               >
                 {pct}%
               </div>
@@ -376,7 +376,7 @@ export function OrgProjectsDataTable({
             const p = row.original
             return (
               <DataTableRowActionsButton
-                label={`More actions for ${p.name}`}
+                label={t("org.orgProjectsDataTable.moreActionsAriaLabel", { name: p.name })}
                 data-testid={`project-row-actions-${p.id}`}
                 revealOnHover
               />

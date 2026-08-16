@@ -104,7 +104,7 @@ export function MemberLaneScopeEditor({
             type="button"
             data-testid={`matrix-scope-trigger-${userId}-${projectId}`}
             className="mt-0.5 block w-full truncate text-start text-[10px] text-muted-foreground underline decoration-dotted underline-offset-2 hover:text-foreground"
-            aria-label={`Edit ${username}'s lane scopes on this project`}
+            aria-label={t("org.memberLaneScopeEditor.editScopesAriaLabel", { username })}
           />
         }
       >
@@ -136,7 +136,7 @@ export function MemberLaneScopeEditor({
                   {s.kind === "lane" ? s.value || "default" : `file:${s.value}`}
                   <button
                     type="button"
-                    aria-label={`Remove ${s.value || "default"}`}
+                    aria-label={t("org.teamDetail.removeAriaLabel", { name: s.value || "default" })}
                     onClick={() => removeScope(s)}
                   >
                     <X className="size-2.5" />

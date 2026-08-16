@@ -4690,12 +4690,12 @@ export function ProjectWorkspace() {
       if (r.failed > 0) {
         toast.add({
           type: "warning",
-          title: `Measured ${r.measured} recording${r.measured === 1 ? "" : "s"}; ${r.failed} could not be measured — re-record to fix those.`,
+          title: t("workspace.legacyMeasure.partialSuccessToast", { measured: r.measured, failed: r.failed }),
         })
       } else if (r.measured > 0) {
         toast.add({
           type: "success",
-          title: `Measured ${r.measured} recording${r.measured === 1 ? "" : "s"}.`,
+          title: t("workspace.legacyMeasure.successToast", { measured: r.measured }),
         })
       }
     })
@@ -6526,17 +6526,21 @@ export function ProjectWorkspace() {
             if (r.applied === 0) {
               toast.add({
                 type: "warning",
-                title: `No labels applied — the CSV doesn't match ${r.fileName}. Re-download the template and try again.`,
+                title: t("workspace.labelPicker.noLabelsAppliedToast", { fileName: r.fileName }),
               })
             } else if (r.unmatched > 0) {
               toast.add({
                 type: "warning",
-                title: `Applied ${r.applied} of ${r.applied + r.unmatched} labels to ${r.fileName}.`,
+                title: t("workspace.labelPicker.partiallyAppliedToast", {
+                  applied: r.applied,
+                  total: r.applied + r.unmatched,
+                  fileName: r.fileName,
+                }),
               })
             } else {
               toast.add({
                 type: "success",
-                title: `Applied ${r.applied} label${r.applied !== 1 ? "s" : ""} to ${r.fileName}.`,
+                title: t("workspace.labelPicker.appliedToast", { applied: r.applied, fileName: r.fileName }),
               })
             }
           }}

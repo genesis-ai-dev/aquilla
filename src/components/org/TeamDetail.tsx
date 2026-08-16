@@ -83,11 +83,12 @@ function lockedOrgRoleTooltip(roleLevel: number | null | undefined): string {
 }
 
 function CopyEmailButton({ email }: { email: string }) {
+  const { t } = useI18n()
   return (
     <button
       type="button"
       className="max-w-full truncate text-left text-muted-foreground hover:text-foreground"
-      aria-label={`Copy ${email}`}
+      aria-label={t("org.membersPage.orgTable.copyEmailAriaLabel", { email })}
       onClick={(e) => {
         e.stopPropagation()
         void navigator.clipboard.writeText(email).then(() => {
@@ -342,7 +343,7 @@ export function TeamDetail() {
           if (!isAdmin) return null
           return (
             <DataTableRowActionsButton
-              label={`Actions for ${p.name}`}
+              label={t("org.rowActionsAriaLabel", { name: p.name })}
               revealOnHover
             />
           )
@@ -401,7 +402,7 @@ export function TeamDetail() {
               <span
                 tabIndex={0}
                 className="inline-flex cursor-help"
-                aria-label={`Org-level role: ${roleLabel(m.roleLevel)}`}
+                aria-label={t("org.teamDetail.orgLevelRoleAriaLabel", { role: roleLabel(m.roleLevel) })}
               >
                 {label}
               </span>
@@ -425,7 +426,7 @@ export function TeamDetail() {
                 <span
                   tabIndex={0}
                   aria-disabled="true"
-                  aria-label={`Remove ${m.username} — maintainers only`}
+                  aria-label={t("org.teamDetail.removeMaintainersOnlyAriaLabel", { username: m.username })}
                   className="inline-flex cursor-not-allowed items-center text-xs text-muted-foreground/70 underline decoration-dotted"
                 >
                   {t("org.membersPage.remove")}
@@ -435,7 +436,7 @@ export function TeamDetail() {
           }
           return (
             <DataTableRowActionsButton
-              label={`Actions for ${m.username}`}
+              label={t("org.rowActionsAriaLabel", { name: m.username })}
               revealOnHover
             />
           )
@@ -740,7 +741,7 @@ export function TeamDetail() {
                             </MenuItem>
                             <MenuSeparator />
                             <MenuItem
-                              aria-label={`Detach ${p.name}`}
+                              aria-label={t("org.teamDetail.detachAriaLabel", { name: p.name })}
                               onClick={() => void handleDetachProject(p.id)}
                             >
                               <Unlink className="size-4" />

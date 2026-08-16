@@ -193,7 +193,7 @@ export function MemberMultiAddRow({
                 <span className="max-w-[12rem] truncate">{s.username}</span>
                 <button
                   type="button"
-                  aria-label={`Remove ${s.username}`}
+                  aria-label={t("org.teamDetail.removeAriaLabel", { name: s.username })}
                   onClick={() => removeStaged(s.username)}
                   disabled={adding || disabled}
                   className="flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"

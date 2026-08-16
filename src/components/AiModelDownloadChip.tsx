@@ -32,6 +32,10 @@ interface ErrorView {
   message: string
 }
 
+// i18n-exempt product/model names — "Whisper" (OpenAI's ASR model) is the
+// same category of atomic proper noun as its siblings here ("Kokoro" is
+// already in ATOMIC_TERMS, tools/eslint-rules/allowlist.cjs; "MMS" is an
+// all-caps acronym the scanner's own heuristic skips). Never translated.
 const LABELS: Record<ModelId, string> = { whisper: "Whisper", kokoro: "Kokoro", mms: "MMS" }
 
 export function AiModelDownloadChip() {

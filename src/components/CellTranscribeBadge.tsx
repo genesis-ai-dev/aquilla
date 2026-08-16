@@ -59,9 +59,12 @@ export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpTo
 
   if (flashedDone) {
     const secs = (flashedDone.durationMs / 1000).toFixed(1)
-    const words = `${flashedDone.wordCount} word${flashedDone.wordCount === 1 ? "" : "s"}`
+    const words = t("terminology.candidates.ngramLength", { count: flashedDone.wordCount })
+    const tooltip = onJumpToTranscript
+      ? t("workspace.transcribeBadge.doneTooltipClickable", { words, secs })
+      : t("workspace.transcribeBadge.doneTooltip", { words, secs })
     return (
-      <AppTooltip content={`Transcribed ${words} in ${secs}s${onJumpToTranscript ? "; click to view" : ""}`}>
+      <AppTooltip content={tooltip}>
         <button
           type="button"
           onClick={onJumpToTranscript}

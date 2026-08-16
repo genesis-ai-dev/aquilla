@@ -609,6 +609,7 @@ export function ProjectOverview() {
   // configuring anything.
   const [fileSortMode, setFileSortMode] = useState<FileSortMode>("last-updated")
   const [fileNameFilter, setFileNameFilter] = useState("")
+  const fileSortItems = FILE_SORT_MODES.map((m) => ({ value: m.value, label: t(m.labelKey) }))
 
   // AQU-500: transient "copied" feedback for the CSV-export control, mirroring
   // the copy-affordance pattern used elsewhere (e.g. ChatMarkdown's code-block
@@ -1167,7 +1168,7 @@ export function ProjectOverview() {
                                   onCheckedChange={() => toggleStat(w.key)}
                                   data-testid={`customize-stat-${w.key}`}
                                 >
-                                  {w.label}
+                                  {t(w.labelKey)}
                                 </DropdownMenuCheckboxItem>
                               ))}
                             </DropdownMenuGroup>
@@ -1467,7 +1468,7 @@ export function ProjectOverview() {
                         />
                       </InputGroup>
                       <Select
-                        items={FILE_SORT_MODES}
+                        items={fileSortItems}
                         value={fileSortMode}
                         onValueChange={(v) => setFileSortMode((v as FileSortMode) ?? "last-updated")}
                       >
@@ -1476,7 +1477,7 @@ export function ProjectOverview() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectGroup>
-                            {FILE_SORT_MODES.map((m) => (
+                            {fileSortItems.map((m) => (
                               <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
                             ))}
                           </SelectGroup>

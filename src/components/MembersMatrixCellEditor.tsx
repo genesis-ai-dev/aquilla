@@ -21,6 +21,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 import { addProjectMember, removeProjectMember } from "@/lib/frontier/members"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { MatrixCell } from "@/hooks/useProjectsMembersMatrix"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 interface CellEditorProps {
   /** Sparse — undefined when the user has no access to the project. */
@@ -66,12 +67,21 @@ type Status = "idle" | "submitting" | "error"
  * override is exactly the "system did something behind your back" failure.
  * The popover names the source so the operator knows where to go to edit.
  */
-/** AQU-170 vocabulary labels for each grant-path source. */
-const SOURCE_LABEL: Record<string, string> = {
-  override: "direct",
-  group: "via group",
-  org: "org-wide",
-  creator: "creator",
+/**
+ * AQU-170 vocabulary labels for each grant-path source. Catalog keys, not
+ * display strings — resolved with `t()` at the render site below. Every
+ * entry reuses an identical-text badge already minted elsewhere
+ * (org.accessModelLegend.direct.label / .orgWide.label /
+ * org.membersPanel.sourceViaGroup / org.memberAccessPanel.creatorGrantLabel
+ * — the surrounding `capitalize` CSS class means the reused keys' Title
+ * Case renders identically to the lowercase this list otherwise uses)
+ * rather than minting duplicate keys for the same words.
+ */
+const SOURCE_LABEL: Record<string, MessageKey> = {
+  override: "org.accessModelLegend.direct.label",
+  group: "org.membersPanel.sourceViaGroup",
+  org: "org.accessModelLegend.orgWide.label",
+  creator: "org.memberAccessPanel.creatorGrantLabel",
 }
 
 /** Badge color classes keyed by badge letter. */
@@ -147,7 +157,7 @@ export function MembersMatrixCellEditor({
                 type="button"
                 className="block w-full px-2 py-1.5 text-center text-xs text-muted-foreground hover:bg-muted/50 disabled:cursor-not-allowed"
                 disabled={!session?.jwt}
-                aria-label={`Add ${username} to project`}
+                aria-label={t("org.membersMatrixCellEditor.addToProjectAriaLabel", { username })}
               />
             }
           >
@@ -155,7 +165,7 @@ export function MembersMatrixCellEditor({
           </PopoverTrigger>
           <PopoverContent className="w-56 p-2" side="bottom">
             <RolePickerBody
-              title={`Add ${username}`}
+              title={t("workspace.typeahead.addUser", { username })}
               currentLevel={null}
               onPick={applyRole}
               status={status}
@@ -178,7 +188,7 @@ export function MembersMatrixCellEditor({
               <button
                 type="button"
                 className="block w-full px-2 py-1.5 text-start text-[11px] hover:bg-muted/30"
-                aria-label={`Edit ${username}'s role on this project`}
+                aria-label={t("org.membersMatrixCellEditor.editRoleAriaLabel", { username })}
               />
           }
         >
@@ -223,7 +233,7 @@ export function MembersMatrixCellEditor({
                     <ul className="space-y-0.5">
                       {secondarySources.map((s) => (
                         <li key={s.source} className="text-[10px] capitalize">
-                          {SOURCE_LABEL[s.source]} · <RoleLabel name={s.name} />
+                          {t(SOURCE_LABEL[s.source])} · <RoleLabel name={s.name} />
                         </li>
                       ))}
                     </ul>
@@ -330,7 +340,7 @@ function EditableBody({
   return (
     <div className="space-y-1.5">
       <RolePickerBody
-        title={`Edit ${username}`}
+        title={t("org.membersMatrixCellEditor.editPopoverTitle", { username })}
         currentLevel={currentLevel}
         onPick={onPick}
         status={status}

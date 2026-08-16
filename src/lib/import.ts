@@ -747,7 +747,7 @@ export async function prepareImportFile(
           importNotices: [{
             code: "basic-parser-fallback",
             severity: "warning",
-            message: "Aquilla could not verify this structured layout with AI, so it used the basic parser. Check the preview carefully before importing.",
+            message: t("importExport.notices.basicParserFallback"),
           }],
         }))
       }

@@ -43,7 +43,9 @@ export function AiModelConsentDialog() {
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
-            {t("workspace.aiConsent.downloadTitle", { model: pending?.model.label ?? "AI model" })}
+            {t("workspace.aiConsent.downloadTitle", {
+              model: pending ? t(pending.model.labelKey) : "AI model",
+            })}
           </DialogTitle>
           <DialogDescription>
             {pending

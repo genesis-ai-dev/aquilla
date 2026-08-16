@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Section } from "@/components/ui/page"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
-import { formatUsdFromCents, formatWordCount } from "@/lib/billing/plans"
+import { formatAgentCredits, formatUsdFromCents, normalizeBillingPlan } from "@/lib/billing/plans"
 import {
   getAdminBillingOrgs,
   getAdminBillingPlans,
@@ -36,9 +36,11 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
 
   const [price, setPrice] = useState("")
   const [addonPrice, setAddonPrice] = useState("")
-  const [included, setIncluded] = useState("")
-  const [addonWords, setAddonWords] = useState("")
-  const [talkToUs, setTalkToUs] = useState("")
+  const [wordsPerCredit, setWordsPerCredit] = useState("")
+  const [exploreCredits, setExploreCredits] = useState("")
+  const [fieldCredits, setFieldCredits] = useState("")
+  const [addonCredits, setAddonCredits] = useState("")
+  const [enterpriseCredits, setEnterpriseCredits] = useState("")
 
   useEffect(() => {
     aliveRef.current = true
@@ -57,9 +59,11 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
       setOrgs(rows)
       setPrice(String(plans.plan.priceCents / 100))
       setAddonPrice(String(plans.plan.addonPriceCents / 100))
-      setIncluded(String(plans.plan.includedWords))
-      setAddonWords(String(plans.plan.addonWords))
-      setTalkToUs(String(plans.plan.talkToUsWordsPerYear))
+      setWordsPerCredit(String(plans.plan.wordsPerCredit ?? 100))
+      setExploreCredits(String(plans.plan.exploreCreditsPerCycle ?? 100))
+      setFieldCredits(String(plans.plan.fieldCreditsPerCycle ?? 1_000))
+      setAddonCredits(String(plans.plan.addonCredits ?? 1_000))
+      setEnterpriseCredits(String(plans.plan.enterpriseCreditsPerLanguagePerYear ?? 10_000))
     } catch (err) {
       if (aliveRef.current) setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -81,9 +85,11 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
         ifMatchVersion: catalog.version,
         priceCents: Math.round(Number(price) * 100),
         addonPriceCents: Math.round(Number(addonPrice) * 100),
-        includedWords: Math.round(Number(included)),
-        addonWords: Math.round(Number(addonWords)),
-        talkToUsWordsPerYear: Math.round(Number(talkToUs)),
+        wordsPerCredit: Math.round(Number(wordsPerCredit)),
+        exploreCreditsPerCycle: Math.round(Number(exploreCredits)),
+        fieldCreditsPerCycle: Math.round(Number(fieldCredits)),
+        addonCredits: Math.round(Number(addonCredits)),
+        enterpriseCreditsPerLanguagePerYear: Math.round(Number(enterpriseCredits)),
       })
       setCatalog({ ...catalog, plan: saved.plan, version: saved.version })
       setNotice(saved.warnings.length > 0 ? saved.warnings.join(" ") : "Catalog saved.")
@@ -129,13 +135,13 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
           <select
             aria-label={`plan for ${row.original.orgName ?? row.original.orgId}`}
             className="h-7 rounded-md border bg-background px-1.5 text-xs"
-            value={row.original.plan}
+            value={normalizeBillingPlan(row.original.plan)}
             onChange={(e) => {
               const plan = e.target.value as AdminBillingOrg["plan"]
               void act(() => patchAdminBillingOrg(jwt, row.original.orgId, { plan }))
             }}
           >
-            <option value="none">None</option>
+            <option value="explore">Explore</option>
             <option value="field">Field</option>
             <option value="enterprise">Enterprise</option>
           </select>
@@ -143,14 +149,27 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
       },
       {
         id: "usage",
-        header: "Words",
+        header: "Agent credits",
         cell: ({ row }) => (
           <div className="text-xs tabular-nums" data-testid={`admin-words-${row.original.orgId}`}>
-            <span className="font-semibold">{formatWordCount(row.original.wordsUsed)}</span>
-            <span className="text-muted-foreground">
-              {row.original.allowanceWords == null ? " recorded" : ` / ${formatWordCount(row.original.allowanceWords)}`}
-            </span>
+            <span className="font-semibold">{formatAgentCredits(row.original.creditsUsed)}</span>
+            <span className="text-muted-foreground"> / {formatAgentCredits(row.original.allowanceCredits)}</span>
+            {normalizeBillingPlan(row.original.plan) === "enterprise" ? (
+              <div className="text-[10px] text-muted-foreground">
+                {row.original.languageCount} language{row.original.languageCount === 1 ? "" : "s"}
+              </div>
+            ) : null}
           </div>
+        ),
+      },
+      {
+        id: "override",
+        header: "Override",
+        cell: ({ row }) => (
+          <OverrideCredits
+            value={row.original.includedCreditsOverride}
+            onCommit={(v) => void act(() => patchAdminBillingOrg(jwt, row.original.orgId, { includedCredits: v }))}
+          />
         ),
       },
       {
@@ -158,7 +177,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
         header: "Courtesy",
         cell: ({ row }) => (
           <span className="text-xs tabular-nums text-muted-foreground">
-            {formatWordCount(row.original.complimentaryWords)}
+            {formatAgentCredits(row.original.complimentaryCredits)}
           </span>
         ),
       },
@@ -170,7 +189,12 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
             org={row.original}
             onGrantWords={() =>
               void act(() =>
-                grantAdminWords(jwt, row.original.orgId, 100_000, "admin courtesy grant"),
+                grantAdminWords(
+                  jwt,
+                  row.original.orgId,
+                  (row.original.wordsPerCredit || 100) * 1_000,
+                  "admin courtesy grant",
+                ),
               )
             }
             onResetWords={() =>
@@ -195,15 +219,17 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
   return (
     <div className="flex flex-col gap-8" data-testid="admin-billing">
       <Section
-        title="Field Plan catalog"
-        description="What new checkouts charge and how many words a period includes. Existing subscribers keep their Stripe price."
+        title="Plan catalog"
+        description="Included agent credits per tier. Users never see agent-processed words — only credits. Existing subscribers keep their Stripe price."
       >
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <AmountField label="Words per credit (internal)" value={wordsPerCredit} onChange={setWordsPerCredit} />
+          <AmountField label="Explore credits / cycle" value={exploreCredits} onChange={setExploreCredits} />
+          <AmountField label="Field credits / cycle" value={fieldCredits} onChange={setFieldCredits} />
           <AmountField label="Field Plan ($ / 4 weeks)" value={price} onChange={setPrice} />
+          <AmountField label="Add-on credits / pack" value={addonCredits} onChange={setAddonCredits} />
           <AmountField label="Add-on ($ / pack)" value={addonPrice} onChange={setAddonPrice} />
-          <AmountField label="Words included" value={included} onChange={setIncluded} />
-          <AmountField label="Words per add-on" value={addonWords} onChange={setAddonWords} />
-          <AmountField label="Talk-to-us words / year" value={talkToUs} onChange={setTalkToUs} />
+          <AmountField label="Enterprise credits / language / year" value={enterpriseCredits} onChange={setEnterpriseCredits} />
         </div>
         <div className="mt-4 flex flex-wrap items-center gap-3">
           <Button onClick={() => void saveCatalog()} disabled={busy || !catalog} data-testid="save-field-plan">
@@ -211,7 +237,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
           </Button>
           {catalog ? (
             <p className="text-xs text-muted-foreground">
-              {formatUsdFromCents(catalog.plan.priceCents)} · {formatWordCount(catalog.plan.includedWords)} words
+              {formatUsdFromCents(catalog.plan.priceCents)} · {formatAgentCredits(catalog.plan.fieldCreditsPerCycle ?? 1_000)} Field credits
               {catalog.stripeConfigured ? " · Stripe will mint a new price if the dollar amount changes" : " · Stripe not connected"}
             </p>
           ) : null}
@@ -219,7 +245,7 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
         {catalog ? <p className="mt-2 text-xs text-muted-foreground">{catalog.note}</p> : null}
       </Section>
 
-      <Section title="Organizations" description="Grant words or credits after an outage, reset a period, or put an org on Field / Enterprise without Checkout.">
+      <Section title="Organizations" description="Override included agent credits, grant courtesy credits after an outage, or put an org on Explore / Field / Enterprise.">
         {orgs && orgs.length > 0 ? (
           <DataTable
             columns={columns}
@@ -245,6 +271,38 @@ export function AdminBillingSection({ jwt }: { jwt: string }) {
         </p>
       ) : null}
     </div>
+  )
+}
+
+function OverrideCredits({
+  value,
+  onCommit,
+}: {
+  value: number | null
+  onCommit: (v: number | null) => void
+}) {
+  const [local, setLocal] = useState(value == null ? "" : String(value))
+  useEffect(() => {
+    setLocal(value == null ? "" : String(value))
+  }, [value])
+  return (
+    <Input
+      type="number"
+      min={0}
+      aria-label="included credits override"
+      placeholder="tier default"
+      value={local}
+      onChange={(e) => setLocal(e.target.value)}
+      onBlur={() => {
+        if (local.trim() === "") {
+          if (value != null) onCommit(null)
+          return
+        }
+        const n = Number(local)
+        if (!Number.isNaN(n) && n >= 0 && n !== value) onCommit(n)
+      }}
+      className="h-7 w-24 text-xs tabular-nums"
+    />
   )
 }
 
@@ -289,10 +347,10 @@ function OrgActions({
     <div className="flex min-w-[220px] flex-col gap-1">
       <div className="flex flex-wrap gap-1">
         <Button size="sm" variant="outline" onClick={onGrantWords} data-testid={`grant-words-${org.orgId}`}>
-          +100k words
+          +1,000 agent credits
         </Button>
         <Button size="sm" variant="outline" onClick={onGrantCredits} data-testid={`grant-credits-${org.orgId}`}>
-          +100 credits
+          +100 compute credits
         </Button>
       </div>
       {confirm == null ? (

@@ -9,9 +9,10 @@ import { Spinner } from "@/components/ui/spinner"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
-  FIELD_PLAN,
+  TIER_CREDITS,
+  formatAgentCredits,
   formatUsdFromCents,
-  formatWordCount,
+  normalizeBillingPlan,
 } from "@/lib/billing/plans"
 import { ROLE } from "@/lib/frontier/roles"
 import {
@@ -29,9 +30,10 @@ function usagePct(used: number, allowance: number | null): number {
 }
 
 function planLabel(plan: OrgBilling["plan"]): string {
-  if (plan === "field") return "Field Plan"
-  if (plan === "enterprise") return "Enterprise"
-  return "No paid plan"
+  const resolved = normalizeBillingPlan(plan)
+  if (resolved === "field") return "Field Plan"
+  if (resolved === "enterprise") return "Enterprise"
+  return "Explore"
 }
 
 export function OrgSettingsBilling() {
@@ -91,8 +93,12 @@ export function OrgSettingsBilling() {
     }
   }
 
-  const allowance = data?.allowanceWords ?? null
-  const pct = usagePct(data?.wordsUsed ?? 0, allowance)
+  const allowance = data?.allowanceCredits ?? null
+  const used = data?.creditsUsed ?? 0
+  const pct = usagePct(used, allowance)
+  const fieldCredits = data?.fieldPlan.fieldCreditsPerCycle ?? TIER_CREDITS.field.creditsPerCycle
+  const addonCredits = data?.fieldPlan.addonCredits ?? TIER_CREDITS.field.creditsPerCycle
+  const checkoutEnabled = data?.checkoutEnabled === true
 
   return (
     <OrgSettingsDetailPage
@@ -121,29 +127,29 @@ export function OrgSettingsBilling() {
               label="Current plan"
               description={
                 data.plan === "field"
-                  ? `${formatUsdFromCents(FIELD_PLAN.priceCents)} every ${FIELD_PLAN.intervalDays} days, including ${formatWordCount(FIELD_PLAN.includedWords)} AI words.`
+                  ? `${formatUsdFromCents(data.fieldPlan.priceCents)} every ${data.fieldPlan.intervalDays} days, including ${formatAgentCredits(fieldCredits)} agent credits.`
                   : data.plan === "enterprise"
-                    ? "Billed offline. AI usage stops at the contracted hard cap."
-                    : "Subscribe to meter AI words and buy more when a period runs hot."
+                    ? "Billed offline. Agent credits scale with each target-language lane."
+                    : `${formatAgentCredits(data.fieldPlan.exploreCreditsPerCycle ?? TIER_CREDITS.explore.creditsPerCycle)} agent credits each 4-week cycle on Explore.`
               }
               control={
-                <Badge variant={data.plan === "none" ? "outline" : "default"} data-testid="billing-plan">
+                <Badge variant={normalizeBillingPlan(data.plan) === "explore" ? "outline" : "default"} data-testid="billing-plan">
                   {planLabel(data.plan)}
                 </Badge>
               }
             />
-            {data.plan === "none" ? (
+            {normalizeBillingPlan(data.plan) === "explore" ? (
               <SettingsRow
                 label="Field Plan"
-                description={`${formatUsdFromCents(FIELD_PLAN.priceCents)} / 4 weeks · ${formatWordCount(FIELD_PLAN.includedWords)} words included · ${formatUsdFromCents(FIELD_PLAN.addonPriceCents)} per extra ${formatWordCount(FIELD_PLAN.addonWords)} words.`}
+                description={`${formatUsdFromCents(data.fieldPlan.priceCents)} / 4 weeks · ${formatAgentCredits(fieldCredits)} agent credits included · ${formatUsdFromCents(data.fieldPlan.addonPriceCents)} per extra ${formatAgentCredits(addonCredits)} credits.`}
                 control={
                   <Button
                     onClick={() => void go("field")}
-                    disabled={!data.canSubscribe || busy != null}
+                    disabled={!checkoutEnabled || !data.canSubscribe || busy != null}
                     data-testid="subscribe-field-plan"
                   >
                     <CreditCard data-icon="inline-start" />
-                    {busy === "field" ? "Redirecting…" : "Subscribe"}
+                    {busy === "field" ? "Redirecting…" : "Coming soon"}
                   </Button>
                 }
               />
@@ -166,14 +172,14 @@ export function OrgSettingsBilling() {
             )}
           </SettingsGroup>
 
-          <SettingsGroup label="AI words this period">
+          <SettingsGroup label="Agent credits this period">
             <SettingsRow label="Usage" block>
               <div className="space-y-3" data-testid="billing-usage">
                 <div className="flex items-baseline justify-between gap-3">
                   <p className="text-2xl font-heading font-semibold tabular-nums">
-                    {formatWordCount(data.wordsUsed)}
+                    {formatAgentCredits(used)}
                     <span className="ml-1.5 text-sm font-normal text-muted-foreground">
-                      {allowance == null ? "words recorded" : `/ ${formatWordCount(allowance)}`}
+                      {allowance == null ? "credits recorded" : `/ ${formatAgentCredits(allowance)}`}
                     </span>
                   </p>
                   {allowance != null ? (
@@ -188,11 +194,7 @@ export function OrgSettingsBilling() {
                       aria-hidden
                     />
                   </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    Unpaid orgs are not capped. Subscribe to get a 100,000-word allowance every four weeks.
-                  </p>
-                )}
+                ) : null}
                 {data.plan === "field" ? (
                   <p className="text-xs text-muted-foreground">
                     {data.addonPacks > 0
@@ -204,16 +206,16 @@ export function OrgSettingsBilling() {
             </SettingsRow>
             {data.plan === "field" && !data.talkToUs ? (
               <SettingsRow
-                label="Need more words?"
-                description={`${formatUsdFromCents(FIELD_PLAN.addonPriceCents)} adds ${formatWordCount(FIELD_PLAN.addonWords)} words to this period only.`}
+                label="Need more credits?"
+                description={`${formatUsdFromCents(data.fieldPlan.addonPriceCents)} adds ${formatAgentCredits(addonCredits)} agent credits to this period only.`}
                 control={
                   <Button
                     variant="outline"
                     onClick={() => void go("addon")}
-                    disabled={!data.canBuyAddon || busy != null}
+                    disabled={!checkoutEnabled || !data.canBuyAddon || busy != null}
                     data-testid="buy-word-addon"
                   >
-                    {busy === "addon" ? "Redirecting…" : "Add 100,000 words"}
+                    {busy === "addon" ? "Redirecting…" : `Add ${formatAgentCredits(addonCredits)} credits`}
                   </Button>
                 }
               />
@@ -223,8 +225,8 @@ export function OrgSettingsBilling() {
                 label="Talk to us"
                 description={
                   data.plan === "enterprise"
-                    ? "Enterprise usage is hard-capped. A human raises the ceiling."
-                    : "Past 25 million words a year, Field Plan add-ons stop and we route the deal."
+                    ? "Enterprise credits are set per target-language lane. A human raises the ceiling."
+                    : "At this volume, Field Plan add-ons stop and we route the deal."
                 }
                 control={
                   <a

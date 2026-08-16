@@ -23,9 +23,17 @@ export interface OrgBilling {
   remainingWords: number | null
   hardCapWords: number | null
   talkToUs: boolean
+  creditsUsed: number
+  allowanceCredits: number
+  remainingCredits: number
+  complimentaryCredits?: number
+  includedCredits: number
+  languageCount?: number
+  wordsPerCredit: number
   canSubscribe: boolean
   canBuyAddon: boolean
   canManage: boolean
+  checkoutEnabled?: boolean
   stripeConfigured: boolean
   fieldPlan: {
     name: string
@@ -35,6 +43,11 @@ export interface OrgBilling {
     addonWords: number
     addonPriceCents: number
     talkToUsWordsPerYear: number
+    wordsPerCredit?: number
+    exploreCreditsPerCycle?: number
+    fieldCreditsPerCycle?: number
+    addonCredits?: number
+    enterpriseCreditsPerLanguagePerYear?: number
   }
 }
 

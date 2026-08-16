@@ -157,7 +157,7 @@
 | Projects    | Multi-select member add on project surfaces (overview Members card + `/project/:id/settings/members`) | `e2e/specs/projects/project-members-add-multiselect.smoke.spec.ts` + `share-invite-username-verified.smoke.spec.ts` | ✅ |
 | Orgs        | Org rename from Identity (inline blur-to-save)        | `e2e/specs/orgs/org-rename.smoke.spec.ts` | ✅ |
 | Orgs        | Org settings page renders; Identity rename round-trip | `e2e/specs/orgs/org-settings.smoke.spec.ts` + `org-settings-rename.smoke.spec.ts` | ✅ |
-| Orgs        | Billing & usage: Field Plan CTA + word meter for maintainers | `e2e/specs/orgs/org-settings-billing.smoke.spec.ts` | ✅ |
+| Orgs        | Billing & usage: Field Plan CTA + agent-credit meter for maintainers | `e2e/specs/orgs/org-settings-billing.smoke.spec.ts` | ✅ |
 | Orgs        | Member access panel expand shows per-project access   | `e2e/specs/orgs/member-access-panel-expand.smoke.spec.ts`     |   ✅   |
 | Orgs        | Assigned to me page shows inbox                       | `e2e/specs/orgs/assigned-to-me-page.smoke.spec.ts` + `assigned.smoke.spec.ts` | ✅ |
 | Orgs        | Preferences page analytics toggle                     | `e2e/specs/orgs/preferences-analytics-toggle.smoke.spec.ts` + `preferences-analytics-disabled-warning.smoke.spec.ts` | ✅ |
@@ -298,7 +298,7 @@
 | Editor      | Workspace actions cell scroll to target cell          | `e2e/specs/editor/workspace-actions-cell-scroll.smoke.spec.ts` |   ✅   |
 | Debug       | Debug view accessible at /debug                       | `e2e/specs/editor/debug-view.smoke.spec.ts`                   |   ✅   |
 | Debug       | Admin console tabs (users/orgs/teams/projects/activity) | `e2e/specs/orgs/admin-console.smoke.spec.ts` + `admin-console-users-tab.smoke.spec.ts` + `admin-console-orgs-tab.smoke.spec.ts` + `admin-console-projects-tab.smoke.spec.ts` + `admin-console-teams-tab.smoke.spec.ts` + `admin-console-activity-tab.smoke.spec.ts` | ✅ |
-| Debug       | Admin Platform → Billing: Field Plan catalog + org grants | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` | ✅ |
+| Debug       | Admin Platform → Billing: credit catalog + org grants | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` | ✅ |
 | Tauri       | Native dialogs / deeplink / updater / fs / keychain  | _gap — Plan 3_                                                |        |
 | Editor      | BT Edit + Regenerate on an existing back-translation | _gap — needs a pre-existing cell.backtranslation (generate covered by bt-edit-locked-for-reviewer; statistical gloss expander covered by cell-expansion-bt-tab)_ |   |
 | Editor      | TranslatedEditor focus-lock banner + Discard and reload | _gap — require two writers editing same cell simultaneously_ |   |

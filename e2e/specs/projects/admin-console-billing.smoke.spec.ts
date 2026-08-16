@@ -14,7 +14,7 @@ test("admin platform billing shows Field Plan catalog", async ({ alice }) => {
   await alice.getByRole("tab", { name: /^Platform$/i }).click()
   await alice.getByRole("tab", { name: /^Billing$/i }).click()
   await expect(alice.getByTestId("admin-billing")).toBeVisible({ timeout: 10_000 })
-  await expect(alice.getByRole("heading", { name: /Field Plan catalog/i })).toBeVisible()
+  await expect(alice.getByRole("heading", { name: /Plan catalog/i })).toBeVisible()
   await expect(alice.getByTestId("save-field-plan")).toBeVisible()
   await expect(alice.getByTestId("admin-billing-orgs")).toBeVisible()
 })

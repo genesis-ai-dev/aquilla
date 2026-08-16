@@ -40,6 +40,43 @@ describe("admin billing catalog", () => {
     expect(((await patch.json()) as { plan: { includedWords: number } }).plan.includedWords).toBe(150_000)
   })
 
+  it("lets an admin set included agent credits per tier and a per-org override", async () => {
+    await seedAdminOrg()
+    const jwt = await jwtFor("root")
+    const get = await request("/api/v2/admin/billing/plans", { headers: authHeader(jwt) })
+    const before = (await get.json()) as { plan: { fieldCreditsPerCycle: number }; version: number }
+    expect(before.plan.fieldCreditsPerCycle).toBe(1_000)
+
+    const patch = await request("/api/v2/admin/billing/plans", {
+      method: "PATCH",
+      headers: authHeader(jwt),
+      body: JSON.stringify({
+        fieldCreditsPerCycle: 2_000,
+        exploreCreditsPerCycle: 80,
+        wordsPerCredit: 50,
+        ifMatchVersion: before.version,
+      }),
+    })
+    expect(patch.status).toBe(200)
+    const saved = (await patch.json()) as {
+      plan: { fieldCreditsPerCycle: number; exploreCreditsPerCycle: number; wordsPerCredit: number; includedWords: number }
+    }
+    expect(saved.plan.fieldCreditsPerCycle).toBe(2_000)
+    expect(saved.plan.exploreCreditsPerCycle).toBe(80)
+    expect(saved.plan.wordsPerCredit).toBe(50)
+    expect(saved.plan.includedWords).toBe(100_000)
+
+    const org = await request("/api/v2/admin/billing/org/1", {
+      method: "PATCH",
+      headers: authHeader(jwt),
+      body: JSON.stringify({ plan: "explore", includedCredits: 40 }),
+    })
+    expect(org.status).toBe(200)
+    const snap = await readWordSnapshot(env.AQUILLA_PG, 1)
+    expect(snap.includedCreditsOverride).toBe(40)
+    expect(snap.allowanceCredits).toBe(40)
+  })
+
   it("403s a non-admin", async () => {
     await seedAdminOrg()
     const res = await request("/api/v2/admin/billing/plans", { headers: authHeader(await jwtFor("wendi")) })
@@ -58,7 +95,7 @@ describe("admin org word grants and resets", () => {
       currentPeriodEnd: new Date(Date.now() + 28 * 86400000).toISOString(),
     })
     await recordWords(env.AQUILLA_PG, 1, 1, "llm", 100_000)
-    expect((await wordGuard(env.AQUILLA_PG, 1)).ok).toBe(false)
+    expect((await wordGuard(env.AQUILLA_PG, 1)).ok).toBe(true)
 
     const res = await request("/api/v2/admin/billing/org/1/grant-words", {
       method: "POST",
@@ -67,7 +104,9 @@ describe("admin org word grants and resets", () => {
     })
     expect(res.status).toBe(200)
     expect((await wordGuard(env.AQUILLA_PG, 1)).ok).toBe(true)
-    expect((await readWordSnapshot(env.AQUILLA_PG, 1)).complimentaryWords).toBe(50_000)
+    const snap = await readWordSnapshot(env.AQUILLA_PG, 1)
+    expect(snap.complimentaryWords).toBe(50_000)
+    expect(snap.allowanceCredits).toBe(1_500)
   })
 
   it("resets word usage for an org", async () => {
@@ -98,7 +137,10 @@ describe("admin org word grants and resets", () => {
     })
     expect(res.status).toBe(200)
     await recordWords(env.AQUILLA_PG, 1, 1, "llm", 2500)
-    expect((await wordGuard(env.AQUILLA_PG, 1)).reason).toBe("hard_cap")
+    const snap = await readWordSnapshot(env.AQUILLA_PG, 1)
+    expect(snap.hardCapWords).toBe(2500)
+    expect(snap.allowanceWords).toBe(2500)
+    expect((await wordGuard(env.AQUILLA_PG, 1)).ok).toBe(true)
   })
 })
 

@@ -38,10 +38,20 @@ describe("GET /api/v2/orgs/:orgId/billing", () => {
       { headers: authHeader(await jwtFor("wendi")) },
     )
     expect(owner.status).toBe(200)
-    const body = (await owner.json()) as { plan: string; wordsUsed: number; canSubscribe: boolean }
-    expect(body.plan).toBe("none")
+    const body = (await owner.json()) as {
+      plan: string
+      wordsUsed: number
+      creditsUsed: number
+      allowanceCredits: number
+      canSubscribe: boolean
+      checkoutEnabled: boolean
+    }
+    expect(body.plan).toBe("explore")
     expect(body.wordsUsed).toBe(0)
+    expect(body.creditsUsed).toBe(0)
+    expect(body.allowanceCredits).toBe(100)
     expect(body.canSubscribe).toBe(false) // no STRIPE_SECRET_KEY in test env
+    expect(body.checkoutEnabled).toBe(false)
   })
 })
 
@@ -59,16 +69,17 @@ describe("POST /api/v2/orgs/:orgId/billing/checkout", () => {
 })
 
 describe("word ledger + guard", () => {
-  it("records words and never blocks an unpaid org", async () => {
+  it("records words and shows Explore's 100-credit allowance without blocking", async () => {
     await seedOrg()
     await recordWords(env.AQUILLA_PG, 1, 1, "llm", 50_000)
     const snap = await readWordSnapshot(env.AQUILLA_PG, 1)
     expect(snap.wordsUsed).toBe(50_000)
-    expect(snap.allowanceWords).toBeNull()
+    expect(snap.creditsUsed).toBe(500)
+    expect(snap.allowanceCredits).toBe(100)
     expect((await wordGuard(env.AQUILLA_PG, 1)).ok).toBe(true)
   })
 
-  it("blocks a Field org at the included 100k, then allows after an add-on pack", async () => {
+  it("raises a Field org's allowance after an add-on pack, still without enforcing", async () => {
     await seedOrg()
     await applySubscriptionSnapshot(env.AQUILLA_PG, 1, {
       id: "sub_test",
@@ -78,27 +89,26 @@ describe("word ledger + guard", () => {
       currentPeriodEnd: new Date(Date.now() + 27 * 86400000).toISOString(),
     })
     await recordWords(env.AQUILLA_PG, 1, 1, "agent", 100_000)
-    const blocked = await wordGuard(env.AQUILLA_PG, 1)
-    expect(blocked.ok).toBe(false)
-    expect(blocked.reason).toBe("allowance")
+    expect((await wordGuard(env.AQUILLA_PG, 1)).ok).toBe(true)
 
     await applyAddonPurchase(env.AQUILLA_PG, 1, 1)
-    const allowed = await wordGuard(env.AQUILLA_PG, 1)
-    expect(allowed.ok).toBe(true)
     const snap = await readWordSnapshot(env.AQUILLA_PG, 1)
     expect(snap.allowanceWords).toBe(200_000)
+    expect(snap.allowanceCredits).toBe(2_000)
     expect(snap.addonPacks).toBe(1)
+    expect((await wordGuard(env.AQUILLA_PG, 1)).ok).toBe(true)
   })
 
-  it("blocks Enterprise at the hard cap", async () => {
+  it("records Enterprise hard-cap usage without blocking while enforcement is off", async () => {
     await seedOrg()
     await env.AQUILLA_PG.prepare(
       `INSERT INTO org_billing (org_id, plan, status, hard_cap_words, addon_packs)
        VALUES (1, 'enterprise', 'active', 5000, 0)`,
     ).run()
     await recordWords(env.AQUILLA_PG, 1, 1, "llm", 5000)
-    const blocked = await wordGuard(env.AQUILLA_PG, 1)
-    expect(blocked).toMatchObject({ ok: false, reason: "hard_cap" })
+    const snap = await readWordSnapshot(env.AQUILLA_PG, 1)
+    expect(snap.allowanceWords).toBe(5000)
+    expect((await wordGuard(env.AQUILLA_PG, 1)).ok).toBe(true)
   })
 })
 

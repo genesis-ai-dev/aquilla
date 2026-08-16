@@ -119,6 +119,13 @@ function parseSettings(raw: string): PlatformSettings {
     if (typeof f.intervalDays === "number") fieldPlan.intervalDays = f.intervalDays
     if (typeof f.stripePriceField === "string") fieldPlan.stripePriceField = f.stripePriceField
     if (typeof f.stripePriceAddon === "string") fieldPlan.stripePriceAddon = f.stripePriceAddon
+    if (typeof f.wordsPerCredit === "number") fieldPlan.wordsPerCredit = f.wordsPerCredit
+    if (typeof f.exploreCreditsPerCycle === "number") fieldPlan.exploreCreditsPerCycle = f.exploreCreditsPerCycle
+    if (typeof f.fieldCreditsPerCycle === "number") fieldPlan.fieldCreditsPerCycle = f.fieldCreditsPerCycle
+    if (typeof f.addonCredits === "number") fieldPlan.addonCredits = f.addonCredits
+    if (typeof f.enterpriseCreditsPerLanguagePerYear === "number") {
+      fieldPlan.enterpriseCreditsPerLanguagePerYear = f.enterpriseCreditsPerLanguagePerYear
+    }
     if (Object.keys(fieldPlan).length > 0) out.fieldPlan = fieldPlan
   }
   return out

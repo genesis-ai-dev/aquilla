@@ -12,6 +12,11 @@ import {
   listOpenDecisions,
   countOpenDecisions,
   DECISION_REASON_MAX_BYTES,
+  answerDecision,
+  dismissDecision,
+  assignDecision,
+  supersedeDecisions,
+  expireDecisionsOlderThan,
 } from "../../../db/shared/contextual-decisions"
 
 const db = env.AQUILLA_PG
@@ -122,5 +127,74 @@ describe("listOpenDecisions", () => {
 
     const ranked = await listOpenDecisions(db, project, 10)
     expect(ranked.map((d) => d.id)).toEqual([older.id, newer.id])
+  })
+})
+
+describe("decision transitions", () => {
+  it("answering closes it and records who answered", async () => {
+    const d = await seed()
+    const t = await answerDecision(db, d.id, "Use 'council'.", 42)
+    expect(t.status).toBe("ok")
+    if (t.status !== "ok") throw new Error("unreachable")
+    expect(t.decision.status).toBe("resolved")
+    expect(t.decision.resolution).toEqual({
+      kind: "answered",
+      answer: "Use 'council'.",
+      byUserId: 42,
+    })
+    expect(t.decision.resolvedAt).not.toBeNull()
+  })
+
+  it("refuses to answer an already-closed decision instead of clobbering it", async () => {
+    const d = await seed()
+    await answerDecision(db, d.id, "first", 1)
+    const second = await answerDecision(db, d.id, "second", 2)
+    expect(second.status).toBe("invalid_state")
+
+    const read = await getDecision(db, d.id)
+    expect(read?.resolution).toEqual({ kind: "answered", answer: "first", byUserId: 1 })
+  })
+
+  it("reports not_found for an unknown id", async () => {
+    expect((await answerDecision(db, "nope", "x", 1)).status).toBe("not_found")
+  })
+
+  // The invariant the whole design rests on: routing must NOT close anything,
+  // or a queue of unanswered questions reports as handled work.
+  it("assigning leaves the decision open so anyone can still answer it", async () => {
+    const project = `proj-assign-${Date.now()}`
+    const d = await seed({ projectId: project })
+    const t = await assignDecision(db, d.id, { userId: 7 })
+    expect(t.status).toBe("ok")
+    if (t.status !== "ok") throw new Error("unreachable")
+    expect(t.decision.status).toBe("open")
+    expect(t.decision.assignedUserId).toBe(7)
+
+    // Still surfaced, still countable, and answerable by someone else.
+    expect(await countOpenDecisions(db, project)).toBe(1)
+    const answered = await answerDecision(db, d.id, "settled", 99)
+    expect(answered.status).toBe("ok")
+  })
+
+  it("supersedes only open decisions and reports how many it closed", async () => {
+    const open = await seed()
+    const closed = await seed()
+    await dismissDecision(db, closed.id)
+
+    const n = await supersedeDecisions(db, [open.id, closed.id])
+    expect(n).toBe(1)
+    expect((await getDecision(db, open.id))?.status).toBe("superseded")
+    expect((await getDecision(db, closed.id))?.status).toBe("dismissed")
+  })
+
+  it("expires only decisions older than the cutoff", async () => {
+    const project = `proj-exp-${Date.now()}`
+    const fresh = await seed({ projectId: project })
+    const past = new Date(Date.now() - 60_000).toISOString()
+    expect(await expireDecisionsOlderThan(db, project, past)).toBe(0)
+
+    const future = new Date(Date.now() + 60_000).toISOString()
+    expect(await expireDecisionsOlderThan(db, project, future)).toBe(1)
+    expect((await getDecision(db, fresh.id))?.status).toBe("expired")
   })
 })

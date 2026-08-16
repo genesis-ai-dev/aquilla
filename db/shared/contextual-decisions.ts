@@ -240,3 +240,126 @@ export async function countOpenDecisions(
     .first<{ n: number }>()
   return row?.n ?? 0
 }
+
+export type DecisionTransition =
+  | { status: "ok"; decision: ContextualDecision }
+  | { status: "invalid_state" }
+  | { status: "not_found" }
+
+/** Every transition is a GUARDED UPDATE: the WHERE clause names the statuses
+ *  it may move from, so two racing writers cannot both win. The loser matches
+ *  zero rows and we distinguish "wrong state" from "no such row" with one
+ *  follow-up read. */
+async function transition(
+  db: AquillaDb,
+  id: string,
+  sql: string,
+  binds: unknown[],
+): Promise<DecisionTransition> {
+  const row = await db.prepare(sql).bind(...binds).first<DecisionRow>()
+  if (row) return { status: "ok", decision: mapRow(row) }
+  const exists = await db
+    .prepare(`SELECT 1 AS n FROM contextual_decisions WHERE id = ?`)
+    .bind(id)
+    .first<{ n: number }>()
+  return exists ? { status: "invalid_state" } : { status: "not_found" }
+}
+
+export async function answerDecision(
+  db: AquillaDb,
+  id: string,
+  answer: string,
+  byUserId: number,
+): Promise<DecisionTransition> {
+  const trimmed = answer.trim()
+  if (!trimmed) throw new Error("answer is required")
+  const resolution: DecisionResolution = { kind: "answered", answer: trimmed, byUserId }
+  return transition(
+    db,
+    id,
+    `UPDATE contextual_decisions
+        SET status = 'resolved', resolution = ?::jsonb,
+            resolved_at = now(), updated_at = now()
+      WHERE id = ? AND status IN ('open','researching')
+      RETURNING ${DECISION_COLS}`,
+    // Pass the object, NOT JSON.stringify(resolution). postgres.js learns the
+    // parameter's jsonb type from `?::jsonb` and applies its own serializer;
+    // pre-stringifying makes it encode a second time, storing a jsonb scalar
+    // string instead of an object. See db/shared/contextual-runs.ts:718-721,
+    // and migration 0074, which exists partly to repair rows written that way.
+    [resolution, id],
+  )
+}
+
+export async function dismissDecision(
+  db: AquillaDb,
+  id: string,
+): Promise<DecisionTransition> {
+  return transition(
+    db,
+    id,
+    `UPDATE contextual_decisions
+        SET status = 'dismissed', resolved_at = now(), updated_at = now()
+      WHERE id = ? AND status IN ('open','researching')
+      RETURNING ${DECISION_COLS}`,
+    [id],
+  )
+}
+
+/** Routing is an ASSIGNMENT: status stays `open` on purpose (§4.3). */
+export async function assignDecision(
+  db: AquillaDb,
+  id: string,
+  to: { userId?: number; inviteId?: string },
+): Promise<DecisionTransition> {
+  return transition(
+    db,
+    id,
+    `UPDATE contextual_decisions
+        SET assigned_user_id = ?, assigned_invite_id = ?, updated_at = now()
+      WHERE id = ? AND status IN ('open','researching')
+      RETURNING ${DECISION_COLS}`,
+    [to.userId ?? null, to.inviteId ?? null, id],
+  )
+}
+
+/** Bulk close for the supersession sweep. Returns how many were actually
+ *  closed — already-closed rows are skipped, never reopened. */
+export async function supersedeDecisions(
+  db: AquillaDb,
+  ids: string[],
+): Promise<number> {
+  if (ids.length === 0) return 0
+  const placeholders = ids.map(() => "?").join(",")
+  const { results } = await db
+    .prepare(
+      `UPDATE contextual_decisions
+          SET status = 'superseded', resolved_at = now(), updated_at = now()
+        WHERE id IN (${placeholders}) AND status IN ('open','researching')
+        RETURNING id`,
+    )
+    .bind(...ids)
+    .all<{ id: string }>()
+  return (results ?? []).length
+}
+
+/** Backstop only — supersession is the real mechanism (§4.3). Expiry is a
+ *  DISTINCT terminal state from supersession because it means the opposite
+ *  thing: nobody ever answered. */
+export async function expireDecisionsOlderThan(
+  db: AquillaDb,
+  projectId: string,
+  cutoffIso: string,
+): Promise<number> {
+  const { results } = await db
+    .prepare(
+      `UPDATE contextual_decisions
+          SET status = 'expired', resolved_at = now(), updated_at = now()
+        WHERE project_id = ? AND status IN ('open','researching')
+          AND created_at < ?::timestamptz
+        RETURNING id`,
+    )
+    .bind(projectId, cutoffIso)
+    .all<{ id: string }>()
+  return (results ?? []).length
+}

@@ -94,6 +94,7 @@ import {
 import { emitCastAssign, emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
+import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
 import { ImportCharactersDialog } from "./timeline/ImportCharactersDialog"
 import type { CueReconcilePlan } from "@/lib/import/cue-reconcile"
 import { diffCueLinks } from "@/lib/timeline/cue-link-diff"
@@ -2039,10 +2040,18 @@ export function ProjectWorkspace() {
    * per-cell and idempotent is what makes a corrected sheet safe to re-import:
    * it overwrites rather than duplicating.
    *
-   * No voices are minted. `EditorTable`'s cast gutter and `ExportDialog`'s
-   * voice filter both read `metadata.cast_name` directly, so names alone are
-   * enough for everything downstream — including stage 7's per-character
-   * export. Building the roster is the separate design session's job.
+   * IT ALSO MINTS A VOICE PER CHARACTER, and that is not optional (corrected
+   * 2026-08-15 after the first real import landed 637 assignments that nothing
+   * on screen acknowledged). The cast gutter reads `metadata.cast_name`, which
+   * is what made "names are enough" look right — but the name is a PROP of
+   * `CastGutterVoice`, and that component only renders when `resolveCastVoice`
+   * finds a voice for the cell. No voice, no circle, no name. `cast.assign`
+   * writes the record; the voice is what makes it visible, and it is also what
+   * puts the character in the voice picker.
+   *
+   * `buildCastAdditions` is the existing pipeline — one voice per distinct
+   * name, reusing any that already exist, seeded from the current library so a
+   * project that has never opened Voice Studio still keeps its Narrator preset.
    */
   const handleImportCharacters = useCallback(
     async (plan: CharacterAssignmentPlan) => {
@@ -2069,13 +2078,41 @@ export function ProjectWorkspace() {
         )
         return
       }
+      // One voice per distinct character, and the cell→voice map that makes
+      // the gutter draw them. Merged over the existing assignments rather than
+      // replacing: another file's cast in the same project must survive.
+      let newVoices = 0
+      try {
+        const before = new Set(getVoiceLibrary(tts.settings).map((v) => v.name))
+        const additions = buildCastAdditions(
+          plan.assignments.map((a) => ({ cellId: a.cellId, speaker: a.castName })),
+          tts.settings,
+          uuidv7,
+        )
+        newVoices = additions.voices.filter((v) => !before.has(v.name)).length
+        await tts.saveTts({
+          voices: additions.voices,
+          castAssignments: {
+            ...(tts.settings?.castAssignments ?? {}),
+            ...additions.castAssignments,
+          },
+        })
+      } catch (e) {
+        // The names and camera states are already written, so this is a
+        // degraded success rather than a failure — but it is the half that
+        // makes them visible, so it must not pass silently.
+        console.warn("[characters] minting voices failed", e)
+        toast.warning("Characters imported, but the cast list could not be updated.")
+      }
+
       revalidateCells()
       toast.success(
         `${plan.assignments.length} lines now carry a character — ${plan.distinctCharacters} people` +
-          (plan.blankRows > 0 ? `, ${plan.blankRows} rows skipped as unspoken text.` : "."),
+          (newVoices > 0 ? `, ${newVoices} added to the cast` : "") +
+          (plan.blankRows > 0 ? `. ${plan.blankRows} rows skipped as unspoken text.` : "."),
       )
     },
-    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, revalidateCells],
+    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, revalidateCells, tts],
   )
   /**
    * Write the picked cues as this file's audio-cue sibling.

@@ -1170,7 +1170,7 @@ CREATE TABLE IF NOT EXISTS contextual_runs (
   file_id text NOT NULL,
   target_lang text NOT NULL DEFAULT '', -- lane ('' = the file's single target language)
   status text NOT NULL DEFAULT 'running'
-    CHECK (status IN ('running','pausing','paused','parked','done','failed','terminated')),
+    CHECK (status IN ('running','pausing','paused','parked','waiting','done','failed','terminated')),
   initiated_by text,                    -- username
   role_snapshot jsonb,                  -- {userId, username, level} at start
   span_cursor jsonb,                    -- {seeds:[SpanSeed…], nextIndex:int}; NULL until the first tick derives seeds
@@ -1183,6 +1183,7 @@ CREATE TABLE IF NOT EXISTS contextual_runs (
   steering_cursor timestamptz,          -- last steering read; informational
   anchor_cell_id text,                  -- where the user was looking at start; rotates the first wave
   scope_group text,                     -- shared id across runs one project-wide start created
+  blocked_on_decision_id text,          -- set while status='waiting'; the open contextual_decisions row blocking this run
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()  -- doubles as the driver heartbeat/lease
 );
@@ -1190,7 +1191,7 @@ CREATE TABLE IF NOT EXISTS contextual_runs (
 -- pill's hydrate lookup and enforces createRun's refuse-double-active.
 CREATE UNIQUE INDEX IF NOT EXISTS contextual_runs_active
   ON contextual_runs(project_id, file_id, target_lang)
-  WHERE status IN ('running','pausing','paused','parked');
+  WHERE status IN ('running','pausing','paused','parked','waiting');
 -- Stranded-run sweeper: 'running' with a quiet heartbeat (dead driver) or
 -- 'parked' with spans still on the cursor (loop hit its wave cap).
 CREATE INDEX IF NOT EXISTS contextual_runs_driver
@@ -1305,6 +1306,54 @@ CREATE TABLE IF NOT EXISTS contextual_project_leases (
 );
 CREATE INDEX IF NOT EXISTS contextual_project_leases_project_expiry
   ON contextual_project_leases(project_id, expires_at);
+
+-- Contextual decisions (0076_contextual_decisions.sql; seam design §4.3) — the
+-- agent → user channel. A decision is a question autopilot cannot answer
+-- alone. It closes exactly two ways (a human answers, or the agent researches
+-- it into a memory proposal); routing only ASSIGNS it and leaves it open. Two
+-- further terminal states are bookkeeping, and are deliberately distinct:
+-- `superseded` means the underlying gap got filled by other means (healthy),
+-- `expired` means nobody ever answered (unhealthy). Merging them would let
+-- the healthy case hide the warning the unhealthy one exists to give.
+CREATE TABLE IF NOT EXISTS contextual_decisions (
+  id text PRIMARY KEY,                  -- uuidv7
+  project_id text NOT NULL,
+  run_id text,                          -- NULL once the owning run ends
+  file_id text NOT NULL,
+  span_id text,
+  cell_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  -- WHY the agent cannot proceed, in the user's words. Never "review this".
+  reason text NOT NULL,
+  -- Which readiness item this gap belongs to; NULL for free-text ambiguities,
+  -- which the deterministic sweep can never close.
+  readiness_item text
+    CHECK (readiness_item IS NULL OR
+           readiness_item IN ('terminology','brief','examples','rules','languages')),
+  -- Set only for terminology decisions: the concept whose rendering is missing.
+  concept_id text,
+  -- How many later passages the answer affects. Drives surfacing rank (§4.6)
+  -- and belongs in the reason text too, because it is what makes a card
+  -- answerable.
+  blast_radius integer NOT NULL DEFAULT 0,
+  status text NOT NULL DEFAULT 'open'
+    CHECK (status IN ('open','researching','resolved','dismissed','superseded','expired')),
+  -- Routing is an ASSIGNMENT, not a resolution: an assigned decision is still
+  -- `open`, and anyone who joins later can answer it.
+  assigned_user_id integer,
+  assigned_invite_id text,
+  resolution jsonb,                     -- {kind:'answered'|'researched', …}
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  resolved_at timestamptz
+);
+-- Surfacing reads the open set per project, ranked by blast radius then age.
+CREATE INDEX IF NOT EXISTS contextual_decisions_open
+  ON contextual_decisions(project_id, blast_radius DESC, created_at ASC)
+  WHERE status IN ('open','researching');
+-- The supersession sweep and the run-unblock path both look up by run.
+CREATE INDEX IF NOT EXISTS contextual_decisions_run
+  ON contextual_decisions(run_id)
+  WHERE status IN ('open','researching');
 
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new

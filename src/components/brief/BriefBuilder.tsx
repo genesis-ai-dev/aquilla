@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface BriefBuilderProps {
   open: boolean
@@ -26,6 +27,7 @@ export interface BriefBuilderProps {
 }
 
 export function BriefBuilder(props: BriefBuilderProps) {
+  const t = useT()
   const { open, brief, canEdit, onSaveDraft, onGenerateL1, onClose, onHelpDraft, onExtractDocument } = props
   const [params, setParams] = useState<Record<string, string>>({ ...brief.parameters })
   const [notes, setNotes] = useState(brief.freeformNotes)
@@ -51,7 +53,7 @@ export function BriefBuilder(props: BriefBuilderProps) {
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose() }}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Translation brief</DialogTitle>
+          <DialogTitle>{t("autopilot.readiness.brief.label")}</DialogTitle>
         </DialogHeader>
 
         {onExtractDocument && step === 0 && (
@@ -84,13 +86,13 @@ export function BriefBuilder(props: BriefBuilderProps) {
                   try { setField(field.id, await onHelpDraft(field.id, draft)) }
                   finally { setBusy(false) }
                 }}>
-                Help me write this
+                {t("agent.brief.helpMeWrite")}
               </Button>
             )}
           </div>
         ) : (
           <div className="space-y-2">
-            <div className="text-sm font-medium">Anything else the AI should know?</div>
+            <div className="text-sm font-medium">{t("agent.brief.notesPrompt")}</div>
             <Textarea value={notes} readOnly={!canEdit} rows={5}
               onChange={(e) => setNotes(e.target.value)} />
           </div>
@@ -98,19 +100,19 @@ export function BriefBuilder(props: BriefBuilderProps) {
 
         <div className="flex items-center justify-between pt-2">
           <Button variant="ghost" disabled={step === 0 || busy} onClick={() => setStep((s) => s - 1)}>
-            Back
+            {t("common.back")}
           </Button>
           <div className="flex gap-2">
             <Button variant="outline" disabled={!canEdit || busy} onClick={saveDraft}>
-              Save draft
+              {t("agent.brief.saveDraft")}
             </Button>
             {isNotesStep ? (
               <Button disabled={!canEdit || busy}
                 onClick={async () => { setBusy(true); try { await onSaveDraft(draft); await onGenerateL1(draft) } finally { setBusy(false) } }}>
-                Save & generate summary
+                {t("agent.brief.saveAndGenerate")}
               </Button>
             ) : (
-              <Button disabled={busy} onClick={() => setStep((s) => s + 1)}>Next</Button>
+              <Button disabled={busy} onClick={() => setStep((s) => s + 1)}>{t("common.next")}</Button>
             )}
           </div>
         </div>
@@ -120,15 +122,16 @@ export function BriefBuilder(props: BriefBuilderProps) {
 }
 
 function DocumentPrefill(props: { disabled: boolean; onExtract: (text: string) => Promise<void> }) {
+  const t = useT()
   const [text, setText] = useState("")
   return (
     <div className="space-y-2 rounded-lg border border-border/50 p-3">
-      <div className="text-xs font-medium">Optional: paste an existing brief to pre-fill</div>
+      <div className="text-xs font-medium">{t("agent.brief.pasteToPrefill")}</div>
       <Textarea value={text} rows={3} disabled={props.disabled}
-        placeholder="Paste notes or an existing brief…" onChange={(e) => setText(e.target.value)} />
+        placeholder={t("agent.brief.pastePlaceholder")} onChange={(e) => setText(e.target.value)} />
       <Button variant="secondary" disabled={props.disabled || !text.trim()}
         onClick={() => props.onExtract(text)}>
-        Pre-fill from text
+        {t("agent.brief.prefillFromText")}
       </Button>
     </div>
   )

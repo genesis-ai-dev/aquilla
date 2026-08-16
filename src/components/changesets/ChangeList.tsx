@@ -3,6 +3,8 @@
 // in-chat ChangesetCard so a reviewer can confirm without leaving the
 // conversation. Data comes from auth-worker GET /api/v2/changesets/:id/approval.
 
+import { useT } from "@/lib/i18n/I18nProvider"
+
 export interface ChangesetChange {
   fileId: string
   fileName: string | null
@@ -58,6 +60,7 @@ export function ChangeList({
   /** Render only the first N items (chat sample mode); omit for all fetched. */
   maxItems?: number
 }) {
+  const t = useT()
   const items = maxItems !== undefined ? changes.items.slice(0, maxItems) : changes.items
   const shownCount = items.length
   const hiddenCount = changes.total - shownCount
@@ -68,7 +71,7 @@ export function ChangeList({
       ))}
       {hiddenCount > 0 && (
         <p className="text-xs text-muted-foreground">
-          …and {hiddenCount} more {hiddenCount === 1 ? "change" : "changes"}.
+          {t("agent.changeset.moreChanges", { count: hiddenCount })}
         </p>
       )}
     </div>
@@ -76,10 +79,11 @@ export function ChangeList({
 }
 
 export function ImportPreviewView({ preview }: { preview: ChangesetImportPreview }) {
+  const t = useT()
   return (
     <div className="space-y-1.5">
       <p className="text-xs font-medium text-muted-foreground">
-        Import {preview.fileName}
+        {t("nav.workspaceActions.import")} {preview.fileName}
         {preview.fileType ? ` (${preview.fileType})` : ""} — {preview.totalCells}{" "}
         {preview.totalCells === 1 ? "cell" : "cells"}
       </p>
@@ -93,7 +97,7 @@ export function ImportPreviewView({ preview }: { preview: ChangesetImportPreview
       ))}
       {preview.totalCells > preview.sampleCells.length && (
         <p className="text-xs text-muted-foreground">
-          …and {preview.totalCells - preview.sampleCells.length} more cells.
+          {t("agent.changeset.moreCellsPreview", { count: preview.totalCells - preview.sampleCells.length })}
         </p>
       )}
     </div>

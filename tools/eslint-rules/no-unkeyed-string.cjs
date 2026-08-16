@@ -10,19 +10,17 @@
  *                       placeholder, title, alt, tooltip content, …).
  *   3. Notification   — first string argument to toast.* / alert / confirm.
  *
+ * String-bearing JSX expressions are inspected as well as plain literals.
+ * This covers the common regression shapes that the original rule missed:
+ * interpolated templates, conditional branches, concatenation, and dynamic
+ * values of translatable attributes.
+ *
  * Escape hatch: `// i18n-exempt <reason>` on the line or the line above, or the
  * standard `// eslint-disable-next-line i18n/no-unkeyed-string`.
  *
  * KNOWN LIMITATIONS (see docs/swarm/TRACES.md SWARM-TODO for the follow-up
  * workstream — a typed `MessageKey` prop convention is the planned fix):
  *
- *   - Template literals WITH expressions (`` `Deleted ${n} files` ``) are not
- *     flagged at all — only zero-expression templates are treated as static
- *     strings. Interpolated strings are exactly the ones that need catalog
- *     placeholders and plural categories, so this is a real coverage hole,
- *     not a cosmetic one. Left out deliberately: flagging static quasis
- *     inside an interpolated template raises the false-positive rate a lot
- *     (`` `${label}:` `` would report the literal `":"`).
  *   - Strings in const arrays/objects hoisted outside component scope
  *     (`const ROLE_OPTIONS = [{ label: 'Owner' }]`) are invisible to this
  *     rule — it has no data-flow analysis and cannot know that `.label`
@@ -59,6 +57,46 @@ function staticStringOf(node) {
     return node.quasis.map((q) => q.value.cooked ?? '').join('')
   }
   return null
+}
+
+/**
+ * Return string-bearing nodes from a value that is known to reach a
+ * user-visible position. We intentionally do not walk arbitrary calls or
+ * identifiers: `t("key")`, formatter output, and server-provided content are
+ * already dynamic. The selected expression shapes all contain authored copy
+ * directly in the component.
+ */
+function visibleStringsOf(node) {
+  if (!node) return []
+
+  const staticText = staticStringOf(node)
+  if (staticText !== null) return [{ node, text: staticText }]
+
+  switch (node.type) {
+    case 'TemplateLiteral': {
+      const text = node.quasis
+        .map((q, index) => `${q.value.cooked ?? ''}${index < node.expressions.length ? '{…}' : ''}`)
+        .join('')
+      return [{ node, text }]
+    }
+    case 'ConditionalExpression':
+      return [...visibleStringsOf(node.consequent), ...visibleStringsOf(node.alternate)]
+    case 'LogicalExpression':
+    case 'BinaryExpression':
+      return [...visibleStringsOf(node.left), ...visibleStringsOf(node.right)]
+    case 'ArrayExpression':
+      return node.elements.flatMap((element) => visibleStringsOf(element))
+    case 'SequenceExpression':
+      return node.expressions.flatMap((expression) => visibleStringsOf(expression))
+    // TypeScript/ESTree wrappers around the actual rendered expression.
+    case 'TSAsExpression':
+    case 'TSTypeAssertion':
+    case 'TSNonNullExpression':
+    case 'ChainExpression':
+      return visibleStringsOf(node.expression)
+    default:
+      return []
+  }
 }
 
 module.exports = {
@@ -99,6 +137,12 @@ module.exports = {
       context.report({ node, messageId: 'unkeyed', data: { text: JSON.stringify(shown) } })
     }
 
+    const reportVisibleStrings = (node) => {
+      for (const candidate of visibleStringsOf(node)) {
+        if (!isAllowedString(candidate.text)) report(candidate.node, candidate.text)
+      }
+    }
+
     return {
       JSXText(node) {
         const raw = node.value
@@ -119,17 +163,20 @@ module.exports = {
         if (valueNode && valueNode.type === 'JSXExpressionContainer') {
           valueNode = valueNode.expression
         }
-        const text = staticStringOf(valueNode)
-        if (text === null || isAllowedString(text)) return
-        report(node, text)
+        reportVisibleStrings(valueNode)
+      },
+
+      JSXExpressionContainer(node) {
+        // Attribute expression containers are handled above so a literal is
+        // reported once. Child containers are visible JSX content.
+        if (node.parent?.type === 'JSXAttribute') return
+        reportVisibleStrings(node.expression)
       },
 
       CallExpression(node) {
         const name = calleeName(node.callee)
         if (!name || !USER_FACING_CALLS.some((re) => re.test(name))) return
-        const text = staticStringOf(node.arguments[0])
-        if (text === null || isAllowedString(text)) return
-        report(node.arguments[0], text)
+        reportVisibleStrings(node.arguments[0])
       },
     }
   },

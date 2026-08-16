@@ -24,9 +24,14 @@
       "count": 6
     }
   },
+  "src/components/AccountSwitcher.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 3
+    }
+  },
   "src/components/AddConceptDialog.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 7
+      "count": 9
     }
   },
   "src/components/AgentDockPanel.tsx": {
@@ -36,12 +41,12 @@
   },
   "src/components/AiModelConsentDialog.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 6
+      "count": 8
     }
   },
   "src/components/AiModelDownloadChip.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 4
+      "count": 9
     }
   },
   "src/components/AiSetupDialog.tsx": {
@@ -54,9 +59,19 @@
       "count": 3
     }
   },
-  "src/components/AssignModal.tsx": {
+  "src/components/AppShell.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 1
+    }
+  },
+  "src/components/AssignModal.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 5
+    }
+  },
+  "src/components/AudioRecorder/AudioRecordingModal.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 17
     }
   },
   "src/components/AudioRecorder/DurationBar.tsx": {
@@ -64,29 +79,59 @@
       "count": 1
     }
   },
-  "src/components/CellAiStatusPopover.tsx": {
+  "src/components/CellActionRail.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 2
     }
   },
-  "src/components/CellTranscribeBadge.tsx": {
+  "src/components/CellAiStatusPopover.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 4
+    }
+  },
+  "src/components/CellAudioButton.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 6
+    }
+  },
+  "src/components/CellTranscribeBadge.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 7
     }
   },
   "src/components/CellTranscriptPreview.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 4
+      "count": 12
+    }
+  },
+  "src/components/CellWaveform.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 1
+    }
+  },
+  "src/components/CommentsPage.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 1
+    }
+  },
+  "src/components/DecayBreakdown.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 1
+    }
+  },
+  "src/components/EditorTable.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 7
     }
   },
   "src/components/ErrorBoundary.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 1
+      "count": 5
     }
   },
   "src/components/ExportDialog.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 1
+      "count": 9
     }
   },
   "src/components/FileActionMenu.tsx": {
@@ -94,9 +139,9 @@
       "count": 3
     }
   },
-  "src/components/FileTargetImportDialog.tsx": {
+  "src/components/FileChapterToolbar.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 1
+      "count": 2
     }
   },
   "src/components/GenerateOverwriteDialog.tsx": {
@@ -104,64 +149,104 @@
       "count": 3
     }
   },
+  "src/components/GlossaryEditor.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 1
+    }
+  },
+  "src/components/GlossaryRow.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 3
+    }
+  },
+  "src/components/HealthRibbon.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 4
+    }
+  },
   "src/components/HelpMenu.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 1
     }
   },
+  "src/components/HistoryDrawer.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 2
+    }
+  },
   "src/components/ImportDialog.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 147
+      "count": 27
     }
   },
   "src/components/InactiveProjectBanner.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 2
+      "count": 4
+    }
+  },
+  "src/components/InlineAiError.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 1
     }
   },
   "src/components/InterlinearAlignmentPanel.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 8
+      "count": 13
     }
   },
   "src/components/JoinOrgPage.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 13
+      "count": 25
+    }
+  },
+  "src/components/JoinPage.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 3
+    }
+  },
+  "src/components/LeftDock.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 1
     }
   },
   "src/components/MemberAccessDrillDown.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 6
+      "count": 11
     }
   },
   "src/components/MemberLaneScopeEditor.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 6
+      "count": 10
     }
   },
   "src/components/MemberMultiAddRow.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 2
+      "count": 5
     }
   },
   "src/components/MembersMatrixCellEditor.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 13
+      "count": 21
     }
   },
   "src/components/MembersMatrixView.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 6
+      "count": 13
     }
   },
   "src/components/MembersPanel.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 8
+      "count": 19
+    }
+  },
+  "src/components/MembershipAvatars.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 1
     }
   },
   "src/components/MultiProjectInviteDialog.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 10
+      "count": 21
     }
   },
   "src/components/OfflineBanner.tsx": {
@@ -174,19 +259,29 @@
       "count": 1
     }
   },
+  "src/components/ParallelPassagesPanel.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 3
+    }
+  },
+  "src/components/PeerPresence.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 5
+    }
+  },
   "src/components/ProjectAssignedToMe.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 2
+      "count": 4
     }
   },
   "src/components/ProjectCard.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 11
+      "count": 15
     }
   },
   "src/components/ProjectCreateDialog.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 30
+      "count": 44
     }
   },
   "src/components/ProjectMembersPage.tsx": {
@@ -196,42 +291,47 @@
   },
   "src/components/ProjectSettings.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 135
+      "count": 154
     }
   },
   "src/components/ProjectSettings/LocalModelsSection.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 7
+      "count": 10
     }
   },
   "src/components/ProjectSettings/MembersSection.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 21
+      "count": 26
     }
   },
   "src/components/ProjectSettings/MondayIntegrationSection.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 23
+      "count": 29
     }
   },
   "src/components/ProjectSettings/MondayLinkedView.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 10
+      "count": 15
     }
   },
   "src/components/ProjectSettings/MondayMappingEditor.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 11
+      "count": 13
     }
   },
   "src/components/ProjectSettings/MondaySetupWizard.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 30
+      "count": 48
     }
   },
   "src/components/ProjectSettings/RulesSection.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 1
+    }
+  },
+  "src/components/ProjectSettings/SourceLinkSection.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 5
     }
   },
   "src/components/ProjectSettings/ValidationSettingsSection.tsx": {
@@ -241,7 +341,7 @@
   },
   "src/components/ProjectWorkspace.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 41
+      "count": 51
     }
   },
   "src/components/RemoveOrgMemberDialog.tsx": {
@@ -261,17 +361,32 @@
   },
   "src/components/RuleEditor.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 1
+      "count": 3
+    }
+  },
+  "src/components/RuleImportDialog.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 4
     }
   },
   "src/components/RuleSuggestDialog.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 14
+      "count": 21
+    }
+  },
+  "src/components/RuleSuggestFromEditsDialog.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 3
     }
   },
   "src/components/RulesPage.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 19
+      "count": 22
+    }
+  },
+  "src/components/SearchDockPanel.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 3
     }
   },
   "src/components/SourceSelectionToolbar.tsx": {
@@ -281,7 +396,7 @@
   },
   "src/components/StaffLanePopover.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 14
+      "count": 19
     }
   },
   "src/components/StatusBar.tsx": {
@@ -296,7 +411,7 @@
   },
   "src/components/TerminologyPage.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 46
+      "count": 61
     }
   },
   "src/components/UpdateBanner.tsx": {
@@ -306,7 +421,27 @@
   },
   "src/components/UsernameTypeahead.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 23
+      "count": 27
+    }
+  },
+  "src/components/VerifyEmailPage.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 3
+    }
+  },
+  "src/components/ViolationPopover.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 2
+    }
+  },
+  "src/components/VoiceCloneSection.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 2
+    }
+  },
+  "src/components/VoiceLibraryPanel.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 1
     }
   },
   "src/components/WorkspaceHeaderActions.tsx": {
@@ -319,9 +454,14 @@
       "count": 1
     }
   },
+  "src/components/agent/AgentContextPane.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 3
+    }
+  },
   "src/components/agent/AgentDockView.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 4
+      "count": 8
     }
   },
   "src/components/agent/AgentEmptyState.tsx": {
@@ -331,17 +471,12 @@
   },
   "src/components/agent/AgentRunView.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 6
-    }
-  },
-  "src/components/agent/AgentWorkbench.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 11
+      "count": 10
     }
   },
   "src/components/agent/AquiferProposalCard.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 5
+      "count": 9
     }
   },
   "src/components/agent/BudgetMeter.tsx": {
@@ -351,7 +486,7 @@
   },
   "src/components/agent/ChangesetCard.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 4
+      "count": 7
     }
   },
   "src/components/agent/CodeActivityBlock.tsx": {
@@ -364,6 +499,11 @@
       "count": 4
     }
   },
+  "src/components/agent/ProposalCard.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 3
+    }
+  },
   "src/components/agent/ProposalReceipt.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 12
@@ -371,17 +511,17 @@
   },
   "src/components/agent/WorkingSetPanel.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 14
+      "count": 18
     }
   },
   "src/components/agent/cards/PassageCard.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 7
+      "count": 9
     }
   },
   "src/components/agent/cards/ValidationQueueCard.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 7
+      "count": 10
     }
   },
   "src/components/agent/memory/AgentMemoryTab.tsx": {
@@ -391,12 +531,12 @@
   },
   "src/components/agent/memory/ApprovedMemoryList.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 6
+      "count": 8
     }
   },
   "src/components/agent/memory/BriefPanel.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 20
+      "count": 22
     }
   },
   "src/components/agent/memory/ProposedMemoryList.tsx": {
@@ -406,7 +546,7 @@
   },
   "src/components/audio/DenoiseButton.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 4
+      "count": 9
     }
   },
   "src/components/brief/BriefBuilder.tsx": {
@@ -416,17 +556,27 @@
   },
   "src/components/brief/BriefSection.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 7
+      "count": 10
     }
   },
-  "src/components/changesets/ChangeList.tsx": {
+  "src/components/cell/TargetCellActions.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 13
+    }
+  },
+  "src/components/cell/TargetValidationControl.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 5
     }
   },
+  "src/components/changesets/ChangeList.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 9
+    }
+  },
   "src/components/chat/ChatComposer.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 7
+      "count": 8
     }
   },
   "src/components/chat/ChatMarkdown.tsx": {
@@ -434,19 +584,19 @@
       "count": 2
     }
   },
-  "src/components/dcs/DcsCatalogBrowser.tsx": {
+  "src/components/contextual/AutopilotActivityInspector.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 22
-    }
-  },
-  "src/components/dcs/DcsSyncBadge.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 1
+      "count": 18
     }
   },
   "src/components/dcs/DcsUpstreamPanel.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 31
+      "count": 7
+    }
+  },
+  "src/components/footnotes/FootnoteInline.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 1
     }
   },
   "src/components/footnotes/FootnoteTextEditor.tsx": {
@@ -454,67 +604,62 @@
       "count": 3
     }
   },
-  "src/components/git-import/FrontierForgotPasswordForm.tsx": {
+  "src/components/import/BiblicaPanel.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 6
+      "count": 2
     }
   },
-  "src/components/git-import/FrontierLoginForm.tsx": {
+  "src/components/import/EBiblePanel.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 2
+    }
+  },
+  "src/components/import/GoogleDrivePanel.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 4
     }
   },
-  "src/components/git-import/FrontierSignupForm.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 5
-    }
-  },
-  "src/components/import/ColumnMappingPanel.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 13
-    }
-  },
-  "src/components/import/FileTargetImportPanel.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 21
-    }
-  },
   "src/components/import/LabelImportPanel.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 18
+      "count": 2
     }
   },
-  "src/components/import/PairedImportPanel.tsx": {
+  "src/components/import/MaculaPanel.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 22
+      "count": 2
     }
   },
-  "src/components/import/PreviewPanel.tsx": {
+  "src/components/import/TnPanel.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 21
-    }
-  },
-  "src/components/import/SpreadsheetImportPanel.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 12
-    }
-  },
-  "src/components/linked/DiffText.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 1
+      "count": 2
     }
   },
   "src/components/linked/UpstreamChangesPanel.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 21
+      "count": 1
     }
   },
   "src/components/metrics/PostEditMetricsSection.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 20
+      "count": 22
+    }
+  },
+  "src/components/onboarding/ProductTour.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 1
+    }
+  },
+  "src/components/onboarding/checklist/AiInstructionsStep.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 2
     }
   },
   "src/components/onboarding/checklist/AiModelsStep.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 5
+    }
+  },
+  "src/components/onboarding/checklist/AiProviderStep.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 1
     }
@@ -524,14 +669,24 @@
       "count": 1
     }
   },
+  "src/components/onboarding/steps/SignInStep.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 3
+    }
+  },
   "src/components/org/ArchivedProjects.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 28
+      "count": 34
     }
   },
   "src/components/org/AssignedToMe.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 16
+    }
+  },
+  "src/components/org/BillingUsagePanel.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 3
     }
   },
   "src/components/org/MemberActivityPanel.tsx": {
@@ -541,17 +696,22 @@
   },
   "src/components/org/OrgHome.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 46
+      "count": 53
+    }
+  },
+  "src/components/org/OrgMembersTable.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 13
     }
   },
   "src/components/org/OrgOverview.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 23
+      "count": 26
     }
   },
   "src/components/org/OrgProjectsDataTable.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 16
+      "count": 20
     }
   },
   "src/components/org/OrgProjectsPage.tsx": {
@@ -561,17 +721,22 @@
   },
   "src/components/org/OrgSwitcher.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 16
+      "count": 17
     }
   },
   "src/components/org/OverviewLaneTable.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 3
+      "count": 4
+    }
+  },
+  "src/components/org/ProjectAutopilotPanel.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 6
     }
   },
   "src/components/org/ProjectOverview.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 4
+      "count": 7
     }
   },
   "src/components/org/ProjectStatusFilter.tsx": {
@@ -581,12 +746,12 @@
   },
   "src/components/org/TeamDetail.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 53
+      "count": 73
     }
   },
   "src/components/org/TeamsList.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 21
+      "count": 28
     }
   },
   "src/components/settings/AssignmentAuthoritySection.tsx": {
@@ -596,12 +761,12 @@
   },
   "src/components/settings/OrgProviderSection.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 7
+      "count": 12
     }
   },
   "src/components/settings/PersonalProviderSection.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 15
+      "count": 19
     }
   },
   "src/components/settings/RosterProgressSection.tsx": {
@@ -619,6 +784,11 @@
       "count": 7
     }
   },
+  "src/components/sidebar/BookHealthSpine.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 5
+    }
+  },
   "src/components/timeline/LinkVideoTimingDialog.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 4
@@ -626,7 +796,7 @@
   },
   "src/components/timeline/TargetAudioLane.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 7
+      "count": 11
     }
   },
   "src/components/timeline/TimelineCard.tsx": {
@@ -636,7 +806,7 @@
   },
   "src/components/timeline/TimelineChipStrip.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 13
+      "count": 21
     }
   },
   "src/components/timeline/TimingModeChangedDialog.tsx": {
@@ -654,14 +824,29 @@
       "count": 1
     }
   },
-  "src/components/voice/CastGutterVoice.tsx": {
+  "src/components/ui/expandable-name.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 1
+    }
+  },
+  "src/components/ui/message-scroller.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 2
     }
   },
+  "src/components/ui/revealable-input.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 2
+    }
+  },
+  "src/components/voice/CastGutterVoice.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 3
+    }
+  },
   "src/components/voice/NewVoiceModal.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 1
+      "count": 3
     }
   },
   "src/hooks/useOpenWorkspace.tsx": {
@@ -671,7 +856,17 @@
   },
   "src/pages/ApproveChangeset/ApproveChangeset.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 20
+      "count": 21
+    }
+  },
+  "src/pages/Login.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 1
+    }
+  },
+  "src/pages/MembersPage.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 1
     }
   },
   "src/pages/Preferences.tsx": {
@@ -679,9 +874,19 @@
       "count": 26
     }
   },
+  "src/pages/ResetPassword.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 3
+    }
+  },
   "src/pages/settings/MondayOAuthCallback.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 3
+    }
+  },
+  "src/pages/settings/OrgSettingsBilling.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 16
     }
   },
   "src/pages/settings/OrgSettingsIdentity.tsx": {
@@ -689,14 +894,9 @@
       "count": 4
     }
   },
-  "src/pages/settings/OrgSettingsIndex.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 11
-    }
-  },
   "src/pages/settings/OrgSettingsMonday.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 29
+      "count": 35
     }
   },
   "src/pages/settings/OrgSettingsShell.tsx": {
@@ -706,7 +906,7 @@
   },
   "src/pages/team-settings/TeamSettingsIndex.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 19
+      "count": 21
     }
   },
   "src/pages/team-settings/TeamSettingsShell.tsx": {

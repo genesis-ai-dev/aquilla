@@ -39,6 +39,7 @@ import { rules } from "../namespaces/rules"
 import { terminology } from "../namespaces/terminology"
 import { agentWorkspace } from "../namespaces/agentWorkspace"
 import { billing } from "../namespaces/billing"
+import { knowledgeBase } from "../namespaces/knowledgeBase"
 import type { MessageValue } from "../plurals"
 
 export const en = {
@@ -62,6 +63,7 @@ export const en = {
   ...terminology.keys,
   ...agentWorkspace.keys,
   ...billing.keys,
+  ...knowledgeBase.keys,
 } as const
 
 export type MessageKey = keyof typeof en

@@ -580,4 +580,27 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "source-column text region inside the cell editor. A mapping-field label " +
     "and an accessibility name for an existing pane serve different purposes " +
     "and different audiences (sighted vs. screen-reader users).",
+
+  // -- AQU-832 (Monday.com integration wave) -----------------------------
+  "projectSettings.monday.orgSettingsLinkText":
+    "Lower-case words spliced mid-sentence into projectSettings.monday." +
+    "orgNotConnectedInstructions ('...connect it in organization settings, " +
+    "or ask...'), read as a continuation of that sentence — sometimes plain " +
+    "text, sometimes the visible text of an inline link, never read alone. " +
+    "editor.navTitle.organizationSettings is a capitalized, standalone " +
+    "sidebar/breadcrumb nav title ('Organization settings') naming a whole " +
+    "page. A mid-sentence lower-case fragment and a standalone Title-Case " +
+    "page name take different forms in languages that case- or " +
+    "register-mark that distinction, mirroring this catalog's other " +
+    "inline-fragment-vs-standalone-title splits (e.g. " +
+    "org.membersPage.orgPage.noExpiry vs org.membersPage.expiryNone above).",
+  "projectSettings.monday.applyButton":
+    "Imperative button that commits the AI-proposed Monday column↔metric mapping " +
+    "shown in the review panel. terminology.lookup.applyButton applies one " +
+    "selected glossary rendering to an editor cell; autopilot.proposal.apply " +
+    "commits every supported event in a staged translation-agent proposal. " +
+    "Three unrelated 'apply a proposed change' operations across three " +
+    "features that happen to share the generic English verb — the object " +
+    "being applied differs in each, and several target languages would " +
+    "translate the verb differently depending on that object.",
 }

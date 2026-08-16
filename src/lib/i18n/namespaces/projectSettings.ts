@@ -533,6 +533,111 @@ export const projectSettings = defineNamespace({
     "projectSettings.languages.offlineError": "You're offline. Reconnect to save language lanes.",
     "projectSettings.languages.permissionError": "You don't have permission to change shared settings.",
     "projectSettings.languages.savingFailedGeneric": "Saving failed.",
+
+    // ── ProjectSettings.tsx — misc call sites without a pre-existing key ──
+    "projectSettings.info.titleLabel": "Project title",
+    "projectSettings.systemPrompt.label": "System prompt",
+    "projectSettings.systemPrompt.navDescription":
+      "What this project is producing and how translations should read",
+    "projectSettings.advancedLlm.modelOverrideName": "Model override",
+    "projectSettings.voice.studioLabel": "Voice Studio",
+    "projectSettings.localModels.onDeviceLabel": "On-device models",
+    "projectSettings.gitSync.autoSyncIntervalAriaLabel": "Auto-sync interval minutes",
+    "projectSettings.gitSync.minutesAbbrev": "min",
+
+    // ── RulesSection.tsx ──
+    "projectSettings.rules.loadingLabel": "Loading rules",
+
+    // ── LocalModelsSection.tsx (device-model download rows) ──
+    "projectSettings.localModels.downloadedBadge": "Downloaded",
+    "projectSettings.localModels.notDownloadedBadge": "{size} MB · not downloaded",
+
+    // ── MembersSection.tsx ──
+    "projectSettings.members.filterAriaLabel": "Filter members",
+    "projectSettings.members.filterProjectGrants": "Project grants",
+    "projectSettings.members.filterViaOrg": "Via organization",
+    "projectSettings.members.removeDirectAccess": "Remove direct access",
+    "projectSettings.members.revokeAllAccess": "Revoke all access…",
+    "projectSettings.members.noActionsAvailable": "No actions available",
+    "projectSettings.members.addDialogDescription":
+      "Grant access from your organization, or create a shareable invite link.",
+
+    // ── Monday.com integration (MondayIntegrationSection / MondayLinkedView /
+    //    MondayMappingEditor / MondaySetupWizard) — SWARM-TODO(AQU-832, i18n)
+    //    in MondayIntegrationSection.tsx scoped this trio to a dedicated later
+    //    wave; this is that wave. "Monday"/"Monday.com" is the product's own
+    //    name and stays as-is in every locale.
+    "projectSettings.monday.boardSyncLabel": "Board sync",
+    "projectSettings.monday.loadingIntegration": "Loading Monday integration…",
+    "projectSettings.monday.orgNotConnected": "Your organization hasn't connected Monday.com yet.",
+    "projectSettings.monday.orgSettingsLinkText": "organization settings",
+    "projectSettings.monday.orgNotConnectedInstructions":
+      "An org maintainer can connect it in {settingsLink}, or ask an org maintainer to set it up.",
+    "projectSettings.monday.noBoardLinkedReadOnly":
+      "No Monday board is linked to this project. Maintainers can set one up here.",
+    "projectSettings.monday.linkBoardPrompt":
+      "Link a Monday board to push this project's translation progress automatically.",
+    "projectSettings.monday.setupWithAiButton": "Set up with AI",
+    "projectSettings.monday.setupWithAiBlurb":
+      "Picks the board, maps your progress metrics to its columns, and shows you the plan " +
+      "before anything is written.",
+    "projectSettings.monday.setupManuallyButton": "Set it up manually instead",
+    "projectSettings.monday.boardSelectAriaLabel": "Monday board",
+    "projectSettings.monday.useAiToConfigure": "Use AI to configure",
+    "projectSettings.monday.analyzingBoardAndProject": "Analyzing the board and this project…",
+    "projectSettings.monday.aiProposalLabel": "AI proposal",
+    "projectSettings.monday.applyButton": "Apply",
+    "projectSettings.monday.removeBoardLinkTitle": "Remove board link?",
+    "projectSettings.monday.removeBoardLinkDescription":
+      "Progress will stop pushing to {boardName}. The board and its items are left " +
+      "untouched on Monday.",
+    "projectSettings.monday.removeLinkButton": "Remove link",
+    "projectSettings.monday.structureStaleWarning": "Board structure changed — review the mapping below.",
+    "projectSettings.monday.linkedBoardPrefix": "Linked board:",
+    "projectSettings.monday.oneItemPerLabel": "One item per {granularity}.",
+    "projectSettings.monday.syncToggleLabel": "Sync",
+    "projectSettings.monday.syncNowButton": "Sync now",
+    "projectSettings.monday.removeBoardLinkAriaLabel": "Remove board link",
+    "projectSettings.monday.columnMappingLabel": "Column mapping",
+    "projectSettings.monday.reconfigureWithAiLabel": "Reconfigure with AI",
+    "projectSettings.monday.reconfigurePlaceholder":
+      "Describe what to change — e.g. “track validated % instead of completion, one item per file”",
+    "projectSettings.monday.reconfigureTooltip": "Ask AI to update the mapping",
+    "projectSettings.monday.noColumnsMapped": "No columns mapped.",
+    "projectSettings.monday.columnHeader": "Monday column",
+    "projectSettings.monday.metricHeader": "Metric",
+    "projectSettings.monday.pickColumnPlaceholder": "Pick a column",
+    "projectSettings.monday.removeMappingRowAriaLabel": "Remove mapping row",
+    "projectSettings.monday.addRowButton": "Add row",
+    "projectSettings.monday.introDescription":
+      "Aquilla reads your Monday board names and columns plus this project's progress " +
+      "figures, then proposes which board to use and what to push to each column. Nothing " +
+      "is written to Monday until you approve it.",
+    "projectSettings.monday.introBullet1": "Picks the board that best matches this project",
+    "projectSettings.monday.introBullet2":
+      "Maps completion, validation and activity metrics to suitable columns",
+    "projectSettings.monday.introBullet3": "Skips columns Monday won't let anything write to",
+    "projectSettings.monday.connectGateDescription":
+      "Your organization isn't connected to Monday.com yet. Connecting opens Monday in a " +
+      "new tab; come back here when it's done and setup continues automatically.",
+    "projectSettings.monday.waitingForMonday": "Waiting for Monday…",
+    "projectSettings.monday.scanStep1Label": "Reading this project and your Monday boards",
+    "projectSettings.monday.scanStep2Label": "Matching progress metrics to board columns",
+    "projectSettings.monday.boardCaption": "Board",
+    "projectSettings.monday.loadingBoards": "Loading boards…",
+    "projectSettings.monday.boardListFailed":
+      "Couldn't list boards — an org maintainer can change the board later.",
+    "projectSettings.monday.pickBoardPlaceholder": "Pick a board",
+    "projectSettings.monday.boardItemsLabel": "Board items",
+    "projectSettings.monday.granularityProjectLabel": "One item for the whole project",
+    "projectSettings.monday.granularityFileLabel": "One item per file",
+    "projectSettings.monday.someColumnsSkipped": "Some columns were skipped",
+    "projectSettings.monday.reviewRowsCaption": "What gets pushed — change any row before applying",
+    "projectSettings.monday.applyingStatus": "Linking the board and pushing your progress…",
+    "projectSettings.monday.progressPushesAutomatically": "Progress pushes automatically as translators work.",
+    "projectSettings.monday.viewBoardLink": "View board on Monday",
+    "projectSettings.monday.connectButton": "Connect Monday.com",
+    "projectSettings.monday.applyAndPushButton": "Apply and push",
   },
   context: {
     _context: {
@@ -906,6 +1011,64 @@ export const projectSettings = defineNamespace({
         placeholders: {
           lane: "The lane's language tag (data, not translated).",
         },
+      },
+      "projectSettings.localModels.notDownloadedBadge": {
+        description: "Badge on a not-yet-downloaded local AI model row, stating its download size.",
+        placeholders: {
+          size: "The model's download size in megabytes, as a plain number (data), e.g. '140'.",
+        },
+      },
+      "projectSettings.members.filterAriaLabel": {
+        description:
+          "Accessible name of the access-source filter select on the Members table " +
+          "toolbar (All / Project grants / Via organization). The select shows only the " +
+          "current choice, not a separate visible label.",
+      },
+      "projectSettings.monday.orgSettingsLinkText": {
+        description:
+          "The words 'organization settings', used both as the visible text of a link to " +
+          "the org's Monday connection settings and, when the caller lacks a linkable " +
+          "org id, as the same words rendered plain (no link) inside " +
+          "projectSettings.monday.orgNotConnectedInstructions.",
+      },
+      "projectSettings.monday.orgNotConnectedInstructions": {
+        description:
+          "Second line of the read-only 'org not connected' notice shown to a project " +
+          "member who cannot manage the Monday integration themselves.",
+        placeholders: {
+          settingsLink: "The rendered projectSettings.monday.orgSettingsLinkText string — insert exactly as given; the caller wraps it in a link when one is available.",
+        },
+      },
+      "projectSettings.monday.removeBoardLinkDescription": {
+        description: "Body text of the confirmation dialog before unlinking the project's Monday board.",
+        placeholders: {
+          boardName: "The linked board's name (data, not translated), or a generic fallback noun if unknown.",
+        },
+      },
+      "projectSettings.monday.oneItemPerLabel": {
+        description:
+          "Small note under the linked-board status row, naming what one Monday board " +
+          "item corresponds to.",
+        placeholders: {
+          granularity: "The literal, untranslated word 'file' or 'project' (data) — matches the value stored on the link's itemGranularity setting, not a separately translated enum.",
+        },
+      },
+      "projectSettings.monday.boardSelectAriaLabel": {
+        description:
+          "Accessible name of the Monday-board picker select, in both the manual link " +
+          "flow and the AI setup wizard's board-change control. No separate visible " +
+          "label — only a placeholder inside the closed select.",
+      },
+      "projectSettings.monday.removeBoardLinkAriaLabel": {
+        description: "Accessible name of the icon-only trash button that opens the remove-board-link confirmation.",
+      },
+      "projectSettings.monday.removeMappingRowAriaLabel": {
+        description: "Accessible name of the icon-only trash button that deletes one column-mapping row.",
+      },
+      "projectSettings.gitSync.autoSyncIntervalAriaLabel": {
+        description:
+          "Accessible name of the numeric minutes input beside the auto-sync toggle — " +
+          "no separate visible label, just the enable switch, this input, and a trailing 'min' unit.",
       },
     },
   },

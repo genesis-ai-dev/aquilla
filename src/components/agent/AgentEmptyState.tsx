@@ -102,7 +102,7 @@ export function AgentEmptyState({ onPromptSelect }: AgentEmptyStateProps) {
             {SLASH_COMMANDS.map((cmd) => (
               <div key={cmd.name} className="contents">
                 <dt className="font-mono text-foreground/80">/{cmd.name}</dt>
-                <dd>{cmd.description}</dd>
+                <dd>{t(cmd.descriptionKey)}</dd>
               </div>
             ))}
           </dl>

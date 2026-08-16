@@ -1,4 +1,5 @@
 // src/lib/brief/brief.ts
+import { t } from "@/lib/i18n/standalone"
 import { BRIEF_FIELDS } from "./schema"
 import type { BriefGroup, BriefStatus, TranslationBrief } from "./types"
 
@@ -63,7 +64,7 @@ export function assembleL2Markdown(brief: TranslationBrief): string {
     if (!fields.length) continue
     parts.push(`## ${GROUP_HEADINGS[group]}`)
     for (const f of fields) {
-      parts.push(`### ${f.label}\n${brief.parameters[f.id].trim()}`)
+      parts.push(`### ${t(f.labelKey)}\n${brief.parameters[f.id].trim()}`)
     }
   }
   if (brief.freeformNotes.trim()) {

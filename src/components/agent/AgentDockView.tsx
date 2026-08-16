@@ -307,7 +307,7 @@ export function AgentDockView({
                       <button
                         type="button"
                         onClick={() => removeAttachment(a.artifactId)}
-                        aria-label={`Remove ${a.fileName}`}
+                        aria-label={t("agent.dock.removeAttachmentAriaLabel", { fileName: a.fileName })}
                         className="shrink-0 text-muted-foreground hover:text-foreground"
                       >
                         <X className="h-3 w-3" />

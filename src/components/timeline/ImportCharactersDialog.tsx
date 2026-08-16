@@ -180,6 +180,15 @@ export function ImportCharactersDialog({
                     have.
                   </p>
                 )}
+                {plan!.filledByPosition > 0 && (
+                  <p
+                    data-testid="import-characters-drift"
+                    className="mt-1 text-muted-foreground"
+                  >
+                    {plan!.filledByPosition} rows have a timestamp that does not quite match
+                    their line; the lines either side pin them, so they are matched by position.
+                  </p>
+                )}
                 {plan!.cameraDisagreements > 0 && (
                   <p
                     data-testid="import-characters-camera-warning"

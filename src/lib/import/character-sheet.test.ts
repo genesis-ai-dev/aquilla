@@ -184,6 +184,72 @@ describe("keying rows to cells", () => {
     expect(p.assignments).toHaveLength(1)
   })
 
+  describe("recovering a drifted row by position", () => {
+    // From Sam's real import (2026-08-15): two of episode 101's rows sit
+    // exactly 84ms after the cell they belong to — two frames at 23.976fps,
+    // which is the minimum gap between adjacent cues. Widening the tolerance
+    // would be the wrong fix, because 84ms IS the neighbour gap.
+    const drifted = readCharacterRows(
+      [
+        HEADER,
+        row("00:00:10.000", "A"),
+        row("00:00:20.084", "B"), // 84ms late — misses cell c2 at 20.000
+        row("00:00:30.000", "C"),
+      ],
+      COLS,
+    )
+
+    it("takes the one free cell its neighbours leave", () => {
+      const p = planCharacterAssignments({
+        rows: drifted,
+        cells: [cell("c1", 10), cell("c2", 20), cell("c3", 30)],
+      })
+      expect(p.unmatchedRows).toEqual([])
+      expect(p.filledByPosition).toBe(1)
+      expect(p.assignments.map((a) => a.cellId)).toEqual(["c1", "c2", "c3"])
+    })
+
+    it("keeps the assignments in sheet order after filling", () => {
+      const p = planCharacterAssignments({
+        rows: drifted,
+        cells: [cell("c1", 10), cell("c2", 20), cell("c3", 30)],
+      })
+      expect(p.assignments.map((a) => a.rowNumber)).toEqual([2, 3, 4])
+    })
+
+    it("REFUSES rather than guessing when the gap holds two candidates", () => {
+      // Two free cells is a guess, and a guess here puts a performance on the
+      // wrong line.
+      const p = planCharacterAssignments({
+        rows: drifted,
+        cells: [cell("c1", 10), cell("c2a", 20), cell("c2b", 25), cell("c3", 30)],
+      })
+      expect(p.filledByPosition).toBe(0)
+      expect(p.unmatchedRows).toEqual([3])
+    })
+
+    it("cannot rescue a wrong-episode sheet, which is the point", () => {
+      // Nothing matches, so nothing brackets anything and the second pass has
+      // no neighbours to reason from. The refusal survives intact.
+      const p = planCharacterAssignments({
+        rows: drifted,
+        cells: [cell("x", 500), cell("y", 600), cell("z", 700)],
+      })
+      expect(p.filledByPosition).toBe(0)
+      expect(p.unmatchedRows).toEqual([2, 3, 4])
+    })
+
+    it("does not fill at the ends, where there is nothing on one side", () => {
+      const ends = readCharacterRows(
+        [HEADER, row("00:00:05.500", "First"), row("00:00:20.000", "B")],
+        COLS,
+      )
+      const p = planCharacterAssignments({ rows: ends, cells: [cell("c1", 5), cell("c2", 20)] })
+      expect(p.filledByPosition).toBe(0)
+      expect(p.unmatchedRows).toEqual([2])
+    })
+  })
+
   it("counts the cast", () => {
     const p = planCharacterAssignments({ rows, cells: [cell("c1", 10), cell("c2", 20)] })
     expect(p.distinctCharacters).toBe(2)
@@ -238,6 +304,9 @@ describe.skipIf(!haveSamples)("against The Chosen episode 101", () => {
     expect(plan.unmatchedRows).toEqual([])
     // The 13 screen-text cards carry no character.
     expect(plan.blankRows).toBe(13)
+    // Against the RAW VTT everything matches on timestamp. The imported cells
+    // are what drift (see the dialog test) — this file needs no filling.
+    expect(plan.filledByPosition).toBe(0)
     expect(plan.assignments).toHaveLength(637)
     // The camera column and the embedded angle never disagree in this file.
     expect(plan.cameraDisagreements).toBe(0)

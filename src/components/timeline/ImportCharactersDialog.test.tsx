@@ -78,6 +78,21 @@ describe("what it will do, before it does it", () => {
     )
   })
 
+  it("says when a row was matched by position rather than timestamp", async () => {
+    // Sam's real file: two rows sit 84ms — two frames — after their line. The
+    // neighbours pin them, so they are recovered, but the fact is worth saying
+    // because it means the sheet and the subtitles disagree slightly.
+    await pick(
+      CSV(row("00:00:10.000", "A"), row("00:00:20.084", "B"), row("00:00:30.000", "C")),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("import-characters-drift")).toHaveTextContent(
+        "matched by position",
+      ),
+    )
+    expect(screen.queryByTestId("import-characters-mismatch")).not.toBeInTheDocument()
+  })
+
   it("warns when the camera column and the embedded angle disagree", async () => {
     // Never happens in episode 101 — this is the tripwire for a future file
     // where the redundancy stops being redundant.

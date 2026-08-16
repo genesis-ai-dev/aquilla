@@ -191,6 +191,10 @@ export interface CharacterAssignmentPlan {
   cellsWithoutRow: number
   /** Rows where the camera column and the embedded angle disagreed. */
   cameraDisagreements: number
+  /** Rows the timestamp missed but POSITION recovered — see the second pass in
+   *  `planCharacterAssignments`. Worth reporting: it means the sheet and the
+   *  subtitles disagree slightly about where some lines start. */
+  filledByPosition: number
   /** How many different people are in this episode. */
   distinctCharacters: number
 }
@@ -257,12 +261,70 @@ export function planCharacterAssignments({
     })
   }
 
+  // ── Second pass: recover rows that DRIFTED but are pinned by their
+  // neighbours. (2026-08-15, from Sam's real import.)
+  //
+  // Episode 101's sheet has two rows sitting exactly 84ms after the cell they
+  // belong to — two frames at 23.976fps, i.e. the minimum gap between adjacent
+  // cues. Widening the tolerance is the WRONG fix for that: 84ms IS the
+  // neighbour gap, so a window that reaches it can also reach the wrong line.
+  //
+  // Position settles it instead, with the same reasoning the cue linker uses.
+  // Both lists are in time order, so if the rows either side of an unmatched
+  // one took cells N and N+2, the cell at N+1 is the only thing it can be.
+  // Requiring EXACTLY one free cell in the gap is what keeps this honest —
+  // two candidates is a guess, and a wrong-episode sheet matches nothing at
+  // all, so nothing brackets anything and this pass cannot rescue it.
+  let filledByPosition = 0
+  if (unmatchedRows.length > 0 && assignments.length > 0) {
+    const cellIndex = new Map(timed.map((c, i) => [c.id, i]))
+    const rowOrder = rows.filter((r) => r.castName !== "")
+    const takenIndexFor = new Map(assignments.map((a) => [a.rowNumber, cellIndex.get(a.cellId)!]))
+    const stillUnmatched: number[] = []
+
+    for (const rowNumber of unmatchedRows) {
+      const at = rowOrder.findIndex((r) => r.rowNumber === rowNumber)
+      let before: number | undefined
+      let after: number | undefined
+      for (let i = at - 1; i >= 0; i--) {
+        const t = takenIndexFor.get(rowOrder[i].rowNumber)
+        if (t !== undefined) { before = t; break }
+      }
+      for (let i = at + 1; i < rowOrder.length; i++) {
+        const t = takenIndexFor.get(rowOrder[i].rowNumber)
+        if (t !== undefined) { after = t; break }
+      }
+      if (before === undefined || after === undefined) { stillUnmatched.push(rowNumber); continue }
+
+      const free: number[] = []
+      for (let i = before + 1; i < after; i++) if (!claimed.has(timed[i].id)) free.push(i)
+      if (free.length !== 1) { stillUnmatched.push(rowNumber); continue }
+
+      const row = rows.find((r) => r.rowNumber === rowNumber)!
+      const cell = timed[free[0]]
+      claimed.add(cell.id)
+      takenIndexFor.set(rowNumber, free[0])
+      assignments.push({
+        cellId: cell.id,
+        castName: row.castName,
+        cameraState: row.cameraState,
+        rowNumber,
+      })
+      filledByPosition++
+    }
+    unmatchedRows.length = 0
+    unmatchedRows.push(...stillUnmatched)
+  }
+
+  assignments.sort((a, b) => a.rowNumber - b.rowNumber)
+
   return {
     assignments,
     blankRows,
     unmatchedRows,
     cellsWithoutRow: timed.length - claimed.size,
     cameraDisagreements,
+    filledByPosition,
     distinctCharacters: new Set(assignments.map((a) => a.castName)).size,
   }
 }

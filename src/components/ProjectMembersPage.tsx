@@ -730,7 +730,7 @@ export function InviteLinkTab({
               setInviteEmail(e.target.value)
               setEmailError(null)
             }}
-            placeholder="name@example.com"
+            placeholder={t("projectSettings.share.emailPlaceholder")}
             disabled={!session?.jwt}
           />
           {emailError ? (

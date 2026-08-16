@@ -57,6 +57,7 @@ import {
   roleHelpText,
   roleName,
 } from "@/lib/frontier/roles"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 type TeamTab = "overview" | "projects" | "members"
 type TeamMember = TeamDetailType["members"][number]
@@ -100,6 +101,7 @@ function CopyEmailButton({ email }: { email: string }) {
 }
 
 export function TeamDetail() {
+  const { t } = useI18n()
   const { groupId } = useParams<{ groupId: string }>()
   const groupIdNum = groupId != null ? Number(groupId) : null
   const { activeOrgId, activeOrg } = useActiveOrg()
@@ -313,7 +315,7 @@ export function TeamDetail() {
       {
         id: "name",
         accessorFn: (p) => p.name.toLowerCase(),
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.name")} />,
         meta: { className: "min-w-0" },
         cell: ({ row }) => (
           <span className="block min-w-0 truncate font-medium">{row.original.name}</span>
@@ -322,7 +324,7 @@ export function TeamDetail() {
       {
         id: "role",
         accessorFn: (p) => p.grantedRoleLevel,
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Role" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.roleLabel")} />,
         meta: { className: "w-[7.5rem] whitespace-nowrap" },
         cell: ({ row }) => (
           <span className="text-sm text-foreground">
@@ -333,7 +335,7 @@ export function TeamDetail() {
       {
         id: "actions",
         enableSorting: false,
-        header: () => <span className="sr-only">Actions</span>,
+        header: () => <span className="sr-only">{t("org.overviewLaneTable.actionsColumn")}</span>,
         meta: { align: "right" as const, className: "w-10" },
         cell: ({ row }) => {
           const p = row.original
@@ -347,7 +349,7 @@ export function TeamDetail() {
         },
       },
     ],
-    [isAdmin],
+    [isAdmin, t],
   )
 
   const memberColumns = useMemo<ColumnDef<TeamMember>[]>(
@@ -355,7 +357,7 @@ export function TeamDetail() {
       {
         id: "name",
         accessorFn: (m) => m.username.toLowerCase(),
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.name")} />,
         meta: { className: "min-w-0" },
         cell: ({ row }) => (
           <UsernameWithAvatar username={row.original.username} size="xs" nameClassName="font-normal" />
@@ -365,7 +367,7 @@ export function TeamDetail() {
         id: "email",
         accessorFn: (m) => missingLast((m.email ?? "").toLowerCase()),
         sortUndefined: SORT_MISSING_LAST,
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Email" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.email")} />,
         meta: { className: "w-[13rem] max-w-[13rem]" },
         cell: ({ row }) => {
           const email = row.original.email?.trim()
@@ -378,12 +380,12 @@ export function TeamDetail() {
       {
         id: "role",
         accessorFn: (m) => m.roleLevel ?? 0,
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Role" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.roleLabel")} />,
         meta: { className: "w-[7.5rem] whitespace-nowrap" },
         cell: ({ row }) => {
           const m = row.original
           if (m.roleLevel == null) {
-            return <span className="text-sm text-muted-foreground">Unknown</span>
+            return <span className="text-sm text-muted-foreground">{t("autopilot.evidence.status.unknown")}</span>
           }
 
           const label = (
@@ -410,7 +412,7 @@ export function TeamDetail() {
       {
         id: "actions",
         enableSorting: false,
-        header: () => <span className="sr-only">Actions</span>,
+        header: () => <span className="sr-only">{t("org.overviewLaneTable.actionsColumn")}</span>,
         meta: { align: "right" as const, className: "w-10" },
         cell: ({ row }) => {
           const m = row.original
@@ -426,7 +428,7 @@ export function TeamDetail() {
                   aria-label={`Remove ${m.username} — maintainers only`}
                   className="inline-flex cursor-not-allowed items-center text-xs text-muted-foreground/70 underline decoration-dotted"
                 >
-                  Remove
+                  {t("org.membersPage.remove")}
                 </span>
               </AppTooltip>
             )
@@ -440,7 +442,7 @@ export function TeamDetail() {
         },
       },
     ],
-    [isAdmin],
+    [isAdmin, t],
   )
 
   const teamDescription = team?.description?.trim() || null
@@ -460,7 +462,10 @@ export function TeamDetail() {
                 <div className="h-40 animate-pulse rounded-lg border bg-card" />
               </>
             ) : team == null ? (
-              <EmptyState title="Team not found." description="This team may have been deleted, or you may not have access to it." />
+              <EmptyState
+                title={t("org.teamDetail.notFoundTitle")}
+                description={t("org.teamDetail.notFoundDescription")}
+              />
             ) : (
             <>
               {isOwner && (
@@ -471,10 +476,12 @@ export function TeamDetail() {
                   <DialogContent className="max-w-md">
                     <DialogHeader>
                       <DialogTitle>
-                        Change role{roleChangeTarget ? ` for ${roleChangeTarget.username}` : ""}
+                        {roleChangeTarget
+                          ? t("org.teamDetail.changeRoleTitleFor", { name: roleChangeTarget.username })
+                          : t("org.membersPage.changeRoleAria")}
                       </DialogTitle>
                       <DialogDescription>
-                        This updates their organization-level role across every project.
+                        {t("org.membersPage.orgTable.changeRoleDescription")}
                       </DialogDescription>
                     </DialogHeader>
                     <RoleSelect
@@ -490,7 +497,7 @@ export function TeamDetail() {
                     />
                     <DialogFooter>
                       <Button type="button" variant="outline" onClick={closeRoleChange} disabled={roleChangeBusy}>
-                        Cancel
+                        {t("common.cancel")}
                       </Button>
                       <Button
                         type="button"
@@ -513,10 +520,12 @@ export function TeamDetail() {
                   <DialogContent className="max-w-md">
                     <DialogHeader>
                       <DialogTitle>
-                        Change role{projectRoleTarget ? ` for ${projectRoleTarget.name}` : ""}
+                        {projectRoleTarget
+                          ? t("org.teamDetail.changeRoleTitleFor", { name: projectRoleTarget.name })
+                          : t("org.membersPage.changeRoleAria")}
                       </DialogTitle>
                       <DialogDescription>
-                        Team members inherit this role on the project through the team grant.
+                        {t("org.teamDetail.projectRoleDialogDescription")}
                       </DialogDescription>
                     </DialogHeader>
                     <RoleSelect
@@ -537,7 +546,7 @@ export function TeamDetail() {
                         onClick={closeProjectRoleChange}
                         disabled={projectRoleBusy}
                       >
-                        Cancel
+                        {t("common.cancel")}
                       </Button>
                       <Button
                         type="button"
@@ -584,7 +593,7 @@ export function TeamDetail() {
                 {isAdmin && activeOrgId != null && groupIdNum != null ? (
                   <Link
                     to={teamSettingsPath(activeOrgId, groupIdNum)}
-                    aria-label="Team settings"
+                    aria-label={t("org.teamDetail.teamSettingsAriaLabel")}
                     className={cn(buttonVariants({ variant: "outline", size: "icon" }), "shrink-0")}
                   >
                     <Settings />
@@ -597,11 +606,11 @@ export function TeamDetail() {
                 onValueChange={(v) => setTab((v as TeamTab) ?? "projects")}
                 className="gap-4"
               >
-                <TabsList aria-label="Team sections">
-                  <TabsTrigger value="projects">Projects</TabsTrigger>
-                  <TabsTrigger value="members">Members</TabsTrigger>
+                <TabsList aria-label={t("org.teamDetail.sectionsAriaLabel")}>
+                  <TabsTrigger value="projects">{t("nav.projects")}</TabsTrigger>
+                  <TabsTrigger value="members">{t("editor.navTitle.members")}</TabsTrigger>
                   <TabsTrigger value="overview" disabled>
-                    Overview
+                    {t("editor.navTitle.overview")}
                   </TabsTrigger>
                 </TabsList>
 
@@ -610,9 +619,9 @@ export function TeamDetail() {
                 <TabsContent value="projects" className="space-y-4">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <h2 className="font-heading text-base font-medium text-foreground">Projects</h2>
+                      <h2 className="font-heading text-base font-medium text-foreground">{t("nav.projects")}</h2>
                       <p className="text-sm text-muted-foreground">
-                        Projects this team can access, and the role granted to members.
+                        {t("org.teamDetail.projectsTabDescription")}
                       </p>
                     </div>
                   </div>
@@ -624,9 +633,11 @@ export function TeamDetail() {
                     >
                       <DialogContent className="max-w-md gap-4">
                         <DialogHeader>
-                          <DialogTitle>Attach project to &apos;{team.name}&apos;</DialogTitle>
+                          <DialogTitle>
+                            {t("org.teamDetail.attachProjectDialogTitle", { name: team.name })}
+                          </DialogTitle>
                           <DialogDescription>
-                            Grant this team access at a chosen role.
+                            {t("org.teamDetail.attachProjectDialogDescription")}
                           </DialogDescription>
                         </DialogHeader>
                         <div className="flex w-full flex-col gap-3">
@@ -635,8 +646,8 @@ export function TeamDetail() {
                             value={selectedProjectId}
                             onValueChange={(v) => setSelectedProjectId(v ?? "")}
                           >
-                            <SelectTrigger aria-label="Project to attach" className="w-full">
-                              <SelectValue placeholder="Select a project…" />
+                            <SelectTrigger aria-label={t("org.teamDetail.projectToAttachAriaLabel")} className="w-full">
+                              <SelectValue placeholder={t("org.teamDetail.selectProjectPlaceholder")} />
                             </SelectTrigger>
                             <SelectContent>
                               <SelectGroup>
@@ -650,25 +661,25 @@ export function TeamDetail() {
                             options={ALL_ROLE_OPTIONS}
                             value={selectedRole}
                             onValueChange={setSelectedRole}
-                            aria-label="Granted role"
+                            aria-label={t("org.teamDetail.grantedRoleAriaLabel")}
                             className="w-full"
                           />
                           {attachableProjects.length === 0 && (
                             <p className="text-xs text-muted-foreground">
-                              All org projects are already attached to this team.
+                              {t("org.teamDetail.allProjectsAttachedNotice")}
                             </p>
                           )}
                         </div>
                         <DialogFooter className="mt-0">
                           <Button type="button" variant="outline" onClick={closeAttachProject}>
-                            Cancel
+                            {t("common.cancel")}
                           </Button>
                           <Button
                             type="button"
                             onClick={handleAttachProject}
                             disabled={!selectedProjectId}
                           >
-                            Attach
+                            {t("editor.media.attach")}
                           </Button>
                         </DialogFooter>
                       </DialogContent>
@@ -684,15 +695,15 @@ export function TeamDetail() {
                             className="shrink-0"
                             onClick={openAttachProject}
                           >
-                            Attach project
+                            {t("org.teamDetail.attachProjectButton")}
                           </Button>
                         </div>
                       )}
                       <EmptyState
                         variant="inline"
                         icon={FolderGit2}
-                        title="No projects."
-                        description={isAdmin ? "Attach a project to grant this team access at a chosen role." : undefined}
+                        title={t("org.teamDetail.noProjectsTitle")}
+                        description={isAdmin ? t("org.teamDetail.noProjectsAdminDescription") : undefined}
                       />
                     </div>
                   ) : (
@@ -714,7 +725,7 @@ export function TeamDetail() {
                             className="ml-auto shrink-0"
                             onClick={openAttachProject}
                           >
-                            Attach project
+                            {t("org.teamDetail.attachProjectButton")}
                           </Button>
                         ) : null
                       }
@@ -725,7 +736,7 @@ export function TeamDetail() {
                           <>
                             <MenuItem onClick={() => openProjectRoleChange(p)}>
                               <ShieldUser className="size-4" />
-                              Change role
+                              {t("org.membersPage.changeRoleAria")}
                             </MenuItem>
                             <MenuSeparator />
                             <MenuItem
@@ -733,14 +744,14 @@ export function TeamDetail() {
                               onClick={() => void handleDetachProject(p.id)}
                             >
                               <Unlink className="size-4" />
-                              Detach
+                              {t("org.teamDetail.detachButton")}
                             </MenuItem>
                           </>
                         ) : null
                       }
                       emptyState={
                         <p className="py-10 text-center text-sm text-muted-foreground">
-                          No projects match this search.
+                          {t("org.teamDetail.noProjectsMatchSearch")}
                         </p>
                       }
                       testId="team-projects-table"
@@ -754,10 +765,10 @@ export function TeamDetail() {
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <h2 className="font-heading text-base font-medium text-foreground">
-                        Members
+                        {t("editor.navTitle.members")}
                       </h2>
                       <p className="text-sm text-muted-foreground">
-                        People on this team inherit its project grants at their org role.
+                        {t("org.teamDetail.membersTabDescription")}
                       </p>
                     </div>
                   </div>
@@ -766,21 +777,23 @@ export function TeamDetail() {
                     <Dialog open={addingMember} onOpenChange={(o) => { if (!o) closeAddMember() }}>
                       <DialogContent className="max-w-md gap-4">
                         <DialogHeader>
-                          <DialogTitle>Add members to &apos;{team.name}&apos;</DialogTitle>
+                          <DialogTitle>
+                            {t("org.teamDetail.addMembersDialogTitle", { name: team.name })}
+                          </DialogTitle>
                         </DialogHeader>
                         <div className="flex w-full flex-col gap-2">
                           <div className="w-full">
                             <MemberMultiSelect
                               id="team-add-members"
-                              aria-label="Members to add"
+                              aria-label={t("org.teamDetail.membersToAddAriaLabel")}
                               className="w-full!"
                               members={availableOrgMembers.map((m) => m.username)}
                               value={stagedUsernames}
                               disabled={availableOrgMembers.length === 0}
-                              placeholder="Select members…"
+                              placeholder={t("org.teamDetail.selectMembersPlaceholder")}
                               searchPlaceholder="Search members…"
                               searchLabel="Search members"
-                              emptyMessage="No available members match."
+                              emptyMessage={t("org.teamDetail.noMembersMatch")}
                               onValueChange={(next) => {
                                 setAddError(null)
                                 setStagedUsernames(next)
@@ -789,18 +802,18 @@ export function TeamDetail() {
                           </div>
                           {availableOrgMembers.length === 0 && stagedUsernames.length === 0 && (
                             <p className="text-xs text-muted-foreground">
-                              All org members are already in this team.
+                              {t("org.teamDetail.allMembersAddedNotice")}
                             </p>
                           )}
                           {addError && (
                             <p role="alert" className="text-xs text-destructive">
-                              Couldn&apos;t add: {addError}
+                              {t("org.teamDetail.addErrorPrefix", { error: addError })}
                             </p>
                           )}
                         </div>
                         <DialogFooter className="mt-0">
                           <Button type="button" variant="outline" onClick={closeAddMember}>
-                            Cancel
+                            {t("common.cancel")}
                           </Button>
                           <Button
                             type="button"
@@ -823,15 +836,15 @@ export function TeamDetail() {
                             type="button"
                             onClick={() => { setAddingMember(true); setStagedUsernames([]); setAddError(null) }}
                           >
-                            Add a member
+                            {t("org.membersPage.orgTable.addMemberTitle")}
                           </Button>
                         </div>
                       )}
                       <EmptyState
                         variant="inline"
                         icon={Users}
-                        title="No members."
-                        description={isAdmin ? "Add org members to this team to grant them shared project access." : undefined}
+                        title={t("org.teamDetail.noMembersTitle")}
+                        description={isAdmin ? t("org.teamDetail.noMembersAdminDescription") : undefined}
                       />
                     </div>
                   ) : (
@@ -856,7 +869,7 @@ export function TeamDetail() {
                             className="ml-auto shrink-0"
                             onClick={() => { setAddingMember(true); setStagedUsernames([]); setAddError(null) }}
                           >
-                            Add a member
+                            {t("org.membersPage.orgTable.addMemberTitle")}
                           </Button>
                         ) : null
                       }
@@ -868,21 +881,21 @@ export function TeamDetail() {
                               <>
                                 <MenuItem onClick={() => openRoleChange(m)}>
                                   <ShieldUser className="size-4" />
-                                  Change role
+                                  {t("org.membersPage.changeRoleAria")}
                                 </MenuItem>
                                 <MenuSeparator />
                               </>
                             )}
                             <MenuItem onClick={() => void handleRemoveMember(m.userId)}>
                               <UserMinus className="size-4" />
-                              Remove from team
+                              {t("org.teamDetail.removeFromTeamButton")}
                             </MenuItem>
                           </>
                         ) : null
                       }
                       emptyState={
                         <p className="py-10 text-center text-sm text-muted-foreground">
-                          No members match this search.
+                          {t("org.membersPage.orgTable.noSearchMatch")}
                         </p>
                       }
                       testId="team-members-table"

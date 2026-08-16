@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
 import { AppShell } from "@/components/AppShell"
@@ -39,6 +39,8 @@ import {
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { FolderPlus, Search, Building2, Sparkles, CircleCheck, Mic, AlertTriangle } from "lucide-react"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 const PANEL_MAX_H =
   "max-h-[clamp(14rem,calc(100dvh-22rem),28rem)]"
@@ -227,37 +229,61 @@ function roleLabel(org: OrgSummary): string {
   return roleDisplayText(org.role.name)
 }
 
-const ORG_SUMMARY_COLUMNS: ColumnDef<OrgPortfolioSummary>[] = [
-  {
-    id: "organization",
-    accessorFn: (s) => orgDisplayName(s.org).toLowerCase(),
-    header: ({ column }) => <DataTableColumnHeader column={column} title="Organization" />,
-    meta: { className: "min-w-[12rem]" },
-    cell: ({ row }) => (
-      <OrgWithAvatar name={orgDisplayName(row.original.org)} size="xs" className="max-w-full" />
-    ),
-  },
-  {
-    id: "role",
-    accessorFn: (s) => roleLabel(s.org).toLowerCase(),
-    header: ({ column }) => <DataTableColumnHeader column={column} title="Role" />,
-    meta: { className: "w-[8.5rem] whitespace-nowrap" },
-    cell: ({ row }) => (
-      <span className="text-sm text-foreground">{roleLabel(row.original.org)}</span>
-    ),
-  },
-  {
-    id: "projects",
-    accessorFn: (s) => s.projectCount,
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} title="Projects" className="justify-end" />
-    ),
-    meta: { align: "right", className: "w-[5.5rem]" },
-    cell: ({ row }) => (
-      <div className="text-right tabular-nums">{row.original.projectCount}</div>
-    ),
-  },
-]
+/** Catalog keys for ORG_SUMMARY_COLUMNS' headers, resolved with `t()` inside
+ * the useOrgSummaryColumns hook below — the column table itself must stay a
+ * plain function-scope value since `t` is a hook and this table is built
+ * once per render, not hoisted to module scope. */
+const ORG_SUMMARY_COLUMN_LABEL_KEYS = {
+  organization: "onboarding.apiTokens.orgLabel",
+  role: "common.roleLabel",
+  projects: "nav.projects",
+} as const satisfies Record<string, MessageKey>
+
+function useOrgSummaryColumns(): ColumnDef<OrgPortfolioSummary>[] {
+  const { t } = useI18n()
+  return useMemo<ColumnDef<OrgPortfolioSummary>[]>(
+    () => [
+      {
+        id: "organization",
+        accessorFn: (s) => orgDisplayName(s.org).toLowerCase(),
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title={t(ORG_SUMMARY_COLUMN_LABEL_KEYS.organization)} />
+        ),
+        meta: { className: "min-w-[12rem]" },
+        cell: ({ row }) => (
+          <OrgWithAvatar name={orgDisplayName(row.original.org)} size="xs" className="max-w-full" />
+        ),
+      },
+      {
+        id: "role",
+        accessorFn: (s) => roleLabel(s.org).toLowerCase(),
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title={t(ORG_SUMMARY_COLUMN_LABEL_KEYS.role)} />
+        ),
+        meta: { className: "w-[8.5rem] whitespace-nowrap" },
+        cell: ({ row }) => (
+          <span className="text-sm text-foreground">{roleLabel(row.original.org)}</span>
+        ),
+      },
+      {
+        id: "projects",
+        accessorFn: (s) => s.projectCount,
+        header: ({ column }) => (
+          <DataTableColumnHeader
+            column={column}
+            title={t(ORG_SUMMARY_COLUMN_LABEL_KEYS.projects)}
+            className="justify-end"
+          />
+        ),
+        meta: { align: "right", className: "w-[5.5rem]" },
+        cell: ({ row }) => (
+          <div className="text-right tabular-nums">{row.original.projectCount}</div>
+        ),
+      },
+    ],
+    [t],
+  )
+}
 
 function deadlineTooltip(project: PortfolioProjectRow, status: "overdue" | "soon") {
   return deadlineStatusTooltip(status, project.deadlineAt)
@@ -327,6 +353,7 @@ export function ProjectTable({
   showOrg: boolean
   defaultLaneLabelByProjectId?: Map<string, string>
 }) {
+  const { t } = useI18n()
   return (
     <div data-testid="project-table" className="@container/project-table -mx-2 overflow-hidden">
       <div className="w-full">
@@ -339,26 +366,26 @@ export function ProjectTable({
               showOrg && `@md/project-table:grid ${PROJECT_IDENTITY_COLS} @md/project-table:gap-x-2`,
             )}
           >
-            <span>Project</span>
-            {showOrg && <span className="hidden text-start @md/project-table:block">Org</span>}
+            <span>{t("common.project")}</span>
+            {showOrg && <span className="hidden text-start @md/project-table:block">{t("common.org")}</span>}
           </span>
           {/* AQU-538: lane chips column (see the LaneChips cell in each row). */}
-          <span className="hidden @md/project-table:block">Language</span>
+          <span className="hidden @md/project-table:block">{t("org.orgHome.table.languageHeader")}</span>
           <ProjectMetricHeader
-            label="Translated"
-            description="Translated: percentage of cells with target-language content filled in."
+            label={t("org.orgHome.table.translatedHeaderLabel")}
+            description={t("org.orgHome.table.translatedHeaderDescription")}
             icon={Sparkles}
             testId="project-table-translated-header"
           />
           <ProjectMetricHeader
-            label="Validated"
-            description="Validated: percentage of cells marked validated by a reviewer."
+            label={t("org.orgHome.table.validatedHeaderLabel")}
+            description={t("org.orgHome.table.validatedHeaderDescription")}
             icon={CircleCheck}
             testId="project-table-validated-header"
           />
           <ProjectMetricHeader
-            label="Has audio"
-            description="Audio: percentage of cells with at least one recording attached."
+            label={t("org.orgHome.table.audioHeaderLabel")}
+            description={t("org.orgHome.table.audioHeaderDescription")}
             icon={Mic}
             testId="project-table-audio-header"
             className="hidden @md/project-table:inline-flex"
@@ -416,7 +443,7 @@ export function ProjectTable({
                         data-testid="project-table-metadata"
                         className="flex min-w-0 items-center text-xs leading-4 text-muted-foreground"
                       >
-                        <span className="truncate" aria-label="Source and target language">
+                        <span className="truncate" aria-label={t("org.orgHome.table.sourceTargetLanguageAria")}>
                           {languagePairLabel(p)}
                         </span>
                       </span>
@@ -486,6 +513,8 @@ export function ProjectTable({
 }
 
 export function OrgHome() {
+  const { t } = useI18n()
+  const orgSummaryColumns = useOrgSummaryColumns()
   const {
     orgs,
     accessibleProjects,
@@ -588,15 +617,15 @@ export function OrgHome() {
         statusBar={null}
         main={
           <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-            <p className="text-lg font-medium">Sign in to see your workspace</p>
+            <p className="text-lg font-medium">{t("org.orgHome.signedOut.heading")}</p>
             <p className="text-sm text-muted-foreground max-w-xs">
-              Your session has ended or you are not signed in. Sign in to access your projects and translation data.
+              {t("org.orgHome.signedOut.description")}
             </p>
             <Link
               to={`/login?next=${encodeURIComponent("/")}`}
               className={cn(buttonVariants())}
             >
-              Sign in
+              {t("auth.login.submitDefault")}
             </Link>
           </div>
         }
@@ -612,7 +641,7 @@ export function OrgHome() {
   // unknown values remain skeletons and startup has one visual transition.
   if (orgShellLoading) {
     return (
-      <LoadingOverlay label="Loading dashboard" data-testid="org-home-loading">
+      <LoadingOverlay label={t("org.orgHome.loadingDashboard")} data-testid="org-home-loading">
         <OrgHomeLoadingTemplate />
       </LoadingOverlay>
     )
@@ -643,14 +672,14 @@ export function OrgHome() {
           statusBar={null}
           main={
             <Page size="wide">
-              <PageHeader title="All organizations" />
+              <PageHeader title={t("org.breadcrumb.allOrganizations")} />
               <EmptyState
                 data-testid="org-load-error"
                 icon={AlertTriangle}
-                title="Couldn’t load your organizations"
+                title={t("org.orgHome.allOrgsError.title")}
                 description={orgsError ?? accessibleProjectsError ?? "Something went wrong loading your workspace."}
                 action={
-                  <Button onClick={() => { void retryOrgLoad() }}>Retry</Button>
+                  <Button onClick={() => { void retryOrgLoad() }}>{t("common.retry")}</Button>
                 }
               />
             </Page>
@@ -666,15 +695,15 @@ export function OrgHome() {
           statusBar={null}
           main={
             <Page size="wide">
-              <PageHeader title="All organizations" />
+              <PageHeader title={t("org.breadcrumb.allOrganizations")} />
               <EmptyState
                 data-testid="no-organizations-empty"
                 icon={Building2}
-                title="You're not part of an organization yet"
-                description="Create one to start a translation project, or ask a teammate to invite you to theirs."
+                title={t("org.orgHome.noOrgYet.title")}
+                description={t("org.orgHome.noOrgYet.description")}
                 action={
                   <Button onClick={() => setOrgCreateOpen(true)}>
-                    Create organization
+                    {t("org.createDialog.title")}
                   </Button>
                 }
               />
@@ -696,7 +725,7 @@ export function OrgHome() {
 
   if (portfolioScopeKey != null && resolvedPortfolioScopeKey !== portfolioScopeKey) {
     return (
-      <LoadingOverlay label="Loading dashboard" data-testid="org-home-loading">
+      <LoadingOverlay label={t("org.orgHome.loadingDashboard")} data-testid="org-home-loading">
         <OrgHomeLoadingTemplate />
       </LoadingOverlay>
     )
@@ -778,8 +807,8 @@ export function OrgHome() {
               {pendingInvites.length > 0 && (
                 <Section
                   data-testid="pending-invitations"
-                  title="Pending invitations"
-                  description="Invites sent to your email that you have not accepted yet."
+                  title={t("org.orgHome.pendingInvitations.heading")}
+                  description={t("org.orgHome.pendingInvitations.description")}
                   headerClassName={ADMIN_TABLE_SECTION_HEADER}
                   contentClassName={ADMIN_TABLE_SECTION_CONTENT}
                 >
@@ -791,7 +820,8 @@ export function OrgHome() {
                             {inv.projects.map((p) => p.projectName).join(", ")}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            Invited by {inv.createdBy} as <RoleLabel name={inv.role.name} />
+                            {t("org.orgHome.pendingInvitations.invitedByAs", { username: inv.createdBy })}{" "}
+                            <RoleLabel name={inv.role.name} />
                             {inv.expiresAt ? ` · expires ${new Date(inv.expiresAt).toLocaleDateString()}` : ""}
                           </p>
                         </div>
@@ -799,7 +829,7 @@ export function OrgHome() {
                           to={`/join/${inv.token}`}
                           className={cn(buttonVariants(), "shrink-0")}
                         >
-                          Review &amp; accept
+                          {t("org.orgHome.pendingInvitations.reviewAccept")}
                         </Link>
                       </div>
                     ))}
@@ -808,13 +838,13 @@ export function OrgHome() {
               )}
 
               <div className={STAT_TILE_GRID}>
-                <StatTile label="Organizations" value={orgs.length} />
-                <StatTile label="Projects" value={projects.length} />
-                <StatTile label="Avg translated" value={`${Math.round(avgTranslatedPct * 100)}%`} />
-                <StatTile label="Avg validated" value={`${Math.round(avgValidatedPct * 100)}%`} />
-                <StatTile label="Stalled" value={stalledCount} />
+                <StatTile label={t("org.orgHome.organizations")} value={orgs.length} />
+                <StatTile label={t("nav.projects")} value={projects.length} />
+                <StatTile label={t("org.orgHome.avgTranslated")} value={`${Math.round(avgTranslatedPct * 100)}%`} />
+                <StatTile label={t("org.orgHome.avgValidated")} value={`${Math.round(avgValidatedPct * 100)}%`} />
+                <StatTile label={t("org.orgHome.stalled")} value={stalledCount} />
                 <StatTile
-                  label="Overdue"
+                  label={t("org.orgHome.overdue")}
                   value={
                     <span className={overdueCount > 0 ? "text-destructive" : undefined}>
                       {overdueCount}
@@ -827,8 +857,8 @@ export function OrgHome() {
               <div className="flex flex-col gap-6">
                 <Section
                   data-testid="projects-panel"
-                  title="Projects"
-                  description="Projects across every organization you belong to."
+                  title={t("nav.projects")}
+                  description={t("org.orgHome.projectsPanel.sectionDescription")}
                   headerClassName={cn(ADMIN_TABLE_SECTION_HEADER, "shrink-0")}
                   contentClassName={cn(
                     ADMIN_TABLE_SECTION_CONTENT,
@@ -849,11 +879,11 @@ export function OrgHome() {
                       variant="inline"
                       className="py-6"
                       icon={AlertTriangle}
-                      title="Couldn’t load your project directory"
-                      description="Projects shared with you and guest organizations may be missing from this view."
+                      title={t("org.orgHome.projectDirectoryError.title")}
+                      description={t("org.orgHome.projectDirectoryError.description")}
                       action={
                         <Button size="sm" onClick={() => { void refreshAccessibleProjects() }}>
-                          Retry
+                          {t("common.retry")}
                         </Button>
                       }
                     />
@@ -866,7 +896,7 @@ export function OrgHome() {
                       variant="inline"
                       className="py-6"
                       icon={FolderPlus}
-                      title="No projects yet"
+                      title={t("org.orgHome.projectsPanel.emptyTitle")}
                     />
                     )
                   ) : (
@@ -905,8 +935,8 @@ export function OrgHome() {
 
                 <Section
                   data-testid="organizations-panel"
-                  title="Organizations"
-                  description="Workspaces you belong to across Aquilla."
+                  title={t("org.orgHome.organizations")}
+                  description={t("org.orgHome.organizationsPanel.sectionDescription")}
                   headerClassName={cn(ADMIN_TABLE_SECTION_HEADER, "shrink-0")}
                   contentClassName={cn(
                     ADMIN_TABLE_SECTION_CONTENT,
@@ -923,11 +953,11 @@ export function OrgHome() {
                         variant="inline"
                         className="py-6"
                         icon={Building2}
-                        title="No organizations yet"
+                        title={t("org.orgHome.organizationsPanel.emptyTitle")}
                       />
                     ) : (
                       <DataTable
-                        columns={ORG_SUMMARY_COLUMNS}
+                        columns={orgSummaryColumns}
                         data={orgSummaries}
                         getRowId={(s) => String(s.org.id)}
                         onRowClick={(s) => openOrg(s.org.id)}
@@ -951,7 +981,7 @@ export function OrgHome() {
                             variant="inline"
                             className="py-6"
                             icon={Search}
-                            title="No matching organizations"
+                            title={t("org.orgHome.organizationsPanel.searchEmptyTitle")}
                           />
                         }
                       />

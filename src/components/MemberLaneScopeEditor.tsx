@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 import { fetchMemberScopes, putMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 export interface MemberLaneScopeEditorProps {
   jwt: string
@@ -46,6 +47,7 @@ export function MemberLaneScopeEditor({
   trigger,
   onSaved,
 }: MemberLaneScopeEditorProps) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState<MemberScope[]>([])
   const [loading, setLoading] = useState(false)
@@ -113,7 +115,7 @@ export function MemberLaneScopeEditor({
         className="w-64 space-y-2 p-2 text-xs"
         side="right"
       >
-        <p className="font-medium">{username}'s scopes</p>
+        <p className="font-medium">{t("org.memberLaneScopeEditor.scopesHeading", { username })}</p>
         {loading ? (
           <div className="flex items-center text-muted-foreground">
             <Spinner className="size-3" />
@@ -122,7 +124,9 @@ export function MemberLaneScopeEditor({
           <>
             <div className="flex flex-wrap gap-1">
               {draft.length === 0 && (
-                <span className="text-[11px] text-muted-foreground">Unscoped — full access</span>
+                <span className="text-[11px] text-muted-foreground">
+                  {t("org.memberLaneScopeEditor.unscopedFullAccess")}
+                </span>
               )}
               {draft.map((s) => (
                 <span
@@ -144,8 +148,8 @@ export function MemberLaneScopeEditor({
               <Input
                 value={newLane}
                 onChange={(e) => setNewLane(e.target.value)}
-                placeholder="Lane code (e.g. es)"
-                aria-label="New lane code"
+                placeholder={t("org.memberLaneScopeEditor.laneCodePlaceholder")}
+                aria-label={t("org.memberLaneScopeEditor.newLaneCodeAriaLabel")}
                 className="h-7 text-[11px]"
               />
               <Button
@@ -154,12 +158,12 @@ export function MemberLaneScopeEditor({
                 onClick={addLane}
                 disabled={!newLane.trim()}
               >
-                Add
+                {t("common.add")}
               </Button>
             </div>
             <Button className="w-full" onClick={handleSave} disabled={saving}>
               {saving && <Spinner className="me-1.5 size-3.5" />}
-              Save scopes
+              {t("org.memberLaneScopeEditor.saveScopesButton")}
             </Button>
             {error && <p className="text-destructive">{error}</p>}
           </>

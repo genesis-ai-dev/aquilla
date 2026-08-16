@@ -32,6 +32,7 @@ import { OrgLaneAssignModal } from "./OrgLaneAssignModal"
 import { displayLanes } from "./project-lanes"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { cn } from "@/lib/utils"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 export type OrgProjectRow = PortfolioProject & {
   orgId?: number
@@ -116,6 +117,7 @@ export function OrgProjectsDataTable({
   /** Extra controls at the end of the toolbar row (e.g. New Project). */
   toolbarTrailing?: ReactNode
 }) {
+  const { t } = useI18n()
   const navigate = useNavigate()
   const [tableNow] = useState(() => now)
   // AQU-538 §3.2: which project rows are expanded into their per-lane detail.
@@ -143,7 +145,7 @@ export function OrgProjectsDataTable({
         {
           id: "name",
           accessorFn: (p) => p.name.toLowerCase(),
-          header: ({ column }) => <DataTableColumnHeader column={column} title="Project" />,
+          header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.project")} />,
           meta: { className: embedded ? "min-w-[12rem]" : "min-w-0" },
           cell: ({ row }) => {
             const p = row.original
@@ -164,7 +166,7 @@ export function OrgProjectsDataTable({
           id: "org",
           accessorFn: (p) => missingLast((p.orgName ?? "").toLowerCase()),
           sortUndefined: SORT_MISSING_LAST,
-          header: ({ column }) => <DataTableColumnHeader column={column} title="Org" />,
+          header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.org")} />,
           meta: { className: embedded ? "min-w-[7.5rem] whitespace-nowrap" : "min-w-0 w-[9rem]" },
           cell: ({ row }) =>
             row.original.orgName ? (
@@ -190,7 +192,7 @@ export function OrgProjectsDataTable({
         {
           id: "languages",
           enableSorting: false,
-          header: ({ column }) => <DataTableColumnHeader column={column} title="Language" />,
+          header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.table.languageHeader")} />,
           meta: { className: embedded ? "min-w-[9rem] whitespace-nowrap" : "min-w-0" },
           cell: ({ row }) => {
             const p = row.original
@@ -214,7 +216,7 @@ export function OrgProjectsDataTable({
           header: ({ column }) => (
             <DataTableColumnHeader
               column={column}
-              title="Translated"
+              title={t("org.orgHome.table.translatedHeaderLabel")}
               className="justify-end"
               data-testid="project-table-translated-header"
             />
@@ -239,7 +241,7 @@ export function OrgProjectsDataTable({
           header: ({ column }) => (
             <DataTableColumnHeader
               column={column}
-              title="Validated"
+              title={t("org.orgHome.table.validatedHeaderLabel")}
               className="justify-end"
               data-testid="project-table-validated-header"
             />
@@ -264,7 +266,7 @@ export function OrgProjectsDataTable({
           header: ({ column }) => (
             <DataTableColumnHeader
               column={column}
-              title="Audio"
+              title={t("nav.lens.audio")}
               className="justify-end"
               data-testid="project-table-audio-header"
             />
@@ -291,7 +293,7 @@ export function OrgProjectsDataTable({
             id: "role",
             accessorFn: (p) => roleByProjectId?.get(p.id)?.name ?? "",
             enableSorting: false,
-            header: ({ column }) => <DataTableColumnHeader column={column} title="Role" />,
+            header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.roleLabel")} />,
             meta: { className: "w-[7.5rem] whitespace-nowrap" },
             cell: ({ row }) => {
               const name = roleByProjectId?.get(row.original.id)?.name
@@ -316,7 +318,7 @@ export function OrgProjectsDataTable({
             cell: ({ row }) => {
               const username = row.original.pm?.username
               if (!username) {
-                return <span className="text-sm text-muted-foreground">Unassigned</span>
+                return <span className="text-sm text-muted-foreground">{t("org.projectOverview.unassigned")}</span>
               }
               return (
                 <UsernameWithAvatar
@@ -333,7 +335,7 @@ export function OrgProjectsDataTable({
       cols.push({
         id: "status",
         accessorFn: (p) => attentionRank(p, tableNow),
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgHome.projectsPanel.statusLabel")} />,
         meta: { className: embedded ? "w-[6.75rem] whitespace-nowrap" : "w-[9.5rem] whitespace-nowrap" },
         cell: ({ row }) => {
           const p = row.original
@@ -353,12 +355,12 @@ export function OrgProjectsDataTable({
         id: "edited",
         accessorFn: (p) => missingLast(p.lastEditAt ?? undefined),
         sortUndefined: SORT_MISSING_LAST,
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Updated" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("org.orgProjectsDataTable.updatedColumn")} />,
         meta: { className: "w-[7.5rem] whitespace-nowrap", ...(embedded ? { hidden: true } : {}) },
         cell: ({ row }) => (
           <DateTooltip
             value={row.original.lastEditAt}
-            label="Updated"
+            label={t("org.orgProjectsDataTable.updatedColumn")}
             className="text-sm text-muted-foreground"
           />
         ),
@@ -368,7 +370,7 @@ export function OrgProjectsDataTable({
         cols.push({
           id: "actions",
           enableSorting: false,
-          header: () => <span className="sr-only">Project actions</span>,
+          header: () => <span className="sr-only">{t("org.orgProjectsDataTable.actionsColumnSrOnly")}</span>,
           meta: { align: "right" as const, className: "w-10" },
           cell: ({ row }) => {
             const p = row.original
@@ -392,6 +394,7 @@ export function OrgProjectsDataTable({
       toggleExpand,
       defaultLaneLabelByProjectId,
       embedded,
+      t,
     ],
   )
 
@@ -456,12 +459,12 @@ export function OrgProjectsDataTable({
                       onClick={() => setAssignTarget({ projectId: p.id, lane: "" })}
                     >
                       <UserPlus className="size-4" />
-                      Assign work
+                      {t("dialog.assign.title")}
                     </MenuItem>
                   )}
                   <MenuItem onClick={() => navigate(`/project/${p.id}/settings/members`)}>
                     <Users className="size-4" />
-                    Add member
+                    {t("org.teamDetail.addMemberButton")}
                   </MenuItem>
                 </>
               )
@@ -472,10 +475,10 @@ export function OrgProjectsDataTable({
             return (
               <div className="flex flex-col items-center gap-3 py-10">
                 <p className="text-center text-sm text-muted-foreground">
-                  No projects match your search.
+                  {t("org.orgProjectsDataTable.noSearchMatch")}
                 </p>
                 <Button variant="outline" onClick={() => table.setGlobalFilter("")}>
-                  Clear
+                  {t("common.clear")}
                 </Button>
               </div>
             )

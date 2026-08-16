@@ -22,6 +22,7 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import { Page, PageHeader, EmptyState } from "@/components/ui/page"
 import { cn } from "@/lib/utils"
 import { readProjectLens } from "./OrgHome"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 function ProjectsLoadingTemplate() {
   return (
@@ -57,6 +58,7 @@ function ProjectsLoadingTemplate() {
  * and the dense portfolio table. Org-level stats and rollups live on Overview.
  */
 export function OrgProjectsPage() {
+  const { t } = useI18n()
   const {
     activeOrg,
     activeOrgId,
@@ -85,12 +87,12 @@ export function OrgProjectsPage() {
         statusBar={null}
         main={
           <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-            <p className="text-lg font-medium">Sign in to see your projects</p>
+            <p className="text-lg font-medium">{t("org.projectsList.signedOutTitle")}</p>
             <Link
               to={`/login?next=${encodeURIComponent("/")}`}
               className={cn(buttonVariants())}
             >
-              Sign in
+              {t("auth.login.submitDefault")}
             </Link>
           </div>
         }
@@ -102,7 +104,7 @@ export function OrgProjectsPage() {
 
   if (isPageLoading) {
     return (
-      <LoadingOverlay label="Loading projects" data-testid="org-projects-loading">
+      <LoadingOverlay label={t("org.projectsList.loadingLabel")} data-testid="org-projects-loading">
         <ProjectsLoadingTemplate />
       </LoadingOverlay>
     )
@@ -120,8 +122,8 @@ export function OrgProjectsPage() {
           {/* Title matches Teams/Members max width; table uses the full content well. */}
           <div className="max-w-6xl">
             <PageHeader
-              title="Projects"
-              description="Open a project to edit, or start a new translation workspace."
+              title={t("nav.projects")}
+              description={t("org.orgProjectsPage.pageDescription")}
               inset={false}
             />
           </div>
@@ -131,8 +133,8 @@ export function OrgProjectsPage() {
             <div className="max-w-6xl">
               <EmptyState
                 icon={FolderPlus}
-                title="Your organization is ready"
-                description="Start a translation project, or bring your team in first — Aquilla is built for people working together."
+                title={t("org.orgHome.readyTitle")}
+                description={t("org.orgHome.readyDescription")}
                 action={
                   <div className="flex flex-wrap items-center justify-center gap-2">
                     {activeOrgId != null && (
@@ -146,7 +148,7 @@ export function OrgProjectsPage() {
                       variant="outline"
                       onClick={() => activeOrgId != null && navigate(membersPath(activeOrgId))}
                     >
-                      Invite your team
+                      {t("org.orgHome.inviteYourTeam")}
                     </Button>
                   </div>
                 }

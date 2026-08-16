@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
 import type { StatusFilter } from "@/hooks/useOrgPortfolio"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -25,6 +26,7 @@ export function ProjectStatusFilter({
   onValueChange: (value: StatusFilter) => void
   className?: string
 }) {
+  const { t } = useI18n()
   return (
     <Select
       items={STATUS_FILTERS}
@@ -32,7 +34,7 @@ export function ProjectStatusFilter({
       onValueChange={(next) => onValueChange((next as StatusFilter) ?? "all")}
     >
       <SelectTrigger
-        aria-label="Project status filter"
+        aria-label={t("org.orgHome.projectsPanel.statusFilterAria")}
         className={cn("bg-background", className)}
       >
         <SelectValue className="flex-none" />

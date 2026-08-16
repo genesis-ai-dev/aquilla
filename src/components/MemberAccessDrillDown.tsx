@@ -28,6 +28,7 @@ interface Props {
 }
 
 export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Props) {
+  const t = useT()
   const state = useMemberAccess(orgId, userId)
 
   return (
@@ -36,14 +37,16 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
       <div className="flex items-center justify-between px-4 py-3 border-b">
         <div>
           <UsernameWithAvatar username={username} nameClassName="text-sm font-semibold" />
-          <p className="mt-0.5 text-xs text-muted-foreground">Project access breakdown</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {t("org.memberAccessDrillDown.heading")}
+          </p>
         </div>
         <Button
           type="button"
           variant="ghost"
           size="icon-sm"
           onClick={onClose}
-          aria-label="Close"
+          aria-label={t("common.close")}
           className="text-muted-foreground"
         >
           <X />
@@ -55,7 +58,7 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
         {state.kind === "loading" && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Spinner />
-            Loading access…
+            {t("org.memberAccessDrillDown.loadingAccess")}
           </div>
         )}
 
@@ -68,7 +71,9 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
             {/* Org-level baseline */}
             {state.data.orgRole != null && (
               <div className="rounded-md border bg-muted/30 px-3 py-2">
-                <p className="text-xs text-muted-foreground">Org-level baseline</p>
+                <p className="text-xs text-muted-foreground">
+                  {t("org.memberAccessDrillDown.orgLevelBaseline")}
+                </p>
                 <p className="text-sm font-medium">
                   <RoleLevelLabel level={state.data.orgRole} />
                 </p>
@@ -86,8 +91,9 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
             ) : (
               <div className="space-y-2">
                 <p className="text-xs text-muted-foreground">
-                  {state.data.projects.length} project
-                  {state.data.projects.length !== 1 ? "s" : ""} accessible
+                  {t("org.memberAccessDrillDown.projectsAccessibleCount", {
+                    count: state.data.projects.length,
+                  })}
                 </p>
                 {state.data.projects.map((p) => (
                   <ProjectRow key={p.projectId} breakdown={p} />

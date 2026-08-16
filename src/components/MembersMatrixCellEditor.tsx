@@ -94,6 +94,7 @@ export function MembersMatrixCellEditor({
   secondarySources = [],
   footer,
 }: CellEditorProps) {
+  const t = useT()
   const { session } = useFrontierSession()
   const [open, setOpen] = useState(false)
   const [status, setStatus] = useState<Status>("idle")
@@ -209,14 +210,16 @@ export function MembersMatrixCellEditor({
                     render={
                       <span
                         className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded cursor-default text-muted-foreground hover:text-foreground"
-                        aria-label="Also has access via other paths"
+                        aria-label={t("org.membersMatrixCellEditor.alsoHasAccessAriaLabel")}
                       />
                     }
                   >
                     <GitMerge className="h-2.5 w-2.5" />
                   </TooltipTrigger>
                   <TooltipContent side="top" className="max-w-[200px]">
-                    <p className="font-medium mb-1 text-[10px]">Also has access via:</p>
+                    <p className="font-medium mb-1 text-[10px]">
+                      {t("org.membersMatrixCellEditor.alsoHasAccessVia")}
+                    </p>
                     <ul className="space-y-0.5">
                       {secondarySources.map((s) => (
                         <li key={s.source} className="text-[10px] capitalize">
@@ -284,7 +287,9 @@ function RolePickerBody({
               <span className="text-xs font-medium capitalize">
                 <RoleLabel name={opt.name} />
                 {isCurrent && (
-                  <span className="ms-1.5 text-[9px] text-muted-foreground">current</span>
+                  <span className="ms-1.5 text-[9px] text-muted-foreground">
+                    {t("org.membersMatrixCellEditor.currentBadge")}
+                  </span>
                 )}
               </span>
               <span className="text-[10px] text-muted-foreground">{t(opt.descriptionKey)}</span>
@@ -295,7 +300,7 @@ function RolePickerBody({
       {status === "submitting" && (
         <div className="flex items-center gap-1 px-1 pt-1 text-[10px] text-muted-foreground">
           <Spinner className="size-3" />
-          Saving…
+          {t("common.saving")}
         </div>
       )}
       {status === "error" && errorMsg && (
@@ -321,6 +326,7 @@ function EditableBody({
   status: Status
   errorMsg: string | null
 }) {
+  const t = useT()
   return (
     <div className="space-y-1.5">
       <RolePickerBody
@@ -339,7 +345,7 @@ function EditableBody({
           className="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10"
         >
           <Trash2 className="me-1.5 h-3.5 w-3.5" />
-          Remove from project
+          {t("org.membersMatrixCellEditor.removeFromProject")}
         </Button>
       </div>
     </div>
@@ -364,14 +370,13 @@ function ImmutableBody({
   status: Status
   errorMsg: string | null
 }) {
+  const t = useT()
   if (source === "creator") {
     return (
       <div className="space-y-1 text-xs">
-        <p className="font-medium">Creator grant</p>
+        <p className="font-medium">{t("org.membersMatrixCellEditor.creatorGrantHeading")}</p>
         <p className="text-muted-foreground">
-          This person created the project. Their Owner role is permanent until
-          project ownership is transferred. The effective role here is Owner
-          (max-wins). Manage in the project's Settings → Share.
+          {t("org.membersMatrixCellEditor.creatorGrantDescription")}
         </p>
       </div>
     )
@@ -379,11 +384,9 @@ function ImmutableBody({
   if (source === "group") {
     return (
       <div className="space-y-1 text-xs">
-        <p className="font-medium">Effective role: via group (max-wins)</p>
+        <p className="font-medium">{t("org.membersMatrixCellEditor.viaGroupHeading")}</p>
         <p className="text-muted-foreground">
-          This role comes from a group attached to this project. Edit the
-          group's membership to change or remove this grant. To override for
-          this project only, add a direct grant below.
+          {t("org.membersMatrixCellEditor.viaGroupDescription")}
         </p>
       </div>
     )
@@ -392,17 +395,14 @@ function ImmutableBody({
   return (
     <div className="space-y-2">
       <div className="text-xs">
-        <p className="font-medium">Effective role: org-wide (max-wins)</p>
+        <p className="font-medium">{t("org.membersMatrixCellEditor.orgWideHeading")}</p>
         <p className="text-muted-foreground">
-          This role is granted org-wide and applies to every project. A direct
-          project grant added here will supersede the org-wide grant for this
-          project only (max-wins still applies — only a higher direct role
-          changes the effective role).
+          {t("org.membersMatrixCellEditor.orgWideDescription")}
         </p>
       </div>
       <div className="border-t pt-1">
         <p className="px-1 pb-1 text-[10px] font-medium text-muted-foreground">
-          Set a project-level exception (direct grant)…
+          {t("org.membersMatrixCellEditor.setExceptionLabel")}
         </p>
         <div className="space-y-0.5">
           {PROJECT_ROLE_OPTIONS.filter((o) => o.level <= ROLE.MAINTAINER).map((opt) => (
@@ -421,7 +421,7 @@ function ImmutableBody({
       </div>
       {status === "submitting" && (
         <div className="flex items-center gap-1 px-1 text-[10px] text-muted-foreground">
-          <Spinner className="size-3" /> Saving…
+          <Spinner className="size-3" /> {t("common.saving")}
         </div>
       )}
       {status === "error" && errorMsg && (

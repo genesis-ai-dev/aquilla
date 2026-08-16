@@ -8,6 +8,7 @@ import { removeProjectMember } from "@/lib/frontier/members";
 import { useFrontierSession } from "@/hooks/useFrontierSession";
 import type { OrgMemberProject } from "@/lib/frontier/orgs";
 import { RoleLabel } from "@/components/RoleLabel";
+import { useI18n } from "@/lib/i18n/I18nProvider";
 
 interface RemoveOrgMemberDialogProps {
   orgId: number;
@@ -27,6 +28,7 @@ export function RemoveOrgMemberDialog({
   onClose,
   onConfirmed,
 }: RemoveOrgMemberDialogProps) {
+  const { t } = useI18n();
   const { session } = useFrontierSession();
   const [projects, setProjects] = useState<OrgMemberProject[] | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
@@ -90,16 +92,17 @@ export function RemoveOrgMemberDialog({
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Remove {username} from {orgName}?</DialogTitle>
+          <DialogTitle>{t("org.removeOrgMemberDialog.title", { username, orgName })}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3 text-sm">
-          <p>
-            {username} will lose org-wide access. They will still keep access to any
-            projects they were added to individually unless you also remove them below.
-          </p>
-          {loading && <p className="text-muted-foreground">Loading projects…</p>}
+          <p>{t("org.removeOrgMemberDialog.warningBody", { username })}</p>
+          {loading && (
+            <p className="text-muted-foreground">{t("org.removeOrgMemberDialog.loadingProjects")}</p>
+          )}
           {!loading && projects && projects.length === 0 && (
-            <p className="text-muted-foreground">No direct project memberships in this org.</p>
+            <p className="text-muted-foreground">
+              {t("org.removeOrgMemberDialog.noDirectMemberships")}
+            </p>
           )}
           {!loading && projects && projects.length > 0 && (
             <ul className="space-y-1 rounded border p-2">
@@ -122,7 +125,7 @@ export function RemoveOrgMemberDialog({
           {error && <p className="text-xs text-destructive">{error}</p>}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
+          <Button variant="outline" onClick={onClose} disabled={submitting}>{t("common.cancel")}</Button>
           <Button variant="destructive" onClick={handleConfirm} disabled={submitting}>
             {buttonLabel}
           </Button>

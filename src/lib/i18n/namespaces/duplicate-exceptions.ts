@@ -541,6 +541,73 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "run wrote into. One describes an input's language, the other identifies a " +
     "destination track; languages that mark that difference with case or an " +
     "adposition cannot share a single rendering.",
+  "org.accessModelLegend.creator.label":
+    "Title-Case, standalone table-cell value in AccessModelLegend's grant-path " +
+    "table, sibling of 'Direct'/'Via group'/'Org-wide' in the same column — a " +
+    "grant-path NAME. org.memberAccessPanel.creatorGrantLabel is lower-case " +
+    "'creator', one item comma-joined inline into a badge fragment alongside " +
+    "'direct:'/'org:'/'team {name}:'. A standalone Title-Case table value and a " +
+    "lower-case inline fragment take different forms in languages that case- or " +
+    "register-mark that distinction, mirroring this catalog's other such splits " +
+    "(e.g. org.membersPage.orgPage.expired vs onboarding.apiTokens.expiredBadge).",
+  "org.membersMatrixView.memberColumnHeader":
+    "Table column heading over the whole 'who' column of the members × projects " +
+    "matrix (sibling of the project-name column headings beside it) — the NAME " +
+    "OF A CATEGORY of table content. org.teamsList.memberBadge is a small pill " +
+    "on a team card meaning 'the current viewer's own role in this team is " +
+    "Member' — a role/STATUS VALUE, not a column name. A table heading and a " +
+    "status badge take different grammatical forms in languages that mark that " +
+    "distinction, mirroring this catalog's other heading-vs-badge splits.",
+  "org.membersPanel.sourceViaGroup":
+    "Lower-case inline badge fragment next to a username in MembersPanel's " +
+    "roster row ('via group'), sibling register to org.membersPage." +
+    "sourceViaOrg/sourceViaTeam on this same row. org.accessModelLegend." +
+    "viaGroup.label is a Title-Case, standalone table-cell value in " +
+    "AccessModelLegend's grant-path table, sibling of 'Direct'/'Org-wide' — " +
+    "the same heading-vs-inline-fragment split already recorded for " +
+    "org.accessModelLegend.creator.label just above.",
+  "org.multiProjectInviteDialog.projectsFieldLabel":
+    "Form-field label above a checklist of projects to invite someone to, in " +
+    "the multi-project invite dialog — labels an in-dialog form control. " +
+    "nav.projects is the primary left-sidebar navigation entry that opens the " +
+    "whole projects list as a destination. A dialog field label and a nav " +
+    "destination name read as different grammatical roles in languages that " +
+    "distinguish an editable-form label from a place you navigate to, mirroring " +
+    "this catalog's other field-label-vs-nav-entry splits (e.g. " +
+    "projectSettings.section.terminology vs nav.sidebarSection.terminology).",
+  "org.archivedProjects.deletedColumnLabel":
+    "Title-Case table column heading (sibling of 'Project'/'Archived' in the " +
+    "same admin table) AND the DateTooltip accessible label naming that " +
+    "column's date — a heading naming a category. comments.file.deletedBadge " +
+    "is lower-case 'deleted', a small inline status badge on a file reference " +
+    "inside a comment thread. A table-column heading and a lower-case inline " +
+    "status badge take different forms in languages that case- or register-" +
+    "mark that distinction, mirroring this catalog's other such splits (e.g. " +
+    "org.accessModelLegend.creator.label vs org.memberAccessPanel.creatorGrantLabel).",
+  "org.overview.needsAttentionHeading":
+    "Section HEADING on the org Overview page, titling a list of at-risk " +
+    "projects (sibling of 'Pending invitations', reads as a page-region " +
+    "name). autopilot.status.needsAttention is one value of a fixed-" +
+    "vocabulary STATUS enum badging a single Autopilot readiness checklist " +
+    "item (alongside 'Ready'/'Missing'/'Partly set up'). A section heading " +
+    "and a per-item status badge are different grammatical roles that " +
+    "happen to share one English phrase, mirroring this catalog's other " +
+    "heading-vs-status-word splits.",
+  "org.joinOrgPage.roleLine":
+    "Second line of the org-invite preview card on JoinOrgPage, always written to " +
+    "open a clause mid-register ('you'll join as …') even when it starts the " +
+    "paragraph, because the same lowercase clause continues an 'Invited by X — ' " +
+    "opener elsewhere on this same card. auth.join.roleLineSingle is a capitalized, " +
+    "standalone sentence opener on the unrelated project-JoinPage summary card " +
+    "('You'll join as …'). Not a bare case split: the org-invite card's own " +
+    "inviter variant (auth.join.roleLineSingleInviter, reused directly here) is " +
+    "byte-identical in both places precisely because register, not case alone, is " +
+    "what's being preserved — collapsing this one onto auth.join.roleLineSingle " +
+    "would put a capital letter mid-sentence the one time no inviter is known.",
+  "org.joinOrgPage.roleLineEmail":
+    "Email-bound sibling of org.joinOrgPage.roleLine, same lowercase mid-register " +
+    "clause, same reasoning: auth.join.roleLineSingleEmail is the capitalized " +
+    "standalone sentence opener on the unrelated project-JoinPage card.",
   "importExport.columnMapping.sourceColumnLabel":
     "Labels the SOURCE-TEXT column picker in the spreadsheet column-mapping " +
     "step during import — a form-field label naming which uploaded column " +

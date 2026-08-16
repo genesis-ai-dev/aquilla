@@ -86,8 +86,8 @@ Closing 1–3 is WS-SCAN's job; it is the "scan the entire app" half of the requ
 | WS-B | `projectSettings` | 243 | 9 | dispatched |
 | WS-F | `workspace` (new) | 246 | 48 | dispatched |
 | WS-D | `agent` (new) | 190 | 23 | dispatched |
-| WS-C | `settings` (new) | 137 | 14 | wave 2 |
-| WS-E | `rules` + `terminology` | 117 | 7 | wave 2 |
+| WS-C | `settings` (new) | 137 | 14 | dispatched |
+| WS-E | `rules` + `terminology` | 117 | 7 | dispatched |
 | WS-T-{th,my,mfa,ar} | *(none — emits JSON)* | full catalogue | — | wave 3 |
 
 ## §4 Merge log
@@ -97,3 +97,5 @@ Closing 1–3 is WS-SCAN's job; it is the "scan the entire app" half of the requ
 | --- | --- | --- |
 | fork | — | integration created at `38a9fcd0`; baseline 143 i18n tests green |
 | pre-wire | orchestrator | `settings`/`agent`/`workspace` namespaces registered + barrels wired; 143 tests still green |
+| tooling | orchestrator | `scripts/i18n-todo.ts` + `pnpm i18n:todo`. Emits per-locale packets of ONLY untranslated/stale leaves. Measured pre-wave: `th` 229, `my` 234, `mfa` 249, `ar` 303 (Arabic higher — six plural categories) = **1,015 leaves**. Round-trip verified: importing an unfilled packet leaves `messages/th.ts` byte-identical. |
+| wave 1 | orchestrator | all 7 workstreams dispatched concurrently (WS-C/WS-E are disjoint from WS-A/B/D/F in both files and namespaces, so serializing them into a second wave bought nothing) |

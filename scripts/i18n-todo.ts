@@ -80,14 +80,21 @@ function packetFor(locale: string): Packet {
 
   for (const leaf of catalogLeafKeys(locale)) {
     const { key, category } = parseLeafKey(leaf)
-    const value = catalog[key as MessageKey]
+    // `parseLeafKey` returns a plain `string` (it also parses leaves that are no
+    // longer in the catalog); narrow once here so the catalog and hash sidecar —
+    // both keyed by `MessageKey` — can be indexed without repeating the cast.
+    const messageKey = key as MessageKey
+    const value = catalog[messageKey]
     const hasValue =
       value !== undefined &&
       (!isPluralMessage(value) || (category ? value.forms[category] !== undefined : true))
 
     if (!hasValue) {
       untranslated.push(leaf)
-    } else if (hashes[key] !== undefined && hashes[key] !== sourceHash(key as MessageKey)) {
+    } else if (
+      hashes[messageKey] !== undefined &&
+      hashes[messageKey] !== sourceHash(messageKey)
+    ) {
       // Translated once, but against a different English source since changed.
       stale.push(leaf)
     } else {
@@ -96,7 +103,7 @@ function packetFor(locale: string): Packet {
     // Seeded with English: `parseTranslatedCatalog` treats a leaf still equal to
     // its English source as skipped, so an unfilled packet is a safe no-op.
     messages[leaf] = englishFor(leaf)
-    notes[leaf] = contextNote(key as MessageKey, locale, category)
+    notes[leaf] = contextNote(messageKey, locale, category)
   }
 
   return { locale, untranslated, stale, messages, notes }

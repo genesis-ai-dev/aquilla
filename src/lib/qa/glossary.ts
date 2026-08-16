@@ -5,6 +5,15 @@
 //   - forbidden renderings appearing in the target are flagged.
 // Operates on Aquilla's Concept model so both the in-app terminology and
 // imported termbases (qa/termbase.ts) share one checker.
+//
+// i18n-exempt (AQU-832 WS-H): both `GlossaryIssue.message` templates below
+// are English-only and untranslated, same reasoning as checks.ts's header —
+// this module's only consumer is `parity/acceptance/workflow-tm.test.ts`,
+// asserting against Matecat's own documented QA message wording. The
+// app's actually-wired terminology-violations UI
+// (TerminologyViolationsInbox.tsx) runs on a separate, already-i18n'd path:
+// `compileConceptsToRules` (src/lib/terminology/compile.ts, keyed under
+// `terminology.compile.*`) + `checkRules` (rule-engine.ts) — not this file.
 import type { Concept } from "@/lib/terminology/types"
 import type { QaIssue } from "./checks"
 

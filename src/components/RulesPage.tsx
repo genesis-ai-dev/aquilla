@@ -279,7 +279,7 @@ export function RulesPage() {
                           <span className="text-muted-foreground">{t("rules.surface.enabledLabel")}</span>
                         </label>
                         <AppTooltip content={manageRulesDeniedReason ?? undefined} disabled={canManageRules || !manageRulesDeniedReason}>
-                          <Button variant="ghost" aria-label={`Delete rule ${rule.name}`}
+                          <Button variant="ghost" aria-label={t("rules.page.deleteRuleAriaLabel", { name: rule.name })}
                             disabled={!canManageRules}
                             onClick={() => setPendingDeleteRuleId(rule.id)}>
                             <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />

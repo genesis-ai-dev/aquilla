@@ -163,6 +163,9 @@ export interface Mandate {
     wakesEscalated: number
     decisionsRaised: number
     decisionsDismissed: number
+    /** Kept apart on purpose — see the accounting rules below. */
+    decisionsSuperseded: number
+    decisionsExpired: number
   }
 }
 ```
@@ -184,6 +187,12 @@ export interface Mandate {
     judged make-work, so it is excluded from both the numerator and the denominator of the
     dismissal rate. It is worth reporting on its own — a rising expiry count means questions
     are being asked of people who are not there.
+  - **Superseded counts as neither, and is a separate signal.** The gap closed by other
+    means (§4.3), so it is excluded from the dismissal rate too — but it must never be
+    merged into the expiry count, because supersession is healthy and expiry is not.
+    Read on its own it carries real information: a high supersession rate means the
+    supervisor is asking *too early*, raising questions that ordinary work was about to
+    answer anyway. That is a cheaper failure than make-work, but it is still noise.
 - **The "Autopilot Routines" chips** (the Cursor quick-action pattern) are scoped mandates.
   Switching one on grants a specific standing authority; switching it off is the kill
   switch. This is how the feature gets flexed without a settings screen.
@@ -208,7 +217,7 @@ export interface Decision {
   reason: string
   /** Which readiness item this gap belongs to, when it maps to one. */
   readinessItem?: "terminology" | "brief" | "examples" | "rules" | "languages"
-  status: "open" | "researching" | "resolved" | "dismissed" | "expired"
+  status: "open" | "researching" | "resolved" | "dismissed" | "superseded" | "expired"
   /** Routing is an ASSIGNMENT, not a resolution — see below. A decision with an
    *  assignee is still `open`. Absent means "whoever gets to it first." */
   assignedTo?: { userId?: number; inviteId?: string }
@@ -233,6 +242,38 @@ it ages out through the `expired` path like any other unanswered decision.
 This is the honest model: routing does not make an interruption go away, it moves who is
 interrupted. Treating it as a resolution would let the escalation metrics report a queue of
 unanswered questions as handled work.
+
+**A third way a decision closes: it stops needing an answer.** Before raising new decisions,
+each wake re-checks every open decision against current readiness. If the gap that caused it
+has since been filled — by the agent, by the person who was asked, or by someone doing
+ordinary work elsewhere in the project — the decision is `superseded` and the run proceeds
+without anyone touching the card.
+
+**This is the least-friction resolution path and it should be the common one.** A user who
+validates eight translations in the editor has answered an examples decision without knowing
+one existed. Unblocking the agent by doing normal work, rather than by clearing a queue, is
+the direct answer to "if it suggests ten things and half need ignoring, the decision to
+ignore is still mental load."
+
+**Deterministic first, judgment only on the residue** (project [`CLAUDE.md`](../../../CLAUDE.md)
+Rule 5 — *if code can answer, code answers*):
+
+| Decision's `readinessItem` | Superseded when — a query, not a model call |
+|---|---|
+| `terminology` | The anchored concept gained a `preferred` or `admitted` rendering |
+| `examples` | Validated pairs crossed `MIN_EXAMPLES` (8) |
+| `brief` | The relevant brief field became non-empty |
+| `rules` / `languages` | The corresponding readiness item left `missing` |
+
+The residual case is genuinely judgment-shaped and is the **only** part that may spend a
+model call: a free-text ambiguity that someone resolved *in the work* — they edited the
+cells and moved on without ever seeing the card. Deciding whether those edits answered the
+question is not a query. Gate it behind `mandate.authority.research`, since it spends
+budget, and run it only on decisions the deterministic sweep did not close.
+
+`superseded` and `expired` must stay distinct. Supersession is the system working; expiry
+is the system stalling. Collapsing them lets the healthy case inflate the count that is
+supposed to warn you about the unhealthy one.
 
 **Routing is the invite trigger.** When a project runner hits a terminology decision they
 personally cannot settle, the card offers to route it to a language expert — and the
@@ -319,9 +360,13 @@ them is how a blocked run silently looks finished.
 predicate names statuses explicitly, a `waiting` run is not adopted, so it cannot be
 re-ticked in a loop while it waits. **Nothing may add `waiting` to that predicate.**
 
-**`waiting → running`** is the mandate's `{ kind: "on-approval"; of: "decision" }` trigger —
-no new mechanism. **`waiting → parked`** on timeout, so an unanswered decision releases the
-lease and leaves drafts reviewable rather than failing the run. Timeout length is open (§11).
+**`waiting → running`** happens two ways. The blocking decision is *answered* — the
+mandate's `{ kind: "on-approval"; of: "decision" }` trigger, no new mechanism. Or it is
+*superseded* (§4.3): the next wake's obsolescence sweep finds the gap already filled and the
+run proceeds with nobody having touched the card. The second path should be the common one.
+
+**`waiting → parked`** on expiry, so an unanswered decision releases the lease and leaves
+drafts reviewable rather than failing the run. Expiry duration is open (§11).
 
 ---
 
@@ -476,6 +521,11 @@ excludes worker packages.
   dismissal rate, and an expired decision must leave it unchanged in both terms. These
   encode *why* the metrics exist: a supervisor whose queue of unanswered questions reported
   as handled work would pass the <10% bar while failing the user completely.
+- **Supersession** — the highest-value test in this spec, because it is the path users will
+  actually take: validate the eighth translation and a `waiting` run must resume on the next
+  wake with the examples decision marked `superseded`, no card touched. Also assert
+  `superseded` and `expired` never merge into one count, since that merge would silently
+  destroy the signal expiry exists to give.
 - **Run status** — the `waiting` transitions from §4.5, and one regression test asserting
   `claimStrandedRuns` does **not** adopt a `waiting` run. That test encodes why the status
   exists: without it, a run blocked on a human gets re-adopted and re-ticked, burning budget
@@ -487,12 +537,12 @@ excludes worker packages.
 
 ## 11. Open questions
 
-1. **Who owns a mandate?** Project-scoped as written. An org-level default that projects
-   inherit is plausible but adds an inheritance model; deferred until a second project
-   needs it.
-2. **How long until an unanswered decision expires?** §4.5 decays `waiting → parked` so the
-   lease is released and drafts stay reviewable. The *duration* is still a product call;
-   how it is counted is settled (§4.2: neither answered nor dismissed).
+1. **How long until an unanswered decision expires?** With supersession (§4.3) carrying most
+   of the load, the clock is a backstop rather than the main mechanism, so the duration can
+   be generous. Still a product call. How it is counted is settled (§4.2).
+2. **Does the judgment-shaped supersession check earn its cost?** The deterministic sweep is
+   free; the model call on free-text ambiguities is not. Ship the deterministic half first
+   and measure how many decisions survive it before building the second half.
 
 **Resolved 2026-08-15:**
 
@@ -508,3 +558,8 @@ excludes worker packages.
   and anyone who joins can answer it.
 - *How is a timed-out decision counted?* → Neither answered nor dismissed (§4.2), reported
   on its own as an expiry count.
+- *Who owns a mandate?* → Project-scoped. An org-level default that projects inherit is
+  deferred until a second project needs it.
+- *Should decisions expire only on a clock?* → No. They are primarily **superseded** when
+  the underlying gap is filled by other means (§4.3), checked deterministically each wake.
+  The clock is a backstop, and `superseded` stays a distinct status from `expired`.

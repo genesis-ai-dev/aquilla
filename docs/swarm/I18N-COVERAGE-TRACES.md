@@ -108,6 +108,38 @@ See also the older `docs/swarm/I18N-TRACES.md` from the AQU-511/AQU-832 waves; i
   (was "New project", to reuse `projectSettings.create.trigger`; 7 assertions updated with it),
   and three "Back to dashboard" buttons were unified onto one casing.
 
+## Remaining `key-it` findings after wave 2 (48 total — audited one by one)
+
+`npx tsx scripts/i18n-scan.ts` reports 48. Most should stay as they are; only the first group
+is real work.
+
+- [OPEN] (milestones-labels) **Genuinely still unkeyed, ~5 strings.**
+  `src/lib/import/milestones.ts:222` `"Start"`, `:431` `"Untimed"`, `:453` `` `Part ${part}` ``,
+  `:180` `` `Story ${address.chapter}` ``, `:324` `` `Story ${ordinal}` ``. These are display
+  labels for the milestone navigator. NOT keyed here deliberately: a milestone label may be
+  matched or persisted rather than only displayed, and WS-K (which owned the file) made a call
+  whose reasoning is not recorded. Whoever picks this up must first confirm the label is
+  display-only before keying it — a keyed label that something compares against changes
+  behaviour, the same hazard `OrgBreadcrumb.tsx` already carries.
+- [OPEN] (qa-checks-messages) `src/lib/qa/checks.ts:85,88` — two check messages
+  ("unclosed paired tag in target (file-breaking)", "target missing source tag(s): …").
+  Same caveat: confirm they are rendered, not matched, before keying.
+- [DONE — correctly exempt, no action] 7 findings in
+  `src/components/onboarding/OnboardingWizard.tsx:26-33` (`"welcome"`, `"privacy"`, `"name"`,
+  `"intent"`, `"organization"`, `"project"`, `"ready"`). These are **step IDs**, not display
+  text. Translating them would break the wizard's step routing. The scanner cannot tell an id
+  from a label in a hoisted array.
+- [DONE — correctly exempt, no action] 10 findings in `src/lib/lqa/builtin-registry.ts`.
+  Already keyed via `rules.builtin.<id>.*`, resolved at render by
+  `translateRuleName`/`translateRuleDescription` in `src/lib/lqa/builtin-resolver.ts`. The
+  English in the registry is the source the keys were minted from; the scanner cannot see the
+  indirection. See `namespaces/rules.ts`'s header.
+- [DONE — correctly exempt, no action] ~15 product/model names: `"Whisper"` (×2), `"Groq"`,
+  `"Together AI"`, `"Mistral"`, `"DeepSeek"`, `"OmniVoice"`, `"Kokoro (local)"`,
+  `"MMS (multilingual)"`, and the four `src/branding/brands/*.data.ts` taglines (brand assets,
+  same policy as the marketing skip). The `(atomic-term-gap)` trace above proposes adding
+  `Whisper` to `ATOMIC_TERMS` so it stops being reported at all.
+
 ## Quality / polish
 
 <!-- [OPEN] (id) description — file:line -->

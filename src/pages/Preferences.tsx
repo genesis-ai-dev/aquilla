@@ -85,14 +85,15 @@ const PROFILE_KEYS: (keyof TranslatorProfile)[] = [
  * Self-contained so it can render on its own detail page.
  */
 function WorkspaceSection() {
+  const { t } = useI18n()
   const { position: railPosition, setPosition: setRailPosition } = useDockRailPosition()
   // AQU-591: the store tracks whether to SKIP the confirm; present it positively.
   const skipReplaceConfirm = useSkipReplaceConfirm()
   return (
-    <SettingsGroup label="Workspace">
+    <SettingsGroup label={t("onboarding.preferences.workspace.groupLabel")}>
       <SettingsRow
-        label="Editor sidebar tab layout"
-        description="Show Files, Chat, and Search as a vertical rail on the left or a horizontal bar across the top of the sidebar."
+        label={t("settings.preferences.workspace.sidebarLayoutLabel")}
+        description={t("onboarding.preferences.workspace.railDescription")}
         control={
           <Select
             items={RAIL_OPTIONS.map((opt) => ({ value: opt.id, label: opt.label }))}
@@ -103,7 +104,7 @@ function WorkspaceSection() {
           >
             <SelectTrigger
               id="sidebar-tab-layout"
-              aria-label="Editor sidebar tab layout"
+              aria-label={t("settings.preferences.workspace.sidebarLayoutLabel")}
               className="w-36 bg-background"
             >
               <SelectValue />
@@ -122,9 +123,11 @@ function WorkspaceSection() {
       />
       <SettingsRow
         label={
-          <label htmlFor="confirm-replace">Confirm before replacing a translation</label>
+          <label htmlFor="confirm-replace">
+            {t("onboarding.preferences.workspace.confirmReplaceLabel")}
+          </label>
         }
-        description="Ask for confirmation when AI Generate replaces a cell that already has a translation. Validated cells always confirm regardless of this setting."
+        description={t("onboarding.preferences.workspace.confirmReplaceDescription")}
         control={
           <Switch
             id="confirm-replace"
@@ -154,10 +157,10 @@ function GeneralSection({
   const languageItems = locales.map((l) => ({ value: l.code, label: l.nativeName }))
 
   return (
-    <SettingsGroup label="General">
+    <SettingsGroup label={t("common.general")}>
       <SettingsRow
-        label="Theme"
-        description="Follow your system appearance or choose a theme for this device."
+        label={t("onboarding.preferences.appearance.groupLabel")}
+        description={t("onboarding.preferences.appearance.themeDescription")}
         control={
           <Select
             items={THEME_OPTIONS.map((opt) => ({ value: opt.id, label: opt.label }))}
@@ -170,7 +173,7 @@ function GeneralSection({
           >
             <SelectTrigger
               id="theme-mode"
-              aria-label="Theme"
+              aria-label={t("onboarding.preferences.appearance.groupLabel")}
               className="w-36 bg-background"
             >
               <SelectValue />
@@ -188,8 +191,8 @@ function GeneralSection({
         }
       />
       <SettingsRow
-        label="UI language"
-        description="The language the app's own interface (menus, buttons, messages) is shown in."
+        label={t("language.switcher.settingsRow")}
+        description={t("onboarding.preferences.language.rowDescription")}
         control={
           <Select
             items={languageItems}
@@ -225,14 +228,13 @@ function GeneralSection({
         }
       />
       <SettingsRow
-        label="Share usage data"
+        label={t("onboarding.privacy.shareUsageData")}
         description={
           <>
-            Events like project creation, exports, and AI translations. Never the contents of your
-            translations or files.
+            {t("onboarding.preferences.privacy.rowDescription")}
             {!enabled ? (
               <span className="mt-1 block text-amber-600 dark:text-amber-400">
-                With analytics disabled, we may not be able to help diagnose problems you encounter.
+                {t("onboarding.privacy.disabledWarning")}
               </span>
             ) : null}
           </>
@@ -242,7 +244,7 @@ function GeneralSection({
             id="analytics-consent"
             checked={enabled}
             onCheckedChange={setEnabled}
-            aria-label="Share usage data"
+            aria-label={t("onboarding.privacy.shareUsageData")}
           />
         }
       />
@@ -250,7 +252,7 @@ function GeneralSection({
         to="/preferences/workspace"
         state={backgroundLocation ? { backgroundLocation, preferencesModalDepth: 2 } : undefined}
         icon={PanelLeft}
-        title="Workspace"
+        title={t("onboarding.preferences.workspace.groupLabel")}
         hint={workspaceHint}
       />
     </SettingsGroup>
@@ -263,6 +265,7 @@ function GeneralSection({
  * sanitizes for storage and notifies the chat/agent hooks.
  */
 function TranslatorProfileSection() {
+  const { t } = useI18n()
   const [form, setForm] = useState<TranslatorProfile>(() => getTranslatorProfile())
 
   function update(key: keyof TranslatorProfile, value: string) {
@@ -272,7 +275,7 @@ function TranslatorProfileSection() {
   }
 
   return (
-    <SettingsGroup label="About you">
+    <SettingsGroup label={t("onboarding.preferences.profileSection.groupLabel")}>
       {PROFILE_TEXT_FIELDS.map(({ key, label, placeholder }) => (
         <SettingsRow
           key={key}
@@ -289,15 +292,17 @@ function TranslatorProfileSection() {
         />
       ))}
       <SettingsRow
-        label={<label htmlFor="profile-otherInfo">Other relevant information</label>}
-        description="Anything else that should shape the summaries you get. All fields are optional and stored on this device."
+        label={
+          <label htmlFor="profile-otherInfo">{t("onboarding.preferences.profile.otherInfoLabel")}</label>
+        }
+        description={t("settings.preferences.profile.otherInfoDescription")}
         block
       >
         <Textarea
           id="profile-otherInfo"
           value={form.otherInfo ?? ""}
           onChange={(e) => update("otherInfo", e.target.value)}
-          placeholder="Anything else that should shape the summaries you get"
+          placeholder={t("onboarding.preferences.profile.otherInfoPlaceholder")}
           rows={3}
           className="bg-background"
         />
@@ -378,6 +383,7 @@ const PREFERENCE_GROUPS = ["AI & personalization", "Account"] as const
 
 /** The index: inline General card + grouped navigation rows for nested sections. */
 function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boolean; backgroundLocation?: Location }) {
+  const { t } = useI18n()
   const { position } = useDockRailPosition()
 
   const profile = getTranslatorProfile()
@@ -394,8 +400,8 @@ function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boole
   const content = (
     <Page>
       <PageHeader
-        title="Preferences"
-        description="Personal preferences that apply to you across all projects on this device."
+        title={t("nav.account.preferences")}
+        description={t("onboarding.preferences.pageDescription")}
       />
       <div className="flex flex-col gap-12">
         <GeneralSection workspaceHint={hints.workspace} backgroundLocation={backgroundLocation} />
@@ -430,6 +436,7 @@ function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boole
 
 /** A single section, rendered on its own page with a back breadcrumb. */
 function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: boolean }) {
+  const { t } = useI18n()
   const navigate = useNavigate()
   if (INLINE_PREFERENCE_SLUGS.has(slug)) return <Navigate to="/preferences" replace />
   const section = PREFERENCE_SECTIONS.find((s) => s.slug === slug)
@@ -440,7 +447,7 @@ function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: bool
     return (
       <Page>
         <div className="space-y-6">
-          <BackLink to="/preferences" onClick={() => navigate(-1)} label="Preferences" />
+          <BackLink to="/preferences" onClick={() => navigate(-1)} label={t("nav.account.preferences")} />
           <PageHeader title={section.title} description={section.description} />
           {section.render()}
         </div>
@@ -472,6 +479,7 @@ export function Preferences() {
 /** Route-modal presentation used by in-app entry points. Direct URLs continue
  * to render the full-page Preferences surface above. */
 export function PreferencesDialog() {
+  const { t } = useI18n()
   const { section } = useParams<{ section?: string }>()
   const location = useLocation()
   const navigate = useNavigate()
@@ -489,8 +497,8 @@ export function PreferencesDialog() {
         data-testid="preferences-dialog"
       >
         <DialogHeader className="sr-only">
-          <DialogTitle>Preferences</DialogTitle>
-          <DialogDescription>Personal preferences that apply across projects.</DialogDescription>
+          <DialogTitle>{t("nav.account.preferences")}</DialogTitle>
+          <DialogDescription>{t("onboarding.preferences.dialogDescription")}</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {section

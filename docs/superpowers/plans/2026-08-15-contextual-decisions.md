@@ -1293,11 +1293,15 @@ decisions.post(
         const { body, status } = errorJson("validation_failed", "answer is required", 400)
         return c.json(body, status)
       }
+      // requireRole returns only { ok, level } — it carries no user. The
+      // authenticated user comes from the middleware's context variable, the
+      // same way requireRole itself reads it (contextual.ts:130).
+      const user = c.get("user")
       result = await answerDecision(
         c.env.AQUILLA_PG,
         decisionId,
         parsed.data.answer,
-        gate.user.id,
+        user.id,
       )
     } else if (action === "dismiss") {
       result = await dismissDecision(c.env.AQUILLA_PG, decisionId)

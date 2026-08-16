@@ -35,7 +35,7 @@ export const workspace = defineNamespace({
     "workspace.focusLock.editingNotice":
       "{user} is now editing this cell — your editor is read-only. Copy any unsaved text before moving away.",
     "workspace.loadingComments": "Loading comments",
-    "workspace.loadingTerminology": "Loading terminology",
+    // "Loading terminology" → terminology.loadingLabel (same panel, same surface)
 
     // -- ProjectWorkspace: "Recently deleted" trash dialog --
     "workspace.trash.empty": "No recently deleted files.",
@@ -59,7 +59,9 @@ export const workspace = defineNamespace({
     // twin already sitting unused in projectSettings.create.* (everything else
     // in this dialog reuses that namespace directly at the call site — see
     // ProjectCreateDialog.tsx) --
-    "workspace.createDialog.titleFieldLabel": "Project title",
+    // "Project title" → projectSettings.info.titleLabel. Post-merge these are the
+    // same sentence-case label for the same underlying value; the create dialog
+    // already reuses projectSettings.create.* for the rest of its fields.
     "workspace.createDialog.targetChipsHint":
       "Type a language and press Enter to add it. The first is the primary target; extras become additional lanes.",
 
@@ -400,11 +402,6 @@ export const workspace = defineNamespace({
           "Loading-panel label shown while the full-page Comments surface inside " +
           "the workspace shell is being fetched.",
       },
-      "workspace.loadingTerminology": {
-        description:
-          "Loading-panel label shown while the full-page Terminology surface " +
-          "inside the workspace shell is being fetched.",
-      },
       "workspace.trash.empty": {
         description:
           "Empty-state text inside the 'Recently deleted' dialog (nav." +
@@ -475,16 +472,6 @@ export const workspace = defineNamespace({
           name: "The trashed project's display name, already quoted by the template.",
           deletedBy: "The username of whoever moved the project to Trash.",
         },
-      },
-      "workspace.createDialog.titleFieldLabel": {
-        description:
-          "Form-field label for the new project's display name, in the create-" +
-          "project dialog (ProjectCreateDialog.tsx — a distinct component from " +
-          "the onboarding project-creation step, which uses sentence-case " +
-          "'Project title' too but keys it separately). Sentence case, distinct " +
-          "from Project Settings' own Title-Case 'Project Name' field label for " +
-          "the same underlying value post-creation.",
-        screenshot: "confirm-dialog",
       },
       "workspace.createDialog.targetChipsHint": {
         description:

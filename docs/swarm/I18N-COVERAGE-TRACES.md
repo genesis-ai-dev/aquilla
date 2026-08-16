@@ -103,6 +103,10 @@ See also the older `docs/swarm/I18N-TRACES.md` from the AQU-511/AQU-832 waves; i
   "Downloading"→"downloading" (WS-B); "Create Translation Rule"/"Rule Name"/"Create Rule"→
   sentence case (WS-E); `ProposalReceipt` "done"→"Done" (WS-D). Each is defensible individually;
   collectively they are unreviewed copy drift and deserve a human read-through.
+  WS-F added more: `nedLabel.light` renders **"slight"** (collided with
+  `onboarding.preferences.theme.light`), the create-project trigger became **"New Project"**
+  (was "New project", to reuse `projectSettings.create.trigger`; 7 assertions updated with it),
+  and three "Back to dashboard" buttons were unified onto one casing.
 
 ## Quality / polish
 

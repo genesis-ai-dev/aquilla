@@ -1080,7 +1080,7 @@ export function TerminologyPage() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (loading) {
-    return <LoadingPanel label={t("terminology.page.loadingLabel")} className="min-h-screen" />
+    return <LoadingPanel label={t("terminology.loadingLabel")} className="min-h-screen" />
   }
 
   // Drill-down view: overlay the detail panel when a concept is selected.

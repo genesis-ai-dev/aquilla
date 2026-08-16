@@ -6006,7 +6006,7 @@ export function ProjectWorkspace() {
         ) : centerSurface === "terminology" ? (
           // FRO-254: Terminology page inside the shell.
           <div className="h-full overflow-y-auto">
-            <Suspense fallback={<LoadingPanel label={t("workspace.loadingTerminology")} />}>
+            <Suspense fallback={<LoadingPanel label={t("terminology.loadingLabel")} />}>
               <GlossaryEditorContent files={projectFiles} />
             </Suspense>
           </div>

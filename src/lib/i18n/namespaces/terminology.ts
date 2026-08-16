@@ -364,7 +364,7 @@ export const terminology = defineNamespace({
     "terminology.candidates.miningLabel": "Mining candidate terms…",
 
     // ── TerminologyPage.tsx: main page chrome ────────────────────────────────
-    "terminology.page.loadingLabel": "Loading terminology",
+    "terminology.loadingLabel": "Loading terminology",
     "terminology.page.addConceptButton": "Add concept",
     "terminology.page.mergeDuplicatesButton": "Merge duplicates",
     "terminology.page.reviewQueueHeading": "Review queue",
@@ -823,8 +823,12 @@ export const terminology = defineNamespace({
       "terminology.candidates.miningLabel": {
         description: "Transient status shown while the candidate-term mining pass is running off the main thread.",
       },
-      "terminology.page.loadingLabel": {
-        description: "Full-page loading label shown while the Terminology page's initial data is still loading.",
+      "terminology.loadingLabel": {
+        description:
+          "Loading-panel label shown while the Terminology surface's initial data " +
+          "is still loading. Rendered from two places for the same surface — the " +
+          "Terminology page itself and the workspace shell's Suspense fallback — " +
+          "so it is worded without naming either container.",
       },
       "terminology.page.addConceptButton": {
         description: "Header button opening the add-concept dialog.",

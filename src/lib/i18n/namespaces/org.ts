@@ -874,7 +874,10 @@ export const org = defineNamespace({
     "org.archivedProjects.noSearchMatch": "No archived projects match your search.",
     // "Clear" → common.clear (identical text)
     "org.archivedProjects.loadingDeletedFilesLabel": "Loading recently deleted files",
-    "org.archivedProjects.noDeletedFilesTitle": "No recently deleted files.",
+    // "No recently deleted files." → workspace.trash.empty. Both this table's
+    // empty state and the project trash dialog say the same thing about the same
+    // kind of list; the scopes differ (org-wide vs one project) but the sentence
+    // does not, so a translator is asked for it once.
     "org.archivedProjects.noDeletedFilesDescription":
       "When you delete a file from a project, it shows up here until you restore it.",
     "org.archivedProjects.noDeletedFilesSearchMatch": "No deleted files match your search.",

@@ -418,7 +418,7 @@ export function ArchivedProjects() {
                             variant="inline"
                             className="flex-none py-12"
                             icon={NAV_PAGE_ICONS.file}
-                            title={t("org.archivedProjects.noDeletedFilesTitle")}
+                            title={t("workspace.trash.empty")}
                             description={t("org.archivedProjects.noDeletedFilesDescription")}
                           />
                         )

@@ -315,7 +315,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                   const invalid = isFieldInvalid(field)
                   return (
                     <Field data-invalid={invalid}>
-                      <FieldLabel htmlFor="project-create-title">{t("workspace.createDialog.titleFieldLabel")}</FieldLabel>
+                      <FieldLabel htmlFor="project-create-title">{t("projectSettings.info.titleLabel")}</FieldLabel>
                       <Input
                         id="project-create-title"
                         // Avoid DOM name="name" — Chrome treats it as a contact

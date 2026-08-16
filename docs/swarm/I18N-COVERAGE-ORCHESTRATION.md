@@ -84,9 +84,9 @@ Closing 1–3 is WS-SCAN's job; it is the "scan the entire app" half of the requ
 | ID | Namespace owned (write) | Strings | Files | Status |
 | --- | --- | --- | --- | --- |
 | WS-SCAN | *(none — read-only + `scripts/i18n-scan.ts`)* | — | — | **merged** |
-| WS-A | `org` | 328 | 25 | dispatched |
+| WS-A | `org` | 328 | 25 | **merged** |
 | WS-B | `projectSettings` | 243 | 9 | **merged** |
-| WS-F | `workspace` (new) | 246 | 48 | dispatched |
+| WS-F | `workspace` (new) | 246 | 48 | **merged** |
 | WS-D | `agent` (new) | 190 | 23 | **merged** |
 | WS-C | `settings` (new) | 137 | 14 | dispatched |
 | WS-E | `rules` + `terminology` | 117 | 7 | **merged** |
@@ -107,3 +107,9 @@ Closing 1–3 is WS-SCAN's job; it is the "scan the entire app" half of the requ
 | merged | WS-E | `swarm/ws-e` @ `f5106cec`. 26 `rules.*` + 40 `terminology.*`, all 117 strings; ~35 by reuse. build ✅ · i18n 143 ✅ · 27 targeted ✅ |
 | conflict | orchestrator | `duplicate-exceptions.ts` — three agents appended independent entries. Resolved as a **union** (both sides kept), per §5 of the skill. |
 | **cross-agent dup** | orchestrator | WS-B `projectSettings.rules.loadingLabel` and WS-E `rules.page.loadingLabel` both minted "Loading rules" — invisible to each other in separate worktrees. Same data, same `LoadingPanel`, so **consolidated to one container-neutral `rules.loadingLabel`** rather than filed as a duplicate exception. This is the predicted cross-worktree collision class; the `no-duplicates` test caught it at integration exactly as designed. |
+| merged | WS-C | `swarm/ws-c` @ `6f6705e3`. 79 keys in `settings.*`, all 137 strings; ~half resolved by reuse alone (found `onboarding.preferences.*` already mirrors `Preferences.tsx` verbatim). Touched `duplicate-exceptions.ts` **zero** times. |
+| merged | WS-A | `swarm/ws-a` @ `8c44e302`. ~150 keys in `org.*`, all 328 strings; ~half by reuse. Correctly moved two module-scope label tables inside their components (`t()` is a hook), one via a new `useOrgSummaryColumns()`. |
+| merged | WS-F | `swarm/ws-f` @ `b5f47e93`. 160 keys in `workspace.*`, all 246 strings. Found a complete pre-authored `projectSettings.create.*` keyset sitting unused and wired `ProjectCreateDialog` to ~25 of them instead of minting duplicates. **Committed by the orchestrator** — the agent finished the edits and its test sweep but stopped before the final gates; verified here before merge. |
+| **orchestrator error** | — | One `git merge swarm/ws-c` ran in the ROOT worktree instead of integration, fast-forwarding the delivery branch past the integration branch. Caught immediately, `git reset --hard 38a9fcd0` restored it exactly (clean tree, pure FF, nothing pushed), merge redone in integration. Cause: shell cwd reset between tool calls. Mitigation: every command now carries an explicit absolute `cd`. |
+| **5 cross-agent dups** | orchestrator | Worktree isolation means agents cannot see each other's new keys, so same-string collisions surface only at integration — where `no-duplicates.test.ts` caught **all five**. Four were genuinely one string and were **consolidated** (`rules.loadingLabel`, `projectSettings.monday.connectButton`, `workspace.trash.empty`, `projectSettings.info.titleLabel`, `terminology.loadingLabel`); **one** was a real register split (icon-link aria-name vs destination page heading) and got a documented exception. |
+| gate | orchestrator | Post-merge on all 7: `npm run build` ✅ · `pnpm test src/lib/i18n` 143/143 ✅ · `i18n:check` **4,140 keys** covered ✅ · 123 targeted component tests ✅ · **0 unexcused collision groups** |

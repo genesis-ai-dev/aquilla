@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dialog"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Button } from "@/components/ui/button"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface GenerateOverwriteDialogProps {
   open: boolean
@@ -43,6 +44,7 @@ export function GenerateOverwriteDialog({
   onConfirm,
   onCancel,
 }: GenerateOverwriteDialogProps) {
+  const t = useT()
   const [dontAskAgain, setDontAskAgain] = useState(false)
 
   // Reset the checkbox each time the dialog opens so a prior tick never leaks
@@ -74,15 +76,15 @@ export function GenerateOverwriteDialog({
               checked={dontAskAgain}
               onCheckedChange={(c) => setDontAskAgain(c === true)}
             />
-            Don't ask again when replacing a translation
+            {t("workspace.generateOverwrite.dontAskAgain")}
           </label>
         )}
         <DialogFooter>
           <Button variant="outline" onClick={onCancel}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant="destructive" onClick={() => onConfirm(dontAskAgain)}>
-            Replace
+            {t("audio.clone.replaceButton")}
           </Button>
         </DialogFooter>
       </DialogContent>

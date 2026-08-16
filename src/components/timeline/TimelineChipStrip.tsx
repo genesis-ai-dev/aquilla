@@ -10,6 +10,7 @@ import { fmtClock } from "./format"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { AppTooltip } from "@/components/ui/tooltip"
 import type { CellData } from "@/hooks/useCells"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 /** The current dub chip's own numbers, computed by TimelineEditor (this
  *  component never reads lane geometry). Null when there is no measured dub. */
@@ -89,6 +90,7 @@ function StripNavSlot() {
 }
 
 export function TimelineChipStrip({ cell, chipStats, audioMissing }: TimelineChipStripProps) {
+  const t = useT()
   const isDialogue = (cell?.medium ?? "text") === "media"
   const start = cell?.startTime ?? 0
   const end = cell?.endTime ?? start
@@ -104,7 +106,7 @@ export function TimelineChipStrip({ cell, chipStats, audioMissing }: TimelineChi
     <div className="flex items-center gap-2 border-t border-border bg-muted/20 px-4 py-1.5">
       {!cell ? (
         <div data-testid="tl-detail-empty" className="flex min-w-0 items-center text-xs text-muted-foreground">
-          Select a clip to see its timing.
+          {t("workspace.chipStrip.selectClipPrompt")}
         </div>
       ) : (
       <div
@@ -124,14 +126,14 @@ export function TimelineChipStrip({ cell, chipStats, audioMissing }: TimelineChi
             {chipStats.srcDurationSec != null && (
               <Pill>
                 <span data-testid="tl-detail-src-duration" className="font-mono tabular-nums">
-                  Source: {chipStats.srcDurationSec.toFixed(1)}s
+                  {t("workspace.chipStrip.sourceLabel")} {chipStats.srcDurationSec.toFixed(1)}s
                 </span>
               </Pill>
             )}
             {chipStats.tgtDurationSec != null && (
               <Pill>
                 <span data-testid="tl-detail-tgt-duration" className="font-mono tabular-nums">
-                  Target: {chipStats.tgtDurationSec.toFixed(1)}s
+                  {t("workspace.chipStrip.targetLabel")} {chipStats.tgtDurationSec.toFixed(1)}s
                 </span>
               </Pill>
             )}
@@ -139,7 +141,7 @@ export function TimelineChipStrip({ cell, chipStats, audioMissing }: TimelineChi
         ) : (
           <Pill>
             <span className="font-mono tabular-nums">
-              {chipStats ? "Source: " : ""}
+              {chipStats ? `${t("workspace.chipStrip.sourceLabel")} ` : ""}
               {fmtClock(start, true)}–{fmtClock(end, true)}
               {" · "}
               {(end - start).toFixed(1)}s
@@ -149,7 +151,7 @@ export function TimelineChipStrip({ cell, chipStats, audioMissing }: TimelineChi
         {chipStats?.kind === "dubbing" && (
           <Pill>
             <span data-testid="tl-detail-dub-range" className="font-mono tabular-nums">
-              Target: {fmtClock(chipStats.startSec, true)}–{fmtClock(chipStats.endSec, true)}
+              {t("workspace.chipStrip.targetLabel")} {fmtClock(chipStats.startSec, true)}–{fmtClock(chipStats.endSec, true)}
               {" · "}
               <span data-testid="tl-detail-duration">{chipStats.durationSec.toFixed(1)}s</span>
             </span>
@@ -173,7 +175,7 @@ export function TimelineChipStrip({ cell, chipStats, audioMissing }: TimelineChi
                   content={`Source duration − target duration${parts.length > 0 ? ` · ${parts.join(" · ")}` : ""}`}
                 >
                   <span data-testid="tl-detail-diff" className="font-mono tabular-nums">
-                    Diff: {signedSec(chipStats.durationDiffSec)}
+                    {t("workspace.chipStrip.diffLabel")} {signedSec(chipStats.durationDiffSec)}
                   </span>
                 </AppTooltip>
               </Pill>
@@ -189,19 +191,19 @@ export function TimelineChipStrip({ cell, chipStats, audioMissing }: TimelineChi
               <Pill>
                 <span
                   data-testid="tl-detail-overlap-start"
-                  title="This target audio starts over the PREVIOUS verse's target audio"
+                  title={t("workspace.chipStrip.startOverlapTooltip")}
                   className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
                 >
-                  Start overlap: −{chipStats.headOverlapSec.toFixed(1)}s
+                  {t("workspace.chipStrip.startOverlapValue", { sec: chipStats.headOverlapSec.toFixed(1) })}
                 </span>
               </Pill>
               <Pill>
                 <span
                   data-testid="tl-detail-overlap-end"
-                  title="This target audio runs over the NEXT verse's target audio"
+                  title={t("workspace.chipStrip.endOverlapTooltip")}
                   className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
                 >
-                  End overlap: −{chipStats.tailOverlapSec.toFixed(1)}s
+                  {t("workspace.chipStrip.endOverlapValue", { sec: chipStats.tailOverlapSec.toFixed(1) })}
                 </span>
               </Pill>
             </>
@@ -211,10 +213,12 @@ export function TimelineChipStrip({ cell, chipStats, audioMissing }: TimelineChi
             <Pill>
               <span
                 data-testid="tl-detail-overlap"
-                title="This target audio sounds over a neighbouring verse's target audio"
+                title={t("workspace.chipStrip.eitherOverlapTooltip")}
                 className="font-mono tabular-nums font-semibold text-red-600 dark:text-red-400"
               >
-                Overlap: −{(chipStats.headOverlapSec ?? chipStats.tailOverlapSec ?? 0).toFixed(1)}s
+                {t("workspace.chipStrip.overlapValue", {
+                  sec: (chipStats.headOverlapSec ?? chipStats.tailOverlapSec ?? 0).toFixed(1),
+                })}
               </span>
             </Pill>
           )}
@@ -232,12 +236,12 @@ export function TimelineChipStrip({ cell, chipStats, audioMissing }: TimelineChi
         )}
         {castName && (
           <Pill>
-            Speaker <b className="font-semibold text-foreground">{castName}</b>
+            {t("workspace.chipStrip.speakerLabel")} <b className="font-semibold text-foreground">{castName}</b>
           </Pill>
         )}
         {isDialogue && cell.cameraState && (
           <Pill>
-            Camera <b className="font-semibold text-foreground">{cell.cameraState}</b>
+            {t("importExport.labels.previewCameraHeader")} <b className="font-semibold text-foreground">{cell.cameraState}</b>
           </Pill>
         )}
       </div>

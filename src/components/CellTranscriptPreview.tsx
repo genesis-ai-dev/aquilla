@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { WordTiming } from "@/lib/codex-editor/types"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   timings: WordTiming[] | undefined
@@ -38,6 +39,7 @@ function looselyEquals(a: string, b: string): boolean {
 export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function CellTranscriptPreview({
   timings, cellText, cellId: _cellId, alignedToCellText, editable, onRetranscribe, onUseAsCellText,
 }: Props, ref) {
+  const t = useT()
   const transcript = useMemo(() => (timings ? transcriptOf(timings) : ""), [timings])
   if (!timings || timings.length === 0) return null
 
@@ -118,38 +120,40 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
       {editable && state !== "match" && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {state === "stale" && onRetranscribe && (
-            <AppTooltip content="Listen to the recording again and refresh the transcript">
+            <AppTooltip content={t("workspace.transcriptPreview.retranscribeTooltip")}>
               <Button
                 size="xs"
                 variant="outline"
                 onClick={onRetranscribe}
               >
-                <RefreshCw /> Transcribe again
+                <RefreshCw /> {t("workspace.transcriptPreview.transcribeAgain")}
               </Button>
             </AppTooltip>
           )}
           {state === "differs" && onUseAsCellText && (
             <AppTooltip content={cellHasText
-              ? "Replace your text with what the recording says"
-              : "Fill in your text from the recording"}>
+              ? t("workspace.transcriptPreview.replaceTextTooltip")
+              : t("workspace.transcriptPreview.fillTextTooltip")}>
               <Button
                 size="xs"
                 variant="outline"
                 onClick={() => onUseAsCellText(transcript)}
               >
-                <CornerDownLeft /> {cellHasText ? "Use what was heard" : "Use as the text"}
+                <CornerDownLeft /> {cellHasText
+                  ? t("workspace.transcriptPreview.useWhatWasHeard")
+                  : t("workspace.transcriptPreview.useAsText")}
               </Button>
             </AppTooltip>
           )}
           {state === "differs" && onRetranscribe && (
-            <AppTooltip content="Listen to the recording again and refresh the transcript">
+            <AppTooltip content={t("workspace.transcriptPreview.retranscribeTooltip")}>
               <Button
                 size="xs"
                 variant="ghost"
                 onClick={onRetranscribe}
                 className="text-muted-foreground"
               >
-                <RefreshCw /> Transcribe again
+                <RefreshCw /> {t("workspace.transcriptPreview.transcribeAgain")}
               </Button>
             </AppTooltip>
           )}

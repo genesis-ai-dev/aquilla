@@ -592,7 +592,7 @@ export function AssignModal({
                     translator in control of sentence/word order. */}
                 <RichMessage
                   k="dialog.assign.laneDescription"
-                  values={{ can: <em>can</em> }}
+                  values={{ can: <em>{t("workspace.assignModal.canModalVerb")}</em> }}
                 />
               </FieldDescription>
             </Field>

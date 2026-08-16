@@ -19,7 +19,7 @@ interface StatusBarProps {
 export function StatusBar({
   cells, projectHealth, healthMap, staleSourceCount, onJumpToCell, className,
 }: StatusBarProps) {
-  const { locale } = useI18n()
+  const { locale, t } = useI18n()
   const total = cells.length
   const empty = cells.filter((c) => c.status === "empty").length
   const unvalidated = cells.filter((c) => c.status === "unvalidated").length
@@ -57,15 +57,21 @@ export function StatusBar({
         </HealthRing>
       </DecayBreakdown>
       <span className="flex items-center gap-2">
-        <span>{totalDisplay} cells · {translatedDisplay} translated {pctDisplay}</span>
+        <span>
+          {t("workspace.statusBar.summary", {
+            total: totalDisplay,
+            translated: translatedDisplay,
+            pct: pctDisplay,
+          })}
+        </span>
         {unvalidated > 0 && (
           <Badge variant="secondary" className="text-amber-500">
-            {unvalidated} unvalidated
+            {t("workspace.statusBar.unvalidatedBadge", { count: unvalidated })}
           </Badge>
         )}
         {validated > 0 && (
           <Badge variant="secondary" className="text-green-500">
-            {validated} validated
+            {t("terminology.livingMemory.validatedCount", { count: validated })}
           </Badge>
         )}
       </span>

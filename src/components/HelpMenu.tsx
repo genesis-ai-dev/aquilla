@@ -109,7 +109,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
               }
             >
               <Home />
-              Homepage
+              {t("workspace.helpMenu.homepage")}
               <ExternalLink className="ml-auto opacity-60" />
             </DropdownMenuItem>
             <DropdownMenuItem

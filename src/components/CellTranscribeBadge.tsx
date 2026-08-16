@@ -17,6 +17,7 @@ import {
 } from "@/lib/audio/transcribe-status"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover, type AiStatusAction } from "./CellAiStatusPopover"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   audioId: string | undefined
@@ -33,6 +34,7 @@ const SUCCESS_FLASH_MS = 5000
 const PILL = "h-5 gap-1 px-1.5 py-0 text-[10px]"
 
 export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpToTranscript, onRetry }: Props) {
+  const t = useT()
   const status = useTranscribeStatus(audioId)
   const [flashedDone, setFlashedDone] = useState<TranscribeStatus & { kind: "done" } | null>(null)
   const lastSeenKindRef = useRef<TranscribeStatus["kind"]>("idle")
@@ -87,7 +89,7 @@ export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpTo
           className={cn(PILL, "text-amber-700 dark:text-amber-300")}
         >
           {pct != null ? <Download className="h-2.5 w-2.5" /> : <Spinner className="size-2.5" />}
-          {pct != null ? <span className="tabular-nums">{pct}%</span> : <span>load</span>}
+          {pct != null ? <span className="tabular-nums">{pct}%</span> : <span>{t("workspace.transcribeBadge.loadShort")}</span>}
         </Badge>
       </AppTooltip>
     )
@@ -95,10 +97,10 @@ export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpTo
 
   if (status.kind === "transcribing") {
     return (
-      <AppTooltip content="Transcribing audio…">
+      <AppTooltip content={t("workspace.transcribeBadge.transcribingTooltip")}>
         <Badge variant="secondary" className={cn(PILL, "text-primary")}>
           <Sparkles className="h-2.5 w-2.5 animate-pulse" />
-          <span>transcribing</span>
+          <span>{t("workspace.transcribeBadge.transcribingPill")}</span>
         </Badge>
       </AppTooltip>
     )
@@ -121,7 +123,7 @@ export function CellTranscribeBadge({ audioId, hasTimings: _hasTimings, onJumpTo
             type="button"
             className={cn(badgeVariants({ variant: "destructive" }), PILL)}
           >
-            Transcription failed
+            {t("workspace.transcribeBadge.failed")}
           </button>
         }
       />

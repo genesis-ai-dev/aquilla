@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { prefetchAiModels, useModelStatus, type ModelId } from "@/lib/audio/prefetch"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const READY_FLASH_MS = 4000
 
@@ -34,6 +35,7 @@ interface ErrorView {
 const LABELS: Record<ModelId, string> = { whisper: "Whisper", kokoro: "Kokoro", mms: "MMS" }
 
 export function AiModelDownloadChip() {
+  const t = useT()
   const whisper = useModelStatus("whisper")
   const kokoro = useModelStatus("kokoro")
   const mms = useModelStatus("mms")
@@ -121,7 +123,7 @@ export function AiModelDownloadChip() {
           variant="ghost"
           size="icon"
           onClick={() => setDismissed(true)}
-          aria-label="Hide"
+          aria-label={t("org.projectOverview.hide")}
           className="ms-auto size-5 text-muted-foreground/60 hover:text-foreground"
         >
           <X className="h-3 w-3" />
@@ -156,7 +158,7 @@ export function AiModelDownloadChip() {
             <li key={id} className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
               <CheckCircle2 className="h-3 w-3" />
               <span className="capitalize">{id}</span>
-              <span className="text-muted-foreground">ready to use</span>
+              <span className="text-muted-foreground">{t("workspace.aiDownloadChip.readyToUse")}</span>
             </li>
           ))}
         </ul>
@@ -179,7 +181,7 @@ export function AiModelDownloadChip() {
                 onClick={() => handleRetry(err.id)}
               >
                 <RotateCw />
-                Retry
+                {t("common.retry")}
               </Button>
             </li>
           ))}
@@ -188,7 +190,7 @@ export function AiModelDownloadChip() {
 
       {downloads.length > 0 && (
         <p className="mt-2 text-[10px] text-muted-foreground">
-          Runs in the background — keep working as normal.
+          {t("workspace.aiDownloadChip.runsInBackground")}
         </p>
       )}
     </div>

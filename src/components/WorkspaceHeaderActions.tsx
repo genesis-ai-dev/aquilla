@@ -2,6 +2,7 @@ import { Plus, Settings } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import { OverflowMenu, type OverflowMenuItem } from "./OverflowMenu"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface WorkspaceHeaderActionsProps {
   onImport: () => void
@@ -15,6 +16,7 @@ export function WorkspaceHeaderActions({
   onSettings,
   menuItems,
 }: WorkspaceHeaderActionsProps) {
+  const t = useT()
   return (
     <div className="flex items-center gap-1">
       <ButtonGroup className="shadow-xs">
@@ -27,7 +29,7 @@ export function WorkspaceHeaderActions({
           data-testid="workspace-import-button"
         >
           <Plus data-icon="inline-start" />
-          Import
+          {t("nav.workspaceActions.import")}
         </Button>
         {menuItems.length > 0 ? (
           <OverflowMenu
@@ -47,7 +49,7 @@ export function WorkspaceHeaderActions({
           size="icon"
           className="bg-card shadow-xs"
           onClick={onSettings}
-          aria-label="Settings"
+          aria-label={t("nav.settings")}
           data-testid="workspace-settings-button"
         >
           <Settings className="h-4 w-4" />

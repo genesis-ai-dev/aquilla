@@ -8,6 +8,7 @@ import { BookOpen, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { Concept } from "@/lib/terminology/types"
 import { TermLookupPopover } from "./TermLookupPopover"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface SourceSelectionToolbarProps {
   sourceSelection: string
@@ -30,6 +31,7 @@ export function SourceSelectionToolbar({
   onToolbarMouseDown,
   onToolbarMouseUp,
 }: SourceSelectionToolbarProps) {
+  const t = useT()
   const activeConcepts = useMemo(() => concepts.filter((c) => c.status === "active"), [concepts])
   const hasMatch = useMemo(
     () =>
@@ -58,14 +60,14 @@ export function SourceSelectionToolbar({
         <TermLookupPopover sourceTerm={sourceSelection} concepts={activeConcepts} onApply={onTermApply}>
           <Button type="button" size="xs" variant="ghost" onMouseDown={handleButtonMouseDown}>
             <BookOpen className="size-3" aria-hidden />
-            View term
+            {t("workspace.sourceSelection.viewTerm")}
           </Button>
         </TermLookupPopover>
       )}
 
       <Button type="button" size="xs" variant="ghost" onMouseDown={handleButtonMouseDown} onClick={onAskAi}>
         <Sparkles className="size-3" aria-hidden />
-        Ask AI
+        {t("workspace.sourceSelection.askAi")}
       </Button>
 
       {onAddToTermbase && (
@@ -77,7 +79,7 @@ export function SourceSelectionToolbar({
           onClick={onAddToTermbase}
         >
           <BookOpen className="size-3" aria-hidden />
-          Add to termbase
+          {t("workspace.sourceSelection.addToTermbase")}
         </Button>
       )}
     </div>

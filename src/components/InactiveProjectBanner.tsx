@@ -8,6 +8,8 @@
 
 import { AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
 interface InactiveProjectBannerProps {
   /** Display name of the project. Used in the banner copy. */
@@ -54,17 +56,20 @@ export function InactiveProjectBanner({
   onReactivate,
   busy = false,
 }: InactiveProjectBannerProps) {
+  const t = useT()
   return (
     <div
       className="flex w-full items-center gap-3 border-b border-amber-300 bg-amber-50 px-4 py-3 dark:border-amber-700/60 dark:bg-amber-950/40"
       role="status"
-      aria-label="This project is inactive"
+      aria-label={t("workspace.inactiveBanner.ariaLabel")}
       data-testid="inactive-project-banner"
     >
       <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
       <p className="flex-1 text-sm text-amber-900 dark:text-amber-200">
-        <span className="font-semibold">{projectName}</span> is inactive — it cannot be edited
-        until reactivated.
+        <RichMessage
+          k="workspace.inactiveBanner.message"
+          values={{ name: <span className="font-semibold">{projectName}</span> }}
+        />
       </p>
       {canReactivate && (
         <Button

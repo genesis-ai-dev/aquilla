@@ -11,6 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils"
 import { AlertCircle, Check, Copy, X } from "lucide-react"
 import type { ActionableError } from "@/lib/audio/ai-error"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface AiStatusAction {
   label: string
@@ -30,6 +31,7 @@ interface Props {
 }
 
 export function CellAiStatusPopover({ trigger, error, actions, onDismiss }: Props) {
+  const t = useT()
   const [copied, setCopied] = useState(false)
 
   // AQU-891: the raw provider message is what support needs. Selecting it out
@@ -63,7 +65,7 @@ export function CellAiStatusPopover({ trigger, error, actions, onDismiss }: Prop
             {error.body !== error.raw && (
               <details className="mt-1">
                 <summary className="text-[10px] text-muted-foreground/70 hover:text-muted-foreground">
-                  Technical detail
+                  {t("workspace.aiStatusPopover.technicalDetail")}
                 </summary>
                 <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap rounded bg-muted/50 p-1.5 text-[10px] text-muted-foreground">
                   {error.raw}
@@ -93,7 +95,7 @@ export function CellAiStatusPopover({ trigger, error, actions, onDismiss }: Prop
               className="h-7 gap-1 px-2 text-[11px]"
             >
               <X className="h-3 w-3" />
-              Dismiss
+              {t("common.dismiss")}
             </Button>
           )}
           {actions.map((action, i) => (

@@ -71,6 +71,13 @@ CREATE POLICY rls_contextual_decisions_update ON contextual_decisions FOR UPDATE
   USING (app_contextual_project_scope(project_id))
   WITH CHECK (app_contextual_project_scope(project_id));
 
+-- Policies alone are unreachable without a grant (0034): RLS and table
+-- privileges are independent layers, and app_runtime has none by default.
+-- No DELETE — decisions reach terminal statuses (resolved/dismissed/
+-- superseded/expired) instead of being removed, matching contextual_runs
+-- and scene_briefs.
+GRANT SELECT, INSERT, UPDATE ON TABLE contextual_decisions TO app_runtime;
+
 -- `waiting` = something left to do, but it needs a human. Distinct from
 -- `parked` (nothing left to do). A waiting run is ACTIVE, so it participates
 -- in the one-active-run-per-lane unique index below.

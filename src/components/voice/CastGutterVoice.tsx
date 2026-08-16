@@ -17,6 +17,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { VoiceAvatar } from "./VoiceAvatar"
 import { VoicePickerContent } from "./VoiceCombobox"
 import type { Voice } from "@/lib/parsers/types"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface CastGutterVoiceProps {
   /** The RESOLVED voice for this line (never undefined — default falls back). */
@@ -33,6 +34,7 @@ export interface CastGutterVoiceProps {
 }
 
 export function CastGutterVoice({ voice, explicit, castName, editable, voices, onPick }: CastGutterVoiceProps) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [applyToSpeaker, setApplyToSpeaker] = useState(false)
   // Hover text leads with the CHARACTER (Sam 2026-08-07) — the voice is the
@@ -96,7 +98,7 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
                   checked={applyToSpeaker}
                   onChange={(e) => setApplyToSpeaker(e.target.checked)}
                 />
-                Apply to all «{castName}» lines
+                {t("workspace.castGutterVoice.applyToAllLines", { name: castName ?? "" })}
               </label>
             ) : undefined
           }

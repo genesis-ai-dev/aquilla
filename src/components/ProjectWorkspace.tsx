@@ -1,6 +1,7 @@
 import { Suspense, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import { useProject } from "@/hooks/useProject"
 import { describePatchFailure, SETTINGS_EDIT_ROLE_FLOOR } from "@/hooks/useProjectSettings"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
@@ -5214,7 +5215,16 @@ export function ProjectWorkspace() {
   if (status === "no-session") {
     return (
       <div className="p-8 text-muted-foreground">
-        This project isn't on this device. <button className="underline" onClick={goToProjects}>Sign in</button> to open it from the cloud.
+        <RichMessage
+          k="workspace.status.notOnDevice"
+          values={{
+            signIn: (
+              <button className="underline" onClick={goToProjects}>
+                {t("auth.login.submitDefault")}
+              </button>
+            ),
+          }}
+        />
       </div>
     )
   }
@@ -5226,14 +5236,14 @@ export function ProjectWorkspace() {
       <div className="p-8">
         <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950">
           <span className="text-amber-800 dark:text-amber-200">
-            Can't reach the server — your project may still be available.
+            {t("workspace.status.unreachable")}
           </span>
           <button
             type="button"
             onClick={refresh}
             className="shrink-0 rounded-md bg-amber-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600"
           >
-            Retry
+            {t("common.retry")}
           </button>
         </div>
       </div>
@@ -5245,16 +5255,32 @@ export function ProjectWorkspace() {
   if (status === "forbidden") {
     return (
       <div className="p-8 text-muted-foreground" data-testid="project-no-access">
-        You no longer have access to this project. Ask a project maintainer to
-        re-invite you if this is unexpected.{" "}
-        <button className="underline" onClick={goToProjects}>Back to dashboard</button>.
+        <RichMessage
+          k="workspace.status.forbidden"
+          values={{
+            backLink: (
+              <button className="underline" onClick={goToProjects}>
+                {t("workspace.backToDashboard")}
+              </button>
+            ),
+          }}
+        />
       </div>
     )
   }
   if (status === "not-found" || !project) {
     return (
       <div className="p-8 text-muted-foreground">
-        Project not found, or you don't have access. <button className="underline" onClick={goToProjects}>Back to dashboard</button>.
+        <RichMessage
+          k="workspace.status.notFound"
+          values={{
+            backLink: (
+              <button className="underline" onClick={goToProjects}>
+                {t("workspace.backToDashboard")}
+              </button>
+            ),
+          }}
+        />
       </div>
     )
   }
@@ -5504,12 +5530,12 @@ export function ProjectWorkspace() {
         dockStorageKey={projectId}
         logoAccessory={
           dockTab !== null ? (
-            <AppTooltip content="Collapse sidebar" side="bottom">
+            <AppTooltip content={t("workspace.sidebar.collapse")} side="bottom">
               <Button
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                aria-label="Collapse sidebar"
+                aria-label={t("workspace.sidebar.collapse")}
                 onClick={() => setDockTab(null)}
               >
                 <PanelLeftClose className="h-3.5 w-3.5" />
@@ -5816,7 +5842,7 @@ export function ProjectWorkspace() {
             {isReadOnly && (
               <div className="flex items-center gap-2 border-b bg-amber-50 px-4 py-2 text-xs text-amber-900">
                 <Lock className="h-3.5 w-3.5" />
-                Read-only — imported from git. Push is coming in Phase 2.
+                {t("workspace.readOnlyGitBanner")}
               </div>
             )}
             {project && (
@@ -5844,7 +5870,7 @@ export function ProjectWorkspace() {
             </div>
             {isSubtitleFile && blobUnavailable && !videoAttachment.videoUrl && (
               <div className="bg-amber-50 px-4 py-2 text-xs text-amber-700 dark:bg-amber-950 dark:text-amber-400">
-                Video file not available on this device. Attach it locally or paste a URL via the Film icon.
+                {t("workspace.videoUnavailable")}
               </div>
             )}
             {/* F6: stale-sibling dead-letter banner. Clicking "View in
@@ -5879,14 +5905,14 @@ export function ProjectWorkspace() {
                     }}
                     className="rounded bg-amber-200/60 px-2 py-0.5 hover:bg-amber-200 dark:bg-amber-800/50 dark:hover:bg-amber-800"
                   >
-                    View in history
+                    {t("workspace.staleSibling.viewInHistory")}
                   </button>
                   <button
                     type="button"
                     onClick={clearStaleSiblings}
                     className="rounded bg-amber-200/40 px-2 py-0.5 hover:bg-amber-200 dark:bg-amber-800/30 dark:hover:bg-amber-800"
                   >
-                    Dismiss
+                    {t("common.dismiss")}
                   </button>
                 </div>
               </div>
@@ -5902,20 +5928,20 @@ export function ProjectWorkspace() {
                   onClick={dismissForbidden}
                   className="ms-2 rounded bg-rose-200/60 px-2 py-0.5 hover:bg-rose-200 dark:bg-rose-800/50 dark:hover:bg-rose-800"
                 >
-                  Dismiss
+                  {t("common.dismiss")}
                 </button>
               </div>
             )}
             {/* F5: stale-source pin banner */}
             {showStaleSourceBanner && (
               <div className="flex items-center justify-between gap-2 bg-blue-50 px-4 py-2 text-xs text-blue-800 dark:bg-blue-950 dark:text-blue-300">
-                <span>Source text changed since your last edit — your translation was saved, but please re-confirm it reflects the latest source.</span>
+                <span>{t("workspace.staleSource.message")}</span>
                 <button
                   type="button"
                   onClick={clearOutboxStaleSource}
                   className="ms-2 rounded bg-blue-200/60 px-2 py-0.5 hover:bg-blue-200 dark:bg-blue-800/50 dark:hover:bg-blue-800"
                 >
-                  Dismiss
+                  {t("common.dismiss")}
                 </button>
               </div>
             )}
@@ -5935,7 +5961,7 @@ export function ProjectWorkspace() {
                   onClick={() => setBtWriteError(null)}
                   className="ms-2 rounded bg-destructive/20 px-2 py-0.5 hover:bg-destructive/30"
                 >
-                  Dismiss
+                  {t("common.dismiss")}
                 </button>
               </div>
             )}
@@ -5952,7 +5978,7 @@ export function ProjectWorkspace() {
                 className="flex items-center justify-between gap-2 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300"
               >
                 <span>
-                  {focusLockState.heldBy.userId} is now editing this cell — your editor is read-only. Copy any unsaved text before moving away.
+                  {t("workspace.focusLock.editingNotice", { user: focusLockState.heldBy.userId })}
                 </span>
               </div>
             )}
@@ -5973,14 +5999,14 @@ export function ProjectWorkspace() {
           // FRO-254: Comments page inside the shell — no page-level back
           // button; breadcrumb + history arrows + sidebar own navigation.
           <div className="h-full overflow-y-auto">
-            <Suspense fallback={<LoadingPanel label="Loading comments" />}>
+            <Suspense fallback={<LoadingPanel label={t("workspace.loadingComments")} />}>
               <CommentsPageContent />
             </Suspense>
           </div>
         ) : centerSurface === "terminology" ? (
           // FRO-254: Terminology page inside the shell.
           <div className="h-full overflow-y-auto">
-            <Suspense fallback={<LoadingPanel label="Loading terminology" />}>
+            <Suspense fallback={<LoadingPanel label={t("workspace.loadingTerminology")} />}>
               <GlossaryEditorContent files={projectFiles} />
             </Suspense>
           </div>
@@ -6661,36 +6687,36 @@ export function ProjectWorkspace() {
           sidebar row (project_lead+); was an inline expander in the files panel. */}
       <Dialog open={trashOpen} onOpenChange={setTrashOpen}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Recently deleted</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>{t("nav.sidebarSection.trash")}</DialogTitle></DialogHeader>
           <div className="space-y-0.5">
             {trashFiles.length === 0 && (
-              <p className="px-1 py-1 text-sm text-muted-foreground">No recently deleted files.</p>
+              <p className="px-1 py-1 text-sm text-muted-foreground">{t("workspace.trash.empty")}</p>
             )}
             {trashFiles.map((f) => (
               <div key={f.fileId} className="flex items-center gap-2 rounded px-1 py-1 text-sm hover:bg-accent">
                 <span className="flex-1 truncate text-muted-foreground">{f.name}</span>
-                <AppTooltip content="Cells and audio come back intact">
+                <AppTooltip content={t("workspace.trash.restoreTooltip")}>
                   <button
                     type="button"
                     className="shrink-0 rounded px-1.5 py-0.5 text-xs hover:bg-muted"
                     onClick={() => void handleRestoreFile(f.fileId)}
                   >
-                    Restore
+                    {t("common.restore")}
                   </button>
                 </AppTooltip>
-                <AppTooltip content="Permanently wipes R2 media" className="max-w-xs">
+                <AppTooltip content={t("workspace.trash.purgeTooltip")} className="max-w-xs">
                   <button
                     type="button"
                     className="shrink-0 rounded px-1.5 py-0.5 text-xs text-destructive hover:bg-destructive/10"
                     onClick={() => void handlePurgeFile(f.fileId)}
                   >
-                    Delete forever
+                    {t("workspace.trash.deleteForever")}
                   </button>
                 </AppTooltip>
               </div>
             ))}
             <p className="px-1 pt-2 text-xs leading-snug text-muted-foreground">
-              Files are kept for 30 days. "Delete forever" permanently wipes media.
+              {t("workspace.trash.retentionNote")}
             </p>
           </div>
         </DialogContent>
@@ -6725,6 +6751,7 @@ function MoveToCorpusDialog({
   onClose: () => void
   onSave: (value: string) => void | Promise<void>
 }) {
+  const t = useT()
   const NEW = "__new__"
   // "Ungrouped" needs a real sentinel rather than "": an empty Select value reads
   // as "nothing selected", so the trigger would render blank. Mapped back to ""
@@ -6748,14 +6775,14 @@ function MoveToCorpusDialog({
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
       <DialogContent className="max-w-sm">
-        <DialogHeader><DialogTitle>Move to corpus</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{t("workspace.moveToCorpus.dialogTitle")}</DialogTitle></DialogHeader>
         <div className="flex flex-col gap-2">
           <Select
             items={corpusItems}
             value={selection}
             onValueChange={(v) => { if (v != null) setSelection(v) }}
           >
-            <SelectTrigger aria-label="Corpus">
+            <SelectTrigger aria-label={t("fileDetails.corpus")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -6768,7 +6795,7 @@ function MoveToCorpusDialog({
                 <SelectSeparator />
                 <SelectItem value={NEW}>
                   <Plus aria-hidden />
-                  Create a corpus
+                  {t("workspace.moveToCorpus.createOption")}
                 </SelectItem>
               </SelectGroup>
             </SelectContent>
@@ -6778,13 +6805,13 @@ function MoveToCorpusDialog({
               autoFocus
               value={customValue}
               onChange={(e) => setCustomValue(e.target.value)}
-              placeholder="Corpus name"
-              aria-label="Corpus name"
+              placeholder={t("workspace.moveToCorpus.corpusNameField")}
+              aria-label={t("workspace.moveToCorpus.corpusNameField")}
             />
           )}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button variant="outline" onClick={onClose}>{t("common.cancel")}</Button>
           <Button
             disabled={isNew && !customValue.trim()}
             onClick={() => {
@@ -6793,7 +6820,7 @@ function MoveToCorpusDialog({
               )
             }}
           >
-            Save
+            {t("common.save")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -6860,6 +6887,7 @@ interface TrashedProjectScreenProps {
 }
 
 function TrashedProjectScreen({ project, onClose, onRestore }: TrashedProjectScreenProps) {
+  const t = useT()
   const { session } = useFrontierSession()
   const canRestore =
     (project.syncRole?.level ?? 0) >= 700 ||
@@ -6872,20 +6900,23 @@ function TrashedProjectScreen({ project, onClose, onRestore }: TrashedProjectScr
         <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-muted">
           <Trash2 className="h-6 w-6 text-muted-foreground" />
         </div>
-        <h1 className="mb-2 text-lg font-semibold">This project is in Trash</h1>
+        <h1 className="mb-2 text-lg font-semibold">{t("workspace.trashedProject.title")}</h1>
         <p className="mb-6 text-sm text-muted-foreground">
-          "{project.name}" was moved to Trash
-          {project.deletedBy ? ` by ${project.deletedBy}` : ""}.
-          Restore it to continue editing.
+          {project.deletedBy
+            ? t("workspace.trashedProject.movedByMessage", {
+                name: project.name,
+                deletedBy: project.deletedBy,
+              })
+            : t("workspace.trashedProject.movedMessage", { name: project.name })}
         </p>
         <div className="flex items-center justify-center gap-2">
           <Button variant="outline" onClick={onClose}>
-            Back to Dashboard
+            {t("workspace.backToDashboard")}
           </Button>
           {canRestore && (
             <Button onClick={() => onRestore()}>
               <Undo2 className="me-1 h-4 w-4" />
-              Restore
+              {t("common.restore")}
             </Button>
           )}
         </div>

@@ -14,6 +14,8 @@ import {
 } from "@/components/ui/dialog"
 import { AUDIO_TIMING_MODE_LABELS } from "@/lib/parsers/types"
 import type { TimingModeAck } from "@/hooks/useTimingModeAck"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
 interface Props {
   ack: TimingModeAck | null
@@ -21,18 +23,21 @@ interface Props {
 }
 
 export function TimingModeChangedDialog({ ack, onAcknowledge }: Props) {
+  const t = useT()
   if (!ack) return null
   return (
     <Dialog open onOpenChange={(next) => { if (!next) onAcknowledge() }}>
       <DialogContent data-testid="timing-mode-changed-ack">
         <DialogHeader>
-          <DialogTitle>Timing mode changed</DialogTitle>
+          <DialogTitle>{t("workspace.timingModeChanged.title")}</DialogTitle>
           <DialogDescription>
-            Someone with settings access switched this file from{" "}
-            <b>{AUDIO_TIMING_MODE_LABELS[ack.from].name}</b> to{" "}
-            <b>{AUDIO_TIMING_MODE_LABELS[ack.to].name}</b>. The Media timeline
-            now lays out on the new mode — recordings and timing data are
-            untouched.
+            <RichMessage
+              k="workspace.timingModeChanged.description"
+              values={{
+                from: <b>{AUDIO_TIMING_MODE_LABELS[ack.from].name}</b>,
+                to: <b>{AUDIO_TIMING_MODE_LABELS[ack.to].name}</b>,
+              }}
+            />
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>

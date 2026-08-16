@@ -1,11 +1,13 @@
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const ROWS = 7
 
 export function WorkspaceSkeleton() {
+  const t = useT()
   return (
-    <LoadingOverlay label="Loading project" data-testid="workspace-loading">
+    <LoadingOverlay label={t("workspace.skeleton.loadingProject")} data-testid="workspace-loading">
       <div
         data-testid="workspace-loading-template"
         className="flex min-h-screen bg-sidebar"

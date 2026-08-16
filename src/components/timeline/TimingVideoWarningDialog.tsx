@@ -15,6 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   open: boolean
@@ -23,22 +24,19 @@ interface Props {
 }
 
 export function TimingVideoWarningDialog({ open, onConfirm, onCancel }: Props) {
+  const t = useT()
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel() }}>
       <DialogContent data-testid="timing-video-warning">
         <DialogHeader>
-          <DialogTitle>Switch to Free timing and hide the video?</DialogTitle>
+          <DialogTitle>{t("workspace.timingVideoWarning.title")}</DialogTitle>
           <DialogDescription>
-            This file has a linked video, which plays on the original
-            recording's timing. Free timing re-flows the timeline to the
-            translations' own lengths, so the video will stay hidden until the
-            file switches back to Original's timing. Switching is lossless —
-            no timing data is changed either way.
+            {t("workspace.timingVideoWarning.description")}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" onClick={onCancel}>Cancel</Button>
-          <Button onClick={onConfirm}>Switch to Free timing</Button>
+          <Button variant="outline" onClick={onCancel}>{t("common.cancel")}</Button>
+          <Button onClick={onConfirm}>{t("workspace.timingVideoWarning.confirmButton")}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -508,6 +508,7 @@ function MmsLanguageField({ value, onChange }: { value: string; onChange: (v: st
             id="voice-mms-code"
             value={value}
             onChange={(e) => onChange(e.target.value.trim().toLowerCase())}
+            // i18n-exempt: fixed ISO 639-3 code example (Italian), not translatable prose
             placeholder="ita"
             className="font-mono"
           />

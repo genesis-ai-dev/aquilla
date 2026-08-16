@@ -23,6 +23,7 @@ import { useMemo } from "react"
 import { Check, X, HelpCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { useT } from "@/lib/i18n/I18nProvider"
 import {
   alignCell,
   confirmAlignment,
@@ -72,6 +73,7 @@ function AlignmentRow({
   onConfirm: () => void
   onInvalidate: () => void
 }) {
+  const t = useT()
   const band = confidenceLabel(link.confidence)
   const pct = Math.round(link.confidence * 100)
 
@@ -167,10 +169,14 @@ function AlignmentRow({
         </>
       )}
       {confirmed && (
-        <span className="shrink-0 text-[9px] font-medium text-emerald-600 dark:text-emerald-400">✓ confirmed</span>
+        <span className="shrink-0 text-[9px] font-medium text-emerald-600 dark:text-emerald-400">
+          {t("workspace.alignment.confirmedBadge")}
+        </span>
       )}
       {invalidated && (
-        <span className="shrink-0 text-[9px] font-medium text-destructive">✗ rejected</span>
+        <span className="shrink-0 text-[9px] font-medium text-destructive">
+          {t("workspace.alignment.rejectedBadge")}
+        </span>
       )}
     </div>
   )
@@ -183,6 +189,7 @@ export function InterlinearAlignmentPanel({
   confirmedSeeds,
   onSeedChange,
 }: InterlinearAlignmentPanelProps) {
+  const t = useT()
   // AQU-241: derive whether the model has enough pairs for non-random results.
   // AlignmentModel.pairCount is the number of (source, target) verse pairs used
   // to train it — read directly from the model so the parent doesn't need to
@@ -252,10 +259,10 @@ export function InterlinearAlignmentPanel({
         <div className="flex items-center gap-1">
           {/* AQU-241: legend/help tooltip for the Alignment section */}
           <span className="text-xs font-medium text-muted-foreground">
-            Alignment
+            {t("editor.bt.alignment")}
           </span>
           <AppTooltip
-            content="Word-level alignment links source and target tokens using a statistical model built from your translated cells. Confirm correct alignments to improve future back-translations; reject incorrect ones to penalize bad suggestions."
+            content={t("workspace.alignment.helpTooltipShort")}
             className="max-w-xs"
           >
             <span className="cursor-help text-muted-foreground/60 hover:text-muted-foreground">
@@ -264,7 +271,7 @@ export function InterlinearAlignmentPanel({
           </AppTooltip>
         </div>
         <p className="rounded-lg bg-muted/50 px-3 py-2.5 text-xs text-muted-foreground">
-          Keep translating — word-level alignments become meaningful once more sentences are validated.
+          {t("workspace.alignment.insufficientData")}
         </p>
       </div>
     )
@@ -278,10 +285,10 @@ export function InterlinearAlignmentPanel({
       <div className="flex items-center gap-1">
         {/* AQU-241: legend/help tooltip for the Alignment section (AQU-240: explains ✓/✕ controls) */}
         <span className="text-xs font-medium text-muted-foreground">
-          Alignment
+          {t("editor.bt.alignment")}
         </span>
         <AppTooltip
-          content="Word-level alignment: the statistical model links source and target tokens based on your translated cells. Confirm correct pairs to teach the glosser; reject wrong ones to penalize them. Both actions improve future back-translations. Only high-confidence suggestions are shown."
+          content={t("workspace.alignment.helpTooltipFull")}
           className="max-w-xs"
         >
           <span className="cursor-help text-muted-foreground/60 hover:text-muted-foreground">
@@ -318,7 +325,7 @@ export function InterlinearAlignmentPanel({
       {amberLinks.length > 0 && (
         <details className="rounded-md border border-amber-500/20 bg-amber-500/5">
           <summary className="select-none px-2 py-1 text-[10px] font-medium text-amber-700 dark:text-amber-400 hover:text-amber-800 dark:hover:text-amber-300 list-none flex items-center gap-1">
-            <span className="flex-1">Needs confirmation ({amberLinks.length})</span>
+            <span className="flex-1">{t("workspace.alignment.needsConfirmation", { count: amberLinks.length })}</span>
             <span className="text-[9px] text-muted-foreground/60">30–59%</span>
           </summary>
           <div className="flex flex-col gap-0.5 px-1 pb-1.5 pt-0.5">

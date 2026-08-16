@@ -14,6 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   open: boolean
@@ -22,24 +23,20 @@ interface Props {
 }
 
 export function LinkVideoTimingDialog({ open, onLinkAnyway, onCancel }: Props) {
+  const t = useT()
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel() }}>
       <DialogContent data-testid="link-video-timing-dialog">
         <DialogHeader>
-          <DialogTitle>This file uses Free timing — the video won't be shown</DialogTitle>
+          <DialogTitle>{t("workspace.linkVideoTiming.title")}</DialogTitle>
           <DialogDescription>
-            A linked video plays on the original recording's timing. This
-            file is set to Free timing, where the timeline re-flows to the
-            translations' own lengths, so the video will stay hidden until the
-            file switches back to Original's timing — a maintainer can change
-            that any time with the timing control in the Media timeline, and
-            switching is lossless.
+            {t("workspace.linkVideoTiming.description")}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button variant="outline" onClick={onCancel}>Cancel</Button>
+          <Button variant="outline" onClick={onCancel}>{t("common.cancel")}</Button>
           <Button data-testid="link-video-anyway" onClick={onLinkAnyway}>
-            Link anyway
+            {t("workspace.linkVideoTiming.linkAnyway")}
           </Button>
         </DialogFooter>
       </DialogContent>

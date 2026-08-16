@@ -270,6 +270,7 @@ export function AiModelsStep({ project, onUpdated }: AiModelsStepProps) {
                         onChange={(e) => { setGeminiKey(e.target.value); if (geminiError) setGeminiError(null) }}
                         onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commitGeminiKey() } }}
                         onBlur={() => { if (geminiKey.trim()) commitGeminiKey() }}
+                        // i18n-exempt: fixed technical format example (Gemini API keys start "AIza"), not translatable prose
                         placeholder="AIza..."
                         autoComplete="off"
                         spellCheck={false}

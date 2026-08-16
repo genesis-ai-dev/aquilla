@@ -39,6 +39,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { DataTableColumnHeader } from "@/components/ui/data-table-column-header"
 import { cn } from "@/lib/utils"
 import { MoreHorizontal, Search } from "lucide-react"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 function columnMetaClass(meta: unknown) {
   const m = meta as { align?: "right"; className?: string; hidden?: boolean } | undefined
@@ -158,6 +159,7 @@ function DataTable<TData, TValue>({
   tableClassName,
   fillHeight = false,
 }: DataTableProps<TData, TValue>) {
+  const t = useT()
   const [sorting, setSorting] = React.useState<SortingState>(
     () => (initialSorting?.length ? initialSorting : defaultSorting(columns)),
   )
@@ -304,7 +306,7 @@ function DataTable<TData, TValue>({
               ) : (
                 <TableRow>
                   <TableCell colSpan={table.getVisibleLeafColumns().length} className="h-24 text-center">
-                    No results.
+                    {t("workspace.dataTable.noResults")}
                   </TableCell>
                 </TableRow>
               )}

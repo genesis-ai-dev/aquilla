@@ -1713,3 +1713,11 @@ Named so a reviewer does not read their absence as an oversight:
 - **Routing that creates an invite.** `assignDecision` accepts an `inviteId`; minting one from a decision is part of the onboarding/invite work.
 - **Mandate, budgets, and the escalation metrics.** Spec §4.2 — these need the supervisor to have something to measure.
 - **Expiry scheduling.** `expireDecisionsOlderThan` exists and is tested; nothing calls it on a timer yet, because the scheduled-job substrate does not exist (spec §8, the one genuinely missing piece).
+
+## Follow-ups this plan deliberately leaves for the wiring task
+
+Found during execution and verified. None can fire while nothing calls `blockRunOnDecision`, which is why they are recorded rather than fixed here — but the task that wires the supervisor into the tick **must** handle them, and it should start from this list.
+
+1. **`waiting` is missing from the wire-frame status allowlists**, so a `waiting` frame is silently dropped and the run pill freezes on its last-known status — the exact "blocked run looks like it is still working" failure the state exists to prevent. Three places: `sync-worker/src/contextual-frames.ts` (`ContextualBroadcastRunStatus` and `RUN_STATUSES`, which returns `null` on an unknown status), `src/lib/sync/ws-reconciler.ts` (`CONTEXTUAL_FRAME_STATUSES`), and `src/lib/contextual/run-store.ts` (the SPA's own `ContextualRunStatus`). Nothing catches this at compile time: auth-worker's `ContextualRunStateFrame` types `status` as the full union, so a `waiting` frame is constructed happily and only fails at sync-worker's runtime validator.
+2. **A terminated or failed run keeps its `blocked_on_decision_id`**, because `transitionRun` writes only `status`/`last_error`/`updated_at`. The decision it names stays `open` with no live run behind it. The wiring task should resolve that decision — `dismissDecision` and `supersedeDecisions` already exist for this.
+3. **The project fan-out skip reason says "already running"** for a file whose lane a `waiting` run holds (`auth-worker/src/routes/contextual.ts:631-639`). Behaviour is right, the copy is imprecise.

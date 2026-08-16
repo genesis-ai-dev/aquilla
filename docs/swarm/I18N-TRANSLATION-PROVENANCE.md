@@ -79,6 +79,24 @@ names, file formats, protocol/unit tokens, and values the app *parses* rather th
   "tracking", "cloud") as machine-readable codes. The sweep pass recovered 140 of them. If
   another locale is ever added, expect this failure mode and budget for the second pass.
 
+## Why coverage can never read 100%
+
+About 50 keys per locale have an English form that IS the correct translation: file formats
+(`USFM`, `XLIFF 1.2`, `PO/POT, Java properties`), product names (`Google Drive`,
+`PowerPoint (.pptx)`, `Door43 (DCS)`), domain hints (`helloao.org`, `UBS MARBLE`), and
+pure-placeholder templates (`{role} ({level})`, `{pct}% · {loaded} / {total}`,
+` ({completed}/{total})`).
+
+`parseTranslatedCatalog` deliberately treats a value equal to its English source as
+"not translated" and skips it, so these keys are never written into a locale catalog and
+**`pnpm i18n:todo` will list them again on every future run**. That is correct behaviour, not
+a bug or an incomplete pass: the alternative is writing a redundant copy of the English into
+four catalogs, which buys nothing and makes real drift harder to spot.
+
+Practical consequence: **do not chase 100%.** The only way to reach it is to "translate" keys
+that must not be translated. A locale sitting at ~98-99% with a stable ~50-key remainder of
+formats and product names is the finished state.
+
 ## Re-running this
 
 `pnpm i18n:todo` regenerates the delta at any time — it reports untranslated *and* stale

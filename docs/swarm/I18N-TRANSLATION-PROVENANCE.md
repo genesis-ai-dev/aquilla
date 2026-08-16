@@ -1,0 +1,87 @@
+# Translation provenance — `th` / `my` / `mfa` / `ar`
+
+**Read this before treating any non-English catalog as reviewed.**
+
+## What these translations are
+
+Every string added to `src/lib/i18n/messages/{th,my,mfa,ar}.ts` in this pass was produced by
+**LLM translation agents (Claude Haiku)**, not by a human speaker of the target language. No
+`th`, `my`, `mfa`, or `ar` speaker has read them.
+
+This follows existing precedent in this repo — commits `28618fd3` ("populate th/my/mfa/ar
+catalogs"), `858a4df2`, and `55f0b35f` ("translate the wave-4 catalog across four locales")
+did the same. It does **not** supersede the standing position in
+`docs/swarm/I18N-ORCHESTRATION.md`: Biblica's `my`/`mfa` reviewers and the `th` consultant
+remain the real gate, and an unreviewed catalog shipped *as if* reviewed is worse than an
+empty one, because the English fallback is honest.
+
+`source-hashes.json` records the English source each key was translated against, so when an
+English string later changes, `pnpm i18n:todo` reports the translation as **stale** rather
+than silently shipping a translation that now describes something else.
+
+## Coverage after this pass
+
+| Locale | Keys translated | Of base | Left as English |
+| --- | ---: | ---: | ---: |
+| `th` Thai | 4,085 | 4,141 | 56 |
+| `my` Burmese | 4,089 | 4,141 | 52 |
+| `mfa` Patani Malay | 4,070 | 4,141 | 71 |
+| `ar` Arabic | 4,097 | 4,141 | 44 |
+
+Baseline before this pass was ~93% for each. The keys still in English are deliberate: product
+names, file formats, protocol/unit tokens, and values the app *parses* rather than displays.
+
+## How it was produced
+
+1. `pnpm i18n:todo` emitted, per locale, only the untranslated and stale leaves (3,567 total)
+   with each one's English source and translator context note.
+2. Those were compacted (the namespace `Surface:` paragraph was repeated verbatim on every
+   leaf — ~80% of the bytes — so it was hoisted once per namespace) and split into 140-leaf
+   chunks.
+3. 12 agents translated the chunks against a shared brief; 4 more did a second **sweep pass**
+   over leaves returned identical to English, to separate correct restraint from misses.
+4. A validator merged the results and **dropped** any leaf whose `{placeholder}` set differed
+   from the English before import.
+5. `pnpm i18n:import <locale>` (merge, not replace) regenerated each catalog.
+
+## What was verified mechanically
+
+- **Placeholder integrity — 0 drift across all 3,567 leaves.** Any leaf whose placeholders
+  did not match English would have been dropped rather than imported (it would render literal
+  braces to the user). None had to be.
+- **0 missing, 0 hallucinated keys** — every leaf asked for came back, none invented.
+- **0 violations of documented `maxLength`** in any locale.
+- `src/lib/i18n/messages/placeholders.test.ts` now enforces the placeholder rule permanently,
+  on every future import. It was verified non-vacuous by renaming `{language}` to `{langue}`
+  in `th.ts` and confirming it fails.
+- `pnpm i18n:check` clean (4,141 keys covered); `npm run build` clean.
+
+## What was NOT verified, and needs a human
+
+- **Meaning.** Nothing here checks that a translation says what the English says. Mechanical
+  checks cannot catch a fluent, confident mistranslation.
+- **Register and terminology consistency** across 4,000 keys, especially the Bible-translation
+  domain vocabulary (source/target, cell, draft, staged vs applied).
+- **Arabic plural correctness.** Arabic needs six CLDR forms where English writes two; the
+  agents reported producing grammatically distinct forms per category (one group of six per
+  counted message, ~53 distinct plural groups), but "distinct" is not "correct". The dual
+  (`#two`) and `#few`/`#many` distinctions are the most likely place for errors.
+- **`mfa` (Patani Malay) is the weakest of the four and should be reviewed first.** Its sweep
+  agent returned **zero** additional translations, arguing that "Audio", "Media", "Metadata",
+  "Status", "Format", "Model" and "Beta" are established loan words in professional Malay
+  technical UI and that translating them would make them *less* recognizable. That argument is
+  defensible, but the agent also visibly reversed its own reasoning mid-report, and `mfa` ends
+  with more untranslated leaves (71) than any other locale. A Patani Malay speaker should
+  confirm or overturn this — it was left standing rather than overridden, because it is a
+  language judgment no one on this side of the work is qualified to make.
+- **`th` (Thai) first-pass conservatism.** Its first-pass agent left 196 leaves in English,
+  far more than the other locales, classifying ordinary UI words ("Scopes", "blocked",
+  "tracking", "cloud") as machine-readable codes. The sweep pass recovered 140 of them. If
+  another locale is ever added, expect this failure mode and budget for the second pass.
+
+## Re-running this
+
+`pnpm i18n:todo` regenerates the delta at any time — it reports untranslated *and* stale
+leaves, so after English copy changes it will surface exactly what drifted. The chunking,
+validation and sweep scripts used here were orchestration-side and are not committed; the
+durable pieces are `scripts/i18n-todo.ts`, `scripts/i18n-catalog.ts`, and the placeholder test.

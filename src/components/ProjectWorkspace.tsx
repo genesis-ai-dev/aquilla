@@ -967,8 +967,10 @@ export function ProjectWorkspace() {
   // card — the Gemini/TTS key entry is then visible without scrolling to find it.
   const openAudioSetup = useCallback(() => {
     if (!projectId) return
-    navigate(`/project/${projectId}/settings?q=gemini`)
-  }, [navigate, projectId])
+    navigate(`/project/${projectId}/settings?q=gemini`, {
+      state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+    })
+  }, [location, navigate, projectId])
   const editorRef = useRef<EditorTableHandle>(null)
   // The section highlighted on the Dialogue timeline. Lifted here so the bottom
   // playback bar (a sibling of the timeline) can start playback from it (AQU-666).
@@ -4449,16 +4451,21 @@ export function ProjectWorkspace() {
 
   const openProjectSettings = useCallback(() => {
     if (!projectId) return
-    window.location.assign(buildProjectSettingsHandoffUrl({
-      projectId,
-      returnTo: workspaceReturnPath(projectId, activeFileId),
-    }))
-  }, [projectId, activeFileId])
+    navigate(
+      buildProjectSettingsHandoffUrl({
+        projectId,
+        returnTo: workspaceReturnPath(projectId, activeFileId),
+      }),
+      { state: { backgroundLocation: location, projectSettingsModalDepth: 1 } },
+    )
+  }, [projectId, activeFileId, location, navigate])
 
   const projectNavItems = useMemo(() => {
     const items = [
       { id: "rules", labelKey: "nav.sidebarSection.rules" as const, icon: Scale,
-        onClick: () => navigate(`/project/${projectId}/rules`) },
+        onClick: () => navigate(`/project/${projectId}/settings/rules`, {
+          state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+        }) },
       // Pinned below Comments: Terminology is a frequent destination, so it
       // stays visible; everything else unpinned collapses into "More".
       { id: "comments", labelKey: "common.comments" as const, icon: MessagesSquare, pinned: true,
@@ -4467,20 +4474,16 @@ export function ProjectWorkspace() {
       { id: "terminology", labelKey: "nav.sidebarSection.terminology" as const, icon: BookOpen, pinned: true,
         onClick: () => openOverlay("terminology") },
       { id: "living-memory", labelKey: "nav.sidebarSection.memory" as const, icon: BookMarked,
-        onClick: () => navigate(`/project/${projectId}/memory`) },
+        onClick: () => navigate(`/project/${projectId}/settings/memory`, {
+          state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+        }) },
       // Audio/Media lens lives in the header EditorModeToggle — keep it out of
       // the sidebar More menu so the overflow list stays structural (share,
       // settings, trash) rather than view-mode toggles.
       { id: "share", labelKey: "nav.sidebarSection.share" as const, icon: Share2,
         onClick: () => setShareOpen(true) },
       { id: "settings", labelKey: "nav.settings" as const, icon: SettingsIcon,
-        onClick: () => {
-          if (!projectId) return
-          window.location.assign(buildProjectSettingsHandoffUrl({
-            projectId,
-            returnTo: workspaceReturnPath(projectId, activeFileId),
-          }))
-        } },
+        onClick: openProjectSettings },
       // FRO-272: trash moved out of the always-visible files footer into the
       // "More" menu — it opens a dialog now (project_lead+ only).
       ...(currentRoleLevel >= ROLE.PROJECT_LEAD
@@ -4489,7 +4492,7 @@ export function ProjectWorkspace() {
         : []),
     ]
     return items
-  }, [openCommentCount, currentRoleLevel, openOverlay])
+  }, [openCommentCount, currentRoleLevel, location, navigate, openOverlay, openProjectSettings, projectId])
 
   // AQU-646 P0: cells from the store never carry audio attachments — only
   // mergeCellsWithAudio adds them (EditorTable and VoicePlaybackBar each merge
@@ -5760,7 +5763,7 @@ export function ProjectWorkspace() {
               <DcsSyncBadgeMount
                 projectId={projectId}
                 roleLevel={serverRoleLevel}
-                onClick={() => navigate(`/project/${projectId}/settings`)}
+                onClick={openProjectSettings}
               />
             )}
 
@@ -6119,7 +6122,9 @@ export function ProjectWorkspace() {
             // Project Info + Languages sections (both carry the "target language"
             // keyword), where the field is edited (server enforces the role floor).
             onEditTargetLanguage={() =>
-              navigate(`/project/${projectId}/settings?q=${encodeURIComponent("target language")}`)
+              navigate(`/project/${projectId}/settings?q=${encodeURIComponent("target language")}`, {
+                state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+              })
             }
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}

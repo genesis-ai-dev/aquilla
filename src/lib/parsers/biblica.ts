@@ -1,10 +1,13 @@
 import type { IdmlProgress } from "@aquilla/idml-roundtrip"
 import { parseIdmlInWorker } from "@/lib/idml/idml-worker-client"
 import {
+  isBiblicaFrontBackMatterPackage,
   selectBiblicaStudyNotes,
+  type BiblicaNoteSection,
   type BiblicaStudyNoteSelection,
 } from "@/lib/biblica/study-notes"
 import { IDML_REJOIN_METADATA_KEY, idmlRejoinMetadata } from "@/lib/idml/rejoin"
+import type { ImportMilestone } from "../../../shared/import-contract"
 import { idmlUnitToTranslatableString, type IdmlParseExecutor } from "./idml"
 import type { TranslatableString } from "./types"
 
@@ -22,6 +25,13 @@ export interface BiblicaStudyNotesParseResult {
   strings: TranslatableString[]
   /** Book codes encountered, in first-seen order. */
   bookCodes: string[]
+  /**
+   * True when the package was read as a front/back matter volume: contents,
+   * "how to use", the Bible Dictionary, the timelines, the maps, the cover.
+   * Those hold no scripture, so an empty result is a legitimate outcome
+   * (the maps volume is artwork) rather than the wrong edition.
+   */
+  frontBackMatter: boolean
   skipped: Pick<BiblicaStudyNoteSelection, "verseUnitCount" | "otherUnitCount">
 }
 
@@ -32,6 +42,11 @@ export interface BiblicaStudyNotesParseResult {
  * reinterpreted, then filtered to the note paragraphs. Scripture is deliberately
  * left out: it is set from the publisher's Bible files, not translated here.
  * Verse runs still drive each note's book and chapter-range label.
+ *
+ * The study Bible's front and back matter ships as separate volumes with no
+ * scripture in them at all, which is how they are recognized. They set their
+ * text in layout styles rather than in `intro:*`, so there every text-bearing
+ * paragraph becomes a cell and the headings — rather than chapters — group them.
  */
 export async function extractBiblicaStudyNoteStrings(
   buffer: ArrayBuffer,
@@ -42,19 +57,32 @@ export async function extractBiblicaStudyNoteStrings(
     ...(options?.signal ? { signal: options.signal } : {}),
     ...(options?.onProgress ? { onProgress: options.onProgress } : {}),
   })
+  const frontBackMatter = isBiblicaFrontBackMatterPackage(result.units)
   const selection = selectBiblicaStudyNotes(result.units, {
     ...(options?.splitSentences !== undefined
       ? { splitSentences: options.splitSentences }
       : {}),
+    frontBackMatter,
   })
 
   const bookCodes: string[] = []
+  // Section badges number the headings in the order they appear, which is
+  // deterministic for one package and so stable across re-imports.
+  const sectionOrdinals = new Map<string, number>()
+
   const strings = selection.notes.map((note) => {
     if (note.bookCode && !bookCodes.includes(note.bookCode)) bookCodes.push(note.bookCode)
     const value = idmlUnitToTranslatableString(note.unit)
+    const milestone = note.section
+      ? sectionMilestone(note.section, sectionOrdinals)
+      : undefined
+    const chapterSection = note.bookCode
+      ? `${note.bookCode} ${note.chapterLabel}`
+      : note.chapterLabel
     return {
       ...value,
-      section: note.bookCode ? `${note.bookCode} ${note.chapterLabel}` : note.chapterLabel,
+      ...(milestone ? { milestone, section: milestone.label } : {}),
+      ...(!milestone && chapterSection ? { section: chapterSection } : {}),
       ...(note.bookCode ? { globalReferences: [note.bookCode] } : {}),
       metadata: {
         ...value.metadata,
@@ -72,8 +100,11 @@ export async function extractBiblicaStudyNoteStrings(
           : {}),
         biblica: {
           version: 1,
-          contentType: "notes",
-          chapterLabel: note.chapterLabel,
+          contentType: frontBackMatter ? "front-back-matter" : "notes",
+          ...(note.chapterLabel ? { chapterLabel: note.chapterLabel } : {}),
+          ...(note.section
+            ? { sectionId: note.section.id, sectionLabel: note.section.label }
+            : {}),
           ...(note.bookCode ? { bookCode: note.bookCode } : {}),
           ...(note.unit.paragraphStyleId
             ? { paragraphStyle: note.unit.paragraphStyleId }
@@ -86,9 +117,29 @@ export async function extractBiblicaStudyNoteStrings(
   return {
     strings,
     bookCodes,
+    frontBackMatter,
     skipped: {
       verseUnitCount: selection.verseUnitCount,
       otherUnitCount: selection.otherUnitCount,
     },
+  }
+}
+
+/**
+ * A heading-titled section navigates by its own name — "Israelʼs covenant
+ * history", or a Bible Dictionary letter — badged with its position in the
+ * volume, because the heading itself is too long to sit in a badge.
+ */
+function sectionMilestone(
+  section: BiblicaNoteSection,
+  ordinals: Map<string, number>,
+): ImportMilestone {
+  const ordinal = ordinals.get(section.id) ?? ordinals.size + 1
+  ordinals.set(section.id, ordinal)
+  return {
+    key: `biblica:section:${section.id}`,
+    kind: "section",
+    label: section.label,
+    shortLabel: section.label.length <= 2 ? section.label : String(ordinal),
   }
 }

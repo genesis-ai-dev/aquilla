@@ -18,7 +18,9 @@ import {
 import type { CellData } from "@/hooks/useCells"
 import {
   BIBLICA_STORY_PATH,
+  FRONT_BACK_MATTER,
   SAMPLE_NOTES,
+  biblicaFrontBackMatterStory,
   makeBiblicaIdml,
   note,
   noteWithTrailingVerseMarker,
@@ -200,6 +202,33 @@ describe("IDML export of a note block that was imported as several cells", () =>
     // needs them to close Matthew's last verse.
     expect(story).toContain(`<Content>28:</Content>`)
     expect(story.match(/<Content>20<\/Content>/g)).toHaveLength(2)
+    expect(result.report).toMatchObject({ missing: 0, rejected: 0 })
+  })
+
+  it("writes a translated front/back matter volume back into its layout paragraphs", async () => {
+    const { bytes, cells } = await importBiblicaCells(biblicaFrontBackMatterStory)
+
+    expect(cells.map((cell) => cell.original)).toEqual([
+      FRONT_BACK_MATTER.title,
+      FRONT_BACK_MATTER.firstLetter,
+      FRONT_BACK_MATTER.firstEntry,
+      FRONT_BACK_MATTER.firstBody.join(""),
+      FRONT_BACK_MATTER.secondLetter,
+      FRONT_BACK_MATTER.secondEntry,
+    ])
+    for (const cell of cells) translate(cell)
+
+    const result = await exportIdml(bytes, cells, directExecutor)
+    const story = await storyOf(result.blob)
+
+    expect(story).toContain(`<Content>${FRONT_BACK_MATTER.title.toUpperCase()}</Content>`)
+    expect(story).toContain(`<Content>${FRONT_BACK_MATTER.firstEntry.toUpperCase()}</Content>`)
+    // The apostrophe is an ordinary possessive here, so its run is written back
+    // with the words around it rather than held at the publisher's text.
+    expect(story).toContain(`<Content>${FRONT_BACK_MATTER.firstBody[0].toUpperCase()}</Content>`)
+    expect(story).toContain(`<Content>${FRONT_BACK_MATTER.firstBody[2].toUpperCase()}</Content>`)
+    // The running head owns no cell, so InDesign's own text survives untouched.
+    expect(story).toContain(`<Content>${FRONT_BACK_MATTER.runningHead}</Content>`)
     expect(result.report).toMatchObject({ missing: 0, rejected: 0 })
   })
 

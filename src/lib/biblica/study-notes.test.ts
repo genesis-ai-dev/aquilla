@@ -4,10 +4,16 @@ import {
   type IdmlTextSlot,
   type IdmlTranslationUnit,
 } from "@aquilla/idml-roundtrip"
-import { selectBiblicaStudyNotes } from "./study-notes"
+import { isBiblicaFrontBackMatterPackage, selectBiblicaStudyNotes } from "./study-notes"
 import {
+  FRONT_BACK_MATTER,
   SAMPLE_NOTES,
+  biblicaFrontBackMatterStory,
   biblicaSampleStory,
+  bookTitle,
+  closedVerse,
+  divisionHeading,
+  layoutText,
   makeBiblicaIdml,
   note,
   noteList,
@@ -395,6 +401,153 @@ describe("Biblica study-note selection", () => {
 
     expect(selection.notes.map((entry) => entry.unit.sourceText))
       .toEqual(["Creation: Genesis 1:1 – 2:25."])
+  })
+
+  it("gives a division heading and its description a section of their own", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "GEN")),
+      // InDesign stores the typesetter's soft hyphens inside the heading text.
+      divisionHeading("p-div", "Israel\u02BCs cove\u00adnant history"),
+      note("p-div-body", "The books from Genesis to Esther record Israel's story."),
+      bookTitle("p-title", "Genesis"),
+      note("p-pref", SAMPLE_NOTES.preface),
+      closedVerse("p-v1", "1", "In the beginning God created.", "1"),
+      note("p-n1", SAMPLE_NOTES.afterChapterOne, "intro%3aipi"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [
+      entry.unit.sourceText,
+      entry.section?.label,
+      entry.chapterLabel,
+      entry.bookCode,
+    ])).toEqual([
+      // The heading names a group of books, so its cells carry no book and no
+      // chapter range — the soft hyphens stay in the text but not in the label.
+      ["Israel\u02BCs cove\u00adnant history", "Israel\u02BCs covenant history", undefined, undefined],
+      [
+        "The books from Genesis to Esther record Israel's story.",
+        "Israel\u02BCs covenant history",
+        undefined,
+        undefined,
+      ],
+      // The book title ends the division: Genesis owns everything after it.
+      ["Genesis", undefined, "Preface", "GEN"],
+      [SAMPLE_NOTES.preface, undefined, "Preface", "GEN"],
+      [SAMPLE_NOTES.afterChapterOne, undefined, "1", "GEN"],
+    ])
+  })
+
+  it("recognizes a front/back matter volume by what it does not contain", async () => {
+    const frontBack = await parseIdml(await makeBiblicaIdml(biblicaFrontBackMatterStory))
+    const bookVolume = await parseIdml(await makeBiblicaIdml())
+
+    expect(isBiblicaFrontBackMatterPackage(frontBack.units)).toBe(true)
+    expect(isBiblicaFrontBackMatterPackage(bookVolume.units)).toBe(false)
+    // The maps volume is artwork: nothing parses out of it at all.
+    expect(isBiblicaFrontBackMatterPackage([])).toBe(true)
+    // A notes-only excerpt is still a book volume — it names its book and sets
+    // its text in intro/* styles, so it must not be read as layout text.
+    const notesOnly = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "GEN")),
+      note("p-n", SAMPLE_NOTES.preface),
+    ]))
+    expect(isBiblicaFrontBackMatterPackage(notesOnly.units)).toBe(false)
+
+    // Biblica's other titles hold no study-Bible chapter markers either, but
+    // they are not this importer's to read — each has a template of its own,
+    // whether it groups its styles (Reach 4 Life) or names them flat (the
+    // Treasure Hunt Bible, whose front matter is `par` / `toc_l2` / `fm_title`).
+    for (const style of ["R4Lv4 Paragraph Styles%3aLesson body", "%21meta_par", "par", "toc_l2"]) {
+      const foreign = await parseIdml(await makeBiblicaIdml([
+        paragraph("p-f", style, run("$ID/[No character style]", "Whose text is this?")),
+      ]))
+      expect(isBiblicaFrontBackMatterPackage(foreign.units)).toBe(false)
+    }
+
+    // The cover is artwork with a few lines of type over it, set in InDesign's
+    // default style — it belongs to no template, so nothing rules it out.
+    const cover = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-c", "%24ID%2fNormalParagraphStyle", run("$ID/[No character style]", "Study Bible")),
+    ]))
+    expect(isBiblicaFrontBackMatterPackage(cover.units)).toBe(true)
+  })
+
+  it("imports every text-bearing paragraph of a front/back matter volume, grouped by heading", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml(biblicaFrontBackMatterStory))
+    const selection = selectBiblicaStudyNotes(parsed.units, { frontBackMatter: true })
+
+    expect(selection.notes.map((entry) => [entry.unit.sourceText, entry.section?.label])).toEqual([
+      [FRONT_BACK_MATTER.title, FRONT_BACK_MATTER.title],
+      [FRONT_BACK_MATTER.firstLetter, FRONT_BACK_MATTER.firstLetter],
+      [FRONT_BACK_MATTER.firstEntry, FRONT_BACK_MATTER.firstLetter],
+      [FRONT_BACK_MATTER.firstBody.join(""), FRONT_BACK_MATTER.firstLetter],
+      [FRONT_BACK_MATTER.secondLetter, FRONT_BACK_MATTER.secondLetter],
+      [FRONT_BACK_MATTER.secondEntry, FRONT_BACK_MATTER.secondLetter],
+    ])
+    // A volume with no chapters labels nothing by chapter, and belongs to no book.
+    expect(selection.notes.every((entry) => (
+      entry.chapterLabel === undefined && entry.bookCode === undefined
+    ))).toBe(true)
+    // Only the running head is left out — InDesign regenerates it from the layout.
+    expect(selection.otherUnitCount).toBe(1)
+    expect(selection.notes.map((entry) => entry.unit.sourceText))
+      .not.toContain(FRONT_BACK_MATTER.runningHead)
+  })
+
+  it("opens a section at the title page and at the contents, so nothing hangs before the first heading", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-t", "title%3amt1", run("$ID/[No character style]", "HOLY BIBLE")),
+      layoutText("p-c", "Copyright \u00a9 2025 by Biblica, Inc.", "text%3apc"),
+      paragraph("p-toc", "toc%3atoc_hd", run("$ID/[No character style]", "Contents")),
+      layoutText("p-g", "Genesis 6", "toc%3aTOC body text"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units, { frontBackMatter: true })
+
+    expect(selection.notes.map((entry) => entry.section?.label))
+      .toEqual(["HOLY BIBLE", "HOLY BIBLE", "Contents", "Contents"])
+  })
+
+  it("reads a heading InDesign broke over several lines as one label", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      noteList("p-h", ["The Drama of the Bible:", "a visual chronology"], "intro%3aimt2"),
+      layoutText("p-1", "Act 1 begins in a garden."),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units, { frontBackMatter: true })
+
+    // Each line is its own cell, but the label reads as the heading was set —
+    // without the space the two lines would run together into one word.
+    expect(selection.notes.map((entry) => entry.unit.sourceText))
+      .toEqual(["The Drama of the Bible:", "a visual chronology", "Act 1 begins in a garden."])
+    expect(selection.notes.every((entry) => (
+      entry.section?.label === "The Drama of the Bible: a visual chronology"
+    ))).toBe(true)
+  })
+
+  it("keeps two sections with the same heading apart", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-a", "head%3ams1", run("$ID/[No character style]", "A")),
+      paragraph("p-a1", "text%3am", run("$ID/[No character style]", "The first A entry.")),
+      paragraph("p-b", "head%3ams1", run("$ID/[No character style]", "A")),
+      paragraph("p-b1", "text%3am", run("$ID/[No character style]", "The second A entry.")),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units, { frontBackMatter: true })
+
+    const ids = selection.notes.map((entry) => entry.section?.id)
+    expect(new Set(ids).size).toBe(2)
+    expect(selection.notes.every((entry) => entry.section?.label === "A")).toBe(true)
+  })
+
+  it("reads an apostrophe slot as text in front/back matter and as glue in a book volume", () => {
+    const apostrophe = [
+      syntheticUnit("ParagraphStyle/intro%3aip", [["\u02BC", "CharacterStyle/source serif"]], 0),
+    ]
+
+    // In a book volume that slot is InDesign glue, so the paragraph holds no
+    // words of its own. In prose-heavy front/back matter it is a possessive.
+    expect(selectBiblicaStudyNotes(apostrophe).notes).toEqual([])
+    expect(selectBiblicaStudyNotes(apostrophe, { frontBackMatter: true }).notes)
+      .toHaveLength(1)
   })
 
   it("returns nothing for a package with no note paragraphs", async () => {

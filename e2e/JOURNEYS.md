@@ -76,7 +76,7 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 | Journey | Spec |
 | --- | --- |
 | IDML roundtrip / IME / protected slots | `e2e/specs/editor/idml-roundtrip.spec.ts` |
-| Biblica study notes import | `e2e/specs/editor/import-biblica-study-notes.spec.ts` |
+| Biblica study notes import (incl. division bookmarks + front/back matter volumes) | `e2e/specs/editor/import-biblica-study-notes.spec.ts` |
 | Treasure Hunt Bible import | `e2e/specs/editor/import-treasure-hunt-bible.spec.ts` |
 | Reach 4 Life import | `e2e/specs/editor/import-reach4life.spec.ts` |
 | Contextual run pill | `e2e/specs/contextual/run-pill.spec.ts` |

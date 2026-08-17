@@ -87,6 +87,20 @@ export function verseMarkerOnlyNote(self: string, chapter: string, verse: string
 }
 
 /**
+ * The `intro:imt2` heading that opens a division — a group of books such as
+ * "Israelʼs covenant history". InDesign sets it inside the following book's
+ * front matter, and stores the typesetter's soft hyphens in the text itself.
+ */
+export function divisionHeading(self: string, text: string): string {
+  return paragraph(self, "intro%3aimt2", run(PLAIN, text))
+}
+
+/** The `intro:imt1` book title that closes a division and opens a preface. */
+export function bookTitle(self: string, text: string): string {
+  return paragraph(self, "intro%3aimt1", run(PLAIN, text))
+}
+
+/**
  * One note paragraph whose lines are separated by `<Br/>` — how Biblica sets a
  * cross-reference list, a glossary, or an outline.
  */
@@ -152,6 +166,52 @@ export const biblicaSampleStory: readonly string[] = [
   note("p-n3", SAMPLE_NOTES.psalmNote, "intro%3ad_h"),
   noteList("p-n4", SAMPLE_NOTES.referenceList),
   note("p-n5", SAMPLE_NOTES.noteBlock),
+]
+
+/**
+ * A paragraph of a front/back matter volume: its text sits in a layout style
+ * (`text:*`, `toc:*`, `title:*`, `Box Text`) rather than in an `intro:*` note.
+ */
+export function layoutText(self: string, body: string, style = "text%3am"): string {
+  return paragraph(self, style, run(PLAIN, body))
+}
+
+/** The `head:ms1` heading that opens a section of a front/back volume. */
+export function majorSectionHeading(self: string, text: string): string {
+  return paragraph(self, "head%3ams1", run(PLAIN, text))
+}
+
+export const FRONT_BACK_MATTER = {
+  title: "Bible Dictionary",
+  firstLetter: "A",
+  firstEntry: "Aaron: Exodus 4:14. Page 89",
+  /** Prose whose apostrophe is an ordinary possessive, not structural glue. */
+  firstBody: ["Aaron was Moses", "\u02BC", "s brother and the first priest."],
+  runningHead: "Bible Dictionary 1701",
+  secondLetter: "B",
+  secondEntry: "Babel: Genesis 11:1\u20139. Page 24",
+} as const
+
+/**
+ * A front/back matter volume, in the shape the Bible Dictionary has: a title,
+ * a section per alphabet letter, entries and prose in layout styles, and the
+ * running heads InDesign regenerates on every page. No book marker and no
+ * verse markers anywhere — which is what says it is not a book volume.
+ */
+export const biblicaFrontBackMatterStory: readonly string[] = [
+  paragraph("p-title", "intro%3aimt2", run(PLAIN, FRONT_BACK_MATTER.title)),
+  majorSectionHeading("p-a", FRONT_BACK_MATTER.firstLetter),
+  layoutText("p-a1", FRONT_BACK_MATTER.firstEntry, "text%3ap"),
+  paragraph(
+    "p-a2",
+    "text%3am",
+    run(PLAIN, FRONT_BACK_MATTER.firstBody[0])
+      + run("source serif", FRONT_BACK_MATTER.firstBody[1])
+      + run(PLAIN, FRONT_BACK_MATTER.firstBody[2]),
+  ),
+  paragraph("p-rh", "meta%3arh", run(PLAIN, FRONT_BACK_MATTER.runningHead)),
+  majorSectionHeading("p-b", FRONT_BACK_MATTER.secondLetter),
+  layoutText("p-b1", FRONT_BACK_MATTER.secondEntry, "text%3ap"),
 ]
 
 export function makeBiblicaIdml(

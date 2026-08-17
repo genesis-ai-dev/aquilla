@@ -1292,6 +1292,11 @@ export interface BiblicaProgress {
  * scripture instead, so everything set around the Bible text is imported —
  * facts and hunts, lessons and journeys, book introductions and front matter.
  * See `@/lib/biblica/treasure-hunt/notes` and `@/lib/biblica/reach4life/notes`.
+ *
+ * The study Bible's own front and back matter — contents, "how to use", the
+ * Bible Dictionary, the timelines, the maps, the cover — ships as separate
+ * volumes holding no scripture at all, which is how the reader recognizes them
+ * without another toggle. There every text-bearing paragraph is a cell.
  */
 export interface BiblicaImportOptions {
   /**
@@ -1327,13 +1332,19 @@ export async function importBiblicaStudyNotes(
       ? { splitSentences: options.splitSentences }
       : {}),
   }
-  const { strings, bookCodes, skippedScriptureCount } = await parseBiblicaEdition(
+  const { strings, bookCodes, skippedScriptureCount, frontBackMatter } = await parseBiblicaEdition(
     edition,
     parseBuffer,
     parseOptions,
   )
 
-  if (strings.length === 0) throw new Error(emptyBiblicaImportMessage(edition, file.name))
+  // A study-Bible volume that yields nothing was almost certainly read with the
+  // wrong edition. A front/back matter volume that yields nothing is simply
+  // artwork — the maps and plates hold no text — and still imports, so the file
+  // stays part of the project and exports back unchanged.
+  if (strings.length === 0 && !frontBackMatter) {
+    throw new Error(emptyBiblicaImportMessage(edition, file.name))
+  }
 
   const name = file.name.replace(/\.idml$/i, "").replace(/[-_]?notes$/i, "").trim() || file.name
   const normalized = normalizeTranslatableStrings(strings, {
@@ -1391,6 +1402,12 @@ interface BiblicaParseOutcome {
   bookCodes: string[]
   /** Paragraphs left out because they are the published Bible text. */
   skippedScriptureCount: number
+  /**
+   * The package is one of the study Bible's front/back matter volumes — no
+   * scripture anywhere, so an empty result is a legitimate artwork-only volume
+   * rather than a package read with the wrong edition.
+   */
+  frontBackMatter: boolean
 }
 
 /**
@@ -1409,16 +1426,31 @@ async function parseBiblicaEdition(
   if (edition === "treasure-hunt") {
     const { strings, bookCodes, skipped } =
       await extractTreasureHuntStrings(buffer, undefined, parseOptions)
-    return { strings, bookCodes, skippedScriptureCount: skipped.scriptureUnitCount }
+    return {
+      strings,
+      bookCodes,
+      skippedScriptureCount: skipped.scriptureUnitCount,
+      frontBackMatter: false,
+    }
   }
   if (edition === "reach4life") {
     const { strings, bookCodes, skipped } =
       await extractReach4LifeStrings(buffer, undefined, parseOptions)
-    return { strings, bookCodes, skippedScriptureCount: skipped.scriptureUnitCount }
+    return {
+      strings,
+      bookCodes,
+      skippedScriptureCount: skipped.scriptureUnitCount,
+      frontBackMatter: false,
+    }
   }
-  const { strings, bookCodes, skipped } =
+  const { strings, bookCodes, skipped, frontBackMatter } =
     await extractBiblicaStudyNoteStrings(buffer, undefined, parseOptions)
-  return { strings, bookCodes, skippedScriptureCount: skipped.verseUnitCount }
+  return {
+    strings,
+    bookCodes,
+    skippedScriptureCount: skipped.verseUnitCount,
+    frontBackMatter,
+  }
 }
 
 /**

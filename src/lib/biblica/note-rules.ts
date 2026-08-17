@@ -21,6 +21,53 @@ function hasStyleToken(styleName: string, prefix: string, suffix = ""): boolean 
   return styleName.includes(`${prefix}%3a${suffix}`) || styleName.includes(`${prefix}:${suffix}`)
 }
 
+/**
+ * The style groups the study-Bible template is built from. A volume may add
+ * groups of its own for a feature — the back matter sets its timeline under
+ * `Drama of the Bible:*` — but every study-Bible volume uses some of these.
+ */
+const STUDY_TEMPLATE_GROUPS: ReadonlySet<string> = new Set([
+  "intro", "meta", "head", "text", "toc", "title", "cv", "fig", "tbl", "list", "note", "ref",
+])
+
+/** The applied style as InDesign wrote it, with its path and encoding undone. */
+function decodeStyleName(styleName: string): string {
+  const name = styleName.startsWith("ParagraphStyle/")
+    ? styleName.slice("ParagraphStyle/".length)
+    : styleName
+  if (!name.includes("%")) return name
+  try {
+    return decodeURIComponent(name)
+  } catch {
+    return name
+  }
+}
+
+/**
+ * True for a paragraph set in the study Bible's own vocabulary (`intro:ip`,
+ * `text:m`, `cv:v1`, `title:mt1`).
+ *
+ * Biblica's other titles are built from templates that share none of it: the
+ * Treasure Hunt Bible names its styles `par`, `toc_l2`, `!meta_par`, `pNormal`,
+ * and Reach 4 Life groups its own under proper names (`R4Lv4 Paragraph
+ * Styles:Lesson body`, `Poetry:q1`). Recognizing that is what lets the importer
+ * say "tick the matching box" instead of importing the wrong thing.
+ */
+export function isBiblicaStudyTemplateStyle(paragraphStyle: string): boolean {
+  const name = decodeStyleName(paragraphStyle)
+  const group = name.split(":")[0]?.trim().toLowerCase() ?? ""
+  return name.includes(":") && STUDY_TEMPLATE_GROUPS.has(group)
+}
+
+/**
+ * True for InDesign's own unnamed defaults (`$ID/NormalParagraphStyle`). A
+ * package that uses nothing else — the study Bible's cover, which is artwork
+ * with a few lines of type over it — belongs to no template at all.
+ */
+export function isUnnamedParagraphStyle(paragraphStyle: string): boolean {
+  return decodeStyleName(paragraphStyle).startsWith("$ID/")
+}
+
 /** Note styles use the intro prefix (e.g. intro%3aipi, intro%3aili1). */
 export function isBiblicaNoteSectionStyle(paragraphStyle: string): boolean {
   return hasStyleToken(paragraphStyle, "intro")
@@ -29,6 +76,69 @@ export function isBiblicaNoteSectionStyle(paragraphStyle: string): boolean {
 /** The paragraph whose text is the 2–4 character book abbreviation. */
 export function isBiblicaBookMarkerStyle(paragraphStyle: string): boolean {
   return hasStyleToken(paragraphStyle, "meta", "bk")
+}
+
+/**
+ * Any `meta:*` paragraph — the book marker, the running heads, the table-of-
+ * contents entries InDesign generates. None of them is text a reader sees.
+ */
+export function isBiblicaMetaStyle(paragraphStyle: string): boolean {
+  return hasStyleToken(paragraphStyle, "meta")
+}
+
+/**
+ * Division headings (`intro:imt2`) open a section about a group of books —
+ * "Israelʼs covenant history" before Genesis, "Israelʼs prophets" before
+ * Isaiah, "Stories about Jesus" before Matthew. InDesign sets them inside the
+ * following book's front matter, but they introduce the whole group, so they
+ * belong to a section of their own rather than to that book's preface.
+ */
+export function isBiblicaDivisionHeadingStyle(paragraphStyle: string): boolean {
+  return hasStyleToken(paragraphStyle, "intro", "imt2")
+}
+
+/** Book titles (`intro:imt1`) open a book's preface, which ends a division. */
+export function isBiblicaBookTitleStyle(paragraphStyle: string): boolean {
+  return hasStyleToken(paragraphStyle, "intro", "imt1")
+}
+
+/**
+ * Major section headings (`head:ms1`). In a front/back matter volume each one
+ * opens a section of the volume — the Bible Dictionary uses one per alphabet
+ * letter — so they carve it into milestones the way chapters carve a book.
+ */
+export function isBiblicaMajorSectionHeadingStyle(paragraphStyle: string): boolean {
+  return hasStyleToken(paragraphStyle, "head", "ms1")
+}
+
+/**
+ * Every heading that opens a section of a front/back matter volume: the major
+ * section headings, the title-page heading (`title:mt1`) and the contents
+ * heading (`toc:toc_hd`). Without the last two the whole title page and table
+ * of contents would fall to whichever section opens after them.
+ */
+export function isBiblicaVolumeSectionHeadingStyle(paragraphStyle: string): boolean {
+  return isBiblicaMajorSectionHeadingStyle(paragraphStyle)
+    || hasStyleToken(paragraphStyle, "title", "mt1")
+    || hasStyleToken(paragraphStyle, "toc", "toc_hd")
+}
+
+/**
+ * Running heads (`meta:rh`) repeat the section marker and the page number on
+ * every page. InDesign regenerates them from the layout, so they carry no
+ * translatable text of their own.
+ */
+export function isBiblicaRunningHeadStyle(paragraphStyle: string): boolean {
+  return hasStyleToken(paragraphStyle, "meta", "rh")
+}
+
+/**
+ * A heading's text as a section label. Soft hyphens are typesetting hints that
+ * InDesign stores in the text itself ("Sto\u00adries about Jesus") and must not
+ * reach a label the navigator shows.
+ */
+export function toBiblicaSectionLabel(headingText: string): string {
+  return headingText.replace(/\u00ad/g, "").replace(/\s+/g, " ").trim()
 }
 
 /** Chapter-label headings such as "Psalm 2", which open a new chapter grouping. */

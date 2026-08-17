@@ -41,6 +41,46 @@ export async function notifySyncWorkerOfMemberRemoval(
 }
 
 /**
+ * [Pen test 2026-08-17] best-effort notification to aquilla-sync-worker when
+ * a direct project-member role changes, so a live ProjectSync DO connection
+ * can update its cached role in place (see sync-worker/src/project-do.ts
+ * ConnectionState). Without this, a demoted-but-still-connected user keeps
+ * whatever focus-lock privileges their old role granted until they
+ * reconnect — actual content writes are unaffected since POST /events
+ * re-resolves role fresh on every request. Mirrors
+ * notifySyncWorkerOfMemberRemoval.
+ */
+export async function notifySyncWorkerOfMemberRoleChange(
+  env: Pick<Env, "SYNC_WORKER_URL" | "SYNC_SECRET_KEY">,
+  projectId: string,
+  changed: { userId: number; username?: string; role: number },
+): Promise<void> {
+  if (!env.SYNC_WORKER_URL || !env.SYNC_SECRET_KEY) return
+  try {
+    await fetch(
+      `${env.SYNC_WORKER_URL.replace(/\/$/, "")}/admin/projects/${encodeURIComponent(projectId)}/member-role-changed`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${env.SYNC_SECRET_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: changed.userId,
+          role: changed.role,
+          ...(changed.username ? { username: changed.username } : {}),
+        }),
+      },
+    )
+  } catch (err) {
+    console.warn(
+      `sync-worker member-role-changed notification failed for ${projectId}/${changed.userId}:`,
+      err,
+    )
+  }
+}
+
+/**
  * Tell connected editor clients that server-authoritative project settings
  * changed. This is deliberately best-effort: settings reads on reconnect are
  * still the correctness path, while this keeps validation-dependent progress

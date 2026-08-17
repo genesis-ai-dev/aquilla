@@ -19,13 +19,20 @@ autopilot graph. §3 reports what a review of each turned up, including the ones
 that turned up nothing, because "we looked and it held" is the part a review
 series usually forgets to write down.
 
-**What this pass turned up that the previous three did not:** OPS-11 came from
-asking not *is this gate correct?* but *how many copies of this gate are there?*
-Every prior pass checked authorization decisions one at a time and found them
-sound. Counting them instead found seven hand-written copies of the same four
-lines — and one copy that had quietly dropped the constant-time compare a
-previous fix had already installed in a sibling file. The bug was not in a
-decision anyone got wrong; it was in there being seven places to get it wrong.
+**What this pass turned up that the previous three did not.** Both findings came
+from counting rather than reading. OPS-11 came from asking not *is this gate
+correct?* but *how many copies of this gate are there?* — every prior pass
+checked authorization decisions one at a time and found them sound; counting
+them found seven hand-written copies of the same four lines, one of which had
+quietly dropped the constant-time compare a previous fix had already installed
+in a sibling file. The bug was not a decision anyone got wrong; it was there
+being seven places to get it wrong.
+
+OPS-13 came from the same question asked of the pipeline, and it came for free:
+this review's own PR went red on a check its diff could not have affected, and
+following that back showed the credential scan had not been running in CI at
+all. Worth recording as method — **opening the PR was itself a probe**, and the
+CI result was evidence about the repo rather than about the change.
 
 ---
 
@@ -157,6 +164,60 @@ not depend on which position matched. Tests cover both orderings, the all-wrong
 case, and that a `v0` signature is not accepted in place of `v1` (v0 covers a
 different payload).
 
+### OPS-13 — [FACT] The required CI check is red on `dev`, and its fail-fast structure means the credential scan never runs — **partially fixed in this change**
+
+Found by opening this pass's own PR: `Workers Builds: aquilla-web-preview`
+failed on a diff containing no `src/` change at all. `git diff` against `dev`'s
+head confirms `src/`, `e2e/`, `scripts/` and `package.json` were byte-identical,
+so the failure could not be the PR's.
+
+It is `dev`'s. Verified by checking out `9890424c` (dev's head) and running the
+lanes directly:
+
+- `pnpm lint` → **484 errors, 375 warnings across 390 files**, every error
+  `i18n/no-unkeyed-string` from the gate added 2026-08-12. None of the 390 files
+  is one this change touches.
+- `pnpm test` → **7 failures**, i18n catalogue collisions
+  (`src/lib/i18n/namespaces/no-duplicates.test.ts`: "Stop" leaves `common.stop`
+  and `agentWorkspace.stop` colliding).
+
+The structural consequence is the finding. `scripts/cloudflare-ci-checks.mjs`
+runs three sequential *phases* of parallel *lanes*; lane steps are a
+`for (…) await run(…)` loop, and a phase that fails throws before the next one
+starts. So a red step does not merely fail the build — **everything after it in
+its lane, and every later phase, does not execute**:
+
+| Never ran while phase 1 is red | Why it matters |
+|---|---|
+| `pnpm run scan:secrets` | Sat last in the lint lane. Its own comment in the script says it was put there deliberately so it would ride an already-required check, "because a secret scan that can be merged past is decoration". It is now past skippable: it does not run. |
+| `pnpm run i18n:check` | Same lane, same position problem. |
+| phases 2–3 entirely | sync-worker suite, identity suite, release contracts, `test:worker`, the SPA build. |
+
+That is OPS-4 and V4's exact class — a control that quietly stopped running —
+and it swallowed the one control this series has cited as working in every pass
+since 2026-08-10. It is also why **this PR cannot be green**: the check dies in
+phase 1, before reaching the lanes the OPS-11/OPS-12 code lives in. Those two
+suites were run directly instead (1240 and 1257 passing).
+
+**Fixed (the OPSEC half):** `scan:secrets` now runs **first** in the lint lane,
+so an unrelated lint regression can no longer take the credential scan off the
+board, and a committed credential fails the build in seconds rather than after
+a full lint pass. `scripts/cloudflare-ci-checks.test.ts` pins the position —
+position, not presence, is the control, and the old test only checked presence.
+
+**Not fixed:** the 484 lint errors and 7 test failures themselves. They are an
+i18n backlog, not a security matter, and draining them inside an OPSEC PR would
+bury a security diff under a few hundred string changes. **They need an owner
+now** — while phase 1 is red, no backend or SPA lane is gating anything that
+merges to `dev`.
+
+**JUDGMENT, worth stating plainly:** a fail-fast pipeline is the right design
+for build speed and the wrong design for controls that must not be skippable.
+Anything whose value is "it cannot be bypassed" — the credential scan today,
+`audit:deps` if it is ever folded in — should not sit downstream of a step that
+can go red for unrelated reasons. Moving the scan to first is the cheap fix; the
+durable one is a lane that runs the non-negotiable checks and nothing else.
+
 ### New surface reviewed with no finding — [FACT]
 
 Recorded deliberately. A review series that only ever publishes hits gives no
@@ -228,6 +289,7 @@ Likelihood over roughly the next year, assuming current practices.
 | OPS-11 | Seven hand-written copies of the service bearer gate; one non-constant-time | Certain (it had already happened) — exploitation of the timing leak itself: very low | Medium-High — the leak is impractical; the *recurrence mechanism* is what reaches the critical secret | **Medium** | Fixed |
 | OPS-1 / V2 | CSP mostly report-only | Medium | High — one XSS ⇒ 30-day token + user API keys | **Medium** | Partial |
 | SEC-2 / V8 | 30-day access tokens | Medium | High | **Medium** | Partial (revocation exists) |
+| OPS-13 | Credential scan (and every backend lane) not running, because the required check is red upstream of them | Certain — it is the current state of `dev` | Medium-High — a committed secret would merge unflagged | **Medium-High** | Partially fixed |
 | OPS-12 | Webhook verification breaks during secret rotation | Certain, *if* the secret is ever rotated | Low-Medium — billing drift; no forgery | **Low-Medium** | Fixed |
 | OPS-10 / SEC-9 | Auto-register grants OWNER on an unknown project ID | Low | Low-Medium — quota bypass | **Low-Medium** | Open |
 
@@ -250,6 +312,7 @@ problem was only visible from a different altitude.
 | One constant-time service-bearer helper, used by all seven internal gates | `sync-worker/src/lib/service-auth.ts` + `member-removed.ts`, `project-archive.ts`, `project-settings-notify.ts`, `contextual-activity-notify.ts`, `project-do.ts` ×3 | `sync-worker/src/lib/service-auth.test.ts` |
 | Source scan banning a hand-rolled `Authorization` compare anywhere in sync-worker | same | same — and the scans self-test against the removed lines |
 | Stripe webhook survives a secret rollover | `auth-worker/src/lib/billing/stripe.ts` | `auth-worker/src/__tests__/billing-routes.test.ts` |
+| Credential scan runs first in its lane, so an unrelated lint failure cannot take it off the board | `scripts/cloudflare-ci-checks.mjs` | `scripts/cloudflare-ci-checks.test.ts` (pins the position, not just the presence) |
 
 The series convention holds: every control above has a test, or is itself the
 test. OPS-11's real deliverable is the scan, not the helper — the helper fixes
@@ -257,6 +320,11 @@ seven sites, the scan fixes the eighth one nobody has written yet.
 
 ### Recommended next, in order
 
+0. **Get `dev` green (OPS-13).** Listed ahead of SEC-1 not because it is more
+   dangerous but because it is blocking: while phase 1 of the required check is
+   red, nothing in phases 2–3 gates a merge, and the reordering shipped here
+   only rescues the credential scan. 484 lint errors and 7 test failures, all
+   i18n, all pre-existing on `dev`. Needs an owner with the i18n context.
 1. **Split `SECRET_KEY` / `SYNC_SECRET_KEY` per environment (SEC-1).** Fourth
    review running as the top item. A dev-environment compromise mints
    production-valid tokens, and neither environment can be rotated alone.
@@ -326,7 +394,9 @@ Re-verified against the tree at this commit, not assumed.
 - **`AuthorizedEvent` perimeter** — symbol-branded, ESLint-enforced, single
   construction site. Still the strongest thing in the codebase, and now the
   explicit model for OPS-11's fix.
-- **Secret scanning** — `pnpm scan:secrets` clean across every tracked file.
+- **Secret scanning** — `pnpm scan:secrets` clean across every tracked file when
+  run by hand. Qualified sharply by OPS-13: it had not been running in CI at
+  all, so "clean" here is this review's own run, not a standing guarantee.
 - **Dependency audit** — `pnpm audit:deps` reports **0 advisories across all
   four lockfiles**. OPS-6/OPS-9's weekly job is doing exactly what it was added
   to do: the nine-advisory backlog has not returned, and the `hono` floor that
@@ -344,6 +414,8 @@ Re-verified against the tree at this commit, not assumed.
 
 | Control | Problem | Action |
 |---|---|---|
+| Secret scanning in CI | Ran last in a lane whose first step is red on `dev`, so it did not run at all (OPS-13) | Fixed — runs first, position pinned by a test |
+| The required check itself | Red on `dev`; phases 2–3 never execute, so no backend or SPA lane gates a merge | Open — recommendation 0 |
 | Service-to-service bearer check | Seven hand-written copies; one non-constant-time (OPS-11) | Fixed — one helper + a drift scan |
 | Stripe webhook verification | Broke during secret rollover (OPS-12) | Fixed — all `v1` candidates checked |
 | `SYNC_SECRET_KEY` as service bearer | One secret authorises seven endpoints *and* signs every sync token | Open — recommendation 2 |
@@ -368,12 +440,19 @@ Re-verified against the tree at this commit, not assumed.
 | SEC-10 — scrypt work factor | **Open (accepted)** | Legacy byte-compatibility constraint unchanged. |
 | SEC-11 — error detail leaked outside production | **Substantially closed** | Two narrow residuals recorded 08-13, unchanged. |
 
-**Reading of the trend.** The controls added by the first three passes are now
-earning their keep without supervision: the dependency audit caught up a
-150-commit window to zero advisories with nobody watching, and two masking and
-sanitisation fixes survived a refactor that moved their call sites to a
-different file. That is the useful signal from this pass — the previous fixes
-held under change, which is the only real test of a control.
+**Reading of the trend.** Mixed, and the mix is the lesson. The controls that
+run on their **own** schedule earned their keep unsupervised: the weekly
+dependency audit carried a 150-commit window to zero advisories with nobody
+watching, and the OPS-3/OPS-8 fixes survived a refactor that moved their call
+sites to another file. The control that runs **downstream of something else**
+did not: `scan:secrets` was placed inside a required check precisely so it could
+not be skipped, and then stopped executing entirely the moment an unrelated lane
+step went red (OPS-13).
+
+Stated as a rule the next pass can use: **a control's reliability is bounded by
+what it depends on to run.** Independent schedule → held. Shared conditional
+path → silently gone. Every prior finding in this series about a control that
+stopped working (V4, OPS-4, OPS-6, now OPS-13) has that same shape.
 
 What remains is what has remained since June: the items that need a **secrets or
 settings decision** rather than a patch. SEC-1, the rest of OPS-2, and the CSP

@@ -279,7 +279,7 @@ export async function construeScene(deps: ConstrueSceneDeps): Promise<ClosureRes
       system: construeSystemPrompt(deps.steeringDirections),
       user: `${windowBlock(window, context)}${priorBlock}`,
       tier: "mid",
-      maxTokens: 1024,
+      maxTokens: 2048,
       temperature: 0,
       label: "construe",
     })

@@ -9,9 +9,12 @@ import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
 
 function projectsRollupStat() {
-  // Overview (and all-orgs) rollup tiles sit outside the nav.
+  // Overview (and all-orgs) rollup tiles sit outside the nav. The label lives
+  // in a nested wrapper so the tile can be a single row on small screens.
   const label = screen.getAllByText("Projects").find((el) => !el.closest("nav"))!
-  return label.parentElement!
+  const tile = label.parentElement?.parentElement
+  if (!tile) throw new Error("rollup tile root not found")
+  return tile
 }
 
 function renderMemberShell(path: string) {
@@ -225,6 +228,26 @@ function mockProjectNameOverflow(overflowing: boolean) {
   })
 }
 
+describe("OrgHome loading template", () => {
+  it("keeps the header breadcrumb-only (no trailing profile chip)", () => {
+    mockUseFrontierSession.mockReturnValue({
+      session: { jwt: "jwt", username: "anna", createdAt: "x" },
+      loading: true,
+    })
+    render(
+      <MemoryRouter initialEntries={["/orgs/all"]}>
+        <OrgProvider>
+          <OrgHome />
+        </OrgProvider>
+      </MemoryRouter>,
+    )
+    expect(screen.getByTestId("org-home-loading-template")).toBeInTheDocument()
+    const header = document.querySelector("[data-slot='app-shell-header']")
+    expect(header).not.toBeNull()
+    expect(header!.querySelectorAll("[data-slot='skeleton']")).toHaveLength(1)
+  })
+})
+
 describe("ProjectTable", () => {
   const project: PortfolioProject & { orgName: string } = {
     id: "long-project",
@@ -281,7 +304,7 @@ describe("ProjectTable", () => {
     expect(projectName.parentElement).toHaveAttribute("data-project-name-truncated", "true")
     expect(expandedProjectName).toHaveTextContent(project.name)
     expect(expandedProjectName).toHaveAttribute("aria-hidden", "true")
-    expect(expandedProjectName).toHaveClass("z-50", "-left-2", "px-2", "py-1", "bg-popover", "shadow-md")
+    expect(expandedProjectName).toHaveClass("z-50", "-start-2", "px-2", "py-1", "bg-popover", "shadow-md")
     expect(organization).not.toHaveAttribute("data-slot", "tooltip-trigger")
     expect(identity).toHaveClass("@md/project-table:grid-cols-[minmax(6.5rem,1fr)_minmax(4rem,6rem)]")
     expect(organization).toHaveClass("relative", "h-5", "w-full")
@@ -313,9 +336,9 @@ describe("ProjectTable", () => {
     expect(screen.getByTestId("project-table-translated-header")).toHaveAttribute("aria-label", "Translated")
     expect(screen.getByTestId("project-table-validated-header")).toHaveAttribute("aria-label", "Validated")
     expect(screen.getByTestId("project-table-audio-header")).toHaveAttribute("aria-label", "Has audio")
-    expect(screen.getByTestId("project-table-translated-value")).toHaveClass("justify-self-start", "text-left")
-    expect(screen.getByTestId("project-table-validated-value")).toHaveClass("justify-self-start", "text-left")
-    expect(screen.getByTestId("project-table-audio-value")).toHaveClass("justify-self-start", "text-left")
+    expect(screen.getByTestId("project-table-translated-value")).toHaveClass("justify-self-start", "text-start")
+    expect(screen.getByTestId("project-table-validated-value")).toHaveClass("justify-self-start", "text-start")
+    expect(screen.getByTestId("project-table-audio-value")).toHaveClass("justify-self-start", "text-start")
     expect(screen.queryByText("Role")).not.toBeInTheDocument()
     expect(screen.queryByText("Updated", { exact: true })).not.toBeInTheDocument()
     expect(screen.queryByText(/Updated /)).not.toBeInTheDocument()
@@ -527,6 +550,8 @@ describe("OrgOverview / OrgProjects", () => {
     await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
     const projectsStat = projectsRollupStat()
     expect(within(projectsStat).getByText("2")).toBeInTheDocument()
+    expect(projectsStat).toHaveClass("flex-row-reverse")
+    expect(projectsStat.parentElement).toHaveClass("grid-cols-1")
   })
 
   it("shows the overdue rollup card and at-risk rows on overview", async () => {

@@ -15,8 +15,10 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useMemberAccess } from "@/hooks/useMemberAccess"
 import type { ProjectAccessBreakdown } from "@/lib/frontier/orgs"
-import { roleName, roleDisplayText } from "@/lib/frontier/roles"
+import { resolveRoleName } from "@/lib/frontier/roles"
 import { RoleLevelLabel } from "@/components/RoleLabel"
+import { useT } from "@/lib/i18n/I18nProvider"
+import type { TFunction } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   orgId: number
@@ -26,22 +28,25 @@ interface Props {
 }
 
 export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Props) {
+  const t = useT()
   const state = useMemberAccess(orgId, userId)
 
   return (
-    <div className="flex flex-col h-full border-l bg-background">
+    <div className="flex flex-col h-full border-s bg-background">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b">
         <div>
           <UsernameWithAvatar username={username} nameClassName="text-sm font-semibold" />
-          <p className="mt-0.5 text-xs text-muted-foreground">Project access breakdown</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {t("org.memberAccessDrillDown.heading")}
+          </p>
         </div>
         <Button
           type="button"
           variant="ghost"
           size="icon-sm"
           onClick={onClose}
-          aria-label="Close"
+          aria-label={t("common.close")}
           className="text-muted-foreground"
         >
           <X />
@@ -53,7 +58,7 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
         {state.kind === "loading" && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Spinner />
-            Loading access…
+            {t("org.memberAccessDrillDown.loadingAccess")}
           </div>
         )}
 
@@ -66,7 +71,9 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
             {/* Org-level baseline */}
             {state.data.orgRole != null && (
               <div className="rounded-md border bg-muted/30 px-3 py-2">
-                <p className="text-xs text-muted-foreground">Org-level baseline</p>
+                <p className="text-xs text-muted-foreground">
+                  {t("org.memberAccessDrillDown.orgLevelBaseline")}
+                </p>
                 <p className="text-sm font-medium">
                   <RoleLevelLabel level={state.data.orgRole} />
                 </p>
@@ -79,13 +86,14 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
                 variant="inline"
                 className="bg-muted/30 py-8"
                 icon={FolderX}
-                title={`${username} has no access to any project in this org.`}
+                title={t("org.memberAccessDrillDown.noAccessEmptyTitle", { username })}
               />
             ) : (
               <div className="space-y-2">
                 <p className="text-xs text-muted-foreground">
-                  {state.data.projects.length} project
-                  {state.data.projects.length !== 1 ? "s" : ""} accessible
+                  {t("org.memberAccessDrillDown.projectsAccessibleCount", {
+                    count: state.data.projects.length,
+                  })}
                 </p>
                 {state.data.projects.map((p) => (
                   <ProjectRow key={p.projectId} breakdown={p} />
@@ -102,8 +110,9 @@ export function MemberAccessDrillDown({ orgId, userId, username, onClose }: Prop
 }
 
 function ProjectRow({ breakdown }: { breakdown: ProjectAccessBreakdown }) {
-  const resolvedRole = roleDisplayText(roleName(breakdown.resolved))
-  const paths = grantPaths(breakdown)
+  const t = useT()
+  const resolvedRole = resolveRoleName(t, breakdown.resolved)
+  const paths = grantPaths(t, breakdown)
 
   return (
     <div className="rounded-md border px-3 py-2 space-y-1">
@@ -131,24 +140,24 @@ function ProjectRow({ breakdown }: { breakdown: ProjectAccessBreakdown }) {
 }
 
 /** Enumerate the contributing grant paths for a project breakdown row. */
-function grantPaths(b: ProjectAccessBreakdown): { label: string; detail: string }[] {
+function grantPaths(t: TFunction, b: ProjectAccessBreakdown): { label: string; detail: string }[] {
   const paths: { label: string; detail: string }[] = []
 
   if (b.direct != null) {
     paths.push({
-      label: `direct · ${roleDisplayText(roleName(b.direct))}`,
+      label: t("org.memberAccessDrillDown.pathDirect", { role: resolveRoleName(t, b.direct) }),
       detail: "Explicitly added to this project (direct grant / override)",
     })
   }
   for (const g of b.groups) {
     paths.push({
-      label: `group "${g.name}" · ${roleDisplayText(roleName(g.roleLevel))}`,
+      label: t("org.memberAccessDrillDown.pathGroup", { group: g.name, role: resolveRoleName(t, g.roleLevel) }),
       detail: `Member of group "${g.name}" which has a project grant`,
     })
   }
   if (b.org != null) {
     paths.push({
-      label: `org-level · ${roleDisplayText(roleName(b.org))}`,
+      label: t("org.memberAccessDrillDown.pathOrgLevel", { role: resolveRoleName(t, b.org) }),
       detail: "Org-level membership applies to all projects in this org",
     })
   }

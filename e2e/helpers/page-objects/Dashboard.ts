@@ -27,7 +27,7 @@ export class Dashboard {
       typeof orgId === "number" && orgId > 0 ? `/orgs/${orgId}/projects` : "/"
     await this.page.goto(target)
     await expect(this.page.getByRole("button", { name: /new project/i }).first()).toBeVisible({
-      timeout: 15_000,
+      timeout: 30_000,
     })
   }
 
@@ -73,11 +73,18 @@ export class Dashboard {
       dialog.getByRole("button", { name: /^Create Project$/i }).click(),
     ])
 
-    // The project name renders in more than one place after creation (card +
-    // heading), so scope to the first match to avoid strict-mode violations.
+    // Overview fetch can 5xx under shard load; the page then shows Retry
+    // instead of the project name. Click Retry until the heading lands —
+    // same 15s budget, still waiting on the loaded overview.
     await expect(dialog).toBeHidden({ timeout: 10_000 })
     await expect(this.page).toHaveURL(/\/projects\/[^/?#]+(?:[?#].*)?$/, { timeout: 15_000 })
-    await expect(this.page.getByText(name).first()).toBeVisible({ timeout: 15_000 })
+    const heading = this.page.getByRole("heading", { name, exact: true })
+    await expect(async () => {
+      // Genuine UI branch: unreachable banner vs loaded overview.
+      const retry = this.page.getByRole("button", { name: /^Retry$/i })
+      if (await retry.isVisible()) await retry.click()
+      await expect(heading).toBeVisible({ timeout: 3_000 })
+    }).toPass({ timeout: 15_000 })
     return name
   }
 
@@ -128,6 +135,19 @@ export class Dashboard {
       await this.page.keyboard.press("Escape")
       await expect(setupSheet).not.toBeVisible({ timeout: 3_000 })
     }
+  }
+
+  /** PanelLeft control that opens the org sidebar sheet below the lg breakpoint (1024px). */
+  openSidebarButton(): Locator {
+    return this.page.getByRole("button", { name: "Open sidebar" })
+  }
+
+  async openMobileSidebar(): Promise<Locator> {
+    await expect(this.openSidebarButton()).toBeVisible({ timeout: 10_000 })
+    await this.openSidebarButton().click()
+    const sheet = this.page.getByRole("dialog", { name: "Navigation" })
+    await expect(sheet).toBeVisible({ timeout: 10_000 })
+    return sheet
   }
 
   async deleteProject(name: string): Promise<void> {

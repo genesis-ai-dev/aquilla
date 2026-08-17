@@ -11,7 +11,7 @@ import { describe, it, expect, afterEach, vi } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
-const CHAMPION = "anthropic/claude-sonnet-4.5" // env DEFAULT_LLM_MODEL fallback
+const CHAMPION = "openai/gpt-5.6-luna" // env DEFAULT_LLM_MODEL fallback
 const CHALLENGER = "anthropic/claude-haiku-4-5"
 
 const patchSettings = (jwt: string, body: Record<string, unknown>) =>

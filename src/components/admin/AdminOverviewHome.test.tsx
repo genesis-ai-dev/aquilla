@@ -5,6 +5,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
+import { STAT_TILE_GRID } from "@/components/ui/page"
 import { AdminOverviewHome } from "./AdminOverviewHome"
 import type { AdminOverview, AdminOrg, AdminUser, AdminProject, AdminActivity } from "@/lib/frontier/admin"
 
@@ -76,6 +77,13 @@ describe("AdminOverviewHome", () => {
     expect(screen.getByText(/archived/)).toBeInTheDocument()
   })
 
+  it("stacks the stat strip to one card per row on small screens", () => {
+    renderHome()
+    const tile = screen.getByText("Organizations").parentElement?.parentElement
+    expect(tile).toHaveClass("flex-row-reverse")
+    expect(tile?.parentElement).toHaveClass(...STAT_TILE_GRID.split(" "))
+  })
+
   it("lists at-risk projects in Needs attention", () => {
     renderHome()
     const table = screen.getByTestId("admin-overview-attention-table")
@@ -99,7 +107,10 @@ describe("AdminOverviewHome", () => {
     expect(orgsTable).toHaveClass("border-0")
     fireEvent.click(within(orgsTable).getByText("Busy").closest("tr")!)
     expect(props.onOpenOrg).toHaveBeenCalledWith(1)
-    fireEvent.click(screen.getByRole("button", { name: /view all/i }))
+    const viewAll = screen.getByRole("button", { name: "View all" })
+    expect(viewAll).toHaveClass("border-border")
+    expect(viewAll.querySelector("svg")).toBeNull()
+    fireEvent.click(viewAll)
     expect(props.onViewActivity).toHaveBeenCalled()
   })
 

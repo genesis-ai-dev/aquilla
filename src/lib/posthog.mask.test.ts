@@ -19,10 +19,16 @@ const read = (p: string) => readFileSync(resolve(__dirname, "../..", p), "utf8")
 
 const MASK_ATTRIBUTE = "data-ph-mask"
 
-/** Every surface that renders source or target cell text. */
+/**
+ * Every surface that renders source or target cell text — plus comment
+ * bodies, which quote draft text and name collaborators (the same exposure
+ * from a different door).
+ */
 const MASKED_SURFACES = [
   "src/components/TranslatedEditor.tsx",
   "src/components/EditorTable.tsx",
+  "src/components/CommentThread.tsx",
+  "src/components/CommentsPage.tsx",
 ]
 
 describe("OPS-3 session-replay masking", () => {

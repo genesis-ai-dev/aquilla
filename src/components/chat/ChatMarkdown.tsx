@@ -12,8 +12,10 @@ import remarkGfm from "remark-gfm"
 import { Copy, Check } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 function CodeBlock({ children }: { children?: ReactNode }) {
+  const t = useT()
   const preRef = useRef<HTMLPreElement>(null)
   const [copied, setCopied] = useState(false)
 
@@ -37,11 +39,11 @@ function CodeBlock({ children }: { children?: ReactNode }) {
       >
         {children}
       </pre>
-      <AppTooltip content="Copy code">
+      <AppTooltip content={t("workspace.chatMarkdown.copyCode")}>
         <button
           type="button"
           onClick={() => void handleCopy()}
-          aria-label="Copy code"
+          aria-label={t("workspace.chatMarkdown.copyCode")}
           className={cn(
             "absolute right-1 top-1 rounded border bg-background p-1 text-muted-foreground",
             "opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/code:opacity-100",
@@ -56,8 +58,8 @@ function CodeBlock({ children }: { children?: ReactNode }) {
 
 const components: ComponentProps<typeof ReactMarkdown>["components"] = {
   p: ({ children }) => <p className="my-1.5 first:mt-0 last:mb-0">{children}</p>,
-  ul: ({ children }) => <ul className="my-1.5 list-disc space-y-0.5 pl-5">{children}</ul>,
-  ol: ({ children }) => <ol className="my-1.5 list-decimal space-y-0.5 pl-5">{children}</ol>,
+  ul: ({ children }) => <ul className="my-1.5 list-disc space-y-0.5 ps-5">{children}</ul>,
+  ol: ({ children }) => <ol className="my-1.5 list-decimal space-y-0.5 ps-5">{children}</ol>,
   li: ({ children }) => <li>{children}</li>,
   h1: ({ children }) => <h1 className="mb-1 mt-2 text-[1.1em] font-semibold first:mt-0">{children}</h1>,
   h2: ({ children }) => <h2 className="mb-1 mt-2 text-[1.05em] font-semibold first:mt-0">{children}</h2>,
@@ -80,7 +82,7 @@ const components: ComponentProps<typeof ReactMarkdown>["components"] = {
   ),
   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
   blockquote: ({ children }) => (
-    <blockquote className="my-1.5 border-l-2 border-border pl-2 text-muted-foreground">
+    <blockquote className="my-1.5 border-s-2 border-border ps-2 text-muted-foreground">
       {children}
     </blockquote>
   ),
@@ -90,7 +92,7 @@ const components: ComponentProps<typeof ReactMarkdown>["components"] = {
     </div>
   ),
   th: ({ children }) => (
-    <th className="border border-border bg-muted/60 px-2 py-1 text-left font-semibold [overflow-wrap:anywhere]">
+    <th className="border border-border bg-muted/60 px-2 py-1 text-start font-semibold [overflow-wrap:anywhere]">
       {children}
     </th>
   ),

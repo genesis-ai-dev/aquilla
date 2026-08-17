@@ -75,7 +75,7 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
   const canResolve = roleLevel !== null ? cloudCanResolve : permissions.canResolveComments
   // Build a helpful denial message for viewers who cannot comment.
   const commentDenialReason = !canComment
-    ? denialMessage(ROLE.COMMENTER, roleLevel)
+    ? denialMessage(t, ROLE.COMMENTER, roleLevel)
     : null
 
   function handleCreate() {
@@ -93,7 +93,7 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
 
   return (
     <RightSidebarPanel storageKey="comments" defaultWidth={384} resizeLabel="Resize comments panel">
-    <div className="bg-card relative z-10 flex h-full w-full flex-col border-l" data-testid="comments-drawer">
+    <div className="bg-card relative z-10 flex h-full w-full flex-col border-s" data-testid="comments-drawer">
       <div className="flex items-center justify-between border-b p-2">
         <h3 className="text-sm font-semibold">
           {t("common.comments")} {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}

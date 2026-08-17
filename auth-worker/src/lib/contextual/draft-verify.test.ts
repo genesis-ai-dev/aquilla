@@ -43,6 +43,7 @@ describe("performSpan", () => {
     )
     // Register rides the system prompt as a hard constraint; discourse context in user msg.
     expect(calls[0].system).toContain("span1:amb:1")
+    expect(calls[0].maxTokens).toBe(6144)
     expect(calls[0].user).toContain("Immediately preceding")
     expect(calls[0].user).toContain("imitate them")
   })
@@ -61,6 +62,24 @@ describe("performSpan", () => {
     if (!result.ok) return
     expect(result.draft.cells.map((c) => c.cellId)).toEqual(["c1"])
     expect(result.missedCellIds).toEqual(["c2"])
+  })
+
+  it("keeps complete approved example and preceding-context text in the prompt", async () => {
+    const longSource = `start ${"complete source text ".repeat(25)}end`
+    const longTarget = `start ${"complete target text ".repeat(25)}end`
+    const { llm, calls } = scriptedLlm([draftJson([{ i: 1, t: "one" }])])
+    await performSpan({
+      sceneBrief,
+      pairs: [pair("c1")],
+      examples: [{ cellId: "ex-long", source: longSource, target: longTarget, validated: true }],
+      precedingValidated: [pair("c0", { source: longSource, target: longTarget, validated: true })],
+      llm,
+      budget: createRunBudget(),
+    })
+
+    expect(calls[0].user).toContain(JSON.stringify(longSource))
+    expect(calls[0].user).toContain(JSON.stringify(longTarget))
+    expect(calls[0].user).toContain("end")
   })
 
   it("refuses to call the model past the budget", async () => {
@@ -121,6 +140,7 @@ describe("verifySpan / parseVoteReply", () => {
       { cellId: "c2", approve: false, reason: "resolves span1:amb:1" },
     ])
     expect(calls[0].tier).toBe("deep")
+    expect(calls[0].maxTokens).toBe(3072)
     expect(calls[0].system).toContain("span1:amb:1")
     expect(calls[0].user).toContain("source of c2")
   })

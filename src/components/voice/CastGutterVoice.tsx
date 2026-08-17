@@ -17,6 +17,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { VoiceAvatar } from "./VoiceAvatar"
 import { VoicePickerContent } from "./VoiceCombobox"
 import type { Voice } from "@/lib/parsers/types"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface CastGutterVoiceProps {
   /** The RESOLVED voice for this line (never undefined — default falls back). */
@@ -33,15 +34,16 @@ export interface CastGutterVoiceProps {
 }
 
 export function CastGutterVoice({ voice, explicit, castName, editable, voices, onPick }: CastGutterVoiceProps) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [applyToSpeaker, setApplyToSpeaker] = useState(false)
   // Hover text leads with the CHARACTER (Sam 2026-08-07) — the voice is the
   // detail, the name is the answer to "who is this circle?".
   const tooltip = explicit
     ? castName && castName !== voice.name
-      ? `${castName} — voiced by ${voice.name}`
+      ? t("audio.castGutter.namedTooltip", { castName, voiceName: voice.name })
       : voice.name
-    : `${voice.name} — default (no one cast yet)`
+    : t("audio.castGutter.defaultTooltip", { voiceName: voice.name })
   const trigger = (
     <span
       className={cn(
@@ -71,7 +73,7 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
               type="button"
               data-testid="gutter-voice"
               data-explicit={String(explicit)}
-              aria-label={`${tooltip}. Choose a character`}
+              aria-label={t("audio.castGutter.chooseCharacterAriaLabel", { tooltip })}
               className="rounded-full opacity-90 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1"
             />
           }
@@ -96,7 +98,7 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
                   checked={applyToSpeaker}
                   onChange={(e) => setApplyToSpeaker(e.target.checked)}
                 />
-                Apply to all «{castName}» lines
+                {t("workspace.castGutterVoice.applyToAllLines", { name: castName ?? "" })}
               </label>
             ) : undefined
           }

@@ -1,39 +1,47 @@
 import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types"
 import { HAS_HOSTED_MMS_MODELS, USE_SHERPA_MMS_MODELS, isSupportedMmsLanguageCode } from "./mms-languages"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 export const DEFAULT_TTS_PROVIDER: TtsProvider = "omnivoice"
 
-export const GEMINI_TTS_VOICES: readonly { name: string; description: string }[] = [
-  { name: "Zephyr", description: "Bright" },
-  { name: "Puck", description: "Upbeat" },
-  { name: "Charon", description: "Informative" },
-  { name: "Kore", description: "Firm" },
-  { name: "Fenrir", description: "Excitable" },
-  { name: "Leda", description: "Youthful" },
-  { name: "Orus", description: "Firm" },
-  { name: "Aoede", description: "Breezy" },
-  { name: "Callirrhoe", description: "Easy-going" },
-  { name: "Autonoe", description: "Bright" },
-  { name: "Enceladus", description: "Breathy" },
-  { name: "Iapetus", description: "Clear" },
-  { name: "Umbriel", description: "Easy-going" },
-  { name: "Algieba", description: "Smooth" },
-  { name: "Despina", description: "Smooth" },
-  { name: "Erinome", description: "Clear" },
-  { name: "Algenib", description: "Gravelly" },
-  { name: "Rasalgethi", description: "Informative" },
-  { name: "Laomedeia", description: "Upbeat" },
-  { name: "Achernar", description: "Soft" },
-  { name: "Alnilam", description: "Firm" },
-  { name: "Schedar", description: "Even" },
-  { name: "Gacrux", description: "Mature" },
-  { name: "Pulcherrima", description: "Forward" },
-  { name: "Achird", description: "Friendly" },
-  { name: "Zubenelgenubi", description: "Casual" },
-  { name: "Vindemiatrix", description: "Gentle" },
-  { name: "Sadachbia", description: "Lively" },
-  { name: "Sadaltager", description: "Knowledgeable" },
-  { name: "Sulafat", description: "Warm" },
+// `descriptionKey` — not `description` — because this table is module scope:
+// `t()` resolves the active locale at CALL time (src/lib/i18n/standalone.ts),
+// so calling it here would freeze whatever locale was active at import and
+// never update. Resolve with `t(voice.descriptionKey)` at the render site
+// instead. `name` (Google's own proper noun for the voice) is never
+// translated. Several voices share one description verbatim — that's Google's
+// own catalog, not a copy-paste — so several rows share one descriptionKey.
+export const GEMINI_TTS_VOICES: readonly { name: string; descriptionKey: MessageKey }[] = [
+  { name: "Zephyr", descriptionKey: "audio.voice.bright" },
+  { name: "Puck", descriptionKey: "audio.voice.upbeat" },
+  { name: "Charon", descriptionKey: "audio.voice.informative" },
+  { name: "Kore", descriptionKey: "audio.voice.firm" },
+  { name: "Fenrir", descriptionKey: "audio.voice.excitable" },
+  { name: "Leda", descriptionKey: "audio.voice.youthful" },
+  { name: "Orus", descriptionKey: "audio.voice.firm" },
+  { name: "Aoede", descriptionKey: "audio.voice.breezy" },
+  { name: "Callirrhoe", descriptionKey: "audio.voice.easyGoing" },
+  { name: "Autonoe", descriptionKey: "audio.voice.bright" },
+  { name: "Enceladus", descriptionKey: "audio.voice.breathy" },
+  { name: "Iapetus", descriptionKey: "audio.voice.clear" },
+  { name: "Umbriel", descriptionKey: "audio.voice.easyGoing" },
+  { name: "Algieba", descriptionKey: "audio.voice.smooth" },
+  { name: "Despina", descriptionKey: "audio.voice.smooth" },
+  { name: "Erinome", descriptionKey: "audio.voice.clear" },
+  { name: "Algenib", descriptionKey: "audio.voice.gravelly" },
+  { name: "Rasalgethi", descriptionKey: "audio.voice.informative" },
+  { name: "Laomedeia", descriptionKey: "audio.voice.upbeat" },
+  { name: "Achernar", descriptionKey: "audio.voice.soft" },
+  { name: "Alnilam", descriptionKey: "audio.voice.firm" },
+  { name: "Schedar", descriptionKey: "audio.voice.even" },
+  { name: "Gacrux", descriptionKey: "audio.voice.mature" },
+  { name: "Pulcherrima", descriptionKey: "audio.voice.forward" },
+  { name: "Achird", descriptionKey: "audio.voice.friendly" },
+  { name: "Zubenelgenubi", descriptionKey: "audio.voice.casual" },
+  { name: "Vindemiatrix", descriptionKey: "audio.voice.gentle" },
+  { name: "Sadachbia", descriptionKey: "audio.voice.lively" },
+  { name: "Sadaltager", descriptionKey: "audio.voice.knowledgeable" },
+  { name: "Sulafat", descriptionKey: "audio.voice.warm" },
 ] as const
 
 export const DEFAULT_GEMINI_VOICE = "Kore"
@@ -42,9 +50,16 @@ export const DEFAULT_MMS_LANGUAGE = "eng"
 
 export interface TtsProviderInfo {
   id: TtsProvider
+  // `title` stays plain, untranslated English by design — it's the engine's
+  // display name (e.g. "OmniVoice", "Gemini TTS"), and its one consumer
+  // (NewVoiceModal's audio.newVoice.singleVoiceHint placeholder) is documented
+  // to keep it "already resolved in English by the app — a brand name, do not
+  // translate the substituted value." shortTitle is likewise a display name.
   title: string
   shortTitle: string
-  hint: string
+  /** `hintKey` — see the GEMINI_TTS_VOICES comment above for why this table
+   *  stores a MessageKey rather than calling `t()` at module scope. */
+  hintKey: MessageKey
   /** Where the engine runs. Drives the Cloud/On-device grouping in the picker. */
   tier: "cloud" | "device"
   /** Whether a reference recording can clone a target timbre for this engine. */
@@ -72,7 +87,7 @@ export const TTS_PROVIDER_INFOS: readonly TtsProviderInfo[] = [
     hasNamedVoices: false,
     badge: "Recommended",
     blurb: "Hosted neural voice — no setup or API key.",
-    hint: "Runs on our servers. No key or download; usage is cloud-metered. Supports voice cloning from a reference recording.",
+    hintKey: "audio.provider.omnivoiceHint",
   },
   {
     id: "gemini",
@@ -84,7 +99,7 @@ export const TTS_PROVIDER_INFOS: readonly TtsProviderInfo[] = [
     requiresGeminiKey: true,
     blurb: "Highest quality, promptable; many languages.",
     caveat: "Needs your own Google AI key.",
-    hint: "BYOK Google AI key. Promptable, high-quality voices.",
+    hintKey: "audio.provider.geminiHint",
   },
   {
     id: "kokoro",
@@ -96,7 +111,7 @@ export const TTS_PROVIDER_INFOS: readonly TtsProviderInfo[] = [
     localModel: "kokoro",
     blurb: "Free, on-device English voices.",
     caveat: "One-time download; may affect performance.",
-    hint: "Runs in-browser after a one-time local model download.",
+    hintKey: "audio.provider.kokoroHint",
   },
   {
     id: "mms",
@@ -108,11 +123,11 @@ export const TTS_PROVIDER_INFOS: readonly TtsProviderInfo[] = [
     localModel: "mms",
     blurb: "Free, on-device; many languages.",
     caveat: "One model per language; may affect performance.",
-    hint: USE_SHERPA_MMS_MODELS
-      ? "Local browser voices loaded from the Sherpa-ONNX MMS mirror."
+    hintKey: USE_SHERPA_MMS_MODELS
+      ? "audio.provider.mmsHintSherpa"
       : HAS_HOSTED_MMS_MODELS
-        ? "Local browser voices loaded from the hosted MMS model bucket."
-        : "Local browser voices for supported MMS language repos.",
+        ? "audio.provider.mmsHintHosted"
+        : "audio.provider.mmsHintFallback",
   },
 ] as const
 

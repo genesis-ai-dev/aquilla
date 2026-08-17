@@ -115,11 +115,12 @@ export interface TimelineEditorProps {
 
 /** The timing modes' user-facing copy, per mode.
  *
- *  `AUDIO_TIMING_MODE_LABELS` (lib/parsers/types) still carries the English for
- *  the Project Settings card; the toolbar reads its copy from the catalog
- *  instead, because a `{mode}` frame filled with a translated noun cannot be
- *  made grammatical in every locale. `lockedDescription` is the same sentence
- *  plus the below-maintainer note, kept whole rather than concatenated. */
+ *  `AUDIO_TIMING_MODE_LABELS` (lib/parsers/types) resolves the same
+ *  `editor.timeline.timingMode*` name/description keys for
+ *  TimingModeChangedDialog; this table adds `lockedDescription` — the same
+ *  sentence plus the below-maintainer note, kept whole rather than
+ *  concatenated, because a `{mode}` frame filled with a translated noun
+ *  cannot be made grammatical in every locale. */
 const TIMING_MODE_KEYS: Record<
   AudioTimingMode,
   { name: MessageKey; description: MessageKey; lockedDescription: MessageKey }
@@ -796,7 +797,7 @@ export function TimelineEditor({
         <div
           data-testid="tl-timing-mode"
           data-mode={timingMode}
-          className="ml-2 inline-flex items-center overflow-hidden rounded-md border border-border text-[11px]"
+          className="ms-2 inline-flex items-center overflow-hidden rounded-md border border-border text-[11px]"
         >
           {(["dubbing", "audioFirst"] as const).map((mode) =>
             onChangeTimingMode ? (
@@ -830,7 +831,7 @@ export function TimelineEditor({
             ) : null,
           )}
         </div>
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ms-auto flex items-center gap-1.5">
           {/* Meeting 2026-08-05: generated voices default to compressed
               playback; fast connections can opt into the original WAV. Mic
               recordings have no lossless form — the tooltip says so. */}
@@ -1012,7 +1013,7 @@ export function TimelineEditor({
 
       {/* timeline */}
       <div className="grid min-h-0 grid-cols-[128px_1fr]">
-        <div className="border-r border-border bg-muted/20">
+        <div className="border-e border-border bg-muted/20">
           <div className="h-7 border-b border-border" />
           <LaneLabel
             name={t("editor.timeline.laneSubtitle")}

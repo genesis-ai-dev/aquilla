@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input"
 import { RoleSelect } from "@/components/RoleSelect"
 import { createOrgInvite } from "@/lib/frontier/orgs"
 import { ROLE, ORG_ROLE_OPTIONS } from "@/lib/frontier/roles"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import posthog from "@/lib/posthog"
 import { INVITE_SENT } from "@/lib/event-names"
@@ -22,6 +23,7 @@ import { INVITE_SENT } from "@/lib/event-names"
  * Server enforces owner-only — this UI is gated by the caller as a courtesy.
  */
 export function OrgInviteByEmail({ orgId }: { orgId: number }) {
+  const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const [email, setEmail] = useState("")
@@ -38,11 +40,11 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
     setLink(null)
     const trimmed = email.trim()
     if (trimmed && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
-      setError("Enter a valid email, or leave blank for an open link.")
+      setError(t("org.inviteByEmail.invalidEmailError"))
       return
     }
     if (!jwt) {
-      setError("Sign in to invite teammates.")
+      setError(t("org.inviteByEmail.notSignedInError"))
       return
     }
     setBusy(true)
@@ -59,11 +61,13 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
       })
       setLink(`${window.location.origin}/join-org/${result.token}`)
       setStatus(
-        trimmed ? `Invitation sent to ${trimmed}.` : "Invite link created — share it below.",
+        trimmed
+          ? t("org.inviteByEmail.sentToEmail", { email: trimmed })
+          : t("org.inviteByEmail.linkCreated"),
       )
       setEmail("")
     } catch {
-      setError("Couldn't create the invite. You may not have permission, or the server is unreachable.")
+      setError(t("org.inviteByEmail.createError"))
     } finally {
       setBusy(false)
     }
@@ -80,7 +84,7 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
     <div className="space-y-3">
       <FieldGroup className="flex-row flex-wrap items-end gap-2">
         <Field className="w-64">
-          <FieldLabel htmlFor="org-invite-email">Invitee email</FieldLabel>
+          <FieldLabel htmlFor="org-invite-email">{t("org.inviteByEmail.emailLabel")}</FieldLabel>
           <Input
             id="org-invite-email"
             type="email"
@@ -88,22 +92,22 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
             autoComplete="off"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="teammate@example.com (optional)"
+            placeholder={t("org.inviteByEmail.emailPlaceholder")}
             className="h-9"
           />
         </Field>
         <Field>
-          <FieldLabel htmlFor="org-invite-role">Org role</FieldLabel>
+          <FieldLabel htmlFor="org-invite-role">{t("org.inviteByEmail.roleLabel")}</FieldLabel>
           <RoleSelect
             id="org-invite-role"
             options={ORG_ROLE_OPTIONS}
             value={role}
             onValueChange={setRole}
-            aria-label="Org role"
+            aria-label={t("org.inviteByEmail.roleLabel")}
           />
         </Field>
-        <Button onClick={submit} disabled={busy}>
-          {busy ? "Sending…" : "Send invite"}
+        <Button size="sm" onClick={submit} disabled={busy}>
+          {busy ? t("auth.resetPassword.sending") : t("org.inviteByEmail.submit")}
         </Button>
       </FieldGroup>
       {error && <FieldError className="text-xs">{error}</FieldError>}
@@ -111,9 +115,9 @@ export function OrgInviteByEmail({ orgId }: { orgId: number }) {
       {link && (
         <div className="flex items-center gap-2">
           <code className="truncate rounded bg-muted px-2 py-1 text-[11px]">{link}</code>
-          <Button variant="outline" onClick={copyLink}>
-            <Copy className="mr-1 size-3.5" />
-            {copied ? "Copied" : "Copy"}
+          <Button size="sm" variant="outline" onClick={copyLink}>
+            <Copy className="me-1 size-3.5" />
+            {copied ? t("nav.version.copiedLabel") : t("common.copy")}
           </Button>
         </div>
       )}

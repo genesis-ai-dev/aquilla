@@ -1,5 +1,6 @@
 import { FRONTIER_API_URL } from "./sync-token"
 import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
+import { t } from "@/lib/i18n/standalone"
 
 /**
  * Provider-keyed map of org-scoped API keys. Keys are provider identifiers
@@ -152,7 +153,7 @@ export async function patchOrgSettings(
   if (res.status === 409) {
     const body = (await res.json()) as { current?: OrgSettingsResponse }
     if (body.current) return { kind: "conflict", latest: body.current }
-    return { kind: "error", status: res.status, message: "version conflict" }
+    return { kind: "error", status: res.status, message: t("org.sync.versionConflictError") }
   }
   if (res.status === 403) {
     return { kind: "forbidden" }

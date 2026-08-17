@@ -155,6 +155,7 @@ export async function getEffectiveOrgRole(
 export interface OrgMemberWithUser {
   userId: number
   username: string
+  email: string | null
   roleLevel: number
   /** ISO timestamp of last project-context activity, or NULL. */
   lastActiveAt: string | null
@@ -166,7 +167,7 @@ export async function listOrgMembersWithUsers(
   orgId: number,
 ): Promise<OrgMemberWithUser[]> {
   const result = await env.AQUILLA_PG.prepare(
-    `SELECT om.user_id AS user_id, u.username AS username,
+    `SELECT om.user_id AS user_id, u.username AS username, u.email AS email,
             om.role_level AS role_level, om.last_active_at AS last_active_at
      FROM org_members om
      INNER JOIN users u ON u.id = om.user_id
@@ -177,6 +178,7 @@ export async function listOrgMembersWithUsers(
     .all<{
       user_id: number
       username: string
+      email: string | null
       role_level: number
       last_active_at: string | null
     }>()
@@ -184,6 +186,7 @@ export async function listOrgMembersWithUsers(
   return (result.results ?? []).map((r) => ({
     userId: r.user_id,
     username: r.username,
+    email: r.email ?? null,
     roleLevel: r.role_level,
     lastActiveAt: r.last_active_at,
   }))

@@ -15,6 +15,7 @@
 
 import { useCallback, useState } from "react"
 import { Button } from "@/components/ui/button"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { applyEBibleTargetImport } from "@/lib/import"
 import { decodeImportText } from "@/lib/import/ai-recipe"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
@@ -75,6 +76,7 @@ export function FileTargetImportPanel({
   applyOptimisticTargetEdits,
   excludeFrontMatter,
 }: FileTargetImportPanelProps) {
+  const t = useT()
   const [step, setStep] = useState<PanelStep>("file")
   const [error, setError] = useState<string | null>(null)
   const [sheets, setSheets] = useState<SpreadsheetSheet[]>([])
@@ -105,17 +107,17 @@ export function FileTargetImportPanel({
           excludeFrontMatter,
         })
         if (rows.length === 0) {
-          setError("No verses found in this USFM file.")
+          setError(t("importExport.fileTarget.noVersesInUsfm"))
           return
         }
         showReview(matchTargetRowsByRef(rows, cells), false)
       } else if (ext === "xls") {
-        setError("Legacy .xls workbooks are not supported. Save the file as .xlsx or CSV and try again.")
+        setError(t("importExport.spreadsheet.legacyXlsUnsupported"))
         return
       } else if (ext === "xlsx") {
         const parsed = await parseXlsxToSheets(await file.arrayBuffer())
         if (parsed.length === 0) {
-          setError("No sheets found in XLSX file.")
+          setError(t("importExport.spreadsheet.noSheetsFound"))
           return
         }
         setSheets(parsed)
@@ -131,14 +133,14 @@ export function FileTargetImportPanel({
         setSelectedSheet(sheet)
         setStep("mapping")
       } else {
-        setError("Unsupported file type. Use USFM (.usfm/.sfm) or a spreadsheet (.csv/.tsv/.xlsx).")
+        setError(t("importExport.fileTarget.unsupportedFileType"))
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to parse file"
+      const message = err instanceof Error ? err.message : t("importExport.errors.failedToParseFile")
       setError(message)
       onError?.(message, "parse")
     }
-  }, [cells, showReview, onError, excludeFrontMatter])
+  }, [cells, showReview, onError, excludeFrontMatter, t])
 
   function handleMappingConfirm(mapping: ColumnMapping, hasHeader: boolean) {
     if (!selectedSheet || mapping.targetCol === null) return
@@ -196,7 +198,7 @@ export function FileTargetImportPanel({
       // revalidate. Restore each cell's pre-import value (empty for fresh cells,
       // the prior translation for conflicts).
       applyOptimisticTargetEdits(selected.map((m) => ({ cellId: m.cellId, value: m.currentText })))
-      const message = err instanceof Error ? err.message : "Import failed"
+      const message = err instanceof Error ? err.message : t("importExport.errors.importFailed")
       setError(message)
       onError?.(message, "apply")
       setApplying(false)
@@ -208,10 +210,9 @@ export function FileTargetImportPanel({
     return (
       <div className="flex flex-col gap-4 py-2">
         <div>
-          <p className="text-sm font-medium">Import target translations into "{fileName}"</p>
+          <p className="text-sm font-medium">{t("importExport.fileTarget.title", { fileName })}</p>
           <p className="text-xs text-muted-foreground">
-            Fills this file's target column from a USFM file or spreadsheet.
-            Source text is never changed. You'll review every match before anything is saved.
+            {t("importExport.fileTarget.description")}
           </p>
         </div>
         <div
@@ -223,10 +224,10 @@ export function FileTargetImportPanel({
             if (file) handleFile(file)
           }}
         >
-          <p className="text-sm text-muted-foreground">Drop a file here, or</p>
+          <p className="text-sm text-muted-foreground">{t("importExport.fileTarget.dropZoneHint")}</p>
           <label>
             <span className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors">
-              Choose file
+              {t("editor.video.chooseFile")}
             </span>
             <input
               type="file"
@@ -238,11 +239,11 @@ export function FileTargetImportPanel({
               }}
             />
           </label>
-          <p className="text-xs text-muted-foreground">USFM, CSV, TSV, or XLSX</p>
+          <p className="text-xs text-muted-foreground">{t("importExport.fileTarget.acceptedFormats")}</p>
         </div>
         {error && <p className="text-xs text-destructive">{error}</p>}
         <div className="flex justify-end">
-          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+          <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>
         </div>
       </div>
     )
@@ -253,27 +254,27 @@ export function FileTargetImportPanel({
     return (
       <div className="flex flex-col gap-4 py-2">
         <div>
-          <p className="text-sm font-medium">Select a sheet</p>
-          <p className="text-xs text-muted-foreground">This XLSX has multiple sheets. Pick one to import.</p>
+          <p className="text-sm font-medium">{t("importExport.spreadsheet.selectSheetTitle")}</p>
+          <p className="text-xs text-muted-foreground">{t("importExport.spreadsheet.selectSheetHint")}</p>
         </div>
         <div className="flex flex-col gap-2">
           {sheets.map((s, i) => (
             <button
               key={i}
               type="button"
-              className="rounded-lg border p-3 text-left hover:border-primary hover:bg-primary/5 transition-colors"
+              className="rounded-lg border p-3 text-start hover:border-primary hover:bg-primary/5 transition-colors"
               onClick={() => {
                 setSelectedSheet(s)
                 setStep("mapping")
               }}
             >
               <p className="text-sm font-medium">{s.name}</p>
-              <p className="text-xs text-muted-foreground">{s.rows.length} row{s.rows.length !== 1 ? "s" : ""}</p>
+              <p className="text-xs text-muted-foreground">{t("importExport.spreadsheet.sheetRowCount", { count: s.rows.length })}</p>
             </button>
           ))}
         </div>
         <div className="flex justify-end">
-          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+          <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>
         </div>
       </div>
     )
@@ -308,17 +309,16 @@ export function FileTargetImportPanel({
     return (
       <div className="flex min-h-0 flex-1 flex-col gap-3 py-2">
         <div className="shrink-0">
-          <p className="text-sm font-medium">Review matches</p>
+          <p className="text-sm font-medium">{t("importExport.review.title")}</p>
           <div className="mt-1 flex flex-wrap gap-3 text-xs text-muted-foreground">
-            <span>{matched.length} matched</span>
-            {conflicts.length > 0 && <span className="text-amber-600">{conflicts.length} conflict{conflicts.length !== 1 ? "s" : ""}</span>}
-            {orphans.length > 0 && <span>{orphans.length} unmatched row{orphans.length !== 1 ? "s" : ""}</span>}
-            {unmatchedSourceCount > 0 && <span>{unmatchedSourceCount} cell{unmatchedSourceCount !== 1 ? "s" : ""} not covered</span>}
+            <span>{t("importExport.review.matchedCount", { count: matched.length })}</span>
+            {conflicts.length > 0 && <span className="text-amber-600">{t("importExport.review.conflictCount", { count: conflicts.length })}</span>}
+            {orphans.length > 0 && <span>{t("importExport.review.unmatchedRowCount", { count: orphans.length })}</span>}
+            {unmatchedSourceCount > 0 && <span>{t("importExport.review.uncoveredCellCount", { count: unmatchedSourceCount })}</span>}
           </div>
           {matchedByOrder && (
             <p className="mt-1.5 text-xs text-amber-600">
-              No ref column mapped — rows were matched to cells in order. Check the
-              source text next to each row to confirm alignment before importing.
+              {t("importExport.review.orderMatchWarning")}
             </p>
           )}
         </div>
@@ -339,7 +339,7 @@ export function FileTargetImportPanel({
                   <p className="truncate text-xs text-foreground/80">{m.incomingText}</p>
                   {m.hasConflict && (
                     <p className="truncate text-[10px] text-amber-600">
-                      Replaces: {m.currentText}
+                      {t("importExport.review.replacesExisting", { text: m.currentText })}
                     </p>
                   )}
                 </div>
@@ -360,15 +360,15 @@ export function FileTargetImportPanel({
               setSelectedCellIds(allSelected ? new Set() : allIds)
             }}
           >
-            {selectedCellIds.size === matched.length ? "Deselect all" : "Select all"}
+            {selectedCellIds.size === matched.length ? t("importExport.review.deselectAll") : t("common.selectAll")}
           </button>
           <div className="flex gap-2">
-            <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+            <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>
             <Button
               disabled={selectedCellIds.size === 0 || applying}
               onClick={handleApply}
             >
-              Import {selectedCellIds.size} cell{selectedCellIds.size !== 1 ? "s" : ""}
+              {t("importExport.review.importCellCount", { count: selectedCellIds.size })}
             </Button>
           </div>
         </div>

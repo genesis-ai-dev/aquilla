@@ -13,6 +13,12 @@ ACCESS_TOKEN_EXPIRE_MINUTES="43200"
 # sync-worker compromise cannot forge access tokens).
 SYNC_SECRET_KEY="test-sync-secret-key"
 
+# Bearer sent to sync-worker's /admin/* routes (R2 cleanup on file delete).
+# MUST match sync-worker's ADMIN_SECRET. When unset here, SYNC_SECRET_KEY is
+# sent instead — which sync-worker accepts only while ITS ADMIN_SECRET is also
+# unset. Set both or neither; a one-sided value 401s the cleanup silently.
+ADMIN_SECRET="test-admin-secret"
+
 # AQU-346: base URL auth-worker calls to notify sync-worker of admin events
 # (member removal -> live WS eject, project archive, file delete). Without
 # this (or if it's wrong), those notifications silently no-op — see
@@ -48,7 +54,10 @@ ENVIRONMENT="development"
 # the former aquilla-chat-worker on 2026-05-26). Without this, chat
 # requests return 500. Grab a key at https://openrouter.ai/keys.
 OPENROUTER_API_KEY=""
-DEFAULT_LLM_MODEL="anthropic/claude-sonnet-4.5"
+DEFAULT_LLM_MODEL="openai/gpt-5.6-luna"
+AGENT_MODEL_DEFAULT="openai/gpt-5.6-luna"
+AGENT_DRAFT_MODEL_DEFAULT="openai/gpt-5.6-luna"
+CONTEXTUAL_FAST_MODEL="openai/gpt-5.6-luna"
 
 # Optional Docker-free agent code execution. Point these at an already deployed
 # development sandbox. Leave both empty to let scripts/dev-stack.ts try the
@@ -75,3 +84,10 @@ MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 # /__dev__/{seed,login} — see routes/dev-seed.ts and routes/test-reset.ts.
 # If you launch auth-worker manually via `wrangler dev`, prepend
 # `WRANGLER_LOCAL=1` on the command line; never persist it.
+
+# Stripe test mode. Secret never goes in wrangler.toml.
+# STRIPE_SECRET_KEY="sk_test_..."
+# STRIPE_WEBHOOK_SECRET="whsec_..."
+# STRIPE_PUBLISHABLE_KEY="pk_test_..."
+# STRIPE_PRICE_FIELD="price_..."
+# STRIPE_PRICE_ADDON="price_..."

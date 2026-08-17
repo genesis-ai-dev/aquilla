@@ -198,6 +198,25 @@ export function scriptMockResponse(messages: ChatMessage[]) {
     }))
   }
 
+  // Monday.com board SELECTION (auth-worker lib/monday/selectBoardForProject):
+  // runs before the mapping call when the wizard omits a boardId. Echo back a
+  // real id from the prompt — a bogus one would exercise the fallback instead
+  // of the flow under test. Must precede the mapping branch below: this prompt
+  // never contains "column mapping", but keeping the order explicit means a
+  // future edit to either prompt can't silently cross the wires.
+  if (userText.includes("Boards available:")) {
+    const boardsMatch = userText.match(/Boards available:\n(\[.*?\])\n/s)
+    let boardId = "1"
+    try {
+      const boards = JSON.parse(boardsMatch?.[1] ?? "[]") as { id: string }[]
+      if (boards[0]?.id) boardId = boards[0].id
+    } catch { /* fall back to the default above */ }
+    return respond(JSON.stringify({
+      boardId,
+      reason: "[mock] First board in the account.",
+    }))
+  }
+
   // Monday.com board analyze (auth-worker lib/monday/analyze.ts): the prompt
   // asks for a "column mapping" proposal in strict JSON. Return a minimal valid
   // MondayMapping so the AI-configure flow works end-to-end against the mock.
@@ -234,15 +253,39 @@ export function scriptMockResponse(messages: ChatMessage[]) {
     return respond(`[mock] ${copilotMatch[1].trim()}`)
   }
 
-  // The draft tool's INTERNAL model call: numbered source segments in, strict
-  // [{i,t}] JSON out. Detected by the user-turn shape the tool builds.
-  const translateMatch = userText.match(/^Translate these \d+ segments:/)
-  if (translateMatch) {
-    const drafts: { i: number; t: string }[] = []
-    for (const line of userText.split("\n")) {
-      const m = line.match(/^(\d+)\.\s*(?:\[[^\]]*\]\s*)?(.+)$/)
-      if (m) drafts.push({ i: Number(m[1]), t: `[bozza] ${m[2].trim()}` })
-    }
+  // The draft tool's INTERNAL two-pass model workflow. Route on the
+  // server-owned system contract, not source/user wording: the generation
+  // user message now starts with the completed evidence record, so matching
+  // only `^Translate these …` silently routed it back into the orchestrator's
+  // draft-tool flow and produced no parseable [{i,t}] result.
+  const isDraftResearch = messages.some((message) =>
+    message.role === "system"
+      && typeof message.content === "string"
+      && message.content.includes("You are the RESEARCH pass, separate from final generation."),
+  )
+  if (isDraftResearch) {
+    const count = extractNumberedLines(userText).length
+    return respond(
+      `Mock evidence record for ${count} source segments: preserve every proposition and follow the project evidence.`,
+    )
+  }
+
+  const isDraftGeneration = messages.some((message) =>
+    message.role === "system"
+      && typeof message.content === "string"
+      && message.content.includes("You are the GENERATION pass."),
+  )
+  // Keep the direct prompt shape as a compatibility fallback for older draft
+  // callers while treating the current generation system prompt as canonical.
+  const translateMatch = userText.match(/(?:^|\n)Translate these \d+ segments:[^\n]*(?:\n|$)/)
+  if (isDraftGeneration || translateMatch) {
+    const numberedInput = translateMatch
+      ? userText.slice((translateMatch.index ?? 0) + translateMatch[0].length)
+      : userText
+    const drafts = extractNumberedLines(numberedInput).map(({ i, body }) => ({
+      i,
+      t: `[bozza] ${body}`,
+    }))
     return respond(JSON.stringify(drafts))
   }
   // Match action words, not status adjectives: "translated" and "validated"

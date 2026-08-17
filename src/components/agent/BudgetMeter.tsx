@@ -8,9 +8,11 @@
 import { AlertTriangle, Gauge } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { formatCredits } from "@/lib/credits"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { AgentBudget } from "@/lib/agent/run-state"
 
 export function BudgetMeter({ budget }: { budget: AgentBudget }) {
+  const t = useT()
   if (budget.exhausted) {
     return (
       <div
@@ -20,7 +22,10 @@ export function BudgetMeter({ budget }: { budget: AgentBudget }) {
       >
         <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
         <span>
-          Run stopped at its {formatCredits(budget.capCredits)} credit cap ({formatCredits(budget.spentCredits)} spent).
+          {t("agent.budget.exhausted", {
+            capCredits: formatCredits(budget.capCredits),
+            spentCredits: formatCredits(budget.spentCredits),
+          })}
         </span>
       </div>
     )

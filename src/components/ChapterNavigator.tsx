@@ -239,7 +239,7 @@ function ProgressSummary({ translated, validated, total }: {
 }) {
   const t = useT()
   return (
-    <span className="w-[7.5rem] shrink-0 justify-self-end text-right text-xs tabular-nums text-muted-foreground">
+    <span className="w-[7.5rem] shrink-0 justify-self-end text-end text-xs tabular-nums text-muted-foreground">
       <span className="block">
         {t("editor.milestone.percentTranslated", { percent: percent(translated, total) })}
       </span>
@@ -336,7 +336,7 @@ function VirtualizedMilestoneList({
                 className={cn(
                   "relative flex w-full cursor-default items-center gap-3 rounded-md px-2 py-1 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50",
                   // Cell ranges read as children of the milestone above them.
-                  subsection && "pl-6",
+                  subsection && "ps-6",
                 )}
                 aria-setsize={filteredItems.length}
                 aria-posinset={virtualItem.index + 1}
@@ -402,11 +402,13 @@ export function MilestoneNavigator({
   activeKey,
   activeSubsectionKey,
   onSelect,
+  compact = false,
 }: {
   items: MilestoneNavigationItem[]
   activeKey: string
   activeSubsectionKey?: string
   onSelect: (key: string, subsectionKey?: string) => void
+  compact?: boolean
 }) {
   const t = useT()
   const [open, setOpen] = useState(false)
@@ -585,7 +587,10 @@ export function MilestoneNavigator({
                 // Default: padded label + chevron. data-icon-only: true icon
                 // button (w-8, p-0, label hidden, chevron centered). xl+: fixed
                 // width with start-aligned label regardless of squeeze.
-                className="flex h-8 min-w-8 w-auto max-w-full shrink items-center justify-center gap-2 overflow-hidden px-2.5 data-[icon-only]:w-8 data-[icon-only]:shrink-0 data-[icon-only]:gap-0 data-[icon-only]:p-0 xl:w-56 xl:min-w-56 xl:shrink-0 xl:justify-start xl:px-2.5 xl:data-[icon-only]:w-56 xl:data-[icon-only]:gap-2 xl:data-[icon-only]:p-2.5 xl:[&>svg:last-child]:ml-auto [&>svg:last-child]:shrink-0"
+                className={cn(
+                  "flex h-8 min-w-8 w-auto max-w-full shrink items-center justify-center gap-2 overflow-hidden px-2.5 data-[icon-only]:w-8 data-[icon-only]:shrink-0 data-[icon-only]:gap-0 data-[icon-only]:p-0 [&>svg:last-child]:shrink-0",
+                  !compact && "xl:w-56 xl:min-w-56 xl:shrink-0 xl:justify-start xl:px-2.5 xl:data-[icon-only]:w-56 xl:data-[icon-only]:gap-2 xl:data-[icon-only]:p-2.5 xl:[&>svg:last-child]:ms-auto",
+                )}
                 aria-label={
                   activeSubsection
                     ? t(vocabulary.currentWithCells, {
@@ -600,15 +605,18 @@ export function MilestoneNavigator({
             <span
               className={
                 iconOnlyTrigger
-                  ? "hidden min-w-0 items-center gap-2 text-left xl:flex"
-                  : "flex min-w-0 items-center gap-2 text-left"
+                  ? cn("hidden min-w-0 items-center gap-2 text-start", !compact && "xl:flex")
+                  : "flex min-w-0 items-center gap-2 text-start"
               }
             >
               <span className="min-w-0 truncate font-semibold leading-none">
                 {active.label}
               </span>
               {/* Below xl: chapter label only — drop the verse/cell summary. */}
-              <span className="hidden min-w-0 truncate text-xs font-normal leading-none text-muted-foreground xl:inline">
+              <span className={cn(
+                "hidden min-w-0 truncate text-xs font-normal leading-none text-muted-foreground",
+                !compact && "xl:inline",
+              )}>
                 {activeSummary}
               </span>
             </span>
@@ -629,7 +637,7 @@ export function MilestoneNavigator({
               aria-label={t(vocabulary.find)}
               // Input defaults to text-base below md (iOS zoom guard); keep this
               // popover field at text-sm so it doesn't jump larger on small screens.
-              className="w-auto rounded-none border-0 shadow-none outline-none ring-0 tabular-nums *:data-[slot=input-group-control]:text-sm *:data-[slot=input-group-addon]:pl-3 hover:border-0! focus-within:border-0! has-[[data-slot=input-group-control]:focus-visible]:border-0! has-[[data-slot=input-group-control]:focus-visible]:ring-0!"
+              className="w-auto rounded-none border-0 shadow-none outline-none ring-0 tabular-nums *:data-[slot=input-group-control]:text-sm *:data-[slot=input-group-addon]:ps-3 hover:border-0! focus-within:border-0! has-[[data-slot=input-group-control]:focus-visible]:border-0! has-[[data-slot=input-group-control]:focus-visible]:ring-0!"
             />
             <ComboboxSeparator className="mx-0 my-0" />
             <ComboboxEmpty>{t(vocabulary.empty)}</ComboboxEmpty>

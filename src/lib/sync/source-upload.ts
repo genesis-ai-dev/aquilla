@@ -3,6 +3,12 @@ import {
   MAX_SOURCE_ARTIFACT_BYTES,
   type SourceArtifactFormat,
 } from "../../../shared/import-contract"
+// This module runs outside React (plain fetch-helper code, no hooks), so it
+// uses the standalone t() rather than useT() — see src/lib/i18n/standalone.ts.
+import { t } from "../i18n/standalone"
+import { formatMB } from "../i18n/format"
+import { normalizeLocale } from "../i18n/locales"
+import { readStoredLocale } from "../i18n/store"
 
 export interface UploadSourceArgs {
   projectId: string
@@ -44,10 +50,10 @@ const IMPORT_ATTEMPTS = 3
 const IMPORT_RETRY_DELAYS_MS = [200, 800] as const
 
 export function assertSourceUploadByteLength(byteLength: number): void {
-  if (byteLength === 0) throw new Error("Source upload failed: the original file is empty.")
+  if (byteLength === 0) throw new Error(t("importExport.errors.sourceUploadEmpty"))
   if (byteLength > MAX_SOURCE_ARTIFACT_BYTES) {
-    const maxMb = MAX_SOURCE_ARTIFACT_BYTES / 1024 / 1024
-    throw new Error(`Source upload failed: the original file exceeds the ${maxMb} MB limit.`)
+    const locale = normalizeLocale(readStoredLocale())
+    throw new Error(t("importExport.errors.sourceUploadTooLarge", { maxSize: formatMB(MAX_SOURCE_ARTIFACT_BYTES, locale) }))
   }
 }
 
@@ -65,7 +71,7 @@ function isRetryableImportStatus(status: number): boolean {
 }
 
 function throwIfSourceUploadAborted(signal?: AbortSignal): void {
-  if (signal?.aborted) throw new Error("Import cancelled")
+  if (signal?.aborted) throw new Error(t("importExport.errors.importCancelled"))
 }
 
 async function waitForSourceRetry(ms: number, signal?: AbortSignal): Promise<void> {
@@ -77,7 +83,7 @@ async function waitForSourceRetry(ms: number, signal?: AbortSignal): Promise<voi
     }, ms)
     const onAbort = () => {
       clearTimeout(timeout)
-      reject(new Error("Import cancelled"))
+      reject(new Error(t("importExport.errors.importCancelled")))
     }
     signal?.addEventListener("abort", onAbort, { once: true })
   })
@@ -91,7 +97,7 @@ export async function uploadSourceOriginal(args: UploadSourceArgs): Promise<Uplo
   // Paratext package inside the worker isolate.
   const sha256 = await sha256Hex(args.bytes)
   let token = await args.getToken(args.fileId)
-  if (!token) throw new Error("Couldn't get an upload token — sign in and try again.")
+  if (!token) throw new Error(t("importExport.errors.couldNotGetUploadToken"))
   const origin = args.baseUrl ?? syncWorkerHttpOrigin()
   const url = `${origin}/api/v1/projects/${encodeURIComponent(args.projectId)}/files/${encodeURIComponent(args.fileId)}/source`
   const fetchFn = args.fetchFn ?? fetch
@@ -126,13 +132,20 @@ export async function uploadSourceOriginal(args: UploadSourceArgs): Promise<Uplo
       })
     } catch (err) {
       throwIfSourceUploadAborted(args.signal)
-      lastError = new Error(`Source upload failed: ${err instanceof Error ? err.message : String(err)}`)
+      // Network-level failure (offline, DNS, etc.) — the raw message is
+      // interpolated as data inside the translated frame, not itself translated.
+      lastError = new Error(
+        t("importExport.errors.sourceUploadNetworkFailed", { detail: err instanceof Error ? err.message : String(err) }),
+      )
     }
 
     if (res) {
       if (res.ok) return await res.json() as UploadSourceResult
+      // HTTP diagnostic — keyed frame; raw status/body kept on `.cause` for DevTools.
       const detail = await res.text().catch(() => "")
-      lastError = new Error(`Source upload failed (HTTP ${res.status})${detail ? `: ${detail}` : ""}`)
+      lastError = new Error(t("importExport.errors.sourceUploadFailed"), {
+        cause: `HTTP ${res.status}${detail ? `: ${detail}` : ""}`,
+      })
 
       // A long import can outlive its original file token — refresh once and
       // retry the same idempotent PUT before treating 401 as fatal.
@@ -151,7 +164,7 @@ export async function uploadSourceOriginal(args: UploadSourceArgs): Promise<Uplo
     }
   }
 
-  throw lastError ?? new Error("Source upload failed")
+  throw lastError ?? new Error(t("importExport.errors.sourceUploadFailed"))
 }
 
 export interface BindSourceArtifactArgs {
@@ -178,7 +191,7 @@ export interface BindSourceArtifactArgs {
 export async function bindSourceArtifact(args: BindSourceArtifactArgs): Promise<void> {
   throwIfSourceUploadAborted(args.signal)
   let token = await args.getToken(args.fileId)
-  if (!token) throw new Error("Couldn't get an upload token — sign in and try again.")
+  if (!token) throw new Error(t("importExport.errors.couldNotGetUploadToken"))
   const origin = args.baseUrl ?? syncWorkerHttpOrigin()
   const url = `${origin}/api/v1/projects/${encodeURIComponent(args.projectId)}/files/${encodeURIComponent(args.fileId)}/source-bindings`
   const fetchFn = args.fetchFn ?? fetch
@@ -206,13 +219,19 @@ export async function bindSourceArtifact(args: BindSourceArtifactArgs): Promise<
       })
     } catch (error) {
       throwIfSourceUploadAborted(args.signal)
-      lastError = new Error(`Artifact binding failed: ${error instanceof Error ? error.message : String(error)}`)
+      // Network-level failure — raw message interpolated as data, not translated.
+      lastError = new Error(
+        t("importExport.errors.artifactBindingNetworkFailed", { detail: error instanceof Error ? error.message : String(error) }),
+      )
     }
 
     if (response) {
       if (response.ok) return
+      // HTTP diagnostic — keyed frame; raw status/body kept on `.cause` for DevTools.
       const detail = await response.text().catch(() => "")
-      lastError = new Error(`Artifact binding failed (HTTP ${response.status})${detail ? `: ${detail}` : ""}`)
+      lastError = new Error(t("importExport.errors.artifactBindingFailed"), {
+        cause: `HTTP ${response.status}${detail ? `: ${detail}` : ""}`,
+      })
       if (response.status === 401 && attempt < IMPORT_ATTEMPTS - 1) {
         const refreshed = await args.getToken(args.fileId)
         if (refreshed) {
@@ -227,5 +246,5 @@ export async function bindSourceArtifact(args: BindSourceArtifactArgs): Promise<
       await waitForSourceRetry(delays[attempt], args.signal)
     }
   }
-  throw lastError ?? new Error("Artifact binding failed")
+  throw lastError ?? new Error(t("importExport.errors.artifactBindingFailed"))
 }

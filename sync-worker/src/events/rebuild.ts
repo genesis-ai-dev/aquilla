@@ -31,12 +31,13 @@ import {
 import type { EventKind } from './types'
 import { eventQualifiedParentKey } from './chain-claims'
 import { fullProgressRecomputeStmts } from './progress-projection'
-import { secureCompare } from '../lib/secure-compare'
+import { isAuthorizedAdminBearer } from '../lib/admin-auth'
 
 const BATCH_LIMIT = 100
 
 export interface RebuildEnv {
   AQUILLA_PG?: AquillaDb
+  ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
 }
 
@@ -73,7 +74,7 @@ export async function handleRebuildProjectionRequest(
     return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   }
   const auth = request.headers.get('Authorization') ?? ''
-  if (!secureCompare(auth, `Bearer ${env.SYNC_SECRET_KEY}`)) {
+  if (!isAuthorizedAdminBearer(auth, env)) {
     return new Response('unauthorized', { status: 401 })
   }
 

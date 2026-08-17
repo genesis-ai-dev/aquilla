@@ -19,16 +19,8 @@ import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
 import type { Concept, TermRendering } from "@/lib/terminology/types"
-
-// ────────────────────────────────────────────────────────────────────────────
-// Status labels (per vocabulary-mapping table in terminology.md)
-// ────────────────────────────────────────────────────────────────────────────
-
-const STATUS_LABEL: Record<TermRendering["status"], string> = {
-  preferred: "required",
-  admitted: "alternate",
-  forbidden: "avoid",
-}
+import { renderingStatusLabelKey } from "@/lib/terminology/types"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 // ────────────────────────────────────────────────────────────────────────────
 // Single rendering row within the popover
@@ -40,6 +32,7 @@ interface RenderingLineProps {
 }
 
 function RenderingLine({ rendering, onApply }: RenderingLineProps) {
+  const t = useT()
   const isForbidden = rendering.status === "forbidden"
 
   return (
@@ -56,7 +49,7 @@ function RenderingLine({ rendering, onApply }: RenderingLineProps) {
             "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400",
         )}
       >
-        {STATUS_LABEL[rendering.status]}
+        {t(renderingStatusLabelKey(rendering.status))}
       </span>
 
       {/* Rendering text */}
@@ -74,10 +67,10 @@ function RenderingLine({ rendering, onApply }: RenderingLineProps) {
         <Button
           variant="outline"
           size="xs"
-          aria-label={`Apply rendering: ${rendering.rendering}`}
+          aria-label={t("terminology.lookup.applyAria", { rendering: rendering.rendering })}
           onClick={() => onApply(rendering.rendering)}
         >
-          Apply
+          {t("terminology.lookup.applyButton")}
         </Button>
       )}
     </div>
@@ -161,6 +154,7 @@ export function TermLookupPopover({
   onOpenChange,
   anchor,
 }: TermLookupPopoverProps) {
+  const t = useT()
   const isControlled = open !== undefined
 
   // Find matching active concepts (case-insensitive substring match on sourceTerm)
@@ -184,7 +178,7 @@ export function TermLookupPopover({
       <div
         className="space-y-4"
         role="tooltip"
-        aria-label={`Terminology lookup for "${sourceTerm}"`}
+        aria-label={t("terminology.lookup.tooltipAria", { term: sourceTerm })}
       >
         {matches.map((concept) => (
           <ConceptPanel key={concept.id} concept={concept} onApply={onApply} />

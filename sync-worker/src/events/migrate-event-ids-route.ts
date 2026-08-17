@@ -10,15 +10,17 @@
 //
 // Paginated by server_seq (the per-project unique ordering key) so even a
 // 137k-event project streams in bounded chunks rather than one giant response.
-// Gated on SYNC_SECRET_KEY — same trust tier as /migrate/ingest.
+// Gated on ADMIN_SECRET (SYNC_SECRET_KEY still accepted — see lib/admin-auth.ts);
+// same trust tier as /migrate/ingest.
 
-import { secureCompare } from '../lib/secure-compare'
+import { isAuthorizedAdminBearer } from '../lib/admin-auth'
 
 const PATH = '/migrate/event-ids'
 const MAX_LIMIT = 50000
 
 export interface MigrateEventIdsEnv {
   AQUILLA_PG?: AquillaDb
+  ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
 }
 
@@ -30,7 +32,7 @@ export async function handleMigrateEventIdsRequest(
   if (url.pathname !== PATH) return null
   if (request.method !== 'GET') return new Response('method not allowed', { status: 405 })
   if (!env.SYNC_SECRET_KEY) return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
-  if (!secureCompare(request.headers.get('Authorization') ?? '', `Bearer ${env.SYNC_SECRET_KEY}`)) {
+  if (!isAuthorizedAdminBearer(request.headers.get('Authorization') ?? '', env)) {
     return new Response('unauthorized', { status: 401 })
   }
   if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })

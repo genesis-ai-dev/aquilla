@@ -5,7 +5,7 @@ import type { RuleInfraction, RuleWaiver } from "@/lib/parsers/types"
 
 const infraction: RuleInfraction = {
   ruleId: "r1", cellId: "c1", fileId: "f1",
-  message: `"No bad": target contains forbidden pattern`,
+  reason: "target-forbids",
   spans: [{ side: "target", start: 0, end: 3, matchedText: "bad" }],
 }
 

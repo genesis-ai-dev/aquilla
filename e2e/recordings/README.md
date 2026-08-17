@@ -51,7 +51,7 @@ Both drive the **real** app via the marketing login (`auth-worker/src/routes/mar
 
 ## ⚠️ Don't `git push` while a recording is running
 
-The `pre-push` husky hook runs `npm run test:e2e:smoke`, which boots its **own** e2e stack on ports `8787`/`8788` — the same ports the recording stack uses. Running both at once kills one of the auth-workers (the recording then fails with `ECONNREFUSED 127.0.0.1:8787`). **Let the recording finish, confirm `e2e-up` has exited, then push.**
+The `pre-push` husky hook runs `npm run test:e2e:smoke`, which boots its **own** e2e stack. An unsharded recording and smoke shard 0 both use **9787**/**9788**/**6173**. Running both at once kills one of the auth-workers. **Let the recording finish, confirm `e2e-up` has exited, then push.**
 
 ## Promo trailer (deterministic) — `scripts/promo/`
 

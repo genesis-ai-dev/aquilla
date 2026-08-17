@@ -1,4 +1,5 @@
 import { FRONTIER_API_URL } from "./sync-token"
+import { t } from "@/lib/i18n/standalone"
 import type {
   TranslationRule,
   RulePenalties,
@@ -80,6 +81,14 @@ export interface ProjectWideSettings {
    * See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
    */
   bibleResourcesEnabled?: boolean
+  /**
+   * Knowledge base drafting toggle (spec docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
+   * When true, translation generation + predictions inject KB string-search
+   * snippets into draft prompts. Agent access to the KB is NOT gated by this.
+   * Default false. Read server-side by the draft tool via
+   * auth-worker/src/lib/knowledge/gate.ts.
+   */
+  knowledgeBaseEnabled?: boolean
   /**
    * DCS (Door43) external-upstream cursor (spec §8). Present when this project is
    * a DCS-linked source/"adapter" project — pins it to a Door43 release so the
@@ -243,7 +252,7 @@ export async function patchProjectSettings(
     }
     const latest = body.latest ?? body.current
     if (latest) return { kind: "conflict", latest }
-    return { kind: "error", status: res.status, message: "version conflict" }
+    return { kind: "error", status: res.status, message: t("org.sync.versionConflictError") }
   }
   if (res.status === 403) {
     const body = (await res.json().catch(() => ({}))) as { required?: number; role?: number }

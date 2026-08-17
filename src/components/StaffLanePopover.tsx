@@ -29,13 +29,15 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Spinner } from "@/components/ui/spinner"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { RoleSelect } from "@/components/RoleSelect"
-import { ROLE, roleName, roleDisplayText, roleDescription } from "@/lib/frontier/roles"
+import { ROLE, roleName, roleDisplayLabel, roleDescription } from "@/lib/frontier/roles"
 import { useOrgMembers } from "@/hooks/useOrg"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { addProjectMember } from "@/lib/frontier/members"
 import { fetchMemberScopes, putMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
 import { cn } from "@/lib/utils"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
 /** Pinned contract — wave-B agents import this exactly. */
 export interface StaffLanePopoverProps {
@@ -74,6 +76,7 @@ export function StaffLanePopover({
   onOpenChange,
   anchorOnly = false,
 }: StaffLanePopoverProps) {
+  const { t } = useI18n()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const { members: orgMembers } = useOrgMembers(orgId)
@@ -153,7 +156,7 @@ export function StaffLanePopover({
       }
       await refreshProjectMembers()
       setPhase("done")
-      setMessage(`${selected.username} is now ${roleDisplayText(roleName(role))} on ${laneLabel}.`)
+      setMessage(`${selected.username} is now ${roleDisplayLabel(role)} on ${laneLabel}.`)
       onDone?.()
     } catch (err) {
       setPhase("error")
@@ -192,14 +195,14 @@ export function StaffLanePopover({
                 ? "sr-only"
                 : "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs hover:bg-muted",
             )}
-            aria-label={`Staff ${laneLabel}`}
+            aria-label={t("org.staffLanePopover.staffLaneHeading", { lane: laneLabel })}
           />
         }
       >
         {trigger ?? (
           <>
             <UserPlus className="size-3.5" aria-hidden />
-            Staff {laneLabel}
+            {t("org.staffLanePopover.staffLaneHeading", { lane: laneLabel })}
           </>
         )}
       </PopoverTrigger>
@@ -209,10 +212,20 @@ export function StaffLanePopover({
         side="bottom"
       >
         <div>
-          <p className="text-xs font-medium">Staff {laneLabel}</p>
+          <p className="text-xs font-medium">
+            {t("org.staffLanePopover.staffLaneHeading", { lane: laneLabel })}
+          </p>
           <p className="text-[11px] text-muted-foreground">
-            Add an <strong className="font-medium text-foreground">org member</strong> to
-            this project, scoped to this lane.
+            <RichMessage
+              k="org.staffLanePopover.addOrgMemberDescription"
+              values={{
+                member: (
+                  <strong className="font-medium text-foreground">
+                    {t("org.staffLanePopover.orgMemberPhrase")}
+                  </strong>
+                ),
+              }}
+            />
           </p>
         </div>
 
@@ -220,15 +233,15 @@ export function StaffLanePopover({
           <div className="space-y-2">
             <div className="relative">
               <Search
-                className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                className="pointer-events-none absolute start-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground"
                 aria-hidden
               />
               <Input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search your organization"
-                aria-label="Search org members"
-                className="h-8 pl-7 text-xs"
+                placeholder={t("org.staffLanePopover.searchPlaceholder")}
+                aria-label={t("org.teamDetail.searchOrgMembersAriaLabel")}
+                className="h-8 ps-7 text-xs"
               />
             </div>
             <ul className="max-h-40 divide-y overflow-y-auto rounded border">
@@ -243,7 +256,7 @@ export function StaffLanePopover({
                   <li key={m.userId}>
                     <button
                       type="button"
-                      className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-xs hover:bg-muted"
+                      className="flex w-full items-center gap-2 px-2 py-1.5 text-start text-xs hover:bg-muted"
                       onClick={() => setSelected({ userId: m.userId, username: m.username })}
                     >
                       <UsernameWithAvatar username={m.username} size="xs" nameClassName="text-xs" />
@@ -259,13 +272,13 @@ export function StaffLanePopover({
                 contributors (e.g. translators) join via a project invite
                 link, not the org roster. */}
             <p className="text-[11px] text-muted-foreground">
-              Searches your organization only. Adding someone from outside it?{" "}
+              {t("org.staffLanePopover.searchScopeNote")}{" "}
               <Link
                 to={`/project/${projectId}/settings/members`}
                 className="font-medium text-foreground underline underline-offset-2"
                 onClick={() => handleOpenChange(false)}
               >
-                Invite them to the project
+                {t("org.staffLanePopover.inviteToProjectLink")}
               </Link>
               .
             </p>
@@ -280,7 +293,7 @@ export function StaffLanePopover({
                 onClick={() => setSelected(null)}
                 disabled={busy}
               >
-                Change
+                {t("org.projectOverview.change")}
               </Button>
             </div>
 
@@ -294,23 +307,23 @@ export function StaffLanePopover({
               onValueChange={setRole}
               disabled={busy}
               size="sm"
-              aria-label="Role"
+              aria-label={t("common.roleLabel")}
             />
 
-            <Button className="w-full" onClick={handleConfirm} disabled={busy || !jwt}>
-              {busy && <Spinner className="mr-1.5 size-3.5" />}
-              Add to {laneLabel}
+            <Button className="w-full" size="sm" onClick={handleConfirm} disabled={busy || !jwt}>
+              {busy && <Spinner className="me-1.5 size-3.5" />}
+              {t("org.staffLanePopover.addToLaneButton", { lane: laneLabel })}
             </Button>
 
             <div className="rounded border border-dashed p-2 text-[11px] text-muted-foreground">
-              Need broader access? Leads see all languages.{" "}
+              {t("org.staffLanePopover.broaderAccessNote")}{" "}
               <button
                 type="button"
                 className="font-medium text-foreground underline underline-offset-2 disabled:opacity-60"
                 onClick={handleAddAsLead}
                 disabled={busy || !jwt}
               >
-                Add as lead (unscoped)
+                {t("org.staffLanePopover.addAsLeadButton")}
               </button>
             </div>
 

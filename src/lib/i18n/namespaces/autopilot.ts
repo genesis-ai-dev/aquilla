@@ -450,9 +450,89 @@ export const autopilot = defineNamespace({
     "autopilot.inspector.technical.copySpanId": "Copy span ID",
     "autopilot.inspector.technical.spanIdCopied": "Span ID copied.",
 
+    // — Process graph: glanceable engine map ————————————————
+    "autopilot.graph.title": "Process",
+    "autopilot.graph.aria": "Autopilot process graph",
+    "autopilot.graph.spanHelp":
+      "Autopilot works on a short piece of text, usually 8 to 12 cells. This lets it read the text around that piece.",
+    "autopilot.graph.spanHelpAria": "What a span is",
+    "autopilot.graph.liveSpans": "Now: {spans}",
+    "autopilot.graph.noLiveSpan": "Autopilot is not working on a passage now.",
+    "autopilot.graph.inspectHint": "Point to a step to see the text. Click to see more.",
+    "autopilot.graph.decision.ambiguities": plural({
+      one: "Noted {count} part of the meaning not to over-specify in {span}",
+      other: "Noted {count} parts of the meaning not to over-specify in {span}",
+    }),
+    "autopilot.graph.decision.ambiguitiesUncounted": "Wrote the situation for {span}",
+    "autopilot.graph.decision.drafts": plural({
+      one: "Put {count} draft out for review in {span}",
+      other: "Put {count} drafts out for review in {span}",
+    }),
+    "autopilot.graph.decision.draftsUncounted": "Put drafts out for review in {span}",
+    "autopilot.graph.decision.outcomeFailed": "{span} needs attention",
+    "autopilot.graph.decision.outcomePartial": "Finished {span}. Some cells have no draft.",
+    "autopilot.graph.decision.outcomeDone": "Finished {span}",
+    "autopilot.graph.decision.phase": "{span}",
+    "autopilot.graph.thisSpan": "this passage",
+    "autopilot.graph.node.scope": "Find work",
+    "autopilot.graph.node.scope.role": "Find the cells that still need a translation.",
+    "autopilot.graph.node.segment": "Piece",
+    "autopilot.graph.node.segment.role": "Cut the next piece of text to work on.",
+    "autopilot.graph.node.construe": "Situation",
+    "autopilot.graph.node.construe.role":
+      "Read the situation in this piece of text: who is there, and what they do.",
+    "autopilot.graph.node.expand_window": "Widen",
+    "autopilot.graph.node.expand_window.role":
+      "Read more of the text until the situation does not change.",
+    "autopilot.graph.node.register": "Open parts",
+    "autopilot.graph.node.register.role":
+      "Write the parts of the meaning that the source does not specify.",
+    "autopilot.graph.node.summarize": "Brief",
+    "autopilot.graph.node.summarize.role": "Write a short note of the situation.",
+    "autopilot.graph.node.persist": "Save note",
+    "autopilot.graph.node.persist.role": "Save the note for this piece of text.",
+    "autopilot.graph.node.draft": "Draft",
+    "autopilot.graph.node.draft.role": "Write the translation from the note.",
+    "autopilot.graph.node.lint_rules": "Checks",
+    "autopilot.graph.node.lint_rules.role": "Run the project checks.",
+    "autopilot.graph.node.route_risk": "Review need",
+    "autopilot.graph.node.route_risk.role": "Decide how much review this piece of text needs.",
+    "autopilot.graph.node.verify_force": "Social function",
+    "autopilot.graph.node.verify_force.role":
+      "Check that the draft has the same social function as the source.",
+    "autopilot.graph.node.verify_ambiguity": "Not too specific",
+    "autopilot.graph.node.verify_ambiguity.role":
+      "Check that the draft does not over-specify the source.",
+    "autopilot.graph.node.verify_naturalness": "Natural",
+    "autopilot.graph.node.verify_naturalness.role":
+      "Check that a speaker of the target language would say this here.",
+    "autopilot.graph.node.quorum": "Agree",
+    "autopilot.graph.node.quorum.role": "Accept a cell when enough checks agree.",
+    "autopilot.graph.node.stage": "Review",
+    "autopilot.graph.node.stage.role": "Put accepted drafts out for review.",
+    "autopilot.graph.node.report": "What happened",
+    "autopilot.graph.node.report.role":
+      "Say what Autopilot wrote, skipped, or could not finish.",
+    "autopilot.graph.inspect.passage": "Passage",
+    "autopilot.graph.inspect.brief": "Situation note",
+    "autopilot.graph.inspect.noBrief": "There is no situation note for this step yet.",
+    "autopilot.graph.inspect.decision": "Decision",
+    "autopilot.graph.inspect.noDecision": "There is no decision for this step yet.",
+
+    // — Staged proposal card: the human approval gate on agent writes ————
+    "autopilot.proposal.unsupportedKind":
+      "not supported yet — apply this kind in the app directly",
+    "autopilot.proposal.currentlyEmpty": "(currently empty)",
+    "autopilot.proposal.newRow": "(new row)",
+    "autopilot.proposal.discarded": "Discarded: {summary}",
+    "autopilot.proposal.applyFailed": "Apply failed",
+    "autopilot.proposal.applying": "Applying…",
+
     // — Stable evidence/readiness enums (raw unknown values remain evidence) —
     "autopilot.evidence.status.proposed": "Proposed",
     "autopilot.evidence.status.applied": "Applied",
+
+    "autopilot.proposal.apply": "Apply",
     "autopilot.evidence.status.rejected": "Rejected",
     "autopilot.evidence.status.superseded": "Superseded",
     "autopilot.evidence.status.approved": "Approved",
@@ -500,6 +580,28 @@ export const autopilot = defineNamespace({
         "Autopilot automation controls, progress, human-review boundaries, recovery messages, and durable evidence across the project overview and translation editor.",
     },
     keys: {
+      "autopilot.proposal.unsupportedKind": {
+        description: "Explanation beside an agent event kind the current app cannot apply.",
+      },
+      "autopilot.proposal.currentlyEmpty": {
+        description: "Diff placeholder showing that the target cell has no current text.",
+      },
+      "autopilot.proposal.newRow": {
+        description: "Diff placeholder identifying a proposed source or target row creation.",
+      },
+      "autopilot.proposal.discarded": withPlaceholders(
+        "Status line for a discarded proposal followed by its human-readable summary.",
+        { summary: "Agent-authored proposal summary; translate only the surrounding status text." },
+      ),
+      "autopilot.proposal.applyFailed": {
+        description: "Label on the inline error shown when applying a staged proposal fails.",
+      },
+      "autopilot.proposal.applying": {
+        description: "Progress label inside the proposal action button while writes are being queued.",
+      },
+      "autopilot.proposal.apply": {
+        description: "Primary action that applies every supported event in a staged proposal.",
+      },
       "autopilot.settings.controlsLabel": {
         description:
           "Device-local switch label that shows or hides Autopilot controls without starting or stopping server work.",
@@ -523,6 +625,11 @@ export const autopilot = defineNamespace({
       "autopilot.inspector.title": {
         description:
           "Heading and accessible name of the sheet containing Autopilot runs, controls, history, and evidence.",
+        screenshot: "editor-table",
+      },
+      "autopilot.inspector.activity.logAria": {
+        description:
+          "Accessible name of the live step-history list inside the Autopilot activity inspector.",
         screenshot: "editor-table",
       },
       "autopilot.progress.passagesComplete": withPlaceholders(
@@ -781,6 +888,56 @@ export const autopilot = defineNamespace({
           sourceLanguage: "Configured source-language name; do not translate the substituted value.",
           targetLanguage: "Configured target-language name; do not translate the substituted value.",
         },
+      ),
+      "autopilot.graph.aria": {
+        description:
+          "Accessible name of the Autopilot process-graph SVG on the inspector and the project card.",
+      },
+      "autopilot.graph.spanHelpAria": {
+        description:
+          "Accessible name of the help control that explains what an Autopilot span is.",
+      },
+      "autopilot.graph.liveSpans": withPlaceholders(
+        "One-line glance naming the spans currently in flight on the process graph.",
+        { spans: "Localized list of live span labels; do not translate the substituted references." },
+      ),
+      "autopilot.graph.decision.ambiguities": withPlaceholders(
+        "Last-decision line when the situation note recorded parts of the meaning not to over-specify.",
+        {
+          count: "Number of parts of the meaning the source does not specify.",
+          span: "Human-readable passage reference, or the generic 'this passage' fallback.",
+        },
+      ),
+      "autopilot.graph.decision.ambiguitiesUncounted": withPlaceholders(
+        "Last-decision line when Autopilot wrote the situation without a count of underspecified parts.",
+        { span: "Human-readable passage reference, or the generic 'this passage' fallback." },
+      ),
+      "autopilot.graph.decision.drafts": withPlaceholders(
+        "Last-decision line when Autopilot put drafts out for review.",
+        {
+          count: "Number of drafts put out for review.",
+          span: "Human-readable passage reference, or the generic 'this passage' fallback.",
+        },
+      ),
+      "autopilot.graph.decision.draftsUncounted": withPlaceholders(
+        "Last-decision line when Autopilot put drafts out for review without a count.",
+        { span: "Human-readable passage reference, or the generic 'this passage' fallback." },
+      ),
+      "autopilot.graph.decision.outcomeFailed": withPlaceholders(
+        "Last-decision line when a passage failed checks.",
+        { span: "Human-readable passage reference, or the generic 'this passage' fallback." },
+      ),
+      "autopilot.graph.decision.outcomePartial": withPlaceholders(
+        "Last-decision line when a passage finished and some cells have no draft.",
+        { span: "Human-readable passage reference, or the generic 'this passage' fallback." },
+      ),
+      "autopilot.graph.decision.outcomeDone": withPlaceholders(
+        "Last-decision line when a passage finished with no remaining work.",
+        { span: "Human-readable passage reference, or the generic 'this passage' fallback." },
+      ),
+      "autopilot.graph.decision.phase": withPlaceholders(
+        "Last-decision fallback that only names the live passage.",
+        { span: "Human-readable passage reference, or the generic 'this passage' fallback." },
       ),
     },
   },

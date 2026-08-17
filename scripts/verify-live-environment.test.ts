@@ -10,10 +10,8 @@ function response(body: string, status = 200, contentType = "text/plain"): Respo
   })
 }
 
-// AQU-798: the spa surface now also verifies the case-study static pages
-// resolve to their dedicated documents (distinct hardcoded og:url) rather than
-// the SPA index-shell fallback. These helpers let each spa mock serve valid
-// case-study documents so the crawl-focused assertions stay in focus.
+// AQU-798: post-promotion SPA verification also checks the marketing Worker's
+// case-study routes on the shared custom domain. Immutable app previews opt out.
 function caseStudyHtml(ogUrl: string): string {
   return `<!doctype html><html><head><title>Case study — Aquilla</title>`
     + `<meta property="og:url" content="${ogUrl}" /></head><body></body></html>`
@@ -373,7 +371,7 @@ describe("live deployment environment verification", () => {
     expect(fetchImpl.mock.calls.flat().map(String)).not.toContain("https://dev.aquilla.app/app")
   })
 
-  it("verifies immutable marketing documents without relying on custom-domain rewrites", async () => {
+  it("does not expect marketing documents in an immutable app preview (AQU-918)", async () => {
     const previewOrigin = "https://4d61d571-aquilla-web-development.blue-darkness-7674.workers.dev"
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {
       const url = String(input)
@@ -387,12 +385,6 @@ describe("live deployment environment verification", () => {
           "https://api.dev.aquilla.app/chat",
         ].join(" "))
       }
-      if (url === `${previewOrigin}/case-study-biblica`) {
-        return response(caseStudyHtml("https://aquilla.app/case-studies/biblica"), 200, "text/html")
-      }
-      if (url === `${previewOrigin}/case-study`) {
-        return response(caseStudyHtml("https://aquilla.app/case-studies/come-and-see"), 200, "text/html")
-      }
       throw new Error(`unexpected URL ${url}`)
     })
 
@@ -402,14 +394,15 @@ describe("live deployment environment verification", () => {
       fetchImpl,
       lookup,
       attempts: 1,
-      staticAssetPaths: true,
+      verifyMarketingRoutes: false,
       log: vi.fn(),
     })).resolves.toBeUndefined()
 
     const requestedUrls = fetchImpl.mock.calls.map(([input]) => String(input))
-    expect(requestedUrls).toContain(`${previewOrigin}/case-study-biblica`)
-    expect(requestedUrls).toContain(`${previewOrigin}/case-study`)
-    expect(requestedUrls).not.toContain(`${previewOrigin}/case-studies/biblica`)
+    expect(requestedUrls).toEqual([
+      `${previewOrigin}/app`,
+      `${previewOrigin}/assets/index.js`,
+    ])
   })
 
   it("retries only the preview entrypoint while a new alias propagates", async () => {
@@ -487,9 +480,8 @@ describe("live deployment environment verification", () => {
           "https://api.aquilla.app/chat",
         ].join(" "))
       }
-      // The case-study HTML is missing from the deployed bundle, so the path
-      // falls through single-page-application not-found handling to the SPA
-      // index shell — which carries the bare-origin og:url, not the page's own.
+      // The marketing route fell through to the app Worker, whose SPA shell
+      // carries the bare-origin og:url rather than the page's own.
       if (url === "https://aquilla.app/case-studies/biblica") {
         return response(caseStudyHtml("https://aquilla.app/"), 200, "text/html")
       }
@@ -504,7 +496,7 @@ describe("live deployment environment verification", () => {
       lookup,
       attempts: 1,
       log: vi.fn(),
-    })).rejects.toThrow("fell back to the SPA index shell")
+    })).rejects.toThrow("fell through to the app Worker's SPA shell")
   })
 
   it("fails closed for unknown environments and surfaces", async () => {

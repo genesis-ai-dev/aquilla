@@ -37,6 +37,7 @@ function title(test: TestCase): string {
 export default class ProgressReporter implements Reporter {
   private total = 0
   private completed = 0
+  private failed = 0
   private active: { test: TestCase; startedAt: number } | null = null
   private heartbeat: NodeJS.Timeout | null = null
 
@@ -71,6 +72,19 @@ export default class ProgressReporter implements Reporter {
       console.log(
         `[e2e-progress] ${this.completed}/${this.total} complete · ` +
           `${result.status} in ${duration} · ${title(test)}`,
+      )
+    }
+    if (result.status === "failed" || result.status === "timedOut") {
+      this.failed += 1
+      const error = result.error?.message?.split("\n")[0] ?? result.status
+      console.log(
+        `E2E_FAIL_FAST ${JSON.stringify({
+          n: this.failed,
+          file: test.location.file.replace(`${process.cwd()}/`, ""),
+          line: test.location.line,
+          title: test.title,
+          error,
+        })}`,
       )
     }
     this.active = null

@@ -4,6 +4,7 @@ import {
   PROCESS_NODE_IDS,
   deriveProcessGraph,
   deriveProcessGraphFromOverview,
+  emptyProcessGraph,
 } from "./process-graph"
 import type {
   ContextualActivityEvent,
@@ -48,6 +49,15 @@ function activity(events: ContextualActivityEvent[]): ContextualRunActivity {
 }
 
 describe("deriveProcessGraph", () => {
+  it("creates inspect state for every declared process node", () => {
+    const model = emptyProcessGraph()
+
+    expect(Object.keys(model.inspect)).toEqual([...PROCESS_NODE_IDS])
+    for (const nodeId of PROCESS_NODE_IDS) {
+      expect(model.inspect[nodeId]).toMatchObject({ nodeId, state: "pending" })
+    }
+  })
+
   it("lights the checking region for a live checking span", () => {
     const model = deriveProcessGraph(run, activity([
       event({

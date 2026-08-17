@@ -351,6 +351,9 @@ function edgeState(
 }
 
 function emptyInspect(decision: ProcessDecision | null): Record<ProcessNodeId, ProcessNodeInspect> {
+  // Object.fromEntries widens the exhaustive tuple keys to `string`; the
+  // PROCESS_NODE_IDS-driven construction (and its regression test) guarantees
+  // every ProcessNodeId is present before this record leaves the function.
   return Object.fromEntries(PROCESS_NODE_IDS.map((id) => [id, {
     nodeId: id,
     state: "pending" as const,
@@ -358,7 +361,7 @@ function emptyInspect(decision: ProcessDecision | null): Record<ProcessNodeId, P
     sceneBrief: null,
     drafts: [],
     decision,
-  }])) as Record<ProcessNodeId, ProcessNodeInspect>
+  }])) as unknown as Record<ProcessNodeId, ProcessNodeInspect>
 }
 
 export function emptyProcessGraph(live = false): ProcessGraphModel {

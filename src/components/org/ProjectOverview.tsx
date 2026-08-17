@@ -383,7 +383,9 @@ function ChapterRow({
         aria-expanded={open}
       >
         <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
-        <span className="w-10 shrink-0 text-muted-foreground">Ch {chapter.chapterLabel}</span>
+        <span className="w-10 shrink-0 text-muted-foreground">
+          {t("org.projectOverview.chapterAbbrevLabel", { chapter: chapter.chapterLabel })}
+        </span>
         <MiniRollupBar filledPct={chapter.filledPct} approvedPct={chapter.approvedPct} />
         <span className="text-[10px] tabular-nums text-muted-foreground">
           {chapter.filledCount}/{chapter.approvedCount}/{chapter.cellCount}
@@ -608,6 +610,7 @@ export function ProjectOverview() {
   // configuring anything.
   const [fileSortMode, setFileSortMode] = useState<FileSortMode>("last-updated")
   const [fileNameFilter, setFileNameFilter] = useState("")
+  const fileSortItems = FILE_SORT_MODES.map((m) => ({ value: m.value, label: t(m.labelKey) }))
 
   // AQU-500: transient "copied" feedback for the CSV-export control, mirroring
   // the copy-affordance pattern used elsewhere (e.g. ChatMarkdown's code-block
@@ -1032,7 +1035,7 @@ export function ProjectOverview() {
                       <Link
                         to={projectSettingsPath(id)}
                         state={{ backgroundLocation: location, projectSettingsModalDepth: 1 }}
-                        aria-label="Project settings"
+                        aria-label={t("editor.navTitle.projectSettings")}
                         data-testid="overview-project-settings"
                         className={cn(buttonVariants({ variant: "outline", size: "icon-sm" }), "shrink-0")}
                       >
@@ -1101,7 +1104,7 @@ export function ProjectOverview() {
                 <ConfirmActionDialog
                   open={archiveConfirmOpen}
                   onOpenChange={setArchiveConfirmOpen}
-                  title="Archive project"
+                  title={t("org.projectOverview.archiveDialogTitle")}
                   description={
                     project?.name
                       ? `Archive "${project.name}"? It will be hidden from the active projects list. Data is kept and owners can restore it anytime from Archived projects.`
@@ -1167,7 +1170,7 @@ export function ProjectOverview() {
                                   onCheckedChange={() => toggleStat(w.key)}
                                   data-testid={`customize-stat-${w.key}`}
                                 >
-                                  {w.label}
+                                  {t(w.labelKey)}
                                 </DropdownMenuCheckboxItem>
                               ))}
                             </DropdownMenuGroup>
@@ -1186,7 +1189,7 @@ export function ProjectOverview() {
                       <SegmentTabs
                         value={laneTagToTab(selectedLaneTag)}
                         onValueChange={(next) => setSelectedLaneTag(tabToLaneTag(next))}
-                        aria-label="Filter progress by language"
+                        aria-label={t("org.projectOverview.filterProgressByLanguageAriaLabel")}
                         options={laneTabOptions}
                       />
                     </div>
@@ -1467,7 +1470,7 @@ export function ProjectOverview() {
                         />
                       </InputGroup>
                       <Select
-                        items={FILE_SORT_MODES}
+                        items={fileSortItems}
                         value={fileSortMode}
                         onValueChange={(v) => setFileSortMode((v as FileSortMode) ?? "last-updated")}
                       >
@@ -1476,7 +1479,7 @@ export function ProjectOverview() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectGroup>
-                            {FILE_SORT_MODES.map((m) => (
+                            {fileSortItems.map((m) => (
                               <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
                             ))}
                           </SelectGroup>

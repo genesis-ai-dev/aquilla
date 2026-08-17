@@ -37,6 +37,9 @@ import { terminology } from "./terminology"
 import { agentWorkspace } from "./agentWorkspace"
 import { billing } from "./billing"
 import { knowledgeBase } from "./knowledgeBase"
+import { settings } from "./settings"
+import { agent } from "./agent"
+import { workspace } from "./workspace"
 
 export const NAMESPACES = [
   common,
@@ -60,4 +63,7 @@ export const NAMESPACES = [
   agentWorkspace,
   billing,
   knowledgeBase,
+  settings,
+  agent,
+  workspace,
 ] as const

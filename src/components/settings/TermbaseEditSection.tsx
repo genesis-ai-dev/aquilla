@@ -29,6 +29,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { ROLE } from "@/lib/frontier/roles"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import { FLOOR_LABEL } from "@/pages/settings/constants"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 
@@ -38,13 +40,16 @@ interface TermbaseEditSectionProps {
   canEdit: boolean
 }
 
-const TERMBASE_ROLE_OPTIONS = [
-  { level: ROLE.CONTRIBUTOR, label: "Contributor (400) — translators manage terms" },
-  { level: ROLE.PROJECT_LEAD, label: "Project lead (500) — default" },
-  { level: ROLE.MAINTAINER, label: "Maintainer (600) — most restrictive" },
+// The closed-trigger text comes from FLOOR_LABEL (short); labelKey is the
+// fuller sentence shown in the open dropdown list, below.
+const TERMBASE_ROLE_OPTIONS: { level: number; labelKey: MessageKey }[] = [
+  { level: ROLE.CONTRIBUTOR, labelKey: "settings.termbase.optionContributor" },
+  { level: ROLE.PROJECT_LEAD, labelKey: "settings.termbase.optionProjectLead" },
+  { level: ROLE.MAINTAINER, labelKey: "settings.termbase.optionMaintainer" },
 ]
 
 export function TermbaseEditSection({ orgSettings, canEdit }: TermbaseEditSectionProps) {
+  const { t } = useI18n()
   const { termbaseEditMinRole, patch } = orgSettings
 
   const [busy, setBusy] = useState(false)
@@ -64,27 +69,27 @@ export function TermbaseEditSection({ orgSettings, canEdit }: TermbaseEditSectio
 
   return (
     <SettingsRow
-      label="Who can manage terminology"
-      description="Minimum role required to add, edit, delete, and archive terms in a project's term base. Below this role the term base is read-only. This setting covers terminology only — every other project setting still requires Maintainer."
+      label={t("settings.termbase.label")}
+      description={t("settings.termbase.description")}
       control={
         <div className="flex min-w-44 flex-col items-end gap-1">
           <Select
             items={TERMBASE_ROLE_OPTIONS.map((opt) => ({
               value: String(opt.level),
-              label: FLOOR_LABEL[opt.level] ?? opt.label,
+              label: FLOOR_LABEL[opt.level] ?? t(opt.labelKey),
             }))}
             value={String(termbaseEditMinRole)}
             onValueChange={(v) => { if (v) void handleChange(Number(v)) }}
             disabled={!canEdit || busy}
           >
-            <SelectTrigger id="termbase-min-role" aria-label="Who can manage terminology" className="w-44">
+            <SelectTrigger id="termbase-min-role" aria-label={t("settings.termbase.label")} className="w-44">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
                 {TERMBASE_ROLE_OPTIONS.map((opt) => (
                   <SelectItem key={opt.level} value={String(opt.level)}>
-                    {opt.label}
+                    {t(opt.labelKey)}
                   </SelectItem>
                 ))}
               </SelectGroup>

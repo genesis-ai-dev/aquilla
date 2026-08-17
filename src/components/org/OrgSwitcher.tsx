@@ -31,6 +31,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 // Trailing check is in-flow only on the selected row — do not reserve `pr-8`
 // on every option (that left a blank gap beside unselected role labels).
@@ -41,7 +42,7 @@ const ORG_ITEM_CLASS =
 const ORG_META_CLASS = "text-xs text-muted-foreground!"
 
 type OrgSwitcherItem =
-  | { kind: "all"; key: "all"; label: "All organizations" }
+  | { kind: "all"; key: "all"; label: string }
   | {
       kind: "member"
       key: `member:${number}`
@@ -55,12 +56,6 @@ type OrgSwitcherItem =
       id: number
       label: string
     }
-
-const ALL_ORGS_ITEM: Extract<OrgSwitcherItem, { kind: "all" }> = {
-  kind: "all",
-  key: "all",
-  label: "All organizations",
-}
 
 function orgMatchesSearch(name: string, query: string): boolean {
   const normalized = query.trim().toLocaleLowerCase()
@@ -150,6 +145,7 @@ function OrgSwitcherList({
   directoryError: string | null
   onRetryDirectory: () => void
 }) {
+  const { t } = useI18n()
   const filtered = ComboboxPrimitive.useFilteredItems<OrgSwitcherItem>()
   const members = filtered.filter((item) => item.kind !== "guest")
   const guests = filtered.filter((item) => item.kind === "guest")
@@ -157,7 +153,7 @@ function OrgSwitcherList({
   return (
     <>
       {members.length > 0 && (
-        <ComboboxGroup aria-label="Organizations">
+        <ComboboxGroup aria-label={t("org.orgHome.organizations")}>
           {members.map((item) => (
             <OrgSwitcherOption
               key={item.key}
@@ -190,11 +186,11 @@ function OrgSwitcherList({
             <div className="flex items-center gap-2 text-sm">
               <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden />
               <span className="min-w-0 flex-1 truncate text-muted-foreground">
-                Couldn’t load shared organizations
+                {t("org.switcher.couldNotLoadSharedOrganizations")}
               </span>
               <button
                 type="button"
-                aria-label="Retry loading shared organizations"
+                aria-label={t("org.switcher.retrySharedOrganizationsAriaLabel")}
                 className="shrink-0 text-xs font-medium underline"
                 onPointerDown={(e) => e.preventDefault()}
                 onClick={(e) => {
@@ -202,7 +198,7 @@ function OrgSwitcherList({
                   onRetryDirectory()
                 }}
               >
-                Retry
+                {t("common.retry")}
               </button>
             </div>
           </div>
@@ -216,7 +212,7 @@ function OrgSwitcherList({
               data-testid="guest-orgs-separator"
             />
           )}
-          <ComboboxGroup aria-label="Guest organizations" data-testid="guest-orgs">
+          <ComboboxGroup aria-label={t("org.switcher.guestOrganizationsGroupLabel")} data-testid="guest-orgs">
             {guests.map((item) => (
               <OrgSwitcherOption
                 key={item.key}
@@ -238,6 +234,7 @@ function OrgSwitcherOption({
   item: OrgSwitcherItem
   selected: boolean
 }) {
+  const { t } = useI18n()
   return (
     <ComboboxItem
       value={item}
@@ -255,7 +252,7 @@ function OrgSwitcherOption({
       <span className="truncate">{item.label}</span>
       <span className="flex shrink-0 items-center gap-1.5">
         {item.kind === "all" ? (
-          <span className={ORG_META_CLASS}>All projects</span>
+          <span className={ORG_META_CLASS}>{t("org.switcher.allProjects")}</span>
         ) : item.kind === "member" ? (
           <RoleLabel name={item.roleName} className={ORG_META_CLASS} />
         ) : (
@@ -270,6 +267,7 @@ function OrgSwitcherOption({
 }
 
 export function OrgSwitcher() {
+  const { t } = useI18n()
   const {
     orgs,
     activeOrg,
@@ -310,16 +308,16 @@ export function OrgSwitcher() {
   const title = guestSelected
     ? selectedGuest.name ?? `Org #${selectedGuest.id}`
     : isAllOrgs
-      ? "All organizations"
+      ? t("org.breadcrumb.allOrganizations")
       : activeOrg?.name ?? "Workspace"
 
   const items = useMemo<OrgSwitcherItem[]>(() => {
     const next: OrgSwitcherItem[] = []
-    if (showAllOrgs) next.push(ALL_ORGS_ITEM)
+    if (showAllOrgs) next.push({ kind: "all", key: "all", label: t("org.breadcrumb.allOrganizations") })
     for (const org of sortedOrgs) next.push(memberItem(org))
     for (const org of sortedGuestOrgs) next.push(guestItem(org))
     return next
-  }, [showAllOrgs, sortedOrgs, sortedGuestOrgs])
+  }, [showAllOrgs, sortedOrgs, sortedGuestOrgs, t])
 
   const selectedItem = useMemo((): OrgSwitcherItem | null => {
     if (guestSelected && selectedGuestOrgId != null) {
@@ -350,15 +348,15 @@ export function OrgSwitcher() {
       <button
         type="button"
         data-testid="org-switcher-error"
-        aria-label="Retry loading organizations"
+        aria-label={t("org.switcher.retryOrganizationsAriaLabel")}
         onClick={() => { void retryOrgLoad() }}
         className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-sm hover:bg-accent"
       >
         <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-muted-foreground">
-          Couldn’t load organizations
+          {t("org.routeGate.errorTitle")}
         </span>
-        <span className="shrink-0 text-xs font-medium underline">Retry</span>
+        <span className="shrink-0 text-xs font-medium underline">{t("common.retry")}</span>
       </button>
     )
   }
@@ -374,15 +372,15 @@ export function OrgSwitcher() {
       <button
         type="button"
         data-testid="org-switcher-projects-error"
-        aria-label="Retry loading shared organizations"
+        aria-label={t("org.switcher.retrySharedOrganizationsAriaLabel")}
         onClick={retryProjectDirectory}
         className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-sm hover:bg-accent"
       >
         <AlertTriangle className="size-4 shrink-0 text-destructive" aria-hidden />
         <span className="min-w-0 flex-1 truncate text-muted-foreground">
-          Couldn’t load shared organizations
+          {t("org.switcher.couldNotLoadSharedOrganizations")}
         </span>
-        <span className="shrink-0 text-xs font-medium underline">Retry</span>
+        <span className="shrink-0 text-xs font-medium underline">{t("common.retry")}</span>
       </button>
     )
   }
@@ -463,7 +461,7 @@ export function OrgSwitcher() {
           render={
             <button
               type="button"
-              aria-label={`Organization switcher: ${title}`}
+              aria-label={t("org.switcher.triggerAriaLabel", { org: title })}
               className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-sm hover:bg-accent [&>svg:last-child]:ml-auto [&>svg:last-child]:opacity-50"
             />
           }
@@ -482,8 +480,8 @@ export function OrgSwitcher() {
             showSearchIcon
             // Gate on query text — Base UI Clear stays visible for any selection.
             showClear={inputValue !== ""}
-            placeholder="Find an organization…"
-            aria-label="Find an organization"
+            placeholder={t("org.switcher.searchPlaceholder")}
+            aria-label={t("org.switcher.searchAriaLabel")}
             className="w-auto rounded-none border-0 bg-transparent shadow-none outline-none ring-0 hover:border-0! focus-within:border-0! has-[[data-slot=input-group-control]:focus-visible]:border-0! has-[[data-slot=input-group-control]:focus-visible]:ring-0! *:data-[slot=input-group-addon]:pl-3"
           />
           <ComboboxSeparator className="mx-0 my-0" />
@@ -497,7 +495,7 @@ export function OrgSwitcher() {
                   <SearchIcon />
                 </EmptyMedia>
                 <EmptyTitle className="text-muted-foreground font-normal">
-                  No organizations found.
+                  {t("org.switcher.noOrganizationsFound")}
                 </EmptyTitle>
               </EmptyHeader>
             </Empty>
@@ -520,7 +518,7 @@ export function OrgSwitcher() {
               onClick={openCreateDialog}
             >
               <OrgMark name="Create" create />
-              <span className="truncate text-muted-foreground!">Create</span>
+              <span className="truncate text-muted-foreground!">{t("org.switcher.create")}</span>
             </button>
           </div>
         </ComboboxContent>

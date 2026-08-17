@@ -1,4 +1,5 @@
 import { FRONTIER_API_URL } from "./sync-token"
+import { t } from "@/lib/i18n/standalone"
 import type {
   TranslationRule,
   RulePenalties,
@@ -251,7 +252,7 @@ export async function patchProjectSettings(
     }
     const latest = body.latest ?? body.current
     if (latest) return { kind: "conflict", latest }
-    return { kind: "error", status: res.status, message: "version conflict" }
+    return { kind: "error", status: res.status, message: t("org.sync.versionConflictError") }
   }
   if (res.status === 403) {
     const body = (await res.json().catch(() => ({}))) as { required?: number; role?: number }

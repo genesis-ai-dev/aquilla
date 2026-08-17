@@ -62,11 +62,12 @@ function lockedOrgRoleTooltip(roleLevel: number | null | undefined): string {
 }
 
 function CopyEmailButton({ email }: { email: string }) {
+  const t = useT()
   return (
     <button
       type="button"
       className="max-w-full truncate text-left text-muted-foreground hover:text-foreground"
-      aria-label={`Copy ${email}`}
+      aria-label={t("org.membersPage.orgTable.copyEmailAriaLabel", { email })}
       onClick={(e) => {
         e.stopPropagation()
         void navigator.clipboard.writeText(email).then(() => {
@@ -169,7 +170,7 @@ export function OrgMembersTable({
               <button
                 type="button"
                 aria-expanded={isOpen}
-                aria-label={`Project access for ${m.username}`}
+                aria-label={t("org.membersPage.orgTable.projectAccessAriaLabel", { username: m.username })}
                 onClick={(e) => {
                   e.stopPropagation()
                   toggleExpand(m.userId)
@@ -217,7 +218,7 @@ export function OrgMembersTable({
               <span
                 tabIndex={0}
                 className="inline-flex cursor-help"
-                aria-label={`Org-level role: ${roleLabel(m.role.level)}`}
+                aria-label={t("org.teamDetail.orgLevelRoleAriaLabel", { role: roleLabel(m.role.level) })}
               >
                 {label}
               </span>
@@ -238,7 +239,7 @@ export function OrgMembersTable({
                 <span
                   tabIndex={0}
                   aria-disabled="true"
-                  aria-label={`Remove ${m.username} — owners only`}
+                  aria-label={t("org.membersPage.orgTable.removeOwnersOnlyAriaLabel", { username: m.username })}
                   className="inline-flex cursor-not-allowed items-center text-xs text-muted-foreground/70 underline decoration-dotted"
                 >
                   {t("org.membersPage.remove")}
@@ -248,7 +249,7 @@ export function OrgMembersTable({
           }
           return (
             <DataTableRowActionsButton
-              label={`Actions for ${m.username}`}
+              label={t("org.rowActionsAriaLabel", { name: m.username })}
               revealOnHover
             />
           )
@@ -439,7 +440,7 @@ export function OrgMembersTable({
                   </>
                 )}
                 <MenuItem
-                  aria-label={`Remove ${m.username}`}
+                  aria-label={t("org.teamDetail.removeAriaLabel", { name: m.username })}
                   disabled={isOrgOwner}
                   onClick={() => {
                     if (!isOrgOwner) onRequestRemove(m.userId, m.username)

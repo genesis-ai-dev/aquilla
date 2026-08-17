@@ -10,6 +10,7 @@ import { useMemo, useState } from "react"
 import { Bot, Maximize2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { ContextChip } from "@/lib/agent/context-chip"
 import { AgentDockView, type AgentDockViewProps } from "./agent/AgentDockView"
 import { CreditsDial, type CreditsDialProps } from "./agent/CreditsDial"
@@ -50,6 +51,7 @@ export interface AgentDockPanelProps {
 export function AgentDockPanel({
   agent, bibleSummary, pendingChip, onPendingChipConsumed, credits, onExpand, expanded,
 }: AgentDockPanelProps) {
+  const t = useT()
   // A summary prompt queued by a button tap; AgentDockView runs it once.
   const [pendingAgentPrompt, setPendingAgentPrompt] = useState<string | null>(null)
 
@@ -62,7 +64,7 @@ export function AgentDockPanel({
     if (bookName) {
       actions.push({
         label: "Summarize book",
-        title: `Summarize ${bookName} using vetted Bible resources, in your profile language`,
+        title: t("workspace.agentDockPanel.summarizeBookTitle", { book: bookName }),
         onClick: () => setPendingAgentPrompt(bookSummaryPrompt(bookName)),
       })
     }
@@ -75,27 +77,27 @@ export function AgentDockPanel({
       onClick: () => chapterRef && setPendingAgentPrompt(chapterSummaryPrompt(chapterRef)),
     })
     return actions.length ? actions : undefined
-  }, [bibleSummary])
+  }, [bibleSummary, t])
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-2 border-b px-3 py-2">
         <Bot className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="text-xs font-medium">AI Agent</span>
+        <span className="text-xs font-medium">{t("agent.dock.title")}</span>
         <span className="ms-auto flex items-center gap-1">
           {/* When the workbench owns the session, its header shows the dial —
               a second copy here would compete for the same click/popover. */}
           {credits && !expanded && <CreditsDial {...credits} />}
           {onExpand && !expanded && (
-            <AppTooltip content="Open in editor tab">
+            <AppTooltip content={t("agent.dock.openInEditorTooltip")}>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon-xs"
                 onClick={onExpand}
                 className="text-muted-foreground"
-                aria-label="Open agent in editor tab"
+                aria-label={t("agent.dock.openInEditorAriaLabel")}
               >
                 <Maximize2 />
               </Button>
@@ -110,7 +112,7 @@ export function AgentDockPanel({
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-4 text-center">
           <Bot className="h-6 w-6 text-muted-foreground" />
           <p className="text-xs text-muted-foreground">
-            The agent is open in an editor tab.
+            {t("agent.dock.openInEditorNotice")}
           </p>
         </div>
       ) : (

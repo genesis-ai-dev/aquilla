@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useOnline } from "@/hooks/useOnline"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { getProject, patchProject } from "@/lib/store/project-index"
 import { ROLE } from "@/lib/frontier/roles"
 import { resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
@@ -186,6 +187,7 @@ export function useProjectSettings(
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const isOnline = useOnline()
+  const t = useT()
 
   const [server, setServer] = useState<ProjectSettingsResponse | null>(null)
   const [local, setLocal] = useState<ProjectWideSettings>({})
@@ -476,7 +478,7 @@ export function useProjectSettings(
     // loosening the hook-wide floor) keeps the AQU-255 guarantee intact for
     // all the other keys.
 
-    if (!projectId || !jwt) return { kind: "error", message: "no session or project" }
+    if (!projectId || !jwt) return { kind: "error", message: t("workspace.projectSettingsHook.noSessionError") }
 
     if (!isOnlineRef.current) {
       // Offline — apply locally so work isn't lost; server will reconcile on reconnect.
@@ -633,7 +635,7 @@ export function useProjectSettings(
       return next
     })
     return { kind: "error", message: result.message }
-  }, [projectId, jwt, roleLevel, termbaseEditMinRole, refresh, runSerialized])
+  }, [projectId, jwt, roleLevel, termbaseEditMinRole, refresh, runSerialized, t])
 
   return {
     settings,

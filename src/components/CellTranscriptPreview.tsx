@@ -190,38 +190,40 @@ export const CellTranscriptPreview = forwardRef<HTMLDivElement, Props>(function 
       {editable && state !== "match" && !editing && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {state === "stale" && onRetranscribe && (
-            <AppTooltip content="Listen to the recording again and refresh the transcript">
+            <AppTooltip content={t("workspace.transcriptPreview.retranscribeTooltip")}>
               <Button
                 size="xs"
                 variant="outline"
                 onClick={onRetranscribe}
               >
-                <RefreshCw /> Transcribe again
+                <RefreshCw /> {t("workspace.transcriptPreview.transcribeAgain")}
               </Button>
             </AppTooltip>
           )}
           {state === "differs" && onUseAsCellText && (
             <AppTooltip content={cellHasText
-              ? "Replace your text with what the recording says"
-              : "Fill in your text from the recording"}>
+              ? t("workspace.transcriptPreview.replaceTextTooltip")
+              : t("workspace.transcriptPreview.fillTextTooltip")}>
               <Button
                 size="xs"
                 variant="outline"
                 onClick={() => onUseAsCellText(transcript)}
               >
-                <CornerDownLeft /> {cellHasText ? "Use what was heard" : "Use as the text"}
+                <CornerDownLeft /> {cellHasText
+                  ? t("workspace.transcriptPreview.useWhatWasHeard")
+                  : t("workspace.transcriptPreview.useAsText")}
               </Button>
             </AppTooltip>
           )}
           {state === "differs" && onRetranscribe && (
-            <AppTooltip content="Listen to the recording again and refresh the transcript">
+            <AppTooltip content={t("workspace.transcriptPreview.retranscribeTooltip")}>
               <Button
                 size="xs"
                 variant="ghost"
                 onClick={onRetranscribe}
                 className="text-muted-foreground"
               >
-                <RefreshCw /> Transcribe again
+                <RefreshCw /> {t("workspace.transcriptPreview.transcribeAgain")}
               </Button>
             </AppTooltip>
           )}

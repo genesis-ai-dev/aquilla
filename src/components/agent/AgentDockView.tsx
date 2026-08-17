@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Bot, Paperclip, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { ChatComposer, type ChatComposerHandle, type SuggestedAction } from "@/components/chat/ChatComposer"
 import { InputGroupButton } from "@/components/ui/input-group"
 import { serializeWithChips, type ContextChip } from "@/lib/agent/context-chip"
@@ -92,6 +93,7 @@ export function AgentDockView({
   renderProposalOverride,
   onReviewMemory,
 }: AgentDockViewProps) {
+  const t = useT()
   const { state, send, stop, noteActivity } = useAgentSession(projectId)
   const [promptHintIndex, setPromptHintIndex] = useState(0)
   const composerRef = useRef<ChatComposerHandle>(null)
@@ -209,7 +211,7 @@ export function AgentDockView({
         ) : (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 px-3 text-center text-muted-foreground">
             <Bot className="h-5 w-5" />
-            <p className="text-xs">Sign in to use the agent.</p>
+            <p className="text-xs">{t("agent.dock.signInNotice")}</p>
           </div>
         )
       ) : (
@@ -288,8 +290,8 @@ export function AgentDockView({
         queueWhileStreaming
         placeholder={
           state.runs.length === 0
-            ? `Try asking: ${AGENT_PROMPT_HINTS[promptHintIndex]}`
-            : "Ask Aquilla…"
+            ? `${t("agent.emptyState.tryAsking")}: ${AGENT_PROMPT_HINTS[promptHintIndex]}`
+            : t("agent.dock.composerPlaceholder")
         }
         attachmentBar={
           attachments.length > 0 || attachError ? (
@@ -307,7 +309,7 @@ export function AgentDockView({
                       <button
                         type="button"
                         onClick={() => removeAttachment(a.artifactId)}
-                        aria-label={`Remove ${a.fileName}`}
+                        aria-label={t("agent.dock.removeAttachmentAriaLabel", { fileName: a.fileName })}
                         className="shrink-0 text-muted-foreground hover:text-foreground"
                       >
                         <X className="h-3 w-3" />
@@ -344,8 +346,8 @@ export function AgentDockView({
               size="icon-sm"
               className="rounded-full"
               disabled={!jwt || uploading}
-              aria-label="Attach file"
-              title="Attach a file for the agent"
+              aria-label={t("agent.dock.attachFileAriaLabel")}
+              title={t("agent.dock.attachFileTitle")}
               onClick={() => fileInputRef.current?.click()}
             >
               {uploading ? <Spinner /> : <Paperclip />}

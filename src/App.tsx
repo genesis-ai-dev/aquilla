@@ -42,6 +42,7 @@ import { VersionBadge } from "@/components/VersionBadge"
 import { UpdateBanner } from "@/components/UpdateBanner"
 import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
 import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
 
 // Heavy workspace / admin routes — loaded only when navigated to
@@ -112,11 +113,12 @@ function GlobalAudioShortcuts() {
 }
 
 function SyncFreezeOverlay() {
+  const t = useT()
   const { syncing } = useSyncing()
   if (!syncing) return null
   return (
     <div className="fixed top-0 left-0 right-0 z-40 bg-amber-50 text-amber-800 border-b border-amber-200 px-3 py-1 text-xs text-center">
-      Merging incoming changes…
+      {t("workspace.syncFreezeOverlay")}
     </div>
   )
 }

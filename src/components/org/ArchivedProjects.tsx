@@ -29,10 +29,12 @@ import { emitFileRestore, InsufficientRoleError } from "@/lib/sync/events-emit"
 import { archivedPath } from "@/lib/navigation/org-paths"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { ArchiveRestore, Building2 } from "lucide-react"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 type ArchivedTab = "projects" | "files"
 
 export function ArchivedProjects() {
+  const { t } = useI18n()
   const { activeOrgId } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -146,7 +148,7 @@ export function ArchivedProjects() {
       {
         id: "name",
         accessorFn: (p) => p.name.toLowerCase(),
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Project" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.project")} />,
         meta: { className: "min-w-0" },
         cell: ({ row }) => (
           <span className="font-medium text-foreground">{row.original.name}</span>
@@ -156,12 +158,14 @@ export function ArchivedProjects() {
         id: "archivedAt",
         accessorFn: (p) => missingLast(p.archivedAt ?? undefined),
         sortUndefined: SORT_MISSING_LAST,
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Archived" />,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title={t("org.orgSidebar.archived")} />
+        ),
         meta: { className: "w-[9rem]" },
         cell: ({ row }) => (
           <DateTooltip
             value={row.original.archivedAt}
-            label="Archived"
+            label={t("org.orgSidebar.archived")}
             className="text-muted-foreground"
           />
         ),
@@ -170,7 +174,7 @@ export function ArchivedProjects() {
         id: "files",
         accessorFn: (p) => p.files?.length ?? 0,
         header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Files" className="justify-end" />
+          <DataTableColumnHeader column={column} title={t("nav.dock.filesTab")} className="justify-end" />
         ),
         meta: { className: "w-[5.5rem]" },
         cell: ({ row }) => (
@@ -182,13 +186,13 @@ export function ArchivedProjects() {
       {
         id: "actions",
         enableSorting: false,
-        header: () => <span className="sr-only">Actions</span>,
+        header: () => <span className="sr-only">{t("org.overviewLaneTable.actionsColumn")}</span>,
         meta: { className: "w-10" },
         cell: ({ row }) => {
           const p = row.original
           return (
             <DataTableRowActionsButton
-              label={`More actions for ${p.name}`}
+              label={t("org.orgProjectsDataTable.moreActionsAriaLabel", { name: p.name })}
               data-testid={`archived-row-actions-${p.id}`}
               revealOnHover
               disabled={restoringId != null}
@@ -198,7 +202,7 @@ export function ArchivedProjects() {
         },
       },
     ],
-    [restoringId],
+    [restoringId, t],
   )
 
   const fileColumns = useMemo<ColumnDef<OrgDeletedFile>[]>(
@@ -206,7 +210,7 @@ export function ArchivedProjects() {
       {
         id: "name",
         accessorFn: (f) => f.name.toLowerCase(),
-        header: ({ column }) => <DataTableColumnHeader column={column} title="File" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.file")} />,
         meta: { className: "min-w-0" },
         cell: ({ row }) => (
           <span className="font-medium text-foreground">{row.original.name}</span>
@@ -215,7 +219,7 @@ export function ArchivedProjects() {
       {
         id: "project",
         accessorFn: (f) => f.projectName.toLowerCase(),
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Project" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.project")} />,
         meta: { className: "w-[12rem]" },
         cell: ({ row }) => (
           <span className="text-muted-foreground">{row.original.projectName}</span>
@@ -225,12 +229,14 @@ export function ArchivedProjects() {
         id: "deletedAt",
         accessorFn: (f) => missingLast(f.deletedAt),
         sortUndefined: SORT_MISSING_LAST,
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Deleted" />,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title={t("org.archivedProjects.deletedColumnLabel")} />
+        ),
         meta: { className: "w-[9rem]" },
         cell: ({ row }) => (
           <DateTooltip
             value={row.original.deletedAt}
-            label="Deleted"
+            label={t("org.archivedProjects.deletedColumnLabel")}
             className="text-muted-foreground"
           />
         ),
@@ -238,13 +244,13 @@ export function ArchivedProjects() {
       {
         id: "actions",
         enableSorting: false,
-        header: () => <span className="sr-only">Actions</span>,
+        header: () => <span className="sr-only">{t("org.overviewLaneTable.actionsColumn")}</span>,
         meta: { className: "w-10" },
         cell: ({ row }) => {
           const f = row.original
           return (
             <DataTableRowActionsButton
-              label={`More actions for ${f.name}`}
+              label={t("org.orgProjectsDataTable.moreActionsAriaLabel", { name: f.name })}
               data-testid={`deleted-file-row-actions-${f.fileId}`}
               revealOnHover
               disabled={restoringId != null}
@@ -254,7 +260,7 @@ export function ArchivedProjects() {
         },
       },
     ],
-    [restoringId],
+    [restoringId, t],
   )
 
   return (
@@ -265,7 +271,7 @@ export function ArchivedProjects() {
       main={
         <Page size="wide" data-testid="archived-projects-scroll">
           <PageHeader
-            title="Archived"
+            title={t("org.orgSidebar.archived")}
             description={
               tab === "files"
                 ? "Files deleted from projects in this organization. Restore one to put it back in its project."
@@ -283,17 +289,17 @@ export function ArchivedProjects() {
           {activeOrgId == null ? (
             <EmptyState
               icon={Building2}
-              title="Select an organization"
-              description="Archived projects are managed within a single organization."
+              title={t("org.teamsList.selectOrgTitle")}
+              description={t("org.archivedProjects.selectOrgDescription")}
             />
           ) : (
             <Tabs
               value={tab}
               onValueChange={(v) => setTab(v as ArchivedTab)}
             >
-              <TabsList aria-label="Archived views">
-                <TabsTrigger value="projects">Projects</TabsTrigger>
-                <TabsTrigger value="files">Recently deleted</TabsTrigger>
+              <TabsList aria-label={t("org.archivedProjects.viewsAriaLabel")}>
+                <TabsTrigger value="projects">{t("nav.projects")}</TabsTrigger>
+                <TabsTrigger value="files">{t("nav.sidebarSection.trash")}</TabsTrigger>
               </TabsList>
 
               <TabsContent value="projects">
@@ -302,7 +308,7 @@ export function ArchivedProjects() {
                     className="h-48 animate-pulse rounded-lg border bg-card"
                     role="status"
                     aria-busy="true"
-                    aria-label="Loading archived projects"
+                    aria-label={t("org.archivedProjects.loadingLabel")}
                   />
                 ) : (
                   <DataTable
@@ -329,7 +335,7 @@ export function ArchivedProjects() {
                         onClick={() => void handleRestoreProject(p.id)}
                       >
                         <ArchiveRestore className="size-4" />
-                        Restore
+                        {t("common.restore")}
                       </MenuItem>
                     )}
                     emptyState={(table) => {
@@ -339,21 +345,21 @@ export function ArchivedProjects() {
                             variant="inline"
                             className="flex-none py-12"
                             icon={NAV_PAGE_ICONS.archived}
-                            title="No archived projects."
-                            description="When you archive a project, it shows up here until you restore it."
+                            title={t("org.archivedProjects.emptyTitle")}
+                            description={t("org.archivedProjects.emptyDescription")}
                           />
                         )
                       }
                       return (
                         <div className="flex flex-col items-center gap-3 py-10">
                           <p className="text-center text-sm text-muted-foreground">
-                            No archived projects match your search.
+                            {t("org.archivedProjects.noSearchMatch")}
                           </p>
                           <Button
                             variant="outline"
                             onClick={() => table.setGlobalFilter("")}
                           >
-                            Clear
+                            {t("common.clear")}
                           </Button>
                         </div>
                       )
@@ -371,7 +377,7 @@ export function ArchivedProjects() {
                     className="h-48 animate-pulse rounded-lg border bg-card"
                     role="status"
                     aria-busy="true"
-                    aria-label="Loading recently deleted files"
+                    aria-label={t("org.archivedProjects.loadingDeletedFilesLabel")}
                   />
                 ) : (
                   <DataTable
@@ -402,7 +408,7 @@ export function ArchivedProjects() {
                         onClick={() => void handleRestoreFile(f)}
                       >
                         <ArchiveRestore className="size-4" />
-                        Restore
+                        {t("common.restore")}
                       </MenuItem>
                     )}
                     emptyState={(table) => {
@@ -412,21 +418,21 @@ export function ArchivedProjects() {
                             variant="inline"
                             className="flex-none py-12"
                             icon={NAV_PAGE_ICONS.file}
-                            title="No recently deleted files."
-                            description="When you delete a file from a project, it shows up here until you restore it."
+                            title={t("workspace.trash.empty")}
+                            description={t("org.archivedProjects.noDeletedFilesDescription")}
                           />
                         )
                       }
                       return (
                         <div className="flex flex-col items-center gap-3 py-10">
                           <p className="text-center text-sm text-muted-foreground">
-                            No deleted files match your search.
+                            {t("org.archivedProjects.noDeletedFilesSearchMatch")}
                           </p>
                           <Button
                             variant="outline"
                             onClick={() => table.setGlobalFilter("")}
                           >
-                            Clear
+                            {t("common.clear")}
                           </Button>
                         </div>
                       )

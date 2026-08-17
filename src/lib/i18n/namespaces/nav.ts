@@ -279,6 +279,7 @@ export const nav = defineNamespace({
     "nav.fileList.expandGroup": "Expand {group}",
     "nav.fileList.collapseGroup": "Collapse {group}",
     "nav.fileList.renameGroup": "Rename {group}",
+    "nav.fileList.ungroupedLabel": "Ungrouped",
 
     // -- OutboxInspectorPopover --
     "nav.outbox.popoverAriaLabel": "Pending changes",
@@ -1174,6 +1175,14 @@ export const nav = defineNamespace({
           "Tooltip and accessible name for the pencil icon that starts inline renaming " +
           "of a corpus/group header.",
         placeholders: { group: "The corpus/group's own label." },
+      },
+      "nav.fileList.ungroupedLabel": {
+        description:
+          "Header text for the synthetic bucket holding files with no corpus marker at " +
+          "all (groupByCorpus, src/lib/sidebar/group-by-corpus.ts). The underlying " +
+          "identity string 'Ungrouped' the code branches on (is-this-the-synthetic-" +
+          "bucket, rename eligibility, …) is NOT this key and stays English — only this " +
+          "display copy is translated.",
       },
 
       // -- OutboxInspectorPopover --

@@ -18,6 +18,7 @@
  */
 
 import { roleNameKey, type RoleT } from "@/lib/frontier/roles"
+import { t } from "@/lib/i18n/standalone"
 
 /** @deprecated use `RoleT` from `@/lib/frontier/roles` — kept as an alias so
  *  existing imports don't need to churn. */
@@ -77,6 +78,6 @@ export function actionGateProps(
   if (allowed) return {}
   return {
     disabled: true,
-    tooltip: `Requires at least ${minRoleName} access`,
+    tooltip: t("org.actionGate.deniedTooltip", { minRole: minRoleName }),
   }
 }

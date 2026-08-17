@@ -151,7 +151,7 @@ export function OrgStep({
                   value={field.state.value}
                   onBlur={field.handleBlur}
                   onChange={(e) => field.handleChange(e.target.value)}
-                  placeholder="alex@example.com, sam@example.com"
+                  placeholder={t("workspace.orgStep.emailsPlaceholder")}
                 />
                 <FieldDescription>
                   {t("onboarding.step.org.inviteDescription")}

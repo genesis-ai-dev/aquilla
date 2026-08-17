@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dialog"
 import { AiProviderStep } from "@/components/onboarding/checklist/AiProviderStep"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface AiSetupDialogProps {
   open: boolean
@@ -18,6 +19,7 @@ interface AiSetupDialogProps {
 }
 
 export function AiSetupDialog({ open, onOpenChange, project, onUpdated }: AiSetupDialogProps) {
+  const t = useT()
   const navigate = useNavigate()
   const location = useLocation()
   const { id } = useParams<{ id: string }>()
@@ -28,10 +30,10 @@ export function AiSetupDialog({ open, onOpenChange, project, onUpdated }: AiSetu
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-4 w-4 text-primary" />
-            Set up AI
+            {t("workspace.aiSetup.title")}
           </DialogTitle>
           <DialogDescription>
-            Choose a provider to enable translation suggestions.
+            {t("workspace.aiSetup.description")}
           </DialogDescription>
         </DialogHeader>
 
@@ -53,7 +55,7 @@ export function AiSetupDialog({ open, onOpenChange, project, onUpdated }: AiSetu
               })
             }}
           >
-            Full settings →
+            {t("workspace.aiSetup.fullSettingsLink")}
           </button>
         </div>
       </DialogContent>

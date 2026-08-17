@@ -441,9 +441,48 @@ export const org = defineNamespace({
     "org.projectOverview.chapterBreakdownAria": "Chapter breakdown",
     "org.projectOverview.audioRecordedSummary": "{minutes} min recorded · {percent} of cells have audio",
 
+    // -- hooks/useProjectLifecycle: freeze/reactivate toggle re-entrancy guard --
+    "org.projectLifecycle.toggleInProgressError": "A freeze/reactivate toggle is already in progress.",
+
+    // -- lib/sync/org-settings.ts AND lib/sync/project-settings.ts: shared
+    // fallback for a 409 response whose body is missing the expected
+    // latest-state payload, so the caller can't offer the usual
+    // reload-and-merge conflict flow. Both files reuse this one key so its
+    // text never needs to exist twice in the catalog. --
+    "org.sync.versionConflictError": "This was changed by someone else — reload and try again.",
+
+    // -- lib/permissions/denial.ts (actionGateProps): generic disabled-button
+    // tooltip. Currently unused by any call site (only denialMessage(), the
+    // richer sibling helper, is wired into the UI today) — keyed now so it's
+    // ready and never drifts from the catalog the moment something adopts it. --
+    "org.actionGate.deniedTooltip": "Requires at least {minRole} access",
+
+    // -- lib/frontier/roles.ts: per-role capability blurb (ROLE_INFO), shown
+    // under the role name in RoleSelect (AD-6/AQU-138), ProjectSettings/
+    // MembersSection, StaffLanePopover, and — composed with the role name and
+    // level via roleHelpText() — TeamDetail/OrgMembersTable's locked-role
+    // tooltip. Distinct from the shorter common.role.*Description blurbs used
+    // by MembersMatrixCellEditor/ProjectMembersPage/SharePanel — both are
+    // real, separately-live UI copy; see the ROLE_INFO doc comment. --
+    "org.role.descriptionViewer": "Can read all org projects. No edit or management actions.",
+    "org.role.descriptionCommenter": "Can read and leave comments. Cannot edit content.",
+    "org.role.descriptionReviewer": "Can read, comment, and review. Cannot make direct edits.",
+    "org.role.descriptionContributor": "Can edit project content. Maximum level grantable via share link.",
+    "org.role.descriptionProjectLead":
+      "Can add members to projects, mint share-link invites, and lead project work.",
+    "org.role.descriptionMaintainer":
+      "Can create/manage teams, rename the org, set project deadlines, and remove project members.",
+    "org.role.descriptionOwner":
+      "Full control: add/remove org members, archive/restore projects, and all maintainer actions.",
+
     // -- OrgSidebar: left nav for org-scoped routes --
     "org.orgSidebar.archived": "Archived",
     "org.orgSidebar.admin": "Admin",
+
+    // -- hooks/useOrgSettings: patch()/requestPromotion() error fallback when
+    // called with no signed-in session or no resolved org id (guards a race
+    // at mount, not a normal user-reachable path) --
+    "org.orgSettings.noSessionError": "No session or organization — sign in and try again.",
 
     // -- OrgSettingsExport: who may export a project's deliverables --
     "org.exportSettings.deliverablesGroupLabel": "Deliverables",
@@ -597,6 +636,13 @@ export const org = defineNamespace({
     "org.membersPage.orgPage.openLinkTooltip": "Open link: anyone holding the URL can redeem",
     "org.membersPage.orgPage.orgOwnerHint": "Org owner",
 
+    // -- Shared: DataTableRowActionsButton accessible name, the "Actions for
+    // X" phrasing (distinct from the "More actions for X" phrasing
+    // org.orgProjectsDataTable.moreActionsAriaLabel uses for a different set
+    // of tables) — reused verbatim by OrgMembersTable, TeamDetail (member AND
+    // project rows), and OverviewLaneTable so the four never drift. --
+    "org.rowActionsAriaLabel": "Actions for {name}",
+
     // -- OrgMembersTable: org roster table and member-management dialogs --
     "org.membersPage.orgTable.changeRoleDescription":
       "This updates their organization-level role across every project.",
@@ -609,6 +655,9 @@ export const org = defineNamespace({
     "org.membersPage.orgTable.noMembersTitle": "No members in this org yet.",
     "org.membersPage.orgTable.noSearchMatch": "No members match this search.",
     "org.membersPage.orgTable.removeFromOrg": "Remove from org",
+    "org.membersPage.orgTable.copyEmailAriaLabel": "Copy {email}",
+    "org.membersPage.orgTable.projectAccessAriaLabel": "Project access for {username}",
+    "org.membersPage.orgTable.removeOwnersOnlyAriaLabel": "Remove {username} — owners only",
 
     // -- Org settings: consolidated security and permission-floor controls --
     "org.settingsSecurity.groupLabel": "Permissions",
@@ -715,6 +764,314 @@ export const org = defineNamespace({
     "org.usageRollup.audioMinutesSeconds": "{minutes} min {seconds} s audio",
     "org.usageRollup.audioMinutesOnly": "{minutes} min audio",
     "org.usageRollup.aiRequestCount": plural({ one: "{count} AI request", other: "{count} AI requests" }),
+
+    // -- AccessModelLegend: collapsible legend explaining the four grant paths --
+    "org.accessModelLegend.heading": "Access model legend",
+    "org.accessModelLegend.badgeColumn": "Badge",
+    "org.accessModelLegend.pathColumn": "Grant path",
+    "org.accessModelLegend.meaningColumn": "Meaning",
+    "org.accessModelLegend.maxWinsHeading": "Effective role = max-wins",
+    "org.accessModelLegend.maxWinsDescription":
+      "A person's effective role on a project is the highest role they hold across all contributing paths. Adding a lower grant never reduces access. To fully remove someone, all contributing grant paths must be cleared.",
+    "org.accessModelLegend.direct.label": "Direct",
+    "org.accessModelLegend.direct.description":
+      "A role granted explicitly to this person on this project only. The most specific path — adding or removing it affects only this project.",
+    "org.accessModelLegend.viaGroup.label": "Via group",
+    "org.accessModelLegend.viaGroup.description":
+      "A role inherited because a group this person belongs to has access to this project. Edit the group's membership to change or remove this grant.",
+    "org.accessModelLegend.orgWide.label": "Org-wide",
+    "org.accessModelLegend.orgWide.description":
+      "A role that applies to every project in this org because of the person's org-level role. Change the org membership to affect all projects at once.",
+    "org.accessModelLegend.creator.label": "Creator",
+    "org.accessModelLegend.creator.description":
+      "Owner role is permanent until project ownership is transferred. Manage in the project's Settings → Share.",
+
+    // -- JoinOrgPage: org-invite landing page (/join-org/:token) --
+    "org.joinOrgPage.organizationLine": "Organization: {name}",
+    "org.joinOrgPage.unnamedOrgFallback": "Unnamed organization",
+    // "Loading invitation details…" → auth.join.loadingDetails (identical text)
+    "org.joinOrgPage.genericInviteFallback":
+      "You've been invited to join an organization on Aquilla.",
+    // "Invalid invite link" → auth.join.invalidInviteLink (identical text)
+    // "Go home" → error.notFound.goHome (identical text)
+    "org.joinOrgPage.cantJoinTitle": "Can't join",
+    "org.joinOrgPage.youreInTitle": "You're in",
+    "org.joinOrgPage.joinedRedirect": "Joined {org}. Taking you there…",
+    "org.joinOrgPage.fallbackOrgName": "the organization",
+    // Role-line sentences below deliberately keep the source's lowercase
+    // "you'll join as" (not auth.join.roleLineSingle's capitalized "You'll") —
+    // this page always opens the clause mid-sentence-register, even with no
+    // "Invited by" prefix, so the English text must not change to match; see
+    // the duplicate-exceptions.ts entries for these two keys. The inviter
+    // variants are byte-identical to auth.join.roleLineSingleInviter(Email)
+    // (both open with "Invited by …", so the case question doesn't arise) —
+    // call sites reuse those two directly instead of duplicating them here.
+    "org.joinOrgPage.roleLine": "you'll join as {role}.",
+    "org.joinOrgPage.roleLineEmail": "you'll join as {role} — invitation sent to {email}.",
+
+    // -- MemberAccessDrillDown: per-member project-access breakdown panel --
+    "org.memberAccessDrillDown.heading": "Project access breakdown",
+    // "Close" → common.close (identical text)
+    "org.memberAccessDrillDown.loadingAccess": "Loading access…",
+    "org.memberAccessDrillDown.orgLevelBaseline": "Org-level baseline",
+    "org.memberAccessDrillDown.projectsAccessibleCount": plural({
+      one: "{count} project accessible",
+      other: "{count} projects accessible",
+    }),
+    "org.memberAccessDrillDown.noAccessEmptyTitle": "{username} has no access to any project in this org.",
+    "org.memberAccessDrillDown.pathDirect": "direct · {role}",
+    "org.memberAccessDrillDown.pathGroup": "group \"{group}\" · {role}",
+    "org.memberAccessDrillDown.pathOrgLevel": "org-level · {role}",
+
+    // -- MemberLaneScopeEditor: freeform lane/file scope editor popover (matrix) --
+    "org.memberLaneScopeEditor.editScopesAriaLabel": "Edit {username}'s lane scopes on this project",
+    "org.memberLaneScopeEditor.scopesHeading": "{username}'s scopes",
+    "org.memberLaneScopeEditor.unscopedFullAccess": "Unscoped — full access",
+    "org.memberLaneScopeEditor.laneCodePlaceholder": "Lane code (e.g. es)",
+    "org.memberLaneScopeEditor.newLaneCodeAriaLabel": "New lane code",
+    // "Add" → common.add (identical text)
+    "org.memberLaneScopeEditor.saveScopesButton": "Save scopes",
+
+    // -- MemberMultiAddRow: shared staged-multi-add affordance (AQU-734) --
+    "org.memberMultiAddRow.peopleToAddAriaLabel": "People to add",
+    // "Role" aria-label → common.roleLabel (identical text)
+
+    // -- MembersMatrixCellEditor: inline per-cell role editor in the members × projects matrix --
+    "org.membersMatrixCellEditor.alsoHasAccessAriaLabel": "Also has access via other paths",
+    "org.membersMatrixCellEditor.alsoHasAccessVia": "Also has access via:",
+    "org.membersMatrixCellEditor.currentBadge": "current",
+    // "Saving…" → common.saving (identical text)
+    "org.membersMatrixCellEditor.removeFromProject": "Remove from project",
+    "org.membersMatrixCellEditor.creatorGrantHeading": "Creator grant",
+    "org.membersMatrixCellEditor.creatorGrantDescription":
+      "This person created the project. Their Owner role is permanent until project ownership is transferred. The effective role here is Owner (max-wins). Manage in the project's Settings → Share.",
+    "org.membersMatrixCellEditor.viaGroupHeading": "Effective role: via group (max-wins)",
+    "org.membersMatrixCellEditor.viaGroupDescription":
+      "This role comes from a group attached to this project. Edit the group's membership to change or remove this grant. To override for this project only, add a direct grant below.",
+    "org.membersMatrixCellEditor.orgWideHeading": "Effective role: org-wide (max-wins)",
+    "org.membersMatrixCellEditor.orgWideDescription":
+      "This role is granted org-wide and applies to every project. A direct project grant added here will supersede the org-wide grant for this project only (max-wins still applies — only a higher direct role changes the effective role).",
+    "org.membersMatrixCellEditor.setExceptionLabel": "Set a project-level exception (direct grant)…",
+    "org.membersMatrixCellEditor.addToProjectAriaLabel": "Add {username} to project",
+    // "Add {username}" popover title → workspace.typeahead.addUser (identical text)
+    "org.membersMatrixCellEditor.editRoleAriaLabel": "Edit {username}'s role on this project",
+    "org.membersMatrixCellEditor.editPopoverTitle": "Edit {username}",
+
+    // -- MembersMatrixView: members × projects scan view with inline cell editing --
+    "org.membersMatrixView.buildingMatrix": "Building portfolio matrix…",
+    "org.membersMatrixView.memberColumnHeader": "Member",
+    "org.membersMatrixView.howAccessResolvedAriaLabel": "How access is resolved",
+    "org.membersMatrixView.accessResolutionExplanation":
+      "Every member's access is the highest role they hold across up to four paths: a direct project grant, any group attached to this project, their org-wide role, or creator status. Adding a lower grant never reduces access — to fully remove someone, all contributing paths must be cleared.",
+    "org.membersMatrixView.soleOwnerWarning": "Sole Owner: losing this person locks the project",
+    "org.membersMatrixView.orgInheritedTooltip":
+      "Access on every project comes from org-wide role; no per-project overrides.",
+
+    // -- MembersPanel: shared roster list (per-project and org membership) --
+    // "via org" badge → org.membersPage.sourceViaOrg (identical text)
+    "org.membersPanel.sourceViaGroup": "via group",
+    // "creator" badge → org.memberAccessPanel.creatorGrantLabel (identical text)
+    // "Change role" aria-label → org.membersPage.changeRoleAria (identical text)
+    "org.membersPanel.scopesToggleLabel": "Scopes",
+    "org.membersPanel.leaveEmptyForFullAccess": "Leave empty for full access.",
+    "org.membersPanel.lanesLegend": "Lanes",
+    "org.membersPanel.laneCheckboxAriaLabel": "Lane {lane}",
+    // "Files" fieldset legend → nav.dock.filesTab (identical text)
+    // File checkbox aria-label → comments.scope.file (identical "File {file}" text)
+
+    // -- MultiProjectInviteDialog: unified add-to-projects dialog (AQU-322) --
+    // "Add to projects" dialog title AND button → org.membersPage.orgPage.addToProjectsButton (identical text)
+    "org.multiProjectInviteDialog.recipientLabel": "Recipient",
+    "org.multiProjectInviteDialog.emailModeHint":
+      "They'll receive one email per selected project with a single-use invite link.",
+    "org.multiProjectInviteDialog.projectsFieldLabel": "Projects",
+    "org.multiProjectInviteDialog.selectProjectAriaLabel": "Select {name}",
+    "org.multiProjectInviteDialog.noProjectsAvailable":
+      "No projects available — create one first or check back when sync completes.",
+    "org.multiProjectInviteDialog.projectsSelectedCount": plural({
+      one: "{count} project selected",
+      other: "{count} projects selected",
+    }),
+    "org.multiProjectInviteDialog.rolesSuffix": " — roles: {roles}",
+    "org.multiProjectInviteDialog.sendInvitesButton": "Send invites",
+
+    // -- RemoveOrgMemberDialog: confirm-and-optionally-cascade org removal --
+    "org.removeOrgMemberDialog.title": "Remove {username} from {orgName}?",
+    "org.removeOrgMemberDialog.warningBody":
+      "{username} will lose org-wide access. They will still keep access to any projects they were added to individually unless you also remove them below.",
+    "org.removeOrgMemberDialog.loadingProjects": "Loading projects…",
+    "org.removeOrgMemberDialog.noDirectMemberships": "No direct project memberships in this org.",
+    // "Cancel" → common.cancel (identical text)
+
+    // -- StaffLanePopover: one-gesture staffing control (AQU-538 §3.4) --
+    "org.staffLanePopover.staffLaneHeading": "Staff {lane}",
+    "org.staffLanePopover.orgMemberPhrase": "org member",
+    "org.staffLanePopover.addOrgMemberDescription": "Add an {member} to this project, scoped to this lane.",
+    "org.staffLanePopover.searchPlaceholder": "Search your organization",
+    // "Search org members" aria-label → org.teamDetail.searchOrgMembersAriaLabel (identical text)
+    "org.staffLanePopover.searchScopeNote":
+      "Searches your organization only. Adding someone from outside it?",
+    "org.staffLanePopover.inviteToProjectLink": "Invite them to the project",
+    // "Change" → org.projectOverview.change (identical text)
+    // "Role" aria-label → common.roleLabel (identical text)
+    "org.staffLanePopover.addToLaneButton": "Add to {lane}",
+    "org.staffLanePopover.broaderAccessNote": "Need broader access? Leads see all languages.",
+    "org.staffLanePopover.addAsLeadButton": "Add as lead (unscoped)",
+
+    // -- ArchivedProjects: org-level archived-projects / recently-deleted-files admin page --
+    // "Project" header → common.project (identical text)
+    // "Archived" header + tooltip label → org.orgSidebar.archived (identical text)
+    // "Files" header → nav.dock.filesTab (identical text)
+    // "Actions" sr-only header (both tables) → org.overviewLaneTable.actionsColumn (identical text)
+    // "File" header → common.file (identical text)
+    "org.archivedProjects.deletedColumnLabel": "Deleted",
+    "org.archivedProjects.viewsAriaLabel": "Archived views",
+    // "Projects" tab → nav.projects (identical text)
+    // "Recently deleted" tab → nav.sidebarSection.trash (identical text)
+    // "Select an organization" → org.teamsList.selectOrgTitle (identical text)
+    // "Restore" menu item (both tables) → common.restore (identical text)
+    "org.archivedProjects.emptyDescription":
+      "When you archive a project, it shows up here until you restore it.",
+    "org.archivedProjects.noSearchMatch": "No archived projects match your search.",
+    // "Clear" → common.clear (identical text)
+    "org.archivedProjects.loadingDeletedFilesLabel": "Loading recently deleted files",
+    // "No recently deleted files." → workspace.trash.empty. Both this table's
+    // empty state and the project trash dialog say the same thing about the same
+    // kind of list; the scopes differ (org-wide vs one project) but the sentence
+    // does not, so a translator is asked for it once.
+    "org.archivedProjects.noDeletedFilesDescription":
+      "When you delete a file from a project, it shows up here until you restore it.",
+    "org.archivedProjects.noDeletedFilesSearchMatch": "No deleted files match your search.",
+
+    // -- AssignedToMe: assignee's open-assignments inbox table --
+    "org.assignedToMe.assignmentColumnLabel": "Assignment",
+    // "File" header → common.file (identical text)
+    // "Project" header → common.project (identical text)
+    // "Progress" header → fileDetails.progress (identical text)
+    "org.assignedToMe.dueColumnLabel": "Due",
+    // "Assigned to me" page title → editor.navTitle.assignedToMe (identical text)
+    "org.assignedToMe.pageDescription":
+      "Open work assigned to you across this organization's projects.",
+    // "Select an organization" → org.teamsList.selectOrgTitle (identical text)
+    "org.assignedToMe.noOpenAssignmentsDescription":
+      "When a manager assigns you a book or chapter, it will show up here.",
+    "org.assignedToMe.noAssignmentsMatchFilters": "No assignments match your filters",
+    "org.assignedToMe.noAssignmentsMatchSearch": "No assignments match your search.",
+    // "Clear" → common.clear (identical text)
+
+    // -- MemberActivityPanel: per-member recent-activity + file-rollup panel --
+    "org.memberActivityPanel.fileRollupSummary": "{cells} cells · {words} words · {timestamp}",
+
+    // -- OrgHome: all-orgs dashboard call-site wiring (most strings here reuse
+    // existing org.orgHome.* / common.* / nav.* keys already defined above —
+    // see the call site for the full mapping). Only genuinely new strings: --
+    "org.orgHome.pendingInvitations.description":
+      "Invites sent to your email that you have not accepted yet.",
+    "org.orgHome.projectsPanel.sectionDescription": "Projects across every organization you belong to.",
+    // Distinct from org.orgHome.noProjectsYet ("No projects yet.", with a
+    // period) — this is the DataTable's own inline empty-state title, which
+    // the source renders without one.
+    "org.orgHome.projectsPanel.emptyTitle": "No projects yet",
+    "org.orgHome.organizationsPanel.sectionDescription": "Workspaces you belong to across Aquilla.",
+    // Distinct from org.orgHome.organizationsPanel.noOrganizationsYet ("No
+    // organizations yet.", with a period) — this is the DataTable's own
+    // empty-state title, which the source renders without one.
+    "org.orgHome.organizationsPanel.emptyTitle": "No organizations yet",
+    // Distinct from org.orgHome.organizationsPanel.noMatchingOrganizations
+    // ("No matching organizations.", with a period) — same split as above.
+    "org.orgHome.organizationsPanel.searchEmptyTitle": "No matching organizations",
+
+    // -- OrgOverview: single-org operator home (rollup tiles + needs-attention) --
+    "org.overview.loadingLabel": "Loading overview",
+    "org.overview.needsAttentionHeading": "Needs attention",
+    "org.overview.needsAttentionDescription":
+      "Active projects that are overdue, due soon, or stalled.",
+    "org.overview.allClearTitle": "All clear",
+    "org.overview.allClearDescription":
+      "No active project is overdue, due soon, or stalled right now.",
+
+    // -- OrgProjectsDataTable: shared portfolio projects DataTable (page/embedded) --
+    // "Project" header → common.project (identical text)
+    // "Org" header → common.org (identical text)
+    // "Language" header → org.orgHome.table.languageHeader (identical text)
+    // "Translated" header → org.orgHome.table.translatedHeaderLabel (identical text)
+    // "Validated" header → org.orgHome.table.validatedHeaderLabel (identical text)
+    // "Audio" header → nav.lens.audio (identical text)
+    // "Role" header → common.roleLabel (identical text)
+    // "Unassigned" → org.projectOverview.unassigned (identical text)
+    // "Status" header → org.orgHome.projectsPanel.statusLabel (identical text)
+    // "Updated" header + tooltip label → org.orgProjectsDataTable.updatedColumn (identical text)
+    // "Project actions" sr-only header → org.orgProjectsDataTable.actionsColumnSrOnly (identical text)
+    // "Assign work" menu item → dialog.assign.title (identical text)
+    // "Add member" menu item → org.teamDetail.addMemberButton (identical text)
+    "org.orgProjectsDataTable.noSearchMatch": "No projects match your search.",
+    // "Clear" → common.clear (identical text)
+
+    // -- OrgProjectsPage: single-org projects list page --
+    // "Sign in to see your projects" → org.projectsList.signedOutTitle (identical text)
+    // "Sign in" → auth.login.submitDefault (identical text)
+    // "Loading projects" → org.projectsList.loadingLabel (identical text)
+    // "Projects" page title → nav.projects (identical text)
+    "org.orgProjectsPage.pageDescription":
+      "Open a project to edit, or start a new translation workspace.",
+    // "Your organization is ready" → org.orgHome.readyTitle (identical text)
+    // readyDescription → org.orgHome.readyDescription (identical text)
+    // "Invite your team" → org.orgHome.inviteYourTeam (identical text)
+
+    // -- OrgSwitcher: sidebar org-switcher combobox dropdown --
+    // "Organizations" group label → org.orgHome.organizations (identical text)
+    // "Couldn't load shared organizations" → org.switcher.couldNotLoadSharedOrganizations (identical text)
+    // "Retry loading shared organizations" aria-label → org.switcher.retrySharedOrganizationsAriaLabel (identical text)
+    // "Retry" → common.retry (identical text)
+    "org.switcher.guestOrganizationsGroupLabel": "Guest organizations",
+    // "All projects" → org.switcher.allProjects (identical text)
+    // "Retry loading organizations" aria-label → org.switcher.retryOrganizationsAriaLabel (identical text)
+    // "Couldn't load organizations" → org.routeGate.errorTitle (identical text)
+    // "Find an organization…" placeholder → org.switcher.searchPlaceholder (identical text)
+    // "Find an organization" aria-label → org.switcher.searchAriaLabel (identical text)
+    // "No organizations found." → org.switcher.noOrganizationsFound (identical text)
+    // "Create" → org.switcher.create (identical text)
+
+    // -- OverviewLaneTable: per-project lane table (AQU-538 §3.3) --
+    // "Actions" sr-only header → org.overviewLaneTable.actionsColumn (identical text)
+    // "Staff {label}" sr-only trigger text → org.staffLanePopover.staffLaneHeading (identical text)
+    "org.overviewLaneTable.sectionDescription":
+      "Progress, people, and actions for each target language on this project.",
+
+    // -- ProjectOverview: per-project overview page (most already i18n'd) --
+    "org.projectOverview.chapterAbbrevLabel": "Ch {chapter}",
+    // "Project settings" aria-label → editor.navTitle.projectSettings (identical text)
+    "org.projectOverview.archiveDialogTitle": "Archive project",
+    "org.projectOverview.filterProgressByLanguageAriaLabel": "Filter progress by language",
+
+    // -- TeamDetail: single team's page. Most call-site strings here reuse
+    // existing org.teamDetail.* / org.teamForm.* / common.* keys already
+    // defined above (they were pre-seeded for this exact file); only
+    // genuinely new strings follow. --
+    // "Change role" dialog titles + menu items → org.membersPage.changeRoleAria (identical text)
+    "org.teamDetail.changeRoleTitleFor": "Change role for {name}",
+    "org.teamDetail.projectRoleDialogDescription":
+      "Team members inherit this role on the project through the team grant.",
+    "org.teamDetail.teamSettingsAriaLabel": "Team settings",
+    "org.teamDetail.sectionsAriaLabel": "Team sections",
+    "org.teamDetail.projectsTabDescription":
+      "Projects this team can access, and the role granted to members.",
+    "org.teamDetail.attachProjectDialogTitle": "Attach project to '{name}'",
+    "org.teamDetail.attachProjectDialogDescription": "Grant this team access at a chosen role.",
+    "org.teamDetail.selectProjectPlaceholder": "Select a project…",
+    "org.teamDetail.allProjectsAttachedNotice": "All org projects are already attached to this team.",
+    // "Attach" confirm button → editor.media.attach (identical text)
+    "org.teamDetail.noProjectsMatchSearch": "No projects match this search.",
+    "org.teamDetail.membersTabDescription":
+      "People on this team inherit its project grants at their org role.",
+    "org.teamDetail.selectMembersPlaceholder": "Select members…",
+    "org.teamDetail.removeFromTeamButton": "Remove from team",
+    // "No members match this search." → org.membersPage.orgTable.noSearchMatch (identical text)
+
+    // -- TeamsList: org's list of teams. Most call-site strings here reuse
+    // existing org.teamsList.* / org.teamForm.* / common.* / editor.navTitle.* /
+    // nav.* keys already defined above; only one genuinely new string. --
+    "org.teamsList.noTeamsMatchSearch": "No teams match your search.",
   },
   context: {
     _context: {
@@ -1108,6 +1465,57 @@ export const org = defineNamespace({
             "Percentage of cells with audio, already formatted with a '%' sign and bidi-isolated for RTL locales.",
         },
       },
+      "org.projectLifecycle.toggleInProgressError": {
+        description:
+          "Error shown if a freeze/reactivate click lands while the previous toggle for " +
+          "the same project is still in flight — a fast-double-click guard, not a normal " +
+          "outcome.",
+      },
+      "org.actionGate.deniedTooltip": {
+        description:
+          "Generic disabled-button tooltip from actionGateProps() — not currently wired " +
+          "into any UI (see key comment). {minRole} is passed through by the caller as-is; " +
+          "existing callers pass the canonical machine-readable role name (lowercase, " +
+          "underscored, e.g. 'project_lead') rather than a translated display label, which " +
+          "is a pre-existing gap in this helper, not something to fix here — do not " +
+          "translate the substituted value.",
+        placeholders: {
+          minRole: "Minimum role name required for the gated action, passed through verbatim.",
+        },
+      },
+      "org.role.descriptionViewer": {
+        description:
+          "Capability blurb under 'Viewer' in RoleSelect and similar role pickers — the " +
+          "sentence explaining what this role can and can't do, distinct from the shorter " +
+          "common.role.viewerDescription used elsewhere (see the ROLE_INFO doc comment in " +
+          "src/lib/frontier/roles.ts). Also composed into roleHelpText()'s 'Viewer (100) " +
+          "— …' tooltip form, lowercasing its own first letter there.",
+      },
+      "org.role.descriptionCommenter": {
+        description: "Same shape as org.role.descriptionViewer, for the Commenter role.",
+      },
+      "org.role.descriptionReviewer": {
+        description: "Same shape as org.role.descriptionViewer, for the Reviewer role.",
+      },
+      "org.role.descriptionContributor": {
+        description: "Same shape as org.role.descriptionViewer, for the Contributor role.",
+      },
+      "org.role.descriptionProjectLead": {
+        description: "Same shape as org.role.descriptionViewer, for the Project Lead role.",
+      },
+      "org.role.descriptionMaintainer": {
+        description: "Same shape as org.role.descriptionViewer, for the Maintainer role.",
+      },
+      "org.role.descriptionOwner": {
+        description: "Same shape as org.role.descriptionViewer, for the Owner role.",
+      },
+      "org.sync.versionConflictError": {
+        description:
+          "Fallback error for a settings-save 409 response whose body doesn't carry the " +
+          "expected latest-state payload, so the normal 'reload the winning version' " +
+          "conflict flow can't run — the reader's only recourse is a manual reload and " +
+          "retry. Shared verbatim by the org-settings and project-settings save paths.",
+      },
       "org.exportSettings.deliverablesGroupLabel": {
         description:
           "Heading of the settings group that holds the export-permission control on an organization's export settings page. A short plural noun for the finished files a team hands over to whoever commissioned the work — the exported documents themselves, not the act of exporting them.",
@@ -1159,6 +1567,13 @@ export const org = defineNamespace({
           level:
             "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
         },
+      },
+      "org.orgSettings.noSessionError": {
+        description:
+          "Error result surfaced in place of a save-confirmation when useOrgSettings' " +
+          "patch()/requestPromotion() is called with no signed-in session or no resolved " +
+          "org id — a mount-order race, not a normal user action. Rare in practice; " +
+          "callers that show it should also offer a retry.",
       },
       "org.exportSettings.saveFailedFallback": {
         description:
@@ -1251,6 +1666,32 @@ export const org = defineNamespace({
         description:
           "Accessible name for the tabs that choose whether the org-member dialog adds an existing Aquilla user or sends an email invitation.",
       },
+      "org.membersPage.orgTable.copyEmailAriaLabel": {
+        description:
+          "Accessible name for the small copy-to-clipboard icon button beside a member's " +
+          "email address in the org roster table.",
+        placeholders: { email: "The member's email address — not translated." },
+      },
+      "org.membersPage.orgTable.projectAccessAriaLabel": {
+        description:
+          "Accessible name for the expand/disclosure control on a member row that reveals " +
+          "which projects they have access to and through which path.",
+        placeholders: { username: "The member's username — not translated." },
+      },
+      "org.membersPage.orgTable.removeOwnersOnlyAriaLabel": {
+        description:
+          "Accessible name for a disabled remove-member control, explaining that only org " +
+          "owners may remove members — shown to a non-owner viewing the roster.",
+        placeholders: { username: "The member's username — not translated." },
+      },
+      "org.rowActionsAriaLabel": {
+        description:
+          "Accessible name for the icon-only '⋯' row-actions button in several data tables " +
+          "(org roster, team roster, team's attached projects, per-lane overview) — a " +
+          "shared DataTableRowActionsButton convention distinct in wording from " +
+          "org.orgProjectsDataTable.moreActionsAriaLabel's 'More actions for' tables.",
+        placeholders: { name: "The row's subject — a username, project name, or lane label — not translated." },
+      },
       "org.projectsList.shownOfTotal": {
         description:
           "Subheading under the projects list heading when a filter or lens narrows the visible rows, showing how many of the total are currently shown.",
@@ -1273,8 +1714,10 @@ export const org = defineNamespace({
       },
       "org.orgProjectsDataTable.moreActionsAriaLabel": {
         description:
-          "Accessible name for the icon-only '…' button that opens a project row's actions menu (Assign work / Add member) in the org projects data table.",
-        placeholders: { name: "The project's name — not translated." },
+          "Accessible name for the icon-only '…' button that opens a row's actions menu " +
+          "(project row: Assign work / Add member; archived-file row: Restore) — shared by " +
+          "the org projects data table and the Archived projects/files tables.",
+        placeholders: { name: "The project's or file's name — not translated." },
       },
       "org.sharedProjectsPage.scopedDescription": {
         description:
@@ -1335,6 +1778,195 @@ export const org = defineNamespace({
         description:
           "Per-member AI-request count on the org Overview's team-usage manager rollup, summing TTS and LLM requests (e.g. '8 AI requests').",
         placeholders: { count: "Combined TTS + LLM request count; also selects the plural form." },
+      },
+      "org.joinOrgPage.organizationLine": {
+        description:
+          "First line of the org-invite preview card on JoinOrgPage, naming the organization the invite belongs to. Rendered via RichMessage with {name} in bold.",
+        placeholders: { name: "The organization's display name, or the localized org.joinOrgPage.unnamedOrgFallback — not translated." },
+      },
+      "org.joinOrgPage.joinedRedirect": {
+        description:
+          "Confirmation line shown after successfully accepting an org invite, immediately before an automatic redirect to the new organization.",
+        placeholders: { org: "The organization's display name, or the localized org.joinOrgPage.fallbackOrgName fallback — not translated." },
+      },
+      "org.joinOrgPage.roleLine": {
+        description:
+          "Second line of the org-invite preview card on JoinOrgPage, naming the role the invite grants, used when no inviter and no bound email are known. Deliberately lowercase — always the start of a clause on this page, never a full sentence opener.",
+        placeholders: { role: "The invite's role name, already humanized (underscores replaced with spaces) — not translated, rendered in a styled span." },
+      },
+      "org.joinOrgPage.roleLineEmail": {
+        description:
+          "Variant of org.joinOrgPage.roleLine used when the invite is bound to a specific email address but no inviter is known.",
+        placeholders: {
+          role: "The invite's role name, already humanized — not translated, rendered in a styled span.",
+          email: "The email address the invite was sent to — not translated, rendered in a monospace span.",
+        },
+      },
+      "org.memberAccessDrillDown.projectsAccessibleCount": {
+        description:
+          "Count line above a member's project list on the access-breakdown panel, stating how many projects in this org the member can access.",
+        placeholders: { count: "How many projects the member can access; also selects the plural form." },
+      },
+      "org.memberAccessDrillDown.noAccessEmptyTitle": {
+        description:
+          "Empty-state title on the access-breakdown panel when the member has no access " +
+          "to any project in this org at all.",
+        placeholders: { username: "The member's username — not translated." },
+      },
+      "org.memberAccessDrillDown.pathDirect": {
+        description:
+          "Small pill naming one contributing grant path on a project row of the access-" +
+          "breakdown panel — this one for an explicit direct project grant/override. " +
+          "{role} is the already-translated role name for that path; do not re-translate.",
+        placeholders: { role: "Already-translated role display name for this grant path — not translated again." },
+      },
+      "org.memberAccessDrillDown.pathGroup": {
+        description:
+          "Same shape as org.memberAccessDrillDown.pathDirect, for access via a group " +
+          "attached to the project. {group} is the group's name.",
+        placeholders: {
+          group: "The group's name — not translated.",
+          role: "Already-translated role display name for this grant path — not translated again.",
+        },
+      },
+      "org.memberAccessDrillDown.pathOrgLevel": {
+        description:
+          "Same shape as org.memberAccessDrillDown.pathDirect, for access via the " +
+          "member's org-wide role.",
+        placeholders: { role: "Already-translated role display name for this grant path — not translated again." },
+      },
+      "org.memberLaneScopeEditor.editScopesAriaLabel": {
+        description:
+          "Accessible name for the trigger button (a truncated summary of current scopes) " +
+          "that opens the freeform lane/file scope editor popover for this member on this " +
+          "project.",
+        placeholders: { username: "The member's username — not translated." },
+      },
+      "org.memberLaneScopeEditor.scopesHeading": {
+        description:
+          "Popover heading naming whose lane/file scopes are being edited, in the matrix's freeform scope editor.",
+        placeholders: { username: "The member's username — not translated." },
+      },
+      "org.memberLaneScopeEditor.newLaneCodeAriaLabel": {
+        description:
+          "Accessible name for the text input where a new lane code is typed, in the matrix's freeform scope editor. No visible form label, only a placeholder example.",
+      },
+      "org.memberMultiAddRow.peopleToAddAriaLabel": {
+        description:
+          "Accessible name for the list of chips naming everyone currently staged to be added, in the shared multi-add row (per-project Members page and the Share modal).",
+      },
+      "org.membersPanel.laneCheckboxAriaLabel": {
+        description:
+          "Accessible name for one lane checkbox in the roster's freeform scope editor " +
+          "(MembersPanel), naming which lane the box scopes access to.",
+        placeholders: { lane: "The lane's display label (a language/lane code or name) — not translated." },
+      },
+      "org.membersMatrixCellEditor.alsoHasAccessAriaLabel": {
+        description:
+          "Accessible name for the small icon-only indicator on a populated matrix cell showing the member has additional, non-winning access paths beyond the one shown.",
+      },
+      "org.membersMatrixCellEditor.addToProjectAriaLabel": {
+        description:
+          "Accessible name for the empty-cell '+' button in the members × projects " +
+          "matrix, which opens the add-role popover for this person on this project.",
+        placeholders: { username: "The person's username — not translated." },
+      },
+      "org.membersMatrixCellEditor.editRoleAriaLabel": {
+        description:
+          "Accessible name for a populated matrix cell's button, which opens the " +
+          "role-edit popover for this person's existing grant on this project.",
+        placeholders: { username: "The person's username — not translated." },
+      },
+      "org.membersMatrixCellEditor.editPopoverTitle": {
+        description:
+          "Heading inside the popover opened by org.membersMatrixCellEditor." +
+          "editRoleAriaLabel, above the role picker / remove action.",
+        placeholders: { username: "The person's username — not translated." },
+      },
+      "org.membersMatrixView.howAccessResolvedAriaLabel": {
+        description:
+          "Accessible name for the small help-circle button beside the Member column heading on the members × projects matrix, which opens a tooltip explaining the max-wins access model.",
+      },
+      "org.multiProjectInviteDialog.selectProjectAriaLabel": {
+        description:
+          "Accessible name for one project's checkbox in the multi-project invite " +
+          "dialog's project checklist.",
+        placeholders: { name: "The project's name — not translated." },
+      },
+      "org.multiProjectInviteDialog.projectsSelectedCount": {
+        description:
+          "Status line under the project checklist in the multi-project invite dialog, counting how many projects are currently checked.",
+        placeholders: { count: "How many projects are checked; also selects the plural form." },
+      },
+      "org.multiProjectInviteDialog.rolesSuffix": {
+        description:
+          "Trailing clause appended after org.multiProjectInviteDialog.projectsSelectedCount, only when more than one project is checked, listing the distinct roles chosen across them. Leading space is deliberate — it continues the preceding sentence rather than starting a new one.",
+        placeholders: { roles: "Comma-joined list of the distinct, already-localized role names chosen across the checked projects." },
+      },
+      "org.removeOrgMemberDialog.title": {
+        description: "Confirmation-dialog title naming who is being removed from which organization.",
+        placeholders: {
+          username: "The member's username — not translated.",
+          orgName: "The organization's display name — not translated.",
+        },
+      },
+      "org.removeOrgMemberDialog.warningBody": {
+        description:
+          "Explanatory paragraph under the remove-member dialog title, naming who is affected and what removal does and doesn't touch.",
+        placeholders: { username: "The member's username — not translated." },
+      },
+      "org.staffLanePopover.staffLaneHeading": {
+        description:
+          "Heading text used both as the popover trigger's fallback content (beside a person-plus icon) and as the popover body's own heading, naming which lane is being staffed.",
+        placeholders: { lane: "The target language lane's display label — not translated." },
+      },
+      "org.staffLanePopover.addOrgMemberDescription": {
+        description:
+          "Subheading under org.staffLanePopover.staffLaneHeading explaining what the popover does. Rendered via RichMessage with {member} substituted as a bold span whose text is the translated org.staffLanePopover.orgMemberPhrase — supplied as a node (not raw data) so its emphasis and word position both survive translation.",
+        placeholders: { member: "The already-translated, bold-styled 'org member' phrase (org.staffLanePopover.orgMemberPhrase) — do not interpolate it as plain data." },
+      },
+      "org.staffLanePopover.addToLaneButton": {
+        description: "Primary confirm button that grants the selected role scoped to the named lane.",
+        placeholders: { lane: "The target language lane's display label — not translated." },
+      },
+      "org.archivedProjects.viewsAriaLabel": {
+        description:
+          "Accessible name for the Projects/Recently deleted tab list on the org Archived page.",
+      },
+      "org.projectOverview.chapterAbbrevLabel": {
+        description:
+          "Compact chapter-row label in the per-file chapter/verse rollup, abbreviating 'Chapter' to fit a narrow column.",
+        placeholders: { chapter: "The chapter's reference label, e.g. '3' — not translated." },
+        maxLength: 10,
+      },
+      "org.projectOverview.filterProgressByLanguageAriaLabel": {
+        description:
+          "Accessible name for the segmented All/per-lane tabs that filter the Progress card's stats by target language, shown only when the project has more than one lane.",
+      },
+      "org.memberActivityPanel.fileRollupSummary": {
+        description:
+          "Compact numeric summary beside a file's name in the per-member file-worked-on rollup: how many cells and words this member touched in the file, and when they last touched it. Not pluralized on purpose — English always reads 'cells'/'words' here regardless of count, matching the source's existing behavior.",
+        placeholders: {
+          cells: "Number of cells this member touched in the file.",
+          words: "Number of words this member touched in the file.",
+          timestamp: "Already locale-formatted date/time of the member's last activity in this file, or an em dash when unknown.",
+        },
+      },
+      "org.teamDetail.changeRoleTitleFor": {
+        description:
+          "Change-role dialog title on TeamDetail, used for both the member org-role dialog and the project team-grant-role dialog, once a target is known. Falls back to org.membersPage.changeRoleAria ('Change role' alone) before a target is picked.",
+        placeholders: { name: "The member's username, or the project's name — not translated." },
+      },
+      "org.teamDetail.attachProjectDialogTitle": {
+        description: "Title of the attach-project dialog on TeamDetail, naming the team a project is being attached to.",
+        placeholders: { name: "The team's name — not translated." },
+      },
+      "org.teamDetail.teamSettingsAriaLabel": {
+        description:
+          "Accessible name for the icon-only gear button on TeamDetail's header that links to this team's settings page.",
+      },
+      "org.teamDetail.sectionsAriaLabel": {
+        description: "Accessible name for the Projects/Members/Overview tab list on TeamDetail.",
       },
     },
   },

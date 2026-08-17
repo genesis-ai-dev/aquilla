@@ -43,6 +43,7 @@
     "i18n:export": "tsx scripts/i18n-catalog.ts export",
     "i18n:import": "tsx scripts/i18n-catalog.ts import",
     "i18n:shots": "tsx scripts/i18n-shots.ts",
+    "i18n:todo": "tsx scripts/i18n-todo.ts",
     "test:e2e:guard": "vitest run scripts/e2e-determinism.test.ts scripts/e2e-impact.test.ts",
     "test:e2e:affected": "pnpm run test:e2e:guard && tsx scripts/e2e-affected.ts",
     "test:e2e:smoke": "pnpm run test:e2e:guard && tsx scripts/e2e-shard.ts 3 -- smoke.spec",

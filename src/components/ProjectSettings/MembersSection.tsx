@@ -52,12 +52,18 @@ import {
 } from "@/lib/frontier/roles"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
-const SOURCE_LABELS: Record<string, string> = {
-  override: "direct invite",
-  group: "via team",
-  org: "via org",
-  creator: "project creator",
+// Access-source annotation shown under a member's name — how they got access
+// to this project. Reuses org.membersPage.source* (org.ts) rather than
+// minting duplicates: the same four grant paths are already named there for
+// the org-level Members page this table mirrors.
+const SOURCE_LABEL_KEYS: Record<string, MessageKey> = {
+  override: "org.membersPage.sourceDirectInvite",
+  group: "org.membersPage.sourceViaTeam",
+  org: "org.membersPage.sourceViaOrg",
+  creator: "org.membersPage.sourceProjectCreator",
 }
 
 type AccessFilter = "all" | "project" | "org"
@@ -90,6 +96,7 @@ function MemberRoleBadge({ name, level }: { name: string; level: number }) {
 }
 
 export function MembersSection({ projectId }: { projectId: string }) {
+  const t = useT()
   const { session } = useFrontierSession()
   const {
     members, isLoading, error, rosterHidden, refresh, add, addMany, remove,
@@ -166,14 +173,15 @@ export function MembersSection({ projectId }: { projectId: string }) {
       {
         id: "name",
         accessorFn: (m) => m.username.toLowerCase(),
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Name" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.name")} />,
         meta: { className: "min-w-0 w-[50%]" },
         cell: ({ row }) => {
           const m = row.original
+          const sourceKey = SOURCE_LABEL_KEYS[m.role.source]
           return (
             <UsernameWithAvatar username={m.username}>
               <span className="truncate text-xs font-normal text-muted-foreground">
-                {SOURCE_LABELS[m.role.source] ?? m.role.source}
+                {sourceKey ? t(sourceKey) : m.role.source}
               </span>
             </UsernameWithAvatar>
           )
@@ -183,7 +191,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
         id: "email",
         accessorFn: (m) => missingLast((m.email ?? "").toLowerCase()),
         sortUndefined: SORT_MISSING_LAST,
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Email" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.email")} />,
         meta: { className: "min-w-0 w-[35%]" },
         cell: ({ row }) => (
           <span className="block truncate text-muted-foreground">
@@ -194,7 +202,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
       {
         id: "role",
         accessorFn: (m) => m.role.level,
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Role" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.roleLabel")} />,
         meta: { className: "w-0 whitespace-nowrap" },
         cell: ({ row }) => (
           <MemberRoleBadge name={row.original.role.name} level={row.original.role.level} />
@@ -203,20 +211,20 @@ export function MembersSection({ projectId }: { projectId: string }) {
       {
         id: "actions",
         enableSorting: false,
-        header: () => <span className="sr-only">Actions</span>,
+        header: () => <span className="sr-only">{t("org.overviewLaneTable.actionsColumn")}</span>,
         meta: { align: "right" as const, className: "w-10" },
         cell: ({ row }) => {
           const m = row.original
           return (
             <DataTableRowActionsButton
-              label={`Actions for ${m.username}`}
+              label={t("projectSettings.members.actionsForRow", { username: m.username })}
               revealOnHover
             />
           )
         },
       },
     ],
-    [],
+    [t],
   )
 
   // AQU-485: below-floor callers must not see this pane at all (ProjectSettings
@@ -237,13 +245,13 @@ export function MembersSection({ projectId }: { projectId: string }) {
               className="ml-auto text-xs underline"
               onClick={() => void refresh()}
             >
-              Retry
+              {t("common.retry")}
             </button>
           </div>
         )}
 
         {isLoading && members.length === 0 ? (
-          <LoadingPanel label="Loading members" className="min-h-48" />
+          <LoadingPanel label={t("org.membersPage.loadingMembers")} className="min-h-48" />
         ) : (
           <DataTable
             columns={columns}
@@ -264,21 +272,21 @@ export function MembersSection({ projectId }: { projectId: string }) {
               <>
                 <Select
                   items={[
-                    { value: "all", label: "All" },
-                    { value: "project", label: "Project grants" },
-                    { value: "org", label: "Via organization" },
+                    { value: "all", label: t("org.orgHome.statusFilter.all") },
+                    { value: "project", label: t("projectSettings.members.filterProjectGrants") },
+                    { value: "org", label: t("projectSettings.members.filterViaOrg") },
                   ]}
                   value={accessFilter}
                   onValueChange={(v) => setAccessFilter((v as AccessFilter) ?? "all")}
                 >
-                  <SelectTrigger className="bg-card" aria-label="Filter members">
+                  <SelectTrigger className="bg-card" aria-label={t("projectSettings.members.filterAriaLabel")}>
                     <SelectValue className="flex-none" />
                   </SelectTrigger>
                   <SelectContent align="start">
                     <SelectGroup>
-                      <SelectItem value="all">All</SelectItem>
-                      <SelectItem value="project">Project grants</SelectItem>
-                      <SelectItem value="org">Via organization</SelectItem>
+                      <SelectItem value="all">{t("org.orgHome.statusFilter.all")}</SelectItem>
+                      <SelectItem value="project">{t("projectSettings.members.filterProjectGrants")}</SelectItem>
+                      <SelectItem value="org">{t("projectSettings.members.filterViaOrg")}</SelectItem>
                     </SelectGroup>
                   </SelectContent>
                 </Select>
@@ -286,7 +294,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
                   className="ml-auto shrink-0"
                   onClick={openAddDialog}
                 >
-                  Add a member
+                  {t("org.membersPage.orgTable.addMemberTitle")}
                 </Button>
               </>
             }
@@ -303,7 +311,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
                     <MenuSub>
                       <MenuSubTrigger>
                         <ShieldUser className="size-4" />
-                        Change role
+                        {t("org.membersPage.changeRoleAria")}
                       </MenuSubTrigger>
                       <MenuSubContent className="min-w-72 max-w-96">
                         {grantableRoles.map((r) => (
@@ -329,7 +337,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
                   {canRemoveDirect && (
                     <MenuItem onClick={() => setRemoveTarget(m)}>
                       <UserMinus className="size-4" />
-                      Remove direct access
+                      {t("projectSettings.members.removeDirectAccess")}
                     </MenuItem>
                   )}
                   {hasJwt && !isSelf && (
@@ -340,12 +348,12 @@ export function MembersSection({ projectId }: { projectId: string }) {
                         onClick={() => setRevokeTarget(m)}
                       >
                         <ShieldOff className="size-4" />
-                        Revoke all access…
+                        {t("projectSettings.members.revokeAllAccess")}
                       </MenuItem>
                     </>
                   )}
                   {!canChangeRole && !canRemoveDirect && !(hasJwt && !isSelf) && (
-                    <MenuItem disabled>No actions available</MenuItem>
+                    <MenuItem disabled>{t("projectSettings.members.noActionsAvailable")}</MenuItem>
                   )}
                 </>
               )
@@ -376,9 +384,9 @@ export function MembersSection({ projectId }: { projectId: string }) {
       >
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Add a member</DialogTitle>
+            <DialogTitle>{t("org.membersPage.orgTable.addMemberTitle")}</DialogTitle>
             <DialogDescription>
-              Grant access from your organization, or create a shareable invite link.
+              {t("projectSettings.members.addDialogDescription")}
             </DialogDescription>
           </DialogHeader>
           <Tabs
@@ -386,9 +394,9 @@ export function MembersSection({ projectId }: { projectId: string }) {
             onValueChange={(v) => setAddTab((v as AddDialogTab) ?? "members")}
             className="gap-3"
           >
-            <TabsList size="lg" className="w-full" aria-label="Add member method">
-              <TabsTrigger value="members">Add members</TabsTrigger>
-              <TabsTrigger value="invite">Invite link</TabsTrigger>
+            <TabsList size="lg" className="w-full" aria-label={t("org.membersPage.orgTable.addMethodAriaLabel")}>
+              <TabsTrigger value="members">{t("org.membersPage.orgTable.addMembersTab")}</TabsTrigger>
+              <TabsTrigger value="invite">{t("projectSettings.share.tabInviteLink")}</TabsTrigger>
             </TabsList>
             <TabsContent value="members" className="space-y-3">
               <MemberMultiAddRow
@@ -433,7 +441,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
       <ConfirmActionDialog
         open={removeTarget !== null}
         onOpenChange={(open) => { if (!open) setRemoveTarget(null) }}
-        title="Remove member"
+        title={t("org.membersPage.removeMemberTitle")}
         description={
           removeTarget
             ? `Remove ${removeTarget.username}'s direct ${humanRoleName(removeTarget.role.level)} access to this project? Any access via org, team, or creator status is unaffected — use "Revoke all" to review every path.`

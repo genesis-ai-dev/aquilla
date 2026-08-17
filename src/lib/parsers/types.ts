@@ -299,17 +299,20 @@ export interface CellTtsSettings {
  */
 export type AudioTimingMode = "dubbing" | "audioFirst"
 
-/** The one place the two modes' user-facing names live — consumed by the
- *  Project Settings card AND the media-lens toolbar note (2026-08-05: the
- *  control moved into settings; the toolbar shows a note). */
-export const AUDIO_TIMING_MODE_LABELS: Record<AudioTimingMode, { name: string; description: string }> = {
+/** The one place the two modes' user-facing names live — consumed by
+ *  TimingModeChangedDialog. Catalog keys, not display strings — `src/lib/`
+ *  can't call `useT()`, so the caller resolves them with `t()` at render
+ *  time. Reuses the exact same `editor.timeline.timingMode*` keys
+ *  `TimelineEditor.tsx`'s `TIMING_MODE_KEYS` table already resolves, so the
+ *  two never drift. */
+export const AUDIO_TIMING_MODE_LABELS: Record<AudioTimingMode, { nameKey: MessageKey; descriptionKey: MessageKey }> = {
   dubbing: {
-    name: "Original's timing",
-    description: "The translation is fitted to the original recording's timing.",
+    nameKey: "editor.timeline.timingModeDubbing",
+    descriptionKey: "editor.timeline.timingModeDubbingHint",
   },
   audioFirst: {
-    name: "Free timing",
-    description: "Verses are laid end to end — each takes as much room as its longer side.",
+    nameKey: "editor.timeline.timingModeFree",
+    descriptionKey: "editor.timeline.timingModeFreeHint",
   },
 }
 

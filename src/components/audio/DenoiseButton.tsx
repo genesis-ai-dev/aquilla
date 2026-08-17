@@ -22,6 +22,7 @@ import {
   injectOptimisticAudioAttachment,
   notifyAudioAttachmentsChanged,
 } from "@/lib/audio/audio-attachments-bus"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   projectId: string
@@ -42,6 +43,7 @@ interface Props {
 }
 
 export function DenoiseButton(props: Props) {
+  const t = useT()
   const {
     projectId, fileId, cellId, selectedAudioId, selectedUrl,
     referenceAudioId, originalUrl, originalDurationMs, author, session, editable,
@@ -115,17 +117,17 @@ export function DenoiseButton(props: Props) {
   if (isDenoised) {
     return (
       <div className="flex flex-wrap items-center gap-1.5">
-        <AppTooltip content="Background noise removed from this take">
+        <AppTooltip content={t("workspace.denoise.removedTooltip")}>
           <Badge
             variant="outline"
             className="border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
           >
             <Check className="h-3 w-3" />
-            Noise removed
+            {t("workspace.denoise.removedBadge")}
           </Badge>
         </AppTooltip>
         {referenceAudioId && (
-          <AppTooltip content="Switch back to the original recording">
+          <AppTooltip content={t("workspace.denoise.revertTooltip")}>
             <Button
               type="button"
               size="xs"
@@ -134,7 +136,7 @@ export function DenoiseButton(props: Props) {
               disabled={!editable || reverting || !session?.jwt}
             >
               {reverting ? <Spinner className="size-3" /> : <RotateCcw className="h-3 w-3" />}
-              Revert
+              {t("workspace.denoise.revertButton")}
             </Button>
           </AppTooltip>
         )}

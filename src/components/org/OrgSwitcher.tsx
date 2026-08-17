@@ -50,6 +50,8 @@ type OrgSwitcherItem =
       id: number
       label: string
       roleName: string
+      /** Cross-tenant visibility via ADMIN_EMAILS — not a ladder role. */
+      viaPlatformAdmin?: boolean
     }
   | {
       kind: "guest"
@@ -75,6 +77,7 @@ function memberItem(org: OrgSummary): OrgSwitcherItem {
     id: org.id,
     label: org.name ?? "Workspace",
     roleName: org.role.name,
+    viaPlatformAdmin: org.viaPlatformAdmin,
   }
 }
 
@@ -254,10 +257,12 @@ function OrgSwitcherOption({
       <span className="flex shrink-0 items-center gap-1.5">
         {item.kind === "all" ? (
           <span className={ORG_META_CLASS}>{t("org.switcher.allProjects")}</span>
+        ) : item.kind === "member" && (item.viaPlatformAdmin || item.roleName === "admin") ? (
+          <span className={ORG_META_CLASS}>{t("org.orgSidebar.admin")}</span>
         ) : item.kind === "member" ? (
           <RoleLabel name={item.roleName} className={ORG_META_CLASS} />
         ) : (
-          <RoleLabel name="guest" className={ORG_META_CLASS} />
+          <span className={ORG_META_CLASS}>{t("org.switcher.guestRole")}</span>
         )}
         {selected && (
           <Check className="size-4 shrink-0" aria-hidden />

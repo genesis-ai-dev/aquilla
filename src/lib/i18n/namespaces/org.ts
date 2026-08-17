@@ -1031,6 +1031,9 @@ export const org = defineNamespace({
     // "Retry loading shared organizations" aria-label → org.switcher.retrySharedOrganizationsAriaLabel (identical text)
     // "Retry" → common.retry (identical text)
     "org.switcher.guestOrganizationsGroupLabel": "Guest organizations",
+    // Role chip on guest-org rows in the switcher (not a ladder role).
+    "org.switcher.guestRole": "Guest",
+    // Platform-admin chip on viaPlatformAdmin rows → org.orgSidebar.admin (identical text)
     // "All projects" → org.switcher.allProjects (identical text)
     // "Retry loading organizations" aria-label → org.switcher.retryOrganizationsAriaLabel (identical text)
     // "Couldn't load organizations" → org.routeGate.errorTitle (identical text)

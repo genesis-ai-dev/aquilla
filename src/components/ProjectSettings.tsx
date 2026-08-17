@@ -70,7 +70,11 @@ import type {
   DecaySettings,
   ProjectRecord,
 } from "@/lib/parsers/types"
-import { projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import {
+  AUDIO_MEDIA_STRATEGY_LABELS,
+  projectHasScriptureFiles,
+  resolveBibleResourcesEnabled,
+} from "@/lib/parsers/types"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
@@ -1221,8 +1225,8 @@ export function ProjectSettings() {
     memory: "Brief & examples",
     "source-sync": hasSourceLink ? "Linked" : hasGitOrigin ? "Git" : "None",
     ai: provider === "frontier" ? "Frontier" : "Custom",
-    validation: validationRoleFloor.replace(/_/g, " "),
-    "audio-media": audioMediaStrategy,
+    validation: resolveRoleName(t, validationRoleFloor),
+    "audio-media": t(AUDIO_MEDIA_STRATEGY_LABELS[audioMediaStrategy].nameKey),
     metrics: "Post-edit",
     integrations: "Monday.com",
     experimental: "This device",

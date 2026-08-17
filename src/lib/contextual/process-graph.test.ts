@@ -4,6 +4,7 @@ import {
   PROCESS_NODE_IDS,
   deriveProcessGraph,
   deriveProcessGraphFromOverview,
+  emptyProcessGraph,
 } from "./process-graph"
 import type {
   ContextualActivityEvent,
@@ -48,6 +49,15 @@ function activity(events: ContextualActivityEvent[]): ContextualRunActivity {
 }
 
 describe("deriveProcessGraph", () => {
+  it("creates inspect state for every declared process node", () => {
+    const model = emptyProcessGraph()
+
+    expect(Object.keys(model.inspect)).toEqual([...PROCESS_NODE_IDS])
+    for (const nodeId of PROCESS_NODE_IDS) {
+      expect(model.inspect[nodeId]).toMatchObject({ nodeId, state: "pending" })
+    }
+  })
+
   it("lights the checking region for a live checking span", () => {
     const model = deriveProcessGraph(run, activity([
       event({
@@ -72,6 +82,28 @@ describe("deriveProcessGraph", () => {
     expect(model.nodeStates.stage).toBe("pending")
     expect(model.liveSpanLabels).toEqual(["LUK 1:1–1:8"])
     expect(model.edgeStates["lint-route"]).toBe("active")
+  })
+
+  it("drops opaque cell/span UUIDs from live and inspect labels", () => {
+    const model = deriveProcessGraph({ ...run, spanLabel: "01920000-0000-7000-8000-000000000001" }, activity([
+      event({
+        id: "start",
+        kind: "span_started",
+        spanId: "s1",
+        spanLabel: "01920000-0000-7000-8000-000000000001",
+      }),
+      event({
+        id: "phase",
+        kind: "phase",
+        spanId: "s1",
+        spanLabel: "01920000…00000008",
+        phase: "checking",
+      }),
+    ]))
+
+    expect(model.liveSpanLabels).toEqual([])
+    expect(model.inspect.construe.spanLabels).toEqual([])
+    expect(model.lastDecision?.spanLabel).toBeNull()
   })
 
   it("keeps two in-flight regions lit at once", () => {

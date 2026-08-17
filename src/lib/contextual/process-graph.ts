@@ -10,6 +10,7 @@ import type {
   ContextualRunActivity,
   ContextualRunRecord,
 } from "./transport"
+import { humanPassageLabel } from "../../../shared/span-label"
 
 export const PROCESS_NODE_IDS = [
   "scope",
@@ -204,13 +205,17 @@ function latestEvent(
   return null
 }
 
+function displayLabel(label: string | null | undefined): string | null {
+  return humanPassageLabel(label)
+}
+
 function cursorFromEvents(
   spanId: string,
   events: ContextualActivityEvent[],
 ): ProcessSpanCursor | null {
   const scoped = eventsForSpan(events, spanId)
   if (scoped.length === 0) return null
-  const label = [...scoped].reverse().find((event) => event.spanLabel)?.spanLabel ?? null
+  const label = [...scoped].reverse().map((event) => displayLabel(event.spanLabel)).find((value): value is string => Boolean(value)) ?? null
   const outcome = latestEvent(scoped, ["span_outcome"])
   if (outcome) {
     const failed = outcome.status === "failed"
@@ -218,7 +223,7 @@ function cursorFromEvents(
     const phaseEvent = latestEvent(scoped, ["phase"])
     return {
       spanId,
-      spanLabel: outcome.spanLabel ?? label,
+      spanLabel: displayLabel(outcome.spanLabel) ?? label,
       region: failed ? (normalizePhase(phaseEvent?.phase) ?? "staging") : "staging",
       failed,
       complete,
@@ -230,7 +235,7 @@ function cursorFromEvents(
   const phaseEvent = latestEvent(scoped, ["phase"])
   const region = normalizePhase(phaseEvent?.phase)
   if (region) {
-    return { spanId, spanLabel: phaseEvent?.spanLabel ?? label, region, failed: false, complete: false }
+    return { spanId, spanLabel: displayLabel(phaseEvent?.spanLabel) ?? label, region, failed: false, complete: false }
   }
   if (latestEvent(scoped, ["scene_ready"])) {
     return { spanId, spanLabel: label, region: "drafting", failed: false, complete: false }
@@ -269,7 +274,7 @@ function decisionFromEvents(events: ContextualActivityEvent[]): ProcessDecision 
     const skipped = detailNumber(outcome.details, "skipped")
     return {
       kind: "outcome",
-      spanLabel: outcome.spanLabel ?? null,
+      spanLabel: displayLabel(outcome.spanLabel),
       count: skipped ?? detailNumber(outcome.details, "staged") ?? undefined,
       status: outcome.status,
       reasons: detailStringList(outcome.details, "reasons"),
@@ -279,7 +284,7 @@ function decisionFromEvents(events: ContextualActivityEvent[]): ProcessDecision 
   if (staged) {
     return {
       kind: "drafts",
-      spanLabel: staged.spanLabel ?? null,
+      spanLabel: displayLabel(staged.spanLabel),
       count: detailNumber(staged.details, "count") ?? detailNumber(staged.details, "staged") ?? undefined,
     }
   }
@@ -287,13 +292,13 @@ function decisionFromEvents(events: ContextualActivityEvent[]): ProcessDecision 
   if (scene) {
     return {
       kind: "ambiguities",
-      spanLabel: scene.spanLabel ?? null,
+      spanLabel: displayLabel(scene.spanLabel),
       count: detailNumber(scene.details, "ambiguityCount") ?? undefined,
     }
   }
   const phase = latestEvent(events, ["phase"])
   if (phase) {
-    return { kind: "phase", spanLabel: phase.spanLabel ?? null, status: phase.phase ?? undefined }
+    return { kind: "phase", spanLabel: displayLabel(phase.spanLabel), status: phase.phase ?? undefined }
   }
   return null
 }
@@ -304,8 +309,14 @@ function briefForSpan(
   spanLabel: string | null,
 ): ContextualActivitySceneBrief | null {
   if (briefs.length === 0) return null
-  if (!spanLabel) return briefs[briefs.length - 1] ?? null
-  const matchingDraft = drafts.find((draft) => draft.provenance && JSON.stringify(draft.provenance).includes(spanLabel))
+  if (spanLabel) {
+    const labelled = briefs.find((brief) => brief.spanLabel === spanLabel)
+    if (labelled) return labelled
+  }
+  const matchingDraft = drafts.find((draft) => (
+    (spanLabel && draft.spanLabel === spanLabel)
+    || (spanLabel && draft.provenance && JSON.stringify(draft.provenance).includes(spanLabel))
+  ))
   if (matchingDraft?.sceneBriefId) {
     return briefs.find((brief) => brief.id === matchingDraft.sceneBriefId) ?? briefs[briefs.length - 1] ?? null
   }
@@ -325,7 +336,7 @@ function inspectForNode(
     || cursor.region === region
     || regionIndex(cursor.region) > regionIndex(region)
   ))
-  const spanLabels = [...new Set(relevant.map((cursor) => cursor.spanLabel).filter((label): label is string => Boolean(label)))]
+  const spanLabels = [...new Set(relevant.map((cursor) => displayLabel(cursor.spanLabel)).filter((label): label is string => Boolean(label)))]
   const latestLabel = spanLabels[0] ?? decision?.spanLabel ?? null
   return {
     nodeId,
@@ -351,6 +362,9 @@ function edgeState(
 }
 
 function emptyInspect(decision: ProcessDecision | null): Record<ProcessNodeId, ProcessNodeInspect> {
+  // Object.fromEntries widens the exhaustive tuple keys to `string`; the
+  // PROCESS_NODE_IDS-driven construction (and its regression test) guarantees
+  // every ProcessNodeId is present before this record leaves the function.
   return Object.fromEntries(PROCESS_NODE_IDS.map((id) => [id, {
     nodeId: id,
     state: "pending" as const,
@@ -358,7 +372,7 @@ function emptyInspect(decision: ProcessDecision | null): Record<ProcessNodeId, P
     sceneBrief: null,
     drafts: [],
     decision,
-  }])) as Record<ProcessNodeId, ProcessNodeInspect>
+  }])) as unknown as Record<ProcessNodeId, ProcessNodeInspect>
 }
 
 export function emptyProcessGraph(live = false): ProcessGraphModel {
@@ -388,7 +402,7 @@ export function deriveProcessGraph(
     if (region && (run?.status === "running" || run?.status === "pausing")) {
       applyCursor(nodeStates, {
         spanId: "run",
-        spanLabel: run.spanLabel,
+        spanLabel: displayLabel(run.spanLabel),
         region,
         failed: false,
         complete: false,
@@ -407,8 +421,8 @@ export function deriveProcessGraph(
   const liveCursors = cursors.filter((cursor) => !cursor.complete && !cursor.failed)
   const liveSpanLabels = [
     ...new Set([
-      ...liveCursors.map((cursor) => cursor.spanLabel),
-      run?.status === "running" || run?.status === "pausing" ? run.spanLabel : null,
+      ...liveCursors.map((cursor) => displayLabel(cursor.spanLabel)),
+      run?.status === "running" || run?.status === "pausing" ? displayLabel(run.spanLabel) : null,
     ].filter((label): label is string => Boolean(label))),
   ]
   const inspect = Object.fromEntries(PROCESS_NODE_IDS.map((id) => [

@@ -2471,7 +2471,7 @@ export function ProjectWorkspace() {
     revalidateCell(cell.id)
   }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
-  const { completeSingle, prepareSingleEvidence, completeBatch, completeParagraph, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
+  const { completeSingle, prepareSingleEvidence, completeBatch, completeParagraph, clearCellError, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
     // language for few-shot/completion; default lane falls back to the file's
     // (then project's) targetLanguage exactly as before. Shares the same
@@ -2977,6 +2977,24 @@ export function ProjectWorkspace() {
 
   const backtranslating = backtranslatingState
   const backtranslationErrors = backtranslationErrorsState
+
+  /**
+   * AQU-913: both of a cell's inline AI failure surfaces — the draft error under
+   * the target editor and the back-translation error in the expanded panel —
+   * are dismissed together when focus leaves that cell's row. They're stored in
+   * two separate per-cell maps owned up here, so the row is handed one clear
+   * function rather than two. Per-cell by construction: only `cellId`'s entries
+   * are removed, so a second cell's error stays put until its own row blurs.
+   */
+  const clearCellErrors = useCallback((cellId: string) => {
+    clearCellError(cellId)
+    setBacktranslationErrorsState((prev) => {
+      if (!prev.has(cellId)) return prev
+      const next = new Map(prev)
+      next.delete(cellId)
+      return next
+    })
+  }, [clearCellError])
 
   const requiredValidations = project ? readValidationCount(project) : 1
   const healthFileCells = useMemo(() => {
@@ -6640,6 +6658,7 @@ export function ProjectWorkspace() {
             }
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
+            onClearCellErrors={clearCellErrors}
             onCompleteSingle={handleCompleteSingle} onCompleteBatch={completeBatch}
             onCompleteParagraph={handleCompleteParagraph}
             healthMap={effectiveHealthMap} infractions={infractions} rules={rules}
@@ -6971,6 +6990,11 @@ export function ProjectWorkspace() {
           cells={legacyCells}
           activeCellId={recordingCellId}
           username={currentUsername}
+          // AQU-906: hand the recorder the file's linked video so the actor can
+          // watch the scene while dubbing. Withheld in audio-first timing for
+          // the same reason the timeline hides it there — the programme is
+          // re-flowed, so cell times no longer address the video's clock.
+          videoUrl={timingMode === "audioFirst" ? null : (activeFile?.coreMediaUrl ?? null)}
           onActiveCellChange={(cellId) => {
             setRecordingCellId(cellId)
             // Scroll the underlying editor to the new cell so the row is visible

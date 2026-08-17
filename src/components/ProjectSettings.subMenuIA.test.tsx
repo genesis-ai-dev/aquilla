@@ -22,7 +22,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, cleanup } from "@testing-library/react"
 import { MemoryRouter, Route, Routes, Link } from "react-router-dom"
-import { ProjectSettings, ProjectSettingsDialog } from "./ProjectSettings"
+import { ProjectSettings } from "./ProjectSettings"
 
 
 vi.mock("./ProjectSettings/RulesSection", () => ({
@@ -229,56 +229,12 @@ function renderAt(path: string) {
   )
 }
 
-function renderModalAt(path: string) {
-  cleanup()
-  const backgroundLocation = {
-    pathname: `/projects/${PROJECT_ID}`,
-    search: "",
-    hash: "",
-    state: null,
-    key: "project-overview",
-  }
-  return render(
-    <MemoryRouter
-      initialIndex={1}
-      initialEntries={[
-        backgroundLocation,
-        {
-          pathname: path,
-          state: { backgroundLocation, projectSettingsModalDepth: 1 },
-        },
-      ]}
-    >
-      <Routes>
-        <Route path="/projects/:id" element={<div data-testid="project-overview-background" />} />
-        <Route path="/project/:id/settings" element={<ProjectSettingsDialog />} />
-        <Route path="/project/:id/settings/:section" element={<ProjectSettingsDialog />} />
-      </Routes>
-    </MemoryRouter>,
-  )
-}
-
 beforeEach(() => {
   vi.clearAllMocks()
   rosterSettings.canViewRoster = true
 })
 
 describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
-  it("renders the shared settings UI in a route-backed modal and closes to its origin", () => {
-    renderModalAt(`/project/${PROJECT_ID}/settings`)
-
-    expect(screen.getByTestId("project-settings-dialog")).toBeTruthy()
-    fireEvent.click(screen.getByText("General"))
-    fireEvent.change(screen.getByLabelText(/project title/i), {
-      target: { value: "Unsaved modal title" },
-    })
-
-    fireEvent.click(screen.getByRole("button", { name: /close/i }))
-    expect(screen.getByRole("heading", { name: "Discard changes?" })).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: "Discard" }))
-    expect(screen.getByTestId("project-overview-background")).toBeTruthy()
-  })
-
   it("index (no ?section=) shows labeled sub-menus, not the full control set", () => {
     renderAt(`/project/${PROJECT_ID}/settings`)
 

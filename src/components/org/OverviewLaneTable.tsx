@@ -17,7 +17,7 @@
 // - "+ Add language" routes to the project's settings Languages section.
 
 import { useEffect, useMemo, useState } from "react"
-import { Link, useLocation, useNavigate } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
 import { UserPlus, Users } from "lucide-react"
 import { projectSettingsPath } from "@/lib/navigation/org-paths"
@@ -135,7 +135,6 @@ export function OverviewLaneTable({
 }: OverviewLaneTableProps) {
   const t = useT()
   const navigate = useNavigate()
-  const location = useLocation()
   const { members, refresh: refreshMembers } = useProjectMembers(projectId)
   const [scopesByUser, setScopesByUser] = useState<Record<number, MemberScope[]>>({})
 
@@ -313,7 +312,6 @@ export function OverviewLaneTable({
             render={
               <Link
                 to={projectSettingsPath(projectId, "general")}
-                state={{ backgroundLocation: location, projectSettingsModalDepth: 1 }}
                 data-testid="overview-lane-add-language"
               />
             }

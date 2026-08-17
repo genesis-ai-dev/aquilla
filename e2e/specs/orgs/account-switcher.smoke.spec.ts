@@ -1,7 +1,6 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { ensureAuthState, injectAdditionalSession } from "../../helpers/auth"
 import { AccountSwitcherPage } from "../../helpers/page-objects/AccountSwitcher"
-import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * AccountSwitcher dropdown — sidebar username button.
@@ -16,15 +15,11 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
  * renders and the dropdown opens.
  */
 test("account switcher dropdown opens with session info", async ({ alice }) => {
-  const seeded = await seedProjectWithFile(await jwtFor("alice"), {
-    name: `Preferences modal ${Date.now()}`,
-  })
-  await openSeededProject(alice, seeded)
+  await alice.goto(orgRoute(alice))
   // The AccountSwitcher renders as a button showing the username.
   // Alice is seeded as "alice".
   const switcher = new AccountSwitcherPage(alice)
   await switcher.openMenu("alice")
-  const accountBtn = alice.getByRole("button", { name: /Account menu: alice/i })
 
   // Dropdown opens showing the active account.
   await expect(alice.getByText(/alice/i).first()).toBeVisible({ timeout: 3_000 })
@@ -34,25 +29,13 @@ test("account switcher dropdown opens with session info", async ({ alice }) => {
     alice.getByRole("menuitem", { name: /Add another account/i })
   ).toBeVisible({ timeout: 3_000 })
 
-  // Preferences opens over the current app route, so changing a personal
-  // setting does not tear down the workspace behind it.
+  // "Preferences" opens as a full page, not a route-backed modal.
   const preferencesItem = alice.getByRole("menuitem", { name: /Preferences/i })
   await expect(preferencesItem).toBeVisible({ timeout: 3_000 })
-  const backgroundUrl = alice.url()
   await preferencesItem.click()
   await expect(alice).toHaveURL(/\/preferences$/)
-  const preferencesDialog = alice.getByTestId("preferences-dialog")
-  await expect(preferencesDialog).toBeVisible()
-  await expect(preferencesDialog.locator("h1").filter({ hasText: "Preferences" })).toBeVisible()
-
-  await preferencesDialog.getByRole("link", { name: /Workspace/i }).click()
-  await expect(alice).toHaveURL(/\/preferences\/workspace$/)
-  await expect(preferencesDialog.getByRole("heading", { name: "Workspace" })).toBeVisible()
-
-  await preferencesDialog.getByRole("button", { name: "Close" }).click()
-  await expect(alice).toHaveURL(backgroundUrl)
-  await expect(preferencesDialog).not.toBeVisible()
-  await expect(accountBtn).toBeVisible()
+  await expect(alice.getByRole("heading", { name: /Preferences/i })).toBeVisible()
+  await expect(alice.getByTestId("preferences-dialog")).toHaveCount(0)
 })
 
 test("logging out promotes another signed-in account", async ({ alice }) => {

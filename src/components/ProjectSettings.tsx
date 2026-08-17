@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react"
-import { useLocation, useParams, useNavigate, useSearchParams, type Location } from "react-router-dom"
+import { useParams, useNavigate, useSearchParams } from "react-router-dom"
 import {
   isProjectEditorPath,
   projectSettingsPath,
@@ -39,7 +39,6 @@ import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
-  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -93,7 +92,7 @@ import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useActiveOrgOptional } from "@/context/OrgContext"
 import { ApiKeyField } from "./ApiKeyField"
 import { SettingsNav, type SettingsSection } from "./ProjectSettings/SettingsNav"
-import { BackLink, NavList, NavRow } from "@/components/ui/nav-list"
+import { NavList, NavRow } from "@/components/ui/nav-list"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
@@ -284,25 +283,11 @@ function decayEqual(a: DecaySettings | undefined, b: DecaySettings | undefined):
   return JSON.stringify(a) === JSON.stringify(b)
 }
 
-interface ProjectSettingsProps {
-  modal?: boolean
-}
-
-export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
+export function ProjectSettings() {
   const t = useT()
   const { id, section: sectionParam } = useParams<{ id: string; section?: string }>()
   const navigate = useNavigate()
-  const location = useLocation()
   const [searchParams] = useSearchParams()
-  const modalState = location.state as {
-    backgroundLocation?: Location
-    projectSettingsModalDepth?: number
-  } | null
-  const backgroundLocation = modal ? modalState?.backgroundLocation : undefined
-  const modalDepth = modal ? (modalState?.projectSettingsModalDepth ?? 1) : 0
-  const nextModalState = backgroundLocation
-    ? { backgroundLocation, projectSettingsModalDepth: modalDepth + 1 }
-    : undefined
   const { project, loading, refresh } = useProject(id!)
 
   // Workspace handoff (`?return=…`) — only accept same-origin relative paths.
@@ -621,8 +606,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   }, [isDirty])
 
   const [discardOpen, setDiscardOpen] = useState(false)
-  const [closeAfterDiscard, setCloseAfterDiscard] = useState(false)
-  const [pendingHistoryDelta, setPendingHistoryDelta] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   // Distinct from `saveError`: a shared-settings save blocked by the active
@@ -638,7 +621,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   }, [session?.username, canEditShared])
   // AQU-408: success message reflects the actual delta saved (a brief
   // enumeration of which fields changed), not a generic "Saved". Auto-dismisses
-  // after a few seconds. The modal/page itself stays open on save — only an
+  // after a few seconds. The page itself stays open on save — only an
   // explicit "Save and close" leaves it.
   const [savedMessage, setSavedMessage] = useState<string | null>(null)
   const savedMessageTimerRef = useRef<number | null>(null)
@@ -659,25 +642,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     } else {
       navigate(target)
     }
-  }, [isDirty, navigate])
-
-  const closeSettings = useCallback(() => {
-    if (isDirty) {
-      setCloseAfterDiscard(true)
-      setDiscardOpen(true)
-      return
-    }
-    if (modal) navigate(-modalDepth)
-    else navigate(editorPath)
-  }, [editorPath, isDirty, modal, modalDepth, navigate])
-
-  const requestHistoryNavigation = useCallback((delta: number) => {
-    if (isDirty) {
-      setPendingHistoryDelta(delta)
-      setDiscardOpen(true)
-      return
-    }
-    navigate(delta)
   }, [isDirty, navigate])
 
   const preset = CUSTOM_PRESETS.find((p) => p.id === presetId) ?? CUSTOM_PRESETS[0]
@@ -909,7 +873,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
 
       // AQU-408 acceptance criterion: the success message reflects the actual
       // delta saved (a brief enumeration of which fields changed), and the
-      // page/modal stays open afterward — callers decide separately whether
+      // page stays open afterward — callers decide separately whether
       // to also navigate away (see handleSaveAndClose).
       const message =
         changedFieldLabels.length === 0
@@ -943,35 +907,19 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // `saveError` from the render closure is stale (set inside handleSave
     // during this same tick); rely on the returned boolean instead.
     if (!ok) return
-    if (modal) navigate(-modalDepth)
-    else navigate(editorPath)
-  }, [handleSave, navigate, editorPath, modal, modalDepth])
+    navigate(editorPath)
+  }, [handleSave, navigate, editorPath])
 
   const handleDiscardConfirm = useCallback(() => {
     if (baseline) applyBaseline(baseline)
     setDiscardOpen(false)
-    if (closeAfterDiscard) {
-      setCloseAfterDiscard(false)
-      setPendingNav(null)
-      if (modal) navigate(-modalDepth)
-      else navigate(editorPath)
-      return
-    }
-    if (pendingHistoryDelta != null) {
-      setPendingHistoryDelta(null)
-      setPendingNav(null)
-      navigate(pendingHistoryDelta)
-      return
-    }
     const target = pendingNav ?? editorPath
     setPendingNav(null)
     navigate(target)
-  }, [baseline, applyBaseline, closeAfterDiscard, pendingHistoryDelta, pendingNav, navigate, editorPath, modal, modalDepth])
+  }, [baseline, applyBaseline, pendingNav, navigate, editorPath])
 
   const handleDiscardCancel = useCallback(() => {
     setDiscardOpen(false)
-    setCloseAfterDiscard(false)
-    setPendingHistoryDelta(null)
     setPendingNav(null)
   }, [])
 
@@ -1360,46 +1308,22 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   )
 
   if (loading) {
-    const loadingContent = (
-      <Page size={pageSize}>
-        <LoadingPanel label={t("projectSettings.loadingLabel")} />
-      </Page>
-    )
-    if (modal) {
-      return (
-        <Dialog open onOpenChange={(open) => { if (!open) closeSettings() }}>
-          <DialogContent
-            className="h-[min(90dvh,56rem)] max-w-[min(72rem,calc(100%-2rem))] gap-0 p-0 sm:max-w-[min(72rem,calc(100%-2rem))]"
-            data-testid="project-settings-dialog"
-          >
-            <DialogHeader className="sr-only">
-              <DialogTitle>{pageTitle}</DialogTitle>
-              <DialogDescription>{pageDescription}</DialogDescription>
-            </DialogHeader>
-            <DialogBody className="m-0 p-0">{loadingContent}</DialogBody>
-          </DialogContent>
-        </Dialog>
-      )
-    }
     return (
       <AppShell
         sidebar={<OrgSidebar />}
         header={breadcrumb}
         statusBar={null}
-        main={loadingContent}
+        main={
+          <Page size={pageSize}>
+            <LoadingPanel label={t("projectSettings.loadingLabel")} />
+          </Page>
+        }
       />
     )
   }
 
   const settingsContent = (
     <Page size={pageSize}>
-          {modal && onSettingsPane ? (
-            <BackLink
-              className="mb-6"
-              label={breadcrumbParent?.label ?? "Project settings"}
-              onClick={() => requestHistoryNavigation(-1)}
-            />
-          ) : null}
           <div className="flex flex-col gap-12">
             <PageHeader
               title={pageTitle}
@@ -1425,7 +1349,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                         <NavRow
                           key={g.id}
                           to={settingsHref(g.id)}
-                          state={nextModalState}
                           icon={g.icon}
                           title={g.label}
                           hint={groupHints[g.id] ?? g.description}
@@ -1722,7 +1645,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               <NavList>
                 <NavRow
                   to={settingsHref("system-prompt")}
-                  state={nextModalState}
                   title={t("projectSettings.systemPrompt.label")}
                   description={t("projectSettings.systemPrompt.navDescription")}
                   hint={
@@ -2385,20 +2307,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     </Page>
   )
 
-  const shell = modal ? (
-    <Dialog open onOpenChange={(open) => { if (!open) closeSettings() }}>
-      <DialogContent
-        className="h-[min(90dvh,56rem)] max-w-[min(72rem,calc(100%-2rem))] gap-0 p-0 sm:max-w-[min(72rem,calc(100%-2rem))]"
-        data-testid="project-settings-dialog"
-      >
-        <DialogHeader className="sr-only">
-          <DialogTitle>{pageTitle}</DialogTitle>
-          <DialogDescription>{pageDescription}</DialogDescription>
-        </DialogHeader>
-        <DialogBody className="m-0 p-0">{settingsContent}</DialogBody>
-      </DialogContent>
-    </Dialog>
-  ) : (
+  const shell = (
     <AppShell
       sidebar={<OrgSidebar />}
       header={breadcrumb}
@@ -2429,10 +2338,4 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
 
     </>
   )
-}
-
-/** Route-modal presentation used by in-app project-settings entry points.
- * Direct settings URLs retain the full-page fallback. */
-export function ProjectSettingsDialog() {
-  return <ProjectSettings modal />
 }

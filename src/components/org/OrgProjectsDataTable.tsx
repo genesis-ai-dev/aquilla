@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react"
-import { useLocation, useNavigate } from "react-router-dom"
+import { useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
 import { UserPlus, Users } from "lucide-react"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
@@ -119,7 +119,6 @@ export function OrgProjectsDataTable({
 }) {
   const { t } = useI18n()
   const navigate = useNavigate()
-  const location = useLocation()
   const [tableNow] = useState(() => now)
   // AQU-538 §3.2: which project rows are expanded into their per-lane detail.
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
@@ -463,9 +462,7 @@ export function OrgProjectsDataTable({
                       {t("dialog.assign.title")}
                     </MenuItem>
                   )}
-                  <MenuItem onClick={() => navigate(`/project/${p.id}/settings/members`, {
-                    state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
-                  })}>
+                  <MenuItem onClick={() => navigate(`/project/${p.id}/settings/members`)}>
                     <Users className="size-4" />
                     {t("org.teamDetail.addMemberButton")}
                   </MenuItem>

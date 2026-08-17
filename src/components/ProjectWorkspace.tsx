@@ -1005,10 +1005,8 @@ export function ProjectWorkspace() {
   // card — the Gemini/TTS key entry is then visible without scrolling to find it.
   const openAudioSetup = useCallback(() => {
     if (!projectId) return
-    navigate(`/project/${projectId}/settings?q=gemini`, {
-      state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
-    })
-  }, [location, navigate, projectId])
+    navigate(`/project/${projectId}/settings?q=gemini`)
+  }, [navigate, projectId])
   const editorRef = useRef<EditorTableHandle>(null)
   // The section highlighted on the Dialogue timeline. Lifted here so the bottom
   // playback bar (a sibling of the timeline) can start playback from it (AQU-666).
@@ -4864,9 +4862,8 @@ export function ProjectWorkspace() {
         projectId,
         returnTo: workspaceReturnPath(projectId, activeFileId),
       }),
-      { state: { backgroundLocation: location, projectSettingsModalDepth: 1 } },
     )
-  }, [projectId, activeFileId, location, navigate])
+  }, [projectId, activeFileId, navigate])
 
   const projectNavItems = useMemo(() => {
     const items = [
@@ -6652,9 +6649,7 @@ export function ProjectWorkspace() {
             // Project Info + Languages sections (both carry the "target language"
             // keyword), where the field is edited (server enforces the role floor).
             onEditTargetLanguage={() =>
-              navigate(`/project/${projectId}/settings?q=${encodeURIComponent("target language")}`, {
-                state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
-              })
+              navigate(`/project/${projectId}/settings?q=${encodeURIComponent("target language")}`)
             }
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}

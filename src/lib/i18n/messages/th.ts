@@ -2440,7 +2440,6 @@ export const th: Catalog = {
   "onboarding.preferences.hint.personal": "ส่วนตัว",
   "onboarding.preferences.hint.onDevice": "ในเครื่อง",
   "onboarding.preferences.pageDescription": "การตั้งค่าส่วนตัวที่มีผลกับคุณในทุกโปรเจกต์บนอุปกรณ์นี้",
-  "onboarding.preferences.dialogDescription": "การตั้งค่าส่วนตัวที่มีผลในทุกโปรเจกต์",
   "onboarding.apiTokens.expiry.90d": "90 วัน",
   "onboarding.apiTokens.scope.projectFallback": "โปรเจกต์ {id}",
   "onboarding.apiTokens.scope.orgFallback": "องค์กร {id}",

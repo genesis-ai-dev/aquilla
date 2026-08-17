@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Navigate, useLocation, useNavigate, useParams, type Location } from "react-router-dom"
+import { Navigate, useParams } from "react-router-dom"
 import { Cpu, Gauge, KeyRound, PanelLeft, UserRound } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
@@ -8,7 +8,7 @@ import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Page, PageHeader, SettingsGroup, SettingsRow } from "@/components/ui/page"
-import { NavList, NavRow, BackLink } from "@/components/ui/nav-list"
+import { NavList, NavRow } from "@/components/ui/nav-list"
 import {
   Select,
   SelectContent,
@@ -17,7 +17,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { useThemeMode, type ThemeMode } from "@/branding/ThemeMode"
@@ -150,10 +149,8 @@ function WorkspaceSection() {
  */
 function GeneralSection({
   workspaceHint,
-  backgroundLocation,
 }: {
   workspaceHint: string
-  backgroundLocation?: Location
 }) {
   const { mode, setMode } = useThemeMode()
   const { locale, locales, setLocale, t } = useI18n()
@@ -254,7 +251,6 @@ function GeneralSection({
       />
       <NavRow
         to="/preferences/workspace"
-        state={backgroundLocation ? { backgroundLocation, preferencesModalDepth: 2 } : undefined}
         icon={PanelLeft}
         title={t("onboarding.preferences.workspace.groupLabel")}
         hint={workspaceHint}
@@ -388,7 +384,7 @@ const PREFERENCE_SECTIONS: PreferenceSection[] = [
 const PREFERENCE_GROUPS = ["AI & personalization", "Account"] as const
 
 /** The index: inline General card + grouped navigation rows for nested sections. */
-function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boolean; backgroundLocation?: Location }) {
+function PreferencesIndex() {
   const { t } = useI18n()
   const { position } = useDockRailPosition()
 
@@ -414,14 +410,13 @@ function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boole
         description={t("onboarding.preferences.pageDescription")}
       />
       <div className="flex flex-col gap-12">
-        <GeneralSection workspaceHint={hints.workspace} backgroundLocation={backgroundLocation} />
+        <GeneralSection workspaceHint={hints.workspace} />
         {PREFERENCE_GROUPS.map((group) => (
           <NavList key={group} label={group}>
             {PREFERENCE_SECTIONS.filter((s) => s.group === group).map((s) => (
               <NavRow
                 key={s.slug}
                 to={`/preferences/${s.slug}`}
-                state={backgroundLocation ? { backgroundLocation, preferencesModalDepth: 2 } : undefined}
                 icon={s.icon}
                 title={t(s.titleKey)}
                 hint={hints[s.slug]}
@@ -433,7 +428,6 @@ function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boole
     </Page>
   )
 
-  if (modal) return content
   return (
     <AppShell
       sidebar={<OrgSidebar />}
@@ -445,25 +439,11 @@ function PreferencesIndex({ modal = false, backgroundLocation }: { modal?: boole
 }
 
 /** A single section, rendered on its own page with a back breadcrumb. */
-function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: boolean }) {
+function PreferencesDetail({ slug }: { slug: string }) {
   const { t } = useI18n()
-  const navigate = useNavigate()
   if (INLINE_PREFERENCE_SLUGS.has(slug)) return <Navigate to="/preferences" replace />
   const section = PREFERENCE_SECTIONS.find((s) => s.slug === slug)
   if (!section) return <Navigate to="/preferences" replace />
-  if (modal) {
-    // In the route-modal there is no breadcrumb, so the BackLink is the way
-    // back to the index; it pops history to keep the dialog's depth intact.
-    return (
-      <Page>
-        <div className="space-y-6">
-          <BackLink to="/preferences" onClick={() => navigate(-1)} label={t("nav.account.preferences")} />
-          <PageHeader title={t(section.titleKey)} description={t(section.descriptionKey)} />
-          {section.render()}
-        </div>
-      </Page>
-    )
-  }
   return (
     <AppShell
       sidebar={<OrgSidebar />}
@@ -484,38 +464,4 @@ function PreferencesDetail({ slug, modal = false }: { slug: string; modal?: bool
 export function Preferences() {
   const { section } = useParams<{ section?: string }>()
   return section ? <PreferencesDetail slug={section} /> : <PreferencesIndex />
-}
-
-/** Route-modal presentation used by in-app entry points. Direct URLs continue
- * to render the full-page Preferences surface above. */
-export function PreferencesDialog() {
-  const { t } = useI18n()
-  const { section } = useParams<{ section?: string }>()
-  const location = useLocation()
-  const navigate = useNavigate()
-  const modalState = location.state as {
-    backgroundLocation?: Location
-    preferencesModalDepth?: number
-  } | null
-  const backgroundLocation = modalState?.backgroundLocation
-  const modalDepth = modalState?.preferencesModalDepth ?? 1
-
-  return (
-    <Dialog open onOpenChange={(open) => { if (!open) navigate(-modalDepth) }}>
-      <DialogContent
-        className="h-[min(90dvh,56rem)] max-w-[min(72rem,calc(100%-2rem))] gap-0 p-0 sm:max-w-[min(72rem,calc(100%-2rem))]"
-        data-testid="preferences-dialog"
-      >
-        <DialogHeader className="sr-only">
-          <DialogTitle>{t("nav.account.preferences")}</DialogTitle>
-          <DialogDescription>{t("onboarding.preferences.dialogDescription")}</DialogDescription>
-        </DialogHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          {section
-            ? <PreferencesDetail slug={section} modal />
-            : <PreferencesIndex modal backgroundLocation={backgroundLocation} />}
-        </div>
-      </DialogContent>
-    </Dialog>
-  )
 }

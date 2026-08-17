@@ -411,7 +411,6 @@ export const onboarding = defineNamespace({
     // — Page chrome — title reuses `nav.account.preferences` (identical text)
     "onboarding.preferences.pageDescription":
       "Personal preferences that apply to you across all projects on this device.",
-    "onboarding.preferences.dialogDescription": "Personal preferences that apply across projects.",
 
     // ═══════════════════════════════════════════════════════════════════════
     // API tokens (src/components/settings/ApiTokensSection.tsx)

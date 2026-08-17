@@ -84,6 +84,28 @@ describe("deriveProcessGraph", () => {
     expect(model.edgeStates["lint-route"]).toBe("active")
   })
 
+  it("drops opaque cell/span UUIDs from live and inspect labels", () => {
+    const model = deriveProcessGraph({ ...run, spanLabel: "01920000-0000-7000-8000-000000000001" }, activity([
+      event({
+        id: "start",
+        kind: "span_started",
+        spanId: "s1",
+        spanLabel: "01920000-0000-7000-8000-000000000001",
+      }),
+      event({
+        id: "phase",
+        kind: "phase",
+        spanId: "s1",
+        spanLabel: "01920000…00000008",
+        phase: "checking",
+      }),
+    ]))
+
+    expect(model.liveSpanLabels).toEqual([])
+    expect(model.inspect.construe.spanLabels).toEqual([])
+    expect(model.lastDecision?.spanLabel).toBeNull()
+  })
+
   it("keeps two in-flight regions lit at once", () => {
     const model = deriveProcessGraph(run, activity([
       event({

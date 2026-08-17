@@ -13,6 +13,10 @@
 > standing document is outstanding work.
 > The later `docs/OPSEC-REVIEW-2026-08-13.md` records the follow-up verification and the
 > passive-resource, session-replay, dependency-audit, and operator-credential findings.
+> `docs/OPSEC-REVIEW-2026-08-17.md` is the most recent pass: it reviews the billing,
+> knowledge-base and EPUB surfaces added since, and adds OPS-11 (one helper plus a drift
+> scan for the service-to-service bearer, which had seven hand-written copies and one
+> non-constant-time compare) and OPS-12 (webhook verification during a secret rollover).
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)

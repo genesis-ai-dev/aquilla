@@ -60,7 +60,7 @@ const DOCK_DEFAULT_WIDTH = 256
 /** Collapsed rail (40) + aside `ps-2` inset (8) when railCollapsed. */
 const DOCK_COLLAPSED_WIDTH = 48
 
-const VIDEO_STORAGE_KEY = "codex:video-height"
+const VIDEO_STORAGE_KEY = "aquilla:video-height"
 const VIDEO_DEFAULT_HEIGHT = 320
 const VIDEO_MIN_HEIGHT = 120
 

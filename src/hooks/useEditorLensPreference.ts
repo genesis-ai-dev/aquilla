@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { EditorLens } from "@/components/EditorModeToggle";
 
-const STORAGE_PREFIX = "codex:editorLens:";
+const STORAGE_PREFIX = "aquilla:editorLens:";
 
 const storageKey = (projectId: string): string => `${STORAGE_PREFIX}${projectId}`;
 

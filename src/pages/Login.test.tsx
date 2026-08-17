@@ -90,7 +90,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   navigate.mockReset()
   mockHasAuthHintCookie.mockReturnValue(false)
-  localStorage.removeItem("codex:onboardingComplete")
+  localStorage.removeItem("aquilla:onboardingComplete")
 })
 
 // ---------------------------------------------------------------------------
@@ -131,7 +131,7 @@ describe("Login page — already signed in", () => {
   })
 
   it("redirects to /app when local onboarding is complete", () => {
-    localStorage.setItem("codex:onboardingComplete", "true")
+    localStorage.setItem("aquilla:onboardingComplete", "true")
     renderLogin()
     expect(screen.getByText("App entry")).toBeInTheDocument()
   })

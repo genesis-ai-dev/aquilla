@@ -383,7 +383,7 @@ function writePersistedActiveLane(projectId: string, lane: string): void {
 
 /** Persist whether the Agent editor tab is open for a project (survives file-tab switches). */
 function agentTabStorageKey(projectId: string): string {
-  return `codex:agent-tab:${projectId}`
+  return `aquilla:agent-tab:${projectId}`
 }
 function readAgentTabOpen(projectId: string | undefined): boolean {
   if (!projectId) return false
@@ -4400,9 +4400,9 @@ export function ProjectWorkspace() {
     // and surface a one-time hint pointing at the chip.
     void dismissChecklist()
     let alreadyShown = false
-    try { alreadyShown = localStorage.getItem("codex.checklistTooltipShown") === "1" } catch { /* ignore */ }
+    try { alreadyShown = localStorage.getItem("aquilla.checklistTooltipShown") === "1" } catch { /* ignore */ }
     if (!alreadyShown) {
-      try { localStorage.setItem("codex.checklistTooltipShown", "1") } catch { /* ignore */ }
+      try { localStorage.setItem("aquilla.checklistTooltipShown", "1") } catch { /* ignore */ }
       setShowChipTooltip(true)
       window.setTimeout(() => setShowChipTooltip(false), 6000)
     }

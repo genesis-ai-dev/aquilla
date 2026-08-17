@@ -187,7 +187,7 @@ interface ImportDialogProps {
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
 function skipStorageKey(projectId: string) {
-  return `codex.importDirectionSkipped.${projectId}`
+  return `aquilla.importDirectionSkipped.${projectId}`
 }
 
 export function ImportDialog({
@@ -349,7 +349,7 @@ export function ImportDialog({
         setScreen("result")
         // Persist per-project so a re-show is possible (bonus scope).
         try {
-          const key = `codex.lastImportReport.${projectId}`
+          const key = `aquilla.lastImportReport.${projectId}`
           localStorage.setItem(
             key,
             JSON.stringify({ ts: Date.now(), skipped: skippedBooks, importedCount: refs.length }),

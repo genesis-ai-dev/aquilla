@@ -118,7 +118,7 @@ describe("Preferences", () => {
 
     await userEvent.click(trigger)
     await userEvent.click(await screen.findByRole("option", { name: "Dark" }))
-    expect(window.localStorage.getItem("codex-theme")).toBe("dark")
+    expect(window.localStorage.getItem("aquilla-theme")).toBe("dark")
     expect(document.documentElement).toHaveClass("dark")
   })
 

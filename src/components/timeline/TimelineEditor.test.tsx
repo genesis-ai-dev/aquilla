@@ -77,7 +77,7 @@ describe("TimelineEditor", () => {
     // Hermetic: zoom persists per file — under a persistent localStorage
     // (NODE_OPTIONS --localstorage-file) each run would ratchet 1.3× until
     // ZOOM_MAX and the assertion goes flat.
-    localStorage.removeItem("codex:timelineZoom:zoomfile")
+    localStorage.removeItem("aquilla:timelineZoom:zoomfile")
     render(
       <TimelineEditor
         fileId="zoomfile"
@@ -288,7 +288,7 @@ describe("TimelineEditor", () => {
   })
 
   it("round 6: the snap magnet is on by default, toggles, and persists globally", () => {
-    localStorage.removeItem("codex:timelineSnap")
+    localStorage.removeItem("aquilla:timelineSnap")
     render(
       <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
@@ -296,8 +296,8 @@ describe("TimelineEditor", () => {
     expect(btn).toHaveAttribute("aria-pressed", "true")
     fireEvent.click(btn)
     expect(btn).toHaveAttribute("aria-pressed", "false")
-    expect(localStorage.getItem("codex:timelineSnap")).toBe("off")
-    localStorage.removeItem("codex:timelineSnap")
+    expect(localStorage.getItem("aquilla:timelineSnap")).toBe("off")
+    localStorage.removeItem("aquilla:timelineSnap")
   })
 
   it("renders the follow toggle, pressed by default, and it toggles", () => {
@@ -421,7 +421,7 @@ describe("TimelineEditor", () => {
   })
 
   it("speaker buttons start audible, push audibility into the queue, toggle, and persist per file", () => {
-    localStorage.removeItem("codex:timelineAudibility:spkfile")
+    localStorage.removeItem("aquilla:timelineAudibility:spkfile")
     lastAudibility = null
     render(
       <TimelineEditor fileId="spkfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
@@ -436,14 +436,14 @@ describe("TimelineEditor", () => {
     fireEvent.click(src)
     expect(src).toHaveAttribute("aria-pressed", "false")
     expect(lastAudibility).toEqual({ source: false, target: true })
-    expect(JSON.parse(localStorage.getItem("codex:timelineAudibility:spkfile")!)).toEqual({ source: false, target: true })
+    expect(JSON.parse(localStorage.getItem("aquilla:timelineAudibility:spkfile")!)).toEqual({ source: false, target: true })
 
     fireEvent.click(tgt)
     expect(lastAudibility).toEqual({ source: false, target: false })
   })
 
   it("a muted-source preference persists across mounts", () => {
-    localStorage.setItem("codex:timelineAudibility:persistfile", JSON.stringify({ source: false, target: true }))
+    localStorage.setItem("aquilla:timelineAudibility:persistfile", JSON.stringify({ source: false, target: true }))
     lastAudibility = null
     render(
       <TimelineEditor fileId="persistfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,

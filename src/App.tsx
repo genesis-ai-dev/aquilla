@@ -140,7 +140,7 @@ function SyncFreezeOverlay() {
  * Signed-in visitors resume their last org (`/orgs/$id` or `/orgs/all`).
  */
 function AppEntry() {
-  const onboarded = localStorage.getItem("codex:onboardingComplete") === "true"
+  const onboarded = localStorage.getItem("aquilla:onboardingComplete") === "true"
   if (!hasAuthHintCookie() && !onboarded) return <Navigate to="/login" replace />
   return <Navigate to={resumeOrgPath()} replace />
 }

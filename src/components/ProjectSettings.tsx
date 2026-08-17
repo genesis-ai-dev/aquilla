@@ -2105,7 +2105,7 @@ export function ProjectSettings() {
                 description={t("projectSettings.voice.libraryNote")}
                 control={
                   <Button variant="outline" onClick={() => {
-                    try { window.localStorage.setItem(`codex:editorLens:${id}`, "audio") } catch { /* ignore */ }
+                    try { window.localStorage.setItem(`aquilla:editorLens:${id}`, "audio") } catch { /* ignore */ }
                     requestNavigate(`/project/${id}/editor`)
                   }}>
                     {t("projectSettings.voice.openStudioButton")}

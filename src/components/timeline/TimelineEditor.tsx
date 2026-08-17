@@ -157,7 +157,7 @@ const SPEAKER_TOGGLE_KEYS: Record<
   },
 }
 
-const zoomKey = (fileId: string) => `codex:timelineZoom:${fileId}`
+const zoomKey = (fileId: string) => `aquilla:timelineZoom:${fileId}`
 
 function loadZoom(fileId: string): number {
   try {
@@ -170,7 +170,7 @@ function loadZoom(fileId: string): number {
 
 // Round 5: which tracks are AUDIBLE, persisted per file like zoom. Both-on is
 // the default; the queue itself only ever sees element.muted flags.
-const audibilityKey = (fileId: string) => `codex:timelineAudibility:${fileId}`
+const audibilityKey = (fileId: string) => `aquilla:timelineAudibility:${fileId}`
 
 function loadAudibility(fileId: string): TrackAudibility {
   try {

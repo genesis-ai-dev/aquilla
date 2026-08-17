@@ -11,6 +11,7 @@ import type { OrgSummary } from "@/lib/frontier/orgs"
 import {
   ALL_ORGS_PARAM,
   orgHomePath,
+  parseOrgPath,
   swapOrgInPath,
 } from "@/lib/navigation/org-paths"
 import { cn } from "@/lib/utils"
@@ -304,10 +305,15 @@ export function OrgSwitcher() {
   const selectedGuestOrgId = activeGuestOrg?.id ?? null
   const guestSelected = selectedGuest != null
 
-  const showAllOrgs = orgs.length > 1
+  const onAllOrgsPath = parseOrgPath(location.pathname)?.orgKey === ALL_ORGS_PARAM
+  // All organizations is the home for foreign-org grants as well as 2+
+  // memberships, so offer it whenever there's something to aggregate beyond
+  // a single member org.
+  const showAllOrgs = orgs.length > 1 || guestOrgs.length > 0
+  const viewingAllOrgs = !guestSelected && (isAllOrgs || onAllOrgsPath)
   const title = guestSelected
     ? selectedGuest.name ?? `Org #${selectedGuest.id}`
-    : isAllOrgs
+    : viewingAllOrgs
       ? t("org.breadcrumb.allOrganizations")
       : activeOrg?.name ?? "Workspace"
 
@@ -323,14 +329,14 @@ export function OrgSwitcher() {
     if (guestSelected && selectedGuestOrgId != null) {
       return items.find((item) => item.kind === "guest" && item.id === selectedGuestOrgId) ?? null
     }
-    if (isAllOrgs && showAllOrgs) {
+    if (viewingAllOrgs && showAllOrgs) {
       return items.find((item) => item.kind === "all") ?? null
     }
     if (activeOrgId != null) {
       return items.find((item) => item.kind === "member" && item.id === activeOrgId) ?? null
     }
     return null
-  }, [items, guestSelected, selectedGuestOrgId, isAllOrgs, showAllOrgs, activeOrgId])
+  }, [items, guestSelected, selectedGuestOrgId, viewingAllOrgs, showAllOrgs, activeOrgId])
 
   function retryProjectDirectory() {
     void refreshAccessibleProjects()
@@ -466,7 +472,7 @@ export function OrgSwitcher() {
             />
           }
         >
-          <OrgMark name={title} allOrgs={!guestSelected && isAllOrgs} />
+          <OrgMark name={title} allOrgs={viewingAllOrgs} />
           <span className="truncate">{title}</span>
         </ComboboxTrigger>
         <ComboboxContent
@@ -503,7 +509,7 @@ export function OrgSwitcher() {
           <ComboboxList className="max-h-80 flex-1">
             <OrgSwitcherList
               guestSelected={guestSelected}
-              isAllOrgs={isAllOrgs}
+              isAllOrgs={viewingAllOrgs}
               activeOrgId={activeOrgId}
               selectedGuestOrgId={selectedGuestOrgId}
               directoryError={accessibleProjectsError}

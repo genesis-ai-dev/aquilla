@@ -99,9 +99,9 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
 // portfolio-focused assertions below are unaffected.
 vi.mock("@/lib/sync/assignments", () => ({ getWorkload: vi.fn(async () => []) }))
 
-// AQU-335/AQU-416: accessible-projects feed for the "Shared with you" section
-// (and OrgProvider's guest-org derivation). Default empty — the shared-section
-// test overrides it with a foreign-org grant.
+// AQU-335/AQU-416: accessible-projects feed for foreign-org grants (and
+// OrgProvider's guest-org derivation). Default empty — the all-orgs Shared
+// origin test overrides it with a foreign-org grant.
 const fetchAccessibleProjectsMock = vi.fn(async (): Promise<unknown[]> => [])
 vi.mock("@/lib/sync/cloud-projects", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/sync/cloud-projects")>()
@@ -722,18 +722,16 @@ describe("OrgOverview / OrgProjects", () => {
     expect(screen.getByText("No projects match your search.")).toBeInTheDocument()
   })
 
-  // AQU-417: cross-org grants are no longer listed on the org dashboard — they
-  // were scattered under every org's project list. They now live on the
-  // dedicated /shared page (SharedProjectsPage), reached via the sidebar. The
-  // dashboard must NOT render the "Shared with you" section anymore, even when
-  // the caller holds a foreign-org grant. (The /shared page's own test pins the
-  // client-side <Link> to /projects/:id that AQU-416 originally guarded.)
-  it("does not render a Shared with you section on the org overview (moved to /shared, AQU-417)", async () => {
+  // AQU-417: cross-org grants are no longer listed on a single org's
+  // dashboard — they were scattered under every org's project list. They
+  // now live on `/orgs/all` as Shared-origin rows. The org overview must
+  // NOT render a Shared with you section, even when the caller holds a
+  // foreign-org grant.
+  it("does not render a Shared with you section on the org overview (moved to /orgs/all)", async () => {
     fetchAccessibleProjectsMock.mockResolvedValue([
       // In the caller's own org (id 1) — surfaces via the normal portfolio.
       { id: "own-1", name: "Legacy Translation", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] },
-      // Foreign-org grant (viewer via invite) — previously in the dashboard's
-      // shared section; now collected on /shared instead.
+      // Foreign-org grant (viewer via invite) — collected on /orgs/all, not here.
       { id: "p503", name: "Guest Gospel", orgId: 503, orgName: "Host Org", role: { level: 100, name: "viewer", source: "override" }, files: [] },
     ])
 
@@ -743,6 +741,20 @@ describe("OrgOverview / OrgProjects", () => {
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
     expect(screen.queryByTestId("shared-with-you")).not.toBeInTheDocument()
     expect(screen.queryByText("Guest Gospel")).not.toBeInTheDocument()
+  })
+
+  it("does not list foreign-org grants on a single org's Projects table (AQU-417)", async () => {
+    fetchAccessibleProjectsMock.mockResolvedValue([
+      { id: "own-1", name: "Legacy Translation", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] },
+      { id: "p503", name: "Guest Gospel", orgId: 503, orgName: "Host Org", role: { level: 100, name: "viewer", source: "override" }, files: [] },
+    ])
+
+    renderMemberProjects()
+
+    await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+    expect(screen.queryByText("Guest Gospel")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("shared-filter-chip")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("project-shared-badge")).not.toBeInTheDocument()
   })
 })
 
@@ -890,11 +902,13 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
     { id: 2, name: "Side Org", role: { level: 700, name: "owner" } },
   ]
 
-  async function renderAllOrgs() {
+  async function renderAllOrgs(
+    portfolios: Array<{ orgId: number; projects: unknown[] }> = [],
+  ) {
     const { listMyOrgs } = await import("@/lib/frontier/orgs")
     vi.mocked(listMyOrgs).mockResolvedValue(twoOrgs)
     const { getPortfolios } = await import("@/lib/frontier/portfolio")
-    vi.mocked(getPortfolios).mockResolvedValue([])
+    vi.mocked(getPortfolios).mockResolvedValue(portfolios as never)
     return render(
       <MemoryRouter initialEntries={["/orgs/all"]}>
         <OrgProvider><OrgHome /></OrgProvider>
@@ -938,5 +952,55 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
     await waitFor(() => expect(screen.getByText("Come and See")).toBeInTheDocument())
     expect(screen.queryByTestId("project-directory-error")).not.toBeInTheDocument()
     expect(screen.getByText("No projects yet")).toBeInTheDocument()
+  })
+
+  it("lists foreign-org grants in the projects table as a Shared origin, without mixing them into org rollup tiles", async () => {
+    fetchAccessibleProjectsMock.mockResolvedValue([
+      {
+        id: "p503",
+        name: "Guest Gospel",
+        orgId: 503,
+        orgName: "Host Org",
+        role: { level: 100, name: "viewer", source: "override" },
+        grantedAt: "2026-07-20T00:00:00Z",
+        files: [],
+      },
+    ])
+    await renderAllOrgs([
+      { orgId: 1, projects: [{
+        id: "own-1",
+        name: "Legacy Translation",
+        totalCells: 200,
+        validatedCells: 20,
+        filledCells: 20,
+        aiDraftedCells: 0,
+        lastEditAt: Date.now(),
+        audioCells: 0,
+        validatedAudioCells: 0,
+        recordedMs: 0,
+        deadlineAt: null,
+      }] },
+      { orgId: 2, projects: [] },
+    ])
+
+    expect(await screen.findByText("Guest Gospel")).toBeInTheDocument()
+    expect(screen.getByText("Legacy Translation")).toBeInTheDocument()
+    expect(screen.getByTestId("project-shared-badge")).toBeInTheDocument()
+    expect(screen.getByText("Host Org")).toBeInTheDocument()
+    expect(screen.getByTestId("shared-filter-chip")).toBeInTheDocument()
+    expect(screen.getByTestId("new-shared-nav-badge")).toBeInTheDocument()
+    expect(screen.getByTestId("organizations-panel")).toBeInTheDocument()
+    // Member rollup only — mixing the 0%-of-N shared stub would make this 2
+    // projects and 5% avg translated.
+    expect(within(projectsRollupStat()).getByText("1")).toBeInTheDocument()
+    const avgTile = screen.getByText("Avg translated").parentElement?.parentElement
+    expect(avgTile).toBeTruthy()
+    expect(within(avgTile!).getByText("10%")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("shared-filter-chip"))
+    await waitFor(() => {
+      expect(screen.queryByText("Legacy Translation")).not.toBeInTheDocument()
+    })
+    expect(screen.getByText("Guest Gospel")).toBeInTheDocument()
   })
 })

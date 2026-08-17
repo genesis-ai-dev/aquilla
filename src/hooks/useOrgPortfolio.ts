@@ -20,7 +20,7 @@ export type PortfolioProjectRow = PortfolioProject & {
   orgName?: string | null
 }
 
-export type StatusFilter = "all" | "stalled" | "attention" | "overdue"
+export type StatusFilter = "all" | "stalled" | "attention" | "overdue" | "shared"
 
 export type AttentionRow = {
   project: PortfolioProjectRow
@@ -177,6 +177,8 @@ export function useOrgPortfolio(orgId: number | null, orgName?: string | null) {
             return portfolioAttentionReasons(p, now).length > 0
           case "overdue":
             return deadlineStatus(p, now) === "overdue"
+          case "shared":
+            return false
           default:
             return true
         }

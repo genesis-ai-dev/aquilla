@@ -22,6 +22,7 @@ import { DateTooltip } from "@/components/ui/date-tooltip"
 import { DataTable, DataTableColumnHeader, DataTableRowActionsButton } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/ui/page"
 import { MenuItem } from "@/components/ui/menu-parts"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
@@ -37,6 +38,8 @@ import { useI18n } from "@/lib/i18n/I18nProvider"
 export type OrgProjectRow = PortfolioProject & {
   orgId?: number
   orgName?: string | null
+  origin?: "member" | "shared"
+  isNew?: boolean
 }
 
 type ProjectLens = "recent" | "attention" | "least-translated" | "most-progress" | "name" | "pm"
@@ -150,11 +153,23 @@ export function OrgProjectsDataTable({
           cell: ({ row }) => {
             const p = row.original
             return (
-              <span
-                data-testid="project-table-name"
-                className="block min-w-0 truncate font-medium text-foreground"
-              >
-                {p.name}
+              <span className="flex min-w-0 items-center gap-2">
+                <span
+                  data-testid="project-table-name"
+                  className="min-w-0 truncate font-medium text-foreground"
+                >
+                  {p.name}
+                </span>
+                {p.origin === "shared" && (
+                  <Badge variant="secondary" className="shrink-0" data-testid="project-shared-badge">
+                    {t("org.orgHome.statusFilter.shared")}
+                  </Badge>
+                )}
+                {p.isNew && (
+                  <Badge className="shrink-0" data-testid="new-shared-badge">
+                    {t("org.guestOrgHome.newBadge")}
+                  </Badge>
+                )}
               </span>
             )
           },
@@ -411,7 +426,10 @@ export function OrgProjectsDataTable({
         columns={columns}
         data={tableData}
         getRowId={(p) => p.id}
-        getRowAttributes={(p) => ({ "data-project-id": p.id })}
+        getRowAttributes={(p) => ({
+          "data-project-id": p.id,
+          ...(p.origin === "shared" ? { "data-origin": "shared" } : {}),
+        })}
         rowClassName="group"
         onRowClick={(p) => navigate(`/projects/${p.id}`)}
         initialSorting={[...lensToSorting(initialLens)]}

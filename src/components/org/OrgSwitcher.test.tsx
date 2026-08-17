@@ -192,6 +192,8 @@ describe("OrgSwitcher", () => {
     await waitFor(() => expect(screen.getByTestId("guest-orgs")).toBeInTheDocument())
     expect(screen.getByText("Guest Org")).toBeInTheDocument()
     expect(screen.getByText("guest")).toBeInTheDocument()
+    // 1 member org + guest grants: All organizations is the home for shared rows.
+    expect(screen.getByRole("option", { name: /all organizations/i })).toBeInTheDocument()
     // Member block above guests → separator between the two sections.
     expect(screen.getByTestId("guest-orgs-separator")).toBeInTheDocument()
   })
@@ -208,7 +210,10 @@ describe("OrgSwitcher", () => {
 
     await waitFor(() => expect(screen.getByTestId("guest-orgs")).toBeInTheDocument())
     expect(screen.getByText("Guest Org")).toBeInTheDocument()
-    expect(screen.queryByTestId("guest-orgs-separator")).not.toBeInTheDocument()
+    // Guest-only: All organizations is still listed (it's the shared-grants home),
+    // so the guest section sits below a separator.
+    expect(screen.getByRole("option", { name: /all organizations/i })).toBeInTheDocument()
+    expect(screen.getByTestId("guest-orgs-separator")).toBeInTheDocument()
   })
 
   // AQU-790: clicking a guest org switches to it using the SAME path convention

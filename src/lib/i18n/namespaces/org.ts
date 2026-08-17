@@ -90,6 +90,7 @@ export const org = defineNamespace({
     "org.orgHome.projectsPanel.noMatchingProjects": "No matching projects.",
 
     "org.orgHome.statusFilter.all": "All",
+    "org.orgHome.statusFilter.shared": "Shared",
 
     "org.orgHome.emptyTitle.stalled": "No stalled projects.",
     "org.orgHome.emptyTitle.attention": "No projects need attention.",
@@ -967,7 +968,8 @@ export const org = defineNamespace({
     // see the call site for the full mapping). Only genuinely new strings: --
     "org.orgHome.pendingInvitations.description":
       "Invites sent to your email that you have not accepted yet.",
-    "org.orgHome.projectsPanel.sectionDescription": "Projects across every organization you belong to.",
+    "org.orgHome.projectsPanel.sectionDescription":
+      "Projects across organizations you belong to, plus any shared with you.",
     // Distinct from org.orgHome.noProjectsYet ("No projects yet.", with a
     // period) — this is the DataTable's own inline empty-state title, which
     // the source renders without one.
@@ -1186,7 +1188,7 @@ export const org = defineNamespace({
       },
       "org.orgHome.projectsPanel.statusFilterAria": {
         description:
-          "Accessible name for the project status filter control (the All / Stalled / Overdue / Needs attention segmented tabs) on OrgHome.",
+          "Accessible name for the project status filter control (All / Stalled / Overdue / Needs attention) on OrgHome. Shared grants use a separate chip beside it.",
       },
       "org.orgHome.projectsPanel.sortProjectsAria": {
         description: "Accessible name for the 'Sort by' project-lens select control on OrgHome.",

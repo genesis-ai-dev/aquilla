@@ -16,7 +16,8 @@ import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-
  * AQU-790: the overview for an org the caller reaches only through a project
  * grant — a *guest* org. It shares the same URL convention as an owned org
  * (`/orgs/:orgId`, resolved by OrgHomeRoute), but shows only the projects in
- * that org shared with the caller. It renders none of the member-org chrome
+ * that org shared with the caller. Cross-org grants stay on `/orgs/all`. It
+ * renders none of the member-org chrome
  * (create dialog, team/usage/credit rollups, org rollup stats) and the sidebar
  * hides member-only nav, because the caller has no org membership here.
  *

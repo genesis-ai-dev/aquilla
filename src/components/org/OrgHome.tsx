@@ -26,6 +26,11 @@ import { displayLanes } from "./project-lanes"
 import { ProjectStatusFilter } from "./ProjectStatusFilter"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import type { StatusFilter } from "@/hooks/useOrgPortfolio"
+import {
+  partitionSharedProjects,
+  toSharedPortfolioRow,
+} from "@/lib/frontier/shared-projects"
+import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Page, PageHeader, Section, StatTile, STAT_TILE_GRID, EmptyState } from "@/components/ui/page"
@@ -196,6 +201,8 @@ const PROJECT_LENS_VALUES: ProjectLens[] = ["recent", "attention", "least-transl
 export type PortfolioProjectRow = PortfolioProject & {
   orgId?: number
   orgName?: string | null
+  origin?: "member" | "shared"
+  isNew?: boolean
 }
 
 type OrgPortfolioSummary = {
@@ -647,24 +654,22 @@ export function OrgHome() {
     )
   }
 
-  // AQU-864: `/orgs/all` has something to aggregate only at 2+ memberships.
-  // Below that it used to render the all-orgs dashboard with nothing in
-  // scope — 0/0/0 stats and no way forward. Send the caller to the surface
-  // that does list what they can reach instead of stranding them.
+  // AQU-864: `/orgs/all` has something to aggregate at 2+ memberships, a
+  // single membership plus foreign-org grants, or project-level access with
+  // no membership. Below that it used to render the all-orgs dashboard with
+  // nothing in scope — 0/0/0 stats and no way forward. Send the caller to
+  // the surface that does list what they can reach instead of stranding them.
   if (isAllOrgsRoute) {
     const landing = resolveAllOrgsLanding({ orgs, accessibleProjects, orgsError, accessibleProjectsError })
     if (landing.kind === "org") {
       return <Navigate to={orgHomePath(landing.orgId)} replace />
-    }
-    if (landing.kind === "shared") {
-      return <Navigate to="/shared" replace />
     }
     if (landing.kind === "error") {
       // An org-list failure leaves `orgs` empty just like a genuine zero.
       // Say so and offer a retry rather than painting a fake-empty workspace.
       // AQU-882: retry must re-issue the project-directory fetch too — the
       // resolver reads `accessibleProjects`, so refreshing orgs alone could
-      // land a project-only user on "empty" instead of /shared.
+      // land a project-only user on "empty" instead of the shared table.
       return (
         <AppShell
           sidebar={<OrgSidebar />}
@@ -748,7 +753,31 @@ export function OrgHome() {
   // AQU-507: the portfolio feed (which backs these rows) has no PM dimension;
   // merge it in from the accessible-projects feed when available — here we rely
   // only on portfolio rows (all-orgs table).
-  const projectsWithPm: PortfolioProjectRow[] = projects
+  const projectsWithPm: PortfolioProjectRow[] = projects.map((project) => ({
+    ...project,
+    origin: "member" as const,
+  }))
+  const username = session?.username ?? null
+  const sharedWithMe = partitionSharedProjects(
+    accessibleProjects,
+    orgs,
+    null,
+    "all-orgs",
+  ).sharedWithMe
+  const memberIds = new Set(projectsWithPm.map((p) => p.id))
+  const sharedRows: PortfolioProjectRow[] = sharedWithMe
+    .filter((p) => !memberIds.has(p.id))
+    .map((p) => ({
+      ...toSharedPortfolioRow(p),
+      isNew: username
+        ? isProjectNew(p.grantedAt, readProjectOpenedAt(username, p.id))
+        : false,
+    }))
+  const tableProjects: PortfolioProjectRow[] = [...projectsWithPm, ...sharedRows]
+  const hasNewSharedProjects = sharedRows.some((p) => p.isNew)
+  // Hide org-rollup chrome when there is nothing to roll up — a project-only
+  // invitee still gets the same projects table, just without fake 0/0/0 stats.
+  const showOrgRollup = orgs.length > 0
   // AQU-538 §3.2: the '' (default) lane chip is labeled with the project's
   // target language — portfolio alone doesn't join file languages; empty map
   // falls back to generic "Default" labels.
@@ -775,8 +804,9 @@ export function OrgHome() {
   }
 
   // Filter bar — narrows the listed projects only; the rollup strip above
-  // continues to reflect the full portfolio. Search/sort live in the DataTable.
-  const filteredProjects = projectsWithPm.filter((p) => {
+  // continues to reflect the member-org portfolio (shared grants stay out of
+  // avg translated / stalled / overdue). Search/sort live in the DataTable.
+  const filteredProjects = tableProjects.filter((p) => {
     switch (statusFilter) {
       case "stalled":
         return activityStatus(p, now) === "stalled"
@@ -784,6 +814,8 @@ export function OrgHome() {
         return portfolioAttentionReasons(p, now).length > 0
       case "overdue":
         return deadlineStatus(p, now) === "overdue"
+      case "shared":
+        return p.origin === "shared"
       default:
         return true
     }
@@ -837,6 +869,7 @@ export function OrgHome() {
                 </Section>
               )}
 
+              {showOrgRollup && (
               <div className={STAT_TILE_GRID}>
                 <StatTile label={t("org.orgHome.organizations")} value={orgs.length} />
                 <StatTile label={t("nav.projects")} value={projects.length} />
@@ -853,12 +886,17 @@ export function OrgHome() {
                   className={attentionCount > 0 ? "border-amber-500/40" : undefined}
                 />
               </div>
+              )}
 
               <div className="flex flex-col gap-6">
                 <Section
                   data-testid="projects-panel"
                   title={t("nav.projects")}
-                  description={t("org.orgHome.projectsPanel.sectionDescription")}
+                  description={
+                    showOrgRollup
+                      ? t("org.orgHome.projectsPanel.sectionDescription")
+                      : t("org.sharedProjectsPage.unscopedDescription")
+                  }
                   headerClassName={cn(ADMIN_TABLE_SECTION_HEADER, "shrink-0")}
                   contentClassName={cn(
                     ADMIN_TABLE_SECTION_CONTENT,
@@ -888,7 +926,7 @@ export function OrgHome() {
                       }
                     />
                   ) : null}
-                  {projects.length === 0 ? (
+                  {tableProjects.length === 0 ? (
                     // Suppress the plain empty state while the directory
                     // error above is explaining the blank panel.
                     accessibleProjectsError ? null : (
@@ -913,26 +951,50 @@ export function OrgHome() {
                         defaultLaneLabelByProjectId={defaultLaneLabelByProjectId}
                         initialLens={statusFilter === "attention" ? "attention" : projectLens}
                         toolbarLeading={
-                          <ProjectStatusFilter
-                            value={statusFilter}
-                            onValueChange={setStatusFilter}
-                            className="bg-background"
-                          />
+                          <div className="flex flex-wrap items-center gap-2">
+                            <ProjectStatusFilter
+                              value={statusFilter === "shared" ? "all" : statusFilter}
+                              onValueChange={setStatusFilter}
+                              className="bg-background"
+                            />
+                            {sharedRows.length > 0 && (
+                              <Button
+                                type="button"
+                                variant={statusFilter === "shared" ? "secondary" : "outline"}
+                                size="sm"
+                                aria-pressed={statusFilter === "shared"}
+                                data-testid="shared-filter-chip"
+                                onClick={() =>
+                                  setStatusFilter(statusFilter === "shared" ? "all" : "shared")
+                                }
+                              >
+                                {t("org.orgHome.statusFilter.shared")}
+                                {hasNewSharedProjects && (
+                                  <Badge className="shrink-0" data-testid="new-shared-nav-badge">
+                                    {t("org.guestOrgHome.newBadge")}
+                                  </Badge>
+                                )}
+                              </Button>
+                            )}
+                          </div>
                         }
                         emptyTitle={
                           statusFilter === "stalled"
-                            ? "No stalled projects."
+                            ? t("org.orgHome.emptyTitle.stalled")
                             : statusFilter === "attention"
-                              ? "No projects need attention."
+                              ? t("org.orgHome.emptyTitle.attention")
                               : statusFilter === "overdue"
-                                ? "No overdue projects."
-                                : "No projects yet."
+                                ? t("org.orgHome.emptyTitle.overdue")
+                                : statusFilter === "shared"
+                                  ? t("org.sharedProjectsPage.emptyUnscopedTitle")
+                                  : t("org.orgHome.projectsPanel.emptyTitle")
                         }
                       />
                     </div>
                   )}
                 </Section>
 
+                {showOrgRollup && (
                 <Section
                   data-testid="organizations-panel"
                   title={t("org.orgHome.organizations")}
@@ -988,6 +1050,7 @@ export function OrgHome() {
                     )}
                   </div>
                 </Section>
+                )}
               </div>
             </div>
           )}

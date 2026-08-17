@@ -111,7 +111,7 @@ function recentKindLabel(t: ReturnType<typeof useT>, kind: RecentKind): string {
     case "project":
       return t("common.project")
     case "team":
-      return t("nav.historyControls.recentKind.team")
+      return t("editor.navTitle.team")
     case "file":
       return t("common.file")
   }
@@ -123,7 +123,6 @@ function RecentItem({ entry, onPick }: { entry: RecentEntity; onPick: () => void
   const ProjectIcon = NAV_PAGE_ICONS.project
   const FileIcon = NAV_PAGE_ICONS.file
   // Color is hashed from the full team title (same as TeamWithAvatar).
-  // `singleInitial` only shrinks the glyph — it does not affect colorFromName.
   const teamName = entry.title.trim()
   // Kind and title share the same type size/weight; only color differs.
   const itemText = "text-sm font-normal leading-5"
@@ -131,13 +130,7 @@ function RecentItem({ entry, onPick }: { entry: RecentEntity; onPick: () => void
     <DropdownMenuItem onClick={onPick} className="gap-2 px-2 py-1.5 text-sm">
       <span className={`w-14 shrink-0 ${itemText} text-muted-foreground`}>{kindLabel}</span>
       {entry.kind === "team" ? (
-        <InitialsAvatar
-          name={teamName}
-          size="xs"
-          className="size-4!"
-          menuSafe
-          singleInitial
-        />
+        <InitialsAvatar name={teamName} size="xs" menuSafe />
       ) : entry.kind === "file" ? (
         <FileIcon className="size-4" />
       ) : (

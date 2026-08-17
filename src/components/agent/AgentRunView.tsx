@@ -9,6 +9,8 @@
  */
 
 import { useState, type ReactNode } from "react"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatNumber } from "@/lib/i18n/format"
 import {
   AlertTriangle,
   Book,
@@ -69,7 +71,7 @@ function ToolChip({ item }: { item: ToolItem }) {
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[11px]"
+        className="flex w-full items-center gap-1.5 px-2 py-1 text-start text-[11px]"
       >
         <ChevronRight
           className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
@@ -116,6 +118,7 @@ export function AgentRunView({
   renderToolCard,
   onReviewMemory,
 }: AgentRunViewProps) {
+  const { locale } = useI18n()
   return (
     <div className="flex flex-col gap-2">
       {/* User prompt — right-aligned primary bubble. */}
@@ -213,9 +216,9 @@ export function AgentRunView({
 
       {run.usage && (
         <div className="text-[10px] text-muted-foreground">
-          {run.usage.promptTokens.toLocaleString()} prompt + {run.usage.completionTokens.toLocaleString()} completion tokens
+          {formatNumber(run.usage.promptTokens, locale)} prompt + {formatNumber(run.usage.completionTokens, locale)} completion tokens
           {" · "}
-          {formatCredits(run.usage.costCredits)}
+          {formatCredits(run.usage.costCredits, locale)}
         </div>
       )}
 

@@ -1305,8 +1305,8 @@ export function ProjectSettings() {
 
         {(permissionBlocked || roleBlocked) && (
           <PermissionDeniedAlert
-            action="change shared settings"
-            requiredRole="Maintainer or higher"
+            action="projectSettings.permission.changeSharedSettingsAction"
+            requiredRoleLevel={ROLE.MAINTAINER}
             currentRole={
               project?.syncRole ? humanRoleName(project.syncRole.level) : undefined
             }

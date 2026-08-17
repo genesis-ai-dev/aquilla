@@ -1,9 +1,10 @@
 import { Suspense, lazy, useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from "react"
 import { useParams, useNavigate, useSearchParams, useLocation } from "react-router-dom"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { useProject } from "@/hooks/useProject"
 import { describePatchFailure, SETTINGS_EDIT_ROLE_FLOOR } from "@/hooks/useProjectSettings"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
-import { deriveNavTitle } from "@/lib/navigation/deriveTitle"
+import { deriveNavTitleKey } from "@/lib/navigation/deriveTitle"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
 import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
 import { WorkspaceSkeleton } from "./WorkspaceSkeleton"
@@ -87,6 +88,7 @@ import { CommentsDrawer } from "./CommentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
 import { VideoAttachmentDialog } from "./VideoAttachmentDialog"
+import { SharePanel } from "./SharePanel"
 import { parseTimestampRange, extractCuesFromCells } from "@/lib/video/vtt-generator"
 import { useFileSync } from "@/hooks/useFileSync"
 import { useFileMeta } from "@/hooks/useFileMeta"
@@ -128,7 +130,7 @@ import { getVoiceLibrary, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Bot, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download } from "lucide-react"
+import { Film, Bot, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, BookMarked, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, Scale, Share2 } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { agentSessionStore } from "@/lib/agent/session-store"
@@ -448,6 +450,7 @@ export async function reconcileContextualDraftsAfterAppliedEvent(args: {
 }
 
 export function ProjectWorkspace() {
+  const t = useT()
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
   const { orgs, activeOrg, activeOrgId, isAllOrgs, refresh: refreshOrgs } = useActiveOrg()
@@ -692,9 +695,13 @@ export function ProjectWorkspace() {
       ? projectFiles.find((f) => f.id === routeFileId)?.name
       : undefined
     if (fileName) return `${project.name} · ${fileName}`
-    const section = deriveNavTitle(location.pathname)
-    return section === "Editor" ? project.name : `${project.name} · ${section}`
-  }, [project, routeFileId, projectFiles, location.pathname])
+    const info = deriveNavTitleKey(location.pathname)
+    // Compare the KEY, never the rendered label: the old `=== "Editor"` check
+    // silently stopped matching the moment this surface was translated.
+    if (info.kind === "key" && info.key === "editor.navTitle.editor") return project.name
+    const section = info.kind === "key" ? t(info.key) : info.text
+    return `${project.name} · ${section}`
+  }, [project, routeFileId, projectFiles, location.pathname, t])
   useNavHistoryTitle(navHistoryTitle)
 
   // `navigate(replace)` calls `history.replaceState` synchronously, but the
@@ -794,6 +801,7 @@ export function ProjectWorkspace() {
   // File-scoped target import dialog ("Import target translations into this file").
   const [fileImportOpen, setFileImportOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
   const [drawerRuleId, setDrawerRuleId] = useState<string | null>(null)
   const [searchParams] = useSearchParams()
 
@@ -1613,11 +1621,14 @@ export function ProjectWorkspace() {
 
   const isSubtitleFile = activeFile?.type === "vtt" || activeFile?.type === "srt"
 
-  const workspaceBreadcrumb = useMemo(() => ({
-    surfaceLabel:
-      centerSurface === "editor" ? "Editor" : deriveNavTitle(location.pathname),
-    editorHref: centerSurface === "editor" ? undefined : editorReturnPath ?? undefined,
-  }), [centerSurface, location.pathname, editorReturnPath])
+  const workspaceBreadcrumb = useMemo((): { surfaceLabel: string; editorHref?: string } => {
+    if (centerSurface === "editor") return { surfaceLabel: t("editor.navTitle.editor") }
+    const info = deriveNavTitleKey(location.pathname)
+    return {
+      surfaceLabel: info.kind === "key" ? t(info.key) : info.text,
+      editorHref: editorReturnPath ?? undefined,
+    }
+  }, [centerSurface, location.pathname, t, editorReturnPath])
 
   const handleVisibleFootnotesChange = useCallback((entries: VisibleFootnoteEntry[]) => {
     const key = entries
@@ -4302,10 +4313,10 @@ export function ProjectWorkspace() {
     refresh()
     const applied = effective
     const toastId = toast.add({
-      title: "Applied renames.",
+      title: t("nav.renameSuggestions.appliedToast"),
       timeout: 10_000,
       actionProps: {
-        children: "Undo",
+        children: t("nav.renameSuggestions.undo"),
         onClick: () => {
           const p = projectForUndoRef.current
           if (!p) return
@@ -4334,7 +4345,7 @@ export function ProjectWorkspace() {
         },
       },
     })
-  }, [project, currentUsername, refresh])
+  }, [project, currentUsername, refresh, t])
 
   const handleApplyOneSuggestion = useCallback(async (fileId: string) => {
     if (!project) return
@@ -4446,19 +4457,34 @@ export function ProjectWorkspace() {
 
   const projectNavItems = useMemo(() => {
     const items = [
+      { id: "rules", labelKey: "nav.sidebarSection.rules" as const, icon: Scale,
+        onClick: () => navigate(`/project/${projectId}/rules`) },
       // Pinned below Comments: Terminology is a frequent destination, so it
       // stays visible; everything else unpinned collapses into "More".
-      { id: "comments", label: "Comments", icon: MessagesSquare, pinned: true,
+      { id: "comments", labelKey: "common.comments" as const, icon: MessagesSquare, pinned: true,
         badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
         onClick: () => openOverlay("comments") },
-      { id: "terminology", label: "Terminology", icon: BookOpen, pinned: true,
+      { id: "terminology", labelKey: "nav.sidebarSection.terminology" as const, icon: BookOpen, pinned: true,
         onClick: () => openOverlay("terminology") },
-      // Project settings is a header cog beside Import. Audio/Media lens lives
-      // in the header EditorModeToggle. Sharing lives in Settings → Members.
+      { id: "living-memory", labelKey: "nav.sidebarSection.memory" as const, icon: BookMarked,
+        onClick: () => navigate(`/project/${projectId}/memory`) },
+      // Audio/Media lens lives in the header EditorModeToggle — keep it out of
+      // the sidebar More menu so the overflow list stays structural (share,
+      // settings, trash) rather than view-mode toggles.
+      { id: "share", labelKey: "nav.sidebarSection.share" as const, icon: Share2,
+        onClick: () => setShareOpen(true) },
+      { id: "settings", labelKey: "nav.settings" as const, icon: SettingsIcon,
+        onClick: () => {
+          if (!projectId) return
+          window.location.assign(buildProjectSettingsHandoffUrl({
+            projectId,
+            returnTo: workspaceReturnPath(projectId, activeFileId),
+          }))
+        } },
       // FRO-272: trash moved out of the always-visible files footer into the
       // "More" menu — it opens a dialog now (project_lead+ only).
       ...(currentRoleLevel >= ROLE.PROJECT_LEAD
-        ? [{ id: "trash", label: "Recently deleted", icon: Trash2,
+        ? [{ id: "trash", labelKey: "nav.sidebarSection.trash" as const, icon: Trash2,
             onClick: () => setTrashOpen(true) }]
         : []),
     ]
@@ -5015,18 +5041,18 @@ export function ProjectWorkspace() {
 
     const diarizeLabel =
       diarizePhase === "starting" || diarizePhase === "running"
-        ? "Diarizing…"
+        ? t("nav.fileMenu.diarizing")
         : diarizePhase === "applying"
-          ? "Applying…"
+          ? t("nav.fileMenu.applying")
           : diarizeError
-            ? "Diarize failed"
-            : "Diarize"
+            ? t("nav.fileMenu.diarizeFailed")
+            : t("nav.fileMenu.diarize")
 
     const actionItems: OverflowMenuItem[] = project === null ? [] : getVisibleActions(workspaceActions, actionCtx)
       .filter((a) => a.id !== "import-new" && a.id !== "export")
       .map((a) => ({
         id: `action-${a.id}`,
-        label: a.label,
+        label: t(a.labelKey),
         icon: a.icon,
         disabled: a.comingSoon,
         onClick: () => handleWorkspaceAction(a),
@@ -5037,7 +5063,7 @@ export function ProjectWorkspace() {
     items.push(
       {
         id: "view-settings",
-        label: "Editor settings",
+        label: t("editor.view.settings"),
         icon: SettingsIcon,
         onClick: () => {
           // Let the file-options dropdown close before anchoring the popover.
@@ -5046,7 +5072,7 @@ export function ProjectWorkspace() {
       },
       {
         id: "next-unfinished",
-        label: "Next unfinished",
+        label: t("nav.fileMenu.nextUnfinished"),
         icon: ArrowRight,
         disabled: !hasUnfinished,
         onClick: handleJumpNextUnfinished,
@@ -5063,7 +5089,9 @@ export function ProjectWorkspace() {
       })
       items.push({
         id: "adopt-speaker-voice",
-        label: adoptingSpeaker ? "Extracting voice…" : "Use file's speaker as a voice",
+        label: adoptingSpeaker
+          ? t("nav.fileMenu.extractingVoice")
+          : t("nav.fileMenu.useFileSpeakerAsVoice"),
         icon: Mic,
         disabled: adoptingSpeaker || diarizeBusy,
         onClick: () => void handleAdoptSpeakerVoice(),
@@ -5074,7 +5102,9 @@ export function ProjectWorkspace() {
       ...(isSubtitleFile
         ? [{
             id: "attach-video",
-            label: "Attach video",
+            // Reuses the video-attachment dialog's own title (this item opens
+            // it) rather than minting a duplicate "Attach video" string.
+            label: t("editor.video.title"),
             icon: Film,
             onClick: () => setVideoDialogOpen(true),
           }]
@@ -5082,7 +5112,7 @@ export function ProjectWorkspace() {
       ...(suggestions.length > 0 && (suggestionsDismissed || project?.suggestionsDismissedAt)
         ? [{
             id: "redetect-suggestions",
-            label: `Show ${suggestions.length} file name suggestion${suggestions.length === 1 ? "" : "s"}`,
+            label: t("nav.fileMenu.showFileNameSuggestions", { count: suggestions.length }),
             icon: Sparkles,
             onClick: handleReinviteSuggestions,
           }]
@@ -5098,13 +5128,13 @@ export function ProjectWorkspace() {
     items.push(
       {
         id: "file-rename",
-        label: "Rename",
+        label: t("fileDetails.rename"),
         icon: Pencil,
         onClick: () => setRenameSignal({ fileId: activeFileId, nonce: Date.now() }),
       },
       {
         id: "file-move",
-        label: "Move to corpus…",
+        label: t("fileDetails.moveToCorpus"),
         icon: FolderInput,
         onClick: () => {
           setMoveTargetId(activeFileId)
@@ -5115,7 +5145,7 @@ export function ProjectWorkspace() {
     if (canAssignWork) {
       items.push({
         id: "assign-work",
-        label: "Assign work",
+        label: t("dialog.assign.title"),
         icon: UserCheck,
         onClick: () => {
           setAssignTargetFileId(null)
@@ -5132,7 +5162,7 @@ export function ProjectWorkspace() {
     if (activeFile && canExportSourceFile(activeFile, canExportByOrgPolicy)) {
       items.push({
         id: "file-export-source",
-        label: "Export source (.SFM)",
+        label: t("fileDetails.exportSource"),
         icon: Download,
         onClick: () => {
           if (!projectId) return
@@ -5149,7 +5179,7 @@ export function ProjectWorkspace() {
       items.push({ id: "sep-file-delete", type: "separator" })
       items.push({
         id: "file-delete",
-        label: "Delete",
+        label: t("common.delete"),
         icon: Trash2,
         destructive: true,
         onClick: () => setPendingDeleteId(activeFileId),
@@ -5184,6 +5214,7 @@ export function ProjectWorkspace() {
     projectId,
     suggestions.length,
     suggestionsDismissed,
+    t,
   ])
 
   const handleHeaderImport = useCallback(() => {
@@ -5628,11 +5659,19 @@ export function ProjectWorkspace() {
                       >
                         <ClipboardList className="h-3 w-3" />
                         {checklistDismissed
-                          ? "Setup"
-                          : `Setup: ${checklistState.completedCount}/${checklistState.totalCount}`}
+                          ? t("nav.sidebarSection.setupChipDismissed")
+                          : t("nav.sidebarSection.setupChipProgress", {
+                              // AQU-511 bidi: the "n/N" run must stay LTR digit-slash-
+                              // digit even under Arabic's RTL bidi algorithm, so it's
+                              // wrapped in Unicode isolates (FSI…PDI) before being
+                              // interpolated — the catalog string never juxtaposes the
+                              // digits against RTL text directly.
+                              ratio: `⁨${checklistState.completedCount}/${checklistState.totalCount}⁩`,
+                              totalCount: checklistState.totalCount,
+                            })}
                       </TooltipTrigger>
                       <TooltipContent side="right">
-                        Reopen the setup checklist anytime from here.
+                        {t("nav.sidebarSection.setupChipTooltip")}
                       </TooltipContent>
                     </Tooltip>
                   </div>
@@ -5743,7 +5782,7 @@ export function ProjectWorkspace() {
               ...(agentTabOpen && projectId
                 ? [{
                     id: "agent",
-                    label: "Agent",
+                    label: t("nav.dock.agentTab"),
                     icon: Bot,
                     active: centerSurface === "agent",
                     onActivate: () => openOverlay("agent"),
@@ -5835,7 +5874,7 @@ export function ProjectWorkspace() {
                     ? "1 change was rejected because it conflicted with a newer edit from another session."
                     : `${outboxStaleSiblingCount} changes were rejected because they conflicted with newer edits from another session.`}
                 </span>
-                <div className="ml-2 flex items-center gap-1">
+                <div className="ms-2 flex items-center gap-1">
                   <button
                     type="button"
                     onClick={() => {
@@ -5875,7 +5914,7 @@ export function ProjectWorkspace() {
                 <button
                   type="button"
                   onClick={dismissForbidden}
-                  className="ml-2 rounded bg-rose-200/60 px-2 py-0.5 hover:bg-rose-200 dark:bg-rose-800/50 dark:hover:bg-rose-800"
+                  className="ms-2 rounded bg-rose-200/60 px-2 py-0.5 hover:bg-rose-200 dark:bg-rose-800/50 dark:hover:bg-rose-800"
                 >
                   Dismiss
                 </button>
@@ -5888,7 +5927,7 @@ export function ProjectWorkspace() {
                 <button
                   type="button"
                   onClick={clearOutboxStaleSource}
-                  className="ml-2 rounded bg-blue-200/60 px-2 py-0.5 hover:bg-blue-200 dark:bg-blue-800/50 dark:hover:bg-blue-800"
+                  className="ms-2 rounded bg-blue-200/60 px-2 py-0.5 hover:bg-blue-200 dark:bg-blue-800/50 dark:hover:bg-blue-800"
                 >
                   Dismiss
                 </button>
@@ -5908,7 +5947,7 @@ export function ProjectWorkspace() {
                 <button
                   type="button"
                   onClick={() => setBtWriteError(null)}
-                  className="ml-2 rounded bg-destructive/20 px-2 py-0.5 hover:bg-destructive/30"
+                  className="ms-2 rounded bg-destructive/20 px-2 py-0.5 hover:bg-destructive/30"
                 >
                   Dismiss
                 </button>
@@ -6015,7 +6054,7 @@ export function ProjectWorkspace() {
               />
             )}
             {timelineStacked ? (
-              <div className="relative flex shrink-0 items-center justify-end gap-3 border-b border-border bg-background/90 py-2 pl-2 pr-2 backdrop-blur-xl">
+              <div className="relative flex shrink-0 items-center justify-end gap-3 border-b border-border bg-background/90 py-2 ps-2 pe-2 backdrop-blur-xl">
                 {fileChapterToolbar}
               </div>
             ) : null}
@@ -6563,6 +6602,11 @@ export function ProjectWorkspace() {
         onAfterReplace={rebuildSearchIndex}
         onReplaceAll={handleReplaceAll}
       />
+      <SharePanel
+        open={shareOpen} onOpenChange={setShareOpen}
+        projectId={projectId!}
+        onSharesChanged={refreshChecklistShares}
+      />
       <VideoAttachmentDialog
         open={videoDialogOpen} onOpenChange={setVideoDialogOpen}
         current={videoAttachment} onSave={saveVideo}
@@ -6573,10 +6617,10 @@ export function ProjectWorkspace() {
         <ConfirmActionDialog
           open={true}
           onOpenChange={(v) => { if (!v) setPendingActionConfirm(null) }}
-          title={pendingActionConfirm.requiresConfirmation.title}
-          description={pendingActionConfirm.requiresConfirmation.description(actionCtx)}
-          confirmLabel={pendingActionConfirm.requiresConfirmation.confirmLabel}
-          checkboxLabel="I understand this change will be attributed to my account."
+          title={t(pendingActionConfirm.requiresConfirmation.titleKey)}
+          description={pendingActionConfirm.requiresConfirmation.description(actionCtx, t)}
+          confirmLabel={t(pendingActionConfirm.requiresConfirmation.confirmLabelKey)}
+          checkboxLabel={t("nav.workspaceActions.confirmAttribution")}
           onConfirm={() => { pendingActionConfirm.run(actionCtx, actionArgs); setPendingActionConfirm(null) }}
         />
       )}
@@ -6591,12 +6635,12 @@ export function ProjectWorkspace() {
       <ConfirmActionDialog
         open={pendingDeleteId !== null}
         onOpenChange={(v) => { if (!v) setPendingDeleteId(null) }}
-        title="Move file to Recently deleted"
+        title={t("nav.workspaceActions.deleteFile.title")}
         description={(() => {
           const f = pendingDeleteId ? project.files.find((x) => x.id === pendingDeleteId) : null
-          return f ? `Move "${f.name}" to Recently deleted? Cells and audio are kept for 30 days. You can restore the file or permanently delete it from "Recently deleted" in the sidebar's More menu.` : ""
+          return f ? t("nav.workspaceActions.deleteFile.description", { name: f.name }) : ""
         })()}
-        confirmLabel="Move to Recently deleted"
+        confirmLabel={t("nav.workspaceActions.deleteFile.confirmLabel")}
         variant="destructive"
         onConfirm={() => { if (pendingDeleteId) { void handleDeleteFile(pendingDeleteId) } setPendingDeleteId(null) }}
       />
@@ -6854,7 +6898,7 @@ function TrashedProjectScreen({ project, onClose, onRestore }: TrashedProjectScr
           </Button>
           {canRestore && (
             <Button onClick={() => onRestore()}>
-              <Undo2 className="mr-1 h-4 w-4" />
+              <Undo2 className="me-1 h-4 w-4" />
               Restore
             </Button>
           )}

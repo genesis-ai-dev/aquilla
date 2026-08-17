@@ -4,14 +4,24 @@
  * When a gated action fails, the user must see a human-readable explanation —
  * never a silent no-op. This module provides:
  *
- *   - `denialMessage(minRole, currentRole?)` — human-readable "why" string.
+ *   - `denialMessage(t, minRole, currentRole?)` — human-readable "why" string.
  *   - `actionGateProps(canPerform, reason)` — disabled+tooltip props for <button>.
  *
  * Keep this module framework-free (no React) so it can be tested purely and
- * imported from hooks, util files, and components alike.
+ * imported from hooks, util files, and components alike. `denialMessage`
+ * takes a `t()` function as its first argument rather than importing
+ * `useT()` itself (AQU-832 wave 3, WS-08) — the sentence is composed from two
+ * catalog keys (`common.role.denialUnknown` / `common.role.denialKnown` in
+ * `src/lib/i18n/namespaces/common.ts`), so it needs a real translator to
+ * render correctly; a test passes a fake `t` to exercise the logic without a
+ * `I18nProvider`.
  */
 
-import { roleName, roleDisplayText } from "@/lib/frontier/roles"
+import { roleNameKey, type RoleT } from "@/lib/frontier/roles"
+
+/** @deprecated use `RoleT` from `@/lib/frontier/roles` — kept as an alias so
+ *  existing imports don't need to churn. */
+export type DenialT = RoleT
 
 /**
  * Human-readable explanation for why an action is denied.
@@ -22,18 +32,30 @@ import { roleName, roleDisplayText } from "@/lib/frontier/roles"
  * who they are and how to remedy it (get a higher role). When the current role
  * is unknown (local projects), fall back to the minimum-role remedy only.
  *
+ * The plural role noun comes from the catalog's `plural({ one, other })` form
+ * (`t(key, { count: 2 })`), never from concatenating "s" onto the singular —
+ * that broke every language whose plural isn't "add an s" the moment a
+ * non-English locale rendered this message.
+ *
+ * @param t             Translator, e.g. from `useT()`.
  * @param minRoleLevel  Minimum role level required for the action.
  * @param currentLevel  Caller's current role level (null = unknown / local project).
  * @returns  A string like "Viewers cannot perform this action — you need at
  *           least Contributor access."
  */
-export function denialMessage(minRoleLevel: number, currentLevel: number | null | undefined): string {
-  const minName = roleDisplayText(roleName(minRoleLevel))
+export function denialMessage(
+  t: DenialT,
+  minRoleLevel: number,
+  currentLevel: number | null | undefined,
+): string {
+  const minKey = roleNameKey(minRoleLevel)
+  const minName = minKey ? t(minKey, { count: 1 }) : String(minRoleLevel)
   if (currentLevel == null) {
-    return `You need at least ${minName} access to do this.`
+    return t("common.role.denialUnknown", { minRole: minName })
   }
-  const currentName = roleDisplayText(roleName(currentLevel))
-  return `${currentName}s cannot perform this action — you need at least ${minName} access.`
+  const currentKey = roleNameKey(currentLevel)
+  const currentName = currentKey ? t(currentKey, { count: 2 }) : String(currentLevel)
+  return t("common.role.denialKnown", { currentRole: currentName, minRole: minName })
 }
 
 /**

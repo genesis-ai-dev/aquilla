@@ -14,7 +14,11 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { messageForStatus } from "@/lib/errors/user-error"
 import { AUTH_BASE } from "@/lib/frontier/auth"
+import { t } from "@/lib/i18n/standalone"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDateTime } from "@/lib/i18n/format"
 import {
   ChangeList,
   ImportPreviewView,
@@ -68,17 +72,16 @@ function humanizeKey(key: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1)
 }
 
+/**
+ * AQU-820: the returned string is rendered verbatim, so it is always ours and
+ * keyed — the server's `error.message` is untranslated and often a raw
+ * diagnostic. The status alone distinguishes the three cases worth naming.
+ */
 async function parseErrorMessage(res: Response): Promise<string> {
-  try {
-    const body = (await res.json()) as { error?: { message?: string } }
-    if (body.error?.message) return body.error.message
-  } catch {
-    // fall through to status-based messages
-  }
-  if (res.status === 403) return "You aren't authorized to view this approval."
-  if (res.status === 404) return "This changeset couldn't be found."
-  if (res.status === 409) return "This changeset can no longer be approved."
-  return `Something went wrong (${res.status}).`
+  if (res.status === 403) return t("error.changeset.notAuthorized")
+  if (res.status === 404) return t("error.changeset.notFound")
+  if (res.status === 409) return t("error.changeset.notApprovable")
+  return messageForStatus(res.status, "", "changeset").message
 }
 
 export function ApproveChangeset() {
@@ -244,6 +247,7 @@ function ApprovalSummaryView({
   onApprove: () => void
   onReject: () => void
 }) {
+  const { locale } = useI18n()
   const { warnings, settingsChanges, ...facts } = data.summary
   const factEntries = Object.entries(facts).filter(([, v]) => typeof v === "number" || typeof v === "string")
   const settingsEntries =
@@ -317,7 +321,7 @@ function ApprovalSummaryView({
       {warnings && warnings.length > 0 && (
         <div className="rounded-md border border-amber-300/50 bg-amber-50 p-3 space-y-1 dark:bg-amber-950/20">
           <p className="text-sm font-medium">Warnings</p>
-          <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+          <ul className="list-disc space-y-0.5 ps-4 text-xs text-muted-foreground">
             {warnings.map((w, i) => (
               <li key={i}>{w.message}</li>
             ))}
@@ -327,7 +331,7 @@ function ApprovalSummaryView({
 
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>Digest: <span className="font-mono">{data.digest.slice(0, 16)}…</span></span>
-        <span>Expires {new Date(data.expiresAt).toLocaleString()}</span>
+        <span>Expires {formatDateTime(data.expiresAt, locale)}</span>
       </div>
 
       {actionError && (

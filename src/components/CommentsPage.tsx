@@ -8,7 +8,7 @@
 import { useMemo, useState, useRef, useEffect } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import {
-  MessageCircle, CheckCircle, ChevronDown, ChevronRight,
+  ArrowLeft, MessageCircle, CheckCircle, ChevronDown, ChevronRight,
   AlertCircle, Search, SlidersHorizontal, ArrowUpRight,
   MoreHorizontal, Pencil, Trash2,
 } from "lucide-react"
@@ -56,7 +56,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useT, useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDateTime } from "@/lib/i18n/format"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 import { translate } from "@/lib/i18n/translate"
 
@@ -177,9 +178,9 @@ export function headerBadgeCount(
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-function formatTs(ms: number): string {
+function formatTs(ms: number, locale: string): string {
   try {
-    return new Date(ms).toLocaleString(undefined, {
+    return formatDateTime(ms, locale, {
       month: "short",
       day: "numeric",
       hour: "numeric",
@@ -309,7 +310,7 @@ function MentionTextarea({
         className={cn("resize-none", className)}
       />
       {mentionOpen && (
-        <div className="absolute left-0 right-0 top-full mt-0.5 z-50 max-h-48 overflow-y-auto rounded-md border bg-popover shadow-md">
+        <div className="absolute start-0 end-0 top-full mt-0.5 z-50 max-h-48 overflow-y-auto rounded-md border bg-popover shadow-md">
           {needsMorePrefix && (
             <p className="px-3 py-2 text-[11px] text-muted-foreground">{t("comments.mention.typeMore")}</p>
           )}
@@ -328,7 +329,7 @@ function MentionTextarea({
                   <button
                     type="button"
                     onClick={() => insertMention(u)}
-                    className="flex w-full items-center px-3 py-1.5 text-left text-sm hover:bg-muted"
+                    className="flex w-full items-center px-3 py-1.5 text-start text-sm hover:bg-muted"
                   >
                     @{u.username}
                   </button>
@@ -352,20 +353,20 @@ interface CommentBubbleProps {
 }
 
 function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBubbleProps) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const isDeleted = comment.deletedAt !== null
   const isOwn = !!currentUsername && comment.authorId === currentUsername
   const canMutate = isOwn && !isDeleted
 
   return (
-    <div className={cn("flex flex-col gap-0.5", comment.parentCommentId ? "pl-6" : "")}>
+    <div className={cn("flex flex-col gap-0.5", comment.parentCommentId ? "ps-6" : "")}>
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <UsernameWithAvatar
           username={comment.authorLabel ?? comment.authorId}
           size="xs"
           nameClassName="text-xs font-medium text-foreground"
         />
-        <span>{formatTs(comment.createdAt)}</span>
+        <span>{formatTs(comment.createdAt, locale)}</span>
         {comment.updatedAt !== comment.createdAt && (
           <span className="italic">{t("comments.bubble.edited")}</span>
         )}
@@ -377,7 +378,7 @@ function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBu
                   type="button"
                   variant="ghost"
                   size="icon-xs"
-                  className="ml-auto size-5"
+                  className="ms-auto size-5"
                   aria-label={t("comments.bubble.actionsLabel")}
                 >
                   <MoreHorizontal className="h-3 w-3" />
@@ -539,7 +540,7 @@ function CommentThreadCard({
                 )}
                 {root.resolved && (
                   <Badge variant="secondary" className="h-4 px-1 text-[10px]">
-                    <CheckCircle className="mr-0.5 h-2.5 w-2.5" />
+                    <CheckCircle className="me-0.5 h-2.5 w-2.5" />
                     {t("comments.status.resolved")}
                   </Badge>
                 )}
@@ -555,7 +556,7 @@ function CommentThreadCard({
                       className="h-6 px-2 text-xs"
                       onClick={() => onNavigate(root)}
                     >
-                      <ArrowUpRight className="mr-0.5 h-3 w-3" />
+                      <ArrowUpRight className="me-0.5 h-3 w-3" />
                       {t("comments.openFile")}
                     </Button>
                   </AppTooltip>
@@ -566,7 +567,7 @@ function CommentThreadCard({
                       className="h-6 px-2 text-xs cursor-not-allowed opacity-50"
                       disabled
                     >
-                      <ArrowUpRight className="mr-0.5 h-3 w-3" />
+                      <ArrowUpRight className="me-0.5 h-3 w-3" />
                       {t("comments.openFile")}
                     </Button>
                   </AppTooltip>
@@ -932,6 +933,12 @@ export function CommentsPage() {
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-8">
+      <div className="flex items-center justify-between">
+        <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${projectId}/editor`)}>
+          <ArrowLeft className="me-2 h-4 w-4" /> {t("comments.backToProject")}
+        </Button>
+      </div>
+
       <div className="flex items-center gap-2">
         <MessageCircle className="h-5 w-5 text-muted-foreground" />
         <h1 className="text-xl font-semibold">

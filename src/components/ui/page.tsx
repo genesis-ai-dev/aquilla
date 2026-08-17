@@ -28,14 +28,18 @@ type PageSize = "default" | "wide" | "full"
  * `<div className="h-full overflow-y-auto"><div className="p-6">` boilerplate.
  *
  * - `default` (max-w-2xl, mx-auto): forms & settings — centered, fills up to
- *   max width. No page insets; headers carry their own left padding.
+ *   max width. Headers still carry their own left padding to align with
+ *   settings-card text; the well's `px-6` is the card gutter, not that inset.
  * - `wide` (max-w-6xl, mx-auto): list/grid surfaces (Overview, Members, Teams).
  * - `full`: no max width, for surfaces that manage their own width.
  *
  * Vertical rhythm: page pad (`py-18`) is 1.5× the section stack gap (`gap-12` /
- * `space-y-12`). PageHeader's bottom margin matches that same section gap.
- * AppShell keeps the floating card flush under the header so the card's top
- * edge still lines up with the org switcher despite this inner pad.
+ * `space-y-12`). Horizontal pad (`px-6`) keeps the well off the AppShell card
+ * edge — `scrollbar-gutter: stable` only reserves the inline-end, so without
+ * this the start edge kisses the card on viewports ≤ max-w-6xl. PageHeader's
+ * bottom margin matches that same section gap. AppShell keeps the floating
+ * card flush under the header so the card's top edge still lines up with the
+ * org switcher despite this inner pad.
  *
  * `scrollbar-gutter: stable` reserves the scrollbar lane so centered
  * `max-w-*` columns (org / project / team settings, Preferences, …) do not
@@ -55,7 +59,7 @@ function Page({
     <div className="h-full overflow-y-auto scrollbar-gutter-stable" {...props}>
       <div
         className={cn(
-          "mx-auto w-full py-18",
+          "mx-auto w-full px-6 py-18",
           size === "default" && "max-w-2xl",
           size === "wide" && "max-w-6xl",
           size === "full" && "max-w-none",

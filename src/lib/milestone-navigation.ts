@@ -3,7 +3,26 @@ import {
   FALLBACK_MILESTONE_SIZE,
   TIMELINE_MILESTONE_MS,
 } from "@/lib/import/milestones"
+import { translate } from "@/lib/i18n/translate"
 import type { ImportMilestone, ImportMilestoneKind } from "../../shared/import-contract"
+
+/**
+ * `ImportMilestone.label`/`shortLabel` are a wire-format field (see
+ * `shared/import-contract.ts`) that mixes two different things: real content
+ * pulled from the imported file (a book name, a chapter number) and a
+ * handful of app-authored vocabulary words used only when no content is
+ * available ("Untimed", "Start", "Section", "Story", "Group", "Part N",
+ * "Slide N"). `src/lib/` can't call `useT()`, and `ChapterNavigator.tsx`
+ * (the sole renderer) already treats the whole field as opaque, pre-formatted
+ * content — see the `MILESTONE_LABEL_PLACEHOLDER` context note in
+ * `src/lib/i18n/namespaces/editor.ts`. Splitting "vocabulary word" from
+ * "content" so the vocabulary half can be genuinely localized needs a wire-
+ * format change plus a `ChapterNavigator.tsx` update, both out of this
+ * module's scope. What's fixed here: the vocabulary words are resolved
+ * through the catalog (`translate(undefined, key, …)`, always English, same
+ * as before) instead of being hard-coded a second time — e.g. this used to
+ * duplicate `editor.timeline.laneUntimed`'s "Untimed" independently.
+ */
 
 export interface MilestoneNavigationCell {
   id: string
@@ -75,7 +94,12 @@ export function deriveMilestoneNavigation(
     }
     const firstSeedIndex = seeds.findIndex(Boolean)
     const startMilestone: ImportMilestone | undefined = seeds[firstSeedIndex]?.kind === "section"
-      ? { key: "section:start", kind: "section", label: "Start", shortLabel: "S" }
+      ? {
+          key: "section:start",
+          kind: "section",
+          label: translate(undefined, "editor.milestone.vocab.startLabel"),
+          shortLabel: "S",
+        }
       : undefined
     let current: ImportMilestone | undefined
     for (let index = 0; index < cells.length; index += 1) {
@@ -150,7 +174,7 @@ function legacyMilestoneSeed(cell: MilestoneNavigationCell): ImportMilestone | u
         return {
           key: `slide:${memberPath}`,
           kind: "slide",
-          label: `Slide ${slide}`,
+          label: translate(undefined, "editor.milestone.label.slide", { number: slide }),
           shortLabel: slide,
         }
       }
@@ -160,14 +184,20 @@ function legacyMilestoneSeed(cell: MilestoneNavigationCell): ImportMilestone | u
         return {
           key: `story:${memberPath}:${story}`,
           kind: "story",
-          label: friendlyMemberLabel(memberPath, "Story"),
+          label: friendlyMemberLabel(
+            memberPath,
+            translate(undefined, "editor.milestone.vocab.story"),
+          ),
           shortLabel: shortOrdinal(memberPath),
         }
       }
       return {
         key: `group:${memberPath}`,
         kind: "group",
-        label: friendlyMemberLabel(memberPath, "Group"),
+        label: friendlyMemberLabel(
+          memberPath,
+          translate(undefined, "editor.milestone.vocab.group"),
+        ),
         shortLabel: shortOrdinal(memberPath),
       }
     }
@@ -179,7 +209,7 @@ function legacyMilestoneSeed(cell: MilestoneNavigationCell): ImportMilestone | u
     return {
       key: `section:${unitKey}`,
       kind: "section",
-      label: compactLabel(cell.original) || "Section",
+      label: compactLabel(cell.original) || translate(undefined, "editor.milestone.vocab.section"),
       shortLabel: "§",
     }
   }
@@ -219,7 +249,7 @@ function scriptureMilestone(value: string | null | undefined): ImportMilestone |
     return {
       key: `story:OBS:${chapter}`,
       kind: "story",
-      label: `Story ${chapter}`,
+      label: translate(undefined, "editor.milestone.label.story", { number: chapter }),
       shortLabel: String(chapter),
     }
   }
@@ -238,7 +268,12 @@ function chapterMilestone(book: string, chapter: number): ImportMilestone {
 
 function timelineMilestone(startMs: number | undefined): ImportMilestone {
   if (startMs === undefined) {
-    return { key: "time:untimed", kind: "time-range", label: "Untimed", shortLabel: "—" }
+    return {
+      key: "time:untimed",
+      kind: "time-range",
+      label: translate(undefined, "editor.timeline.laneUntimed"),
+      shortLabel: "—",
+    }
   }
   const bucketStart = Math.floor(startMs / TIMELINE_MILESTONE_MS) * TIMELINE_MILESTONE_MS
   const bucketEnd = bucketStart + TIMELINE_MILESTONE_MS
@@ -257,7 +292,7 @@ function fallbackMilestones(cells: readonly MilestoneNavigationCell[]): ImportMi
     const value: ImportMilestone = {
       key: `part:${cells[index]?.id ?? part}`,
       kind: "part",
-      label: `Part ${part}`,
+      label: translate(undefined, "editor.milestone.label.part", { number: part }),
       shortLabel: String(part),
     }
     for (

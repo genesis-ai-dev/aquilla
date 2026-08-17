@@ -113,7 +113,7 @@ function BackLink({
   className?: string
 }) {
   const classes = cn(
-    "group -ml-1.5 inline-flex w-fit items-center gap-1 self-start rounded-md py-1 pr-1.5 pl-4 text-sm text-muted-foreground hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+    "group -ms-1.5 inline-flex w-fit items-center gap-1 self-start rounded-md py-1 pe-1.5 ps-4 text-sm text-muted-foreground hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
     className,
   )
   if (onClick) {

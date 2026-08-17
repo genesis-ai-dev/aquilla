@@ -24,6 +24,7 @@ import { FrontierSignupForm } from "./git-import/FrontierSignupForm"
 import { FrontierForgotPasswordForm } from "./git-import/FrontierForgotPasswordForm"
 import { cn } from "@/lib/utils"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 type AuthMode = "login" | "signup" | "forgot"
@@ -235,16 +236,22 @@ export function AccountSwitcher({
                     : "w-full rounded-md px-1.5 py-1.5 hover:bg-accent",
               )}
               aria-label={t("nav.account.menuLabel", { username: active.username })}
+              data-account-switcher-surface={variant}
             />
           }
         >
-          <InitialsAvatar name={active.username} size="xs" shape={isHeader ? "circle" : "square"} />
-          {!compact && (
+          {compact ? (
+            <InitialsAvatar name={active.username} size="xs" />
+          ) : (
             <>
-              <span className={cn("truncate font-medium", !isHeader && "flex-1 text-left")}>
-                {active.username}
-              </span>
-              <ChevronDown className={cn("size-4 opacity-50", !isHeader && "ml-auto")} />
+              <UsernameWithAvatar
+                username={active.username}
+                size="xs"
+                shape={isHeader ? "circle" : "square"}
+                className={cn("min-w-0", !isHeader && "flex-1")}
+                nameClassName={!isHeader ? "flex-1 text-start" : undefined}
+              />
+              <ChevronDown className={cn("size-4 opacity-50", !isHeader && "ms-auto")} />
             </>
           )}
         </DropdownMenuTrigger>

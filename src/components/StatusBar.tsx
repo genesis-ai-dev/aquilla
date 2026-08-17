@@ -3,6 +3,8 @@ import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { HealthRing } from "./HealthRing"
 import { DecayBreakdown } from "./DecayBreakdown"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { bidiIsolate, formatNumber, formatPercent } from "@/lib/i18n/format"
 
 interface StatusBarProps {
   cells: readonly CellSummary[]
@@ -17,12 +19,20 @@ interface StatusBarProps {
 export function StatusBar({
   cells, projectHealth, healthMap, staleSourceCount, onJumpToCell, className,
 }: StatusBarProps) {
+  const { locale } = useI18n()
   const total = cells.length
   const empty = cells.filter((c) => c.status === "empty").length
   const unvalidated = cells.filter((c) => c.status === "unvalidated").length
   const validated = cells.filter((c) => c.status === "validated").length
   const translated = total - empty
-  const pct = total > 0 ? Math.round((translated / total) * 100) : 0
+  const fraction = total > 0 ? translated / total : 0
+  // The ratio/percent run reorders under Arabic's bidi algorithm when this
+  // footer sits inside an <html dir="rtl"> page (a user photographed exactly
+  // this) even though the surrounding words stay English — isolate each
+  // formatted numeric token so its digits/punctuation can't be reordered.
+  const totalDisplay = bidiIsolate(formatNumber(total, locale))
+  const translatedDisplay = bidiIsolate(formatNumber(translated, locale))
+  const pctDisplay = bidiIsolate(`(${formatPercent(fraction, locale)})`)
 
   const healthByCell = cells.map((c) => ({
     cellId: c.id,
@@ -47,7 +57,7 @@ export function StatusBar({
         </HealthRing>
       </DecayBreakdown>
       <span className="flex items-center gap-2">
-        <span>{total.toLocaleString()} cells · {translated} translated ({pct}%)</span>
+        <span>{totalDisplay} cells · {translatedDisplay} translated {pctDisplay}</span>
         {unvalidated > 0 && (
           <Badge variant="secondary" className="text-amber-500">
             {unvalidated} unvalidated

@@ -207,7 +207,7 @@ export function PassageCard({ cardKey, rows, projectId, jwt, onActivity, fetchCe
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="w-full px-2 py-1 text-left text-[10px] text-muted-foreground hover:text-foreground"
+          className="w-full px-2 py-1 text-start text-[10px] text-muted-foreground hover:text-foreground"
         >
           … {hidden} more — show all
         </button>

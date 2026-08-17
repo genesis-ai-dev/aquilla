@@ -24,6 +24,16 @@ describe("Page", () => {
     expect(well).toHaveClass("py-18")
   })
 
+  it("insets the well from the card on the inline axis", () => {
+    const { container } = render(
+      <Page size="wide">
+        <div>body</div>
+      </Page>,
+    )
+    const well = container.firstElementChild?.firstElementChild
+    expect(well).toHaveClass("px-6")
+  })
+
   it("reserves a stable scrollbar gutter so centered columns do not nudge", () => {
     const { container } = render(
       <Page>

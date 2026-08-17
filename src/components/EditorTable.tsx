@@ -16,7 +16,6 @@ import {
   Pilcrow,
   PilcrowRight,
   Bold,
-  Loader2,
   VolumeX,
   Bot,
 } from "lucide-react"
@@ -445,7 +444,7 @@ function SynthStatusBadge({
           data-testid="synth-status-busy"
           className={cn(gutterIconShell, "bg-primary/15 text-primary")}
         >
-          <Loader2 className="h-3 w-3 animate-spin" />
+          <Spinner className="h-3 w-3" />
         </span>
       </AppTooltip>
     )
@@ -459,7 +458,7 @@ function SynthStatusBadge({
           data-testid="synth-status-busy"
           className={cn(gutterIconShell, "bg-primary/15 text-primary")}
         >
-          <Loader2 className="h-3 w-3 animate-spin" />
+          <Spinner className="h-3 w-3" />
         </span>
       </AppTooltip>
     )
@@ -5581,7 +5580,7 @@ function EditorRow({
                     </span>
                   </AppTooltip>
                 )}
-                {(isSynthBusy || isSynthError) && (
+                {((isSynthBusy && !audioLens) || isSynthError) && (
                   <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
                 )}
                 {/* AQU-599: persistent "has comment" indicator. Unlike the

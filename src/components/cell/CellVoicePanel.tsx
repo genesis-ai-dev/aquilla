@@ -406,7 +406,7 @@ export function CellVoicePanel({
     )
   }
 
-  const loading = isVoicing || audioState === "loading"
+  const audioLoading = audioState === "loading"
   // Scrubber maps over the cropped window (full clip when untrimmed).
   const effStart = trimStart ?? 0
   const effEnd = trimEnd ?? duration
@@ -446,26 +446,21 @@ export function CellVoicePanel({
                 aria-label={primaryTitle}
                 className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shadow-md ring-4 ring-background transition-transform hover:scale-105"
               >
-                {loading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-[1px]" />}
+                {audioLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-[1px]" />}
               </Button>
             </AppTooltip>
             <span className="pointer-events-none absolute bottom-0 left-0 rounded bg-background/70 px-1 text-[10px] tabular-nums text-muted-foreground">
-              {isVoicing ? t("editor.voice.voicing") : `${fmtTime(effCurrent)} / ${effDur > 0 ? fmtTime(effDur) : "–:––"}`}
+              {`${fmtTime(effCurrent)} / ${effDur > 0 ? fmtTime(effDur) : "–:––"}`}
             </span>
           </div>
         </>
       )}
 
-      {/* Unvoiced: a quiet hint above the cast strip. */}
-      {!hasTake && (
-        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          {isVoicing ? (
-            <>
-              <Spinner className="h-3 w-3" /> {t("editor.voice.voicing")}
-            </>
-          ) : (
-            t("editor.voice.clickVoiceToGenerate")
-          )}
+      {/* Unvoiced: a quiet hint above the cast strip (hidden while voicing —
+          the combobox spinner is the sole busy indicator). */}
+      {!hasTake && !isVoicing && (
+        <div className="mb-1.5 text-[11px] text-muted-foreground">
+          {t("editor.voice.clickVoiceToGenerate")}
         </div>
       )}
 

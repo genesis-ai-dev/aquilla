@@ -1,7 +1,8 @@
 import type { ReactNode } from "react"
 import { Lock } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { roleName, roleDisplayText } from "@/lib/frontier/roles"
+import { resolveRoleName } from "@/lib/frontier/roles"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 /**
  * AQU-334: gates a Project Setup checklist step's body on the caller's
@@ -57,10 +58,16 @@ export function RoleGatedStep({
   actionLabel: string
   children: ReactNode
 }) {
+  const t = useT()
   const allowed = roleLevel == null || roleLevel >= requiredRole
   if (allowed) return <>{children}</>
 
-  const tooltip = `${actionLabel} is available to ${roleDisplayText(roleName(requiredRole))}s and above.`
+  // AQU-623 class of bug: the plural role noun ("Maintainers") comes from the
+  // catalog's plural() form, never from concatenating "s" onto the singular.
+  const tooltip = t("onboarding.checklist.roleGated.tooltip", {
+    action: actionLabel,
+    role: resolveRoleName(t, requiredRole, { plural: true }),
+  })
 
   return (
     <AppTooltip content={tooltip}>
@@ -69,7 +76,7 @@ export function RoleGatedStep({
         data-testid="role-gated-step"
         className="pointer-events-none relative opacity-60 select-none"
       >
-        <div className="absolute -top-1 -right-1 z-10 flex h-5 w-5 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+        <div className="absolute -top-1 -end-1 z-10 flex h-5 w-5 items-center justify-center rounded-lg bg-muted text-muted-foreground">
           <Lock className="h-3 w-3" aria-hidden />
         </div>
         {children}

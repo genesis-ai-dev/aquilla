@@ -20,6 +20,7 @@ import { ExternalLink, FileDiff } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { AUTH_BASE } from "@/lib/frontier/auth"
 import type { ChangesetItem } from "@/lib/agent/run-state"
@@ -72,6 +73,7 @@ function statusVariant(status: string, approvedLocally: boolean): "default" | "s
 }
 
 export function ChangesetCard({ item }: { item: ChangesetItem }) {
+  const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const [approval, setApproval] = useState<ApprovalPayload | null>(null)
@@ -171,7 +173,7 @@ export function ChangesetCard({ item }: { item: ChangesetItem }) {
 
       {approvedLocally && status === "staged" && (
         <p className="text-[11px] text-muted-foreground">
-          Approved — the agent can now commit these changes.
+          {t("agent.changeset.approvedNotice")}
         </p>
       )}
 
@@ -182,7 +184,7 @@ export function ChangesetCard({ item }: { item: ChangesetItem }) {
           <>
             <Button size="sm" className="h-6 px-2 text-[11px]" disabled={working} onClick={() => void act("approve")}>
               {working ? <Spinner data-icon="inline-start" /> : null}
-              Approve
+              {t("agent.approve")}
             </Button>
             <Button
               size="sm"
@@ -191,7 +193,7 @@ export function ChangesetCard({ item }: { item: ChangesetItem }) {
               disabled={working}
               onClick={() => void act("reject")}
             >
-              Reject
+              {t("agent.reject")}
             </Button>
           </>
         )}
@@ -201,7 +203,7 @@ export function ChangesetCard({ item }: { item: ChangesetItem }) {
           rel="noopener noreferrer"
           className="inline-flex w-fit items-center gap-1 text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
         >
-          View full details
+          {t("agent.changeset.viewFullDetails")}
           <ExternalLink className="h-3 w-3" />
         </a>
       </div>

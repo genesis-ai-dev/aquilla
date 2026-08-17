@@ -11,7 +11,7 @@ consultants — USFM/Paratext import-export fidelity is a hard requirement.
 | Layer | Tech |
 |---|---|
 | SPA | React 19 + Vite 8, TypeScript, Tailwind 4, shadcn/base-ui |
-| Edge router | Cloudflare Worker (`worker/`) — selects marketing vs app HTML |
+| App edge | Cloudflare Worker (`worker/`) — serves SPA routes and invite unfurls |
 | Identity | Cloudflare Worker (`auth-worker/`) — Hono, Neon Postgres via Hyperdrive |
 | Sync | Cloudflare Worker (`sync-worker/`) — event log + projection writer + ProjectSync DO |
 | Data | Neon Postgres (live); Docker `postgres:16` locally |
@@ -23,6 +23,10 @@ sync-worker projects into `cells`/`files` tables → ProjectSync DO broadcasts t
 WebSocket clients. Start with the [documentation index](docs/README.md),
 [system specification](docs/SPEC.md), and
 [deployment environment matrix](docs/DEPLOYMENT-ENVIRONMENTS.md).
+
+The public homepage, legal pages, case studies, sitemap, and robots policy live
+in the sibling `aquilla-marketing` repository and deploy independently through
+more-specific Cloudflare zone routes. This repository builds the SPA only.
 
 ## Fresh-clone setup
 
@@ -60,18 +64,19 @@ user and redirects to `/project/dev-project`.
 
 ```bash
 pnpm test                # unit tests (vitest)
-pnpm test:e2e:smoke      # smoke suite — runs serially, ~40-60 min; also runs on git push
+pnpm test:e2e:affected   # changed-file gate used by pre-push; normally a few specs
+pnpm test:e2e:smoke      # complete smoke suite — merge/deploy/release gate
 pnpm test:e2e            # full Playwright suite (requires Docker)
 ```
 
-> **Note:** the smoke suite has outgrown its original "<2 min" design — nearly
-> every spec is tagged `.smoke.spec.ts` and they run with `workers: 1`, so a
-> full smoke pass takes ~40-60 minutes (audit TEST-3). Budget accordingly
-> before pushing; see [e2e/README.md](e2e/README.md) for details.
+> **Note:** pre-push selects changed journey specs plus a small domain sentinel
+> set and uses one fast dev-mode stack. The complete three-shard smoke pass is
+> still required for merge/deploy/release validation; see
+> [e2e/README.md](e2e/README.md).
 
-> **Warning:** `pnpm test:e2e` (via `scripts/e2e-up.ts`) force-kills whatever is on
-> ports 5173, 8787, and 8788. Do not run it while your live dev stack is active.
-> See [e2e/README.md](e2e/README.md) for full setup instructions.
+> **Note:** `pnpm test:e2e` (via `scripts/e2e-up.ts`) uses its own ports
+> (6173 / 9787 / 9788 for shard 0) and frees them on shutdown. It does not
+> take over a live `pnpm dev` stack. See [e2e/README.md](e2e/README.md).
 
 Worker test suites (run separately, each uses PGlite — no Docker needed):
 

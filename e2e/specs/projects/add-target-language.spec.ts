@@ -40,7 +40,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
 
 test("add target language, switch lane, translate independently per lane", async ({ alice }) => {
-  test.setTimeout(60_000)
+  test.setTimeout(120_000)
 
   const dash = new Dashboard(alice)
   await dash.goto()

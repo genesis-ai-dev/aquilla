@@ -35,7 +35,7 @@ export default defineConfig({
   timeout: 300_000,
 
   use: {
-    baseURL: "http://127.0.0.1:5173",
+    baseURL: process.env.E2E_BASE_URL ?? "http://127.0.0.1:6173",
     viewport: FRAME,
     trace: "on",
     screenshot: "on",

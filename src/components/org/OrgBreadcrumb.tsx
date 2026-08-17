@@ -11,6 +11,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface OrgBreadcrumbParent {
   label: string
@@ -32,6 +33,16 @@ interface OrgBreadcrumbProps {
   orgId?: number | null
   /** Segments after section (e.g. open file, current book/chapter). Last is current page. */
   trail?: OrgBreadcrumbTrailSegment[]
+  /**
+   * The caller's `section` is the org-level projects landing page, so the
+   * crumb is redundant with the org crumb above it and should be omitted
+   * (unless a `parent` or `trail` makes it meaningful again). This used to be
+   * inferred by comparing `section` to the literal English string
+   * "Projects" — a display string doubling as control flow, which breaks
+   * the moment `section` is translated. Callers on the projects landing page
+   * must pass this explicitly instead.
+   */
+  isProjectsLanding?: boolean
 }
 
 interface Crumb {
@@ -86,7 +97,7 @@ function CrumbLink({ crumb }: { crumb: Crumb }) {
 function CrumbSeparator() {
   return (
     <BreadcrumbSeparator className="shrink-0">
-      <span className="text-muted-foreground">›</span>
+      <span className="inline-block text-muted-foreground rtl:-scale-x-100">›</span>
     </BreadcrumbSeparator>
   )
 }
@@ -99,26 +110,25 @@ function renderCrumbItem(crumb: Crumb, key: string) {
   )
 }
 
-export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }: OrgBreadcrumbProps) {
+export function OrgBreadcrumb({
+  parent,
+  section,
+  sectionTo,
+  orgId,
+  trail = [],
+  isProjectsLanding = false,
+}: OrgBreadcrumbProps) {
   const { activeOrgId, isAllOrgs, orgs, guestOrgs, setActiveOrg, setAllOrgs } = useActiveOrg()
   const location = useLocation()
+  const t = useT()
   const scrollRef = useRef<HTMLOListElement | null>(null)
   const parsed = parseOrgPath(location.pathname)
-  // "Overview" is the member-org landing (`/overview`): omit the trailing
-  // section crumb so the org name is current.
-  // "Projects" used to be the org index and was hidden the same way; now the
-  // dedicated `/orgs/:id/projects` page shows it (Teams-style). Portfolio
-  // (`/orgs/all`) and guest-org index still omit the redundant section crumb.
-  // Portfolio home passes section="Overview"; guest index still uses "Projects".
-  const isOverviewSection = section === "Overview"
-  const isMemberOrgProjectsPage =
-    section === "Projects" &&
-    typeof parsed?.orgKey === "number" &&
-    parsed.rest === "/projects"
-  const showSection =
-    parent != null ||
-    isMemberOrgProjectsPage ||
-    (section !== "Projects" && !isOverviewSection)
+  // Callers on a landing page whose section would duplicate the ancestor
+  // crumb above it pass `isProjectsLanding` explicitly (see the prop doc —
+  // comparing the display string to a literal English value breaks the
+  // moment `section` is translated). The dedicated `/orgs/:id/projects` page
+  // shows its own crumb "for free" under this model: it never opts in.
+  const showSection = (!isProjectsLanding || parent != null)
   const resolvedOrgId = orgId ?? (!isAllOrgs ? activeOrgId : null)
   const resolvedOrg = resolvedOrgId == null ? null : orgs.find((org) => org.id === resolvedOrgId) ?? null
   // AQU-790: a guest org (`/orgs/:guestId`) is not a membership, so it isn't in
@@ -149,7 +159,7 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
   }
 
   const crumbs: Crumb[] = [{
-    label: "All organizations",
+    label: t("org.breadcrumb.allOrganizations"),
     to: isRootLanding ? undefined : orgHomePath(ALL_ORGS_PARAM),
     onClick: isRootLanding ? undefined : handleAllOrgs,
     isCurrent: isRootLanding,
@@ -158,7 +168,7 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
 
   if (resolvedOrg) {
     crumbs.push({
-      label: resolvedOrg.name ?? "Organization",
+      label: resolvedOrg.name ?? t("org.breadcrumb.organizationFallback"),
       to: isOrgLanding ? undefined : orgHomePath(resolvedOrg.id),
       onClick: isOrgLanding ? undefined : () => setActiveOrg(resolvedOrg.id),
       isCurrent: isOrgLanding,
@@ -167,7 +177,7 @@ export function OrgBreadcrumb({ parent, section, sectionTo, orgId, trail = [] }:
     // AQU-790: link only (no setActiveOrg onClick) — the path drives the guest
     // scope; navigation keeps it a sibling of "All organizations".
     crumbs.push({
-      label: resolvedGuestOrg.name ?? "Organization",
+      label: resolvedGuestOrg.name ?? t("org.breadcrumb.organizationFallback"),
       to: isGuestOrgLanding ? undefined : orgHomePath(resolvedGuestOrg.id),
       isCurrent: isGuestOrgLanding,
     })

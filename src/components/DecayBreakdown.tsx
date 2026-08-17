@@ -80,7 +80,7 @@ export function DecayBreakdown({
                 <li key={c.cellId}>
                   <button
                     type="button"
-                    className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1 text-left text-xs transition-all hover:bg-card"
+                    className="flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1 text-start text-xs transition-all hover:bg-card"
                     onClick={() => onJumpToCell?.(c.cellId)}
                     disabled={!onJumpToCell}
                   >

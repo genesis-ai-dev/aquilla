@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog"
 import { FileTargetImportPanel } from "@/components/import/FileTargetImportPanel"
 import type { FileTargetCellRef } from "@/lib/import-file-target"
+import { useT } from "@/lib/i18n/I18nProvider"
 import posthog from "@/lib/posthog"
 import { IMPORT_STARTED, IMPORT_SUCCEEDED, IMPORT_FAILED } from "@/lib/event-names"
 
@@ -50,6 +51,7 @@ export function FileTargetImportDialog({
   applyOptimisticTargetEdits,
   excludeFrontMatter,
 }: FileTargetImportDialogProps) {
+  const t = useT()
   // Remount the panel each time the dialog opens so a previous run's step
   // state never leaks into the next one.
   const [panelKey, setPanelKey] = useState(0)
@@ -64,7 +66,7 @@ export function FileTargetImportDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Import target translations</DialogTitle>
+          <DialogTitle>{t("importExport.dialog.titleFileTarget")}</DialogTitle>
         </DialogHeader>
         {/* The panel owns its own header / scroll / footer layout; give it the
             full remaining height so its review step can pin the footer. */}

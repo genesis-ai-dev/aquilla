@@ -15,6 +15,8 @@ import { AlertTriangle, ArrowUpRight, Check, ListChecks, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import { pendingRows, proposalRowKey, type WorkingSetRow } from "@/lib/agent/working-set"
 
 const STATUS_STYLE: Record<string, string> = {
@@ -27,12 +29,12 @@ const STATUS_STYLE: Record<string, string> = {
 
 /** Stripe + label per row lifecycle state (the mock's left border). */
 function rowStripe(row: WorkingSetRow, editing: boolean): string {
-  if (editing) return "border-l-sky-400 bg-accent/30"
-  if (row.outcome === "accepted" || row.outcome === "edited") return "border-l-emerald-500"
-  if (row.outcome === "undone") return "border-l-amber-500 opacity-70"
-  if (row.outcome === "rejected") return "border-l-transparent opacity-55"
-  if (row.proposed !== undefined) return "border-l-sky-800"
-  return "border-l-transparent"
+  if (editing) return "border-s-sky-400 bg-accent/30"
+  if (row.outcome === "accepted" || row.outcome === "edited") return "border-s-emerald-500"
+  if (row.outcome === "undone") return "border-s-amber-500 opacity-70"
+  if (row.outcome === "rejected") return "border-s-transparent opacity-55"
+  if (row.proposed !== undefined) return "border-s-sky-800"
+  return "border-s-transparent"
 }
 
 export interface WorkingSetPanelHandle {
@@ -53,13 +55,31 @@ export interface WorkingSetPanelProps {
   lintRow?: (row: WorkingSetRow, text: string) => string[]
   /** Disables the apply buttons while an apply is in flight. */
   busy?: boolean
+  /** Hide source when it already has a dedicated workbench pane. */
+  showSource?: boolean
+  /** Pane heading; defaults to the legacy label. */
+  title?: string
+  /** Optional language label beside the heading. */
+  language?: string | null
 }
 
 const rowKey = (row: WorkingSetRow): string =>
   row.proposalId ? proposalRowKey(row.proposalId, row.cellId) : row.cellId
 
 export const WorkingSetPanel = forwardRef<WorkingSetPanelHandle, WorkingSetPanelProps>(
-  function WorkingSetPanel({ rows, onAccept, onReject, onAcceptAll, onJumpToCell, lintRow, busy }, ref) {
+  function WorkingSetPanel({
+    rows,
+    onAccept,
+    onReject,
+    onAcceptAll,
+    onJumpToCell,
+    lintRow,
+    busy,
+    showSource = true,
+    title = "Working set",
+    language,
+  }, ref) {
+    const t = useT()
     const pending = useMemo(() => pendingRows(rows), [rows])
     const [focusIdx, setFocusIdx] = useState(0)
     const [editing, setEditing] = useState(false)
@@ -172,8 +192,9 @@ export const WorkingSetPanel = forwardRef<WorkingSetPanelHandle, WorkingSetPanel
         <div className="flex h-full flex-col items-center justify-center gap-1.5 px-6 text-center text-muted-foreground">
           <ListChecks className="h-5 w-5" />
           <p className="text-xs">
-            The cells the agent reads and drafts appear here — source on the left, translation on the
-            right, with staged drafts to accept or reject.
+            {showSource
+              ? t("agent.workingSet.emptyState")
+              : t("agent.workingSet.emptyStateTargetOnly")}
           </p>
         </div>
       )
@@ -184,25 +205,28 @@ export const WorkingSetPanel = forwardRef<WorkingSetPanelHandle, WorkingSetPanel
         ref={containerRef}
         tabIndex={0}
         onKeyDown={handleKeyDown}
-        aria-label="Working set"
+        role="region"
+        aria-label={title === "Working set" ? t("agent.workingSet.title") : `${title} review pane`}
         className="flex h-full min-h-0 flex-col outline-none"
       >
-        <div className="flex items-center gap-2 border-b px-3 py-1.5">
-          <span className="text-xs font-medium">Working set</span>
-          <span className="text-[11px] text-muted-foreground">
-            {rows.length} cell{rows.length === 1 ? "" : "s"}
-            {pending.length > 0 && ` · ${pending.length} to review`}
+        <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/70 px-3">
+          <span className="text-[11px] font-semibold tracking-tight text-foreground/90">{title}</span>
+          <span className="truncate text-[10px] text-muted-foreground">
+            {[language || null, t("common.cellCount", { count: rows.length }), pending.length > 0 ? `${pending.length} to review` : null]
+              .filter(Boolean)
+              .join(" · ")}
           </span>
           {pending.length > 0 && onAcceptAll && (
-            <AppTooltip content="Accept every pending draft, with your edits (Shift+A)">
+            <AppTooltip content={t("agent.workingSet.acceptAllTooltip")}>
               <Button
                 type="button"
-                className="ml-auto h-6 text-[11px]"
+                size="sm"
+                className="ms-auto h-6 text-[11px]"
                 disabled={busy}
                 onClick={() => void onAcceptAll(valueFor)}
               >
                 <Check data-icon="inline-start" />
-                Accept remaining ({pending.length})
+                {t("agent.workingSet.acceptRemaining", { count: pending.length })}
               </Button>
             </AppTooltip>
           )}
@@ -240,12 +264,13 @@ export const WorkingSetPanel = forwardRef<WorkingSetPanelHandle, WorkingSetPanel
               onAccept={onAccept ? () => acceptAndAdvance(idx) : undefined}
               onReject={onReject ? () => rejectAndAdvance(idx) : undefined}
               onJumpToCell={onJumpToCell}
+              showSource={showSource}
             />
           ))}
         </div>
 
         <div className="border-t px-3 py-1 text-[10px] text-muted-foreground">
-          j/k move · Enter accept & next · type to edit · x reject · Shift+A accept remaining
+          {t("agent.workingSet.keyboardHelp")}
         </div>
       </div>
     )
@@ -270,19 +295,21 @@ interface RowViewProps {
   onAccept?: () => void
   onReject?: () => void
   onJumpToCell?: (fileId: string, cellId: string) => void
+  showSource: boolean
 }
 
-const OUTCOME_LABEL: Record<string, string> = {
-  accepted: "✓ accepted",
-  edited: "✓ edited & accepted",
-  rejected: "rejected",
-  undone: "↩ undone",
+const OUTCOME_LABEL_KEY: Record<string, MessageKey> = {
+  accepted: "agent.workingSet.outcome.accepted",
+  edited: "agent.workingSet.outcome.edited",
+  rejected: "agent.workingSet.outcome.rejected",
+  undone: "agent.workingSet.outcome.undone",
 }
 
 const WorkingSetRowView = memo(function WorkingSetRowView({
   row, index, focused, editing, editValue, busy, lintRow,
-  onFocus, onStartEdit, onEditChange, onEditRevert, onAccept, onReject, onJumpToCell,
+  onFocus, onStartEdit, onEditChange, onEditRevert, onAccept, onReject, onJumpToCell, showSource,
 }: RowViewProps) {
+  const t = useT()
   const isPending = row.proposed !== undefined && row.stagedEvent
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -302,8 +329,9 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
     }
   }, [editing])
 
-  const stateLabel = row.outcome
-    ? OUTCOME_LABEL[row.outcome]
+  const outcomeLabelKey = row.outcome ? OUTCOME_LABEL_KEY[row.outcome] : undefined
+  const stateLabel = outcomeLabelKey
+    ? t(outcomeLabelKey)
     : isPending
       ? "draft"
       : row.status
@@ -325,7 +353,8 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
       data-row-index={index}
       onClick={onFocus}
       className={cn(
-        "grid grid-cols-[minmax(64px,7rem)_1fr_1fr] gap-x-4 border-b border-l-2 px-3 py-2 text-xs",
+        "grid gap-x-4 border-b border-s-2 px-3 py-2 text-xs",
+        showSource ? "grid-cols-[minmax(64px,7rem)_1fr_1fr]" : "grid-cols-[minmax(64px,6rem)_1fr]",
         focused && !editing && "bg-accent/50",
         rowStripe(row, editing),
       )}
@@ -339,7 +368,7 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
         {/* AQU-846: the destination file, so an accept never lands somewhere
             the user didn't expect. */}
         {row.fileName && (
-          <AppTooltip content={`In ${row.fileName}`}>
+          <AppTooltip content={t("agent.workingSet.inFileTooltip", { fileName: row.fileName })}>
             <span className="max-w-full truncate text-[10px] text-muted-foreground">
               {row.fileName}
             </span>
@@ -347,20 +376,22 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
         )}
         {stateLabel && <span className={cn("text-[10px] font-medium", stateClass)}>{stateLabel}</span>}
         {row.fileId && onJumpToCell && (
-          <AppTooltip content="Open in editor">
+          <AppTooltip content={t("agent.workingSet.openInEditorTooltip")}>
             <button
               type="button"
               onClick={() => onJumpToCell(row.fileId!, row.cellId)}
               className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-foreground"
             >
               <ArrowUpRight className="h-3 w-3" />
-              open
+              {t("agent.workingSet.openLink")}
             </button>
           </AppTooltip>
         )}
       </div>
 
-      <div className="whitespace-pre-wrap break-words text-muted-foreground">{row.source || "∅"}</div>
+      {showSource && (
+        <div className="whitespace-pre-wrap break-words text-muted-foreground">{row.source || "∅"}</div>
+      )}
 
       <div className="flex min-w-0 flex-col gap-1.5">
         {isPending ? (
@@ -394,16 +425,16 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
                     e.stopPropagation()
                   }
                 }}
-                aria-label={`Edit draft for ${row.ref ?? row.cellId}`}
+                aria-label={t("agent.workingSet.editDraftAriaLabel", { ref: row.ref ?? row.cellId })}
                 className="w-full resize-none rounded-md border border-sky-400 bg-background px-2 py-1.5 text-xs leading-relaxed shadow-[0_0_0_3px_rgba(56,189,248,0.12)] outline-none"
               />
             ) : (
-              <AppTooltip content="Edit this draft (or just start typing)">
+              <AppTooltip content={t("agent.workingSet.editTooltip")}>
                 <button
                   type="button"
                   dir="auto"
                   onClick={onStartEdit}
-                  className="whitespace-pre-wrap break-words rounded-sm text-left text-sky-700 hover:bg-sky-500/10 dark:text-sky-300"
+                  className="whitespace-pre-wrap break-words rounded-sm text-start text-sky-700 hover:bg-sky-500/10 dark:text-sky-300"
                 >
                   {editValue}
                 </button>
@@ -422,7 +453,7 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
 
             {editing ? (
               <span className="text-[10px] text-muted-foreground">
-                Enter accept & next · Esc revert to draft · Shift+Enter newline
+                {t("agent.workingSet.editingHelp")}
               </span>
             ) : (
               <span className="flex items-center gap-1 pt-0.5">
@@ -432,10 +463,10 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
                   className="h-5 px-1.5 text-[10px]"
                   disabled={busy || !onAccept}
                   onClick={onAccept}
-                  aria-label={`Accept draft for ${row.ref ?? row.cellId}`}
+                  aria-label={t("agent.workingSet.acceptDraftAriaLabel", { ref: row.ref ?? row.cellId })}
                 >
                   <Check data-icon="inline-start" />
-                  Accept
+                  {t("agent.accept")}
                 </Button>
                 <Button
                   type="button"
@@ -443,16 +474,16 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
                   className="h-5 px-1.5 text-[10px] text-muted-foreground"
                   disabled={!onReject}
                   onClick={onReject}
-                  aria-label={`Reject draft for ${row.ref ?? row.cellId}`}
+                  aria-label={t("agent.workingSet.rejectDraftAriaLabel", { ref: row.ref ?? row.cellId })}
                 >
                   <X data-icon="inline-start" />
-                  Reject
+                  {t("agent.reject")}
                 </Button>
               </span>
             )}
           </>
         ) : row.outcome === "rejected" && !row.target ? (
-          <span className="italic text-muted-foreground">draft discarded — cell left untranslated</span>
+          <span className="italic text-muted-foreground">{t("agent.workingSet.draftDiscarded")}</span>
         ) : (
           <span dir="auto" className="whitespace-pre-wrap break-words">{row.target || "∅"}</span>
         )}

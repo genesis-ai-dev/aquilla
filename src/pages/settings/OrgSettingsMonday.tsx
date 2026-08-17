@@ -24,6 +24,8 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDate } from "@/lib/i18n/format"
 import { ROLE } from "@/lib/frontier/roles"
 import {
   deleteMondayConnection,
@@ -35,6 +37,7 @@ import { ORG_SETTINGS_SECTION_DESCRIPTIONS, ORG_SETTINGS_SECTION_TITLES } from "
 import { OrgSettingsDetailPage } from "./OrgSettingsDetailPage"
 
 export function OrgSettingsMonday() {
+  const { locale, t } = useI18n()
   const { activeOrg, activeOrgId } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -164,11 +167,11 @@ export function OrgSettingsMonday() {
           className="flex items-start justify-between gap-3 rounded border border-green-300 bg-green-50 px-4 py-3 text-sm text-green-900 dark:border-green-700 dark:bg-green-950 dark:text-green-100"
         >
           <span className="flex items-center gap-2">
-            <CheckCircle2 className="h-4 w-4 shrink-0" /> Monday.com connected.
+            <CheckCircle2 className="h-4 w-4 shrink-0" /> {t("settings.monday.connectedNotice")}
           </span>
           <button
             type="button"
-            aria-label="Dismiss notice"
+            aria-label={t("settings.monday.dismissNoticeAriaLabel")}
             onClick={() => setReturnNotice(null)}
             className="shrink-0 text-green-700 hover:text-green-900 dark:text-green-400 dark:hover:text-green-200"
           >
@@ -183,11 +186,13 @@ export function OrgSettingsMonday() {
         >
           <span className="flex items-center gap-2">
             <XCircle className="h-4 w-4 shrink-0" />
-            Connecting to Monday.com failed{returnNotice.reason ? ` (${returnNotice.reason})` : ""}. Try again.
+            {returnNotice.reason
+              ? t("settings.monday.connectFailedWithReason", { reason: returnNotice.reason })
+              : t("settings.monday.connectFailed")}
           </span>
           <button
             type="button"
-            aria-label="Dismiss notice"
+            aria-label={t("settings.monday.dismissNoticeAriaLabel")}
             onClick={() => setReturnNotice(null)}
             className="shrink-0 hover:opacity-70"
           >
@@ -199,7 +204,7 @@ export function OrgSettingsMonday() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            Connection
+            {t("settings.monday.connectionCardTitle")}
             {!loading && (
               <Badge variant={connected ? "default" : "secondary"}>
                 {connected ? "Connected" : "Not connected"}
@@ -210,7 +215,7 @@ export function OrgSettingsMonday() {
         <CardContent className="space-y-4">
           {loading ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Spinner /> Loading connection status…
+              <Spinner /> {t("settings.monday.loadingStatus")}
             </div>
           ) : connected ? (
             <>
@@ -219,10 +224,7 @@ export function OrgSettingsMonday() {
                   role="status"
                   className="flex items-center justify-between gap-3 rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
                 >
-                  <span>
-                    The Monday.com authorization has expired (Monday limits it to 6 months).
-                    Reconnect to resume syncing — board links and mappings are kept.
-                  </span>
+                  <span>{t("settings.monday.reauthExpiredNotice")}</span>
                   {canManage && (
                     <Button
                       variant="outline"
@@ -230,7 +232,7 @@ export function OrgSettingsMonday() {
                       onClick={() => setAdminStepOpen(true)}
                       disabled={busy}
                     >
-                      Reconnect
+                      {t("settings.monday.reconnectButton")}
                     </Button>
                   )}
                 </div>
@@ -238,55 +240,51 @@ export function OrgSettingsMonday() {
               <div className="space-y-1 text-sm">
                 {connection?.account?.slug && (
                   <p>
-                    Account: <span className="font-medium">{connection.account.slug}</span>
+                    {t("auth.resetPassword.accountPrefix")}{" "}
+                    <span className="font-medium">{connection.account.slug}</span>
                   </p>
                 )}
                 {connection?.account?.userName && (
                   <p className="text-muted-foreground">
-                    Connected as {connection.account.userName}
+                    {t("settings.monday.connectedAsRow", { username: connection.account.userName })}
                   </p>
                 )}
                 {connection?.createdAt && (
                   <p className="text-xs text-muted-foreground">
-                    Connected{" "}
-                    {new Date(connection.createdAt).toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
+                    {t("settings.monday.connectedOnRow", {
+                      date: formatDate(connection.createdAt, locale, { month: "short", day: "numeric", year: "numeric" }),
                     })}
                   </p>
                 )}
               </div>
               {canManage ? (
                 <Button variant="destructive" onClick={() => setConfirmOpen(true)} disabled={busy}>
-                  Disconnect
+                  {t("settings.monday.disconnectButton")}
                 </Button>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  Only org maintainers and owners can manage this connection.
+                  {t("settings.monday.manageRestrictedNotice")}
                 </p>
               )}
             </>
           ) : (
             <>
               <p className="text-sm text-muted-foreground">
-                Connect a Monday.com account to let projects in this organization link boards and
-                push translation progress automatically.
+                {t("settings.monday.connectPrompt")}
               </p>
               {canManage ? (
                 <Button onClick={() => setAdminStepOpen(true)} disabled={busy}>
                   <ExternalLink data-icon="inline-start" />
-                  Connect Monday.com
+                  {t("projectSettings.monday.connectButton")}
                 </Button>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  Ask an org maintainer or owner to connect Monday.com.
+                  {t("settings.monday.connectRestrictedNotice")}
                 </p>
               )}
               {awaitingOAuth && (
                 <p className="text-xs text-muted-foreground">
-                  Waiting for the Monday.com tab… this page updates automatically once the
-                  connection completes.
+                  {t("settings.monday.awaitingOAuthNotice")}
                 </p>
               )}
             </>
@@ -301,10 +299,9 @@ export function OrgSettingsMonday() {
       <Dialog open={adminStepOpen} onOpenChange={setAdminStepOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Connect to Monday.com</DialogTitle>
+            <DialogTitle>{t("settings.monday.adminStepDialogTitle")}</DialogTitle>
             <DialogDescription>
-              Installing the Aquilla app requires admin permissions in your Monday.com workspace.
-              Are you an admin there?
+              {t("settings.monday.adminStepDialogDescription")}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -312,31 +309,30 @@ export function OrgSettingsMonday() {
               type="button"
               onClick={() => void handleConnect()}
               disabled={busy}
-              className="w-full rounded-lg border p-4 text-left transition-colors hover:border-primary hover:bg-accent disabled:opacity-50"
+              className="w-full rounded-lg border p-4 text-start transition-colors hover:border-primary hover:bg-accent disabled:opacity-50"
             >
               <span className="flex items-center gap-2 font-medium">
                 {busy ? <Spinner className="size-4" /> : <ExternalLink className="size-4" />}
-                Yes, I'm a Monday admin
+                {t("settings.monday.isAdminOptionLabel")}
               </span>
               <span className="mt-1 block text-sm text-muted-foreground">
-                Continue to Monday.com in a new tab to install and authorize Aquilla.
+                {t("settings.monday.isAdminOptionDescription")}
               </span>
             </button>
             <div className="w-full rounded-lg border p-4">
               <span className="flex items-center gap-2 font-medium">
                 <Copy className="size-4" />
-                No — my admin needs to install it
+                {t("settings.monday.notAdminOptionLabel")}
               </span>
               <span className="mt-1 block text-sm text-muted-foreground">
-                Copy the install link and send it to your Monday admin. Once they've installed the
-                Aquilla app, come back here and connect.
+                {t("settings.monday.notAdminOptionDescription")}
               </span>
               <div className="mt-3 flex items-center gap-3">
                 {connection?.installUrl && (
                   <a href={connection.installUrl} target="_blank" rel="noreferrer">
                     {/* Monday's official install badge (their brand asset CDN). */}
                     <img
-                      alt="Add to monday.com"
+                      alt={t("settings.monday.addToMondayAlt")}
                       height={32}
                       className="h-8"
                       src="https://dapulse-res.cloudinary.com/image/upload/f_auto,q_auto/remote_mondaycom_static/uploads/Tal/4b5d9548-0598-436e-a5b6-9bc5f29ee1d9_Group12441.png"
@@ -369,19 +365,18 @@ export function OrgSettingsMonday() {
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Disconnect Monday.com?</DialogTitle>
+            <DialogTitle>{t("settings.monday.disconnectConfirmTitle")}</DialogTitle>
             <DialogDescription>
-              This removes the connection for the whole organization. Every project's board link
-              and sync configuration will be deleted. This cannot be undone.
+              {t("settings.monday.disconnectConfirmBody")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setConfirmOpen(false)} disabled={busy}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button variant="destructive" onClick={handleDisconnect} disabled={busy}>
               {busy && <Spinner data-icon="inline-start" />}
-              Disconnect
+              {t("settings.monday.disconnectButton")}
             </Button>
           </DialogFooter>
         </DialogContent>

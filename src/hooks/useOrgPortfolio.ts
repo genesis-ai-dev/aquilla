@@ -12,7 +12,7 @@ import {
 } from "@/lib/frontier/portfolio"
 import { portfolioActivityStatus, portfolioAttentionReasons } from "@/lib/project-status"
 import { UserError } from "@/lib/errors/user-error"
-import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { withOptimisticLane } from "@/components/org/project-lanes"
 
 export type PortfolioProjectRow = PortfolioProject & {
@@ -81,7 +81,9 @@ export function useOrgPortfolio(orgId: number | null, orgName?: string | null) {
       .catch((err) => {
         if (!cancelled) {
           if (err instanceof UserError && err.category === "session-expired") {
-            notifySessionExpired()
+            // Guarded: a 401 from a JWT that re-login has since replaced must
+            // not re-raise the banner (see lib/frontier/session-expiry.ts).
+            void notifySessionExpiredIfCurrent(jwt)
           }
           setError(err instanceof Error ? err.message : String(err))
         }

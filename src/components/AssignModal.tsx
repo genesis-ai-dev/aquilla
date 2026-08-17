@@ -467,7 +467,12 @@ export function AssignModal({
       if (e instanceof AssignmentEmitError) {
         setError(e.message)
       } else {
-        setError(e instanceof Error ? e.message : t("dialog.assign.error.unknown"))
+        // AQU-820: any error that isn't an AssignmentEmitError (the type
+        // createAssignment uses for its own known failure modes, handled
+        // above) is unexpected — a raw JS error, not something curated for
+        // display. Previously `e instanceof Error` was true for those too, so
+        // dialog.assign.error.unknown never actually rendered.
+        setError(t("dialog.assign.error.unknown"))
       }
     } finally {
       setSubmitting(false)
@@ -587,7 +592,7 @@ export function AssignModal({
                     translator in control of sentence/word order. */}
                 <RichMessage
                   k="dialog.assign.laneDescription"
-                  values={{ can: <em>can</em> }}
+                  values={{ can: <em>{t("workspace.assignModal.canModalVerb")}</em> }}
                 />
               </FieldDescription>
             </Field>
@@ -601,10 +606,14 @@ export function AssignModal({
                 {fileGroups.map((group) => {
                   const groupFileIds = group.files.map((f) => f.id)
                   const allSelected = groupFileIds.every((id) => selectedFileIds.has(id))
+                  // group.label is the stable identity string (compared/keyed
+                  // on below); group.labelKey, set only on the synthetic
+                  // "Ungrouped" bucket, is what's actually shown to the user.
+                  const displayLabel = group.labelKey ? t(group.labelKey) : group.label
                   return (
                     <div key={group.label}>
                       <div className="flex items-center justify-between px-1 py-0.5">
-                        <span className="text-xs font-medium text-muted-foreground">{group.label}</span>
+                        <span className="text-xs font-medium text-muted-foreground">{displayLabel}</span>
                         {group.label !== "Ungrouped" && groupFileIds.length > 1 && (
                           <button
                             type="button"
@@ -734,7 +743,7 @@ export function AssignModal({
             {t("common.cancel")}
           </Button>
           <Button onClick={handleSubmit} disabled={submitting}>
-            {submitting ? <Spinner className="mr-1" /> : null}
+            {submitting ? <Spinner className="me-1" /> : null}
             {t("dialog.assign.submit")}
           </Button>
         </DialogFooter>

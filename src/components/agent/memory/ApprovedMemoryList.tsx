@@ -25,6 +25,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { ChatMarkdown } from "@/components/chat/ChatMarkdown"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { ROLE } from "@/lib/agent/role-floors"
 import type { AgentMemory } from "@/lib/agent/memory-api"
 
@@ -42,10 +43,11 @@ function canEdit(memory: AgentMemory, roleLevel: number | null, username: string
 }
 
 export function ApprovedMemoryList({ memories, roleLevel, username, onEdit }: ApprovedMemoryListProps) {
+  const t = useT()
   const [editing, setEditing] = useState<AgentMemory | null>(null)
 
   if (memories.length === 0) {
-    return <p className="px-1 py-4 text-xs text-muted-foreground">No approved memories yet.</p>
+    return <p className="px-1 py-4 text-xs text-muted-foreground">{t("agent.memory.noneApproved")}</p>
   }
 
   // Group by path so re-approved supersessions collapse to one visible row
@@ -70,10 +72,10 @@ export function ApprovedMemoryList({ memories, roleLevel, username, onEdit }: Ap
               <div className="flex flex-wrap items-center gap-1.5">
                 <code className="min-w-0 truncate text-xs font-medium">{memory.path}</code>
                 {memory.humanEdited && (
-                  <AppTooltip content="Protected: the agent cannot modify this; it can only ask.">
+                  <AppTooltip content={t("agent.memory.protectedTooltip")}>
                     <Badge variant="secondary" className="gap-1 px-1.5 py-0 text-[10px]">
                       <ShieldCheck className="h-2.5 w-2.5" />
-                      Human-edited
+                      {t("agent.memory.humanEditedBadge")}
                     </Badge>
                   </AppTooltip>
                 )}
@@ -92,7 +94,7 @@ export function ApprovedMemoryList({ memories, roleLevel, username, onEdit }: Ap
                     onClick={() => setEditing(memory)}
                   >
                     <Pencil data-icon="inline-start" />
-                    Edit
+                    {t("common.edit")}
                   </Button>
                 </div>
               )}
@@ -124,6 +126,7 @@ function EditMemoryDialog({
   onClose: () => void
   onSave: (content: string) => Promise<void>
 }) {
+  const t = useT()
   const [content, setContent] = useState(memory.content)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -148,20 +151,20 @@ function EditMemoryDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit {memory.path}</DialogTitle>
+          <DialogTitle>{t("agent.memory.editMemoryTitle", { path: memory.path })}</DialogTitle>
         </DialogHeader>
         <DialogBody className="space-y-2">
           <Textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
             className="min-h-40 font-mono text-xs"
-            aria-label="Memory content"
+            aria-label={t("agent.memory.contentAriaLabel")}
           />
           {error && <FieldError role="alert">{error}</FieldError>}
         </DialogBody>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={busy}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button onClick={() => void handleSave()} disabled={busy || content === memory.content}>
             {busy && <Spinner data-icon="inline-start" />}

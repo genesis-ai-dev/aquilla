@@ -134,6 +134,30 @@ describe("chat /api/v1/chat/completions — allowlist guard", () => {
       expect.objectContaining({ method: "POST" }),
     )
   })
+
+  // [Pen test] API security & data exposure (2026-08-13): an upstream error
+  // body used to be forwarded to the client unbounded and verbatim.
+  it("truncates a verbose upstream error body instead of passing it through unbounded", async () => {
+    await seedUser(23, "trunc-tester")
+    const jwt = await jwtFor("trunc-tester")
+    const verbose = "x".repeat(5000)
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(verbose, { status: 502 }))
+    const testEnv = withEnvOverrides({
+      OPENROUTER_API_KEY: "test-key",
+      AI_BUDGET_ENFORCE: "false",
+    })
+
+    const res = await app.request(
+      "/api/v1/chat/completions",
+      { method: "POST", headers: authHeader(jwt), body: chatBody(ALLOWED_MODEL) },
+      testEnv,
+    )
+
+    expect(res.status).toBe(502)
+    const body = (await res.json()) as { error: string; message: string }
+    expect(body.error).toBe("openrouter_error")
+    expect(body.message.length).toBeLessThanOrEqual(500)
+  })
 })
 
 describe("chat /api/v1/chat/completions — budget enforcement", () => {

@@ -39,10 +39,11 @@ import { Spinner } from "@/components/ui/spinner"
 import { DataTableColumnHeader } from "@/components/ui/data-table-column-header"
 import { cn } from "@/lib/utils"
 import { MoreHorizontal, Search } from "lucide-react"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 function columnMetaClass(meta: unknown) {
   const m = meta as { align?: "right"; className?: string; hidden?: boolean } | undefined
-  return cn(m?.align === "right" && "text-right", m?.className)
+  return cn(m?.align === "right" && "text-end", m?.className)
 }
 
 function columnId<TData, TValue>(col: ColumnDef<TData, TValue>): string | undefined {
@@ -158,6 +159,7 @@ function DataTable<TData, TValue>({
   tableClassName,
   fillHeight = false,
 }: DataTableProps<TData, TValue>) {
+  const t = useT()
   const [sorting, setSorting] = React.useState<SortingState>(
     () => (initialSorting?.length ? initialSorting : defaultSorting(columns)),
   )
@@ -225,9 +227,10 @@ function DataTable<TData, TValue>({
           "rounded-md border",
           className,
           // After `className` so fillHeight scroll wins over admin
-          // `overflow-visible` chrome.
+          // `overflow-visible` chrome. overflow-auto keeps sticky headers
+          // and lets wide columns scroll horizontally in the same port.
           fillHeight
-            ? "min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10 [&_thead]:bg-card"
+            ? "min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10 [&_thead]:bg-card"
             : "overflow-hidden",
         )}
         data-testid={testId}
@@ -303,7 +306,7 @@ function DataTable<TData, TValue>({
               ) : (
                 <TableRow>
                   <TableCell colSpan={table.getVisibleLeafColumns().length} className="h-24 text-center">
-                    No results.
+                    {t("workspace.dataTable.noResults")}
                   </TableCell>
                 </TableRow>
               )}

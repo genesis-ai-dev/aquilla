@@ -105,7 +105,7 @@ export function FootnoteInline({
         isDocx={isDocx}
         count={targetFootnotes.length || sourceFootnotes.length}
       />
-      <div className="min-w-0 md:border-l md:border-border/40 md:pl-2.5">
+      <div className="min-w-0 md:border-s md:border-border/40 md:ps-2.5">
         <FootnoteRows
           sourceFootnotes={sourceFootnotes}
           targetFootnotes={targetFootnotes}
@@ -200,7 +200,7 @@ export function FootnotesTray({
                     </span>
                   )}
                 </div>
-                <div className="min-w-0 md:border-l md:border-border/40 md:pl-3">
+                <div className="min-w-0 md:border-s md:border-border/40 md:ps-3">
                   <FootnoteRows
                     sourceFootnotes={[]}
                     targetFootnotes={entry.targetFootnotes}
@@ -397,7 +397,7 @@ function FootnoteRow({
         sourceFn && canCreateTarget && onCreateTarget ? (
           <button
             type="button"
-            className="rounded px-1 py-0.5 text-left text-xs font-medium text-primary hover:bg-primary/10"
+            className="rounded px-1 py-0.5 text-start text-xs font-medium text-primary hover:bg-primary/10"
             onClick={() => onCreateTarget(sourceFn)}
           >
             {t("editor.footnotes.addTarget")}
@@ -444,7 +444,7 @@ function FootnoteRow({
                 type="button"
                 onClick={handleDelete}
                 className={cn(
-                  "ml-auto rounded px-2 py-0.5 text-[10px] font-medium",
+                  "ms-auto rounded px-2 py-0.5 text-[10px] font-medium",
                   confirmDelete
                     ? "bg-destructive/15 text-destructive hover:bg-destructive/20"
                     : "text-destructive hover:bg-destructive/10",
@@ -459,7 +459,7 @@ function FootnoteRow({
         <button
           type="button"
           className={cn(
-            "block w-full rounded text-left text-xs",
+            "block w-full rounded text-start text-xs",
             compact ? "px-0.5 py-0 leading-snug" : "px-1 py-0.5",
             editable
               ? "text-foreground hover:bg-muted/60"
@@ -527,7 +527,7 @@ function FootnoteRow({
         )}
       </div>
 
-      <div className="flex min-w-0 items-start gap-1.5 border-border/40 md:border-l md:pl-2">
+      <div className="flex min-w-0 items-start gap-1.5 border-border/40 md:border-s md:ps-2">
         <span className="sr-only">{t("editor.footnotes.targetRole")}</span>
         {targetFn && (
           <FootnoteMarkerBadge
@@ -642,7 +642,7 @@ function FootnoteText({ footnote, muted }: { footnote: ExtractedFootnote; muted?
   return (
     <div className="min-w-0 flex-1">
       {footnote.ref && (
-        <span className="mr-1 font-mono text-[10px] text-muted-foreground">
+        <span className="me-1 font-mono text-[10px] text-muted-foreground">
           {footnote.ref}
         </span>
       )}

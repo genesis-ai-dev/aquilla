@@ -13,8 +13,10 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { AquiferPublishProposal } from "@/lib/agent/protocol"
 import { aquiferPublishAnswer } from "@/lib/aquifer/client"
+import { InlineAiError } from "@/components/InlineAiError"
 
 const TRUNCATE_AT = 280
 
@@ -28,6 +30,7 @@ export interface AquiferProposalCardProps {
 type CardState = "idle" | "applying" | "applied" | "discarded"
 
 export function AquiferProposalCard({ proposal, projectId, jwt }: AquiferProposalCardProps) {
+  const t = useT()
   const [state, setState] = useState<CardState>("idle")
   const [applyError, setApplyError] = useState<string | null>(null)
   const [publishedUrl, setPublishedUrl] = useState<string | null>(null)
@@ -59,7 +62,7 @@ export function AquiferProposalCard({ proposal, projectId, jwt }: AquiferProposa
   if (state === "discarded") {
     return (
       <div className="rounded-lg border border-dashed px-2.5 py-1.5 text-[11px] text-muted-foreground">
-        Discarded: {proposal.question}
+        {t("agent.aquifer.discarded", { question: proposal.question })}
       </div>
     )
   }
@@ -83,7 +86,7 @@ export function AquiferProposalCard({ proposal, projectId, jwt }: AquiferProposa
           <button
             type="button"
             onClick={() => setExpanded((v) => !v)}
-            className="ml-1 inline-flex items-center align-baseline text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            className="ms-1 inline-flex items-center align-baseline text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
           >
             {expanded ? "Show less" : "Show more"}
           </button>
@@ -109,13 +112,13 @@ export function AquiferProposalCard({ proposal, projectId, jwt }: AquiferProposa
       )}
 
       {applyError && (
-        <div className="text-[11px] text-destructive">Publish failed: {applyError}</div>
+        <InlineAiError message={applyError} label={t("agent.aquifer.publishFailed")} className="text-[11px]" />
       )}
 
       {state === "applied" ? (
         <div className="space-y-1 text-[11px] font-medium text-emerald-600">
           <div className="flex items-center gap-1">
-            <Check className="h-3 w-3" /> Published
+            <Check className="h-3 w-3" /> {t("agent.aquifer.published")}
           </div>
           {publishedUrl && (
             <AppTooltip content={publishedUrl}>
@@ -139,7 +142,7 @@ export function AquiferProposalCard({ proposal, projectId, jwt }: AquiferProposa
             onClick={() => setState("discarded")}
             disabled={state === "applying"}
           >
-            Discard
+            {t("common.discard")}
           </Button>
           <AppTooltip content={!jwt ? "Sign in to publish" : undefined} disabled={Boolean(jwt)}>
             <Button
@@ -149,7 +152,7 @@ export function AquiferProposalCard({ proposal, projectId, jwt }: AquiferProposa
             >
             {state === "applying" ? (
               <>
-                <Spinner className="size-3" /> Publishing…
+                <Spinner className="size-3" /> {t("agent.aquifer.publishing")}
               </>
             ) : (
               "Apply"

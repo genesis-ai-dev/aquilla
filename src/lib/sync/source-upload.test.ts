@@ -24,10 +24,14 @@ describe("uploadSourceOriginal", () => {
 
   it("throws on non-2xx", async () => {
     const fetchFn = vi.fn().mockResolvedValue(new Response("nope", { status: 403 }))
-    await expect(uploadSourceOriginal({
+    // Message is a keyed, translated frame; the raw HTTP status/body lives on
+    // `.cause` for DevTools (same UserError pattern as src/lib/errors).
+    const err = await uploadSourceOriginal({
       projectId: "p1", fileId: "f1", artifactId: "01900000-0000-7000-8000-000000000002", bytes: new ArrayBuffer(3), format: "docx",
       getToken: async () => "tok", fetchFn, baseUrl: "https://sync.test",
-    })).rejects.toThrow(/403/)
+    }).catch((e: Error) => e)
+    expect(err).toBeInstanceOf(Error)
+    expect((err as Error).cause).toMatch(/403/)
   })
 
   it("throws if getToken returns null", async () => {
@@ -53,7 +57,7 @@ describe("uploadSourceOriginal", () => {
       getToken,
       fetchFn,
       baseUrl: "https://sync.test",
-    })).rejects.toThrow(/95 MB/)
+    })).rejects.toThrow(/95\.0 MB/)
     expect(getToken).not.toHaveBeenCalled()
     expect(fetchFn).not.toHaveBeenCalled()
   })
@@ -80,11 +84,12 @@ describe("uploadSourceOriginal", () => {
 
   it("does not retry a non-retryable 403", async () => {
     const fetchFn = vi.fn().mockResolvedValue(new Response("nope", { status: 403 }))
-    await expect(uploadSourceOriginal({
+    const err = await uploadSourceOriginal({
       projectId: "p1", fileId: "f1", artifactId: "01900000-0000-7000-8000-000000000005", bytes: new ArrayBuffer(3), format: "docx",
       getToken: async () => "tok", fetchFn, baseUrl: "https://sync.test",
       retryDelaysMs: [0, 0],
-    })).rejects.toThrow(/403/)
+    }).catch((e: Error) => e)
+    expect((err as Error).cause).toMatch(/403/)
     expect(fetchFn).toHaveBeenCalledOnce()
   })
 
@@ -219,7 +224,7 @@ describe("bindSourceArtifact", () => {
   })
 
   it("reports binding failures", async () => {
-    await expect(bindSourceArtifact({
+    const err = await bindSourceArtifact({
       projectId: "p1",
       fileId: "f2",
       artifactId: "01900000-0000-7000-8000-000000000006",
@@ -229,7 +234,8 @@ describe("bindSourceArtifact", () => {
       getToken: async () => "tok",
       fetchFn: vi.fn().mockResolvedValue(new Response("missing", { status: 404 })),
       baseUrl: "https://sync.test",
-    })).rejects.toThrow(/404.*missing/)
+    }).catch((e: Error) => e)
+    expect((err as Error).cause).toMatch(/404.*missing/)
   })
 
   it("retries an idempotent shared-artifact binding after a transient failure", async () => {

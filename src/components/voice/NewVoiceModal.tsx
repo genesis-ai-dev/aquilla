@@ -275,13 +275,13 @@ function NewVoiceModalBody({
                   <FieldLabel>{t("audio.newVoice.engineLabel")}</FieldLabel>
                   <div className="grid grid-cols-2 gap-1.5">
                     {TTS_PROVIDER_INFOS.map((info) => (
-                      <AppTooltip key={info.id} content={info.hint} className="max-w-xs">
+                      <AppTooltip key={info.id} content={t(info.hintKey)} className="max-w-xs">
                         <button
                           type="button"
                           onClick={() => pickProvider(info.id)}
                           aria-pressed={activeProvider === info.id}
                           className={cn(
-                            "rounded-lg border px-2.5 py-2 text-left transition-colors",
+                            "rounded-lg border px-2.5 py-2 text-start transition-colors",
                             activeProvider === info.id ? "border-primary bg-primary/10" : "hover:bg-accent/40",
                           )}
                         >
@@ -366,7 +366,7 @@ function NewVoiceModalBody({
                               onClick={() => void applyTake(take)}
                               disabled={takeBusy}
                               className={cn(
-                                "flex w-full items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-left text-xs transition-colors disabled:opacity-50",
+                                "flex w-full items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-start text-xs transition-colors disabled:opacity-50",
                                 seeded ? "border-emerald-500 bg-emerald-500/10" : "border-transparent hover:bg-accent/40",
                               )}
                             >
@@ -409,7 +409,7 @@ function NewVoiceModalBody({
                 <Button
                   type="button" variant="outline" onClick={onMakeDefault}
                 >
-                  <Star className="mr-1 h-3.5 w-3.5" /> {t("audio.newVoice.makeNarratorButton")}
+                  <Star className="me-1 h-3.5 w-3.5" /> {t("audio.newVoice.makeNarratorButton")}
                 </Button>
               </AppTooltip>
             )}
@@ -424,17 +424,17 @@ function NewVoiceModalBody({
                 className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                 onClick={() => setDeleteOpen(true)}
               >
-                <Trash2 className="mr-1 h-3.5 w-3.5" /> {t("common.delete")}
+                <Trash2 className="me-1 h-3.5 w-3.5" /> {t("common.delete")}
               </Button>
             )}
-            <div className="ml-auto flex flex-col items-end gap-1">
+            <div className="ms-auto flex flex-col items-end gap-1">
               {takeError && (
                 <p className="text-xs text-destructive" role="alert">{takeError}</p>
               )}
               <div className="flex gap-2">
-                <Button type="button" variant="ghost" onClick={onClose}>{t("common.cancel")}</Button>
-                <Button type="button" onClick={handleSave}>
-                  {isNew ? <><Plus className="mr-1 h-3.5 w-3.5" /> {t("audio.newVoice.createButton")}</> : <><Check className="mr-1 h-3.5 w-3.5" /> {t("common.save")}</>}
+                <Button type="button" size="sm" variant="ghost" onClick={onClose}>{t("common.cancel")}</Button>
+                <Button type="button" size="sm" onClick={handleSave}>
+                  {isNew ? <><Plus className="me-1 h-3.5 w-3.5" /> {t("audio.newVoice.createButton")}</> : <><Check className="me-1 h-3.5 w-3.5" /> {t("common.save")}</>}
                 </Button>
               </div>
             </div>
@@ -508,6 +508,7 @@ function MmsLanguageField({ value, onChange }: { value: string; onChange: (v: st
             id="voice-mms-code"
             value={value}
             onChange={(e) => onChange(e.target.value.trim().toLowerCase())}
+            // i18n-exempt: fixed ISO 639-3 code example (Italian), not translatable prose
             placeholder="ita"
             className="font-mono"
           />

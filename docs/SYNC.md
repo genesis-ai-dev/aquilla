@@ -84,8 +84,9 @@ Hyperdrive is pointed at the Docker-managed Postgres instance. The dev login at
 `http://127.0.0.1:5173/__dev/login` is enabled only under the local Wrangler flag.
 
 Run affected unit/worker tests while implementing. Cross-boundary changes require
-the relevant integration or smoke spec, and `pnpm run test:e2e:smoke` is the
-pre-push gate. See [e2e/README.md](../e2e/README.md).
+the relevant integration or smoke journey. Pre-push runs `pnpm test:e2e:affected`
+(domain sentinels for the touched product area); `pnpm test:e2e:smoke` is the
+merge/deploy/release gate (~25 cross-layer journeys). See [e2e/README.md](../e2e/README.md).
 
 ## Deployment safety
 

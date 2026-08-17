@@ -215,8 +215,8 @@ describe("rule engine — builtin variant", () => {
   })
 })
 
-describe("builtin messages name the offending content (FRO-345)", () => {
-  it("placeholder-integrity names the missing placeholder", () => {
+describe("builtin infractions name the offending content via reasonParams (FRO-345 / AQU-832)", () => {
+  it("placeholder-integrity names the missing placeholder via reasonParams.tokens", () => {
     const rule = makeRule({
       id: "builtin-ph",
       name: "Placeholder integrity",
@@ -228,11 +228,13 @@ describe("builtin messages name the offending content (FRO-345)", () => {
     })
     const out = checkRulesForCell(cell, "f1", [rule])
     expect(out).toHaveLength(1)
-    expect(out[0].message).toContain("{age}")
-    expect(out[0].message).not.toContain("{name}")
+    expect(out[0].reason).toBe("builtin:placeholder-integrity")
+    expect(out[0].reasonParams?.tokens).toContain("{age}")
+    expect(out[0].reasonParams?.tokens).not.toContain("{name}")
+    expect(out[0].reasonParams?.count).toBe("1")
   })
 
-  it("static-message builtins are unaffected", () => {
+  it("static-reason builtins carry no reasonParams", () => {
     const rule = makeRule({
       id: "builtin-tes2",
       name: "Target eq source",
@@ -242,6 +244,36 @@ describe("builtin messages name the offending content (FRO-345)", () => {
     const cell = makeCell({ id: "c1", original: "Hello", translated: "Hello", status: "validated" })
     const out = checkRulesForCell(cell, "f1", [rule])
     expect(out).toHaveLength(1)
-    expect(typeof out[0].message).toBe("string")
+    expect(out[0].reason).toBe("builtin:target-equals-source")
+    expect(out[0].reasonParams).toBeUndefined()
+  })
+})
+
+describe("non-builtin infractions carry a reason code, not a rule-name-embedded message", () => {
+  it("target-forbids", () => {
+    const cells = new Map([["f1", [
+      makeCell({ id: "c1", translated: "this is bad text", status: "validated", original: "source" }),
+    ]]])
+    const rules = [makeRule({ id: "r1", name: "No bad", check: { type: "target-forbids", targetPattern: "bad" } })]
+    const inf = checkRules(cells, rules).get("c1")![0]
+    expect(inf.reason).toBe("target-forbids")
+  })
+
+  it("source-requires-target", () => {
+    const cells = new Map([["f1", [
+      makeCell({ id: "c1", original: "Chapter 5 is here", translated: "Chapitre est ici", status: "validated" }),
+    ]]])
+    const rules = [makeRule({ id: "r1", check: { type: "source-requires-target", sourcePattern: "\\d+", targetPattern: "\\d+" } })]
+    const inf = checkRules(cells, rules).get("c1")![0]
+    expect(inf.reason).toBe("source-requires-target")
+  })
+
+  it("source-target-match", () => {
+    const cells = new Map([["f1", [
+      makeCell({ id: "c1", original: "Visit https://example.com today", translated: "Visitez aujourd'hui", status: "validated" }),
+    ]]])
+    const rules = [makeRule({ id: "r1", check: { type: "source-target-match", pattern: "https?://\\S+" } })]
+    const inf = checkRules(cells, rules).get("c1")![0]
+    expect(inf.reason).toBe("source-target-match")
   })
 })

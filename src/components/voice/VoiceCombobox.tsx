@@ -59,7 +59,7 @@ export function VoicePickerContent({
               type="button"
               disabled={busy}
               onClick={() => onPick(v.id)}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/50 disabled:opacity-60"
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors hover:bg-accent/50 disabled:opacity-60"
             >
               <VoiceAvatar voice={v} size={20} />
               <span className="min-w-0 flex-1 truncate">{v.name}</span>
@@ -122,7 +122,7 @@ export function VoiceCombobox({
               </span>
             )}
           </span>
-          <span className="min-w-0 flex-1 truncate text-left font-medium text-foreground">{active.name}</span>
+          <span className="min-w-0 flex-1 truncate text-start font-medium text-foreground">{active.name}</span>
           <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </PopoverTrigger>
       </AppTooltip>

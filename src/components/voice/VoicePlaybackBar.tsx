@@ -202,7 +202,7 @@ export function VoicePlaybackBar({
           <IconButton title={t("audio.playbackBar.nextLine")} disabled={!canPlay} onClick={skipForward}>
             <SkipForward className="h-4 w-4" />
           </IconButton>
-          <span className="ml-1.5 shrink-0 text-[11px] tabular-nums text-muted-foreground">
+          <span className="ms-1.5 shrink-0 text-[11px] tabular-nums text-muted-foreground">
             {fmtTime(currentTime)} / {fmtTime(duration)}
           </span>
         </div>

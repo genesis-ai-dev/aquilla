@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactNode } from "react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { cn } from "@/lib/utils"
-import { colorFromName, initialsFromName, singleInitialFromName } from "@/lib/avatar-utils"
+import { colorFromName, initialsFromName } from "@/lib/avatar-utils"
 
 export type InitialsAvatarSize = "xs" | "sm" | "default" | "lg"
 export type InitialsAvatarShape = "circle" | "square"
@@ -40,7 +40,6 @@ type InitialsAvatarProps = {
   menuSafe?: boolean
   /** Preserved text/icon color inside menu items. Defaults to white for colored fallbacks. */
   menuSafeColor?: string
-  singleInitial?: boolean
   children?: ReactNode
 }
 
@@ -53,11 +52,10 @@ export function InitialsAvatar({
   fallbackClassName,
   menuSafe = false,
   menuSafeColor,
-  singleInitial = false,
   children,
 }: InitialsAvatarProps) {
   const circle = shape === "circle"
-  const label = singleInitial ? singleInitialFromName(name) : initialsFromName(name)
+  const label = initialsFromName(name)
   const bg = color ?? colorFromName(name)
   const hasCustomFallback = Boolean(fallbackClassName)
   const usesColoredFallback = !children && !hasCustomFallback

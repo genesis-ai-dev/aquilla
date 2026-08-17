@@ -13,7 +13,7 @@ describe("buildViolationDecorationSet", () => {
     const doc = makeDoc("this is bad text")
     const state = EditorState.create({ schema: basicSchema, doc })
     const infractions: RuleInfraction[] = [{
-      ruleId: "r1", cellId: "c1", fileId: "f1", message: "",
+      ruleId: "r1", cellId: "c1", fileId: "f1", reason: "target-forbids",
       spans: [{ side: "target", start: 8, end: 11, matchedText: "bad" }],
     }]
     const ruleSeverity = new Map([["r1", "major" as const]])
@@ -29,7 +29,7 @@ describe("buildViolationDecorationSet", () => {
     const doc = makeDoc("some forbidden word here")
     const state = EditorState.create({ schema: basicSchema, doc })
     const infractions: RuleInfraction[] = [{
-      ruleId: "term:concept-42:forbidden:forbidden", cellId: "c1", fileId: "f1", message: "",
+      ruleId: "term:concept-42:forbidden:forbidden", cellId: "c1", fileId: "f1", reason: "target-forbids",
       spans: [{ side: "target", start: 5, end: 13, matchedText: "forbidden" }],
     }]
     const ruleSeverity = new Map([["term:concept-42:forbidden:forbidden", "major" as const]])
@@ -46,7 +46,7 @@ describe("buildViolationDecorationSet", () => {
     const doc = makeDoc("some generic error here")
     const state = EditorState.create({ schema: basicSchema, doc })
     const infractions: RuleInfraction[] = [{
-      ruleId: "rule-abc", cellId: "c1", fileId: "f1", message: "",
+      ruleId: "rule-abc", cellId: "c1", fileId: "f1", reason: "target-forbids",
       spans: [{ side: "target", start: 5, end: 12, matchedText: "generic" }],
     }]
     const ruleSeverity = new Map([["rule-abc", "minor" as const]])
@@ -62,7 +62,7 @@ describe("buildViolationDecorationSet", () => {
     const doc = makeDoc("missing punctuation")
     const state = EditorState.create({ schema: basicSchema, doc })
     const infractions: RuleInfraction[] = [{
-      ruleId: "builtin:end-punctuation-mismatch", cellId: "c1", fileId: "f1", message: "",
+      ruleId: "builtin:end-punctuation-mismatch", cellId: "c1", fileId: "f1", reason: "builtin:end-punctuation-mismatch",
       spans: [{ side: "target", start: 19, end: 19, matchedText: "" }],
     }]
     const set = buildViolationDecorationSet(state.doc, infractions, new Map(), new Set())
@@ -73,7 +73,7 @@ describe("buildViolationDecorationSet", () => {
     const doc = makeDoc("anything")
     const state = EditorState.create({ schema: basicSchema, doc })
     const infractions: RuleInfraction[] = [{
-      ruleId: "r1", cellId: "c1", fileId: "f1", message: "",
+      ruleId: "r1", cellId: "c1", fileId: "f1", reason: "target-forbids",
       spans: [{ side: "source", start: 0, end: 4, matchedText: "xxxx" }],
     }]
     const set = buildViolationDecorationSet(state.doc, infractions, new Map(), new Set())

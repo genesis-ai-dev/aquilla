@@ -108,6 +108,8 @@ export interface CellRow {
   validated: number
   word_count: number
   content_hash?: string | null
+  ai_drafted?: number
+  ai_draft?: Record<string, unknown> | null
   endorsement_count?: number
   start_ms?: number | null
   end_ms?: number | null
@@ -613,7 +615,7 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
     // timecode-aware and older column lists. The hasTimecodes check below conditionally
     // includes start_ms/end_ms in the returned rows.
     if (
-      /^SELECT cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, ai_drafted, word_count, endorsement_count/.test(
+      /^SELECT cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, ai_drafted, ai_draft, word_count, endorsement_count/.test(
         normalized,
       )
     ) {
@@ -662,6 +664,7 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
           last_edit_at: c.last_edit_at,
           validated: c.validated,
           ai_drafted: (c as { ai_drafted?: number }).ai_drafted ?? 0,
+          ai_draft: c.ai_draft ?? null,
           word_count: c.word_count,
           endorsement_count: c.endorsement_count ?? 0,
           ...(hasTimecodes ? { start_ms: c.start_ms ?? null, end_ms: c.end_ms ?? null } : {}),
@@ -781,8 +784,9 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
     // the claim as held — same as it always has).
     // Bind order: 0=project_id, 1=file_id, 2=cell_id, 3=target_lang, 4=value,
     //             5=value_html, 6=event_id, 7=source_event_id, 8=last_editor,
-    //             9=last_edit_at, 10=word_count, 11=content_hash, 12=ai_drafted
-    if (/^INSERT INTO cells \(\s*project_id, file_id, cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash, ai_drafted\s*\) SELECT \?, \?, \?, 'target', \?,/.test(
+    //             9=last_edit_at, 10=word_count, 11=content_hash,
+    //             12=ai_drafted, 13=ai_draft
+    if (/^INSERT INTO cells \(\s*project_id, file_id, cell_id, side, target_lang, value, value_html, type, canonical_ref, anchor_cell_id, event_id, source_event_id, last_editor, last_edit_at, validated, word_count, content_hash, ai_drafted, ai_draft\s*\) SELECT \?, \?, \?, 'target', \?,/.test(
       normalized,
     )) {
       const projectId = args[0] as string
@@ -797,6 +801,10 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
       const lastEditAt = args[9] as number
       const wordCount = args[10] as number
       const contentHash = args[11] as string | null
+      const aiDrafted = args[12] as number
+      const aiDraft = typeof args[13] === 'string'
+        ? JSON.parse(args[13] as string) as Record<string, unknown>
+        : null
 
       const existing = db.cells.find(
         (c) =>
@@ -825,6 +833,8 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
           validated: 0,
           word_count: wordCount,
           content_hash: contentHash,
+          ai_drafted: aiDrafted,
+          ai_draft: aiDraft,
         })
       } else {
         existing.value = value
@@ -836,6 +846,8 @@ export function makeInMemoryDb(tables: Partial<Tables> = {}): InMemoryDb {
         existing.word_count = wordCount
         existing.content_hash = contentHash
         existing.validated = 0
+        existing.ai_drafted = aiDrafted
+        existing.ai_draft = aiDraft
       }
       return []
     }

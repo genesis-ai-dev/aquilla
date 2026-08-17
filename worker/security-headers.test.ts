@@ -10,11 +10,9 @@ import {
 } from "./security-headers"
 
 // public/_headers is not a convenience copy of the Worker's headers — it is
-// where most of the site actually gets them. `run_worker_first = ["/"]` plus
-// `not_found_handling = "single-page-application"` means the asset router
-// answers every path but the bare root without invoking the Worker, so a
-// header tightened only in security-headers.ts would cover one URL out of the
-// whole app while reading, in code review, as though it covered everything.
+// where most of the app actually gets them. The static asset router may answer
+// SPA documents without invoking the Worker, so a header tightened only in
+// security-headers.ts would read as broader than its real coverage.
 //
 // These tests exist so that failure mode is a red build rather than a silent
 // gap nobody notices for two months (which is exactly what happened to the

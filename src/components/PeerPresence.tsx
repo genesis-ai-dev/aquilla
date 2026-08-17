@@ -4,6 +4,7 @@ import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
 import type { ProjectPresencePeer } from "@/lib/sync/presence-store"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface PeerPresenceProps {
   peers: ProjectPresencePeer[]
@@ -11,6 +12,7 @@ interface PeerPresenceProps {
 }
 
 export function PeerPresence({ peers, onJumpToPeer }: PeerPresenceProps) {
+  const t = useT()
   const [showPopover, setShowPopover] = useState(false)
 
   if (peers.length === 0) return null
@@ -18,15 +20,17 @@ export function PeerPresence({ peers, onJumpToPeer }: PeerPresenceProps) {
   const visible = peers.slice(0, 5)
   const overflow = peers.length - 5
   const firstPeer = peers[0]
-  const label = peers.length === 1 && firstPeer ? firstPeer.username : `${peers.length} online`
+  const label = peers.length === 1 && firstPeer
+    ? firstPeer.username
+    : t("workspace.peerPresence.onlineCount", { count: peers.length })
 
   return (
     <Popover open={showPopover} onOpenChange={setShowPopover}>
-      <AppTooltip content={`${peers.length} collaborator${peers.length !== 1 ? "s" : ""} online`}>
+      <AppTooltip content={t("workspace.peerPresence.collaboratorsOnlineTooltip", { count: peers.length })}>
         <PopoverTrigger
           render={
             <button
-              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/70 bg-background/80 px-1.5 pr-2 text-xs text-muted-foreground shadow-sm transition-colors hover:border-border hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border/70 bg-background/80 px-1.5 pe-2 text-xs text-muted-foreground shadow-sm transition-colors hover:border-border hover:bg-muted/60 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
             >
               <AvatarGroup className="-space-x-1 *:data-[slot=avatar]:ring-background">
                 {visible.map((peer) => (
@@ -54,7 +58,7 @@ export function PeerPresence({ peers, onJumpToPeer }: PeerPresenceProps) {
         align="end"
         sideOffset={8}
         className="w-56 gap-0 p-2"
-        aria-label={`${peers.length} online`}
+        aria-label={t("workspace.peerPresence.onlineCount", { count: peers.length })}
       >
         <ul className="flex flex-col gap-1">
           {peers.map((peer) => (
@@ -62,7 +66,7 @@ export function PeerPresence({ peers, onJumpToPeer }: PeerPresenceProps) {
               <button
                 type="button"
                 disabled={!peer.currentFileId && !peer.focusedCell}
-                className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-xs transition-colors hover:bg-muted disabled:cursor-default disabled:hover:bg-transparent"
+                className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-start text-xs transition-colors hover:bg-muted disabled:cursor-default disabled:hover:bg-transparent"
                 onClick={() => {
                   if (!peer.currentFileId && !peer.focusedCell) return
                   onJumpToPeer?.(peer)
@@ -71,7 +75,7 @@ export function PeerPresence({ peers, onJumpToPeer }: PeerPresenceProps) {
               >
                 <InitialsAvatar name={peer.username} size="xs" color={peer.color} />
                 <span className="truncate">{peer.username}</span>
-                <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">
+                <span className="ms-auto shrink-0 text-[10px] text-muted-foreground">
                   {peer.focusedCell ? "editing" : peer.currentFileId ? "viewing" : "online"}
                 </span>
               </button>

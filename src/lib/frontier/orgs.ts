@@ -58,6 +58,8 @@ export interface MyOrg {
 export interface OrgMember {
   userId: number;
   username: string;
+  /** Account email when the members API includes it; omitted on older payloads. */
+  email?: string | null;
   role: OrgRole;
   /** ISO timestamp of last project-context activity by this user in this
    * org. NULL when no activity has been recorded since migration 0018

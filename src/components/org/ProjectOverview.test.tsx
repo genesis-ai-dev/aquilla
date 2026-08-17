@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react"
-import { MemoryRouter, Routes, Route } from "react-router-dom"
+import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { ProjectOverview, deriveProjectStatus } from "./ProjectOverview"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -187,11 +187,29 @@ function projectRecord(over: Partial<ProjectRecord> & { level: number; deletedAt
   } as ProjectRecord
 }
 
+function SettingsLocationProbe() {
+  const location = useLocation()
+  const state = location.state as {
+    backgroundLocation?: { pathname?: string }
+    projectSettingsModalDepth?: number
+  } | null
+  return (
+    <div
+      data-testid="settings-location"
+      data-background={state?.backgroundLocation?.pathname}
+      data-depth={state?.projectSettingsModalDepth}
+    />
+  )
+}
+
 function renderOverview() {
   return render(
     <MemoryRouter initialEntries={["/projects/p1"]}>
       <OrgProvider>
-        <Routes><Route path="/projects/:id" element={<ProjectOverview />} /></Routes>
+        <Routes>
+          <Route path="/projects/:id" element={<ProjectOverview />} />
+          <Route path="/project/:id/settings" element={<SettingsLocationProbe />} />
+        </Routes>
       </OrgProvider>
     </MemoryRouter>,
   )
@@ -408,7 +426,7 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     // Neither audio tile may appear (audioCells === 0) — AQU-490: this also
     // guards against a false-positive "Audio Validated" figure on a
     // text-only project, since neither field exists to fabricate one from.
-    expect(screen.queryByText("Has Audio")).not.toBeInTheDocument()
+    expect(screen.queryByText("Has audio")).not.toBeInTheDocument()
     expect(screen.queryByText("Audio Validated")).not.toBeInTheDocument()
   })
 
@@ -432,7 +450,7 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     renderOverview()
 
     // Has Audio (coverage) tile should appear
-    await waitFor(() => expect(screen.getAllByText("Has Audio").length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0))
     // Translated and Validated must NOT appear (filledCells === 0 means showText is false,
     // but note: totalCells > 0 means hasText=true in current logic which guards on totalCells.
     // The real guard is audioCells > 0 for audio, and totalCells > 0 for text.
@@ -441,7 +459,7 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     // totalCells > 0 means there IS translatable content, so text bars appear even if empty.
     // The audio-only guard is specifically: audioCells > 0 shows Has Audio, always shows text when totalCells > 0.
     // This test therefore confirms Has Audio appears when audioCells > 0.
-    expect(screen.getAllByText("Has Audio").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0)
     // AQU-490: a distinct audio-validated count doesn't exist server-side
     // (see the in-component comment for the full investigation). The tile
     // must appear — labeled, honest, and reading "N/A" — never a fabricated
@@ -473,7 +491,7 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     }])
     renderOverview()
 
-    for (const label of ["Translated", "Validated", "Has Audio", "Audio Validated"]) {
+    for (const label of ["Translated", "Validated", "Has audio", "Audio Validated"]) {
       await waitFor(() => expect(screen.getAllByText(label).length).toBeGreaterThan(0))
     }
   })
@@ -809,7 +827,7 @@ describe("ProjectOverview audio progress (AQU-160)", () => {
 
     // The progress section should be present (totalCells > 0).
     // The "Has Audio" label must appear in the StatBar list (AQU-490 relabel).
-    await waitFor(() => expect(screen.getAllByText("Has Audio").length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0))
     // The audio StatBar displays "30%" in its percentage column.
     // getAllByText because translated (80%) and validated (50%) also render %.
     const pctLabels = screen.getAllByText(/^\d+%$/)
@@ -847,7 +865,7 @@ describe("ProjectOverview audio progress (AQU-160)", () => {
     // So we just confirm the progress section renders with text metrics.
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
     // Audio tiles should be hidden
-    expect(screen.queryByText("Has Audio")).not.toBeInTheDocument()
+    expect(screen.queryByText("Has audio")).not.toBeInTheDocument()
     expect(screen.queryByText("Audio Validated")).not.toBeInTheDocument()
   })
 })
@@ -954,7 +972,7 @@ describe("ProjectOverview project-only invitee access (AQU-474)", () => {
     ).toBe(true)
   })
 
-  it("exposes a Project settings link to /project/:id/settings", async () => {
+  it("opens Project settings as a route modal over the overview", async () => {
     useProject.mockReturnValue({
       project: projectRecord({ level: 400, files: [] }),
       status: "ready",
@@ -966,6 +984,11 @@ describe("ProjectOverview project-only invitee access (AQU-474)", () => {
 
     const settings = await screen.findByRole("link", { name: "Project settings" })
     expect(settings).toHaveAttribute("href", "/project/p1/settings")
+    fireEvent.click(settings)
+
+    const destination = await screen.findByTestId("settings-location")
+    expect(destination).toHaveAttribute("data-background", "/projects/p1")
+    expect(destination).toHaveAttribute("data-depth", "1")
   })
 })
 
@@ -1693,18 +1716,16 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     await waitFor(() => expect(statTile("Translated")).toHaveTextContent("50%"))
   })
 
-  it("each lane row's Open menu item deep-links the workspace at that lane (?lane=)", async () => {
+  it("lane row ⋯ menu has Assign and Staff, not Open", async () => {
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject()])
     renderOverview()
 
     await screen.findByTestId("overview-lane-table")
     fireEvent.click(screen.getByTestId("overview-lane-actions-es"))
-    expect(screen.getByTestId("overview-lane-open-es").getAttribute("href")).toBe("/project/p1/editor?lane=es")
-
-    // Close and open the default-lane menu — default lane has no lane param.
-    fireEvent.click(screen.getByTestId("overview-lane-actions-default"))
-    expect(screen.getByTestId("overview-lane-open-default").getAttribute("href")).toBe("/project/p1/editor")
+    expect(screen.queryByRole("menuitem", { name: /^open$/i })).not.toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: /assign/i })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: /staff/i })).toBeInTheDocument()
   })
 
   it("Assign… from a lane row ⋯ menu mounts AssignModal pinned to that lane", async () => {

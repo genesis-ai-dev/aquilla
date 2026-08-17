@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import { formatMb, isValidGeminiKey, describeModelDownload } from "./ai-setup-utils"
+import { t } from "@/lib/i18n/standalone"
 
 describe("isValidGeminiKey", () => {
   it("accepts a well-formed AIza key", () => {
@@ -39,6 +40,7 @@ describe("describeModelDownload", () => {
     const r = describeModelDownload(
       { kind: "downloading", loaded: 70 * 1024 * 1024, total: 140 * 1024 * 1024, file: "model.onnx" },
       140,
+      t,
     )
     expect(r.pct).toBe(50)
     expect(r.label).toBe("50% · 70 MB / 140 MB")
@@ -47,6 +49,7 @@ describe("describeModelDownload", () => {
     const over = describeModelDownload(
       { kind: "downloading", loaded: 200, total: 100, file: "f" },
       140,
+      t,
     )
     expect(over.pct).toBe(100)
   })
@@ -54,6 +57,7 @@ describe("describeModelDownload", () => {
     const r = describeModelDownload(
       { kind: "downloading", loaded: 20 * 1024 * 1024, total: 0, file: "f" },
       140,
+      t,
     )
     expect(r.pct).toBeNull()
     expect(r.label).toBe("20 MB of ~140 MB")
@@ -62,6 +66,7 @@ describe("describeModelDownload", () => {
     const r = describeModelDownload(
       { kind: "downloading", loaded: 0, total: 0, file: "" },
       140,
+      t,
     )
     expect(r.pct).toBeNull()
     expect(r.label).toContain("~140 MB")

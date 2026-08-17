@@ -210,7 +210,7 @@ describe("groupInfractionsByRule", () => {
     const r1 = rule("r1", { type: "target-forbids", targetPattern: "a" })
     const r2 = rule("r2", { type: "target-forbids", targetPattern: "b" })
     const inf = (ruleId: string, cellId: string) => ({
-      ruleId, cellId, fileId: "f", message: "m", spans: [],
+      ruleId, cellId, fileId: "f", reason: "target-forbids" as const, spans: [],
     })
     const groups = groupInfractionsByRule(
       [inf("r2", "c1"), inf("r1", "c2"), inf("r2", "c3")],

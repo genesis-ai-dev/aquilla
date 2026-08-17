@@ -103,7 +103,7 @@ export function AddFootnoteDialog({
                     aria-pressed={active}
                     onClick={() => setMarkerStyle(style)}
                     className={cn(
-                      "flex items-start gap-3 rounded-lg border px-3 py-2 text-left transition-colors",
+                      "flex items-start gap-3 rounded-lg border px-3 py-2 text-start transition-colors",
                       active
                         ? "border-primary/50 bg-primary/10 text-foreground"
                         : "border-border bg-background hover:bg-muted/60",

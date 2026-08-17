@@ -67,7 +67,11 @@ describe("TermLookupPopover", () => {
 
   // ── Status labels ─────────────────────────────────────────────────────────
 
-  it("shows correct status labels (required / alternate / avoid)", () => {
+  it("shows correct status labels (required / alternate / forbidden)", () => {
+    // Consolidated onto the shared terminology.status.* vocabulary (AQU-832,
+    // WS-16): TermLookupPopover used to say "avoid" for forbidden while the
+    // other five status-label call sites said "forbidden" — reconciled to the
+    // 5-of-6 majority (also what the underlying RenderingStatus id itself is).
     render(
       <TermLookupPopover sourceTerm="spirit" concepts={CONCEPTS} onApply={vi.fn()}>
         <span>spirit</span>
@@ -77,7 +81,7 @@ describe("TermLookupPopover", () => {
 
     expect(screen.getByText("required")).toBeInTheDocument()
     expect(screen.getByText("alternate")).toBeInTheDocument()
-    expect(screen.getByText("avoid")).toBeInTheDocument()
+    expect(screen.getByText("forbidden")).toBeInTheDocument()
   })
 
   // ── Apply buttons: present for preferred/admitted, absent for forbidden ────

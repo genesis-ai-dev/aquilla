@@ -13,7 +13,7 @@ export interface LiveVerificationOptions {
   retryDelayMs?: number
   maxJavascriptAssets?: number
   retryAssetFallbacks?: boolean
-  staticAssetPaths?: boolean
+  verifyMarketingRoutes?: boolean
   log?: (message: string) => void
 }
 

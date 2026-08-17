@@ -9,6 +9,7 @@ import {
   type IdmlProtectedTokenKind,
 } from "@aquilla/idml-roundtrip"
 import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
+import { t } from "@/lib/i18n/standalone"
 
 export const IDML_PARAGRAPH_NODE_NAME = "idmlParagraph"
 export const IDML_SLOT_NODE_NAME = "idmlSlot"
@@ -400,7 +401,7 @@ export function resolveIdmlEditorConfiguration(
   if (!hasIdmlCellMetadata(cellMetadata)) return null
   const raw = cellMetadata?.idml
   if (!isRecord(raw)) {
-    return { kind: "error", error: "This IDML cell has invalid formatting metadata and must be repaired or re-imported." }
+    return { kind: "error", error: t("editor.idml.invalidMetadataError") }
   }
   if (raw.version !== 2) {
     return {
@@ -411,7 +412,7 @@ export function resolveIdmlEditorConfiguration(
     }
   }
   if (!sourceHtml) {
-    return { kind: "error", error: "This IDML cell is missing its protected source HTML and must be re-imported." }
+    return { kind: "error", error: t("editor.idml.missingSourceHtmlError") }
   }
 
   const metadata = raw as unknown as IdmlFormatMetadataV2
@@ -462,8 +463,7 @@ export function prepareIdmlEditorContent(
   } else if (targetPlain.length > 0) {
     return {
       html: emptyEditableSlots(safeSource, context.metadata),
-      error:
-        "This translated IDML cell has plain text but no formatting anchors. Re-import or repair it before editing.",
+      error: t("editor.idml.plainTextNoAnchorsError"),
     }
   } else {
     candidate = emptyEditableSlots(safeSource, context.metadata)
@@ -881,7 +881,7 @@ export function createIdmlGuardExtension({ context, onRejected }: IdmlGuardOptio
             onRejected({
               code: "ANCHOR_INVALID",
               severity: "error",
-              message: "This edit would change the protected IDML document structure.",
+              message: t("editor.idml.editWouldChangeStructureError"),
             })
             return false
           }
@@ -890,7 +890,7 @@ export function createIdmlGuardExtension({ context, onRejected }: IdmlGuardOptio
           onRejected(result.diagnostics[0] ?? {
             code: "ANCHOR_INVALID",
             severity: "error",
-            message: "This edit would change protected IDML formatting.",
+            message: t("editor.idml.editWouldChangeFormattingError"),
           })
           return false
         },

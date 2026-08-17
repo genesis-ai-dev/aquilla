@@ -13,7 +13,8 @@ import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { MemberMultiSelect } from "@/components/MemberMultiSelect"
 import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
-import { VALIDATION_FLOOR_ROLE_OPTIONS, roleDisplayText } from "@/lib/frontier/roles"
+import { VALIDATION_FLOOR_ROLE_OPTIONS, resolveRoleName } from "@/lib/frontier/roles"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 type ValidationRoleFloor = NonNullable<ProjectRecord["validationRoleFloor"]>
@@ -24,11 +25,15 @@ type ValidationRoleFloor = NonNullable<ProjectRecord["validationRoleFloor"]>
 // intentional subset (reviewer and up); subsetting is fine, renaming is not.
 // `roleName` (the option's `name`) is exactly the ProjectRecord
 // `validationRoleFloor` literal, so it doubles as the stored value.
-const ROLE_OPTIONS: { value: ValidationRoleFloor; label: string }[] =
-  VALIDATION_FLOOR_ROLE_OPTIONS.map((o) => ({
+//
+// Built inside the component (not at module scope) because the label needs
+// `useT()` — this small (3-item) list is cheap to recompute per render.
+function roleOptionsFor(t: ReturnType<typeof useT>): { value: ValidationRoleFloor; label: string }[] {
+  return VALIDATION_FLOOR_ROLE_OPTIONS.map((o) => ({
     value: o.name as ValidationRoleFloor,
-    label: roleDisplayText(o.name),
+    label: resolveRoleName(t, o.name),
   }))
+}
 
 interface Props {
   /** Project id for loading member usernames into the named-validators combobox. */
@@ -82,6 +87,8 @@ export function ValidationSettingsSection({
   disabledTooltip,
   onChange,
 }: Props) {
+  const t = useT()
+  const ROLE_OPTIONS = roleOptionsFor(t)
   const { members } = useProjectMembers(projectId)
 
   // Offer project members, and keep any already-saved names that left the roster
@@ -102,10 +109,10 @@ export function ValidationSettingsSection({
   }
 
   return (
-    <SettingsGroup label="Validation">
+    <SettingsGroup label={t("projectSettings.section.validation")}>
       <SettingsRow
-        label={<label htmlFor="validation-count">Required validators (text)</label>}
-        description="Cells need this many distinct validators to count as fully validated."
+        label={<label htmlFor="validation-count">{t("projectSettings.validation.requiredTextLabel")}</label>}
+        description={t("projectSettings.validation.requiredTextDescription")}
         control={
           <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
             <Input
@@ -117,17 +124,17 @@ export function ValidationSettingsSection({
               value={validationCount}
               onChange={(e) => onChange({ validationCount: clamp(e.target.value) })}
               className="w-24 bg-background"
-              aria-label="Required validators (text)"
+              aria-label={t("projectSettings.validation.requiredTextLabel")}
             />
           </DisabledFieldTooltip>
         }
       />
       <SettingsRow
-        label={<label htmlFor="validation-count-audio">Required validators (audio)</label>}
+        label={<label htmlFor="validation-count-audio">{t("projectSettings.validation.requiredAudioLabel")}</label>}
         description={
           hasAnyAudioData
-            ? "Applies to audio translations."
-            : "Enabled once audio translations exist."
+            ? t("projectSettings.validation.requiredAudioAppliesNote")
+            : t("projectSettings.validation.requiredAudioDisabledNote")
         }
         control={
           <DisabledFieldTooltip
@@ -143,14 +150,14 @@ export function ValidationSettingsSection({
               value={validationCountAudio}
               onChange={(e) => onChange({ validationCountAudio: clamp(e.target.value) })}
               className="w-24 bg-background"
-              aria-label="Required validators (audio)"
+              aria-label={t("projectSettings.validation.requiredAudioLabel")}
             />
           </DisabledFieldTooltip>
         }
       />
       <SettingsRow
-        label={<label htmlFor="validation-role-floor">Minimum validator role</label>}
-        description="Only users with at least this role can cast a validation vote. Defaults to reviewer."
+        label={<label htmlFor="validation-role-floor">{t("projectSettings.validation.minRoleLabel")}</label>}
+        description={t("projectSettings.validation.minRoleDescription")}
         control={
           <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
             <Select
@@ -166,7 +173,7 @@ export function ValidationSettingsSection({
               <SelectTrigger
                 id="validation-role-floor"
                 className="w-48 bg-background"
-                aria-label="Minimum validator role"
+                aria-label={t("projectSettings.validation.minRoleLabel")}
               >
                 <SelectValue />
               </SelectTrigger>
@@ -184,8 +191,8 @@ export function ValidationSettingsSection({
         }
       />
       <SettingsRow
-        label={<label htmlFor="allow-self-validation">Allow self-validation</label>}
-        description="When off, a contributor's vote on their own commit is ignored."
+        label={<label htmlFor="allow-self-validation">{t("projectSettings.validation.allowSelfLabel")}</label>}
+        description={t("projectSettings.validation.allowSelfDescription")}
         control={
           <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
             <Switch
@@ -193,7 +200,7 @@ export function ValidationSettingsSection({
               disabled={disabled}
               checked={allowSelfValidation}
               onCheckedChange={(checked) => onChange({ allowSelfValidation: checked })}
-              aria-label="Allow self-validation"
+              aria-label={t("projectSettings.validation.allowSelfLabel")}
             />
           </DisabledFieldTooltip>
         }
@@ -201,15 +208,10 @@ export function ValidationSettingsSection({
       <SettingsRow
         label={
           <label htmlFor="validation-named-users">
-            Named validators <OptionalMark />
+            {t("projectSettings.validation.namedValidatorsLabel")} <OptionalMark />
           </label>
         }
-        description={
-          <>
-            When set, only these users&apos; votes count toward the threshold (AND&apos;d with
-            the role floor). Leave empty to allow any sufficiently-privileged user.
-          </>
-        }
+        description={t("projectSettings.validation.namedValidatorsDescription")}
         block
       >
         <DisabledFieldTooltip disabled={disabled} tooltip={disabledTooltip ?? null}>
@@ -218,8 +220,8 @@ export function ValidationSettingsSection({
             members={namedUserItems}
             value={validationNamedUsers}
             disabled={disabled}
-            placeholder="Select project members…"
-            aria-label="Named validators"
+            placeholder={t("projectSettings.validation.namedValidatorsPlaceholder")}
+            aria-label={t("projectSettings.validation.namedValidatorsLabel")}
             onValueChange={(next) => onChange({ validationNamedUsers: next })}
           />
         </DisabledFieldTooltip>

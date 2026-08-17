@@ -25,11 +25,13 @@
  * `scripts/i18n-catalog.ts` is the CLI over this module.
  */
 
+import { createHash } from "node:crypto"
 import { en, type Catalog, type MessageKey } from "./messages/en"
 import {
   CATALOG_CONTEXT,
   CONTEXT_SCHEMA_VERSION,
   MESSAGE_KEYS,
+  englishFormsFor,
   englishSourceFor,
   pluralMessageFor,
   resolveKeyContext,
@@ -332,6 +334,115 @@ export function parseTranslatedCatalog(json: string): ParsedCatalog {
 
   const missingKeys = MESSAGE_KEYS.filter((key) => catalog[key] === undefined)
   return { catalog, unknownKeys, missingKeys }
+}
+
+/**
+ * Sidecar recording, for every translated key, a hash of the English source it
+ * was last translated against. Lets an import notice that English changed
+ * *underneath* an existing translation — without it, a stale translation looks
+ * identical to a correct one, forever.
+ *
+ * Keyed by `MessageKey` rather than by leaf: a plural key's forms are hashed
+ * together (see {@link sourceHash}), because a translator revising one category
+ * revises the whole message.
+ */
+export type SourceHashes = Partial<Record<MessageKey, string>>
+
+/**
+ * Deterministic fingerprint of a key's current English source — every plural
+ * form for a count-governed key, the single string otherwise. Not a security
+ * hash; just short and stable so two imports agree on whether English moved.
+ */
+export function sourceHash(key: MessageKey): string {
+  const text = englishFormsFor(key).join(" ")
+  return createHash("sha256").update(text, "utf8").digest("hex").slice(0, 16)
+}
+
+/** One locale's merged catalog: the union plus which carried-over keys are stale. */
+export interface MergedCatalog {
+  /** `existing` overlaid with `incoming` — a partial import never drops a key. */
+  catalog: Catalog
+  /** Updated hash sidecar: fresh hashes for keys this import touched, existing hashes carried for the rest. */
+  hashes: SourceHashes
+  /**
+   * Keys carried over from `existing` (not retranslated this round) whose
+   * recorded hash no longer matches the key's current English source — the
+   * translation shipped is still the old one and may no longer be accurate.
+   * A key with no recorded hash (translated before this feature existed) is
+   * never reported stale; there is nothing to compare it against.
+   */
+  staleKeys: MessageKey[]
+}
+
+/**
+ * Overlay `incoming` onto `existing` — the fix for the import that used to
+ * discard every key the translated file didn't happen to include. A caller
+ * doing a full replace passes `{}` for both `existing` and `existingHashes`
+ * instead of calling this with real ones.
+ */
+export function mergeCatalogs(
+  existing: Catalog,
+  existingHashes: SourceHashes,
+  incoming: Catalog,
+): MergedCatalog {
+  const catalog: Catalog = { ...existing, ...incoming }
+  const hashes: SourceHashes = { ...existingHashes }
+  const staleKeys: MessageKey[] = []
+
+  for (const key of MESSAGE_KEYS) {
+    if (incoming[key] !== undefined) {
+      // Freshly translated this round — trust it, and record the source it was
+      // translated against so a *future* import can tell if English moves on.
+      hashes[key] = sourceHash(key)
+      continue
+    }
+    if (catalog[key] === undefined) continue // never translated at all
+    const stored = existingHashes[key]
+    if (stored !== undefined && stored !== sourceHash(key)) staleKeys.push(key)
+    // Otherwise carry the stored hash forward unchanged — only a fresh
+    // translation should ever update it, or a stale flag would clear itself
+    // the next time someone imports a translation for an unrelated key.
+  }
+
+  return { catalog, hashes, staleKeys }
+}
+
+/** Everything a caller needs to write and report one locale's import. */
+export interface ImportOutcome {
+  catalog: Catalog
+  hashes: SourceHashes
+  /** Base keys with no translation at all — not merely absent from THIS import. */
+  untranslatedKeys: MessageKey[]
+  staleKeys: MessageKey[]
+  /** Leaves in the translated file that no longer map to a base key. */
+  unknownKeys: string[]
+}
+
+/**
+ * Parse a translated export and merge it into `existing`, the full logic
+ * behind `i18n:import`. Pass `{ replace: true }` for the explicit, non-default
+ * full replacement — everything not in `translatedJson` is then dropped, same
+ * as the old (unintentionally) destructive behaviour.
+ *
+ * `untranslatedKeys` here is computed from the *merged* catalog, not from the
+ * translated file alone — a key this import didn't touch but an earlier import
+ * already translated is not "untranslated", and reporting it as such is
+ * exactly the misleading message that hid the data loss this fixes.
+ */
+export function importCatalog(
+  translatedJson: string,
+  existing: Catalog,
+  existingHashes: SourceHashes,
+  opts: { replace?: boolean } = {},
+): ImportOutcome {
+  const { catalog: incoming, unknownKeys } = parseTranslatedCatalog(translatedJson)
+  const { catalog, hashes, staleKeys } = mergeCatalogs(
+    opts.replace ? {} : existing,
+    opts.replace ? {} : existingHashes,
+    incoming,
+  )
+  const untranslatedKeys = MESSAGE_KEYS.filter((key) => catalog[key] === undefined)
+  return { catalog, hashes, untranslatedKeys, staleKeys, unknownKeys }
 }
 
 /**

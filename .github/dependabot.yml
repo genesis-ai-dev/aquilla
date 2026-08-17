@@ -4,8 +4,10 @@ updates:
   - package-ecosystem: npm
     directory: "/"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
+      interval: monthly
+    cooldown:
+      default-days: 30
+    open-pull-requests-limit: 2
     groups:
       npm-minor-patch:
         update-types:
@@ -25,8 +27,10 @@ updates:
   - package-ecosystem: npm
     directory: "/auth-worker"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
+      interval: monthly
+    cooldown:
+      default-days: 30
+    open-pull-requests-limit: 2
     groups:
       auth-worker-deps:
         patterns:
@@ -35,8 +39,10 @@ updates:
   - package-ecosystem: npm
     directory: "/sync-worker"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
+      interval: monthly
+    cooldown:
+      default-days: 30
+    open-pull-requests-limit: 2
     groups:
       sync-worker-deps:
         patterns:
@@ -49,8 +55,10 @@ updates:
   - package-ecosystem: npm
     directory: "/agent-worker"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
+      interval: monthly
+    cooldown:
+      default-days: 30
+    open-pull-requests-limit: 2
     groups:
       agent-worker-deps:
         patterns:
@@ -59,8 +67,10 @@ updates:
   - package-ecosystem: cargo
     directory: "/src-tauri"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
+      interval: monthly
+    cooldown:
+      default-days: 30
+    open-pull-requests-limit: 2
     groups:
       cargo-deps:
         patterns:
@@ -69,8 +79,10 @@ updates:
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
+      interval: monthly
+    cooldown:
+      default-days: 30
+    open-pull-requests-limit: 2
     groups:
       github-actions:
         patterns:

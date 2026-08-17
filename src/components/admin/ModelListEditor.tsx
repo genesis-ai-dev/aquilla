@@ -66,7 +66,7 @@ export function ModelListEditor({
               addModel()
             }
           }}
-          placeholder="e.g. anthropic/claude-sonnet-4.5"
+          placeholder="e.g. openai/gpt-5.6-luna"
           aria-label="Add a model ID"
           spellCheck={false}
           className="font-mono text-xs"

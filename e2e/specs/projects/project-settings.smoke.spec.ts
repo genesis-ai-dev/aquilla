@@ -1,5 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { ProjectSettings } from "../../helpers/page-objects/ProjectSettings"
 
 /**
  * AQU-765: synced projects can now be renamed from Settings — the name field
@@ -70,4 +71,19 @@ test("project settings renames the project and saves source language", async ({ 
   // reload and confirm the settings page hydrates the new name back.
   await alice.reload()
   await expect(alice.locator("#pname")).toHaveValue(renamedName, { timeout: 10_000 })
+
+  // AQU-825: Knowledge Base originals cross SPA → auth-worker → Postgres + R2.
+  // Exercise the real upload, rehydrate it after navigation, read the server-
+  // extracted content, and delete it through the same project settings surface.
+  const settings = new ProjectSettings(alice)
+  const knowledgeName = `style-${Date.now()}.md`
+  const knowledgeText = "Use formal language for every translated heading."
+  await settings.openLivingMemory(projectId!)
+  await settings.uploadKnowledgeDocument(knowledgeName, knowledgeText)
+
+  await alice.reload()
+  const knowledgeDialog = await settings.openKnowledgeDocument(knowledgeName)
+  await expect(knowledgeDialog.getByText(knowledgeText)).toBeVisible({ timeout: 10_000 })
+  await knowledgeDialog.getByRole("button", { name: "Close" }).click()
+  await settings.deleteKnowledgeDocument(knowledgeName)
 })

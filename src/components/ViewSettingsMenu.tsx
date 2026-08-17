@@ -9,7 +9,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react"
-import { Settings } from "lucide-react"
+import { AlertTriangle, Settings, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Label } from "@/components/ui/label"
@@ -127,6 +127,10 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
     mismatchSignature &&
     dismissedMismatchSignature !== mismatchSignature,
   )
+  // "mixed" detected text has no single forceable direction — only a definite
+  // ltr/rtl detection offers a one-click "use the detected direction" button.
+  const detectedManualDirection =
+    mismatch && mismatch.detected !== "mixed" ? mismatch.detected : null
 
   useImperativeHandle(ref, () => ({
     open: () => setMenuOpen(true),
@@ -181,7 +185,64 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
 
   return (
     // When anchored to the file-options ⋯ button, skip the header-only gap hack.
-    <div className={cn("relative flex items-center", hideTrigger && !anchor && "-ml-1")}>
+    <div className={cn("relative flex items-center", hideTrigger && !anchor && "-ms-1")}>
+      {showMismatchWarning && mismatch && (
+        <div
+          className={cn(
+            "absolute end-full top-1/2 z-30 me-2 flex -translate-y-1/2 items-center gap-2 whitespace-nowrap",
+            "rounded-2xl bg-card px-3 py-2 text-xs",
+            "animate-in fade-in-0 slide-in-from-right-2 rtl:slide-in-from-left-2 duration-200",
+          )}
+          role="status"
+        >
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-600" />
+          <span className="text-foreground">
+            {/* The two conflicting values are the point of the warning, so they
+                stay emphasised inside the translated sentence rather than being
+                flattened into it. */}
+            <RichMessage
+              k="editor.view.directionMismatch"
+              values={{
+                side: t(sideLabelKey(mismatch.side)),
+                forced: <strong>{t(directionNameKey(mismatch.forced))}</strong>,
+                detected: <strong>{t(detectedDirectionNameKey(mismatch.detected))}</strong>,
+              }}
+            />
+          </span>
+          <button
+            type="button"
+            onClick={() => applyDirectionMismatchFix("auto")}
+            className="rounded-md px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
+          >
+            {t("editor.view.directionAuto")}
+          </button>
+          {detectedManualDirection && (
+            <button
+              type="button"
+              onClick={() => applyDirectionMismatchFix(detectedManualDirection)}
+              className="rounded-md px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
+            >
+              {detectedManualDirection.toUpperCase()}
+            </button>
+          )}
+          <AppTooltip content={t("common.dismiss")}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => setDismissedMismatchSignature(mismatchSignature)}
+              aria-label={t("editor.view.dismissDirectionWarning")}
+              className="size-5 rounded-lg text-muted-foreground/70"
+            >
+              <X className="h-3 w-3" />
+            </Button>
+          </AppTooltip>
+          <span
+            className="absolute start-full top-1/2 -translate-y-1/2 border-y-4 border-s-4 border-y-transparent border-s-card"
+            aria-hidden="true"
+          />
+        </div>
+      )}
       <Popover open={menuOpen} onOpenChange={setMenuOpen}>
         {!anchor && (
           <AppTooltip content={t("editor.view.settings")}>

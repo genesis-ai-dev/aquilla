@@ -14,6 +14,7 @@ import { fetchCellAudio, parseFrontierAudioUrl, audioIdSeededWith } from "./uplo
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
 import { makeAudioSyncTokenFetcher } from "./sync-token-fetcher"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { t } from "@/lib/i18n/standalone"
 import type {
   ResultMessage,
   ErrorMessage,
@@ -217,13 +218,13 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
   const attachment = cell.attachments?.[audioId]
   const attachmentUrl = attachment?.url
   if (!attachmentUrl) {
-    setTranscribeStatus(audioId, { kind: "error", message: "This recording has no downloadable audio yet. Try again after it finishes syncing." })
+    setTranscribeStatus(audioId, { kind: "error", message: t("audio.error.noDownloadableAudio") })
     return 0
   }
 
   const frontier = parseFrontierAudioUrl(attachmentUrl)
   if (!frontier) {
-    setTranscribeStatus(audioId, { kind: "error", message: "This audio isn't stored in a transcribable location." })
+    setTranscribeStatus(audioId, { kind: "error", message: t("audio.error.notTranscribableLocation") })
     return 0
   }
 
@@ -233,7 +234,7 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
   // sign-in guard moves below the cache probe.
   const cached = await audioCacheGet(frontier.audioId, frontier.ext)
   if (!cached && !session?.jwt) {
-    setTranscribeStatus(audioId, { kind: "error", message: "Sign in to transcribe audio." })
+    setTranscribeStatus(audioId, { kind: "error", message: t("audio.error.signInToTranscribe") })
     return 0
   }
 

@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { validateApiCredential } from "../../../db/shared/api-credentials"
+import { CREDENTIAL_MINT_MAX_PER_USER } from "../utils/rate-limit"
 
 type CreateResponse = {
   token: string
@@ -159,6 +160,29 @@ describe("POST /api/v2/credentials + validateApiCredential", () => {
     const res = await mint("alice", { name: "t", mode: "act" })
     expect(res.status).toBe(403)
     expect(((await res.json()) as { error: string }).error).toBe("scope_denied")
+  })
+
+  // [Pen test] API security & data exposure (2026-08-13): guards the
+  // credential_mint throttle in utils/rate-limit.ts.
+  it("throttles a caller minting more than the per-user limit", async () => {
+    await seedUser(1, "alice")
+    for (let i = 0; i < CREDENTIAL_MINT_MAX_PER_USER; i++) {
+      const res = await mint("alice", { name: `t${i}`, mode: "ask" })
+      expect(res.status).toBe(201)
+    }
+    const throttled = await mint("alice", { name: "one-too-many", mode: "ask" })
+    expect(throttled.status).toBe(429)
+    expect(((await throttled.json()) as { error: string }).error).toBe("rate_limited")
+  })
+
+  it("does not let one user's minting throttle a different user", async () => {
+    await seedUser(1, "alice")
+    await seedUser(2, "bob")
+    for (let i = 0; i < CREDENTIAL_MINT_MAX_PER_USER; i++) {
+      expect((await mint("alice", { name: `t${i}`, mode: "ask" })).status).toBe(201)
+    }
+    expect((await mint("alice", { name: "throttled", mode: "ask" })).status).toBe(429)
+    expect((await mint("bob", { name: "still-fine", mode: "ask" })).status).toBe(201)
   })
 })
 

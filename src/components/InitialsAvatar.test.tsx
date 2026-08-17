@@ -4,6 +4,15 @@ import { describe, expect, it } from "vitest"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 
 describe("InitialsAvatar", () => {
+  it("uses the same two-letter initials at every size", () => {
+    const { rerender } = render(<InitialsAvatar name="ryder" size="xs" />)
+    expect(screen.getByText("RY")).toBeInTheDocument()
+    rerender(<InitialsAvatar name="ryder" size="sm" />)
+    expect(screen.getByText("RY")).toBeInTheDocument()
+    rerender(<InitialsAvatar name="ryder" size="lg" />)
+    expect(screen.getByText("RY")).toBeInTheDocument()
+  })
+
   it("pins initials color inline so menu **:text-* cannot recolor the glyph", () => {
     render(<InitialsAvatar name="alice" menuSafe />)
     const initials = screen.getByText("AL")

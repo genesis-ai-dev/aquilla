@@ -12,79 +12,68 @@ export const L1_MAX_CHARS = 1600
 export const BRIEF_FIELDS: BriefField[] = [
   {
     id: "purpose",
-    label: "Purpose / skopos",
+    labelKey: "agent.brief.field.purpose.label",
     group: "purpose",
-    helperText:
-      "Why this translation exists and its intended function(s): e.g. evangelistic, liturgical, study, devotional, first Scripture in this language, or a revision.",
+    helperTextKey: "agent.brief.field.purpose.helperText",
   },
   {
     id: "audience",
-    label: "Audience / addressees",
+    labelKey: "agent.brief.field.audience.label",
     group: "purpose",
-    helperText:
-      "Who will use it — age range, literacy level, churched vs. unchurched, and whether they are bilingual with a language of wider communication.",
+    helperTextKey: "agent.brief.field.audience.helperText",
   },
   {
     id: "useAndMedium",
-    label: "Intended use & medium",
+    labelKey: "agent.brief.field.useAndMedium.label",
     group: "purpose",
-    helperText:
-      "How it will be encountered: read aloud, personal study, liturgy, audio/oral, print, or app. The medium shapes sentence length and naturalness.",
+    helperTextKey: "agent.brief.field.useAndMedium.helperText",
   },
   {
     id: "motiveSponsor",
-    label: "Motive & sponsor",
+    labelKey: "agent.brief.field.motiveSponsor.label",
     group: "purpose",
-    helperText:
-      "Who commissioned the work and the denominational or institutional context behind it. Records the brief's 'motive' in skopos terms.",
+    helperTextKey: "agent.brief.field.motiveSponsor.helperText",
   },
   {
     id: "sourceTexts",
-    label: "Source & base texts",
+    labelKey: "agent.brief.field.sourceTexts.label",
     group: "standards",
-    helperText:
-      "The original-language editions and any front/model translations the team works from.",
+    helperTextKey: "agent.brief.field.sourceTexts.helperText",
   },
   {
     id: "targetVariety",
-    label: "Target language & variety",
+    labelKey: "agent.brief.field.targetVariety.label",
     group: "standards",
-    helperText:
-      "The specific dialect/variety and any orthography decisions (spelling system, script, punctuation conventions).",
+    helperTextKey: "agent.brief.field.targetVariety.helperText",
   },
   {
     id: "registerNaturalness",
-    label: "Register & naturalness",
+    labelKey: "agent.brief.field.registerNaturalness.label",
     group: "standards",
-    helperText:
-      "Formal vs. informal register, and how strongly the team prefers natural target-language phrasing over concordance with the source.",
+    helperTextKey: "agent.brief.field.registerNaturalness.helperText",
   },
   {
     id: "literalness",
-    label: "Level of literalness",
+    labelKey: "agent.brief.field.literalness.label",
     group: "standards",
-    helperText:
-      "Where the translation sits on the formal ↔ functional equivalence spectrum, and when adaptation is acceptable.",
+    helperTextKey: "agent.brief.field.literalness.helperText",
   },
   {
     id: "keyTerms",
-    label: "Key terms & theological tradition",
+    labelKey: "agent.brief.field.keyTerms.label",
     group: "standards",
-    helperText:
-      "Key-term strategy, denominational constraints, and whether to transliterate or use indigenous terms for difficult concepts.",
+    helperTextKey: "agent.brief.field.keyTerms.helperText",
   },
   {
     id: "constraints",
-    label: "Constraints & sensitivities",
+    labelKey: "agent.brief.field.constraints.label",
     group: "standards",
-    helperText:
-      "Cultural, political, or religious taboos and any renderings that must be avoided.",
+    helperTextKey: "agent.brief.field.constraints.helperText",
   },
   {
     id: "qualityBar",
-    label: "Quality bar",
+    labelKey: "agent.brief.field.qualityBar.label",
     group: "standards",
-    helperText:
-      "What 'good' and 'done' mean for this project — the standard a draft must meet before it is acceptable.",
+    helperTextKey: "agent.brief.field.qualityBar.helperText",
   },
 ]

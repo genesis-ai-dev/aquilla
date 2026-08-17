@@ -77,6 +77,16 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: vi.fn(() => ({ session: { username: "alice", jwt: "tok" } })),
 }))
 
+vi.mock("@/lib/frontier/knowledge-base", () => ({
+  listKnowledgeDocuments: vi.fn(async () => []),
+  getKnowledgeDocument: vi.fn(),
+  getKnowledgeDocumentContent: vi.fn(),
+  getKnowledgeDocumentOriginal: vi.fn(),
+  uploadKnowledgeDocument: vi.fn(),
+  deleteKnowledgeDocument: vi.fn(),
+  reindexKnowledgeDocument: vi.fn(),
+}))
+
 import { useProject } from "@/hooks/useProject"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 
@@ -169,9 +179,20 @@ describe("LivingMemoryPage — empty states", () => {
 
   it("Recent Examples empty state explains why pairs appear here", () => {
     renderPage()
+    expect(
+      document.querySelector('section[aria-label="Recent Examples"]'),
+    ).toBeInTheDocument()
     expect(screen.getByText(/No validated translations yet/i)).toBeInTheDocument()
+    expect(
+      screen.getByRole("status", { name: /No validated translations/i }),
+    ).toBeInTheDocument()
     // Should mention that AI draws on these
     expect(screen.getByText(/AI draws on these pairs/i)).toBeInTheDocument()
+  })
+
+  it("shows a 0 validated badge when there are no validated cells", () => {
+    renderPage()
+    expect(screen.getByText(/0 validated/i)).toBeInTheDocument()
   })
 })
 

@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import posthog from "@/lib/posthog"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { makeAudioSyncTokenFetcher } from "@/lib/audio/sync-token-fetcher"
@@ -75,6 +76,7 @@ export function useCellAudio(
   fileId: string,
 ): UseCellAudioResult {
   const { session } = useFrontierSession()
+  const t = useT()
   const [state, setState] = useState<UseCellAudioResult["state"]>("idle")
   const [error, setError] = useState<AudioError | null>(null)
   const [isPlaying, setIsPlaying] = useState(false)
@@ -180,7 +182,7 @@ export function useCellAudio(
     if (bytesPromiseRef.current) return bytesPromiseRef.current
 
     if (!attachmentUrl) {
-      throw { kind: "pointer-missing", message: "No audio attachment on this cell" } as AudioError
+      throw { kind: "pointer-missing", message: t("audio.error.noAttachment") } as AudioError
     }
 
     if (isRemoteMediaUrl(attachmentUrl)) {
@@ -214,7 +216,7 @@ export function useCellAudio(
       // surface this clearly so the UI can render a "needs re-record" state.
       throw {
         kind: "pointer-invalid",
-        message: `Unsupported audio URL (legacy LFS): ${attachmentUrl}`,
+        message: t("audio.error.legacyLfsUnsupported", { url: attachmentUrl }),
       } as AudioError
     }
 
@@ -231,7 +233,7 @@ export function useCellAudio(
         }
 
         if (!sessionRef.current?.jwt) {
-          throw { kind: "no-session", message: "Not signed in" } as AudioError
+          throw { kind: "no-session", message: t("audio.error.notSignedIn") } as AudioError
         }
 
         const bytes = await fetchCellAudio({
@@ -260,7 +262,7 @@ export function useCellAudio(
           void audioCacheEvict(frontier.audioId, frontier.ext)
           throw {
             kind: "audio-deleted",
-            message: "This audio recording has been deleted and cannot be played.",
+            message: t("audio.error.recordingDeleted"),
           } as AudioError
         }
         throw {
@@ -275,7 +277,7 @@ export function useCellAudio(
     } finally {
       bytesPromiseRef.current = null
     }
-  }, [attachmentUrl, project.id, fileId, getSyncToken])
+  }, [attachmentUrl, project.id, fileId, getSyncToken, t])
 
   const tickPlayhead = useCallback(() => {
     const a = audioRef.current
@@ -362,7 +364,7 @@ export function useCellAudio(
         posthog.captureException(new Error("audio element failed to stream media source"), {
           audio_error_kind: "download-failed",
         })
-        setError({ kind: "download-failed", message: "Playback failed — the media source could not be streamed." })
+        setError({ kind: "download-failed", message: t("audio.error.streamingFailed") })
         setState("error")
       }
       audio.onplay = () => { setIsPlaying(true); startTicking() }
@@ -453,7 +455,7 @@ export function useCellAudio(
       setError(err)
       setState("error")
     }
-  }, [attachmentUrl, project.id, fileId, getSyncToken, ensureBytes, startTicking, stopTicking])
+  }, [attachmentUrl, project.id, fileId, getSyncToken, ensureBytes, startTicking, stopTicking, t])
 
   const pause = useCallback(() => {
     audioRef.current?.pause()

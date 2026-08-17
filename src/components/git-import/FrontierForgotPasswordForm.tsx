@@ -14,14 +14,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { requestPasswordReset, FrontierAuthError } from "@/lib/frontier/auth"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { useSubmitError } from "@/lib/forms/submit-error"
-
-const formSchema = z.object({
-  email: z
-    .string()
-    .trim()
-    .min(1, "Email is required")
-    .email("Enter a valid email address"),
-})
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
 export function FrontierForgotPasswordForm({
   onBack,
@@ -33,6 +27,16 @@ export function FrontierForgotPasswordForm({
 }) {
   const [sentEmail, setSentEmail] = useState<string | null>(null)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
+  const t = useT()
+
+  // Built per-render so its messages resolve in the active locale.
+  const formSchema = z.object({
+    email: z
+      .string()
+      .trim()
+      .min(1, t("auth.resetPassword.emailRequired"))
+      .email(t("auth.resetPassword.emailInvalid")),
+  })
 
   const form = useForm({
     defaultValues: { email: "" },
@@ -43,7 +47,7 @@ export function FrontierForgotPasswordForm({
         await requestPasswordReset(value.email.trim())
         setSentEmail(value.email.trim())
       } catch (err) {
-        setSubmitError(err instanceof FrontierAuthError ? err.message : "Failed to send reset email")
+        setSubmitError(err instanceof FrontierAuthError ? err.message : t("auth.resetPassword.failedToSend"))
       }
     },
   })
@@ -52,10 +56,13 @@ export function FrontierForgotPasswordForm({
     return (
       <div className="space-y-3">
         <p className="text-sm">
-          If an account exists for <span className="font-medium">{sentEmail}</span>, a password reset link has been sent. Check your email and follow the link to choose a new password.
+          <RichMessage
+            k="auth.resetPassword.linkSentIfAccountExists"
+            values={{ email: <span className="font-medium">{sentEmail}</span> }}
+          />
         </p>
         <Button variant="outline" onClick={() => onBack(returnTo)} className="w-full">
-          Back to login
+          {t("auth.resetPassword.backToLogin")}
         </Button>
       </div>
     )
@@ -77,7 +84,7 @@ export function FrontierForgotPasswordForm({
             const invalid = isFieldInvalid(field)
             return (
               <Field data-invalid={invalid}>
-                <FieldLabel htmlFor="r-email">Email</FieldLabel>
+                <FieldLabel htmlFor="r-email">{t("common.email")}</FieldLabel>
                 <Input
                   id="r-email"
                   name={field.name}
@@ -89,7 +96,7 @@ export function FrontierForgotPasswordForm({
                   autoComplete="email"
                 />
                 <FieldDescription>
-                  We'll send a link to reset your password.
+                  {t("auth.resetPassword.emailFieldHint")}
                 </FieldDescription>
                 {invalid && <FieldError errors={field.state.meta.errors} />}
               </Field>
@@ -100,10 +107,12 @@ export function FrontierForgotPasswordForm({
       {submitError && <FieldError>{submitError}</FieldError>}
       <Button type="submit" form="forgot-password-form" className="w-full">
         {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-        {form.state.isSubmitting ? "Sending…" : "Send reset link"}
+        {form.state.isSubmitting
+          ? t("auth.resetPassword.sending")
+          : t("auth.resetPassword.submitSendLink")}
       </Button>
       <Button type="button" variant="ghost" onClick={() => onBack(returnTo)} className="w-full">
-        Back to login
+        {t("auth.resetPassword.backToLogin")}
       </Button>
     </form>
   )

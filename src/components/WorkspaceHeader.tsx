@@ -10,7 +10,7 @@ interface Props {
   extraMenuItems?: OverflowMenuItem[]
   /** When set, renders Import in a button group beside the ⋯ overflow menu. */
   onImport?: () => void
-  /** When set, renders a Settings cog beside Import. */
+  /** When set, renders a Settings cog beside the Import group. */
   onSettings?: () => void
   /**
    * AQU-428: When provided, the project name in the breadcrumb becomes a
@@ -47,7 +47,7 @@ export function WorkspaceHeader({
   if (surfaceLabel) trail.push({ label: surfaceLabel })
   if (bookLabel) trail.push({ label: bookLabel })
   return (
-    <header className="relative z-30 flex h-full min-w-0 items-center justify-between gap-3 pr-4">
+    <header className="relative z-30 flex h-full min-w-0 items-center justify-between gap-3 pe-4">
       <div className="min-w-0 flex-1">
         <OrgBreadcrumb
           section={project.name}

@@ -11,6 +11,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { storeAllFeaturesConsent, usePendingAiConsent } from "@/lib/audio/ai-consent"
 import { prefetchAiModels } from "@/lib/audio/prefetch"
 import { DEFAULT_MMS_LANGUAGE } from "@/lib/audio/tts-providers"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const SHORT_LABELS = {
   whisper: "Whisper",
@@ -19,6 +20,7 @@ const SHORT_LABELS = {
 } as const
 
 export function AiModelConsentDialog() {
+  const t = useT()
   const pending = usePendingAiConsent()
   const open = pending !== null
 
@@ -41,7 +43,9 @@ export function AiModelConsentDialog() {
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
-            Download {pending?.model.label ?? "AI model"}?
+            {t("workspace.aiConsent.downloadTitle", {
+              model: pending ? t(pending.model.labelKey) : "AI model",
+            })}
           </DialogTitle>
           <DialogDescription>
             {pending
@@ -53,25 +57,24 @@ export function AiModelConsentDialog() {
           <p className="flex items-center gap-2">
             <Spinner className="size-3.5 opacity-60" />
             <span>
-              While the model downloads, you'll see a progress percentage on
-              the cell. The page won't reload.
+              {t("workspace.aiConsent.downloadProgressNote")}
             </span>
           </p>
-          <p>You'll only see this prompt once per browser.</p>
+          <p>{t("workspace.aiConsent.oncePerBrowser")}</p>
         </div>
         <DialogFooter className="flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
           <Button variant="outline" onClick={handleCancel} className="w-full sm:w-auto">
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant="outline" onClick={handleAccept} className="w-full sm:w-auto">
             {justThisLabel}
           </Button>
-          <AppTooltip content="Also pre-download the local AI models so they're ready next time">
+          <AppTooltip content={t("workspace.aiConsent.enableAllTooltip")}>
             <Button
               onClick={handleAcceptAll}
               className="w-full sm:w-auto"
             >
-              Enable all local models
+              {t("workspace.aiConsent.enableAllButton")}
             </Button>
           </AppTooltip>
         </DialogFooter>

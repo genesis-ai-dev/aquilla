@@ -28,7 +28,8 @@ import {
   type ReactNode,
 } from "react"
 import { useLocation, useNavigate, useNavigationType } from "react-router-dom"
-import { deriveNavTitle } from "@/lib/navigation/deriveTitle"
+import { deriveNavTitle, deriveNavTitleKey } from "@/lib/navigation/deriveTitle"
+import { useT } from "@/lib/i18n/I18nProvider"
 import {
   parseRecentEntity,
   recentProvisionalTitle,
@@ -129,12 +130,25 @@ function persist(entries: NavEntry[], recent: RecentEntity[]): void {
   }
 }
 
-function makeEntry(loc: { key: string; pathname: string; search: string }): NavEntry {
+/**
+ * Resolves a pathname to a display title. `src/lib/navigation/deriveTitle.ts`
+ * can't call `useT()` (it's pure, locale-free lib code), so the component
+ * below builds a resolver from `useT()` + `deriveNavTitleKey` and passes it
+ * in; `initialState`/`syncToLocation` default to the English-only
+ * `deriveNavTitle` so callers without a live locale (tests, and any future
+ * caller that doesn't have one) keep working unchanged.
+ */
+export type TitleResolver = (pathname: string) => string
+
+function makeEntry(
+  loc: { key: string; pathname: string; search: string },
+  resolveTitle: TitleResolver = deriveNavTitle,
+): NavEntry {
   return {
     key: loc.key,
     pathname: loc.pathname,
     search: loc.search,
-    title: deriveNavTitle(loc.pathname),
+    title: resolveTitle(loc.pathname),
     timestamp: Date.now(),
   }
 }
@@ -152,7 +166,7 @@ function recordRecent(recent: RecentEntity[], loc: NavLoc): RecentEntity[] {
   })
 }
 
-export function initialState(loc: NavLoc): HistoryState {
+export function initialState(loc: NavLoc, resolveTitle: TitleResolver = deriveNavTitle): HistoryState {
   const persisted = loadPersisted()
   // Restore the stack + cursor on a same-tab reload. Match on pathname too, not
   // just key: React Router reuses the sentinel key "default" for the first entry
@@ -167,7 +181,7 @@ export function initialState(loc: NavLoc): HistoryState {
     }
   }
   return {
-    entries: [makeEntry(loc)],
+    entries: [makeEntry(loc, resolveTitle)],
     index: 0,
     recent: recordRecent(persisted.recent, loc),
   }
@@ -177,6 +191,7 @@ export function syncToLocation(
   prev: HistoryState,
   loc: NavLoc,
   navType: "PUSH" | "POP" | "REPLACE",
+  resolveTitle: TitleResolver = deriveNavTitle,
 ): HistoryState {
   const withRecent = (next: Omit<HistoryState, "recent">): HistoryState => ({
     ...next,
@@ -196,12 +211,12 @@ export function syncToLocation(
   if (navType === "REPLACE") {
     // A redirect swaps the current entry without adding a step.
     const entries = prev.entries.slice()
-    entries[prev.index] = makeEntry(loc)
+    entries[prev.index] = makeEntry(loc, resolveTitle)
     return withRecent({ entries, index: prev.index })
   }
   // A new PUSH — drop any forward entries, append, and point at it.
   const truncated = prev.entries.slice(0, prev.index + 1)
-  const nextEntries = [...truncated, makeEntry(loc)].slice(-MAX_ENTRIES)
+  const nextEntries = [...truncated, makeEntry(loc, resolveTitle)].slice(-MAX_ENTRIES)
   return withRecent({ entries: nextEntries, index: nextEntries.length - 1 })
 }
 
@@ -209,8 +224,20 @@ export function NavHistoryProvider({ children }: { children: ReactNode }) {
   const location = useLocation()
   const navigate = useNavigate()
   const navType = useNavigationType()
+  const t = useT()
 
-  const [state, setState] = useState<HistoryState>(() => initialState(location))
+  // Resolves through the active locale where deriveNavTitleKey has a real
+  // catalog key; `raw` entries (an arbitrary URL segment, or a title read
+  // from a still-unkeyed English source) pass through unchanged either way.
+  const resolveTitle = useCallback<TitleResolver>(
+    (pathname) => {
+      const info = deriveNavTitleKey(pathname)
+      return info.kind === "key" ? t(info.key) : info.text
+    },
+    [t],
+  )
+
+  const [state, setState] = useState<HistoryState>(() => initialState(location, resolveTitle))
 
   // Sync during render (not in an effect) so the stack is already correct before
   // child route effects run — that lets a child's `useNavHistoryTitle` land on
@@ -220,7 +247,7 @@ export function NavHistoryProvider({ children }: { children: ReactNode }) {
   const [seenKey, setSeenKey] = useState(location.key)
   if (location.key !== seenKey) {
     setSeenKey(location.key)
-    setState((prev) => syncToLocation(prev, location, navType))
+    setState((prev) => syncToLocation(prev, location, navType, resolveTitle))
   }
 
   useEffect(() => {

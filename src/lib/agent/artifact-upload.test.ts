@@ -66,15 +66,19 @@ describe("uploadAgentArtifact", () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it("surfaces a server error message as a typed ArtifactUploadError", async () => {
+  // AQU-820: AgentDockView renders `err.message` verbatim, so the raw
+  // (untranslated) server message must stay off `.message` and live on `.cause`.
+  it("surfaces a failure as a typed ArtifactUploadError with our keyed message", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({ error: { code: "permission_denied", message: "need contributor" } }, 403),
     )
     const file = new File(["data"], "f.txt")
-    await expect(uploadAgentArtifact(JWT, PROJECT_ID, file)).rejects.toMatchObject({
+    const err = await uploadAgentArtifact(JWT, PROJECT_ID, file).catch((e: unknown) => e)
+    expect(err).toMatchObject({
       name: "ArtifactUploadError",
       status: 403,
-      message: "need contributor",
+      message: "Upload failed",
     })
+    expect(String((err as Error).cause)).toContain("need contributor")
   })
 })

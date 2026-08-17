@@ -19,6 +19,7 @@ import { getAudioQualityPref, type AudioQuality } from "@/lib/store/audio-qualit
 import { audioMimeForExt } from "./mime"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { setActiveAudio, clearActiveAudioIf, getActiveAudio, type ActiveAudioController } from "./audio-coordinator"
+import { t } from "@/lib/i18n/standalone"
 
 export type QueueState =
   | { kind: "idle" }
@@ -2348,7 +2349,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
       })()
       return
     }
-    setState({ kind: "error", message: "Audio failed to load", cellId: cell.id })
+    setState({ kind: "error", message: t("audio.error.queueLoadFailed"), cellId: cell.id })
   }
 
   // Fresh element = everything reset (disposeCurrent killed any overlay) —

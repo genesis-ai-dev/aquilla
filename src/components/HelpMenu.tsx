@@ -77,7 +77,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
               {/* AQU-699: advertise that the trigger expands, so the Tour housed
                   inside it stays discoverable. Omitted when collapsed to an icon. */}
               <ChevronDown
-                className="ml-auto size-4 opacity-50"
+                className="ms-auto size-4 opacity-50"
                 aria-hidden
               />
             </>
@@ -109,7 +109,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
               }
             >
               <Home />
-              Homepage
+              {t("workspace.helpMenu.homepage")}
               <ExternalLink className="ml-auto opacity-60" />
             </DropdownMenuItem>
             <DropdownMenuItem
@@ -125,7 +125,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
             >
               <BookOpen />
               {t("nav.help.docs")}
-              <ExternalLink className="ml-auto opacity-60" />
+              <ExternalLink className="ms-auto opacity-60" />
             </DropdownMenuItem>
             <DropdownMenuItem
               className={HELP_ITEM_CLASS}
@@ -140,7 +140,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
             >
               <Discord className="size-4 shrink-0" />
               {t("nav.help.discord")}
-              <ExternalLink className="ml-auto opacity-60" />
+              <ExternalLink className="ms-auto opacity-60" />
             </DropdownMenuItem>
             <DropdownMenuItem
               className={HELP_ITEM_CLASS}
@@ -150,7 +150,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
             >
               <Mail />
               {t("nav.help.contactSupport")}
-              <ExternalLink className="ml-auto opacity-60" />
+              <ExternalLink className="ms-auto opacity-60" />
             </DropdownMenuItem>
             <DropdownMenuItem onClick={handleReport} className={HELP_ITEM_CLASS}>
               <Flag />

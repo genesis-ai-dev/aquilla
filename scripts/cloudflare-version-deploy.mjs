@@ -79,7 +79,9 @@ async function verifyImmutableWebVersion(environment, previewOrigin) {
     appOrigin: previewOrigin,
     attempts: 30,
     retryAssetFallbacks: false,
-    staticAssetPaths: true,
+    // The app preview is SPA-only. Marketing routes belong to a separate
+    // Worker and are checked after promotion on the shared custom domain.
+    verifyMarketingRoutes: false,
   })
   console.log(`[cloudflare-deploy] immutable web assets verified at ${previewOrigin}`)
 }

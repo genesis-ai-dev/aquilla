@@ -7,7 +7,8 @@ import type { CommentThread as ThreadData } from "@/lib/parsers/types"
 import { renderCommentHtml, isThreadStale } from "@/lib/comments/comment-helpers"
 import DOMPurify from "dompurify"
 import { cn } from "@/lib/utils"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDateTime } from "@/lib/i18n/format"
 
 interface CommentThreadProps {
   thread: ThreadData
@@ -26,7 +27,7 @@ function draftKey(projectId: string | undefined, cellId: string | undefined, thr
 }
 
 export function CommentThread({ thread, currentTranslated, canReply = true, canResolve = true, onReply, onResolve, onReopen, projectId, cellId }: CommentThreadProps) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const storageKey = draftKey(projectId, cellId, thread.id)
   const [replyText, setReplyText] = useState(() => {
     if (typeof window === "undefined") return ""
@@ -48,7 +49,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
 
   function formatTimestamp(iso: string): string {
     try {
-      return new Date(iso).toLocaleString()
+      return formatDateTime(iso, locale)
     } catch {
       return iso
     }
@@ -146,12 +147,12 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
             <div className="flex flex-wrap gap-1">
               {canReply && (
                 <Button size="sm" variant="outline" onClick={handleReply} disabled={!replyText.trim()}>
-                  <Send className="mr-1 h-3 w-3" /> {t("comments.thread.reply")}
+                  <Send className="me-1 h-3 w-3" /> {t("comments.thread.reply")}
                 </Button>
               )}
               {canReply && canResolve && (
                 <Button size="sm" variant="outline" onClick={handleCloseWithReply} disabled={!replyText.trim()}>
-                  <Check className="mr-1 h-3 w-3" /> {t("comments.thread.closeWithReply")}
+                  <Check className="me-1 h-3 w-3" /> {t("comments.thread.closeWithReply")}
                 </Button>
               )}
               {canResolve && (
@@ -166,7 +167,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
         canResolve && (
           <div className="mt-2">
             <Button size="sm" variant="ghost" onClick={onReopen}>
-              <Undo2 className="mr-1 h-3 w-3" /> {t("comments.reopen")}
+              <Undo2 className="me-1 h-3 w-3" /> {t("comments.reopen")}
             </Button>
           </div>
         )

@@ -1,0 +1,52 @@
+{
+  "assign-modal": {
+    "hash": "eaee25b3ea7a604d99a9a50791bd9bbe08a38456387790bad97a6b607f65e6db",
+    "route": "/project/:projectId",
+    "capturedAt": "155f00725"
+  },
+  "audio-studio": {
+    "hash": "a47d4bb618a2a818bbb364947b4be50b7c6069e4d81606b70ea773c4117161bd",
+    "route": "/project/:projectId/voice",
+    "capturedAt": "155f00725"
+  },
+  "auth": {
+    "hash": "89d92ba04235b2385b5ceacd605dcc028035afcde1f47f5929ee581569db6dd7",
+    "route": "/login",
+    "capturedAt": "155f00725"
+  },
+  "cell-editor": {
+    "hash": "eb31a49f4e5df7a423a8eeb89a2d16d5eba6f047ecf3534db9e4dede7eda2ae6",
+    "route": "/project/:projectId",
+    "capturedAt": "155f00725"
+  },
+  "comments": {
+    "hash": "fbfeebd371597920df062f5d8be5fbb5449d7cb1117480a1ff2f5fc2ec512845",
+    "route": "/project/:projectId/comments",
+    "capturedAt": "155f00725"
+  },
+  "confirm-dialog": {
+    "hash": "b490c9863234d2f209fce3a32ac9d622ab159917f64034fdde6509d27c94706a",
+    "route": "/project/:projectId",
+    "capturedAt": "155f00725"
+  },
+  "editor-table": {
+    "hash": "046267eed5165125c0254813a7557c31ec990fed0cbf8906d2e276a0a41e906b",
+    "route": "/project/:projectId/editor",
+    "capturedAt": "155f00725"
+  },
+  "error-state": {
+    "hash": "7fb98ea4dda3a119af508edbe6c205c1d2e6b79e364c06a032a978718ac723fd",
+    "route": "/(any unmatched route)",
+    "capturedAt": "155f00725"
+  },
+  "search": {
+    "hash": "65259a10e2bf05aa08d02a75c79e548887299bab3d3c43beb33bd2049cdc8da1",
+    "route": "/project/:projectId",
+    "capturedAt": "155f00725"
+  },
+  "workspace-nav": {
+    "hash": "3c4c9d8a53953fcf0142b8819e6b194fc40ec4e435606aeb8dfc6a08d572cec6",
+    "route": "/project/:projectId",
+    "capturedAt": "155f00725"
+  }
+}

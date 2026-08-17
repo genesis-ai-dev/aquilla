@@ -56,6 +56,7 @@ export const SOURCE_ARTIFACT_FORMATS = {
   md: { extension: "md", contentType: "text/markdown; charset=utf-8", defaultFidelity: "content-only" },
   txt: { extension: "txt", contentType: "text/plain; charset=utf-8", defaultFidelity: "content-only" },
   html: { extension: "html", contentType: "text/html; charset=utf-8", defaultFidelity: "content-only" },
+  epub: { extension: "epub", contentType: "application/epub+zip", defaultFidelity: "content-only" },
   json: { extension: "json", contentType: "application/json; charset=utf-8", defaultFidelity: "content-only" },
   po: { extension: "po", contentType: "text/x-gettext-translation; charset=utf-8", defaultFidelity: "content-only" },
   properties: { extension: "properties", contentType: "text/plain; charset=utf-8", defaultFidelity: "content-only" },

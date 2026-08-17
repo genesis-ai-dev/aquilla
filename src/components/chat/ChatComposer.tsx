@@ -31,6 +31,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { ContextChipNode } from "@/lib/richtext/context-chip-node"
 import { serializeDocJSON, type ContextChip } from "@/lib/agent/context-chip"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface SuggestedAction {
   label: string
@@ -68,6 +69,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   { isStreaming, isConfigured, onSend, onStop, compact, suggestedActions, queueWhileStreaming, placeholder, attachmentBar, attachAction },
   ref,
 ) {
+  const t = useT()
   const [isEmpty, setIsEmpty] = useState(true)
 
   // Latest props for the view-driven send path (avoids stale closures in the
@@ -191,7 +193,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             {isEmpty && (
               <span
                 className={cn(
-                  "pointer-events-none absolute left-3 top-2 text-muted-foreground",
+                  "pointer-events-none absolute start-3 top-2 text-muted-foreground",
                   compact ? "text-xs" : "text-sm",
                 )}
                 aria-hidden
@@ -203,34 +205,34 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           <InputGroupAddon align="block-end">
             {attachAction}
             <InputGroupText className={cn(compact ? "text-[9px]" : "text-[10px]")}>
-              Enter to send · Shift+Enter for newline
+              {t("workspace.chatComposer.keyboardHint")}
             </InputGroupText>
             {isStreaming ? (
-              <span className="ml-auto flex items-center gap-1">
+              <span className="ms-auto flex items-center gap-1">
                 {queueWhileStreaming && (
-                  <AppTooltip content="Queue — sends when the current run finishes">
+                  <AppTooltip content={t("workspace.chatComposer.queueTooltip")}>
                     <InputGroupButton
                       type="button" variant="default" size="icon-sm" onClick={handleSendClick}
-                      disabled={isEmpty} aria-label="Queue message"
+                      disabled={isEmpty} aria-label={t("workspace.chatComposer.queueMessage")}
                     >
                       <ArrowUp />
                     </InputGroupButton>
                   </AppTooltip>
                 )}
-                <AppTooltip content="Stop">
+                <AppTooltip content={t("common.stop")}>
                   <InputGroupButton
                     type="button" variant="outline" size="icon-sm" onClick={onStop}
-                    aria-label="Stop"
+                    aria-label={t("common.stop")}
                   >
                     <Square />
                   </InputGroupButton>
                 </AppTooltip>
               </span>
             ) : (
-              <AppTooltip content="Send">
+              <AppTooltip content={t("autopilot.steering.send")}>
                 <InputGroupButton
                   type="button" variant="default" size="icon-sm" onClick={handleSendClick}
-                  disabled={isEmpty || !isConfigured} className="ml-auto" aria-label="Send"
+                  disabled={isEmpty || !isConfigured} className="ms-auto" aria-label={t("autopilot.steering.send")}
                 >
                   <ArrowUp />
                 </InputGroupButton>

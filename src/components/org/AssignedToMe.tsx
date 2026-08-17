@@ -16,6 +16,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { getMyAssignmentsForOrg, type MyOrgAssignment } from "@/lib/sync/assignments"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 function assignmentHref(a: MyOrgAssignment): string {
   const base = a.fileId
@@ -40,6 +41,7 @@ function progressPct(a: MyOrgAssignment): number {
  * shared admin table panel chrome.
  */
 export function AssignedToMe() {
+  const { t } = useI18n()
   const { activeOrgId } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -80,7 +82,9 @@ export function AssignedToMe() {
       {
         id: "assignment",
         accessorFn: (a) => a.scopeLabel.toLowerCase(),
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Assignment" />,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title={t("org.assignedToMe.assignmentColumnLabel")} />
+        ),
         meta: { className: "min-w-0 w-[42%]" },
         cell: ({ row }) => {
           const a = row.original
@@ -99,7 +103,7 @@ export function AssignedToMe() {
         id: "file",
         accessorFn: (a) => missingLast((a.fileName ?? "").toLowerCase()),
         sortUndefined: SORT_MISSING_LAST,
-        header: ({ column }) => <DataTableColumnHeader column={column} title="File" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.file")} />,
         meta: { className: "min-w-0 w-[28%]" },
         cell: ({ row }) => {
           const name = row.original.fileName
@@ -112,7 +116,7 @@ export function AssignedToMe() {
       {
         id: "project",
         accessorFn: (a) => a.projectName.toLowerCase(),
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Project" />,
+        header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.project")} />,
         meta: { className: "w-[8rem]" },
         cell: ({ row }) => (
           <div className="truncate text-muted-foreground">{row.original.projectName}</div>
@@ -122,7 +126,7 @@ export function AssignedToMe() {
         id: "progress",
         accessorFn: (a) => (a.cellsTotal > 0 ? a.cellsDone / a.cellsTotal : 0),
         header: ({ column }) => (
-          <DataTableColumnHeader column={column} title="Progress" className="justify-end" />
+          <DataTableColumnHeader column={column} title={t("fileDetails.progress")} className="justify-end" />
         ),
         meta: { className: "w-[11rem]" },
         cell: ({ row }) => {
@@ -134,7 +138,7 @@ export function AssignedToMe() {
                 <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
               </div>
               <span className="text-xs tabular-nums text-muted-foreground">
-                {a.cellsDone}/{a.cellsTotal} cells · {pct}%
+                {t("org.assignedToMe.cellsProgress", { done: a.cellsDone, total: a.cellsTotal, pct })}
               </span>
             </div>
           )
@@ -144,18 +148,20 @@ export function AssignedToMe() {
         id: "deadline",
         accessorFn: (a) => missingLast(a.deadline),
         sortUndefined: SORT_MISSING_LAST,
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Due" />,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title={t("org.assignedToMe.dueColumnLabel")} />
+        ),
         meta: { className: "w-[7rem]" },
         cell: ({ row }) => (
           <DateTooltip
             value={row.original.deadline}
-            label="Due"
+            label={t("org.assignedToMe.dueColumnLabel")}
             className="text-muted-foreground"
           />
         ),
       },
     ],
-    [],
+    [t],
   )
 
   return (
@@ -168,16 +174,16 @@ export function AssignedToMe() {
         // data-testid kept on the Page scroll root for the existing scroll helper.
         <Page size="wide" data-testid="assigned-to-me-scroll" className="overscroll-contain">
           <PageHeader
-            title="Assigned to me"
-            description="Open work assigned to you across this organization's projects."
+            title={t("editor.navTitle.assignedToMe")}
+            description={t("org.assignedToMe.pageDescription")}
             inset={false}
           />
 
           {activeOrgId == null ? (
             <EmptyState
               icon={Building2}
-              title="Select an organization"
-              description="Assignments are scoped to a single organization."
+              title={t("org.teamsList.selectOrgTitle")}
+              description={t("org.assignedToMe.selectOrgDescription")}
             />
           ) : loading ? (
             <div className="h-48 animate-pulse rounded-lg border bg-card" />
@@ -212,8 +218,8 @@ export function AssignedToMe() {
                       variant="inline"
                       className="flex-none py-12"
                       icon={NAV_PAGE_ICONS.assigned}
-                      title="You have no open assignments."
-                      description="When a manager assigns you a book or chapter, it will show up here."
+                      title={t("org.assignedToMe.emptyTitle")}
+                      description={t("org.assignedToMe.noOpenAssignmentsDescription")}
                     />
                   )
                 }
@@ -223,20 +229,20 @@ export function AssignedToMe() {
                       variant="inline"
                       className="flex-none py-12"
                       icon={NAV_PAGE_ICONS.assigned}
-                      title="No assignments match your filters"
+                      title={t("org.assignedToMe.noAssignmentsMatchFilters")}
                     />
                   )
                 }
                 return (
                   <div className="flex flex-col items-center gap-3 py-10">
                     <p className="text-center text-sm text-muted-foreground">
-                      No assignments match your search.
+                      {t("org.assignedToMe.noAssignmentsMatchSearch")}
                     </p>
                     <Button
                       variant="outline"
                       onClick={() => table.setGlobalFilter("")}
                     >
-                      Clear
+                      {t("common.clear")}
                     </Button>
                   </div>
                 )

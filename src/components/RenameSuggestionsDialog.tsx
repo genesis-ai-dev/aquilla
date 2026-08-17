@@ -6,6 +6,7 @@ import {
 } from "@/components/ui/dialog"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import type { RenameSuggestion } from "@/lib/file-labeling/detect"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   open: boolean
@@ -15,6 +16,7 @@ interface Props {
 }
 
 export function RenameSuggestionsDialog({ open, onOpenChange, suggestions, onApply }: Props) {
+  const { t } = useI18n()
   const [checked, setChecked] = useState<Set<string>>(new Set())
   useEffect(() => {
     if (open) setChecked(new Set(suggestions.map((s) => s.fileId)))
@@ -35,7 +37,7 @@ export function RenameSuggestionsDialog({ open, onOpenChange, suggestions, onApp
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>Review suggested names</DialogTitle>
+          <DialogTitle>{t("terminology.renameSuggestions.title")}</DialogTitle>
         </DialogHeader>
         <ScrollArea className="max-h-80">
           <ul className="space-y-1 py-2">
@@ -54,7 +56,10 @@ export function RenameSuggestionsDialog({ open, onOpenChange, suggestions, onApp
                   </div>
                   {s.suggestedCorpus && s.suggestedCorpus !== s.currentCorpus && (
                     <div className="text-xs text-muted-foreground">
-                      Corpus: {s.currentCorpus ?? "—"} → {s.suggestedCorpus}
+                      {t("terminology.renameSuggestions.corpusChange", {
+                        current: s.currentCorpus ?? "—",
+                        suggested: s.suggestedCorpus,
+                      })}
                     </div>
                   )}
                 </div>
@@ -63,12 +68,12 @@ export function RenameSuggestionsDialog({ open, onOpenChange, suggestions, onApp
           </ul>
         </ScrollArea>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>{t("common.cancel")}</Button>
           <Button
             disabled={chosen.length === 0}
             onClick={() => { onApply(chosen); onOpenChange(false) }}
           >
-            Apply {chosen.length} change{chosen.length === 1 ? "" : "s"}
+            {t("terminology.renameSuggestions.applyButton", { count: chosen.length })}
           </Button>
         </DialogFooter>
       </DialogContent>

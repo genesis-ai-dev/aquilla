@@ -7,6 +7,7 @@
 // AiModelConsentDialog mounted at the app root subscribes and renders.
 
 import { useSyncExternalStore } from "react"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 export class AiModelConsentDeniedError extends Error {
   readonly modelId: string
@@ -20,11 +21,15 @@ export class AiModelConsentDeniedError extends Error {
 export interface AiModelInfo {
   /** Stable id used for the localStorage key. */
   id: "whisper" | "kokoro" | "mms"
-  /** Display name in the dialog. */
-  label: string
+  /** MessageKey for the display name shown in the dialog — this table is
+   *  module scope, so `t()` (locale-frozen-at-import) can't be called here;
+   *  resolve with `t(model.labelKey)` at the render site instead. */
+  labelKey: MessageKey
   /** Approximate download size in MB (one-time). */
   sizeMb: number
-  /** Short user-facing rationale. */
+  /** Short user-facing rationale. Not yet keyed — out of this pass's scope
+   *  (the i18n scan's TRANSLATABLE_PROP_NAMES list doesn't include
+   *  `rationale`, so it wasn't flagged; still genuinely untranslated). */
   rationale: string
 }
 
@@ -124,7 +129,7 @@ export function usePendingAiConsent(): PendingRequest | null {
 
 export const WHISPER_MODEL: AiModelInfo = {
   id: "whisper",
-  label: "Whisper (transcription)",
+  labelKey: "audio.consent.whisperLabel",
   sizeMb: 140,
   rationale:
     "Powers automatic word-level timing of recordings so you can scrub and karaoke playback. Runs entirely in your browser — recordings never leave your device.",
@@ -132,7 +137,7 @@ export const WHISPER_MODEL: AiModelInfo = {
 
 export const KOKORO_MODEL: AiModelInfo = {
   id: "kokoro",
-  label: "Kokoro (text-to-speech)",
+  labelKey: "audio.consent.kokoroLabel",
   sizeMb: 80,
   rationale:
     "Generates a clean voice rendering of cell text. Runs entirely in your browser — your text isn't sent to any server.",
@@ -140,7 +145,7 @@ export const KOKORO_MODEL: AiModelInfo = {
 
 export const MMS_MODEL: AiModelInfo = {
   id: "mms",
-  label: "MMS (multilingual TTS)",
+  labelKey: "audio.consent.mmsLabel",
   sizeMb: 130,
   rationale:
     "Meta's MMS-TTS runs in your browser from browser-ready ONNX language models. Each language is downloaded the first time you use it.",

@@ -9,6 +9,7 @@
 import { isVisible } from "@/lib/timeline/scale"
 import { subtitleSpanSec } from "@/lib/timeline/lane-timing"
 import { TimelineCard } from "./TimelineCard"
+import type { SelectMods } from "./selection"
 import type { TimelineLayout } from "@/lib/timeline/layout"
 import type { CellData } from "@/hooks/useCells"
 
@@ -23,12 +24,14 @@ export interface TimelineLaneProps {
   viewStartSec: number
   viewEndSec: number
   selectedId: string | null
+  /** AQU-928: the rest of the section selection (batch scope), primary aside. */
+  multiSelectedIds?: ReadonlySet<string>
   editable: boolean
   /** Round 6: whether cards in this lane may be retimed at all. */
   retimable: boolean
   /** Round 6: edge snapping on/off (candidates are computed here). */
   snapEnabled?: boolean
-  onSelect(id: string): void
+  onSelect(id: string, mods?: SelectMods): void
   onRetime(id: string, startSec: number, endSec: number): void
   /** AQU-646: clean click on a card navigates playback to it. */
   onSeek?(id: string): void
@@ -42,6 +45,7 @@ export function TimelineLane({
   viewStartSec,
   viewEndSec,
   selectedId,
+  multiSelectedIds,
   editable,
   retimable,
   snapEnabled,
@@ -95,6 +99,7 @@ export function TimelineLane({
           laneStartSec={0}
           variant={variant}
           selected={selectedId === c.id}
+          multiSelected={multiSelectedIds?.has(c.id)}
           editable={editable}
           retimable={retimable}
           span={spanOf(c)}

@@ -5133,6 +5133,42 @@ export function ProjectWorkspace() {
     [legacyCells, workspaceAudioByCellId],
   )
 
+  // AQU-928: transcribe EXACTLY the sections selected on the timeline. Same
+  // per-cell path (and same post-run flush/revalidate) as transcribe-all, only
+  // the cell list is the user's selection instead of the whole file — so the
+  // per-section trim scope from AQU-782 is honoured for free. `force` because
+  // the user named these sections: an existing transcript is a re-run, not a
+  // no-op, which is how the per-cell Transcribe button already behaves.
+  const handleTranscribeSections = useCallback(
+    (cellIds: string[]) => {
+      if (!activeFileId || !project || cellIds.length === 0) return
+      const wanted = new Set(cellIds)
+      const cells = audioMergedCells.filter((c) => wanted.has(c.id))
+      if (cells.length === 0) return
+      const fileId = activeFileId
+      void (async () => {
+        await runBatchTranscribeAll({
+          cells,
+          projectId: project.id,
+          session: frontierSession ?? null,
+          sourceLanguage: project.sourceLanguage,
+          targetLanguage: project.targetLanguage,
+          force: true,
+        })
+        // AQU-783: the batch enqueues one cell.audio.attach per cell but never
+        // revalidates — without this the transcripts only surface on reload.
+        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        await refreshOutboxPending()
+        revalidateCells()
+        notifyAudioAttachmentsChanged(fileId)
+      })()
+    },
+    [
+      activeFileId, project, audioMergedCells, frontierSession,
+      getTokenForProjectFile, refreshOutboxPending, revalidateCells,
+    ],
+  )
+
   // AQU-646 SUB-53 / pre-merge round: which job THIS FILE is for. The mode is
   // file-level (files.meta via file.timing.set); a file with no mode of its
   // own inherits the legacy project-level value (so projects that chose Free
@@ -6619,6 +6655,10 @@ export function ProjectWorkspace() {
                     onOpenRecording={handleOpenRecording}
                     project={editorProject ?? project ?? undefined}
                     onSelectCell={setTimelineSelectedCellId}
+                    // AQU-928: transcription emits contributor-level events, so
+                    // a viewer/reviewer must not be offered the row at all —
+                    // the same gate `legacyMeasure` uses below.
+                    onTranscribeSections={isReadOnly ? undefined : handleTranscribeSections}
                     session={frontierSession ?? null}
                     audioByCellId={timelineAudioByCellId}
                     legacyMeasure={

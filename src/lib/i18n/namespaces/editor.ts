@@ -616,6 +616,29 @@ export const editor = defineNamespace({
     "editor.timeline.measureBusyTooltip": "Another batch is running — wait for it to finish.",
     "editor.timeline.measureDismiss": "Dismiss for now",
 
+    // — Section-scoped transcription (AQU-928) ————————————————————
+    "editor.timeline.transcribeSelectionEmpty": "No section selected",
+    "editor.timeline.transcribeSelectionCount": plural({
+      one: "{count} section selected",
+      other: "{count} sections selected",
+    }),
+    "editor.timeline.transcribeSelectionActionOne": "Transcribe section",
+    "editor.timeline.transcribeSelectionActionMany": plural({
+      one: "Transcribe {count} section",
+      other: "Transcribe {count} sections",
+    }),
+    "editor.timeline.transcribeSelectionClear": "Clear selection",
+    "editor.timeline.transcribeSelectionHint":
+      "Ctrl/⌘-click or Shift-click chips to select more sections.",
+    "editor.timeline.transcribeSelectionTooltip":
+      "Run speech-to-text on the selected sections' audio only — the rest of the file is left alone.",
+    "editor.timeline.transcribeSelectionEmptyTooltip":
+      "Click a chip on the timeline to pick a section, then transcribe just that section.",
+    "editor.timeline.transcribeSelectionNoAudioTooltip":
+      "None of the selected sections has audio to transcribe.",
+    "editor.timeline.transcribeSelectionBusyTooltip":
+      "Another audio batch is running — wait for it to finish.",
+
     // — Per-cell voice panel (audio lens) ————————————————————————
     "editor.voice.volumeLevel": "Volume level",
     "editor.voice.translateFirst": "Translate to voice this line",
@@ -3071,6 +3094,30 @@ export const editor = defineNamespace({
           "Accessible name of the small X that hides the measure notice for this " +
           "visit. 'For now' is deliberate: the notice returns next time the timeline " +
           "opens while unmeasured recordings remain. Never visible.",
+      },
+      "editor.timeline.transcribeSelectionCount": {
+        description:
+          "Read-out on the timeline's transcribe row, stating how many sections the " +
+          "user has picked on the lanes. It is the confirmation that transcribing is " +
+          "about to run on a chosen subset rather than the whole file, so the number " +
+          "carries the meaning — keep it in the string.",
+        placeholders: {
+          count:
+            "How many timeline sections are currently selected; it also selects " +
+            "which plural form is used. Never zero — a separate string covers that.",
+        },
+      },
+      "editor.timeline.transcribeSelectionActionMany": {
+        description:
+          "Label of the transcribe button on that row when more than one section is " +
+          "selected, so the count tells the user how much work the click starts. " +
+          "Imperative. A separate string covers the single-section label.",
+        maxLength: 28,
+        placeholders: {
+          count:
+            "How many selected sections have audio and will actually be " +
+            "transcribed; it also selects which plural form is used.",
+        },
       },
       "editor.timeline.laneUntimed": {
         description:

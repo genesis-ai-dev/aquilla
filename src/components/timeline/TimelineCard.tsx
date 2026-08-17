@@ -16,6 +16,7 @@ import { secToPx, pxToSec, clampRange } from "@/lib/timeline/scale"
 import { subtitleMirrorText } from "@/lib/timeline/lanes"
 import { subtitleSpanSec } from "@/lib/timeline/lane-timing"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
+import { readSelectMods, type SelectMods } from "./selection"
 import { fmtClock } from "./format"
 import { formatVttTime } from "@/lib/video/vtt-generator"
 import type { CellData } from "@/hooks/useCells"
@@ -39,6 +40,10 @@ export interface TimelineCardProps {
   laneStartSec: number
   variant: "subtitle" | "dialogue"
   selected: boolean
+  /** AQU-928: in the selection, but not the primary chip — a batch-scope
+   *  member. Rung more lightly so "the chip the strip describes" stays
+   *  visually distinct from "also selected". */
+  multiSelected?: boolean
   editable: boolean
   /** Round 6: whether this LANE allows retiming at all (the source row never
    *  does — its split is frozen at import). */
@@ -48,7 +53,9 @@ export interface TimelineCardProps {
   /** SUB-53: where this card sits, resolved by the lane's layout. Absent falls
    *  back to the pre-SUB-53 computation (the dubbing answer). */
   span?: { start: number; end: number }
-  onSelect(cellId: string): void
+  /** AQU-928: `mods` is undefined for a plain click (which also seeks) and set
+   *  when a modifier made this a selection-building gesture. */
+  onSelect(cellId: string, mods?: SelectMods): void
   /** Final bounds in seconds, fired once on pointer-up. */
   onRetime(cellId: string, startSec: number, endSec: number): void
   /** AQU-646: navigate playback to this clip on a CLEAN click (a drag that
@@ -63,6 +70,7 @@ export function TimelineCard({
   laneStartSec,
   variant,
   selected,
+  multiSelected,
   editable,
   retimable,
   snap,
@@ -186,12 +194,21 @@ export function TimelineCard({
       // Space on a just-clicked card toggles the transport (playback-keys
       // honors this opt-in) — a card's activation is selection, already done.
       data-spacebar-transport=""
-      onClick={() => {
-        onSelect(cell.id)
-        if (!movedRef.current) onSeek?.(cell.id)
+      data-multi-selected={multiSelected ? "" : undefined}
+      onClick={(e) => {
+        // AQU-928: a modified click BUILDS a selection — it must not also yank
+        // playback to this clip, which is what makes multi-select usable.
+        const mods = readSelectMods(e)
+        onSelect(cell.id, mods)
+        if (!movedRef.current && !mods) onSeek?.(cell.id)
         movedRef.current = false
       }}
-      onPointerDown={(e) => beginDrag("move", e)}
+      onPointerDown={(e) => {
+        // …and must not start a retime drag either, or ⌘-clicking a subtitle
+        // card would nudge its span.
+        if (readSelectMods(e)) return
+        beginDrag("move", e)
+      }}
       className={cn(
         "group absolute top-2.5 flex h-[46px] touch-none select-none flex-col justify-center gap-0.5 rounded-lg border px-2.5 transition-colors",
         // SUB-11: the drag chip renders above the card bounds, so overflow can't
@@ -201,7 +218,10 @@ export function TimelineCard({
           ? "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-200"
           : "border-border bg-card text-foreground",
         selected && "z-10 ring-2 ring-sky-500 ring-offset-1 ring-offset-background",
-        !selected && !drag && "hover:z-10 hover:bg-muted/30",
+        // AQU-928: no ring-offset — the lighter, flush ring reads as "also in
+        // the selection" next to the primary's offset one.
+        !selected && multiSelected && "z-10 ring-2 ring-sky-400/80",
+        !selected && !multiSelected && !drag && "hover:z-10 hover:bg-muted/30",
       )}
       style={{ left: `${left}px`, width: `${width}px` }}
     >

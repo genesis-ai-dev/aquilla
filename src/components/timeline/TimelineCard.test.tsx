@@ -37,7 +37,29 @@ describe("TimelineCard", () => {
     const onSelect = vi.fn()
     render(<TimelineCard cell={cell()} {...base} onSelect={onSelect} onRetime={() => {}} />)
     fireEvent.click(screen.getByTestId("tl-card-c1"))
-    expect(onSelect).toHaveBeenCalledWith("c1")
+    // AQU-928: a PLAIN click reports no modifiers — that undefined is what
+    // tells the editor this click may also seek.
+    expect(onSelect).toHaveBeenCalledWith("c1", undefined)
+  })
+
+  // AQU-928: a modified click is a selection-building gesture, so it must not
+  // also drag the playhead to the clip.
+  it("reports the modifier and suppresses the seek on a ⌘/Ctrl-click", () => {
+    const onSeek = vi.fn()
+    const onSelect = vi.fn()
+    render(<TimelineCard cell={cell()} {...base} onSelect={onSelect} onRetime={() => {}} onSeek={onSeek} />)
+    fireEvent.click(screen.getByTestId("tl-card-c1"), { metaKey: true })
+    expect(onSelect).toHaveBeenCalledWith("c1", { toggle: true })
+    expect(onSeek).not.toHaveBeenCalled()
+  })
+
+  it("reports a range on a Shift-click, and still does not seek", () => {
+    const onSeek = vi.fn()
+    const onSelect = vi.fn()
+    render(<TimelineCard cell={cell()} {...base} onSelect={onSelect} onRetime={() => {}} onSeek={onSeek} />)
+    fireEvent.click(screen.getByTestId("tl-card-c1"), { shiftKey: true })
+    expect(onSelect).toHaveBeenCalledWith("c1", { range: true })
+    expect(onSeek).not.toHaveBeenCalled()
   })
 
   it("emits moved bounds after dragging the body (subtitle lane)", () => {
@@ -186,7 +208,7 @@ describe("TimelineCard", () => {
     render(<TimelineCard cell={cell()} {...base} onSelect={onSelect} onRetime={() => {}} onSeek={onSeek} />)
     fireEvent.click(screen.getByTestId("tl-card-c1"))
     expect(onSeek).toHaveBeenCalledWith("c1")
-    expect(onSelect).toHaveBeenCalledWith("c1")
+    expect(onSelect).toHaveBeenCalledWith("c1", undefined)
   })
 
   it("suppresses onSeek after a drag (>3px), while the retime still commits", () => {

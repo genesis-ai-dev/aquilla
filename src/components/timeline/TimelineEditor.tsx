@@ -23,13 +23,15 @@ import { activeTargetForCell } from "@/lib/audio/track-audio"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { setAudioQualityPref, useAudioQualityPref } from "@/lib/store/audio-quality-pref"
-import { useBatchProgress } from "@/lib/audio/batch-audio"
+import { useBatchProgress, canTranscribeCell } from "@/lib/audio/batch-audio"
 import { useOnline } from "@/hooks/useOnline"
 import { TimelineRuler } from "./TimelineRuler"
 import { TimelineLane } from "./TimelineLane"
 import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
 import { TimelinePlayhead } from "./TimelinePlayhead"
 import { TimelineChipStrip } from "./TimelineChipStrip"
+import { TimelineTranscribeBar } from "./TimelineTranscribeBar"
+import { applySelect, selectedIdsInOrder, type SelectMods } from "./selection"
 import { useTimelineClock } from "./useTimelineClock"
 import { resolveEntryAudio, useClipAudioMissing } from "./useClipAudioMissing"
 import type { CellData } from "@/hooks/useCells"
@@ -94,6 +96,11 @@ export interface TimelineEditorProps {
   /** Fires when the highlighted section changes so a sibling transport (the
    *  bottom playback bar) can start playback from the selected section. */
   onSelectCell?(cellId: string | null): void
+  /** AQU-928: run transcription over exactly these sections. Present = the
+   *  media view shows its section-scoped transcribe row; absent (read-only
+   *  users, focused unit tests) = no row at all, since the run would emit
+   *  events the server would reject. */
+  onTranscribeSections?(cellIds: string[]): void
   /** Session for the missing-audio probe that badges a selected clip whose
    *  recording is permanently gone. Absent (focused unit tests) → no probe. */
   session?: FrontierSession | null
@@ -220,6 +227,7 @@ export function TimelineEditor({
   onChangeTimingMode,
   project,
   onSelectCell,
+  onTranscribeSections,
   session,
   audioByCellId,
   legacyMeasure,
@@ -242,6 +250,10 @@ export function TimelineEditor({
   // Seeded by the text→media trace (AQU-646 round 3): the seed alone opens
   // the detail pane and rings the card.
   const [selectedId, setSelectedId] = useState<string | null>(() => initialSelectedCellId ?? null)
+  // AQU-928: the sections selected ALONGSIDE the primary chip — purely a batch
+  // scope for the transcribe row. Every rule about how a click changes this
+  // lives in `applySelect`; this component only stores the two halves.
+  const [extraIds, setExtraIds] = useState<readonly string[]>([])
   const [scrollLeft, setScrollLeft] = useState(0)
   const [viewportPx, setViewportPx] = useState(0)
   const [follow, setFollow] = useState(true)
@@ -259,6 +271,9 @@ export function TimelineEditor({
   const queueState = useQueueState()
   const queueProgress = useQueueProgress()
   const cellIdSet = useMemo(() => new Set(cells.map((c) => c.id)), [cells])
+  // AQU-928: what "from here to there" means for a Shift-click — the file's own
+  // cell order, i.e. the order the text table below shows, not lane order.
+  const orderedIds = useMemo(() => cells.map((c) => c.id), [cells])
   const queueActive =
     (queueState.kind === "playing" || queueState.kind === "paused" || queueState.kind === "loading") &&
     cellIdSet.has(queueState.cellId)
@@ -724,6 +739,8 @@ export function TimelineEditor({
   useEffect(() => {
     if (!activateRequest) return
     setSelectedId(activateRequest.cellId)
+    // AQU-928: a row click is a plain selection, so it replaces the batch scope.
+    setExtraIds([])
     centerAndCue(activateRequest.cellId)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consumed per nonce
   }, [activateRequest?.nonce])
@@ -757,10 +774,36 @@ export function TimelineEditor({
   // 2026-08-07 (wire a): USER chip selection — as opposed to programmatic
   // selection from a row click — also notifies the workspace so the text
   // table scrolls to and flashes the matching row.
-  const selectFromChip = (cellId: string) => {
-    setSelectedId(cellId)
-    onChipActivated?.(cellId)
+  const selectFromChip = (cellId: string, mods?: SelectMods) => {
+    const next = applySelect({ primaryId: selectedId, extraIds }, cellId, mods, orderedIds)
+    setSelectedId(next.primaryId)
+    setExtraIds(next.extraIds)
+    // AQU-928: only a PLAIN click is a navigation — a modified one is building
+    // a batch scope, and scroll-yanking the text table on each ⌘-click would
+    // make picking a handful of sections unusable.
+    if (!mods) onChipActivated?.(cellId)
   }
+
+  // AQU-928: the batch scope the transcribe row acts on. `selectedIdsInOrder`
+  // is strict about `orderedIds`, so a section that left the file (file switch,
+  // deletion) drops out of the scope instead of lingering invisibly.
+  const selectedIds = useMemo(
+    () => selectedIdsInOrder({ primaryId: selectedId, extraIds }, orderedIds),
+    [selectedId, extraIds, orderedIds],
+  )
+  const multiSelectedIds = useMemo(
+    () => new Set(selectedIds.filter((id) => id !== selectedId)),
+    [selectedIds, selectedId],
+  )
+  // Only sections with audio can be transcribed; the row reports the shortfall
+  // rather than silently running over a smaller set than the user selected.
+  const transcribeTargetIds = useMemo(
+    () => selectedIds.filter((id) => {
+      const cell = cells.find((c) => c.id === id)
+      return cell ? canTranscribeCell(cell) : false
+    }),
+    [selectedIds, cells],
+  )
 
   const laneProps = {
     layout,
@@ -768,6 +811,7 @@ export function TimelineEditor({
     viewStartSec,
     viewEndSec,
     selectedId,
+    multiSelectedIds,
     editable,
     onSelect: selectFromChip,
     onRetime: onRetimeSubtitle,
@@ -1111,6 +1155,20 @@ export function TimelineEditor({
         </div>
       </div>
 
+      {/* AQU-928: the section-scoped transcribe row. Above the chip strip so the
+          strip stays adjacent to the text table it portals its nav into. */}
+      {onTranscribeSections && (
+        <TimelineTranscribeBar
+          selectedCount={selectedIds.length}
+          eligibleCount={transcribeTargetIds.length}
+          busy={batchProgress != null}
+          onTranscribe={() => onTranscribeSections(transcribeTargetIds)}
+          onClear={() => {
+            setSelectedId(null)
+            setExtraIds([])
+          }}
+        />
+      )}
       <TimelineChipStrip cell={currentCell} chipStats={currentChipStats} audioMissing={audioMissing} />
     </div>
   )

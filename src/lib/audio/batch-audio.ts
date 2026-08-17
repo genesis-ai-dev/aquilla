@@ -139,6 +139,20 @@ export interface TranscribeAllArgs {
   targetLanguage?: string
   /** @deprecated single-language callers; used as targetLanguage fallback. */
   language?: string
+  /** AQU-928: run every cell that HAS audio, not just the ones missing a
+   *  transcript. For an explicitly chosen scope — the sections the user
+   *  selected on the timeline — "already transcribed" is not a reason to do
+   *  nothing; re-running is exactly what the per-cell Transcribe button does.
+   *  In-flight cells are still skipped. Never set for transcribe-all, which
+   *  is a fill-in-the-gaps pass over the whole file. */
+  force?: boolean
+}
+
+/** AQU-928: is there any audio on this cell to run ASR over? The first gate of
+ *  `needsTranscription`, split out because a forced (user-selected) run needs
+ *  this half of the predicate without the "is it missing" half. */
+export function canTranscribeCell(c: CellData): c is CellData & { selectedAudioId: string } {
+  return Boolean(c.selectedAudioId)
 }
 
 /**
@@ -147,7 +161,7 @@ export interface TranscribeAllArgs {
  * for that recording. Shared by runTranscribeAll and the workspace menu count.
  */
 export function needsTranscription(c: CellData): boolean {
-  if (!c.selectedAudioId) return false
+  if (!canTranscribeCell(c)) return false
   // SUB-29: the source-vs-take split is attachment PROVENANCE, not cell
   // medium — a dub take recorded onto a media section follows the take rule.
   if (isSourceSegmentSelected(c)) return !c.transcription?.trim()
@@ -174,7 +188,10 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
   const targetLang = args.targetLanguage ?? args.language
 
   const targets = cells.filter((c) => {
-    if (!needsTranscription(c)) return false
+    // AQU-928: a forced run keeps only the "has audio" half of the gate — the
+    // caller already decided WHICH cells; re-transcribing one that has a
+    // transcript is the point.
+    if (args.force ? !canTranscribeCell(c) : !needsTranscription(c)) return false
     // Skip cells already being transcribed.
     const st = getTranscribeStatus(c.selectedAudioId!)
     if (st.kind === "loading" || st.kind === "transcribing") return false

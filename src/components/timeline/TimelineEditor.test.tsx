@@ -815,3 +815,133 @@ describe("TimelineEditor — audio-first mode", () => {
     expect(screen.getByTestId("tl-snap-toggle")).toBeInTheDocument()
   })
 })
+
+// AQU-928: transcribing a section used to mean finding a Transcribe button
+// inside one clip's expanded audio panel in the table below — so the only
+// discoverable action was "transcribe everything". The timeline now carries a
+// visible, selection-scoped transcribe row, and a chip click can build that
+// selection with a modifier.
+describe("TimelineEditor — section-scoped transcription (AQU-928)", () => {
+  beforeEach(() => { topOwner.value = 1 })
+
+  // Three media sections, each with its own source clip, plus one section with
+  // no recording at all (nothing to transcribe).
+  const sections = () => [
+    cell({ id: "d1", original: "one", medium: "media", startTime: 0, endTime: 2, selectedAudioId: "f1-a1" }),
+    cell({ id: "d2", original: "two", medium: "media", startTime: 2, endTime: 4, selectedAudioId: "f1-a2" }),
+    cell({ id: "d3", original: "three", medium: "media", startTime: 4, endTime: 6, selectedAudioId: "f1-a3" }),
+    cell({ id: "d4", original: "four", medium: "media", startTime: 6, endTime: 8 }),
+  ]
+
+  const renderBar = (over: Partial<React.ComponentProps<typeof TimelineEditor>> = {}) => {
+    const onTranscribeSections = vi.fn()
+    const view = render(
+      <TimelineEditor
+        fileId="f1"
+        coreMediaUrl={null}
+        editable
+        cells={sections()}
+        onRetimeSubtitle={() => {}}
+        onTranscribeSections={onTranscribeSections}
+        {...over}
+      />,
+    )
+    return { ...view, onTranscribeSections }
+  }
+
+  const dialogueCard = (container: HTMLElement, id: string) =>
+    container.querySelector(`[data-variant="dialogue"] [data-testid="tl-card-${id}"]`)! as HTMLElement
+
+  it("shows the transcribe row in the media view without opening any detail pane", () => {
+    renderBar()
+    expect(screen.getByTestId("tl-transcribe-bar")).toBeInTheDocument()
+    expect(screen.getByTestId("tl-transcribe-count")).toHaveTextContent("No section selected")
+  })
+
+  // The gate is "don't pass the callback" — a read-only user is not offered a
+  // run whose events the server would reject.
+  it("omits the row entirely when transcription is not offered", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={sections()} onRetimeSubtitle={() => {}}
+      />,
+    )
+    expect(screen.queryByTestId("tl-transcribe-bar")).toBeNull()
+  })
+
+  it("a plain chip click arms the row for exactly that one section", () => {
+    const { container, onTranscribeSections } = renderBar()
+    fireEvent.click(dialogueCard(container, "d2"))
+    expect(screen.getByTestId("tl-transcribe-count")).toHaveTextContent("1 section selected")
+    expect(screen.getByTestId("tl-transcribe-selection")).toHaveTextContent("Transcribe section")
+    fireEvent.click(screen.getByTestId("tl-transcribe-selection"))
+    expect(onTranscribeSections).toHaveBeenCalledWith(["d2"])
+  })
+
+  it("⌘-click adds sections, and transcribes exactly those — not the whole file", () => {
+    const { container, onTranscribeSections } = renderBar()
+    fireEvent.click(dialogueCard(container, "d1"))
+    fireEvent.click(dialogueCard(container, "d3"), { metaKey: true })
+    expect(screen.getByTestId("tl-transcribe-count")).toHaveTextContent("2 sections selected")
+    expect(screen.getByTestId("tl-transcribe-selection")).toHaveTextContent("Transcribe 2 sections")
+    fireEvent.click(screen.getByTestId("tl-transcribe-selection"))
+    expect(onTranscribeSections).toHaveBeenCalledWith(["d1", "d3"])
+  })
+
+  it("Shift-click selects the range between the anchor and the clicked chip", () => {
+    const { container, onTranscribeSections } = renderBar()
+    fireEvent.click(dialogueCard(container, "d1"))
+    fireEvent.click(dialogueCard(container, "d3"), { shiftKey: true })
+    fireEvent.click(screen.getByTestId("tl-transcribe-selection"))
+    expect(onTranscribeSections).toHaveBeenCalledWith(["d1", "d2", "d3"])
+  })
+
+  it("a ⌘-click builds the selection WITHOUT yanking playback or the text table", () => {
+    const onSeekToTime = vi.fn()
+    const onChipActivated = vi.fn()
+    const { container } = renderBar({ onSeekToTime, onChipActivated })
+    fireEvent.click(dialogueCard(container, "d1"))
+    expect(onChipActivated).toHaveBeenCalledTimes(1)
+    onSeekToTime.mockClear()
+    onChipActivated.mockClear()
+    fireEvent.click(dialogueCard(container, "d3"), { metaKey: true })
+    expect(onChipActivated).not.toHaveBeenCalled()
+    expect(onSeekToTime).not.toHaveBeenCalled()
+  })
+
+  it("rings the extra sections distinctly from the primary chip", () => {
+    const { container } = renderBar()
+    fireEvent.click(dialogueCard(container, "d1"))
+    fireEvent.click(dialogueCard(container, "d3"), { metaKey: true })
+    expect(dialogueCard(container, "d1")).not.toHaveAttribute("data-multi-selected")
+    expect(dialogueCard(container, "d3")).toHaveAttribute("data-multi-selected")
+  })
+
+  it("counts a section with no recording as selected but not transcribable", () => {
+    const { container, onTranscribeSections } = renderBar()
+    fireEvent.click(dialogueCard(container, "d1"))
+    fireEvent.click(dialogueCard(container, "d4"), { metaKey: true })
+    expect(screen.getByTestId("tl-transcribe-count")).toHaveTextContent("2 sections selected")
+    // The button promises only the work that can actually run.
+    expect(screen.getByTestId("tl-transcribe-selection")).toHaveTextContent("Transcribe section")
+    fireEvent.click(screen.getByTestId("tl-transcribe-selection"))
+    expect(onTranscribeSections).toHaveBeenCalledWith(["d1"])
+  })
+
+  it("⌘-clicking the primary chip hands the strip to the next selected section", () => {
+    const { container } = renderBar()
+    fireEvent.click(dialogueCard(container, "d1"))
+    fireEvent.click(dialogueCard(container, "d3"), { metaKey: true })
+    fireEvent.click(dialogueCard(container, "d1"), { metaKey: true })
+    expect(screen.getByTestId("tl-transcribe-count")).toHaveTextContent("1 section selected")
+    expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "d3")
+  })
+
+  it("Clear selection empties the scope and disables the run", () => {
+    const { container } = renderBar()
+    fireEvent.click(dialogueCard(container, "d1"))
+    fireEvent.click(screen.getByTestId("tl-transcribe-clear"))
+    expect(screen.getByTestId("tl-transcribe-count")).toHaveTextContent("No section selected")
+    expect(screen.getByTestId("tl-transcribe-selection")).toBeDisabled()
+  })
+})

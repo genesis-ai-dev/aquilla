@@ -127,6 +127,9 @@ export const audio = defineNamespace({
     "audio.takesStrip.renameTooltip": "Rename take",
     "audio.takesStrip.unknownLengthTooltip": "Length unknown — re-record or re-upload to fix",
     "audio.takesStrip.pendingSyncTooltip": "Saving — kept safe on this device until it syncs",
+    "audio.takesStrip.syncFailedTooltip":
+      "Couldn't save to the server — this take is still on this device. Retry to send it again.",
+    "audio.takesStrip.syncFailedRetry": "Not saved — retry",
     "audio.takesStrip.playTakeTooltip": "Play take",
     "audio.takesStrip.removeNoiseTooltip": "Remove noise (adds a cleaned take)",
     "audio.takesStrip.revertTooltip": "Revert to the original recording",
@@ -903,6 +906,19 @@ export const audio = defineNamespace({
           "Hover title on the cloud badge of a take that has been saved on this " +
           "device but not yet uploaded to the server. Reassurance: nothing is lost " +
           "while it waits.",
+      },
+      "audio.takesStrip.syncFailedTooltip": {
+        description:
+          "Hover title on the red badge of a take whose save to the server FAILED " +
+          "and will not be retried automatically. Distinct from the 'saving' badge: " +
+          "that one is still on its way, this one is stuck and needs the user to " +
+          "retry. Reassures that the recording itself is not lost.",
+      },
+      "audio.takesStrip.syncFailedRetry": {
+        description:
+          "Label on the small red button shown on a take that failed to save to the " +
+          "server; pressing it queues the save again. Very short — it sits inline on " +
+          "a compact take row.",
       },
       "audio.takesStrip.playTakeTooltip": {
         description:

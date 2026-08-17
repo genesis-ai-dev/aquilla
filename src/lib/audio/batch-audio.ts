@@ -269,6 +269,10 @@ export function attachmentNeedsMeasure(
 ): boolean {
   if (att.durationMs != null) return false
   if (att.pendingSync) return false
+  // AQU-924: the attach never reached the server, so there is no row for a
+  // measure event to fill — and emitting one would queue a second undeliverable
+  // event behind the first. Retrying the attach is the only thing that helps.
+  if (att.syncFailed) return false
   if (audioIdSeededWith(att.audioId, fileId)) return false
   if (!audioIdSeededWith(att.audioId, cellId)) return false
   return !isSharedAcrossCells(att.audioId)

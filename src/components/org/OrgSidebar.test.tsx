@@ -66,6 +66,7 @@ beforeEach(() => {
   listMyOrgs.mockReset()
   fetchAccessibleProjects.mockReset()
   rosterSettings.canViewRoster = true
+  platformAdmin.isAdmin = false
 })
 afterEach(() => vi.clearAllMocks())
 
@@ -141,6 +142,34 @@ describe("OrgSidebar all-organizations scope", () => {
     expect(overview).toHaveAttribute("data-tour", "nav-overview")
     expect(screen.queryByRole("link", { name: "Projects" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument()
+  })
+})
+
+describe("OrgSidebar platform-admin separator", () => {
+  it("omits the separator between Overview and Admin on all organizations", async () => {
+    platformAdmin.isAdmin = true
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+      { id: 2, name: "Beta", role: { level: 700, name: "owner" } },
+    ])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    renderSidebar("/orgs/all")
+
+    expect(await screen.findByRole("link", { name: "Admin" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument()
+    expect(screen.queryByTestId("platform-admin-nav-separator")).not.toBeInTheDocument()
+  })
+
+  it("keeps the separator before Admin in a member org", async () => {
+    platformAdmin.isAdmin = true
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Acme", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    renderSidebar("/orgs/1")
+
+    expect(await screen.findByRole("link", { name: "Admin" })).toBeInTheDocument()
+    expect(screen.getByTestId("platform-admin-nav-separator")).toBeInTheDocument()
   })
 })
 

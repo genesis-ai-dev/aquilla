@@ -132,6 +132,13 @@ export function AdminTeamsSection({
           .toLowerCase()
           .includes(q)
       }}
+      toolbar={(table) => (
+        <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+          {table.getFilteredRowModel().rows.length === teams.length
+            ? `${teams.length}`
+            : `${table.getFilteredRowModel().rows.length} of ${teams.length}`}
+        </span>
+      )}
       testId="admin-teams-table"
       className={ADMIN_TABLE_PANEL_CLASS}
       dense

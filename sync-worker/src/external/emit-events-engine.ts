@@ -28,6 +28,7 @@ import {
 import { stageAndRespond } from './stage'
 import { mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
+import { PROJECT_SENTINEL_FILE_ID as PROJECT_SENTINEL } from '../events/authorize'
 import { handleEventsWriteRequest } from '../events/route'
 import { ROLE } from '../events/role-policy'
 import type { CommentScope, EventKind, RawEvent } from '../events/types'
@@ -42,10 +43,6 @@ import type {
   StoredChangeset,
 } from './types'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
-
-/** Sentinel fileId for project-scoped comment events (authorize.ts's
- *  PROJECT_SENTINEL_FILE_ID — comment kinds are the only ones allowed on it). */
-const PROJECT_SENTINEL = '__project__'
 
 /** Kinds whose payload pins the live target head (and source, for repin). */
 const PIN_KINDS = new Set([
@@ -243,6 +240,12 @@ export async function prepareEmitEvents(
       if (typeof parent === 'string') {
         const row = comments.get(parent)
         if (!row || row.deleted_at != null) return failed(i, `parent comment ${parent} does not exist`)
+      }
+      if (e.fileId && e.cellId) {
+        const s = states.get(laneCellKey(e.fileId, e.cellId, e.laneId))
+        if (!s || (!s.sourceExists && !s.targetExists)) {
+          return failed(i, `cell ${e.cellId} in file ${e.fileId} does not exist`)
+        }
       }
       if (e.fileId && !e.cellId) {
         const f = files.get(e.fileId)

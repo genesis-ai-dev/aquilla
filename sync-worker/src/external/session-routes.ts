@@ -192,7 +192,7 @@ export async function handleSessionChangesetsRequest(
 
   if (action === 'commit') {
     if (request.method !== 'POST') return errorResponse('validation_failed', 'method not allowed')
-    return commitChangesetCore(
+    const res = await commitChangesetCore(
       request,
       env,
       projectId,
@@ -200,6 +200,14 @@ export async function handleSessionChangesetsRequest(
       { cred, ownership: 'creator', channel: 'app' },
       ctx,
     )
+    // The shared core replies with the PAT-surface `{ receipt }` shape (frozen
+    // for external callers). The in-app review card renders the status
+    // transition and receipt, so the session surface returns the full record —
+    // the same envelope as the session GET.
+    if (!res.ok) return res
+    const cs = await loadChangeset(db, projectId, changesetId)
+    if (!cs) return res
+    return Response.json({ changeset: changesetToResponse(cs), approvalUrl: approvalUrlFor(env, cs.id) })
   }
   if (action === 'discard') {
     if (request.method !== 'POST') return errorResponse('validation_failed', 'method not allowed')

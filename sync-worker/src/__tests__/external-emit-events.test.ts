@@ -192,6 +192,18 @@ describe('EmitEvents — validation + floors', () => {
     expect(await tdb.rows('changesets')).toHaveLength(0)
   })
 
+  it('comment.create on a missing cell rejects at prepare (never burns an approval)', async () => {
+    const env = makeEnv(tdb.db)
+    const commenter = await memberToken(tdb, 200)
+    const { res, body } = await prepare(env, commenter.token, [
+      { kind: 'comment.create', fileId: FILE, cellId: 'nope', payload: { body: 'orphan note' } },
+    ])
+    expect(res.status).toBe(400)
+    expect(body.error.message).toContain('events[0]')
+    expect(body.error.message).toContain('does not exist')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
   it('foreign unvalidate below maintainer is denied at prepare', async () => {
     const env = makeEnv(tdb.db)
     await seedTargetCommit(tdb, 'cell-1', 'tgt-evt-1')

@@ -195,7 +195,10 @@ describe('session changesets — commit', () => {
     await insertConfirmation(tdb.db, { id: 'conf-1', changesetId: id, digest: prep.digest })
     const { res, body } = await call(env, req(token, `/${id}/commit`, 'POST'))
     expect(res.status).toBe(200)
-    expect(body.receipt.appliedCount).toBe(1)
+    // Session commit returns the full record (the card renders the status
+    // transition), unlike the PAT surface's bare { receipt }.
+    expect(body.changeset.status).toBe('committed')
+    expect(body.changeset.receipt.appliedCount).toBe(1)
 
     // §3 provenance: channel 'app', ask mode, session human authority.
     const events = await tdb.rows<{ kind: string; provenance: unknown; author: string }>('events')
@@ -210,7 +213,8 @@ describe('session changesets — commit', () => {
     // Idempotent re-commit returns the stored receipt.
     const { res: again, body: againBody } = await call(env, req(token, `/${id}/commit`, 'POST'))
     expect(again.status).toBe(200)
-    expect(againBody.receipt.eventIds).toEqual(body.receipt.eventIds)
+    expect(againBody.changeset.status).toBe('committed')
+    expect(againBody.changeset.receipt.eventIds).toEqual(body.changeset.receipt.eventIds)
   })
 })
 

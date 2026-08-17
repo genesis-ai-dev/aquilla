@@ -220,6 +220,44 @@ describe("buildSystemPrompt brief block", () => {
   })
 })
 
+// AQU-926 (COMMAND-REGISTRY §4): the changeset-command index has the same
+// absent-not-rejected property as the event card — a command a role cannot
+// stage must be missing from that role's prompt, and only the ONE-LINE index
+// enters the prompt (paramsDocs stay behind describe_command).
+describe("buildSystemPrompt — changeset command index", () => {
+  it("MAINTAINER (600): lists PatchSettings and points at describe_command", () => {
+    const prompt = buildSystemPrompt({ ...baseCtx, roleLevel: AGENT_ROLE.MAINTAINER })
+    expect(prompt).toContain("## Changeset commands")
+    expect(prompt).toContain("PatchSettings")
+    expect(prompt).toContain("PlanImport")
+    expect(prompt).toContain("describe_command")
+    expect(prompt).toContain("propose_command")
+  })
+
+  it("CONTRIBUTOR (400): SetTranslation and EmitEvents appear; PlanImport (500+) does not", () => {
+    const prompt = buildSystemPrompt({ ...baseCtx, roleLevel: AGENT_ROLE.CONTRIBUTOR })
+    expect(prompt).toContain("- SetTranslation (400+")
+    expect(prompt).toContain("- EmitEvents (200+")
+    expect(prompt).not.toContain("PlanImport")
+    expect(prompt).not.toContain("PatchSettings")
+  })
+
+  it("VIEWER (100): no command index block at all", () => {
+    const prompt = buildSystemPrompt({ ...baseCtx, roleLevel: AGENT_ROLE.VIEWER })
+    expect(prompt).not.toContain("## Changeset commands")
+    expect(prompt).not.toContain("PlanImport")
+    expect(prompt).not.toContain("SetTranslation")
+  })
+
+  it("keeps paramsDoc bodies OUT of the prompt (index is one line per command)", () => {
+    const prompt = buildSystemPrompt({ ...baseCtx, roleLevel: AGENT_ROLE.OWNER })
+    // Doc-only fragments from the catalog paramsDocs must not leak into L1.
+    expect(prompt).not.toContain("ifMatchVersion")
+    expect(prompt).not.toContain("### SetTranslation")
+    expect(prompt).not.toContain("agentMemoryAutonomy")
+  })
+})
+
 describe("AGENT_REQUIRED_ROLE — mirror of sync-worker role-policy.ts", () => {
   it("pins the floors the agent's safety depends on", () => {
     expect(AGENT_REQUIRED_ROLE["target.cell.commit"]).toBe(400)

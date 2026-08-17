@@ -114,7 +114,7 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     )
   })
 
-  it("fits the embedded overview table to the card instead of overflowing", () => {
+  it("lets the embedded overview table scroll horizontally instead of clipping", () => {
     render(
       <MemoryRouter>
         <OrgProjectsDataTable
@@ -136,16 +136,16 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     )
 
     const table = screen.getByTestId("project-table")
-    expect(table).toHaveClass("min-w-0", "w-full")
-    expect(table.className).toContain("[&_[data-slot=table-container]]:overflow-hidden")
-    expect(table.className).not.toContain("overflow-x-auto")
+    expect(table).toHaveClass("min-w-0", "w-full", "overflow-auto")
+    expect(table.className).not.toContain("overflow-x-hidden")
+    expect(table.className).toContain("[&_[data-slot=table-container]]:overflow-visible")
 
     const htmlTable = table.querySelector('[data-slot="table"]')
-    expect(htmlTable).toHaveClass("table-fixed")
+    expect(htmlTable).not.toHaveClass("table-fixed")
 
     const nameCell = screen.getByTestId("project-table-name").closest("td")
-    expect(nameCell).toHaveClass("min-w-0", "max-w-0")
-    expect(table.className).toContain("[&_td]:overflow-hidden")
+    expect(nameCell).toHaveClass("min-w-[12rem]")
+    expect(nameCell).not.toHaveClass("max-w-0")
     expect(screen.getByTestId("project-table-organization")).toHaveClass("min-w-0", "max-w-full")
     expect(screen.getByRole("button", { name: /^Status$/i })).toBeInTheDocument()
   })
@@ -156,7 +156,9 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     expect(screen.getByRole("textbox", { name: /Search projects/i })).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /Project/i })).toBeInTheDocument()
     expect(screen.getByText("Gospels")).toHaveClass("font-medium")
-    expect(screen.getByText("maintainer")).toHaveClass("capitalize")
+    // RoleLabel resolves the localized display name (AQU-511) — "Maintainer",
+    // not the raw role name with a CSS capitalize class.
+    expect(screen.getByText("Maintainer")).toBeInTheDocument()
   })
 
   it("renders one chip per lane with the '' default lane first, labeled with the target language", () => {

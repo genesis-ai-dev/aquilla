@@ -9,6 +9,13 @@
 // MAINTAINER (600) to mutate; any member sees a read-only status summary.
 // Board list / structure fetches require ORG maintainer server-side — when
 // they 403 we degrade gracefully (raw column ids instead of titles).
+//
+// SWARM-TODO(AQU-832, i18n): this file plus MondayLinkedView.tsx and
+// MondayMappingEditor.tsx (~50 unkeyed strings total) are deliberately left
+// unkeyed by the WS-14 project-settings/creation/sharing i18n wave — the
+// audit scoped the Monday.com integration trio to a later wave rather than
+// this pass. Key with a `projectSettings.monday.*` (or dedicated `monday`)
+// namespace when that wave starts; see docs/swarm/TRACES.md.
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
@@ -54,6 +61,7 @@ import type { MondayMapping } from "@/lib/monday/types"
 import { MondayMappingTable } from "./MondayMappingEditor"
 import { MondayLinkedView } from "./MondayLinkedView"
 import { MondaySetupWizard } from "./MondaySetupWizard"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const MAINTAINER = 600
 
@@ -70,6 +78,7 @@ function errMsg(e: unknown): string {
 }
 
 export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props) {
+  const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const canManage = (roleLevel ?? 0) >= MAINTAINER
@@ -307,6 +316,13 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
   }, [jwt, projectId])
 
   // ── Render ───────────────────────────────────────────────────────────────
+  const orgSettingsLinkLabel = t("projectSettings.monday.orgSettingsLinkText")
+  const connectInstructions = t("projectSettings.monday.orgNotConnectedInstructions", {
+    settingsLink: orgSettingsLinkLabel,
+  })
+  const [connectInstructionsBefore, connectInstructionsAfter] =
+    connectInstructions.split(orgSettingsLinkLabel)
+
   return (
     <div id="section-monday">
       <SettingsGroup
@@ -321,27 +337,27 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
           </span>
         }
       >
-        <SettingsRow label="Board sync" block>
+        <SettingsRow label={t("projectSettings.monday.boardSyncLabel")} block>
           {loading ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Spinner /> Loading Monday integration…
+              <Spinner /> {t("projectSettings.monday.loadingIntegration")}
             </div>
           ) : !orgConnected && !canManage ? (
             <div className="space-y-2 text-sm text-muted-foreground">
-              <p>Your organization hasn&apos;t connected Monday.com yet.</p>
+              <p>{t("projectSettings.monday.orgNotConnected")}</p>
               <p>
-                An org maintainer can connect it in{" "}
+                {connectInstructionsBefore}
                 {orgId != null ? (
                   <Link
                     to={`/orgs/${orgId}/settings/monday`}
                     className="font-medium text-foreground underline underline-offset-4"
                   >
-                    organization settings
+                    {orgSettingsLinkLabel}
                   </Link>
                 ) : (
-                  "organization settings"
+                  orgSettingsLinkLabel
                 )}
-                , or ask an org maintainer to set it up.
+                {connectInstructionsAfter}
               </p>
             </div>
           ) : link ? (
@@ -365,20 +381,19 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
             />
           ) : !canManage ? (
             <p className="text-sm text-muted-foreground">
-              No Monday board is linked to this project. Maintainers can set one up here.
+              {t("projectSettings.monday.noBoardLinkedReadOnly")}
             </p>
           ) : (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
-                Link a Monday board to push this project&apos;s translation progress automatically.
+                {t("projectSettings.monday.linkBoardPrompt")}
               </p>
               <Button onClick={() => setWizardOpen(true)} data-testid="monday-setup-with-ai">
                 <Sparkles data-icon="inline-start" />
-                Set up with AI
+                {t("projectSettings.monday.setupWithAiButton")}
               </Button>
               <p className="text-xs text-muted-foreground">
-                Picks the board, maps your progress metrics to its columns, and shows you the plan
-                before anything is written.
+                {t("projectSettings.monday.setupWithAiBlurb")}
               </p>
               {/* Manual board+mapping path, kept as an escape hatch. Hidden until
                   the org is connected — without a token it can only ever show an
@@ -386,7 +401,7 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
               {orgConnected &&
                 (!manualOpen ? (
                   <Button variant="ghost" onClick={() => setManualOpen(true)}>
-                    Set it up manually instead
+                    {t("projectSettings.monday.setupManuallyButton")}
                   </Button>
                 ) : (
                   <div className="flex items-center gap-2">
@@ -396,7 +411,7 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
                       onValueChange={(value) => setSelectedBoardId((value as string) ?? "")}
                       disabled={boards === null}
                     >
-                      <SelectTrigger aria-label="Monday board" className="bg-background">
+                      <SelectTrigger aria-label={t("projectSettings.monday.boardSelectAriaLabel")} className="bg-background">
                         <SelectValue
                           placeholder={boards === null ? "Loading boards…" : "Pick a board"}
                         />
@@ -417,15 +432,15 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
                         disabled={!selectedBoardId}
                         loading={analyzing}
                         onComplete={() => void runAnalyze(selectedBoardId)}
-                        tooltip="Use AI to configure"
+                        tooltip={t("projectSettings.monday.useAiToConfigure")}
                       />
-                      Use AI to configure
+                      {t("projectSettings.monday.useAiToConfigure")}
                     </span>
                   </div>
                 ))}
               {analyzing && (
                 <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Spinner /> Analyzing the board and this project…
+                  <Spinner /> {t("projectSettings.monday.analyzingBoardAndProject")}
                 </p>
               )}
             </div>
@@ -433,7 +448,7 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
 
           {proposal && (
             <div className="mt-3 space-y-3 rounded-lg border bg-background p-4" data-testid="monday-proposal-review">
-              <p className="text-sm font-medium">AI proposal</p>
+              <p className="text-sm font-medium">{t("projectSettings.monday.aiProposalLabel")}</p>
               <p className="text-sm text-muted-foreground">{proposal.summary}</p>
               <MondayMappingTable columns={proposal.proposal.columns} structure={structure} />
               {proposal.proposal.notes && (
@@ -442,10 +457,10 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
               <div className="flex items-center gap-2">
                 <Button onClick={() => void applyProposal()} disabled={applying}>
                   {applying && <Spinner data-icon="inline-start" />}
-                  Apply
+                  {t("projectSettings.monday.applyButton")}
                 </Button>
                 <Button variant="ghost" onClick={() => setProposal(null)} disabled={applying}>
-                  Discard
+                  {t("common.discard")}
                 </Button>
               </div>
             </div>
@@ -478,19 +493,20 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
       <Dialog open={unlinkOpen} onOpenChange={setUnlinkOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Remove board link?</DialogTitle>
+            <DialogTitle>{t("projectSettings.monday.removeBoardLinkTitle")}</DialogTitle>
             <DialogDescription>
-              Progress will stop pushing to {link?.boardName ?? "the linked board"}. The board and
-              its items are left untouched on Monday.
+              {t("projectSettings.monday.removeBoardLinkDescription", {
+                boardName: link?.boardName ?? "the linked board",
+              })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setUnlinkOpen(false)} disabled={unlinking}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button variant="destructive" onClick={handleUnlink} disabled={unlinking}>
               {unlinking && <Spinner data-icon="inline-start" />}
-              Remove link
+              {t("projectSettings.monday.removeLinkButton")}
             </Button>
           </DialogFooter>
         </DialogContent>

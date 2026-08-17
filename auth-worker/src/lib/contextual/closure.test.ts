@@ -38,6 +38,7 @@ describe("construeScene — the three exits", () => {
     expect(result.rounds).toBe(1)
     expect(calls).toHaveLength(1)
     expect(calls[0].tier).toBe("mid")
+    expect(calls[0].maxTokens).toBe(2048)
     expect(budget.unitsUsed).toBe(TIER_WEIGHTS.mid)
   })
 

@@ -30,6 +30,7 @@ import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
 import type { TimelineLayout } from "@/lib/timeline/layout"
 import type { CellData } from "@/hooks/useCells"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface TargetAudioItem {
   cell: CellData
@@ -135,6 +136,7 @@ function TargetAudioChip({
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
   onOpenRecording?(cellId: string): void
 }) {
+  const t = useT()
   const { cell } = chip.item
   const { geom, section } = chip
   const [drag, setDrag] = useState<{ mode: ChipDragMode; dx: number } | null>(null)
@@ -331,7 +333,7 @@ function TargetAudioChip({
               −{tailOverlapSec.toFixed(1)}s{" "}
             </span>
           )}
-          <span className="opacity-90">Overlaps the next dub</span>
+          <span className="opacity-90">{t("workspace.targetAudioLane.overlapsNext")}</span>
         </div>,
       )
     }
@@ -346,32 +348,32 @@ function TargetAudioChip({
               −{headOverlapSec.toFixed(1)}s{" "}
             </span>
           )}
-          <span className="opacity-90">Overlaps the previous dub</span>
+          <span className="opacity-90">{t("workspace.targetAudioLane.overlapsPrevious")}</span>
         </div>,
       )
     }
   } else if (overflow === "soft") {
-    tipLines.push(<div key="soft">{`Runs ${overflowSec.toFixed(1)}s past the section`}</div>)
+    tipLines.push(<div key="soft">{t("workspace.targetAudioLane.runsPastSectionTooltip", { sec: overflowSec.toFixed(1) })}</div>)
   } else {
     tipLines.push(<div key="kind">{lengthNote ? `${kindTitle} · ${lengthNote}` : kindTitle}</div>)
   }
   // Decision 2026-08-05: a definitively 404'd clip says so, in red.
   if (missing) tipLines.push(<div key="missing" className="font-semibold text-red-600 dark:text-red-400">{MISSING_AUDIO_MESSAGE}</div>)
   // SUB-48: never let a guessed width read as a measured one.
-  if (geom.usingFallback) tipLines.push(<div key="fallback" className="text-muted-foreground">Length unknown — re-record or re-upload to fix</div>)
-  if (pendingSync) tipLines.push(<div key="saving" className="text-muted-foreground">Saving — kept safe on this device until it syncs</div>)
+  if (geom.usingFallback) tipLines.push(<div key="fallback" className="text-muted-foreground">{t("audio.takesStrip.unknownLengthTooltip")}</div>)
+  if (pendingSync) tipLines.push(<div key="saving" className="text-muted-foreground">{t("audio.takesStrip.pendingSyncTooltip")}</div>)
   // NOTE (2026-08-08): keyed on the CUTS, not on the painted state — hovering
   // is what opens this tooltip and hovering is also what restores full length,
   // so a line keyed on `truncated` could never actually be read.
   if (headCutSec != null || tailCutSec != null) {
-    const who =
+    const drawnShortKey =
       headCutSec != null && tailCutSec != null
-        ? "the neighbouring dubs stay"
+        ? "workspace.targetAudioLane.drawnShortNeighboringDubsStay"
         : headCutSec != null
-          ? "the previous dub stays"
-          : "the next dub stays"
+          ? "workspace.targetAudioLane.drawnShortPreviousDubStays"
+          : "workspace.targetAudioLane.drawnShortNextDubStays"
     tipLines.push(
-      <div key="truncated" className="text-muted-foreground">{`Drawn short at rest so ${who} reachable`}</div>,
+      <div key="truncated" className="text-muted-foreground">{t(drawnShortKey)}</div>,
     )
   }
   const tooltipContent = <div className="flex flex-col gap-0.5">{tipLines}</div>
@@ -485,7 +487,7 @@ function TargetAudioChip({
         <span
           role="button"
           tabIndex={0}
-          title="Record audio for this line"
+          title={t("workspace.targetAudioLane.recordAudio")}
           data-testid={`tl-target-${cell.id}-record`}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
@@ -570,6 +572,7 @@ export function TargetAudioLane({
   onOpenRecording,
   emptyCells,
 }: TargetAudioLaneProps) {
+  const t = useT()
   const audioFirst = layout?.mode === "audioFirst"
   // Resolve every chip first — overflow needs the NEXT chip's start, and
   // snapping needs neighbors' effective edges.
@@ -652,9 +655,9 @@ export function TargetAudioLane({
         >
           <button
             type="button"
-            title="Record audio for this line"
+            title={t("workspace.targetAudioLane.recordAudio")}
             data-testid={`tl-target-empty-${cell.id}-record`}
-            aria-label="Record audio for this line"
+            aria-label={t("workspace.targetAudioLane.recordAudio")}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation()

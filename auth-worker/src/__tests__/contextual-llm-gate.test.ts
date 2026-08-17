@@ -143,3 +143,36 @@ describe("makeLlmCall capacity retry", () => {
     await expect(llm(req())).rejects.toThrow(/^provider_invalid_response status=200$/)
   })
 })
+
+describe("makeLlmCall OpenRouter extras", () => {
+  it("sends reasoning.effort and usage.include on OpenRouter", async () => {
+    let body: Record<string, unknown> | undefined
+    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>
+      return new Response(okBody(), { status: 200 })
+    })
+    const llm = makeLlmCall({
+      url: "https://openrouter.ai/api/v1",
+      apiKey: "k",
+      models: MODELS,
+    })
+    await llm(req())
+    expect(body).toMatchObject({
+      usage: { include: true },
+      reasoning: { effort: "none" },
+    })
+  })
+
+  it("omits vendor fields on a non-OpenRouter upstream", async () => {
+    let body: Record<string, unknown> | undefined
+    vi.stubGlobal("fetch", async (_url: string, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>
+      return new Response(okBody(), { status: 200 })
+    })
+    const llm = makeLlmCall({ url: URL_, apiKey: "k", models: MODELS })
+    await llm(req())
+    expect(body).toBeDefined()
+    expect(body).not.toHaveProperty("usage")
+    expect(body).not.toHaveProperty("reasoning")
+  })
+})

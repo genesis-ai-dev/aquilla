@@ -38,7 +38,7 @@ export function VoiceAvatar({
       {initial}
       {isClone && (
         <span
-          className="absolute -bottom-0.5 -right-0.5 grid place-items-center rounded-full bg-emerald-500 text-white ring-1 ring-background"
+          className="absolute -bottom-0.5 -end-0.5 grid place-items-center rounded-full bg-emerald-500 text-white ring-1 ring-background"
           style={{ width: Math.round(size * 0.45), height: Math.round(size * 0.45) }}
         >
           <Sparkles style={{ width: Math.round(size * 0.28), height: Math.round(size * 0.28) }} />

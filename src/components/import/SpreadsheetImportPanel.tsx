@@ -9,6 +9,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { FileReference, FileType, ProjectTtsSettings } from "@/lib/parsers/types"
 import {
   parseCsvToSheet,
@@ -63,6 +64,7 @@ export function SpreadsheetImportPanel({
   onCancel,
   initialFile,
 }: SpreadsheetImportPanelProps) {
+  const t = useT()
   const [step, setStep] = useState<Step>("file")
   const [error, setError] = useState<string | null>(null)
   const [sheets, setSheets] = useState<SpreadsheetSheet[]>([])
@@ -85,14 +87,14 @@ export function SpreadsheetImportPanel({
     try {
       assertSourceUploadByteLength(file.size)
       if (ext === "xls") {
-        setError("Legacy .xls workbooks are not supported. Save the file as .xlsx or CSV and try again.")
+        setError(t("importExport.spreadsheet.legacyXlsUnsupported"))
         return
       }
       if (ext === "xlsx") {
         const buf = await file.arrayBuffer()
         const parsed = await parseXlsxToSheets(buf)
         if (parsed.length === 0) {
-          setError("No sheets found in XLSX file.")
+          setError(t("importExport.spreadsheet.noSheetsFound"))
           return
         }
         setSheets(parsed)
@@ -110,9 +112,9 @@ export function SpreadsheetImportPanel({
         setStep("mapping")
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to parse file")
+      setError(err instanceof Error ? err.message : t("importExport.errors.failedToParseFile"))
     }
-  }, [])
+  }, [t])
 
   useEffect(() => {
     if (!initialFile || consumedInitialFile.current === initialFile) return
@@ -126,7 +128,7 @@ export function SpreadsheetImportPanel({
 
     const mappedRows = applyColumnMapping(selectedSheet.rows, mapping, hasHeader)
     if (mappedRows.length === 0) {
-      setError("No data rows found after applying the mapping. Check that the source column is not empty.")
+      setError(t("importExport.spreadsheet.noDataRows"))
       return
     }
 
@@ -167,7 +169,7 @@ export function SpreadsheetImportPanel({
         targetLang,
         getToken,
       }
-      if (!sourceFile) throw new Error("The selected spreadsheet is no longer available")
+      if (!sourceFile) throw new Error(t("importExport.spreadsheet.sourceUnavailable"))
       const prepared: PreparedImportFile = {
         fileType: sourceFormat,
         results: [importResult],
@@ -200,7 +202,7 @@ export function SpreadsheetImportPanel({
 
       await onImported(checkpoint.refs)
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Upload failed"
+      const message = err instanceof Error ? err.message : t("common.uploadFailed")
       setError(message)
       onCommitError?.(message)
       setStep("mapping")
@@ -212,9 +214,9 @@ export function SpreadsheetImportPanel({
     return (
       <div className="flex flex-col gap-4 py-2">
         <div>
-          <p className="text-sm font-medium">Spreadsheet import</p>
+          <p className="text-sm font-medium">{t("importExport.spreadsheet.title")}</p>
           <p className="text-xs text-muted-foreground">
-            Upload a CSV or XLSX file. You will map columns (source, target, ref, cast, timestamps) before importing.
+            {t("importExport.spreadsheet.description")}
           </p>
         </div>
         <div
@@ -226,10 +228,10 @@ export function SpreadsheetImportPanel({
             if (file) handleFile(file)
           }}
         >
-          <p className="text-sm text-muted-foreground">Drop a CSV or XLSX file here, or</p>
+          <p className="text-sm text-muted-foreground">{t("importExport.spreadsheet.dropZoneHint")}</p>
           <label>
             <span className="inline-flex items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent transition-colors">
-              Choose file
+              {t("editor.video.chooseFile")}
             </span>
             <input
               type="file"
@@ -241,11 +243,11 @@ export function SpreadsheetImportPanel({
               }}
             />
           </label>
-          <p className="text-xs text-muted-foreground">CSV, TSV, or XLSX</p>
+          <p className="text-xs text-muted-foreground">{t("importExport.spreadsheet.acceptedFormats")}</p>
         </div>
         {error && <p className="text-xs text-destructive">{error}</p>}
         <div className="flex justify-end">
-          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+          <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>
         </div>
       </div>
     )
@@ -256,9 +258,9 @@ export function SpreadsheetImportPanel({
     return (
       <div className="flex flex-col gap-4 py-2">
         <div>
-          <p className="text-sm font-medium">Select a sheet</p>
+          <p className="text-sm font-medium">{t("importExport.spreadsheet.selectSheetTitle")}</p>
           <p className="text-xs text-muted-foreground">
-            This XLSX has multiple sheets — each sheet is one importable unit.
+            {t("importExport.spreadsheet.selectSheetUnitHint")}
           </p>
         </div>
         <div className="flex flex-col gap-2">
@@ -266,20 +268,20 @@ export function SpreadsheetImportPanel({
             <button
               key={i}
               type="button"
-              className="rounded-lg border p-3 text-left hover:border-primary hover:bg-primary/5 transition-colors"
+              className="rounded-lg border p-3 text-start hover:border-primary hover:bg-primary/5 transition-colors"
               onClick={() => {
                 setSelectedSheet(s)
                 setStep("mapping")
               }}
             >
               <p className="text-sm font-medium">{s.name}</p>
-              <p className="text-xs text-muted-foreground">{s.rows.length} row{s.rows.length !== 1 ? "s" : ""}</p>
+              <p className="text-xs text-muted-foreground">{t("importExport.spreadsheet.sheetRowCount", { count: s.rows.length })}</p>
             </button>
           ))}
         </div>
         {error && <p className="text-xs text-destructive">{error}</p>}
         <div className="flex justify-end">
-          <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+          <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>
         </div>
       </div>
     )
@@ -299,8 +301,8 @@ export function SpreadsheetImportPanel({
   // ── Step: uploading ─────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-8">
-      <p className="text-sm font-medium">Uploading…</p>
-      <p className="text-xs text-muted-foreground">Sending cells to the server.</p>
+      <p className="text-sm font-medium">{t("common.uploading")}</p>
+      <p className="text-xs text-muted-foreground">{t("importExport.spreadsheet.sendingCells")}</p>
     </div>
   )
 }

@@ -144,7 +144,7 @@ export async function openSeededProject(page: Page, seeded: SeededProject): Prom
     if (response.request().method() !== "GET") return false
     const url = new URL(response.url())
     return url.pathname === sourceCellsPath && url.searchParams.get("side") === "source"
-  }, { timeout: 30_000 })
+  }, { timeout: 60_000 })
 
   await page.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
   const sourceResponse = await sourceCellsLoaded

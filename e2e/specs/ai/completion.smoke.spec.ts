@@ -15,6 +15,7 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
  * IDB layout: db "codex" v4, store "projects" keyed by id.
  */
 test("sparkle button fills target cell from mock LLM (config injected via IDB)", async ({ alice }) => {
+  test.setTimeout(90_000)
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `AI ${Date.now()}` })
   const ws = await openSeededProject(alice, seeded)
 
@@ -35,19 +36,7 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
   await alice.reload()
   await ws.waitForEditor()
 
-  // The sparkle lives in CellActionRail, hidden until the row is hovered
-  // and faded in over 180ms. Playwright's auto-hover-on-click occasionally
-  // doesn't trigger the row's onMouseEnter (the rail wrapper is
-  // pointer-events:none and Playwright teleports the cursor), leaving the
-  // children container at opacity:0 + pointer-events:none and the chip
-  // parent intercepting. Hover the cell row explicitly first.
-  const sparkle = alice
-    .locator("[data-tooltip*='Translate with AI'] button, button[aria-label*='Translate with AI']")
-    .first()
-  await sparkle.scrollIntoViewIfNeeded()
-  await alice.locator("[data-cell-id]").first().hover()
-  await expect(sparkle).toBeVisible()
-  await sparkle.click()
+  await ws.clickSparkleOnFirstCell()
 
   // Mock LLM's default response is "Traducción de prueba".
   await expect(

@@ -11,6 +11,7 @@ let temporarySequence = 0
 export interface PersistedSession {
   jwt: string
   username: string
+  email?: string
   createdAt: string
 }
 

@@ -72,10 +72,11 @@ function infractionMapsEqual(
     if (!bv) return false
     if (av.length !== bv.length) return false
     for (let i = 0; i < av.length; i++) {
-      // Compare by ruleId + message — enough to detect rule-trigger changes
-      // without a full deep equality over the object.
+      // Compare by ruleId + reason(+params) — enough to detect rule-trigger
+      // changes without a full deep equality over the object.
       if (av[i].ruleId !== bv[i].ruleId) return false
-      if (av[i].message !== bv[i].message) return false
+      if (av[i].reason !== bv[i].reason) return false
+      if (av[i].reasonParams?.tokens !== bv[i].reasonParams?.tokens) return false
     }
   }
   return true

@@ -44,7 +44,7 @@ export function ExamplePanel({
             return (
               <div
                 key={ex.cellId}
-                className="rounded border-l-2 bg-muted/30 p-2 space-y-1"
+                className="rounded border-s-2 bg-muted/30 p-2 space-y-1"
                 style={{ borderLeftColor: EXAMPLE_COLORS[colorIndex] }}
               >
                 <div className="text-xs text-muted-foreground/70">

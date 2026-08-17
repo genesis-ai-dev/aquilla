@@ -13,6 +13,8 @@ design and audit material.
   ownership.
 - [Cloudflare Workers Builds](runbooks/cloudflare-workers-builds.md) — disconnected
   build integrations, explicit deployment ownership, previews, and verification.
+- [Hetzner self-hosted e2e](runbooks/hetzner-ci.md) — dedicated-box Playwright
+  smoke; GitHub remains the webhook and queue.
 - [E2E](../e2e/README.md) — local integration and smoke-test environment.
 - [RLS rollout](RLS-ROLLOUT.md) — Postgres row-level-security operations.
 - [Operational security](OPSEC.md) — sensitive data inventory, threat model,

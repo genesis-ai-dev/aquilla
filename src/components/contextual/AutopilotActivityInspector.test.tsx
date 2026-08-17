@@ -53,6 +53,7 @@ const activity: ContextualRunActivity = {
     status: "proposed",
     startCellId: "c1",
     endCellId: "c3",
+    spanLabel: "LUK 1:1–1:8",
     l1Summary: "A teacher addresses a crowd.",
     construal: "The teacher warns the crowd.",
     ambiguityRegister: [{ id: "a1", question: "Is the warning ironic?" }],
@@ -62,6 +63,8 @@ const activity: ContextualRunActivity = {
     runId: RUN_ID,
     fileId: "file-1",
     cellId: "c2",
+    cellLabel: "LUK 1:2",
+    spanLabel: "LUK 1:1–1:8",
     text: "Draft text",
     status: "proposed",
     provenance: { runId: RUN_ID, sceneBriefId: "brief-1" },
@@ -159,6 +162,7 @@ describe("AutopilotActivityInspector", () => {
     expect(screen.getByRole("dialog")).toHaveAccessibleName("Autopilot activity")
     expect(screen.getByText(/evidence behind each step/i)).toBeInTheDocument()
     expect(await screen.findByText("3 reviewable drafts staged")).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: "Autopilot process graph" })).toBeInTheDocument()
     expect(screen.getByRole("log", { name: "Autopilot step history" })).toHaveAttribute("aria-live", "off")
     expect(screen.getByLabelText("3 of 10 passages complete")).toBeInTheDocument()
     expect(screen.getByText(/7 calls/)).toBeInTheDocument()
@@ -280,12 +284,15 @@ describe("AutopilotActivityInspector", () => {
   it("progressively reveals drafts, construal, L1 summary, ambiguities, and provenance", async () => {
     renderInspector({ initialSection: "review" })
     expect(await screen.findByText("Draft text")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Review in editor: cell c2" })).toHaveAttribute(
+    expect(screen.getByText("LUK 1:2")).toBeInTheDocument()
+    expect(screen.getByText("Drafted from LUK 1:1–1:8")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Review in editor: cell LUK 1:2" })).toHaveAttribute(
       "href",
       "/project/p1/editor/file/file-1?cellId=c2&lane=",
     )
-    expect(screen.getByText(/sceneBriefId/)).toBeInTheDocument()
+    expect(screen.queryByText(/sceneBriefId/)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /Context/ }))
+    expect(screen.getAllByText("LUK 1:1–1:8").length).toBeGreaterThan(0)
     expect(screen.getByText("A teacher addresses a crowd.")).toBeInTheDocument()
     expect(screen.getByText("The teacher warns the crowd.")).toBeInTheDocument()
     expect(screen.getByText("Is the warning ironic?")).toBeInTheDocument()

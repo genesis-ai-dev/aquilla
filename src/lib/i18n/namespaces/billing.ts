@@ -1,0 +1,40 @@
+import { defineNamespace } from "./types"
+
+export const billing = defineNamespace({
+  keys: {
+    "billing.usage.aiWords": "Agent credits",
+    "billing.usage.open": "Billing",
+    "billing.usage.words": "credits",
+    "billing.loading": "Loading billing…",
+    "billing.maintainersOnly": "Billing is visible to organization maintainers.",
+    "billing.plan.group": "Plan",
+    "billing.plan.current": "Current plan",
+    "billing.plan.field": "Field Plan",
+    "billing.plan.manage": "Manage",
+    "billing.plan.manageHelp": "Update the card, invoices, or cancel in Stripe.",
+    "billing.usage.period": "Agent credits this period",
+    "billing.usage.label": "Usage",
+    "billing.usage.unpaidHelp": "Explore includes a cycle of agent credits. Field Plan checkout is coming soon.",
+    "billing.addon.prompt": "Need more credits?",
+    "billing.contact.prompt": "Talk to us",
+    "billing.contact.email": "Email support",
+    "billing.settings.title": "Organization settings",
+    "billing.settings.description": "Manage this organization. Personal preferences moved to",
+    "billing.settings.preferences": "Preferences",
+    "billing.settings.organization": "Organization",
+    "billing.settings.identity": "Identity",
+    "billing.settings.security": "Security",
+    "billing.settings.billing": "Billing & usage",
+    "billing.settings.providers": "AI provider keys",
+    "billing.settings.peopleProjects": "People & Projects",
+    "billing.settings.members": "Members",
+    "billing.settings.teams": "Teams",
+    "billing.settings.archived": "Archived projects",
+  },
+  context: {
+    _context: {
+      description: "Organization billing, agent-credit usage, plan controls, and the organization-settings navigation that exposes them.",
+    },
+  },
+  surfaces: [],
+})

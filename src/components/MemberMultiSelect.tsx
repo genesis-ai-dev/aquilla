@@ -10,6 +10,7 @@ import {
   MultiSelectComboboxValue,
 } from "@/components/ui/multi-select-combobox"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 
 const DEFAULT_AVATAR_CAP = 3
 
@@ -79,12 +80,7 @@ export function MemberMultiSelect({
                   aria-hidden
                 >
                   {shown.map((username) => (
-                    <InitialsAvatar
-                      key={username}
-                      name={username}
-                      size="sm"
-                      singleInitial
-                    />
+                    <InitialsAvatar key={username} name={username} size="sm" />
                   ))}
                   {overflow > 0 && (
                     <AvatarGroupCount className="size-6 text-[10px] font-semibold">
@@ -108,13 +104,7 @@ export function MemberMultiSelect({
         <MultiSelectComboboxList>
           {(username: string) => (
             <MultiSelectComboboxOption key={username} value={username}>
-              {/* Match MembersSection / MembershipAvatars: square InitialsAvatar. */}
-              <span aria-hidden className="shrink-0">
-                <InitialsAvatar name={username} size="sm" singleInitial menuSafe />
-              </span>
-              <span className="min-w-0 flex-1 truncate font-medium text-foreground">
-                {username}
-              </span>
+              <UsernameWithAvatar username={username} size="sm" menuSafe className="min-w-0 flex-1" />
             </MultiSelectComboboxOption>
           )}
         </MultiSelectComboboxList>

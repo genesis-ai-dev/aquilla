@@ -1,0 +1,12 @@
+{
+  "src/components/org/BillingUsagePanel.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 3
+    }
+  },
+  "src/pages/settings/OrgSettingsBilling.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 16
+    }
+  }
+}

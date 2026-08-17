@@ -12,7 +12,6 @@ import {
   roleDescription,
   roleDisplayText,
   roleName,
-  type RoleOption,
 } from "@/lib/frontier/roles"
 import { cn } from "@/lib/utils"
 
@@ -40,9 +39,9 @@ export interface RoleSelectProps {
   contentClassName?: string
 }
 
-function resolveOption(opt: RoleSelectOption): RoleOption {
+function resolveOption(opt: RoleSelectOption): Required<RoleSelectOption> {
   return {
-    level: opt.level as RoleOption["level"],
+    level: opt.level,
     name: opt.name || roleName(opt.level),
     description: opt.description ?? roleDescription(opt.level),
   }

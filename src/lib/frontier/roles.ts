@@ -16,7 +16,17 @@
  * GitLab pass-through for legacy desktop-app users is handled server-side
  * in `accessLevelToRoleLevel`. Clients must not re-derive that mapping;
  * the server returns `role.level` already collapsed onto this ladder.
+ *
+ * This module is a pure lib — no React, no `useT()` — so it stays
+ * locale-free (AQU-832 wave 3, WS-08): `roleName()` returns the canonical,
+ * untranslated machine name used for comparisons/sorting/the wire format;
+ * `roleNameKey()`/`roleDescriptionKey()` return `MessageKey`s a component
+ * resolves with `t()`, the same "return a descriptor, let the caller
+ * localize" shape `src/lib/navigation/deriveTitle.ts` uses.
  */
+import type { MessageKey } from "@/lib/i18n/messages/en"
+import { t as tStandalone } from "@/lib/i18n/standalone"
+
 export const ROLE = {
   VIEWER: 100,
   COMMENTER: 200,
@@ -83,7 +93,7 @@ export const ORG_ROLE_PICKER: readonly RoleLevel[] = [
  * Roles offered as the project's "minimum validator role" floor
  * (ValidationSettingsSection). An intentional subset of the canonical ladder:
  * reviewer (300) is the lowest role that can validate cells (see
- * `roleDescription`), and the floor caps at maintainer — owner is the org
+ * `roleDescriptionKey`), and the floor caps at maintainer — owner is the org
  * boundary, not a per-project validation floor. Drawn from the canonical ladder
  * so the labels read identically to every other role surface (member / invite /
  * share) — no per-surface taxonomy drift (AQU-352). The names these map to
@@ -96,57 +106,128 @@ export const VALIDATION_FLOOR_ROLES: readonly RoleLevel[] = [
   ROLE.MAINTAINER,
 ]
 
+/**
+ * Canonical name + capability-blurb catalog key per role level, keyed
+ * identically for `roleName` and `roleDescription` (mirrors server's
+ * ROLE_NAMES). The blurb is a `MessageKey`, never a raw string — this table
+ * is module scope, and `src/lib/` can't call `useT()` there; `t()` is only
+ * ever called inside `roleDescription()`, at call time (see its doc comment).
+ * Distinct from — and displays different, longer copy than — the
+ * `common.role.*Description` blurbs `ROLE_NAME_KEY`'s sibling
+ * `ROLE_DESCRIPTION_KEY` map resolves below; both are genuine, separately
+ * live UI copy for different surfaces (RoleSelect/MembersSection/
+ * StaffLanePopover/roleHelpText here vs. MembersMatrixCellEditor/
+ * ProjectMembersPage/SharePanel there).
+ */
+const ROLE_INFO: Record<number, { name: string; descriptionKey: MessageKey }> = {
+  100: {
+    name: "viewer",
+    descriptionKey: "org.role.descriptionViewer",
+  },
+  200: {
+    name: "commenter",
+    descriptionKey: "org.role.descriptionCommenter",
+  },
+  300: {
+    name: "reviewer",
+    descriptionKey: "org.role.descriptionReviewer",
+  },
+  400: {
+    name: "contributor",
+    descriptionKey: "org.role.descriptionContributor",
+  },
+  500: {
+    name: "project_lead",
+    descriptionKey: "org.role.descriptionProjectLead",
+  },
+  600: {
+    name: "maintainer",
+    descriptionKey: "org.role.descriptionMaintainer",
+  },
+  700: {
+    name: "owner",
+    descriptionKey: "org.role.descriptionOwner",
+  },
+}
+
+/** Canonical role name for a given level (mirrors server's ROLE_NAMES).
+ *
+ * This is the machine-readable, locale-free identifier — the wire format
+ * shared with the server (migration 0013) and the value every comparison,
+ * sort, or lookup in this codebase keys on. It is NEVER translated: routing
+ * it through the message catalog would silently break permission logic (a
+ * switch on the current locale's word for "viewer") the moment a non-English
+ * locale renders. For a user-facing label, resolve `roleNameKey()` through
+ * `useT()` instead — see the module doc comment below. */
+export function roleName(level: number): string {
+  return ROLE_INFO[level]?.name ?? `level_${level}`
+}
+
 /** Underscore-free role string for display with CSS `capitalize`. */
 export function formatRoleDisplay(name: string): string {
   return name.replace(/_/g, " ")
 }
 
-/** Title-cased role label for plain-text contexts (tooltips, aria labels). */
+/** Title-cased role label for plain-text contexts (tooltips, aria labels) —
+ *  for call sites outside `useT()`'s reach (pure non-React modules). Prefer
+ *  `roleNameKey()` + `t()` in components. */
 export function roleDisplayText(name: string): string {
   return formatRoleDisplay(name).replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-/** Display label from a numeric role level. */
+/** Display label from a numeric role level — see `roleDisplayText()`. */
 export function roleDisplayLabel(level: number): string {
   return roleDisplayText(roleName(level))
 }
 
-/** Canonical role name for a given level (mirrors server's ROLE_NAMES). */
-export function roleName(level: number): string {
-  switch (level) {
-    case 100: return "viewer"
-    case 200: return "commenter"
-    case 300: return "reviewer"
-    case 400: return "contributor"
-    case 500: return "project_lead"
-    case 600: return "maintainer"
-    case 700: return "owner"
-    default: return `level_${level}`
-  }
-}
-
-/** Human display form of a role level: 500 → "Project lead". Use this (never
- *  the numeric level or raw snake_case name) anywhere copy faces users. */
+/** Human display form of a role level: 500 → "Project lead". */
 export function humanRoleName(level: number): string {
   const name = roleName(level).replace(/_/g, " ")
   return name.charAt(0).toUpperCase() + name.slice(1)
 }
 
 /**
+ * Catalog key → display label lookup, keyed by the canonical role name.
+ * `common.role.*` (`src/lib/i18n/namespaces/common.ts`) authors each as a
+ * `plural({ one, other })` pair: `one` is the singular label ("Viewer"),
+ * `other` is the plural noun ("Viewers"). Never build the plural by
+ * concatenating "s" onto the singular — see AQU-623 / the fixed bug in
+ * `src/lib/permissions/denial.ts`.
+ */
+const ROLE_NAME_KEY: Partial<Record<string, MessageKey>> = {
+  viewer: "common.role.viewer",
+  commenter: "common.role.commenter",
+  reviewer: "common.role.reviewer",
+  contributor: "common.role.contributor",
+  project_lead: "common.role.projectLead",
+  maintainer: "common.role.maintainer",
+  owner: "common.role.owner",
+}
+
+const ROLE_DESCRIPTION_KEY: Partial<Record<number, MessageKey>> = {
+  100: "common.role.viewerDescription",
+  200: "common.role.commenterDescription",
+  300: "common.role.reviewerDescription",
+  400: "common.role.contributorDescription",
+  500: "common.role.projectLeadDescription",
+  600: "common.role.maintainerDescription",
+  700: "common.role.ownerDescription",
+}
+
+/**
  * Capability blurb shown under each role in RoleSelect (AD-6 / AQU-138).
  * Name + level stay on the label line — this is the "what it does" copy only.
+ *
+ * Called at render/event time from every current call site (RoleSelect's
+ * `resolveOption`/`roleSelectOptionFromLevel`, MembersSection, StaffLanePopover,
+ * and — via `roleHelpText` below — TeamDetail/OrgMembersTable's locked-role
+ * tooltip), never at module scope, so resolving the catalog key here via the
+ * standalone `t()` is safe (AQU-832 wave-3 pattern 2) — it is NOT called
+ * inside any module-scope `const`.
  */
 export function roleDescription(level: number): string {
-  switch (level) {
-    case 100: return "Can read all org projects. No edit or management actions."
-    case 200: return "Can read and leave comments. Cannot edit content."
-    case 300: return "Can read, comment, and review. Cannot make direct edits."
-    case 400: return "Can edit project content. Maximum level grantable via share link."
-    case 500: return "Can add members to projects, mint share-link invites, and lead project work."
-    case 600: return "Can create/manage teams, rename the org, set project deadlines, and remove project members."
-    case 700: return "Full control: add/remove org members, archive/restore projects, and all maintainer actions."
-    default: return ""
-  }
+  const key = ROLE_INFO[level]?.descriptionKey
+  return key ? tStandalone(key) : ""
 }
 
 /** Full "Viewer (100) — …" string for tooltips and help affordances. */
@@ -158,18 +239,91 @@ export function roleHelpText(level: number): string {
 }
 
 /**
- * Human-readable role option for picker UIs. Combines the canonical name
- * with its long description; `name` and `description` keep the existing
- * shape used by SharePanel/MembersPage/MembersPanel.
+ * Catalog key for a role's display name, from either a numeric level or its
+ * canonical name string. Returns `undefined` for a non-canonical level (the
+ * `level_${level}` sentinel from `roleName()`) — there is no vocabulary for
+ * that in the catalog, because it should never reach a user; callers fall
+ * back to `unknownRoleLabel()`.
+ *
+ * `src/lib/` is a pure lib — it cannot call the `useT()` hook — so this
+ * returns a `MessageKey` and the caller resolves it: `t(roleNameKey(level)!,
+ * { count: 1 })` for the singular label, `{ count: 2 }` (or any count other
+ * than 1) for the plural noun. `RoleLabel`/`useRoleDisplayName` in
+ * `src/components/RoleLabel.tsx` do this once so most call sites don't have
+ * to.
+ */
+export function roleNameKey(nameOrLevel: string | number): MessageKey | undefined {
+  const name = typeof nameOrLevel === "number" ? roleName(nameOrLevel) : nameOrLevel
+  return ROLE_NAME_KEY[name]
+}
+
+/** Catalog key for a role's one-line description (role pickers). `undefined`
+ *  for a non-canonical level — see `roleNameKey()`. */
+export function roleDescriptionKey(level: number): MessageKey | undefined {
+  return ROLE_DESCRIPTION_KEY[level]
+}
+
+/** English fallback for a level outside the canonical ladder (corrupt data,
+ *  a future server-side level this client doesn't know yet). Never real UI
+ *  vocabulary — nothing to translate, it's a "this shouldn't happen" label —
+ *  so it stays English, mirroring the `raw()` escape hatch in
+ *  `src/lib/navigation/deriveTitle.ts`. */
+export function unknownRoleLabel(level: number): string {
+  return `Level ${level}`
+}
+
+/** Minimal `t()` shape shared by every pure lib module that needs to resolve
+ *  a `MessageKey` without importing `useT()`/React — mirrors `TFunction` from
+ *  `I18nProvider` structurally. */
+export type RoleT = (key: MessageKey, vars?: Record<string, string | number>) => string
+
+type TFn = RoleT
+
+/**
+ * Resolve a role's display label given a `t()` function — for call sites
+ * that build plain-string label lists (e.g. `<Select>` items) outside JSX,
+ * where the `<RoleLabel>` component can't be used. Falls back to
+ * `unknownRoleLabel()` for a non-canonical level/name.
+ */
+export function resolveRoleName(
+  t: TFn,
+  nameOrLevel: string | number,
+  opts?: { plural?: boolean },
+): string {
+  const key = roleNameKey(nameOrLevel)
+  if (!key) {
+    return typeof nameOrLevel === "number" ? unknownRoleLabel(nameOrLevel) : nameOrLevel
+  }
+  return t(key, { count: opts?.plural ? 2 : 1 })
+}
+
+/** Resolve a role's one-line description given a `t()` function. Empty
+ *  string for a non-canonical level (mirrors the old `roleDescription()`
+ *  default). */
+export function resolveRoleDescription(t: TFn, level: number): string {
+  const key = roleDescriptionKey(level)
+  return key ? t(key) : ""
+}
+
+/**
+ * Role option for picker UIs. `name` is the canonical machine-readable name
+ * (never rendered directly — resolve `nameKey`/`descriptionKey` through
+ * `t()`, or pass `level` to `<RoleLabel>`).
  */
 export interface RoleOption {
   level: RoleLevel
   name: string
-  description: string
+  nameKey: MessageKey
+  descriptionKey: MessageKey
 }
 
 function toOption(level: RoleLevel): RoleOption {
-  return { level, name: roleName(level), description: roleDescription(level) }
+  const nameKey = roleNameKey(level)
+  const descriptionKey = roleDescriptionKey(level)
+  if (!nameKey || !descriptionKey) {
+    throw new Error(`roles.ts: no catalog keys for canonical level ${level}`)
+  }
+  return { level, name: roleName(level), nameKey, descriptionKey }
 }
 
 /** Full seven-rung ladder — team attach / org-owner role change. */

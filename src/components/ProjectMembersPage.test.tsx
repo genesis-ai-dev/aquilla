@@ -486,7 +486,7 @@ describe("MembersTab — AQU-485 roster visibility", () => {
   // caller must not see the member list OR the add-member form (which would
   // imply an editable roster exists) — rendering "no members" instead would
   // be a lie (the roster is hidden, not empty).
-  it("renders a 'Roster hidden' state instead of the member list when rosterHidden is true", async () => {
+  it("renders nothing when rosterHidden is true — no list and no disclosure", async () => {
     mockUseProjectMembers.mockReturnValueOnce({
       members: [],
       isLoading: false,
@@ -501,7 +501,7 @@ describe("MembersTab — AQU-485 roster visibility", () => {
 
     renderPage()
 
-    expect(screen.getByText(/roster hidden/i)).toBeInTheDocument()
+    expect(screen.queryByText(/roster hidden/i)).not.toBeInTheDocument()
     expect(screen.queryByText("alice")).not.toBeInTheDocument()
     expect(screen.queryByPlaceholderText("Aquilla username")).not.toBeInTheDocument()
   })

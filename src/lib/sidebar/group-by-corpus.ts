@@ -1,7 +1,24 @@
 import { compareByCanonicalBookOrder } from "@/lib/file-labeling/bible-book-names"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 export interface CorpusGroup<T = unknown> {
+  /**
+   * Stable identity string — the raw corpus marker for a named group, or the
+   * literal `"Ungrouped"` sentinel for the synthetic no-marker bucket.
+   * Callers compare/key on THIS field (`group.label === "Ungrouped"`,
+   * `collapsed.has(group.label)`, …) — it must never be swapped for a
+   * translated string, or every one of those comparisons silently breaks in
+   * a non-English locale. Named-group values are user/import-authored data
+   * (a season name, "OT"/"NT", …) and are correctly never translated either.
+   */
   label: string
+  /**
+   * Set ONLY on the synthetic "Ungrouped" bucket — the catalog key for its
+   * user-visible text. `src/lib/` can't call `useT()`, so the caller
+   * resolves it with `t()` at render time, falling back to the raw `label`
+   * for named groups (`group.labelKey ? t(group.labelKey) : group.label`).
+   */
+  labelKey?: MessageKey
   files: T[]
 }
 
@@ -46,7 +63,7 @@ export function groupByCorpus<T extends { name: string; corpusMarker?: string }>
   // purely alphabetic, which is exactly the sidebar complaint in AQU-582.
   ungrouped.sort((a, b) => compareByCanonicalBookOrder(a.name, b.name))
 
-  const named = Array.from(groupsByKey.values()).sort((a, b) => {
+  const named: CorpusGroup<T>[] = Array.from(groupsByKey.values()).sort((a, b) => {
     if (a.label === "OT" && b.label !== "OT") return -1
     if (b.label === "OT" && a.label !== "OT") return 1
     if (a.label === "NT" && b.label !== "NT") return -1
@@ -54,6 +71,10 @@ export function groupByCorpus<T extends { name: string; corpusMarker?: string }>
     return a.label.localeCompare(b.label)
   })
 
-  if (ungrouped.length > 0) named.push({ label: "Ungrouped", files: ungrouped })
+  if (ungrouped.length > 0) {
+    // i18n-exempt control-flow identity value, not display text — labelKey
+    // carries the translated text; see the CorpusGroup.label doc comment.
+    named.push({ label: "Ungrouped", labelKey: "nav.fileList.ungroupedLabel", files: ungrouped })
+  }
   return named
 }

@@ -4,6 +4,7 @@
 // target duration hit the elapsed-only fallback elsewhere.
 
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   elapsedMs: number
@@ -24,6 +25,7 @@ function formatTime(ms: number): string {
 }
 
 export function DurationBar({ elapsedMs, targetSec, overrunHeadroomSec = 1.5, className }: Props) {
+  const t = useT()
   const elapsedSec = elapsedMs / 1000
   const axisSec = targetSec + overrunHeadroomSec
   const pct = Math.min(100, (elapsedSec / axisSec) * 100)
@@ -63,7 +65,7 @@ export function DurationBar({ elapsedMs, targetSec, overrunHeadroomSec = 1.5, cl
         <span className={cn(state === "over" && "font-medium text-red-500")}>
           {formatTime(elapsedMs)}
         </span>
-        <span>target {formatTime(targetSec * 1000)}</span>
+        <span>{t("workspace.durationBar.targetLabel", { time: formatTime(targetSec * 1000) })}</span>
       </div>
     </div>
   )

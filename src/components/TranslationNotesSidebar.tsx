@@ -186,7 +186,7 @@ export function TranslationNotesSidebar({
     <RightSidebarPanel storageKey="translation-notes" defaultWidth={288} resizeLabel="Resize translation notes panel">
     <div
       className={cn(
-        "flex h-full w-full flex-col border-l bg-card text-sm",
+        "flex h-full w-full flex-col border-s bg-card text-sm",
         className,
       )}
     >

@@ -152,7 +152,7 @@ describe("rendering", () => {
     })
     render(<ProposalCard {...BASE_PROPS} proposal={proposal} roleLevel={ROLE.CONTRIBUTOR} />)
     expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled()
-    expect(screen.getByText("Requires Project Lead role or higher")).toBeInTheDocument()
+    expect(screen.getByText("Requires Project lead role or higher")).toBeInTheDocument()
   })
 })
 

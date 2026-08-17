@@ -13,6 +13,8 @@ import { useProjectHealth } from "@/hooks/useProjectHealth"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { roleName } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDate as formatLocaleDate } from "@/lib/i18n/format"
 
 /**
  * Has this project ever lived server-side? Two signals:
@@ -62,6 +64,7 @@ export function ProjectCard({
   canToggleLifecycle,
   onToggleLifecycle,
 }: ProjectCardProps) {
+  const { locale, t } = useI18n()
   const isGit = project.origin?.kind === "git"
   const isTrashed = variant === "trashed"
   // isActive absent or true → active; explicit false → inactive (frozen)
@@ -141,15 +144,15 @@ export function ProjectCard({
               </HealthRing>
             )}
             {!isTrashed && isInactive && (
-              <AppTooltip content="This project is inactive and cannot be edited until reactivated">
+              <AppTooltip content={t("workspace.projectCard.inactiveTooltip")}>
                 <Badge variant="secondary" data-testid="inactive-badge">
                   <PauseCircle data-icon="inline-start" />
-                  Inactive
+                  {t("org.projectOverview.inactiveBadge")}
                 </Badge>
               </AppTooltip>
             )}
             {!isTrashed && myRoleLabel && (
-              <AppTooltip content="Your role on this project">
+              <AppTooltip content={t("workspace.projectCard.yourRoleTooltip")}>
                 <Badge variant="secondary">
                   <RoleLabel name={myRoleLabel} />
                 </Badge>
@@ -158,6 +161,7 @@ export function ProjectCard({
             {isGit && (
               <Badge variant="secondary">
                 <GitBranch data-icon="inline-start" />
+                {/* i18n-exempt: "git" here is the tool/technology name, not a translatable word */}
                 git
               </Badge>
             )}
@@ -169,7 +173,7 @@ export function ProjectCard({
                       size="icon"
                       variant="ghost"
                       className="h-7 w-7"
-                      aria-label="Project actions"
+                      aria-label={t("org.orgProjectsDataTable.actionsColumnSrOnly")}
                       onClick={(e) => e.stopPropagation()}
                     />
                   }
@@ -204,7 +208,7 @@ export function ProjectCard({
                       }}
                     >
                       <Trash2 className="h-4 w-4" />
-                      Move to Trash
+                      {t("workspace.projectCard.moveToTrash")}
                     </button>
                   )}
                 </PopoverContent>
@@ -216,19 +220,22 @@ export function ProjectCard({
       <CardContent>
         {project.sourceLanguage || project.targetLanguage ? (
           <p className="text-sm text-muted-foreground">
-            {project.sourceLanguage || "?"} → {project.targetLanguage || "?"}
+            {project.sourceLanguage || "?"} <span className="inline-block rtl:-scale-x-100">→</span>{" "}
+            {project.targetLanguage || "?"}
           </p>
         ) : hasServerSideExistence(project) ? (
           <p className="text-sm text-muted-foreground italic">
-            Awaiting setup{maintainerLabel ? ` by ${maintainerLabel}` : ""}
+            {maintainerLabel
+              ? t("workspace.projectCard.awaitingSetupBy", { maintainer: maintainerLabel })
+              : t("workspace.projectCard.awaitingSetup")}
           </p>
         ) : (
           <p className="text-sm text-muted-foreground italic">
-            Languages not set
+            {t("workspace.projectCard.languagesNotSet")}
           </p>
         )}
         <p className="text-sm text-muted-foreground">
-          {project.files.length} file{project.files.length !== 1 ? "s" : ""}
+          {t("search.expanded.fileCount", { count: project.files.length })}
         </p>
         {!isTrashed && members.length > 0 && (
           <div className="mt-2">
@@ -238,14 +245,14 @@ export function ProjectCard({
         {isTrashed && (
           <div className="mt-3 flex items-center justify-between gap-2">
             <span className="text-xs text-muted-foreground">
-              Deleted
+              {t("comments.file.deletedBadge")}
               {project.deletedBy ? ` by ${project.deletedBy}` : ""}
-              {project.deletedAt ? ` · ${formatDate(project.deletedAt)}` : ""}
+              {project.deletedAt ? ` · ${formatDate(project.deletedAt, locale)}` : ""}
             </span>
             {onRestore && (
-              <Button variant="outline" onClick={onRestore}>
-                <Undo2 className="mr-1 h-3.5 w-3.5" />
-                Restore
+              <Button size="sm" variant="outline" onClick={onRestore}>
+                <Undo2 className="me-1 h-3.5 w-3.5" />
+                {t("common.restore")}
               </Button>
             )}
           </div>
@@ -255,13 +262,9 @@ export function ProjectCard({
   )
 }
 
-function formatDate(iso: string): string {
+function formatDate(iso: string, locale: string): string {
   try {
-    return new Date(iso).toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    })
+    return formatLocaleDate(iso, locale, { month: "short", day: "numeric", year: "numeric" })
   } catch {
     return iso
   }

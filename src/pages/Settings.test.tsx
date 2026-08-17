@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
-import { MemoryRouter, Route, Routes } from "react-router-dom"
+import { MemoryRouter, Navigate, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
-import { Settings, OrgSettingsIdentity, OrgSettingsExport, OrgSettingsRoster, OrgSettingsAssignment } from "./Settings"
+import { Settings, OrgSettingsIdentity, OrgSettingsKnowledge, OrgSettingsSecurity } from "./Settings"
 import { renameOrg, listMyOrgs } from "@/lib/frontier/orgs"
 import { toast } from "@/components/ui/toast"
 
@@ -10,7 +10,6 @@ vi.mock("@/components/ui/toast", () => ({
   toast: { add: vi.fn(), close: vi.fn(), update: vi.fn(), promise: vi.fn() },
 }))
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockPatch = vi.fn<() => Promise<any>>(async () => ({ kind: "ok", value: { orgId: 1, settings: {}, version: 1, updatedAt: null, updatedBy: null } }))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -21,6 +20,17 @@ vi.mock("@/lib/frontier/orgs", () => ({
   renameOrg: vi.fn(async () => {}),
 }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
+vi.mock("@/lib/frontier/knowledge-base", () => ({
+  listKnowledgeDocuments: vi.fn(async () => []),
+  getKnowledgeDocument: vi.fn(),
+  getKnowledgeDocumentContent: vi.fn(),
+  getKnowledgeDocumentOriginal: vi.fn(),
+  uploadKnowledgeDocument: vi.fn(),
+  deleteKnowledgeDocument: vi.fn(),
+  reindexKnowledgeDocument: vi.fn(),
+}))
+
+const rosterSettings = vi.hoisted(() => ({ canViewRoster: true }))
 vi.mock("@/hooks/useOrgSettings", () => ({
   useOrgSettings: () => ({
     exportMinRole: null,
@@ -38,23 +48,26 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     canEditOrgKeys: true,
     // AQU-485: roster/member-progress visibility — default floor (Maintainer)
     // and the mocked caller (owner, role 700) passes it.
-    canViewRoster: true,
+    canViewRoster: rosterSettings.canViewRoster,
     rosterViewMinRole: 600,
     canViewMemberProgress: true,
     memberProgressViewMinRole: 600,
     // AQU-496: self-assignment authority — default leads-only.
     allowSelfAssignment: false,
+    // AQU-822: terminology floor — default Project lead.
+    termbaseEditMinRole: 500,
     refresh: vi.fn(async () => null),
     requestPromotion: vi.fn(async () => ({ kind: "blocked" })),
   }),
-  // AQU-485: Settings.tsx imports this directly (not part of the hook's
-  // return value) to gate the roster/progress Select controls owner-only.
   canEditRosterProgressFloor: (level: number | null | undefined) => (level ?? 0) >= 700,
-  // AQU-496: same pattern, gates the allowSelfAssignment Switch owner-only.
   canEditAssignmentAuthority: (level: number | null | undefined) => (level ?? 0) >= 700,
+  canEditTermbaseFloor: (level: number | null | undefined) => (level ?? 0) >= 700,
 }))
 
-beforeEach(() => localStorage.clear())
+beforeEach(() => {
+  localStorage.clear()
+  rosterSettings.canViewRoster = true
+})
 afterEach(() => vi.clearAllMocks())
 
 // Drive the shadcn (Base UI) Select: open the trigger, hover-highlight the
@@ -81,9 +94,10 @@ function renderSettings(path = "/orgs/1/settings") {
         <Routes>
           <Route path="/orgs/:orgId/settings" element={<Settings />} />
           <Route path="/orgs/:orgId/settings/identity" element={<OrgSettingsIdentity />} />
-          <Route path="/orgs/:orgId/settings/export" element={<OrgSettingsExport />} />
-          <Route path="/orgs/:orgId/settings/roster" element={<OrgSettingsRoster />} />
-          <Route path="/orgs/:orgId/settings/assignment" element={<OrgSettingsAssignment />} />
+          <Route path="/orgs/:orgId/settings/security" element={<OrgSettingsSecurity />} />
+          <Route path="/orgs/:orgId/settings/knowledge" element={<OrgSettingsKnowledge />} />
+          <Route path="/orgs/:orgId/settings/export" element={<Navigate to="../security" replace relative="path" />} />
+          <Route path="/orgs/:orgId/settings/roster" element={<Navigate to="../security" replace relative="path" />} />
         </Routes>
       </OrgProvider>
     </MemoryRouter>,
@@ -91,6 +105,22 @@ function renderSettings(path = "/orgs/1/settings") {
 }
 
 describe("Org Settings", () => {
+  it("lists Billing & usage on the settings index", async () => {
+    renderSettings("/orgs/1/settings")
+    expect(await screen.findByRole("link", { name: /Billing & usage/i })).toBeDefined()
+  })
+
+  it("links to and renders the organization knowledge base", async () => {
+    const { unmount } = renderSettings("/orgs/1/settings")
+    const link = await screen.findByRole("link", { name: /Knowledge base/i })
+    expect(link).toHaveAttribute("href", "/orgs/1/settings/knowledge")
+    unmount()
+
+    renderSettings("/orgs/1/settings/knowledge")
+    expect(await screen.findByRole("heading", { name: "Knowledge base" })).toBeInTheDocument()
+    expect(screen.getAllByText(/every project in this organization/i)).toHaveLength(1)
+  })
+
   it("shows the org name and an owner can rename it on blur", async () => {
     renderSettings("/orgs/1/settings/identity")
     const input = await screen.findByLabelText(/^Organization name$/i)
@@ -113,10 +143,22 @@ describe("Org Settings", () => {
   })
 })
 
-describe("Export policy silent auto-save", () => {
-  it("patches on change without a Saved acknowledgment", async () => {
+describe("Security settings page", () => {
+  it("renders visibility and permission controls on one page", async () => {
+    renderSettings("/orgs/1/settings/security")
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Security" })).toBeInTheDocument())
+    expect(screen.getByText("Visibility")).toBeInTheDocument()
+    expect(screen.getByText("Permissions")).toBeInTheDocument()
+    expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined()
+    expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined()
+    expect(screen.getByLabelText(/who can export/i)).toBeDefined()
+    expect(screen.getByLabelText(/allow self-assignment/i)).toBeDefined()
+    expect(screen.getByLabelText(/who can manage terminology/i)).toBeDefined()
+  })
+
+  it("patches export on change without a Saved acknowledgment", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "ok", value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })
-    renderSettings("/orgs/1/settings/export")
+    renderSettings("/orgs/1/settings/security")
     await waitFor(() => expect(screen.getByLabelText(/who can export/i)).toBeDefined())
 
     await pickSelectOption(/who can export/i, /contributor \(400\)/i)
@@ -126,9 +168,9 @@ describe("Export policy silent auto-save", () => {
     expect(toast.add).not.toHaveBeenCalled()
   })
 
-  it("surfaces a server error when the save fails", async () => {
+  it("surfaces a server error when the export save fails", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "error" as const, status: 500, message: "Server error" })
-    renderSettings("/orgs/1/settings/export")
+    renderSettings("/orgs/1/settings/security")
     await waitFor(() => expect(screen.getByLabelText(/who can export/i)).toBeDefined())
 
     await pickSelectOption(/who can export/i, /contributor \(400\)/i)
@@ -136,19 +178,10 @@ describe("Export policy silent auto-save", () => {
     expect(await screen.findByText(/server error/i)).toBeDefined()
     expect(screen.queryByText(/^Saved$/i)).toBeNull()
   })
-})
-
-// AQU-485: roster + member-progress visibility settings UI.
-describe("Roster & member-progress visibility settings (AQU-485)", () => {
-  it("renders both independent controls, defaulting to Maintainer", async () => {
-    renderSettings("/orgs/1/settings/roster")
-    await waitFor(() => expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined())
-    expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined()
-  })
 
   it("silently patches the roster floor without a Saved acknowledgment", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "ok", value: { orgId: 1, settings: { rosterViewMinRole: 400 }, version: 2, updatedAt: null, updatedBy: null } })
-    renderSettings("/orgs/1/settings/roster")
+    renderSettings("/orgs/1/settings/security")
     await waitFor(() => expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined())
 
     await pickSelectOption(/who can view the roster/i, /contributor \(400\)/i)
@@ -160,12 +193,36 @@ describe("Roster & member-progress visibility settings (AQU-485)", () => {
 
   it("surfaces a server error for the member-progress floor without a false Saved", async () => {
     mockPatch.mockResolvedValueOnce({ kind: "error" as const, status: 500, message: "Server error" })
-    renderSettings("/orgs/1/settings/roster")
+    renderSettings("/orgs/1/settings/security")
     await waitFor(() => expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined())
 
     await pickSelectOption(/who can view member progress/i, /owner \(700\)/i)
 
     expect(await screen.findByText(/server error/i)).toBeDefined()
     expect(screen.queryByText(/^Saved$/i)).toBeNull()
+  })
+
+  it("redirects retired floor URLs onto /settings/security", async () => {
+    renderSettings("/orgs/1/settings/roster")
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Security" })).toBeInTheDocument())
+    expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined()
+  })
+})
+
+describe("Settings index", () => {
+  it("omits the Members settings row when the caller is below the roster floor", async () => {
+    rosterSettings.canViewRoster = false
+    renderSettings("/orgs/1/settings")
+    await waitFor(() => expect(screen.getByText("Organization settings")).toBeInTheDocument())
+    expect(screen.queryByRole("link", { name: "Members" })).not.toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /^security/i })).toBeInTheDocument()
+  })
+
+  it("links Security as a single row, not per-floor pages", async () => {
+    renderSettings("/orgs/1/settings")
+    await waitFor(() => expect(screen.getByText("Organization settings")).toBeInTheDocument())
+    expect(screen.getByRole("link", { name: /^security/i })).toHaveAttribute("href", "/orgs/1/settings/security")
+    expect(screen.queryByRole("link", { name: /roster & progress visibility/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: /export permissions/i })).not.toBeInTheDocument()
   })
 })

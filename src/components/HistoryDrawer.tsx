@@ -9,7 +9,8 @@ import { cn } from "@/lib/utils"
 import { useCellEditHistory } from "@/hooks/useCellEditHistory"
 import { FootnotedTextValue } from "./footnotes/FootnoteInline"
 import { RightSidebarPanel } from "./RightSidebarPanel"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useT, useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDateTime } from "@/lib/i18n/format"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 
 interface HistoryDrawerProps {
@@ -122,7 +123,7 @@ function commonSuffixLength(a: string, b: string, prefixLen: number): number {
 }
 
 export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFile, isSynced = false, onPromote }: HistoryDrawerProps) {
-  const t = useT()
+  const { t, locale } = useI18n()
   const enabled = !!projectId && !!fileId && !!getTokenForFile
   // Target side is the typical edit surface in this translation app, so we
   // use `targetEventId` as the AD-2 chain head when computing stale-branch
@@ -173,7 +174,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
 
   function formatTimestamp(iso: string): string {
     try {
-      return new Date(iso).toLocaleString()
+      return formatDateTime(iso, locale)
     } catch {
       return iso
     }
@@ -181,7 +182,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
 
   return (
     <RightSidebarPanel storageKey="history" defaultWidth={384} resizeLabel="Resize history panel">
-    <div className="flex h-full w-full flex-col border-l bg-card">
+    <div className="flex h-full w-full flex-col border-s bg-card">
       <div className="flex items-center justify-between border-b p-2">
         <h3 className="text-sm font-semibold">
           {t("editor.history.title")} {cell.context && <span className="text-muted-foreground">· {cell.context}</span>}
@@ -231,7 +232,7 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
             <p className="text-[10px] text-muted-foreground">
               {t("editor.history.revisions", { count: groups.length })}
               {hiddenCount > 0 && (
-                <span className="ml-1 normal-case text-muted-foreground/70">
+                <span className="ms-1 normal-case text-muted-foreground/70">
                   {t("editor.history.collapsedNote", {
                     total: history.length,
                     hidden: hiddenCount,
@@ -354,7 +355,7 @@ function GroupItem({
             {t("editor.history.minorEdits", { count: group.entries.length - 1 })}
           </span>
         )}
-        <span className="ml-auto text-muted-foreground">
+        <span className="ms-auto text-muted-foreground">
           {formatTimestamp(terminal.timestamp)}
         </span>
       </div>
@@ -365,9 +366,9 @@ function GroupItem({
           k="editor.history.author"
           values={{ author: <span className="font-medium">{terminal.author}</span> }}
         />
-        {isCurrent && <span className="ml-1.5 text-primary">{t("editor.history.currentMarker")}</span>}
+        {isCurrent && <span className="ms-1.5 text-primary">{t("editor.history.currentMarker")}</span>}
         {isStale && (
-          <span className="ml-1.5 text-amber-700 dark:text-amber-300">
+          <span className="ms-1.5 text-amber-700 dark:text-amber-300">
             {t("editor.history.bumpedMarker")}
           </span>
         )}
@@ -416,7 +417,7 @@ function GroupItem({
             {expanded ? t("editor.history.hideIntermediate") : t("editor.history.showIntermediate")}
           </button>
           {expanded && (
-            <ol className="mt-1 space-y-1 border-l-2 pl-2">
+            <ol className="mt-1 space-y-1 border-s-2 ps-2">
               {group.entries.slice(0, -1).map((entry, j) => (
                 <li
                   key={`${entry.timestamp}-${j}`}

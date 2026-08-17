@@ -106,6 +106,21 @@ describe("MilestoneNavigator", () => {
     expect(screen.getByText("Revelation 20")).toHaveClass("truncate")
   })
 
+  it("stays content-sized when embedded in the compact workspace header", () => {
+    render(
+      <MilestoneNavigator
+        items={chapters}
+        activeKey="scripture:MAT:1"
+        onSelect={() => {}}
+        compact
+      />,
+    )
+
+    const trigger = screen.getByRole("combobox", { name: /Current chapter: Matthew 1/ })
+    expect(trigger).not.toHaveClass("xl:w-56")
+    expect(screen.getByText("Verses 1–25")).not.toHaveClass("xl:inline")
+  })
+
   it("moves to the next chapter by stable milestone key", () => {
     const onSelect = vi.fn()
     render(<MilestoneNavigator items={chapters} activeKey="scripture:MAT:1" onSelect={onSelect} />)
@@ -216,7 +231,7 @@ describe("MilestoneNavigator", () => {
     })
     expect(subsection).toHaveAttribute("data-checked", "true")
     expect(subsection).toHaveAttribute("data-milestone-subsection")
-    expect(subsection).toHaveClass("pl-6")
+    expect(subsection).toHaveClass("ps-6")
     fireEvent.click(screen.getByText("Cells 101–117"))
     expect(onSelect).toHaveBeenCalledWith("story:u363", "story:u363:range:c102")
   })

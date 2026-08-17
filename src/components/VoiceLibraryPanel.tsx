@@ -88,7 +88,7 @@ export function VoiceLibraryPanel({
   // local projects that never resolve a syncRole — same convention as
   // resolveEditorCapabilities / canPerform.
   const canEditVoices = roleLevel == null || roleLevel >= ROLE.MAINTAINER
-  const voiceDenialReason = !canEditVoices ? denialMessage(ROLE.MAINTAINER, roleLevel) : null
+  const voiceDenialReason = !canEditVoices ? denialMessage(t, ROLE.MAINTAINER, roleLevel) : null
 
   // Seed the local library once per project.
   useEffect(() => {
@@ -290,7 +290,7 @@ function VoiceRow({
         onClick={onSelect}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() } }}
         className={cn(
-          "group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition-colors",
+          "group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-start text-sm transition-colors",
           active ? "bg-primary/10" : "hover:bg-accent/50",
         )}
       >

@@ -17,6 +17,7 @@ import { useEditorScroll } from "@/context/EditorScrollContext"
 import {
   attachContextualRun,
   dismissContextualRunSummary,
+  getContextualRunState,
   requestPauseContextualRun,
   resumeContextualRun,
   startContextualRun,
@@ -48,7 +49,7 @@ interface PillProps {
 }
 
 const PILL_BASE =
-  "pointer-events-auto absolute bottom-4 right-4 z-30 flex items-center gap-2 " +
+  "pointer-events-auto absolute bottom-4 end-4 z-30 flex items-center gap-2 " +
   "rounded-lg border bg-card px-4 py-2 text-xs ring-1 ring-foreground/10"
 
 function ProgressBar({ done, total }: { done: number; total: number }) {
@@ -221,12 +222,22 @@ function ContextualRunPillScoped({
           aria-label={t("autopilot.action.run")}
           onClick={() => {
             setControlError(null)
-            if (!available) { onSetupNeeded?.(); return }
-            void startContextualRun(projectId, fileId, anchorCellId ?? undefined, activeLane).then((started) => {
+            void (async () => {
+              // available starts false until the snapshot lands. Treat that
+              // window as hydration, not "backend missing" — otherwise Play
+              // opens AI setup instead of starting the run.
+              if (!available) {
+                await attachContextualRun(projectId, fileId)
+                if (!getContextualRunState().available) {
+                  onSetupNeeded?.()
+                  return
+                }
+              }
+              const started = await startContextualRun(projectId, fileId, anchorCellId ?? undefined, activeLane)
               if (!started) {
                 setControlError(t("autopilot.pill.startFailed"))
               }
-            })
+            })()
           }}
         >
           <Play className="h-3.5 w-3.5" />
@@ -431,7 +442,11 @@ function ContextualRunPillScoped({
   return (
     <>
       <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</span>
-      <div className={pillClass} data-testid="contextual-run-pill">
+      <div
+        className={pillClass}
+        data-testid="contextual-run-pill"
+        data-contextual-available={available ? "true" : "false"}
+      >
         {content}
         {steer}
         {activityButton}

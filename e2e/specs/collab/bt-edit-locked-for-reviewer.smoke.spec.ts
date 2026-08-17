@@ -74,6 +74,7 @@ async function hasPersistedBacktranslation(
  *   4. Verifies the locked "Edit" span is present (and no generate button).
  */
 test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice, bob }) => {
+  test.setTimeout(120_000)
   const aliceSession = await ensureAuthState("alice")
   const acme = await getMyOrg(aliceSession.jwt)
   await addOrgMember(aliceSession.jwt, acme.id, "bob", ROLE.REVIEWER)

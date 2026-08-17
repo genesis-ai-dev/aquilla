@@ -9,6 +9,9 @@
  */
 
 import { useState, type ReactNode } from "react"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
+import { formatNumber } from "@/lib/i18n/format"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   AlertTriangle,
   Book,
@@ -49,40 +52,42 @@ const TOOL_ICON: Record<ToolKind, typeof Database> = {
   draft: PenLine,
 }
 
-const TOOL_LABEL: Record<ToolKind, string> = {
-  sql: "sql",
-  emit: "stage",
-  docs: "docs",
-  aquifer: "Bible reference",
-  read: "read",
-  examples: "examples",
-  search: "search",
-  draft: "draft",
+const TOOL_LABEL_KEY: Record<ToolKind, MessageKey> = {
+  sql: "agent.run.tool.sql",
+  emit: "agent.run.tool.stage",
+  docs: "agent.run.tool.docs",
+  aquifer: "agent.run.tool.bibleReference",
+  read: "agent.run.tool.read",
+  examples: "agent.run.tool.examples",
+  search: "agent.run.tool.search",
+  draft: "agent.run.tool.draft",
 }
 
 function ToolChip({ item }: { item: ToolItem }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const Icon = TOOL_ICON[item.tool] ?? Database
+  const labelKey = TOOL_LABEL_KEY[item.tool]
   return (
     <div className="rounded-md border bg-muted/30">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-1.5 px-2 py-1 text-left text-[11px]"
+        className="flex w-full items-center gap-1.5 px-2 py-1 text-start text-[11px]"
       >
         <ChevronRight
           className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
         />
         <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
-        <span className="font-mono text-muted-foreground">{TOOL_LABEL[item.tool] ?? item.tool}</span>
+        <span className="font-mono text-muted-foreground">{labelKey ? t(labelKey) : item.tool}</span>
         <span className="min-w-0 flex-1 truncate font-mono">{item.summary}</span>
         {item.ok === undefined ? (
-          <Spinner className="size-3 shrink-0 text-muted-foreground" aria-label="Step running" />
+          <Spinner className="size-3 shrink-0 text-muted-foreground" aria-label={t("agent.run.stepRunning")} />
         ) : item.ok ? (
-          <Check className="h-3 w-3 shrink-0 text-emerald-600" aria-label="Step succeeded" />
+          <Check className="h-3 w-3 shrink-0 text-emerald-600" aria-label={t("agent.run.stepSucceeded")} />
         ) : (
-          <X className="h-3 w-3 shrink-0 text-destructive" aria-label="Step failed" />
+          <X className="h-3 w-3 shrink-0 text-destructive" aria-label={t("agent.run.stepFailed")} />
         )}
       </button>
       {open && item.resultSummary !== undefined && (
@@ -116,6 +121,7 @@ export function AgentRunView({
   renderToolCard,
   onReviewMemory,
 }: AgentRunViewProps) {
+  const { locale, t } = useI18n()
   return (
     <div className="flex flex-col gap-2">
       {/* User prompt — right-aligned primary bubble. */}
@@ -207,15 +213,18 @@ export function AgentRunView({
           <MarkerIcon>
             <AlertTriangle />
           </MarkerIcon>
-          <MarkerContent>Run hit its step/token cap — results may be partial.</MarkerContent>
+          <MarkerContent>{t("agent.run.capped")}</MarkerContent>
         </Marker>
       )}
 
       {run.usage && (
         <div className="text-[10px] text-muted-foreground">
-          {run.usage.promptTokens.toLocaleString()} prompt + {run.usage.completionTokens.toLocaleString()} completion tokens
+          {t("agent.run.tokenUsage", {
+            promptTokens: formatNumber(run.usage.promptTokens, locale),
+            completionTokens: formatNumber(run.usage.completionTokens, locale),
+          })}
           {" · "}
-          {formatCredits(run.usage.costCredits)}
+          {formatCredits(run.usage.costCredits, locale)}
         </div>
       )}
 

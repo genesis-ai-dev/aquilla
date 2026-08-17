@@ -9,9 +9,12 @@ import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
 
 function projectsRollupStat() {
-  // Overview (and all-orgs) rollup tiles sit outside the nav.
+  // Overview (and all-orgs) rollup tiles sit outside the nav. The label lives
+  // in a nested wrapper so the tile can be a single row on small screens.
   const label = screen.getAllByText("Projects").find((el) => !el.closest("nav"))!
-  return label.parentElement!
+  const tile = label.parentElement?.parentElement
+  if (!tile) throw new Error("rollup tile root not found")
+  return tile
 }
 
 function renderMemberShell(path: string) {
@@ -225,6 +228,26 @@ function mockProjectNameOverflow(overflowing: boolean) {
   })
 }
 
+describe("OrgHome loading template", () => {
+  it("keeps the header breadcrumb-only (no trailing profile chip)", () => {
+    mockUseFrontierSession.mockReturnValue({
+      session: { jwt: "jwt", username: "anna", createdAt: "x" },
+      loading: true,
+    })
+    render(
+      <MemoryRouter initialEntries={["/orgs/all"]}>
+        <OrgProvider>
+          <OrgHome />
+        </OrgProvider>
+      </MemoryRouter>,
+    )
+    expect(screen.getByTestId("org-home-loading-template")).toBeInTheDocument()
+    const header = document.querySelector("[data-slot='app-shell-header']")
+    expect(header).not.toBeNull()
+    expect(header!.querySelectorAll("[data-slot='skeleton']")).toHaveLength(1)
+  })
+})
+
 describe("ProjectTable", () => {
   const project: PortfolioProject & { orgName: string } = {
     id: "long-project",
@@ -281,7 +304,7 @@ describe("ProjectTable", () => {
     expect(projectName.parentElement).toHaveAttribute("data-project-name-truncated", "true")
     expect(expandedProjectName).toHaveTextContent(project.name)
     expect(expandedProjectName).toHaveAttribute("aria-hidden", "true")
-    expect(expandedProjectName).toHaveClass("z-50", "-left-2", "px-2", "py-1", "bg-popover", "shadow-md")
+    expect(expandedProjectName).toHaveClass("z-50", "-start-2", "px-2", "py-1", "bg-popover", "shadow-md")
     expect(organization).not.toHaveAttribute("data-slot", "tooltip-trigger")
     expect(identity).toHaveClass("@md/project-table:grid-cols-[minmax(6.5rem,1fr)_minmax(4rem,6rem)]")
     expect(organization).toHaveClass("relative", "h-5", "w-full")
@@ -313,9 +336,9 @@ describe("ProjectTable", () => {
     expect(screen.getByTestId("project-table-translated-header")).toHaveAttribute("aria-label", "Translated")
     expect(screen.getByTestId("project-table-validated-header")).toHaveAttribute("aria-label", "Validated")
     expect(screen.getByTestId("project-table-audio-header")).toHaveAttribute("aria-label", "Has audio")
-    expect(screen.getByTestId("project-table-translated-value")).toHaveClass("justify-self-start", "text-left")
-    expect(screen.getByTestId("project-table-validated-value")).toHaveClass("justify-self-start", "text-left")
-    expect(screen.getByTestId("project-table-audio-value")).toHaveClass("justify-self-start", "text-left")
+    expect(screen.getByTestId("project-table-translated-value")).toHaveClass("justify-self-start", "text-start")
+    expect(screen.getByTestId("project-table-validated-value")).toHaveClass("justify-self-start", "text-start")
+    expect(screen.getByTestId("project-table-audio-value")).toHaveClass("justify-self-start", "text-start")
     expect(screen.queryByText("Role")).not.toBeInTheDocument()
     expect(screen.queryByText("Updated", { exact: true })).not.toBeInTheDocument()
     expect(screen.queryByText(/Updated /)).not.toBeInTheDocument()
@@ -518,7 +541,7 @@ describe("OrgOverview / OrgProjects", () => {
 
   it("renders no Pending invitations card when there are none", async () => {
     renderMemberOverview()
-    await waitFor(() => expect(screen.getByTestId("org-overview-attention-table")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId("org-overview-projects-table")).toBeInTheDocument())
     expect(screen.queryByTestId("pending-invitations")).not.toBeInTheDocument()
   })
 
@@ -527,12 +550,72 @@ describe("OrgOverview / OrgProjects", () => {
     await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
     const projectsStat = projectsRollupStat()
     expect(within(projectsStat).getByText("2")).toBeInTheDocument()
+    expect(projectsStat).toHaveClass("flex-row-reverse")
+    expect(projectsStat.parentElement).toHaveClass("grid-cols-1")
   })
 
   it("shows the overdue rollup card and at-risk rows on overview", async () => {
     renderMemberOverview()
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
     expect(screen.getAllByText("Overdue").length).toBeGreaterThan(0)
+  })
+
+  it("shows every project directly in recent-update order and marks attention projects", async () => {
+    renderMemberOverview()
+
+    const table = await screen.findByTestId("org-overview-projects-table")
+    const recentProject = within(table).getByText("New Testament")
+    const staleProject = within(table).getByText("Legacy Translation")
+
+    expect(staleProject.compareDocumentPosition(recentProject) & Node.DOCUMENT_POSITION_PRECEDING)
+      .toBeTruthy()
+    expect(within(staleProject.closest("tr")!).getByRole("img", {
+      name: "Needs attention: Overdue, Stalled",
+    })).toHaveClass("text-amber-600")
+    expect(within(recentProject.closest("tr")!).queryByRole("img", { name: /needs attention/i }))
+      .not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /view projects/i })).not.toBeInTheDocument()
+  })
+
+  it("shows the ten most recently updated projects first and expands the rest inline", async () => {
+    const { getPortfolio } = await import("@/lib/frontier/portfolio")
+    const now = Date.now()
+    vi.mocked(getPortfolio).mockResolvedValue(
+      Array.from({ length: 12 }, (_, index) => ({
+        id: `project-${index + 1}`,
+        name: `Project ${String(index + 1).padStart(2, "0")}`,
+        totalCells: 100,
+        validatedCells: 50,
+        filledCells: 50,
+        aiDraftedCells: 0,
+        lastEditAt: now - index * 1_000,
+        audioCells: 0,
+        validatedAudioCells: 0,
+        recordedMs: 0,
+        deadlineAt: null,
+        sourceLanguage: null,
+        targetLanguage: null,
+      })),
+    )
+
+    renderMemberOverview()
+
+    const table = await screen.findByTestId("org-overview-projects-table")
+    expect(within(table).getByText("Project 01")).toBeInTheDocument()
+    expect(within(table).getByText("Project 10")).toBeInTheDocument()
+    expect(within(table).queryByText("Project 11")).not.toBeInTheDocument()
+
+    const showAll = screen.getByRole("button", { name: "Show all 12" })
+    expect(showAll).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(showAll)
+
+    expect(within(table).getByText("Project 11")).toBeInTheDocument()
+    expect(within(table).getByText("Project 12")).toBeInTheDocument()
+    const showFewer = screen.getByRole("button", { name: "Show fewer" })
+    expect(showFewer).toHaveAttribute("aria-expanded", "true")
+
+    fireEvent.click(showFewer)
+    expect(within(table).queryByText("Project 11")).not.toBeInTheDocument()
   })
 
   it("shows the audio rollup card and per-project audio % on the projects table", async () => {

@@ -19,6 +19,7 @@ import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
 import { fmtClock } from "./format"
 import { formatVttTime } from "@/lib/video/vtt-generator"
 import type { CellData } from "@/hooks/useCells"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const MIN_DUR_SEC = 0.2
 
@@ -70,6 +71,7 @@ export function TimelineCard({
   onRetime,
   onSeek,
 }: TimelineCardProps) {
+  const t = useT()
   // Round 6: a subtitle card on a media cell shows its INDEPENDENT span.
   const laneSpan = span ?? (variant === "subtitle" ? subtitleSpanSec(cell) : null)
   const startSec = laneSpan?.start ?? cell.startTime ?? 0
@@ -245,7 +247,7 @@ export function TimelineCard({
                 : "bg-muted text-muted-foreground",
             )}
           >
-            cam {cell.cameraState}
+            {t("workspace.timelineCard.camLabel", { state: cell.cameraState })}
           </span>
         )}
         {castName && <span className="font-medium text-foreground/80">{castName}</span>}

@@ -3,6 +3,7 @@ import { NavLink, useNavigate } from "react-router-dom"
 import type { LucideIcon } from "lucide-react"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
 import { partitionSharedProjects } from "@/lib/frontier/shared-projects"
 import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
@@ -18,6 +19,7 @@ import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { OrgSwitcher } from "./OrgSwitcher"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { HelpMenu } from "@/components/HelpMenu"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const link = ({ isActive }: { isActive: boolean }) =>
   `flex items-center gap-2 rounded-md px-2 py-1.5 text-sm font-normal ${isActive ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`
@@ -48,6 +50,7 @@ function OrgNavLink(props: ComponentProps<typeof NavLink>) {
 }
 
 export function OrgSidebar() {
+  const t = useT()
   const { orgs, activeOrg, activeOrgId, activeGuestOrg, isAllOrgs, accessibleProjects } = useActiveOrg()
   const { session } = useFrontierSession()
   const username = session?.username ?? null
@@ -59,6 +62,14 @@ export function OrgSidebar() {
   const isGuestOrg = activeGuestOrg != null
   const isMemberOrg = !isAllOrgs && activeOrgId != null && !isGuestOrg
   const isAdmin = isMemberOrg && (activeOrg?.role.level ?? 0) >= 600
+  // AQU-485: Members is a roster-visibility surface, not a generic admin
+  // tool. Follow rosterViewMinRole so a below-floor maintainer does not see
+  // the nav item, and a lowered floor can surface it for contributors.
+  const { canViewRoster } = useOrgSettings(
+    isMemberOrg ? activeOrgId : null,
+    activeOrg?.role?.level,
+  )
+  const showMembersNav = isMemberOrg && canViewRoster
   // Platform-operator (site-wide admin) — separate axis from the org role.
   const { isAdmin: isPlatformAdmin } = usePlatformAdmin()
 
@@ -105,7 +116,7 @@ export function OrgSidebar() {
             data-tour="nav-overview"
           >
             <NavIcon icon={NAV_PAGE_ICONS.projects} />
-            Projects
+            {t("nav.projects")}
           </OrgNavLink>
         ) : isMemberOrg && activeOrgId != null ? (
           <>
@@ -116,7 +127,7 @@ export function OrgSidebar() {
               data-tour="nav-overview"
             >
               <NavIcon icon={NAV_PAGE_ICONS.overview} />
-              Overview
+              {t("editor.navTitle.overview")}
             </OrgNavLink>
             <OrgNavLink
               to={orgProjectsPath(activeOrgId)}
@@ -124,7 +135,7 @@ export function OrgSidebar() {
               data-tour="nav-projects"
             >
               <NavIcon icon={NAV_PAGE_ICONS.projects} />
-              Projects
+              {t("nav.projects")}
             </OrgNavLink>
           </>
         ) : (
@@ -138,39 +149,43 @@ export function OrgSidebar() {
             data-tour="nav-overview"
           >
             <NavIcon icon={NAV_PAGE_ICONS.overview} />
-            Overview
+            {t("editor.navTitle.overview")}
           </OrgNavLink>
         )}
         {isMemberOrg && activeOrgId != null && <>
           <OrgNavLink to={orgPath(activeOrgId, "/teams")} className={link}>
             <NavIcon icon={NAV_PAGE_ICONS.teams} />
-            Teams
+            {t("editor.navTitle.teams")}
           </OrgNavLink>
           <OrgNavLink to={orgPath(activeOrgId, "/assigned")} className={link} data-tour="nav-assigned">
             <NavIcon icon={NAV_PAGE_ICONS.assigned} />
-            Assigned to me
+            {t("editor.navTitle.assignedToMe")}
           </OrgNavLink>
         </>}
-        {isAdmin && activeOrgId != null && <>
+        {isMemberOrg && activeOrgId != null && (showMembersNav || isAdmin) && (
           <div className="my-1 border-t" />
+        )}
+        {showMembersNav && activeOrgId != null && (
           <OrgNavLink to={orgPath(activeOrgId, "/members")} className={link}>
             <NavIcon icon={NAV_PAGE_ICONS.members} />
-            Members
+            {t("editor.navTitle.members")}
           </OrgNavLink>
+        )}
+        {isAdmin && activeOrgId != null && <>
           <OrgNavLink to={orgPath(activeOrgId, "/archived")} className={link}>
             <NavIcon icon={NAV_PAGE_ICONS.archived} />
-            Archived
+            {t("org.orgSidebar.archived")}
           </OrgNavLink>
           <OrgNavLink to={orgPath(activeOrgId, "/settings")} className={link} data-tour="nav-settings">
             <NavIcon icon={NAV_PAGE_ICONS.settings} />
-            Settings
+            {t("nav.settings")}
           </OrgNavLink>
         </>}
         {isPlatformAdmin && <>
           <div className="my-1 border-t" />
           <OrgNavLink to="/admin" className={link}>
             <NavIcon icon={NAV_PAGE_ICONS.admin} />
-            Admin
+            {t("org.orgSidebar.admin")}
           </OrgNavLink>
         </>}
         {hasSharedProjects && (
@@ -179,10 +194,10 @@ export function OrgSidebar() {
             <OrgNavLink to="/shared" className={link}>
               <NavIcon icon={NAV_PAGE_ICONS.shared} />
               <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-                Shared with you
+                {t("editor.navTitle.sharedWithYou")}
                 {hasNewSharedProjects && (
                   <Badge className="shrink-0" data-testid="new-shared-nav-badge">
-                    New
+                    {t("org.guestOrgHome.newBadge")}
                   </Badge>
                 )}
               </span>

@@ -3,6 +3,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 import { resolveApiKey } from "@/lib/store/user-api-keys"
 import { effectiveSourceText, type SourceTextCell } from "@/lib/cell-text"
 import { getUserProviderOverride } from "@/lib/store/user-provider-override"
+import { t } from "@/lib/i18n/standalone"
 
 // ---------------------------------------------------------------------------
 // Memory primitives
@@ -16,6 +17,52 @@ export interface ValidatedPair {
   cellId?: string
   source: string
   target: string
+}
+
+/**
+ * Research-backed default for Luna: keep the global approved-example pool
+ * small enough to stay focused, while leaving room for local discourse
+ * context. This is a TOTAL prompt budget, not a per-retriever allowance.
+ */
+export const DEFAULT_APPROVED_EXAMPLE_COUNT = 10
+
+function normalizedExampleSource(source: string): string {
+  return source.trim().replace(/\s+/g, " ").toLowerCase()
+}
+
+/**
+ * Merge canonical retrieval with the local approved-cell fallback into one
+ * bounded prompt pool. Retrieved examples win; local cells only fill unused
+ * slots. Examples already present in the live request or immediate discourse
+ * window are excluded, and source text is preserved in full.
+ */
+export function selectApprovedExamples(
+  retrieved: ValidatedPair[],
+  fallback: ValidatedPair[],
+  limit: number,
+  excludedContext: { source: string }[] = [],
+): ValidatedPair[] {
+  if (limit <= 0) return []
+
+  const excludedSources = new Set(
+    excludedContext.map((context) => normalizedExampleSource(context.source)).filter(Boolean),
+  )
+  const seenSources = new Set<string>()
+  const seenCellIds = new Set<string>()
+  const selected: ValidatedPair[] = []
+
+  for (const example of [...retrieved, ...fallback]) {
+    if (selected.length >= limit) break
+    const sourceKey = normalizedExampleSource(example.source)
+    if (!sourceKey || !example.target.trim() || excludedSources.has(sourceKey)) continue
+    if (seenSources.has(sourceKey) || (example.cellId && seenCellIds.has(example.cellId))) continue
+
+    selected.push(example)
+    seenSources.add(sourceKey)
+    if (example.cellId) seenCellIds.add(example.cellId)
+  }
+
+  return selected
 }
 
 /**
@@ -113,7 +160,7 @@ export function buildBriefBlock(summary: string | undefined | null): string {
 
 export const DEFAULT_SYSTEM_PROMPT =
   "You are a translation assistant completing a project that translates from {sourceLanguage} into {targetLanguage}.\n\n" +
-  "The translation examples the user provides are your PRIMARY source of truth. They show the exact terminology, tone, register, punctuation, and stylistic conventions this specific project uses. Study them and reproduce those patterns precisely. This may be an ultra-low-resource language, so do not fall back on general knowledge of {targetLanguage} — follow the project's own patterns above all else.\n\n" +
+  "The translation examples the user provides are your PRIMARY source of truth. Treat every observable convention in them as binding: reproduce the project's wording, spelling, tone, register, punctuation, formatting, and style rather than substituting defaults associated with the {targetLanguage} label. This may be an ultra-low-resource language, so follow the project's own evidence above general knowledge.\n\n" +
   "Always translate from {sourceLanguage} to {targetLanguage}, relying strictly on the reference data and context provided. The language may be an ultra-low-resource language, so it is critical to follow the patterns and style of the provided reference data closely.\n\n" +
   "To produce the translation, follow these steps:\n" +
   "1. Analyze the provided reference data to understand the translation patterns and style.\n" +
@@ -237,12 +284,6 @@ export function buildPrompt(options: {
 
   const targetOnly = options.exampleFormat === "target-only"
 
-  // In target-only mode, append a note so the model understands what the
-  // examples represent (reference translations, not source→target alignments).
-  if (targetOnly) {
-    sys = sys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."
-  }
-
   // Validated pairs lead the few-shot examples; search-retrieved examples follow.
   // Drop incomplete pairs (empty source or target): the branching-search corpus
   // keeps source-only cells (COALESCE(t.value,'') in loadCorpus) so in-progress
@@ -252,6 +293,12 @@ export function buildPrompt(options: {
   // In target-only mode we still require a non-empty target; source is omitted.
   const allExamples = [...(options.validatedPairs ?? []), ...options.examples]
     .filter((ex) => (targetOnly ? ex.target.trim() : ex.source.trim() && ex.target.trim()))
+
+  // In target-only mode, append a note so the model understands what the
+  // examples represent (reference translations, not source→target alignments).
+  if (targetOnly) {
+    sys = sys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."
+  }
 
   let user = ""
   if (targetOnly) {
@@ -303,6 +350,8 @@ export function buildBatchPrompt(options: {
   briefSummary?: string
   /** Format-specific output contract appended after project rules. */
   systemAddendum?: string
+  /** Approved bilingual pairs immediately preceding the first live cell. */
+  precedingContext?: { source: string; target: string }[]
 }): ChatMessage[] {
   const targetOnly = options.exampleFormat === "target-only"
 
@@ -349,6 +398,13 @@ export function buildBatchPrompt(options: {
       user += `Translation:\n${renderSide(cells, "target")}\n\n`
     } else {
       user += `Source:\n${renderSide(cells, "source")}\n\nTranslation:\n${renderSide(cells, "target")}\n\n`
+    }
+  }
+  // Keep immediate discourse context closest to the live batch, matching the
+  // single-cell and paragraph recipes.
+  for (const ctx of options.precedingContext ?? []) {
+    if (ctx.source.trim() && ctx.target.trim()) {
+      user += `Source: ${ctx.source}\nTranslation: ${ctx.target}\n\n`
     }
   }
   const liveSource = options.cells.map((c, i) => `<v${i + 1}>${c.source}</v${i + 1}>`).join("\n")
@@ -551,7 +607,7 @@ export async function fetchModels(endpoint: string, apiKey?: string): Promise<st
   const headers: Record<string, string> = {}
   if (apiKey?.trim()) headers.Authorization = `Bearer ${apiKey.trim()}`
   const res = await fetch(modelsUrl, { headers })
-  if (!res.ok) throw new Error(`Failed to fetch models: ${res.status} ${res.statusText}`)
+  if (!res.ok) throw new Error(t("rules.completion.failedToFetchModels", { status: res.status, statusText: res.statusText }))
   const data = await res.json()
   return data.data.map((m: { id: string }) => m.id)
 }
@@ -632,9 +688,9 @@ export async function complete(options: CompleteOptions): Promise<string> {
       const text = await res.text().catch(() => "")
       // Frontier returns 402 when subscription/credits are exhausted; surface message.
       if (provider === "frontier" && res.status === 402) {
-        throw new Error(`Frontier AI limit reached: ${text || "Out of credits."}`)
+        throw new Error(t("rules.completion.frontierLimitReached", { detail: text || t("rules.completion.outOfCredits") }))
       }
-      throw new Error(`Completion failed: ${res.status} ${text}`)
+      throw new Error(t("rules.completion.completionFailed", { status: res.status, text }))
     }
 
     // A/B experiment assignment (frontier default-model traffic only): surface
@@ -658,7 +714,7 @@ export async function complete(options: CompleteOptions): Promise<string> {
     return data.choices[0]?.message?.content?.trim() || ""
   } catch (error) {
     if (request.didTimeout()) {
-      throw new Error("The AI request timed out. Please try again.")
+      throw new Error(t("rules.completion.requestTimedOut"))
     }
     throw error
   } finally {
@@ -735,7 +791,7 @@ async function consumeStream(
     if (parsed.error) {
       const msg = typeof parsed.error === "string"
         ? (parsed.message || parsed.error)
-        : (parsed.error.message || parsed.message || "Completion stream error")
+        : (parsed.error.message || parsed.message || t("rules.completion.streamError"))
       throw new Error(msg)
     }
     const delta = parsed.choices?.[0]?.delta?.content || ""
@@ -749,7 +805,7 @@ async function consumeStream(
   while (true) {
     if (signal?.aborted) {
       reader.cancel().catch(() => { /* ignore */ })
-      throw new DOMException("Completion aborted", "AbortError")
+      throw new DOMException(t("rules.completion.completionAborted"), "AbortError")
     }
     const { done, value } = await reader.read()
     if (done) {
@@ -775,7 +831,7 @@ async function buildRequestTarget(
 ): Promise<{ url: string; headers: Record<string, string> }> {
   if (provider === "frontier") {
     if (!session?.jwt) {
-      throw new Error("Sign in to use Frontier AI.")
+      throw new Error(t("rules.completion.signInRequired"))
     }
     return {
       url: FRONTIER_CHAT_URL,
@@ -785,7 +841,7 @@ async function buildRequestTarget(
   // custom: local, self-hosted, or third-party OpenAI-compatible (OpenRouter, OpenAI, Groq, ...)
   const customEndpoint = (settings.endpoint ?? "").trim()
   if (!customEndpoint) {
-    throw new Error("No custom endpoint configured.")
+    throw new Error(t("rules.completion.noCustomEndpoint"))
   }
   const { chatUrl } = normalizeOpenAIBaseUrl(customEndpoint)
   const headers: Record<string, string> = {}

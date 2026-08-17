@@ -45,18 +45,17 @@ import {
 import { selectCellPairs, type CellPair } from "../agent/tools/select-cells"
 import { type LintRule } from "../agent/lint"
 import { loadProjectContext, type ProjectContext } from "./project-context"
-import { openRouterUsage } from "../llm-vendor"
+import { openRouterExtras } from "../llm-vendor"
 import { deriveSpanSeeds } from "./segment"
 import { lintSpanDraft } from "./lint-node"
 import { runSpan, EXAMPLES_TARGET } from "./pipeline"
 import type { ExamplePair } from "./draft"
 import type { NeighborBrief, LayerAboveBlock } from "./closure"
 import type { LlmCall, SpanSeed, SpanPhase, SpanReport, Tier } from "./types"
+import { DEFAULT_LLM_MODEL_ID } from "../model-defaults"
+import { formatSpanRange } from "../../../../shared/span-label"
 
 // ── Model + endpoint resolution ─────────────────────────────────────────────
-
-/** Default fast-tier model (Haiku-class, same default as the agent loop). */
-const DEFAULT_FAST_MODEL = "anthropic/claude-haiku-4-5"
 
 export interface ContextualModels {
   fast: string
@@ -78,10 +77,10 @@ export function resolveContextualModels(
   env: ModelEnv,
   settings: { agentModel?: string; agentDraftModel?: string },
 ): ContextualModels {
-  const agentModel = settings.agentModel || env.AGENT_MODEL_DEFAULT || DEFAULT_FAST_MODEL
+  const agentModel = settings.agentModel || env.AGENT_MODEL_DEFAULT || DEFAULT_LLM_MODEL_ID
   const mid = settings.agentDraftModel || env.AGENT_DRAFT_MODEL_DEFAULT || agentModel
   return {
-    fast: env.CONTEXTUAL_FAST_MODEL || DEFAULT_FAST_MODEL,
+    fast: env.CONTEXTUAL_FAST_MODEL || DEFAULT_LLM_MODEL_ID,
     mid,
     deep: env.CONTEXTUAL_DEEP_MODEL || mid,
   }
@@ -199,7 +198,7 @@ export function makeLlmCall(cfg: {
       ],
       max_tokens: req.maxTokens,
       temperature: req.temperature,
-      ...openRouterUsage(cfg.url),
+      ...openRouterExtras(cfg.url, "none"),
     })
     const RETRIABLE = new Set([429, 500, 502, 503, 504])
     const MAX_ATTEMPTS = 5
@@ -527,15 +526,12 @@ export function orderSeedsFromAnchor(
 // ── Span label ("LUK 1:1–1:8") — display only, never authoritative ──────────
 
 function spanLabel(seed: StoredSpanSeed, pairs: CellPair[]): string {
-  const byId = new Map(pairs.map((p) => [p.cellId, p]))
-  const start = byId.get(seed.startCellId)
-  const end = byId.get(seed.endCellId)
-  if (start?.canonicalRef && end?.canonicalRef) {
-    return start.canonicalRef === end.canonicalRef
-      ? start.canonicalRef
-      : `${start.canonicalRef}–${end.canonicalRef}`
-  }
-  return `${seed.startCellId.slice(0, 8)}…${seed.endCellId.slice(0, 8)}`
+  const startIdx = pairs.findIndex((pair) => pair.cellId === seed.startCellId)
+  const endIdx = pairs.findIndex((pair) => pair.cellId === seed.endCellId)
+  return formatSpanRange(
+    startIdx >= 0 ? { canonicalRef: pairs[startIdx]?.canonicalRef, ordinal: startIdx + 1 } : null,
+    endIdx >= 0 ? { canonicalRef: pairs[endIdx]?.canonicalRef, ordinal: endIdx + 1 } : null,
+  ) ?? ""
 }
 
 // ── Context assembly ────────────────────────────────────────────────────────
@@ -865,6 +861,7 @@ async function processSpan(
             text: c.text,
             provenance: {
               spanId: draft.spanId,
+              spanLabel: label,
               promptVersion: draft.promptVersion,
               exampleIds: draft.exampleIds,
             },

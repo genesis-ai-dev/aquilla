@@ -13,6 +13,7 @@ import { Info } from "lucide-react"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { cn } from "@/lib/utils"
 import { CellAiStatusPopover, type AiStatusAction } from "./CellAiStatusPopover"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface Props {
   /** The raw error text. Never rendered directly — it is categorized first. */
@@ -39,6 +40,7 @@ export function InlineAiError({
   className,
   announce = true,
 }: Props): ReactElement {
+  const t = useT()
   const error = useMemo(() => categorizeAiError(message ?? ""), [message])
 
   // `body !== raw` means the categorizer judged the raw text unfit to show —
@@ -64,7 +66,7 @@ export function InlineAiError({
           trigger={
             <button
               type="button"
-              aria-label={`Show error details: ${line}`}
+              aria-label={t("workspace.inlineAiError.showDetailsAriaLabel", { line })}
               className="inline-flex items-center rounded-full text-destructive/80 outline-hidden hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring"
             >
               <Info className="h-3 w-3" />

@@ -45,7 +45,7 @@ export function ChecklistItem({
       }
     >
       <button
-        className="flex w-full items-start gap-3 rounded-lg p-3 text-left text-sm hover:bg-accent/40"
+        className="flex w-full items-start gap-3 rounded-lg p-3 text-start text-sm hover:bg-accent/40"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >

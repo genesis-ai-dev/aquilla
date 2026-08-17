@@ -43,6 +43,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { agentSessionStore, useAgentSession } from "@/lib/agent/session-store"
 import {
@@ -78,6 +80,7 @@ export interface AgentMemoryTabProps {
 type LoadState = "idle" | "loading" | "loaded" | "error"
 
 export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabProps) {
+  const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const username = session?.username ?? null
@@ -275,11 +278,11 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
   )
 
   if (!jwt) {
-    return <p className="p-3 text-xs text-muted-foreground">Sign in to view agent memory.</p>
+    return <p className="p-3 text-xs text-muted-foreground">{t("agent.memory.signInNotice")}</p>
   }
 
   if (state === "loading" && memories.length === 0 && !brief) {
-    return <p className="p-3 text-xs text-muted-foreground">Loading agent memory…</p>
+    return <p className="p-3 text-xs text-muted-foreground">{t("agent.memory.loading")}</p>
   }
 
   if (state === "error") {
@@ -293,7 +296,7 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
           className="text-[11px] underline underline-offset-2"
           onClick={() => void load()}
         >
-          Retry
+          {t("common.retry")}
         </button>
       </div>
     )
@@ -309,15 +312,15 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
       <Tabs defaultValue="proposed" className="flex min-h-0 flex-1 flex-col px-3 py-2">
         <TabsList className="w-fit">
           <TabsTrigger value="proposed" className="gap-1.5">
-            Proposed
+            {t("agent.memory.tabProposed")}
             {proposed.length > 0 && (
               <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
                 {proposed.length}
               </Badge>
             )}
           </TabsTrigger>
-          <TabsTrigger value="approved">Approved</TabsTrigger>
-          <TabsTrigger value="brief">Project brief</TabsTrigger>
+          <TabsTrigger value="approved">{t("agent.memory.tabApproved")}</TabsTrigger>
+          <TabsTrigger value="brief">{t("agent.memory.projectBriefTitle")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="proposed" className="min-h-0 flex-1 overflow-y-auto pt-2">
@@ -363,21 +366,22 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
         >
           <DialogContent>
             <DialogHeader>
-              <DialogTitle className="text-destructive">Replace the human-edited memory?</DialogTitle>
+              <DialogTitle className="text-destructive">{t("agent.memory.supersedeTitle")}</DialogTitle>
             </DialogHeader>
             <DialogBody>
               <p className="text-sm">
-                Approving will replace the human-edited memory at{" "}
-                <code className="font-mono">{supersedePrompt.path}</code>. The existing human-authored
-                content will be archived.
+                <RichMessage
+                  k="agent.memory.supersedeBody"
+                  values={{ path: <code className="font-mono">{supersedePrompt.path}</code> }}
+                />
               </p>
             </DialogBody>
             <DialogFooter>
               <Button variant="outline" onClick={() => setSupersedePrompt(null)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button variant="destructive" onClick={confirmSupersede}>
-                Replace it
+                {t("agent.memory.supersedeConfirm")}
               </Button>
             </DialogFooter>
           </DialogContent>

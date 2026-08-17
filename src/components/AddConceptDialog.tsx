@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { requiredString } from "@/lib/forms/schemas"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 const formSchema = z.object({
   term: requiredString("Source term"),
@@ -47,6 +48,7 @@ export function AddConceptDialog({
   onConfirm,
   onCancel,
 }: AddConceptDialogProps) {
+  const { t } = useI18n()
   // AQU-754: onConfirm persists the concept and throws when the save is
   // rejected (below Maintainer, offline, conflict, 5xx). Surface that reason and
   // keep the dialog open instead of dismissing it as if the concept was saved.
@@ -78,10 +80,9 @@ export function AddConceptDialog({
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onCancel() }}>
       <DialogContent aria-labelledby="add-concept-title" aria-describedby="add-concept-desc">
         <DialogHeader>
-          <DialogTitle id="add-concept-title">Add to term base</DialogTitle>
+          <DialogTitle id="add-concept-title">{t("terminology.addConcept.title")}</DialogTitle>
           <DialogDescription id="add-concept-desc">
-            Creates a draft concept with this source term. Add renderings and
-            activate it from the Terminology page.
+            {t("terminology.addConcept.description")}
           </DialogDescription>
         </DialogHeader>
 
@@ -100,7 +101,7 @@ export function AddConceptDialog({
                 return (
                   <Field data-invalid={invalid}>
                     <FieldLabel htmlFor="concept-term-input" className="text-xs font-medium">
-                      Source term
+                      {t("terminology.editor.sourceTermLabel")}
                     </FieldLabel>
                     <Input
                       id="concept-term-input"
@@ -114,8 +115,8 @@ export function AddConceptDialog({
                           void form.handleSubmit()
                         }
                       }}
-                      placeholder="Source term…"
-                      aria-label="Source term for new concept"
+                      placeholder={t("terminology.addConcept.sourceTermPlaceholder")}
+                      aria-label={t("terminology.addConcept.sourceTermAriaLabel")}
                       aria-invalid={invalid}
                       disabled={blocked}
                       autoFocus={!blocked}
@@ -136,7 +137,7 @@ export function AddConceptDialog({
 
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onCancel}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           {/* Subscribe rather than reading form.state.isSubmitting in render:
               that read is not reactive, so after a rejected save the button
@@ -147,7 +148,7 @@ export function AddConceptDialog({
               <Button
                 type="submit"
                 form="add-concept-form"
-                aria-label="Create draft concept"
+                aria-label={t("terminology.addConcept.createDraftAriaLabel")}
                 disabled={blocked || isSubmitting}
               >
                 {isSubmitting && <Spinner data-icon="inline-start" />}

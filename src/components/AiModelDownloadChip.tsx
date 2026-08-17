@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { prefetchAiModels, useModelStatus, type ModelId } from "@/lib/audio/prefetch"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const READY_FLASH_MS = 4000
 
@@ -31,9 +32,14 @@ interface ErrorView {
   message: string
 }
 
+// i18n-exempt product/model names — "Whisper" (OpenAI's ASR model) is the
+// same category of atomic proper noun as its siblings here ("Kokoro" is
+// already in ATOMIC_TERMS, tools/eslint-rules/allowlist.cjs; "MMS" is an
+// all-caps acronym the scanner's own heuristic skips). Never translated.
 const LABELS: Record<ModelId, string> = { whisper: "Whisper", kokoro: "Kokoro", mms: "MMS" }
 
 export function AiModelDownloadChip() {
+  const t = useT()
   const whisper = useModelStatus("whisper")
   const kokoro = useModelStatus("kokoro")
   const mms = useModelStatus("mms")
@@ -98,9 +104,9 @@ export function AiModelDownloadChip() {
   return (
     <div
       className={cn(
-        // Anchored bottom-left so we don't collide with the workspace's
-        // bottom-right "Synced" pill.
-        "fixed bottom-4 left-4 z-30 w-72 rounded-xl border bg-popover p-3 text-xs text-popover-foreground shadow-lg",
+        // Anchored at the reading-start corner so we don't collide with the
+        // workspace's "Synced" pill, which sits at the opposite (end) corner.
+        "fixed bottom-4 start-4 z-30 w-72 rounded-xl border bg-popover p-3 text-xs text-popover-foreground shadow-lg",
       )}
     >
       <div className="mb-2 flex items-center gap-2">
@@ -121,8 +127,8 @@ export function AiModelDownloadChip() {
           variant="ghost"
           size="icon"
           onClick={() => setDismissed(true)}
-          aria-label="Hide"
-          className="ml-auto size-5 text-muted-foreground/60 hover:text-foreground"
+          aria-label={t("org.projectOverview.hide")}
+          className="ms-auto size-5 text-muted-foreground/60 hover:text-foreground"
         >
           <X className="h-3 w-3" />
         </Button>
@@ -156,7 +162,7 @@ export function AiModelDownloadChip() {
             <li key={id} className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
               <CheckCircle2 className="h-3 w-3" />
               <span className="capitalize">{id}</span>
-              <span className="text-muted-foreground">ready to use</span>
+              <span className="text-muted-foreground">{t("workspace.aiDownloadChip.readyToUse")}</span>
             </li>
           ))}
         </ul>
@@ -179,7 +185,7 @@ export function AiModelDownloadChip() {
                 onClick={() => handleRetry(err.id)}
               >
                 <RotateCw />
-                Retry
+                {t("common.retry")}
               </Button>
             </li>
           ))}
@@ -188,7 +194,7 @@ export function AiModelDownloadChip() {
 
       {downloads.length > 0 && (
         <p className="mt-2 text-[10px] text-muted-foreground">
-          Runs in the background — keep working as normal.
+          {t("workspace.aiDownloadChip.runsInBackground")}
         </p>
       )}
     </div>

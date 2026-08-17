@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { InitialsAvatar, type InitialsAvatarSize } from "@/components/InitialsAvatar"
+import { InitialsAvatar, type InitialsAvatarShape, type InitialsAvatarSize } from "@/components/InitialsAvatar"
 import { cn } from "@/lib/utils"
 
 type UsernameWithAvatarProps = {
@@ -8,6 +8,7 @@ type UsernameWithAvatarProps = {
   /** Visible label; defaults to `username`. */
   label?: string
   size?: InitialsAvatarSize
+  shape?: InitialsAvatarShape
   className?: string
   nameClassName?: string
   /** When false, the name does not truncate. Default true. */
@@ -28,6 +29,7 @@ export function UsernameWithAvatar({
   username,
   label,
   size = "sm",
+  shape,
   className,
   nameClassName,
   truncate = true,
@@ -40,12 +42,7 @@ export function UsernameWithAvatar({
     <span className={cn("inline-flex min-w-0 items-center gap-2", className)}>
       {/* Decorative when the username text is visible beside it. */}
       <span aria-hidden className="shrink-0">
-        <InitialsAvatar
-          name={username}
-          size={size}
-          singleInitial
-          menuSafe={menuSafe}
-        />
+        <InitialsAvatar name={username} size={size} shape={shape} menuSafe={menuSafe} />
       </span>
       <span
         data-slot="username"

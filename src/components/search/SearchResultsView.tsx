@@ -89,7 +89,7 @@ export function SearchResultsView({
         <span className="text-sm font-medium flex-1 truncate">
           {t("search.expanded.header")}
           {query && (
-            <span className="ml-2 text-xs font-normal text-muted-foreground">
+            <span className="ms-2 text-xs font-normal text-muted-foreground">
               {t("search.expanded.forQuery", { query })}
             </span>
           )}
@@ -152,7 +152,7 @@ function FileSection({
       <div className="flex items-center gap-1.5 px-4 py-1 text-xs font-medium text-muted-foreground sticky top-0 bg-background/95 backdrop-blur-sm border-b border-border/50">
         <ChevronRight className="h-3 w-3 shrink-0" />
         <span className="truncate">{group.fileName}</span>
-        <span className="ml-auto shrink-0 text-[10px] font-normal">
+        <span className="ms-auto shrink-0 text-[10px] font-normal">
           {group.results.length}
         </span>
       </div>
@@ -186,7 +186,7 @@ function ResultRow({
       type="button"
       onClick={() => onJump(result)}
       className={cn(
-        "w-full text-left px-6 py-1.5 hover:bg-accent transition-colors",
+        "w-full text-start px-6 py-1.5 hover:bg-accent transition-colors",
         "flex flex-col gap-0.5 group",
       )}
     >

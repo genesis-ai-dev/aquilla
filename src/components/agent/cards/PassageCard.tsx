@@ -18,6 +18,7 @@ import { BookOpen, ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { PassageRow } from "@/lib/agent/protocol"
 import { fetchAllFileCells } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
@@ -70,6 +71,7 @@ function labelOf(rows: PassageRow[]): string {
 }
 
 export function PassageCard({ cardKey, rows, projectId, jwt, onActivity, fetchCells = fetchAllFileCells }: PassageCardProps) {
+  const t = useT()
   const [side, setSide] = useState<PassageSide>("both")
   const [shown, setShown] = useState<PassageRow[]>(rows)
   const [expanded, setExpanded] = useState(false)
@@ -144,9 +146,9 @@ export function PassageCard({ cardKey, rows, projectId, jwt, onActivity, fetchCe
           {labelOf(shown)}
         </span>
         <span className="flex items-center gap-0.5 rounded-md border p-0.5">
-          <SideButton value="source" label="Source" />
-          <SideButton value="target" label="Target" />
-          <SideButton value="both" label="Both" />
+          <SideButton value="source" label={t("editor.column.source")} />
+          <SideButton value="target" label={t("editor.column.target")} />
+          <SideButton value="both" label={t("search.side.both")} />
         </span>
         {navigable && (
           <span className="flex items-center">
@@ -156,7 +158,7 @@ export function PassageCard({ cardKey, rows, projectId, jwt, onActivity, fetchCe
               size="icon-xs"
               onClick={() => void navigate(-1)}
               disabled={loading}
-              aria-label="Previous chapter"
+              aria-label={t("editor.milestone.chapter.previous")}
               className="text-muted-foreground"
             >
               <ChevronLeft />
@@ -167,14 +169,14 @@ export function PassageCard({ cardKey, rows, projectId, jwt, onActivity, fetchCe
               size="icon-xs"
               onClick={() => void navigate(1)}
               disabled={loading}
-              aria-label="Next chapter"
+              aria-label={t("editor.milestone.chapter.next")}
               className="text-muted-foreground"
             >
               <ChevronRight />
             </Button>
           </span>
         )}
-        {loading && <Spinner className="size-3 text-muted-foreground" aria-label="Loading chapter" />}
+        {loading && <Spinner className="size-3 text-muted-foreground" aria-label={t("agent.passage.loadingChapterAriaLabel")} />}
       </div>
 
       {navError && <p className="px-2 py-1 text-[10px] text-destructive">{navError}</p>}
@@ -207,9 +209,9 @@ export function PassageCard({ cardKey, rows, projectId, jwt, onActivity, fetchCe
         <button
           type="button"
           onClick={() => setExpanded(true)}
-          className="w-full px-2 py-1 text-left text-[10px] text-muted-foreground hover:text-foreground"
+          className="w-full px-2 py-1 text-start text-[10px] text-muted-foreground hover:text-foreground"
         >
-          … {hidden} more — show all
+          … {t("agent.passage.moreShowAll", { count: hidden })}
         </button>
       )}
     </div>

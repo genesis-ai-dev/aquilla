@@ -36,6 +36,11 @@ import { cn } from "@/lib/utils"
 import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { draftReviewHref } from "@/components/project-workspace-lane-deeplink"
+import { AutopilotProcessGraph } from "@/components/contextual/AutopilotProcessGraph"
+import {
+  collapseListToRange,
+  humanPassageLabel,
+} from "../../../shared/span-label"
 import {
   commandContextualRun,
   fetchContextualRunActivity,
@@ -298,7 +303,7 @@ function Disclosure({
             aria-hidden
           />
           {title}
-          {badge && <span className="ml-auto">{badge}</span>}
+          {badge && <span className="ms-auto">{badge}</span>}
         </Button>
       </CollapsibleTrigger>
       <CollapsibleContent className="flex flex-col gap-3 px-2 pb-2">{children}</CollapsibleContent>
@@ -333,6 +338,29 @@ function redactedDetails(value: unknown, key = ""): unknown {
     )
   }
   return value
+}
+
+const CELL_ID_LIST_KEY = /cellids$/i
+
+function displayDetails(value: unknown, key = ""): unknown {
+  if (CELL_ID_LIST_KEY.test(key) && Array.isArray(value)) {
+    return collapseListToRange(value) ?? value
+  }
+  if (/authorization|cookie|token|secret|api.?key|prompt|completion/i.test(key)) return "[redacted]"
+  if (Array.isArray(value)) return value.map((item) => displayDetails(item))
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([childKey, child]) => [
+        childKey,
+        displayDetails(child, childKey),
+      ]),
+    )
+  }
+  return value
+}
+
+function humanCellTitle(cellLabel: string | null | undefined, cellId: string | null | undefined): string | null {
+  return humanPassageLabel(cellLabel) ?? humanPassageLabel(cellId)
 }
 
 function activityLog(run: ContextualRunRecord, activity: ContextualRunActivity | null): string {
@@ -488,8 +516,9 @@ function eventSummary(event: ContextualActivityEvent, t: TFunction): string {
     return t("autopilot.inspector.event.statusChanged")
   }
   if (event.kind === "span_started") {
-    return event.spanLabel
-      ? t("autopilot.inspector.event.spanStarted", { spanLabel: event.spanLabel })
+    const spanLabel = humanPassageLabel(event.spanLabel)
+    return spanLabel
+      ? t("autopilot.inspector.event.spanStarted", { spanLabel })
       : t("autopilot.inspector.event.spanStartedGeneric")
   }
   if (event.kind === "phase") {
@@ -572,17 +601,16 @@ function ReviewDraft({
   runTargetLang?: string
 }) {
   const t = useT()
-  const provenance = draft.provenance && Object.keys(draft.provenance).length > 0
-    ? JSON.stringify(draft.provenance)
-    : t("autopilot.inspector.review.noProvenance")
+  const cellTitle = humanCellTitle(draft.cellLabel, draft.cellId)
+  const passage = humanPassageLabel(draft.spanLabel)
   const draftStatus = evidenceStatusLabel(draft.status, t)
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle>{draft.cellId
-          ? t("common.cellLabel", { id: draft.cellId })
-          : t("autopilot.inspector.review.draftTitle")}</CardTitle>
-        <CardDescription>{provenance}</CardDescription>
+        <CardTitle>{cellTitle ?? t("autopilot.inspector.review.draftTitle")}</CardTitle>
+        {passage && (
+          <CardDescription>{t("autopilot.draft.draftedFrom", { spanLabel: passage })}</CardDescription>
+        )}
         <CardAction>
           <Badge variant="outline">
             {draftStatus ?? t("autopilot.evidence.status.unknown")}
@@ -594,8 +622,8 @@ function ReviewDraft({
         <CardFooter>
           <a
             href={draftReviewHref(projectId, draft.fileId, draft.cellId, runTargetLang ?? "")}
-            aria-label={draft.cellId
-              ? t("autopilot.inspector.review.inEditorCell", { cellId: draft.cellId })
+            aria-label={cellTitle
+              ? t("autopilot.inspector.review.inEditorCell", { cellId: cellTitle })
               : t("autopilot.inspector.review.inEditor")}
             className="text-sm font-medium text-primary underline-offset-4 hover:underline"
           >
@@ -614,9 +642,8 @@ function SceneBriefEvidence({ brief }: { brief: ContextualActivitySceneBrief }) 
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle>{brief.startCellId && brief.endCellId
-          ? `${brief.startCellId} → ${brief.endCellId}`
-          : t("autopilot.inspector.context.sceneBrief")}</CardTitle>
+        <CardTitle>{humanPassageLabel(brief.spanLabel)
+          ?? t("autopilot.inspector.context.sceneBrief")}</CardTitle>
         <CardDescription>
           {brief.l1Summary ?? t("autopilot.inspector.context.noSceneSummary")}
         </CardDescription>
@@ -634,7 +661,7 @@ function SceneBriefEvidence({ brief }: { brief: ContextualActivitySceneBrief }) 
             {t("autopilot.inspector.context.ambiguities", { count: ambiguities.length })}
           </p>
           {ambiguities.length > 0 ? (
-            <ul className="mt-1 flex list-disc flex-col gap-1 pl-4 text-sm text-muted-foreground">
+            <ul className="mt-1 flex list-disc flex-col gap-1 ps-4 text-sm text-muted-foreground">
               {ambiguities.map((item, index) => (
                 <li key={item.id ?? index}>
                   {item.question ?? t("autopilot.inspector.context.unlabelledAmbiguity")}
@@ -1108,7 +1135,7 @@ export function AutopilotActivityInspector({
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-2xl!" data-testid="autopilot-activity-inspector">
-        <SheetHeader className="pr-12">
+        <SheetHeader className="pe-12">
           <SheetTitle>{t("autopilot.inspector.title")}</SheetTitle>
           <SheetDescription>
             {t("autopilot.inspector.description")}
@@ -1181,7 +1208,7 @@ export function AutopilotActivityInspector({
                       key={run.runId}
                       type="button"
                       variant={run.runId === selectedRun?.runId ? "secondary" : "outline"}
-                      className="h-auto min-w-0 justify-start whitespace-normal px-3 py-2 text-left"
+                      className="h-auto min-w-0 justify-start whitespace-normal px-3 py-2 text-start"
                       aria-pressed={run.runId === selectedRun?.runId}
                       onClick={() => {
                         selectionOverrideRef.current = run.runId
@@ -1242,6 +1269,7 @@ export function AutopilotActivityInspector({
             {selectedRun && (
               <>
                 <Separator />
+                <AutopilotProcessGraph run={selectedRun} activity={activity} />
                 <Card size="sm">
                   <CardHeader>
                     <CardTitle>{fileNames?.get(selectedRun.fileId) ?? selectedRun.fileId}</CardTitle>
@@ -1489,7 +1517,7 @@ export function AutopilotActivityInspector({
                             </Button>
                           )}
                         </div>
-                        <pre className="whitespace-pre-wrap break-words text-xs text-muted-foreground">{JSON.stringify(redactedDetails(event.details), null, 2)}</pre>
+                        <pre className="whitespace-pre-wrap break-words text-xs text-muted-foreground">{JSON.stringify(displayDetails(event.details), null, 2)}</pre>
                       </div>
                     )
                   })}

@@ -32,6 +32,10 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { SegmentTabs, Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { t as tStandalone } from "@/lib/i18n/standalone"
+import { RichMessage } from "@/lib/i18n/RichMessage"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   importFile,
   importEBible,
@@ -61,10 +65,11 @@ import type { PreparedImportFile } from "@/lib/import/import-service"
 import { GoogleDrivePanel } from "@/components/import/GoogleDrivePanel"
 import { importSdbh, type SdbhImportProgress } from "@/lib/import-sdbh"
 import { assertSourceUploadByteLength } from "@/lib/sync/source-upload"
-import { PreviewPanel, type ImportUploadProgress } from "@/components/import/PreviewPanel"
+import { PreviewPanel, type ImportUploadProgress, type PreviewConfirmOptions } from "@/components/import/PreviewPanel"
 import { formatBytesProgress } from "@/lib/format-bytes"
 import type { FileReference, ProjectTtsSettings } from "@/lib/parsers/types"
 import { detectFileType, isMediaFileType } from "@/lib/parsers/types"
+import { filterEpubStrings } from "@/lib/parsers/epub"
 import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
 import { v7 as uuidv7 } from "uuid"
 import { filesToProjectEntries } from "@/lib/import/file-entries"
@@ -206,6 +211,7 @@ export function ImportDialog({
   onLabelsImported,
   excludeFrontMatter,
 }: ImportDialogProps) {
+  const t = useT()
   const [screen, setScreen] = useState<Screen>("landing")
   // Holds refs + inferred languages while waiting for the user to set direction.
   const [pendingImport, setPendingImport] = useState<{
@@ -236,7 +242,7 @@ export function ImportDialog({
   const [previewState, setPreviewState] = useState<{
     results: ImportResult[]
     /** Commits the parsed results to the server once user confirms. */
-    commit: () => void | Promise<void>
+    commit: (options?: PreviewConfirmOptions) => void | Promise<void>
     /** Surface to restore if the user cancels the preview. */
     returnScreen: "upload" | "spreadsheet" | "gdrive"
   } | null>(null)
@@ -297,12 +303,12 @@ export function ImportDialog({
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err)
       setPendingImport(captured)
-      setConfirmError(`Couldn't finish saving your import — please try again. (${message})`)
+      setConfirmError(t("importExport.dialog.finishSaveFailed", { message }))
     } finally {
       flushingRef.current = false
       setConfirming(false)
     }
-  }, [onImported, onOpenChange, projectId])
+  }, [onImported, onOpenChange, projectId, t])
 
   // Intercept dialog close while an imported file still needs its final project
   // handoff. Keep the dialog visible until that async write succeeds; on failure
@@ -403,9 +409,9 @@ export function ImportDialog({
       setImportResult(null)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      setImportResultError(`Couldn't finish saving your import — please try again. (${message})`)
+      setImportResultError(t("importExport.dialog.finishSaveFailed", { message }))
     }
-  }, [importResult, handleChildImported])
+  }, [importResult, handleChildImported, t])
 
   // BLOCKER 1 fix: values confirmed via DirectionPanel are EXPLICIT — they
   // replace current values, not merely fill empty slots.
@@ -434,7 +440,7 @@ export function ImportDialog({
       // retry or skip. The rejection MUST NOT escape as an unhandled rejection.
       setPendingImport(captured)
       const message = err instanceof Error ? err.message : String(err)
-      setConfirmError(`Couldn't save your import — please try again. (${message})`)
+      setConfirmError(t("importExport.dialog.saveFailed", { message }))
     } finally {
       flushingRef.current = false
       setConfirming(false)
@@ -452,13 +458,13 @@ export function ImportDialog({
         <DialogHeader>
           <DialogTitle>
             {screen === "landing" ? (
-              "Import"
+              t("nav.workspaceActions.import")
             ) : screen === "direction" ? (
-              "Set translation direction"
+              t("importExport.dialog.titleDirection")
             ) : screen === "result" ? (
-              "Import complete — some items skipped"
+              t("importExport.dialog.titleResult")
             ) : screen === "collision" ? (
-              "Re-import detected"
+              t("importExport.dialog.titleCollision")
             ) : screen === "preview" ? (
               <div className="flex items-center gap-2">
                 <ImportDialogBackButton
@@ -468,29 +474,29 @@ export function ImportDialog({
                     setPreviewCommitError(null)
                     setScreen(returnScreen)
                   }}
-                  label="Back to file selection"
+                  label={t("importExport.dialog.backToFileSelection")}
                 />
-                Preview
+                {t("importExport.dialog.titlePreview")}
               </div>
             ) : (
               <div className="flex items-center gap-2">
                 <ImportDialogBackButton
                   onClick={() => setScreen("landing")}
-                  label="Back to import types"
+                  label={t("importExport.dialog.backToImportTypes")}
                 />
-                {screen === "upload" ? "Upload Files"
-                  : screen === "gdrive" ? "Google Drive"
-                  : screen === "helloao" ? "Bible API (helloao.org)"
-                  : screen === "obs" ? "Open Bible Stories"
-                  : screen === "dcs" ? "Door43 (DCS)"
-                  : screen === "macula" ? "Macula Hebrew + Greek"
-                  : screen === "tn" ? "Translation Notes (TSV)"
-                  : screen === "biblica" ? "Biblica Study Bible Notes"
-                  : screen === "spreadsheet" ? "Spreadsheet (CSV / XLSX)"
-                  : screen === "labels" ? "Cell Labels / Cast"
-                  : screen === "paired" ? "Paired Translation Import"
-                  : screen === "sdbh" ? "SDBH Hebrew Lexicon"
-                  : "eBible Corpus"}
+                {screen === "upload" ? t("importExport.landing.upload.title")
+                  : screen === "gdrive" ? t("importExport.landing.gdrive.title")
+                  : screen === "helloao" ? t("importExport.dialog.titleHelloao")
+                  : screen === "obs" ? t("importExport.landing.obs.title")
+                  : screen === "dcs" ? t("importExport.landing.dcs.title")
+                  : screen === "macula" ? t("importExport.landing.macula.title")
+                  : screen === "tn" ? t("importExport.dialog.titleTn")
+                  : screen === "biblica" ? t("importExport.landing.biblica.title")
+                  : screen === "spreadsheet" ? t("importExport.dialog.titleSpreadsheet")
+                  : screen === "labels" ? t("importExport.landing.labels.title")
+                  : screen === "paired" ? t("importExport.dialog.titlePaired")
+                  : screen === "sdbh" ? t("importExport.landing.sdbh.title")
+                  : t("importExport.landing.ebible.title")}
               </div>
             )}
           </DialogTitle>
@@ -746,7 +752,7 @@ export function ImportDialog({
         )}
         {screen === "labels" && (!projectFiles || projectFiles.length === 0) && (
           <div className="py-4 text-center text-sm text-muted-foreground">
-            Cell labels require an existing source file in this project. Import source files first, then return here.
+            {t("importExport.dialog.labelsNeedSourceFile")}
           </div>
         )}
 
@@ -767,7 +773,7 @@ export function ImportDialog({
         )}
         {screen === "paired" && (!sourceCells || sourceCells.length === 0) && (
           <div className="py-4 text-center text-sm text-muted-foreground">
-            Paired translation import requires existing source cells in this project. Import source files first.
+            {t("importExport.dialog.pairedNeedsSourceCells")}
           </div>
         )}
 
@@ -799,9 +805,9 @@ export function ImportDialog({
         {screen === "preview" && previewState && (
           <PreviewPanel
             results={previewState.results}
-            onConfirm={async () => {
+            onConfirm={async (options) => {
               setPreviewCommitError(null)
-              await previewState.commit()
+              await previewState.commit(options)
             }}
             onCancel={() => {
               const returnScreen = previewState.returnScreen
@@ -869,71 +875,77 @@ export function ImportDialog({
 // so it inherits the app theme.
 // ---------------------------------------------------------------------------
 
+// AQU-832: title/hint/description are catalog keys, not English strings — this
+// table is module-level, evaluated once before any I18nProvider exists, so it
+// cannot call t() itself. OptionCard resolves each key at render time instead.
 type ImportOption = {
   /** Screen to route to on select. Omitted for not-yet-available options. */
   id?: Screen
-  title: string
+  titleKey: MessageKey
   /** Short qualifier shown in lighter weight after the title. */
-  hint?: string
-  description: string
+  hintKey?: MessageKey
+  descriptionKey: MessageKey
   icon: LucideIcon
   badge?: "beta" | "soon"
   disabled?: boolean
 }
 
 const POPULAR_OPTIONS: ImportOption[] = [
-  { id: "upload", title: "Upload files", icon: Upload,
-    description: "USFM, DOCX, PPTX, IDML, TXT, subtitles, spreadsheets, audio/video, or a Paratext project." },
-  { id: "gdrive", title: "Google Drive", hint: "files or a folder", icon: CloudDownload, badge: "beta",
-    description: "Pick documents or a whole folder from your Drive — Google Docs import as DOCX." },
-  { id: "ebible", title: "eBible Corpus", hint: "public library", icon: Library,
-    description: "Openly-licensed Bible translations, imported directly — no download." },
-  { id: "helloao", title: "Bible API", hint: "helloao.org", icon: Globe,
-    description: "1,000+ translations — the whole Bible, one testament, or just the books you pick." },
-  { id: "spreadsheet", title: "Spreadsheet", hint: "CSV / XLSX", icon: Table2, badge: "beta",
-    description: "Map which columns are source, target, label, cast, or timestamp." },
+  { id: "upload", titleKey: "importExport.landing.upload.title", icon: Upload,
+    descriptionKey: "importExport.landing.upload.description" },
+  { id: "gdrive", titleKey: "importExport.landing.gdrive.title", hintKey: "importExport.landing.gdrive.hint", icon: CloudDownload, badge: "beta",
+    descriptionKey: "importExport.googleDrive.description" },
+  { id: "ebible", titleKey: "importExport.landing.ebible.title", hintKey: "importExport.landing.ebible.hint", icon: Library,
+    descriptionKey: "importExport.landing.ebible.description" },
+  { id: "helloao", titleKey: "importExport.landing.helloao.title", hintKey: "importExport.landing.helloao.hint", icon: Globe,
+    descriptionKey: "importExport.landing.helloao.description" },
+  { id: "spreadsheet", titleKey: "importExport.landing.spreadsheet.title", hintKey: "importExport.landing.spreadsheet.hint", icon: Table2, badge: "beta",
+    descriptionKey: "importExport.landing.spreadsheet.description" },
 ]
 
 const SPECIALIZED_OPTIONS: ImportOption[] = [
-  { id: "macula", title: "Macula Hebrew + Greek", icon: Languages, badge: "beta",
-    description: "Original-language OT/NT with per-word lemma, morphology, and Strong's." },
-  { id: "paired", title: "Paired translation", icon: ArrowLeftRight, badge: "beta",
-    description: "Source + target pairs from a spreadsheet to fill the target column." },
-  { id: "labels", title: "Cell labels / cast", icon: Tags, badge: "beta",
-    description: "Re-upload a template to label existing cells with cast names." },
-  { id: "tn", title: "Translation Notes", hint: "TSV", icon: StickyNote, badge: "beta",
-    description: "unfoldingWord notes, shown beside the matching verse as you translate." },
-  { id: "biblica", title: "Biblica Study Bible Notes", hint: "IDML", icon: BookOpen, badge: "beta",
-    description: "Study notes from an InDesign study Bible — imports the notes only and leaves the scripture untouched." },
-  { id: "obs", title: "Open Bible Stories", hint: "door43", icon: BookImage, badge: "beta",
-    description: "Narrative stories with reference images, from unfoldingWord/door43." },
-  { id: "dcs", title: "Door43 (DCS)", hint: "upstream", icon: Cloud, badge: "beta",
-    description: "Import any released Door43 resource as source and pin it to a release — pull upstream changes later." },
-  { id: "sdbh", title: "SDBH Hebrew Lexicon", hint: "UBS MARBLE", icon: BookA, badge: "beta",
-    description: "Semantic Dictionary of Biblical Hebrew — localize definitions and glosses by semantic domain, with lossless export back to the MARBLE XML." },
-  { id: "upload", title: "Translation Memory", hint: "TMX", icon: Database,
-    description: "Import source/target pairs from a TMX memory file." },
+  { id: "macula", titleKey: "importExport.landing.macula.title", icon: Languages, badge: "beta",
+    descriptionKey: "importExport.landing.macula.description" },
+  { id: "paired", titleKey: "importExport.landing.paired.title", icon: ArrowLeftRight, badge: "beta",
+    descriptionKey: "importExport.landing.paired.description" },
+  { id: "labels", titleKey: "importExport.landing.labels.title", icon: Tags, badge: "beta",
+    descriptionKey: "importExport.landing.labels.description" },
+  { id: "tn", titleKey: "importExport.landing.tn.title", hintKey: "importExport.landing.tn.hint", icon: StickyNote, badge: "beta",
+    descriptionKey: "importExport.landing.tn.description" },
+  { id: "biblica", titleKey: "importExport.landing.biblica.title", hintKey: "importExport.landing.biblica.hint", icon: BookOpen, badge: "beta",
+    descriptionKey: "importExport.landing.biblica.description" },
+  { id: "obs", titleKey: "importExport.landing.obs.title", hintKey: "importExport.landing.obs.hint", icon: BookImage, badge: "beta",
+    descriptionKey: "importExport.landing.obs.description" },
+  { id: "dcs", titleKey: "importExport.landing.dcs.title", hintKey: "importExport.landing.dcs.hint", icon: Cloud, badge: "beta",
+    descriptionKey: "importExport.landing.dcs.description" },
+  { id: "sdbh", titleKey: "importExport.landing.sdbh.title", hintKey: "importExport.landing.sdbh.hint", icon: BookA, badge: "beta",
+    descriptionKey: "importExport.landing.sdbh.description" },
+  { id: "upload", titleKey: "importExport.landing.tm.title", hintKey: "importExport.landing.tm.hint", icon: Database,
+    descriptionKey: "importExport.landing.tm.description" },
 ]
 
 function OptionBadge({ kind }: { kind: "beta" | "soon" }) {
+  const t = useT()
   if (kind === "soon") {
-    return <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-medium">Soon</Badge>
+    return <Badge variant="outline" className="px-1.5 py-0 text-[10px] font-medium">{t("importExport.landing.badgeSoon")}</Badge>
   }
   return (
     <Badge
       variant="secondary"
       className="border border-amber-200 bg-amber-100 px-1.5 py-0 text-[10px] font-medium text-amber-700 dark:border-amber-800 dark:bg-amber-900/40 dark:text-amber-400"
     >
-      Beta
+      {t("importExport.landing.badgeBeta")}
     </Badge>
   )
 }
 
 function OptionCard({ option, onSelect }: { option: ImportOption; onSelect: (s: Screen) => void }) {
+  const t = useT()
   const { icon: Icon, disabled } = option
+  const title = t(option.titleKey)
   const select = () => { if (!disabled && option.id) onSelect(option.id) }
   const disabledTooltip = disabled
-    ? `Coming soon — ${option.title} import is tracked for a later release`
+    ? t("importExport.landing.comingSoonTooltip", { title })
     : undefined
   const testTooltipAttr = import.meta.env.MODE === "test" ? disabledTooltip : undefined
   const card = (
@@ -960,11 +972,11 @@ function OptionCard({ option, onSelect }: { option: ImportOption; onSelect: (s: 
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <span className="text-sm font-medium leading-none">{option.title}</span>
-            {option.hint && <span className="text-xs text-muted-foreground">{option.hint}</span>}
+            <span className="text-sm font-medium leading-none">{title}</span>
+            {option.hintKey && <span className="text-xs text-muted-foreground">{t(option.hintKey)}</span>}
             {option.badge && <span className="ml-auto shrink-0"><OptionBadge kind={option.badge} /></span>}
           </div>
-          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{option.description}</p>
+          <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">{t(option.descriptionKey)}</p>
         </div>
       </div>
     </Card>
@@ -993,6 +1005,7 @@ interface ImportLandingProps {
 }
 
 function ImportLanding({ onSelect, allowDcs }: ImportLandingProps) {
+  const t = useT()
   // The specialized tier is a growing catalogue of domain-specific importers —
   // filterable so it stays scannable as entries accumulate.
   const [filter, setFilter] = useState("")
@@ -1003,20 +1016,20 @@ function ImportLanding({ onSelect, allowDcs }: ImportLandingProps) {
     : SPECIALIZED_OPTIONS.filter((o) => o.id !== "dcs")
   const specialized = q
     ? available.filter((o) =>
-        [o.title, o.hint ?? "", o.description].some((t) => t.toLowerCase().includes(q)),
+        [t(o.titleKey), o.hintKey ? t(o.hintKey) : "", t(o.descriptionKey)].some((s) => s.toLowerCase().includes(q)),
       )
     : available
   return (
     <div className="space-y-5 py-1">
-      <p className="text-sm text-muted-foreground">Choose the format that matches your files.</p>
-      <ImportSection label="Most popular">
+      <p className="text-sm text-muted-foreground">{t("importExport.landing.intro")}</p>
+      <ImportSection label={t("importExport.landing.popularSection")}>
         {POPULAR_OPTIONS.map((o) => (
-          <OptionCard key={o.title} option={o} onSelect={onSelect} />
+          <OptionCard key={o.titleKey} option={o} onSelect={onSelect} />
         ))}
       </ImportSection>
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-3">
-          <h3 className="px-0.5 text-xs font-medium text-muted-foreground/70">Specialized</h3>
+          <h3 className="px-0.5 text-xs font-medium text-muted-foreground/70">{t("importExport.landing.specializedSection")}</h3>
           <InputGroup className="h-7 w-44">
             <InputGroupAddon>
               <Search className="text-muted-foreground/60" />
@@ -1025,19 +1038,19 @@ function ImportLanding({ onSelect, allowDcs }: ImportLandingProps) {
               type="search"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter importers…"
-              aria-label="Filter specialized importers"
+              placeholder={t("importExport.landing.filterPlaceholder")}
+              aria-label={t("importExport.landing.filterAriaLabel")}
               className="text-xs placeholder:text-muted-foreground/60"
             />
           </InputGroup>
         </div>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           {specialized.map((o) => (
-            <OptionCard key={o.title} option={o} onSelect={onSelect} />
+            <OptionCard key={o.titleKey} option={o} onSelect={onSelect} />
           ))}
           {specialized.length === 0 && (
             <p className="col-span-full px-0.5 py-2 text-xs text-muted-foreground">
-              No importer matches “{filter}”.
+              {t("importExport.landing.noMatches", { filter })}
             </p>
           )}
         </div>
@@ -1069,7 +1082,7 @@ interface UploadPanelProps {
    * AQU-310: called after client-side parsing completes, before any upload.
    * Parent shows a preview screen; commit() triggers the actual bulk upload.
    */
-  onPreview?: (results: ImportResult[], commit: () => Promise<void>) => void
+  onPreview?: (results: ImportResult[], commit: (options?: PreviewConfirmOptions) => Promise<void>) => void
   /**
    * AQU-430: callbacks for the parent to receive upload progress while the
    * preview screen is shown (UploadPanel is unmounted during preview). The
@@ -1097,22 +1110,33 @@ function fileExts(list: File[]): string {
   return [...new Set(list.map((f) => f.name.split(".").pop()?.toLowerCase() ?? ""))].sort().join(",")
 }
 
+// Outside React render (called from a progress callback passed into a plain
+// lib helper), so this uses the standalone t() rather than useT() — see
+// src/lib/i18n/standalone.ts.
 function idmlParsePhase(
   fileName: string,
   progress: { phase: string; completed: number; total: number },
 ): string {
-  const action = progress.phase === "inspect"
-    ? "Checking"
+  const actionKey = progress.phase === "inspect"
+    ? "importExport.upload.idmlChecking"
     : progress.phase === "unpack"
-      ? "Opening"
-      : "Reading"
+      ? "importExport.upload.idmlOpening"
+      : "importExport.upload.idmlReading"
   const count = progress.total > 1
-    ? ` (${Math.min(progress.completed, progress.total)}/${progress.total})`
+    ? tStandalone("importExport.upload.idmlCountSuffix", {
+        completed: Math.min(progress.completed, progress.total),
+        total: progress.total,
+      })
     : ""
-  return `${action} ${fileName}${count}…`
+  return tStandalone("importExport.upload.idmlPhase", {
+    action: tStandalone(actionKey),
+    fileName,
+    count,
+  })
 }
 
 function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, onPreview, onCommitPhase, onCommitProgress, onCommitError, onSpreadsheetFile, excludeFrontMatter, variant = "upload" }: UploadPanelProps) {
+  const t = useT()
   const [importing, setImporting] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -1165,7 +1189,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       await doImportFiles(list)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision]
+    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, existingFiles, onCollision, t]
   )
 
   /** Inner helper: import a resolved list of files (after collision resolution).
@@ -1180,7 +1204,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       const spreadsheets = list.filter((file) => /\.(?:csv|tsv|xlsx)$/i.test(file.name))
       if (spreadsheets.length > 0) {
         if (list.length !== 1) {
-          setError("Import one spreadsheet at a time so its columns can be mapped safely.")
+          setError(t("importExport.upload.oneSpreadsheetAtATime"))
           return
         }
         onSpreadsheetFile(spreadsheets[0])
@@ -1214,7 +1238,11 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         try {
           for (const file of textFiles) {
             const knownType = detectFileType(file.name)
-            setPhase(knownType ? `Reading ${file.name}…` : `Analyzing ${file.name}…`)
+            setPhase(
+              knownType
+                ? t("importExport.upload.readingFile", { fileName: file.name })
+                : t("importExport.upload.analyzingFile", { fileName: file.name }),
+            )
             const prepared = await prepareImportFile(file, {
               projectId,
               identityToken,
@@ -1238,7 +1266,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             file_exts: fileExts(list),
             error_message: err instanceof Error ? err.message : String(err),
           })
-          setError(err instanceof Error ? err.message : "Parse failed")
+          setError(err instanceof Error ? err.message : t("importExport.upload.parseFailed"))
           setImporting(false)
           setPhase("")
           return
@@ -1250,7 +1278,20 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
 
         // Hand off to parent to show the preview screen.
         // The commit closure does the actual upload.
-        onPreview(allParsedResults, async () => {
+        onPreview(allParsedResults, async (options) => {
+          if (options?.skipMemberPaths && options.skipMemberPaths.size > 0) {
+            for (const [file, prepared] of preparedByFile) {
+              preparedByFile.set(file, {
+                ...prepared,
+                results: prepared.results.map((result) => ({
+                  ...result,
+                  strings: result.epubMembers
+                    ? filterEpubStrings(result.strings, options.skipMemberPaths!)
+                    : result.strings,
+                })),
+              })
+            }
+          }
           await doCommit(list, preparedByFile, reimportFileIds)
         })
         return
@@ -1260,7 +1301,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       await doCommit(list, undefined, reimportFileIds)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onPreview, onSpreadsheetFile]
+    [projectId, username, sourceLanguage, targetLanguage, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onPreview, onSpreadsheetFile, t]
   )
 
   /** Upload all files (called after preview confirmation, or directly for media). */
@@ -1277,14 +1318,14 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       onCommitError?.(null)
       const checkpoint = finalizationCheckpointRef.current
       if (checkpoint?.files === list) {
-        const finishPhase = "Finishing up…"
+        const finishPhase = t("importExport.upload.finishingUp")
         setPhase(finishPhase)
         onCommitPhase?.(finishPhase)
         try {
           await onImported(checkpoint.refs, undefined, checkpoint.skipped)
           finalizationCheckpointRef.current = null
         } catch (err) {
-          const message = err instanceof Error ? err.message : "Import finalization failed"
+          const message = err instanceof Error ? err.message : t("importExport.upload.finalizationFailed")
           setError(message)
           onCommitError?.(message)
         } finally {
@@ -1325,7 +1366,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
       try {
         for (; currentFileIndex < list.length; currentFileIndex++) {
           const file = list[currentFileIndex]
-          const filePhase = `Uploading ${file.name}…`
+          const filePhase = t("importExport.upload.uploadingFile", { fileName: file.name })
           setPhase(filePhase)
           // AQU-430: surface phase to parent so PreviewPanel can show progress.
           onCommitPhase?.(filePhase)
@@ -1344,7 +1385,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             origins: originsRef.current ?? undefined,
             getToken,
             onCellEnqueued: (count, total) => {
-              const p = `Uploading ${file.name}`
+              const p = t("importExport.upload.uploadingFile", { fileName: file.name })
               setPhase(p)
               onCommitPhase?.(p)
               const frac = total > 0 ? Math.min(count / total, 1) : 0
@@ -1361,7 +1402,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         }
         // Apply cast additions if any subtitle speakers were found.
         await persistCastAdditions()
-        const finishPhase = "Finishing up…"
+        const finishPhase = t("importExport.upload.finishingUp")
         setPhase(finishPhase)
         onCommitPhase?.(finishPhase)
         handoffAttempted = true
@@ -1370,7 +1411,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         await onImported(allRefs, undefined, skipped)
         finalizationCheckpointRef.current = null
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Import failed"
+        const message = err instanceof Error ? err.message : t("importExport.errors.importFailed")
         posthog.captureException(err, { import_stage: "upload", project_id: projectId, file_exts: fileExts(list) })
         posthog.capture(IMPORT_FAILED, {
           import_stage: "upload",
@@ -1383,7 +1424,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             ...allSkipped,
             ...list.slice(currentFileIndex).map((file, index) => ({
               book: file.name,
-              reason: index === 0 ? message : "not attempted after an earlier file failed",
+              reason: index === 0 ? message : t("importExport.upload.notAttempted"),
             })),
           ]
           // Speakers from files that did succeed must not disappear merely
@@ -1394,13 +1435,13 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
               await persistCastAdditions()
             } catch (castError) {
               failedAndUnattempted.push({
-                book: "Cast assignments",
+                book: t("importExport.upload.castAssignmentsLabel"),
                 reason: castError instanceof Error ? castError.message : String(castError),
               })
             }
           }
           if (failedAndUnattempted.length === 0) {
-            failedAndUnattempted.push({ book: "Import finalization", reason: message })
+            failedAndUnattempted.push({ book: t("importExport.upload.importFinalizationLabel"), reason: message })
           }
           handoffAttempted = true
           finalizationCheckpointRef.current = {
@@ -1412,7 +1453,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             await onImported(allRefs, undefined, failedAndUnattempted)
             finalizationCheckpointRef.current = null
           } catch (handoffError) {
-            const handoffMessage = handoffError instanceof Error ? handoffError.message : "Import finalization failed"
+            const handoffMessage = handoffError instanceof Error ? handoffError.message : t("importExport.upload.finalizationFailed")
             setError(handoffMessage)
             onCommitError?.(handoffMessage)
           }
@@ -1433,7 +1474,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
         onCommitPhase?.("")
       }
     },
-    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError]
+    [projectId, username, sourceLanguage, targetLanguage, targetLang, identityToken, getToken, onImported, ttsSettings, onCastUpdated, onCommitPhase, onCommitProgress, onCommitError, t]
   )
 
   function handleDrop(e: React.DragEvent) {
@@ -1503,7 +1544,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
     >
       {importing ? (
         <div className="w-full max-w-sm text-center">
-          <p className="text-sm font-medium">{phase || "Importing…"}</p>
+          <p className="text-sm font-medium">{phase || t("importExport.action.importing")}</p>
           {progress && progress.total > 0 ? (
             <>
               <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted">
@@ -1513,7 +1554,10 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
                 />
               </div>
               <p className="mt-1.5 text-xs text-muted-foreground">
-                {progress.count.toLocaleString()} / {progress.total.toLocaleString()} cells
+                {t("importExport.upload.cellsProgress", {
+                  count: progress.count.toLocaleString(),
+                  total: progress.total.toLocaleString(),
+                })}
                 {progress.bytesTotal ? (
                   <>
                     {" · "}
@@ -1525,17 +1569,17 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
               </p>
             </>
           ) : (
-            <p className="mt-2 text-xs text-muted-foreground">Working…</p>
+            <p className="mt-2 text-xs text-muted-foreground">{t("importExport.action.working")}</p>
           )}
         </div>
       ) : (
         <>
           <p className="mb-2 text-sm text-muted-foreground">
-            Drag & drop files here, or
+            {t("importExport.upload.dragDropHint")}
           </p>
           <div className="flex items-center gap-2">
             <Button variant="outline" nativeButton={false} render={<label />}>
-              Choose Files
+              {t("importExport.upload.chooseFiles")}
               <input
                 type="file"
                 multiple
@@ -1544,7 +1588,7 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
               />
             </Button>
             <Button variant="outline" nativeButton={false} render={<label />}>
-              Choose Folder
+              {t("importExport.upload.chooseFolder")}
               {/* Folder picker for an unzipped Paratext project. */}
               <input
                 type="file"
@@ -1557,13 +1601,13 @@ function UploadPanel({ projectId, username, sourceLanguage, targetLanguage, targ
             </Button>
           </div>
           <div className="mt-3 space-y-1 text-xs text-muted-foreground">
-            <p><span className="font-medium text-foreground/70">Scripture</span> — USFM, USX, SFM</p>
-            <p><span className="font-medium text-foreground/70">Translation</span> — XLIFF/XLF, TMX, CSV/TSV</p>
-            <p><span className="font-medium text-foreground/70">Documents</span> — DOCX, TXT, MD, HTML, JSON/ARB, PPTX, IDML (InDesign)</p>
-            <p><span className="font-medium text-foreground/70">Localization</span> — PO/POT, Java properties</p>
-            <p><span className="font-medium text-foreground/70">Subtitles</span> — VTT, SRT, SBV</p>
-            <p><span className="font-medium text-foreground/70">Paratext project</span> — .zip or folder</p>
-            <p><span className="font-medium text-foreground/70">Other formats</span> — AI-assisted when configured, always reviewed before import</p>
+            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryScripture")}</span> — USFM, USX, SFM</p>
+            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryTranslation")}</span> — {t("importExport.upload.formatsTranslation")}</p>
+            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryDocuments")}</span> — {t("importExport.upload.formatsDocuments")}</p>
+            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryLocalization")}</span> — {t("importExport.upload.formatsLocalization")}</p>
+            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categorySubtitles")}</span> — {t("importExport.upload.formatsSubtitles")}</p>
+            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryParatextProject")}</span> — {t("importExport.upload.zipOrFolder")}</p>
+            <p><span className="font-medium text-foreground/70">{t("importExport.upload.categoryOtherFormats")}</span> — {t("importExport.upload.otherFormatsHint")}</p>
           </div>
         </>
       )}
@@ -1603,6 +1647,7 @@ function ParatextChoice({
   entries, bookCount, projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, onImported, onCancel,
   existingFiles, onCollision, excludeFrontMatter,
 }: ParatextChoiceProps) {
+  const t = useT()
   const [mode, setMode] = useState<"choose" | "pickSource" | "importing">("choose")
   const [plan, setPlan] = useState<ParatextPlan | null>(null)
   const [phase, setPhase] = useState("")
@@ -1630,16 +1675,20 @@ function ParatextChoice({
           project_id: projectId,
           error_message: err instanceof Error ? err.message : String(err),
         })
-        setError(err instanceof Error ? err.message : "Couldn't read the project")
+        setError(err instanceof Error ? err.message : t("importExport.paratext.couldNotReadProject"))
       })
     return () => { cancelled = true }
-  }, [entries, projectId, excludeFrontMatter])
+  }, [entries, projectId, excludeFrontMatter, t])
 
   function onProgress(p: ParatextImportProgress) {
     const bookLabel = p.book
-      ? `${p.book} · book ${Math.min(p.booksDone + 1, p.booksTotal)} of ${p.booksTotal}`
-      : `${p.booksDone} / ${p.booksTotal} books`
-    setPhase(p.book ? `Uploading ${p.book}…` : "Uploading…")
+      ? t("importExport.paratext.bookProgressLabel", {
+          book: p.book,
+          done: Math.min(p.booksDone + 1, p.booksTotal),
+          total: p.booksTotal,
+        })
+      : t("importExport.paratext.booksProgressLabel", { done: p.booksDone, total: p.booksTotal })
+    setPhase(p.book ? t("importExport.paratext.uploadingBook", { book: p.book }) : t("common.uploading"))
     // Prefer the per-chunk cell counts (smooth bar); fall back to books.
     if (p.cellsTotal != null && p.cellsTotal > 0) {
       setProgress({ count: p.cellsDone ?? 0, total: p.cellsTotal, bookLabel })
@@ -1664,7 +1713,7 @@ function ParatextChoice({
 
   async function runSourceWithResolution(resolution: CollisionResolution) {
     if (!plan) return
-    setMode("importing"); setError(null); setPhase("Uploading…"); setProgress(null)
+    setMode("importing"); setError(null); setPhase(t("common.uploading")); setProgress(null)
     try {
       const { refs, settings, skipped } = await commitParatextProject(plan, {
         ...ctx,
@@ -1680,7 +1729,7 @@ function ParatextChoice({
         project_id: projectId,
         error_message: err instanceof Error ? err.message : String(err),
       })
-      setError(err instanceof Error ? err.message : "Import failed"); setMode("choose")
+      setError(err instanceof Error ? err.message : t("importExport.errors.importFailed")); setMode("choose")
     }
   }
 
@@ -1703,14 +1752,14 @@ function ParatextChoice({
       try {
         setTranslations(await fetchTranslationsList())
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Couldn't load the source list")
+        setError(err instanceof Error ? err.message : t("importExport.paratext.couldNotLoadSourceList"))
       }
     }
   }
 
   async function runTargetWithResolution(sel: EBibleTranslation, resolution: CollisionResolution) {
     if (!plan) return
-    setMode("importing"); setError(null); setPhase(`Fetching source: ${sel.title}…`); setProgress(null)
+    setMode("importing"); setError(null); setPhase(t("importExport.paratext.fetchingSource", { title: sel.title })); setProgress(null)
     try {
       const corpus = await fetchTranslationText(sel.id, () => {})
       const sourceVerses: SourceVerse[] = parseEBibleCorpus(corpus).map((s) => ({
@@ -1731,7 +1780,7 @@ function ParatextChoice({
         skipped.length ? skipped : undefined,
       )
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed"); setMode("pickSource")
+      setError(err instanceof Error ? err.message : t("importExport.errors.importFailed")); setMode("pickSource")
     }
   }
 
@@ -1753,10 +1802,10 @@ function ParatextChoice({
     const q = query.trim().toLowerCase()
     const base = q
       ? translations.filter(
-          (t) =>
-            t.id.toLowerCase().includes(q) ||
-            t.title.toLowerCase().includes(q) ||
-            t.languageNameInEnglish.toLowerCase().includes(q),
+          (tr) =>
+            tr.id.toLowerCase().includes(q) ||
+            tr.title.toLowerCase().includes(q) ||
+            tr.languageNameInEnglish.toLowerCase().includes(q),
         )
       : translations
     return base.slice(0, 200)
@@ -1765,14 +1814,18 @@ function ParatextChoice({
   if (mode === "importing") {
     return (
       <div className="mx-auto w-full max-w-sm py-8 text-center">
-        <p className="text-sm font-medium">{phase || "Importing…"}</p>
+        <p className="text-sm font-medium">{phase || t("importExport.action.importing")}</p>
         {progress && progress.total > 0 && (
           <>
             <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted">
               <div className="h-full bg-primary transition-all" style={{ width: `${Math.round((progress.count / progress.total) * 100)}%` }} />
             </div>
             <p className="mt-1.5 text-xs text-muted-foreground">
-              {progress.count.toLocaleString()} / {progress.total.toLocaleString()} cells · {progress.bookLabel}
+              {t("importExport.paratext.cellsProgress", {
+                count: progress.count.toLocaleString(),
+                total: progress.total.toLocaleString(),
+                bookLabel: progress.bookLabel,
+              })}
             </p>
           </>
         )}
@@ -1785,35 +1838,35 @@ function ParatextChoice({
     return (
       <div className="flex flex-col gap-3 py-2">
         <div className="flex items-center justify-between">
-          <p className="text-sm font-medium">Pick a source Bible to align against</p>
-          <Button variant="ghost" onClick={() => setMode("choose")}>Back</Button>
+          <p className="text-sm font-medium">{t("importExport.paratext.pickSourceTitle")}</p>
+          <Button variant="ghost" onClick={() => setMode("choose")}>{t("common.back")}</Button>
         </div>
         <p className="text-xs text-muted-foreground">
-          It just needs to be close — verses align by reference (e.g. MAT 1:1). Verses missing on either side stay blank.
+          {t("importExport.paratext.pickSourceHint")}
         </p>
         <InputGroup>
           <InputGroupAddon>
             <Search />
           </InputGroupAddon>
           <InputGroupInput
-            placeholder="Search translations (language, name, code)…"
+            placeholder={t("importExport.paratext.searchTranslationsPlaceholder")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            aria-label="Search translations"
+            aria-label={t("importExport.paratext.searchTranslationsAriaLabel")}
           />
         </InputGroup>
         <ScrollArea className="h-64 rounded border">
           {!translations ? (
-            <p className="p-3 text-sm text-muted-foreground">Loading source list…</p>
+            <p className="p-3 text-sm text-muted-foreground">{t("importExport.paratext.loadingSourceList")}</p>
           ) : filtered.length === 0 ? (
-            <p className="p-3 text-sm text-muted-foreground">No matches.</p>
+            <p className="p-3 text-sm text-muted-foreground">{t("common.noMatches")}</p>
           ) : (
             <ul className="divide-y">
-              {filtered.map((t) => (
-                <li key={t.id}>
-                  <button type="button" onClick={() => runTarget(t)} className="flex w-full flex-col items-start px-3 py-2 text-left hover:bg-accent">
-                    <span className="text-sm">{t.title}</span>
-                    <span className="text-xs text-muted-foreground">{t.languageNameInEnglish} · {t.id}</span>
+              {filtered.map((tr) => (
+                <li key={tr.id}>
+                  <button type="button" onClick={() => runTarget(tr)} className="flex w-full flex-col items-start px-3 py-2 text-left hover:bg-accent">
+                    <span className="text-sm">{tr.title}</span>
+                    <span className="text-xs text-muted-foreground">{tr.languageNameInEnglish} · {tr.id}</span>
                   </button>
                 </li>
               ))}
@@ -1844,12 +1897,17 @@ function ParatextChoice({
     <div className="flex flex-col gap-3 py-2">
       <div>
         <p className="text-sm font-medium">
-          Paratext project detected — {plan ? plan.books.length : bookCount} book{(plan ? plan.books.length : bookCount) === 1 ? "" : "s"}
+          {t("importExport.paratext.projectDetected", { count: plan ? plan.books.length : bookCount })}
         </p>
         <p className="text-xs text-muted-foreground">
           {plan
-            ? <>{language && <>Language: {language} · </>}{includedCells.toLocaleString()} cells parsed in your browser — review, then choose how to bring it in.</>
-            : "Reading project…"}
+            ? (
+              <>
+                {language && <>{t("importExport.paratext.languageLabel", { language })} · </>}
+                {t("importExport.paratext.cellsParsedHint", { count: includedCells.toLocaleString() })}
+              </>
+            )
+            : t("importExport.paratext.readingProject")}
         </p>
       </div>
       {plan && (
@@ -1867,18 +1925,23 @@ function ParatextChoice({
                     <Checkbox
                       checked={included}
                       onCheckedChange={() => toggleBook(b.book.bookId)}
-                      aria-label={`Include ${b.book.displayName}`}
+                      aria-label={t("importExport.paratext.includeBookAriaLabel", { book: b.book.displayName })}
                     />
                     <button
                       type="button"
                       onClick={() => setExpandedBook(expanded ? null : key)}
                       className="flex min-w-0 flex-1 items-baseline gap-2 text-left"
-                      aria-label="Show the first parsed cells"
+                      aria-label={t("importExport.paratext.showParsedCellsAriaLabel")}
                     >
                       <span className={`truncate text-sm ${included ? "" : "text-muted-foreground line-through"}`}>{b.book.displayName}</span>
                       <span className="shrink-0 text-xs text-muted-foreground">
-                        {b.book.bookId} · {b.cellCount.toLocaleString()} cells
-                        {b.duplicateRefs.length > 0 && <span className="text-amber-600"> · {b.duplicateRefs.length} duplicate ref{b.duplicateRefs.length === 1 ? "" : "s"}</span>}
+                        {t("importExport.paratext.bookCellsCount", { bookId: b.book.bookId, count: b.cellCount.toLocaleString() })}
+                        {b.duplicateRefs.length > 0 && (
+                          <span className="text-amber-600">
+                            {" · "}
+                            {t("importExport.paratext.duplicateRefsCount", { count: b.duplicateRefs.length })}
+                          </span>
+                        )}
                       </span>
                     </button>
                   </div>
@@ -1895,7 +1958,9 @@ function ParatextChoice({
                         </li>
                       ))}
                       {b.strings.length > 4 && (
-                        <li className="text-xs text-muted-foreground/70">… {(b.strings.length - 4).toLocaleString()} more</li>
+                        <li className="text-xs text-muted-foreground/70">
+                          {t("importExport.paratext.moreCells", { count: (b.strings.length - 4).toLocaleString() })}
+                        </li>
                       )}
                     </ul>
                   )}
@@ -1905,19 +1970,19 @@ function ParatextChoice({
           </ul>
         </div>
       )}
-      <p className="text-xs text-muted-foreground">How should we bring it in?</p>
+      <p className="text-xs text-muted-foreground">{t("importExport.paratext.howToBringIn")}</p>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <button type="button" onClick={runSource} disabled={!plan || includedBooks.length === 0} className="rounded-lg border p-3 text-left transition-colors hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50">
-          <p className="text-sm font-medium">Source text</p>
-          <p className="mt-1 text-xs text-muted-foreground">A reference Bible to translate from. Books import as source cells.</p>
+          <p className="text-sm font-medium">{t("importExport.paratext.sourceTextTitle")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("importExport.paratext.sourceTextDescription")}</p>
         </button>
         <button type="button" onClick={startTarget} disabled={!plan || includedBooks.length === 0} className="rounded-lg border p-3 text-left transition-colors hover:border-primary hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-50">
-          <p className="text-sm font-medium">Translation in progress</p>
-          <p className="mt-1 text-xs text-muted-foreground">Your team's target text. We'll pair it with a source Bible by verse.</p>
+          <p className="text-sm font-medium">{t("importExport.paratext.translationInProgressTitle")}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{t("importExport.paratext.translationInProgressDescription")}</p>
         </button>
       </div>
       <div>
-        <Button variant="ghost" onClick={onCancel}>Cancel</Button>
+        <Button variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button>
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
@@ -1942,6 +2007,7 @@ type EBiblePanelMode = "source" | "target"
 type EBibleTargetStep = "pick" | "review" | "applying" | "done"
 
 function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targetLang, getToken, sourceCells, onImported, onTargetImported }: EBiblePanelProps) {
+  const t = useT()
   const [mode, setMode] = useState<EBiblePanelMode>("source")
   const [targetStep, setTargetStep] = useState<EBibleTargetStep>("pick")
   const [matchResult, setMatchResult] = useState<EBibleMatchResult | null>(null)
@@ -1978,11 +2044,11 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
     if (!q) return translations.slice(0, 200)
     return translations
       .filter(
-        (t) =>
-          t.id.toLowerCase().includes(q) ||
-          t.title.toLowerCase().includes(q) ||
-          t.languageNameInEnglish.toLowerCase().includes(q) ||
-          t.languageName.toLowerCase().includes(q)
+        (tr) =>
+          tr.id.toLowerCase().includes(q) ||
+          tr.title.toLowerCase().includes(q) ||
+          tr.languageNameInEnglish.toLowerCase().includes(q) ||
+          tr.languageName.toLowerCase().includes(q)
       )
       .slice(0, 200)
   }, [translations, query])
@@ -2011,7 +2077,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
       // sourceLanguage so the project can seed it when unset (AQU-249).
       await onImported(ref, { sourceLanguage: selected.languageCode || selected.id })
     } catch (err) {
-      setImportErr(err instanceof Error ? err.message : "Import failed")
+      setImportErr(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
     } finally {
       setImporting(false)
       abortRef.current = null
@@ -2043,7 +2109,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
       setMatchResult(result)
       setTargetStep("review")
     } catch (err) {
-      setTargetErr(err instanceof Error ? err.message : "Preparation failed")
+      setTargetErr(err instanceof Error ? err.message : t("importExport.ebible.preparationFailed"))
     } finally {
       setImporting(false)
       abortRef.current = null
@@ -2063,7 +2129,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
       )
       setTargetStep("done")
     } catch (err) {
-      setTargetErr(err instanceof Error ? err.message : "Apply failed")
+      setTargetErr(err instanceof Error ? err.message : t("importExport.ebible.applyFailed"))
       setTargetStep("review")
     }
   }
@@ -2074,8 +2140,11 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
       <div className="mx-auto w-full max-w-sm py-8 text-center">
         <p className="text-sm font-medium">
           {targetProgress?.phase === "save" && targetProgress.cellsTotal
-            ? `Committing ${(targetProgress.cellsEnqueued ?? 0).toLocaleString()} / ${targetProgress.cellsTotal.toLocaleString()} verses…`
-            : "Committing verses…"}
+            ? t("importExport.ebible.committingVerses", {
+                enqueued: (targetProgress.cellsEnqueued ?? 0).toLocaleString(),
+                total: targetProgress.cellsTotal.toLocaleString(),
+              })
+            : t("importExport.ebible.committingVersesIndeterminate")}
         </p>
         {targetProgress?.phase === "save" && targetProgress.cellsTotal ? (
           <div className="mx-auto mt-3 h-2 w-full max-w-xs overflow-hidden rounded-full bg-muted">
@@ -2085,7 +2154,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
             />
           </div>
         ) : (
-          <p className="mt-2 text-xs text-muted-foreground">Working…</p>
+          <p className="mt-2 text-xs text-muted-foreground">{t("importExport.action.working")}</p>
         )}
       </div>
     )
@@ -2095,11 +2164,11 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
   if (mode === "target" && targetStep === "done") {
     return (
       <div className="flex flex-col items-center gap-4 py-8 text-center">
-        <p className="text-sm font-medium">Target verses committed.</p>
+        <p className="text-sm font-medium">{t("importExport.ebible.targetCommitted")}</p>
         <p className="text-xs text-muted-foreground">
-          The target column will update as the server projection lands.
+          {t("importExport.ebible.targetCommittedHint")}
         </p>
-        <Button onClick={() => onTargetImported?.()}>Close</Button>
+        <Button onClick={() => onTargetImported?.()}>{t("common.close")}</Button>
       </div>
     )
   }
@@ -2129,27 +2198,27 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
           onValueChange={(value) => setMode(value as EBiblePanelMode)}
           className="gap-0"
         >
-          <TabsList size="lg" className="w-full" aria-label="eBible import mode">
-            <TabsTrigger value="source">New source file</TabsTrigger>
-            <TabsTrigger value="target">Into target column</TabsTrigger>
+          <TabsList size="lg" className="w-full" aria-label={t("importExport.ebible.modeTabsAriaLabel")}>
+            <TabsTrigger value="source">{t("importExport.ebible.modeSource")}</TabsTrigger>
+            <TabsTrigger value="target">{t("importExport.ebible.modeTarget")}</TabsTrigger>
           </TabsList>
         </Tabs>
       )}
 
       <p className="text-xs text-muted-foreground">
         {mode === "source" ? (
-          <>
-            Import a Bible translation directly from the{" "}
-            <a href="https://github.com/BibleNLP/ebible" target="_blank" rel="noreferrer" className="underline">
-              BibleNLP/ebible corpus
-            </a>
-            . Only redistributable translations are included.
-          </>
+          <RichMessage
+            k="importExport.ebible.sourceDescription"
+            values={{
+              link: (
+                <a href="https://github.com/BibleNLP/ebible" target="_blank" rel="noreferrer" className="underline">
+                  {t("importExport.ebible.corpusLinkText")}
+                </a>
+              ),
+            }}
+          />
         ) : (
-          <>
-            Match eBible verses to existing source cells by canonical reference (e.g. GEN 1:1) and
-            fill the target column. A review step lets you keep or replace any existing target content.
-          </>
+          t("importExport.ebible.targetDescription")
         )}
       </p>
 
@@ -2158,47 +2227,47 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
           <Search />
         </InputGroupAddon>
         <InputGroupInput
-          placeholder="Search by language, title, or id (e.g. 'eng', 'KJV')"
+          placeholder={t("importExport.ebible.searchPlaceholder")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           disabled={!translations || importing}
-          aria-label="Search eBible translations"
+          aria-label={t("importExport.ebible.searchAriaLabel")}
         />
       </InputGroup>
 
       {loadErr ? (
-        <p className="text-sm text-destructive">Failed to load list: {loadErr}</p>
+        <p className="text-sm text-destructive">{t("importExport.helloao.failedToLoadList", { error: loadErr })}</p>
       ) : !translations ? (
-        <p className="text-sm text-muted-foreground">Loading translations...</p>
+        <p className="text-sm text-muted-foreground">{t("importExport.helloao.loadingTranslations")}</p>
       ) : (
         <ScrollArea className="h-72 rounded-md border">
           <ul className="divide-y">
             {filtered.length === 0 && (
-              <li className="p-3 text-sm text-muted-foreground">No matches.</li>
+              <li className="p-3 text-sm text-muted-foreground">{t("common.noMatches")}</li>
             )}
-            {filtered.map((t) => {
-              const isSelected = selected?.id === t.id
+            {filtered.map((tr) => {
+              const isSelected = selected?.id === tr.id
               return (
-                <li key={t.id}>
+                <li key={tr.id}>
                   <button
                     type="button"
                     disabled={importing}
-                    onClick={() => setSelected(t)}
+                    onClick={() => setSelected(tr)}
                     className={cn(
                       "flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm transition-colors hover:bg-accent",
                       isSelected && "bg-accent"
                     )}
                   >
                     <div className="flex w-full items-center justify-between gap-2">
-                      <span className="font-medium">{t.title}</span>
+                      <span className="font-medium">{tr.title}</span>
                       <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                        {t.id}
+                        {tr.id}
                       </span>
                     </div>
                     <span className="text-xs text-muted-foreground">
-                      {t.languageNameInEnglish || t.languageName}
-                      {t.otBooks + t.ntBooks > 0 && (
-                        <> · {t.otBooks} OT · {t.ntBooks} NT</>
+                      {tr.languageNameInEnglish || tr.languageName}
+                      {tr.otBooks + tr.ntBooks > 0 && (
+                        <> · {t("importExport.ebible.otBooks", { count: tr.otBooks })} · {t("importExport.ebible.ntBooks", { count: tr.ntBooks })}</>
                       )}
                     </span>
                   </button>
@@ -2212,7 +2281,7 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
       {selected && (
         <div className="rounded-md border bg-muted/30 p-3 text-xs">
           <div className="font-medium text-sm">{selected.title}</div>
-          <div className="text-muted-foreground">{selected.copyright || "No copyright info."}</div>
+          <div className="text-muted-foreground">{selected.copyright || t("importExport.ebible.noCopyrightInfo")}</div>
         </div>
       )}
 
@@ -2221,12 +2290,18 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
         <div className="text-xs text-muted-foreground">
           <p>
             {progress.phase === "download"
-              ? `Downloading ${selected?.id ?? ""}… ${formatProgress(progress.received, progress.total)}`
+              ? t("importExport.ebible.downloading", {
+                  id: selected?.id ?? "",
+                  progress: formatProgress(progress.received, progress.total),
+                })
               : progress.phase === "parse"
-                ? "Parsing verses…"
+                ? t("importExport.helloao.parsingVerses")
                 : progress.cellsTotal
-                  ? `Uploading verses: ${(progress.cellsEnqueued ?? 0).toLocaleString()} / ${progress.cellsTotal.toLocaleString()}`
-                  : "Uploading to project…"}
+                  ? t("importExport.helloao.uploadingVerses", {
+                      enqueued: (progress.cellsEnqueued ?? 0).toLocaleString(),
+                      total: progress.cellsTotal.toLocaleString(),
+                    })
+                  : t("importExport.obs.uploadingToProject")}
           </p>
           {progress.phase === "save" && progress.cellsTotal ? (
             <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
@@ -2246,10 +2321,13 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
         <div className="text-xs text-muted-foreground">
           <p>
             {targetProgress.phase === "download"
-              ? `Downloading ${selected?.id ?? ""}… ${formatProgress(targetProgress.received, targetProgress.total)}`
+              ? t("importExport.ebible.downloading", {
+                  id: selected?.id ?? "",
+                  progress: formatProgress(targetProgress.received, targetProgress.total),
+                })
               : targetProgress.phase === "parse"
-                ? "Parsing verses…"
-                : "Matching verses to source cells…"}
+                ? t("importExport.helloao.parsingVerses")
+                : t("importExport.ebible.matchingVerses")}
           </p>
         </div>
       )}
@@ -2260,11 +2338,11 @@ function EBiblePanel({ projectId, username, sourceLanguage, targetLanguage, targ
       <div className="flex justify-end">
         {mode === "source" ? (
           <Button onClick={handleImport} disabled={!selected || importing}>
-            {importing ? "Importing..." : "Import"}
+            {importing ? t("importExport.action.importing") : t("nav.workspaceActions.import")}
           </Button>
         ) : (
           <Button onClick={handlePrepareTarget} disabled={!selected || importing || !sourceCells?.length}>
-            {importing ? "Preparing…" : "Next: Review matches"}
+            {importing ? t("importExport.ebible.preparing") : t("importExport.ebible.nextReviewMatches")}
           </Button>
         )}
       </div>
@@ -2288,6 +2366,7 @@ interface HelloaoPanelProps {
 }
 
 function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported }: HelloaoPanelProps) {
+  const t = useT()
   const [translations, setTranslations] = useState<HelloaoTranslation[] | null>(null)
   const [loadErr, setLoadErr] = useState<string | null>(null)
   const [query, setQuery] = useState("")
@@ -2329,23 +2408,23 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
     if (!q) return translations.slice(0, 200)
     return translations
       .filter(
-        (t) =>
-          t.id.toLowerCase().includes(q) ||
-          t.name.toLowerCase().includes(q) ||
-          t.englishName.toLowerCase().includes(q) ||
-          t.languageEnglishName.toLowerCase().includes(q) ||
-          t.languageName.toLowerCase().includes(q)
+        (tr) =>
+          tr.id.toLowerCase().includes(q) ||
+          tr.name.toLowerCase().includes(q) ||
+          tr.englishName.toLowerCase().includes(q) ||
+          tr.languageEnglishName.toLowerCase().includes(q) ||
+          tr.languageName.toLowerCase().includes(q)
       )
       .slice(0, 200)
   }, [translations, query])
 
-  function handleSelect(t: HelloaoTranslation) {
-    setSelected(t)
+  function handleSelect(tr: HelloaoTranslation) {
+    setSelected(tr)
     setBooks(null)
     setBooksErr(null)
     setCheckedBooks(new Set())
     setBookPreset("all")
-    fetchHelloaoBooks(t.id)
+    fetchHelloaoBooks(tr.id)
       .then((list) => {
         setBooks(list)
         // Default: everything selected (whole bible).
@@ -2401,7 +2480,7 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
       )
       await onImported(ref, { sourceLanguage: selected.language || undefined })
     } catch (err) {
-      setImportErr(err instanceof Error ? err.message : "Import failed")
+      setImportErr(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
     } finally {
       setImporting(false)
       abortRef.current = null
@@ -2421,40 +2500,40 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
           <ImportDialogBackButton
             disabled={importing}
             onClick={() => setSelected(null)}
-            label="Back to translation list"
+            label={t("importExport.helloao.backToList")}
           />
           <div className="min-w-0">
             <p className="truncate text-sm font-medium">{selected.englishName || selected.name}</p>
             <p className="text-xs text-muted-foreground">
               {selected.languageEnglishName || selected.languageName} ·{" "}
               <a href={selected.licenseUrl} target="_blank" rel="noreferrer" className="underline">
-                license
+                {t("importExport.helloao.license")}
               </a>
             </p>
           </div>
         </div>
 
         {booksErr ? (
-          <p className="text-sm text-destructive">Failed to load books: {booksErr}</p>
+          <p className="text-sm text-destructive">{t("importExport.helloao.failedToLoadBooks", { error: booksErr })}</p>
         ) : !books ? (
-          <p className="text-sm text-muted-foreground">Loading books…</p>
+          <p className="text-sm text-muted-foreground">{t("importExport.helloao.loadingBooks")}</p>
         ) : (
           <>
             <div className="flex items-center gap-1.5">
               <SegmentTabs
-                aria-label="Book selection preset"
+                aria-label={t("importExport.helloao.presetAriaLabel")}
                 value={bookPreset}
                 onValueChange={(preset) => {
                   if (!importing) applyPreset(preset)
                 }}
                 options={[
-                  { value: "all", label: "Whole bible", disabled: importing },
-                  { value: "OT", label: "Old Testament", disabled: importing },
-                  { value: "NT", label: "New Testament", disabled: importing },
+                  { value: "all", label: t("importExport.helloao.presetWholeBible"), disabled: importing },
+                  { value: "OT", label: t("importExport.helloao.presetOldTestament"), disabled: importing },
+                  { value: "NT", label: t("importExport.helloao.presetNewTestament"), disabled: importing },
                 ]}
               />
               <span className="ml-auto text-xs text-muted-foreground">
-                {checkedBooks.size} of {books.length} books
+                {t("importExport.helloao.booksSelected", { checked: checkedBooks.size, total: books.length })}
               </span>
             </div>
 
@@ -2481,12 +2560,18 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
           <div className="text-xs text-muted-foreground">
             <p>
               {progress.phase === "download"
-                ? `Downloading ${selected.id}… ${formatProgress(progress.received, progress.total)}`
+                ? t("importExport.ebible.downloading", {
+                    id: selected.id,
+                    progress: formatProgress(progress.received, progress.total),
+                  })
                 : progress.phase === "parse"
-                  ? "Parsing verses…"
+                  ? t("importExport.helloao.parsingVerses")
                   : progress.cellsTotal
-                    ? `Uploading verses: ${(progress.cellsEnqueued ?? 0).toLocaleString()} / ${progress.cellsTotal.toLocaleString()}`
-                    : "Uploading to project…"}
+                    ? t("importExport.helloao.uploadingVerses", {
+                        enqueued: (progress.cellsEnqueued ?? 0).toLocaleString(),
+                        total: progress.cellsTotal.toLocaleString(),
+                      })
+                    : t("importExport.obs.uploadingToProject")}
             </p>
             {progress.phase === "save" && progress.cellsTotal ? (
               <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
@@ -2506,11 +2591,11 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
         <div className="flex items-center justify-end gap-3">
           {books && checkedBooks.size > 0 && (
             <span className="text-xs text-muted-foreground">
-              ~{selectedVerseCount.toLocaleString()} verses
+              {t("importExport.helloao.approxVerseCount", { count: selectedVerseCount.toLocaleString() })}
             </span>
           )}
           <Button onClick={handleImport} disabled={!books || checkedBooks.size === 0 || importing}>
-            {importing ? "Importing..." : "Import"}
+            {importing ? t("importExport.action.importing") : t("nav.workspaceActions.import")}
           </Button>
         </div>
       </div>
@@ -2521,12 +2606,16 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs text-muted-foreground">
-        Import a Bible translation from the{" "}
-        <a href="https://bible.helloao.org/docs/" target="_blank" rel="noreferrer" className="underline">
-          Free Use Bible API
-        </a>{" "}
-        — over 1,000 versions with section headings and formatting. You can import the whole
-        bible, a single testament, or individual books.
+        <RichMessage
+          k="importExport.helloao.description"
+          values={{
+            link: (
+              <a href="https://bible.helloao.org/docs/" target="_blank" rel="noreferrer" className="underline">
+                {t("importExport.helloao.apiLinkText")}
+              </a>
+            ),
+          }}
+        />
       </p>
 
       <InputGroup>
@@ -2534,39 +2623,42 @@ function HelloaoPanel({ projectId, username, sourceLanguage, targetLanguage, get
           <Search />
         </InputGroupAddon>
         <InputGroupInput
-          placeholder="Search by language, name, or id (e.g. 'eng', 'BSB')"
+          placeholder={t("importExport.helloao.searchPlaceholder")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           disabled={!translations}
-          aria-label="Search Bible translations"
+          aria-label={t("importExport.helloao.searchAriaLabel")}
         />
       </InputGroup>
 
       {loadErr ? (
-        <p className="text-sm text-destructive">Failed to load list: {loadErr}</p>
+        <p className="text-sm text-destructive">{t("importExport.helloao.failedToLoadList", { error: loadErr })}</p>
       ) : !translations ? (
-        <p className="text-sm text-muted-foreground">Loading translations...</p>
+        <p className="text-sm text-muted-foreground">{t("importExport.helloao.loadingTranslations")}</p>
       ) : (
         <ScrollArea className="h-72 rounded-md border">
           <ul className="divide-y">
             {filtered.length === 0 && (
-              <li className="p-3 text-sm text-muted-foreground">No matches.</li>
+              <li className="p-3 text-sm text-muted-foreground">{t("common.noMatches")}</li>
             )}
-            {filtered.map((t) => (
-              <li key={t.id}>
+            {filtered.map((tr) => (
+              <li key={tr.id}>
                 <button
                   type="button"
-                  onClick={() => handleSelect(t)}
+                  onClick={() => handleSelect(tr)}
                   className="flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
                 >
                   <div className="flex w-full items-center justify-between gap-2">
-                    <span className="font-medium">{t.englishName || t.name}</span>
+                    <span className="font-medium">{tr.englishName || tr.name}</span>
                     <span className="shrink-0 font-mono text-xs text-muted-foreground">
-                      {t.id}
+                      {tr.id}
                     </span>
                   </div>
                   <span className="text-xs text-muted-foreground">
-                    {t.languageEnglishName || t.languageName} · {t.numberOfBooks} books
+                    {t("importExport.helloao.languageAndBookCount", {
+                      language: tr.languageEnglishName || tr.languageName,
+                      count: tr.numberOfBooks,
+                    })}
                   </span>
                 </button>
               </li>
@@ -2610,6 +2702,7 @@ function DirectionPanel({
   confirming = false,
   error = null,
 }: DirectionPanelProps) {
+  const t = useT()
   // WARN e: use normalizer so "French"=="fra" registers as same and blocks confirm.
   const targetTrimmed = targetLanguage.trim()
   const sourceTrimmed = sourceLanguage.trim()
@@ -2620,47 +2713,47 @@ function DirectionPanel({
 
   return (
     <div className="flex flex-col gap-4 py-2">
-      <p className="text-sm text-muted-foreground">
-        We detected the source language from the imported project. Please confirm the
-        source and set the target language so back-translation and QA rules work correctly.
-      </p>
+      <p className="text-sm text-muted-foreground">{t("importExport.direction.intro")}</p>
       <FieldGroup className="grid grid-cols-2 gap-4">
         <Field>
-          <FieldLabel htmlFor="dl-source">Source language</FieldLabel>
+          <FieldLabel htmlFor="dl-source">{t("projectSettings.info.sourceLanguageLabel")}</FieldLabel>
           <Input
             id="dl-source"
             value={sourceLanguage}
             onChange={(e) => onSourceChange(e.target.value)}
-            placeholder="e.g. English, arb, hbo"
+            placeholder={t("importExport.direction.sourcePlaceholder")}
           />
         </Field>
         <Field>
           <FieldLabel htmlFor="dl-target">
-            Target language <span className="text-destructive">*</span>
+            {t("importExport.direction.targetLabel")} <span className="text-destructive">*</span>
           </FieldLabel>
           <Input
             id="dl-target"
             value={targetLanguage}
             onChange={(e) => onTargetChange(e.target.value)}
-            placeholder="e.g. Spanish, fra, swh"
+            placeholder={t("importExport.direction.targetPlaceholder")}
             autoFocus
           />
         </Field>
       </FieldGroup>
       <p className="text-xs text-muted-foreground">
-        You can change these later in <strong>Project Settings → Project Info</strong>.
+        <RichMessage
+          k="importExport.direction.changeLaterHint"
+          values={{ path: <strong>{t("importExport.direction.settingsBreadcrumb")}</strong> }}
+        />
       </p>
       {/* AQU-249: restore direction screen on failure so the user can retry */}
       {error && <FieldError role="alert">{error}</FieldError>}
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={onSkip} disabled={confirming}>
-          Skip for now
+          {t("onboarding.common.skipForNow")}
         </Button>
         <Button
           onClick={onConfirm}
           disabled={confirmDisabled}
         >
-          {confirming ? "Setting…" : "Set direction"}
+          {confirming ? t("importExport.direction.setting") : t("importExport.direction.setDirection")}
         </Button>
       </div>
     </div>
@@ -2681,13 +2774,21 @@ interface ImportResultPanelProps {
 }
 
 function ImportResultPanel({ importedCount, skipped, onDismiss, error }: ImportResultPanelProps) {
+  const t = useT()
   const [copied, setCopied] = useState(false)
   const [dismissing, setDismissing] = useState(false)
 
+  // Two independent counts (imported vs. skipped) can't share one plural
+  // template — English "1 item imported, 2 skipped" hides that "item" and
+  // "skipped" each agree with a different number, which breaks for a locale
+  // with real plural agreement. Resolved as two separately-pluralized
+  // sub-phrases and interpolated into the header, so each stays grammatical.
+  const importedPhrase = t("importExport.result.reportImportedCount", { count: importedCount })
+  const skippedPhrase = t("importExport.result.reportSkippedCount", { count: skipped.length })
   const reportText = [
-    `Import complete: ${importedCount} item${importedCount === 1 ? "" : "s"} imported, ${skipped.length} skipped.`,
+    t("importExport.result.reportHeader", { imported: importedPhrase, skipped: skippedPhrase }),
     "",
-    "Skipped items:",
+    t("importExport.result.reportSkippedListLabel"),
     ...skipped.map((s) => `  ${s.book}: ${s.reason}`),
   ].join("\n")
 
@@ -2714,9 +2815,16 @@ function ImportResultPanel({ importedCount, skipped, onDismiss, error }: ImportR
   return (
     <div className="flex flex-col gap-4 py-2">
       <p className="text-sm text-muted-foreground">
-        <span className="font-medium text-foreground">{importedCount}</span> item{importedCount === 1 ? "" : "s"} imported
-        successfully; <span className="font-medium text-amber-600">{skipped.length}</span> could not be imported.
-        Review the list below and copy it before closing.
+        <RichMessage
+          k="importExport.result.summaryImported"
+          count={importedCount}
+          values={{ count: <span className="font-medium text-foreground">{importedCount}</span> }}
+        />{" "}
+        <RichMessage
+          k="importExport.result.summarySkipped"
+          values={{ count: <span className="font-medium text-amber-600">{skipped.length}</span> }}
+        />{" "}
+        {t("importExport.result.summaryReviewHint")}
       </p>
       <ScrollArea className="h-56 rounded-md border bg-muted/30 p-3">
         <ul className="space-y-1">
@@ -2731,10 +2839,10 @@ function ImportResultPanel({ importedCount, skipped, onDismiss, error }: ImportR
       {error ? <FieldError role="alert">{error}</FieldError> : null}
       <div className="flex justify-between gap-2">
         <Button variant="outline" onClick={handleCopy} disabled={dismissing}>
-          {copied ? "Copied!" : "Copy report"}
+          {copied ? t("nav.report.copied") : t("nav.report.copyReport")}
         </Button>
         <Button onClick={handleDismiss} disabled={dismissing}>
-          {dismissing ? "Closing…" : "Close"}
+          {dismissing ? t("importExport.result.closing") : t("common.close")}
         </Button>
       </div>
     </div>
@@ -2758,6 +2866,7 @@ interface CollisionPanelProps {
 
 /** Per-collision prompt with apply-to-all toggle. */
 function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps) {
+  const t = useT()
   // Updating preserves logical cell ids and is the safe default when the
   // existing project listing supplied an id. Legacy name-only callers fall
   // back to Skip because they cannot address an existing file safely.
@@ -2818,21 +2927,20 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
   return (
     <div className="flex flex-col gap-4 py-2">
       <p className="text-sm text-muted-foreground">
-        The following {collisions.length === 1 ? "file already exists" : `${collisions.length} files already exist`} in this
-        project. Choose what to do with each one.
+        {t("importExport.collision.intro", { count: collisions.length })}
       </p>
       <p className="text-xs text-muted-foreground">
-        Updating matches stable units and keeps translations, language lanes, comments, audio, and units missing from the new file.
+        {t("importExport.collision.updateHint")}
       </p>
       {collisions.some((collision) => collision.ambiguous) && (
         <p role="alert" className="text-xs text-amber-700 dark:text-amber-300">
-          Some files have multiple matches. Choose Skip or Import as duplicate for those files.
+          {t("importExport.collision.ambiguousWarning")}
         </p>
       )}
 
       {/* Apply-to-all row */}
       <div className="flex items-center gap-2 text-xs">
-        <span className="text-muted-foreground">Apply to all:</span>
+        <span className="text-muted-foreground">{t("importExport.collision.applyToAll")}</span>
         <button
           type="button"
           onClick={() => setAll("update")}
@@ -2842,7 +2950,7 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
             allUpdate ? "border-primary bg-primary/10 text-primary" : "border-muted text-muted-foreground hover:border-foreground/40",
           )}
         >
-          Update all
+          {t("importExport.collision.updateAll")}
         </button>
         <button
           type="button"
@@ -2852,7 +2960,7 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
             allSkip ? "border-primary bg-primary/10 text-primary" : "border-muted text-muted-foreground hover:border-foreground/40",
           )}
         >
-          Skip all
+          {t("importExport.collision.skipAll")}
         </button>
         <button
           type="button"
@@ -2862,7 +2970,7 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
             allDup ? "border-primary bg-primary/10 text-primary" : "border-muted text-muted-foreground hover:border-foreground/40",
           )}
         >
-          Import all as duplicates
+          {t("importExport.collision.duplicateAll")}
         </button>
       </div>
 
@@ -2877,7 +2985,7 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium">{c.name}</p>
                   <p className="truncate text-xs text-muted-foreground">
-                    Existing: {c.existingName}
+                    {t("importExport.collision.existing", { name: c.existingName })}
                     {c.bookCode ? ` (${c.bookCode})` : ""}
                   </p>
                 </div>
@@ -2894,7 +3002,7 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
                         : "border-muted text-muted-foreground hover:border-foreground/40",
                     )}
                   >
-                    Update existing
+                    {t("importExport.collision.updateExisting")}
                   </button>
                   <button
                     type="button"
@@ -2906,7 +3014,7 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
                         : "border-muted text-muted-foreground hover:border-foreground/40",
                     )}
                   >
-                    Skip
+                    {t("importExport.collision.skip")}
                   </button>
                   <button
                     type="button"
@@ -2918,7 +3026,7 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
                         : "border-muted text-muted-foreground hover:border-foreground/40",
                     )}
                   >
-                    Import as duplicate
+                    {t("importExport.collision.duplicate")}
                   </button>
                 </div>
               </li>
@@ -2929,10 +3037,10 @@ function CollisionPanel({ collisions, onResolve, onCancel }: CollisionPanelProps
 
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={onCancel} disabled={resolving}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button onClick={handleConfirm} disabled={resolving}>
-          {resolving ? "Continuing…" : "Continue"}
+          {resolving ? t("importExport.collision.continuing") : t("onboarding.common.continue")}
         </Button>
       </div>
     </div>
@@ -2955,6 +3063,7 @@ interface ObsPanelProps {
 }
 
 function ObsPanel({ projectId, username, sourceLanguage, targetLanguage, getToken, onImported }: ObsPanelProps) {
+  const t = useT()
   const [progress, setProgress] = useState<EBibleProgress | null>(null)
   const [importing, setImporting] = useState(false)
   const [importErr, setImportErr] = useState<string | null>(null)
@@ -2989,7 +3098,7 @@ function ObsPanel({ projectId, username, sourceLanguage, targetLanguage, getToke
       // English OBS — seed the project source language when unset.
       await onImported(ref, { sourceLanguage: "en" })
     } catch (err) {
-      setImportErr(err instanceof Error ? err.message : "Import failed")
+      setImportErr(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
     } finally {
       setImporting(false)
       abortRef.current = null
@@ -2999,24 +3108,34 @@ function ObsPanel({ projectId, username, sourceLanguage, targetLanguage, getToke
   return (
     <div className="flex flex-col gap-3">
       <p className="text-xs text-muted-foreground">
-        Narrative stories with reference images, from{" "}
-        <a href="https://git.door43.org/unfoldingWord/en_obs" target="_blank" rel="noreferrer" className="underline">
-          unfoldingWord/door43
-        </a>
-        . 50 stories are imported as one source file; each frame becomes a cell
-        carrying its reference image.
+        <RichMessage
+          k="importExport.obs.description"
+          values={{
+            link: (
+              <a href="https://git.door43.org/unfoldingWord/en_obs" target="_blank" rel="noreferrer" className="underline">
+                {/* i18n-exempt organisation/repository name */}
+                unfoldingWord/door43
+              </a>
+            ),
+          }}
+        />
       </p>
 
       {progress && (
         <div className="text-xs text-muted-foreground">
           <p>
             {progress.phase === "download"
-              ? `Downloading stories… ${formatProgress(progress.received, progress.total)}`
+              ? t("importExport.obs.downloading", {
+                  progress: formatProgress(progress.received, progress.total),
+                })
               : progress.phase === "parse"
-                ? "Parsing frames…"
+                ? t("importExport.obs.parsingFrames")
                 : progress.cellsTotal
-                  ? `Uploading frames: ${(progress.cellsEnqueued ?? 0).toLocaleString()} / ${progress.cellsTotal.toLocaleString()}`
-                  : "Uploading to project…"}
+                  ? t("importExport.obs.uploadingFrames", {
+                      enqueued: (progress.cellsEnqueued ?? 0).toLocaleString(),
+                      total: progress.cellsTotal.toLocaleString(),
+                    })
+                  : t("importExport.obs.uploadingToProject")}
           </p>
           {progress.phase === "save" && progress.cellsTotal ? (
             <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
@@ -3035,7 +3154,7 @@ function ObsPanel({ projectId, username, sourceLanguage, targetLanguage, getToke
 
       <div className="flex justify-end">
         <Button onClick={handleImport} disabled={importing}>
-          {importing ? "Importing…" : "Download & Import"}
+          {importing ? t("importExport.action.importing") : t("importExport.obs.downloadAndImport")}
         </Button>
       </div>
     </div>
@@ -3073,6 +3192,7 @@ interface DcsPanelProps {
 type DcsPanelStage = "browse" | "importing" | "done"
 
 function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onImported, excludeFrontMatter }: DcsPanelProps) {
+  const t = useT()
   const [stage, setStage] = useState<DcsPanelStage>("browse")
   const [selected, setSelected] = useState<DcsCatalogEntry | null>(null)
   const [progress, setProgress] = useState<{ uploaded: number; total: number } | null>(null)
@@ -3117,12 +3237,12 @@ function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onImported
         result.skipped,
       )
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed")
+      setError(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
       setStage("browse")
     } finally {
       abortRef.current = null
     }
-  }, [projectId, getToken, patchDcsCursor, onImported, excludeFrontMatter])
+  }, [projectId, getToken, patchDcsCursor, onImported, excludeFrontMatter, t])
 
   if (stage === "browse") {
     return (
@@ -3143,8 +3263,10 @@ function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onImported
     return (
       <div className="mx-auto w-full max-w-sm py-8 text-center">
         <p className="text-sm font-medium">
-          Importing {selected?.fullName ?? "resource"}
-          {selected?.ref ? ` @ ${selected.ref}` : ""}…
+          {t("importExport.dcs.importingResource", {
+            resource: selected?.fullName ?? t("importExport.dcs.genericResource"),
+            ref: selected?.ref ? ` @ ${selected.ref}` : "",
+          })}
         </p>
         {progress && progress.total > 0 ? (
           <>
@@ -3152,11 +3274,14 @@ function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onImported
               <div className="h-full bg-primary transition-all" style={{ width: `${pct}%` }} />
             </div>
             <p className="mt-1.5 text-xs text-muted-foreground">
-              {progress.uploaded.toLocaleString()} / {progress.total.toLocaleString()} files
+              {t("importExport.dcs.filesProgress", {
+                uploaded: progress.uploaded.toLocaleString(),
+                total: progress.total.toLocaleString(),
+              })}
             </p>
           </>
         ) : (
-          <p className="mt-2 text-xs text-muted-foreground">Fetching &amp; parsing from Door43…</p>
+          <p className="mt-2 text-xs text-muted-foreground">{t("importExport.dcs.fetchingAndParsing")}</p>
         )}
       </div>
     )
@@ -3165,20 +3290,26 @@ function DcsPanel({ projectId, getToken, defaultLang, patchDcsCursor, onImported
   // stage === "done"
   return (
     <div className="mx-auto w-full max-w-sm py-8 text-center">
-      <p className="text-sm font-medium">Import complete</p>
+      <p className="text-sm font-medium">{t("importExport.dcs.importComplete")}</p>
       {summary && (
         <div className="mt-2 space-y-1 text-xs text-muted-foreground">
           <p>{selected?.fullName}</p>
           <p>
-            {summary.files.toLocaleString()} file{summary.files === 1 ? "" : "s"} ·{" "}
-            {summary.cells.toLocaleString()} cell{summary.cells === 1 ? "" : "s"}
+            {/* Two independent counts (files, cells) — each pluralized on its own and
+             *  joined, rather than one template agreeing with two numbers at once. */}
+            {t("search.expanded.fileCount", { count: summary.files })}
+            {" · "}
+            {t("common.cellCount", { count: summary.cells })}
           </p>
           <p>
             {summary.pinned
-              ? <>Pinned to release <span className="font-medium text-foreground/80">{summary.ref}</span></>
-              : <span className="text-amber-600 dark:text-amber-400">
-                  Imported, but couldn&apos;t pin the release — you may lack maintainer rights on this project.
-                </span>}
+              ? (
+                <RichMessage
+                  k="importExport.dcs.pinnedToRelease"
+                  values={{ ref: <span className="font-medium text-foreground/80">{summary.ref}</span> }}
+                />
+              )
+              : <span className="text-amber-600 dark:text-amber-400">{t("importExport.dcs.couldNotPin")}</span>}
           </p>
         </div>
       )}
@@ -3205,6 +3336,7 @@ interface SdbhPanelProps {
 }
 
 function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps) {
+  const t = useT()
   const [masterFile, setMasterFile] = useState<File | null>(null)
   const [localizedFile, setLocalizedFile] = useState<File | null>(null)
   const [importing, setImporting] = useState(false)
@@ -3244,7 +3376,7 @@ function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps
         ...(summary.targetLanguageCode ? { targetLanguage: summary.targetLanguageCode } : {}),
       }, summary.skipped)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed")
+      setError(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
     } finally {
       setImporting(false)
       setProgress(null)
@@ -3260,15 +3392,20 @@ function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps
   return (
     <div className="flex flex-col gap-4 py-2">
       <p className="text-xs text-muted-foreground">
-        Import the UBS MARBLE <span className="font-medium">Semantic Dictionary of Biblical Hebrew</span>.
-        Choose the master edition (usually <code>SDBH-en.JSON</code>) as the source; optionally add a
-        localized edition (e.g. <code>SDBH-es.JSON</code>) to pre-fill the target column with the
-        translation so far. Entries import one file per Hebrew letter plus a semantic-domain label
-        file; each sense groups as one paragraph with a cell per definition, gloss list, and comment.
+        <RichMessage
+          k="importExport.sdbh.description"
+          values={{
+            dictName: <span className="font-medium">{t("importExport.sdbh.dictionaryName")}</span>,
+            // i18n-exempt example filename
+            masterFile: <code>SDBH-en.JSON</code>,
+            // i18n-exempt example filename
+            localizedFile: <code>SDBH-es.JSON</code>,
+          }}
+        />
       </p>
       <div className="flex flex-col gap-2">
         <Button variant="outline" nativeButton={false} render={<label />}>
-          {masterFile ? masterFile.name : "Choose master edition (SDBH-en.JSON)"}
+          {masterFile ? masterFile.name : t("importExport.sdbh.chooseMaster")}
           <input
             type="file"
             className="hidden"
@@ -3281,7 +3418,7 @@ function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps
           />
         </Button>
         <Button variant="outline" nativeButton={false} render={<label />}>
-          {localizedFile ? localizedFile.name : <>Choose localized edition <OptionalMark /></>}
+          {localizedFile ? localizedFile.name : <>{t("importExport.sdbh.chooseLocalized")} <OptionalMark /></>}
           <input
             type="file"
             className="hidden"
@@ -3297,14 +3434,21 @@ function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps
       {progress && (
         <div className="text-xs text-muted-foreground">
           {progress.phase === "parse" ? (
-            <p>Parsing lexicon…</p>
+            <p>{t("importExport.sdbh.parsingLexicon")}</p>
           ) : (
             <>
               <p>
-                {progress.phase === "source" ? "Uploading source" : "Pre-filling translations"}
-                {progress.fileIndex ? ` — file ${progress.fileIndex} / ${progress.fileCount}` : ""}
+                {progress.phase === "source"
+                  ? t("importExport.sdbh.uploadingSource")
+                  : t("importExport.sdbh.prefillingTranslations")}
+                {progress.fileIndex
+                  ? ` — ${t("importExport.sdbh.fileProgress", { index: progress.fileIndex, count: progress.fileCount ?? 0 })}`
+                  : ""}
                 {progress.cellsTotal
-                  ? `: ${(progress.cellsEnqueued ?? 0).toLocaleString()} / ${progress.cellsTotal.toLocaleString()} cells`
+                  ? `: ${t("importExport.sdbh.cellsProgress", {
+                      enqueued: (progress.cellsEnqueued ?? 0).toLocaleString(),
+                      total: progress.cellsTotal.toLocaleString(),
+                    })}`
                   : ""}
               </p>
               <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
@@ -3317,7 +3461,7 @@ function SdbhPanel({ projectId, username, getToken, onImported }: SdbhPanelProps
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex justify-end">
         <Button onClick={handleImport} disabled={!masterFile || importing}>
-          {importing ? "Importing…" : "Import"}
+          {importing ? t("importExport.action.importing") : t("nav.workspaceActions.import")}
         </Button>
       </div>
     </div>
@@ -3336,6 +3480,7 @@ interface MaculaPanelProps {
 }
 
 function MaculaPanel({ projectId, username, getToken, onImported }: MaculaPanelProps) {
+  const t = useT()
   const [importing, setImporting] = useState(false)
   const [progress, setProgress] = useState<MaculaProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -3350,7 +3495,7 @@ function MaculaPanel({ projectId, username, getToken, onImported }: MaculaPanelP
       const refs = await importMacula(file, { projectId, author: username, getToken }, setProgress)
       await onImported(refs)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed")
+      setError(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
     } finally {
       setImporting(false)
       setProgress(null)
@@ -3360,21 +3505,25 @@ function MaculaPanel({ projectId, username, getToken, onImported }: MaculaPanelP
   return (
     <div className="flex flex-col gap-4 py-2">
       <p className="text-xs text-muted-foreground">
-        Upload a Macula TSV file obtained from{" "}
-        <a
-          href="https://github.com/Clear-Bible/macula-hebrew"
-          target="_blank"
-          rel="noreferrer"
-          className="underline"
-        >
-          Clear Bible's Macula project
-        </a>
-        . Each TSV file represents one biblical book. The Hebrew and Greek word-level
-        morphology (lemma, morph code, Strong's) will be preserved alongside the verse text.
+        <RichMessage
+          k="importExport.macula.description"
+          values={{
+            link: (
+              <a
+                href="https://github.com/Clear-Bible/macula-hebrew"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                {t("importExport.macula.linkText")}
+              </a>
+            ),
+          }}
+        />
       </p>
       <div className="flex flex-col gap-2">
         <Button variant="outline" nativeButton={false} render={<label />}>
-          {file ? file.name : "Choose Macula TSV file"}
+          {file ? file.name : t("importExport.macula.chooseFile")}
           <input
             type="file"
             className="hidden"
@@ -3393,10 +3542,15 @@ function MaculaPanel({ projectId, username, getToken, onImported }: MaculaPanelP
       </div>
       {progress && (
         <div className="text-xs text-muted-foreground">
-          {progress.phase === "parse" && "Parsing verse data…"}
+          {progress.phase === "parse" && t("importExport.macula.parsing")}
           {progress.phase === "save" && progress.cellsTotal && (
             <>
-              <p>Uploading: {(progress.cellsEnqueued ?? 0).toLocaleString()} / {progress.cellsTotal.toLocaleString()} cells</p>
+              <p>
+                {t("importExport.macula.uploadingCells", {
+                  enqueued: (progress.cellsEnqueued ?? 0).toLocaleString(),
+                  total: progress.cellsTotal.toLocaleString(),
+                })}
+              </p>
               <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
                 <div
                   className="h-full bg-primary transition-all"
@@ -3410,7 +3564,7 @@ function MaculaPanel({ projectId, username, getToken, onImported }: MaculaPanelP
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex justify-end">
         <Button onClick={handleImport} disabled={!file || importing}>
-          {importing ? "Importing…" : "Import"}
+          {importing ? t("importExport.action.importing") : t("nav.workspaceActions.import")}
         </Button>
       </div>
     </div>
@@ -3438,6 +3592,7 @@ function BiblicaPanel({
   getToken,
   onImported,
 }: BiblicaPanelProps) {
+  const t = useT()
   const [importing, setImporting] = useState(false)
   const [progress, setProgress] = useState<BiblicaProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -3465,7 +3620,7 @@ function BiblicaPanel({
       )
       await onImported(ref)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed")
+      setError(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
     } finally {
       setImporting(false)
       setProgress(null)
@@ -3474,19 +3629,10 @@ function BiblicaPanel({
 
   return (
     <div className="flex flex-col gap-4 py-2">
-      <p className="text-xs text-muted-foreground">
-        Upload the InDesign (.idml) package for a Biblica study Bible. Only the study
-        notes are imported — the Bible text is skipped, because it comes from the
-        published scripture files rather than being retyped here. Each note keeps its
-        InDesign formatting locked, and the notes carry the book and chapter range they
-        belong to so they stay in step with the passage. Lists that InDesign holds in a
-        single paragraph — cross-references, glossaries, outlines — always arrive as one
-        cell per line. Optionally, longer note blocks can also be split into one cell per
-        sentence; export puts each block back together as InDesign set it.
-      </p>
+      <p className="text-xs text-muted-foreground">{t("importExport.biblica.description")}</p>
       <div className="flex flex-col gap-2">
         <Button variant="outline" nativeButton={false} render={<label className="cursor-pointer" />}>
-          {file ? file.name : "Choose study Bible IDML file"}
+          {file ? file.name : t("importExport.biblica.chooseFile")}
           <input
             type="file"
             className="hidden"
@@ -3510,13 +3656,12 @@ function BiblicaPanel({
             checked={splitSentences}
             disabled={importing}
             onCheckedChange={(checked) => setSplitSentences(checked === true)}
-            aria-label="Split long notes into one cell per sentence"
+            aria-label={t("importExport.biblica.splitSentencesLabel")}
           />
           <span className="flex flex-col gap-0.5">
-            <span>Split long notes into one cell per sentence</span>
+            <span>{t("importExport.biblica.splitSentencesLabel")}</span>
             <span className="text-xs text-muted-foreground">
-              Leave unchecked to import each note line as one larger cell. Lists still
-              split per line either way.
+              {t("importExport.biblica.splitSentencesHint")}
             </span>
           </span>
         </label>
@@ -3525,16 +3670,21 @@ function BiblicaPanel({
         <div className="text-xs text-muted-foreground">
           {progress.phase === "parse" && (
             <p>
-              Reading the InDesign package…
               {progress.idml?.total
-                ? ` (${progress.idml.completed} / ${progress.idml.total})`
-                : ""}
+                ? t("importExport.biblica.readingPackageWithProgress", {
+                    completed: progress.idml.completed,
+                    total: progress.idml.total,
+                  })
+                : t("importExport.biblica.readingPackage")}
             </p>
           )}
           {progress.phase === "save" && progress.cellsTotal && (
             <>
               <p>
-                Uploading: {(progress.cellsEnqueued ?? 0).toLocaleString()} / {progress.cellsTotal.toLocaleString()} notes
+                {t("importExport.tn.uploadingNotes", {
+                  enqueued: (progress.cellsEnqueued ?? 0).toLocaleString(),
+                  total: progress.cellsTotal.toLocaleString(),
+                })}
               </p>
               <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
                 <div
@@ -3544,7 +3694,7 @@ function BiblicaPanel({
               </div>
               {progress.verseUnitCount ? (
                 <p className="mt-1.5">
-                  {progress.verseUnitCount.toLocaleString()} scripture paragraphs skipped.
+                  {t("importExport.biblica.paragraphsSkipped", { count: progress.verseUnitCount })}
                 </p>
               ) : null}
             </>
@@ -3554,7 +3704,7 @@ function BiblicaPanel({
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex justify-end">
         <Button onClick={handleImport} disabled={!file || importing}>
-          {importing ? "Importing…" : "Import"}
+          {importing ? t("importExport.action.importing") : t("nav.workspaceActions.import")}
         </Button>
       </div>
     </div>
@@ -3573,6 +3723,7 @@ interface TnPanelProps {
 }
 
 function TnPanel({ projectId, username, getToken, onImported }: TnPanelProps) {
+  const t = useT()
   const [importing, setImporting] = useState(false)
   const [progress, setProgress] = useState<TnProgress | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -3591,7 +3742,7 @@ function TnPanel({ projectId, username, getToken, onImported }: TnPanelProps) {
       )
       await onImported(ref)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Import failed")
+      setError(err instanceof Error ? err.message : t("importExport.errors.importFailed"))
     } finally {
       setImporting(false)
       setProgress(null)
@@ -3601,21 +3752,25 @@ function TnPanel({ projectId, username, getToken, onImported }: TnPanelProps) {
   return (
     <div className="flex flex-col gap-4 py-2">
       <p className="text-xs text-muted-foreground">
-        Upload an{" "}
-        <a
-          href="https://door43.org/u/Door43-Catalog/en_tn/"
-          target="_blank"
-          rel="noreferrer"
-          className="underline"
-        >
-          unfoldingWord-style Translation Notes
-        </a>{" "}
-        TSV file. Each row becomes a note cell; notes appear in a sidebar when you focus a
-        translation cell at the matching verse reference.
+        <RichMessage
+          k="importExport.tn.description"
+          values={{
+            link: (
+              <a
+                href="https://door43.org/u/Door43-Catalog/en_tn/"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                {t("importExport.tn.linkText")}
+              </a>
+            ),
+          }}
+        />
       </p>
       <div className="flex flex-col gap-2">
         <Button variant="outline" nativeButton={false} render={<label />}>
-          {file ? file.name : "Choose Translation Notes TSV"}
+          {file ? file.name : t("importExport.tn.chooseFile")}
           <input
             type="file"
             className="hidden"
@@ -3634,10 +3789,15 @@ function TnPanel({ projectId, username, getToken, onImported }: TnPanelProps) {
       </div>
       {progress && (
         <div className="text-xs text-muted-foreground">
-          {progress.phase === "parse" && "Parsing translation notes…"}
+          {progress.phase === "parse" && t("importExport.tn.parsing")}
           {progress.phase === "save" && progress.cellsTotal && (
             <>
-              <p>Uploading: {(progress.cellsEnqueued ?? 0).toLocaleString()} / {progress.cellsTotal.toLocaleString()} notes</p>
+              <p>
+                {t("importExport.tn.uploadingNotes", {
+                  enqueued: (progress.cellsEnqueued ?? 0).toLocaleString(),
+                  total: progress.cellsTotal.toLocaleString(),
+                })}
+              </p>
               <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
                 <div
                   className="h-full bg-primary transition-all"
@@ -3645,7 +3805,9 @@ function TnPanel({ projectId, username, getToken, onImported }: TnPanelProps) {
                 />
               </div>
               {progress.skippedCount ? (
-                <p className="mt-1 text-yellow-600">{progress.skippedCount} rows skipped (missing canonical reference)</p>
+                <p className="mt-1 text-yellow-600">
+                  {t("importExport.tn.rowsSkipped", { count: progress.skippedCount })}
+                </p>
               ) : null}
             </>
           )}
@@ -3654,7 +3816,7 @@ function TnPanel({ projectId, username, getToken, onImported }: TnPanelProps) {
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex justify-end">
         <Button onClick={handleImport} disabled={!file || importing}>
-          {importing ? "Importing…" : "Import"}
+          {importing ? t("importExport.action.importing") : t("nav.workspaceActions.import")}
         </Button>
       </div>
     </div>

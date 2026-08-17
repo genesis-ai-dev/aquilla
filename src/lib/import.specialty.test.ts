@@ -32,7 +32,7 @@ describe("specialty import durability", () => {
     await expect(importer(
       file,
       { projectId: "p1", author: "alice", getToken: async () => "tok" },
-    )).rejects.toThrow(/95 MB limit/)
+    )).rejects.toThrow(/95\.0 MB limit/)
     expect(arrayBuffer).not.toHaveBeenCalled()
     expect(fetchMock).not.toHaveBeenCalled()
   })

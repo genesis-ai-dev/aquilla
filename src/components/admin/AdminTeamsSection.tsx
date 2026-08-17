@@ -3,7 +3,7 @@ import { type ColumnDef } from "@tanstack/react-table"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { DateTooltip } from "@/components/ui/date-tooltip"
-import { EmptyState } from "@/components/ui/empty"
+import { TableEmptyState } from "@/components/ui/empty"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { TeamWithAvatar } from "@/components/TeamWithAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
@@ -105,17 +105,6 @@ export function AdminTeamsSection({
     [],
   )
 
-  if (teams.length === 0) {
-    return (
-      <EmptyState
-        variant="panel"
-        icon={NAV_PAGE_ICONS.teams}
-        title="No teams yet"
-        description="Teams appear here as orgs create them."
-      />
-    )
-  }
-
   return (
     <DataTable
       columns={columns}
@@ -132,6 +121,15 @@ export function AdminTeamsSection({
           .toLowerCase()
           .includes(q)
       }}
+      emptyState={
+        teams.length === 0 ? (
+          <TableEmptyState
+            icon={NAV_PAGE_ICONS.teams}
+            title="No teams yet"
+            description="Teams appear here as orgs create them."
+          />
+        ) : undefined
+      }
       toolbar={(table) => (
         <span className="ml-auto text-xs tabular-nums text-muted-foreground">
           {table.getFilteredRowModel().rows.length === teams.length

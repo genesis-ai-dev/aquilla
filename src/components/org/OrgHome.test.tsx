@@ -402,9 +402,10 @@ describe("OrgOverview / OrgProjects", () => {
     )
 
     try {
-      await waitFor(() => expect(screen.getByTestId("org-projects-loading")).toBeInTheDocument())
-      expect(screen.getByText("Loading projects…")).toBeInTheDocument()
-      expect(screen.getByTestId("org-projects-loading-template")).toBeInTheDocument()
+      await waitFor(() =>
+        expect(screen.getByRole("status", { name: "Loading projects" })).toBeInTheDocument(),
+      )
+      expect(screen.getByPlaceholderText("Search projects…")).toBeInTheDocument()
       expect(document.querySelector('[data-slot="app-shell-header"]')).not.toBeNull()
       expect(screen.queryByTestId("loading-neutral-template")).not.toBeInTheDocument()
       await act(async () => { await Promise.resolve() })
@@ -413,8 +414,11 @@ describe("OrgOverview / OrgProjects", () => {
       // Keep subsequent refetches empty so the empty-state isn't replaced by default mock data.
       vi.mocked(getPortfolio).mockResolvedValue([])
       await act(async () => { resolvePortfolio([]) })
-      await waitFor(() => expect(screen.queryByTestId("org-projects-loading")).not.toBeInTheDocument())
+      await waitFor(() =>
+        expect(screen.queryByRole("status", { name: "Loading projects" })).not.toBeInTheDocument(),
+      )
       expect(screen.getByText("Your organization is ready")).toBeInTheDocument()
+      expect(screen.getByPlaceholderText("Search projects…")).toBeInTheDocument()
     } finally {
       observer.disconnect()
       view.unmount()

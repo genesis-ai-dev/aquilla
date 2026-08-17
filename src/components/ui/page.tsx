@@ -1,6 +1,6 @@
 import * as React from "react"
 
-import { EmptyState } from "@/components/ui/empty"
+import { EmptyState, TableEmptyState } from "@/components/ui/empty"
 import { cn } from "@/lib/utils"
 
 /**
@@ -315,4 +315,4 @@ function SettingsRow({
   )
 }
 
-export { Page, PageHeader, Section, SettingsGroup, SettingsRow, StatTile, STAT_TILE_GRID, EmptyState }
+export { Page, PageHeader, Section, SettingsGroup, SettingsRow, StatTile, STAT_TILE_GRID, EmptyState, TableEmptyState }

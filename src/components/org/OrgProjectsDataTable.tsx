@@ -23,7 +23,7 @@ import { DataTable, DataTableColumnHeader, DataTableRowActionsButton } from "@/c
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { EmptyState } from "@/components/ui/page"
+import { TableEmptyState } from "@/components/ui/page"
 import { MenuItem } from "@/components/ui/menu-parts"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
@@ -77,6 +77,7 @@ export function OrgProjectsDataTable({
   initialLens = "recent",
   emptyTitle = "No projects yet.",
   emptyDescription,
+  emptyAction,
   testId = "org-projects-table",
   layout = "page",
   defaultLaneLabelByProjectId,
@@ -89,6 +90,8 @@ export function OrgProjectsDataTable({
   onLanesChanged,
   toolbarLeading,
   toolbarTrailing,
+  loading = false,
+  loadingLabel,
 }: {
   projects: OrgProjectRow[]
   now: number
@@ -97,6 +100,7 @@ export function OrgProjectsDataTable({
   initialLens?: ProjectLens
   emptyTitle?: string
   emptyDescription?: string
+  emptyAction?: ReactNode
   testId?: string
   /** `page` = panel shell; `embedded` = in-Section admin table chrome. */
   layout?: "page" | "embedded"
@@ -119,6 +123,8 @@ export function OrgProjectsDataTable({
   toolbarLeading?: ReactNode
   /** Extra controls at the end of the toolbar row (e.g. New Project). */
   toolbarTrailing?: ReactNode
+  loading?: boolean
+  loadingLabel?: string
 }) {
   const { t } = useI18n()
   const navigate = useNavigate()
@@ -435,6 +441,8 @@ export function OrgProjectsDataTable({
         initialSorting={[...lensToSorting(initialLens)]}
         searchPlaceholder="Search projects…"
         fillHeight={embedded}
+        loading={loading}
+        loadingLabel={loadingLabel}
         globalFilterFn={(row, _columnId, filterValue) => {
           const q = String(filterValue).trim().toLowerCase()
           if (!q) return true
@@ -502,12 +510,11 @@ export function OrgProjectsDataTable({
             )
           }
           return (
-            <EmptyState
-              variant="inline"
-              className="flex-none py-12"
+            <TableEmptyState
               icon={NAV_PAGE_ICONS.projects}
               title={emptyTitle}
               description={emptyDescription}
+              action={emptyAction}
             />
           )
         }}

@@ -22,7 +22,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
-import { EmptyState } from "@/components/ui/page"
+import { TableEmptyState } from "@/components/ui/page"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from "@/components/ui/toast"
@@ -89,6 +89,7 @@ export function OrgMembersTable({
   add,
   addMany,
   onRequestRemove,
+  loading = false,
 }: {
   orgId: number
   members: OrgMember[]
@@ -98,6 +99,7 @@ export function OrgMembersTable({
   add: (username: string, role: number) => Promise<unknown>
   addMany: (members: Array<{ username: string; role: number }>) => Promise<MemberGrantResult[]>
   onRequestRemove: (userId: number, username: string) => void
+  loading?: boolean
 }) {
   const t = useT()
   const isOwner = (callerOrgRoleLevel ?? 0) >= ROLE.OWNER
@@ -356,39 +358,11 @@ export function OrgMembersTable({
         </Dialog>
       )}
 
-      {members.length === 0 ? (
-        <div className="space-y-4">
-          <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onAddToProjects}
-              disabled={!canAddToProjects}
-            >
-              <UserPlus className="mr-1.5 size-4" />
-              {t("org.membersPage.orgPage.addToProjectsButton")}
-            </Button>
-            {isOwner ? (
-              <Button type="button" onClick={() => setAdding(true)}>
-                {t("org.membersPage.orgTable.addMemberTitle")}
-              </Button>
-            ) : null}
-          </div>
-          <EmptyState
-            variant="inline"
-            icon={NAV_PAGE_ICONS.members}
-            title={t("org.membersPage.orgTable.noMembersTitle")}
-            description={
-              isOwner
-                ? "Add people by username, or invite someone by email."
-                : "An org owner can add members to this organization."
-            }
-          />
-        </div>
-      ) : (
-        <DataTable
+      <DataTable
           columns={columns}
           data={members}
+          loading={loading}
+          loadingLabel={t("org.membersPage.loadingMembers")}
           getRowId={(m) => String(m.userId)}
           getRowAttributes={(m) => ({ "data-user-id": String(m.userId) })}
           initialSorting={[{ id: "name", desc: false }]}
@@ -463,17 +437,28 @@ export function OrgMembersTable({
             ) : null
           }
           emptyState={
-            <div className="flex flex-col items-center gap-3 py-10">
-              <p className="text-center text-sm text-muted-foreground">
-                {t("org.membersPage.orgTable.noSearchMatch")}
-              </p>
-            </div>
+            members.length === 0 ? (
+              <TableEmptyState
+                icon={NAV_PAGE_ICONS.members}
+                title={t("org.membersPage.orgTable.noMembersTitle")}
+                description={
+                  isOwner
+                    ? "Add people by username, or invite someone by email."
+                    : "An org owner can add members to this organization."
+                }
+              />
+            ) : (
+              <div className="flex flex-col items-center gap-3 py-10">
+                <p className="text-center text-sm text-muted-foreground">
+                  {t("org.membersPage.orgTable.noSearchMatch")}
+                </p>
+              </div>
+            )
           }
           testId="org-members-table"
           className={ADMIN_TABLE_PANEL_CLASS}
           dense
         />
-      )}
     </>
   )
 }

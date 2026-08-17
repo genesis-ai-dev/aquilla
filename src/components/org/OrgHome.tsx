@@ -43,7 +43,7 @@ import {
 } from "@/components/admin/shared"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { FolderPlus, Search, Building2, Sparkles, CircleCheck, Mic, AlertTriangle } from "lucide-react"
+import { Search, Building2, Sparkles, CircleCheck, Mic, AlertTriangle } from "lucide-react"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
@@ -926,18 +926,7 @@ export function OrgHome() {
                       }
                     />
                   ) : null}
-                  {tableProjects.length === 0 ? (
-                    // Suppress the plain empty state while the directory
-                    // error above is explaining the blank panel.
-                    accessibleProjectsError ? null : (
-                    <EmptyState
-                      variant="inline"
-                      className="py-6"
-                      icon={FolderPlus}
-                      title={t("org.orgHome.projectsPanel.emptyTitle")}
-                    />
-                    )
-                  ) : (
+                    {accessibleProjectsError && tableProjects.length === 0 ? null : (
                     <div
                       data-testid="projects-scroll"
                       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
@@ -991,7 +980,7 @@ export function OrgHome() {
                         }
                       />
                     </div>
-                  )}
+                    )}
                 </Section>
 
                 {showOrgRollup && (

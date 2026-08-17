@@ -232,6 +232,27 @@ describe("DataTable", () => {
     expect(screen.getByTestId("empty-table")).toHaveClass("border", "bg-card")
   })
 
+  it("keeps search visible and skeletonizes rows while loading", () => {
+    render(
+      <DataTable
+        columns={columns}
+        data={[]}
+        searchPlaceholder="Search…"
+        loading
+        loadingLabel="Loading rows"
+        emptyState={<div data-testid="custom-empty">Nothing here</div>}
+        testId="loading-table"
+      />,
+    )
+    const search = screen.getByLabelText("Search…")
+    expect(search).toBeInTheDocument()
+    expect(search).toBeDisabled()
+    expect(screen.getByRole("status", { name: "Loading rows" })).toHaveAttribute("aria-busy", "true")
+    expect(screen.getByRole("table")).toBeInTheDocument()
+    expect(screen.queryByTestId("custom-empty")).not.toBeInTheDocument()
+    expect(screen.getByTestId("loading-table").querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0)
+  })
+
   it("opens renderRowMenuItems from row right-click and from the ⋯ button", async () => {
     renderRowMenuTable()
 

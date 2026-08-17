@@ -51,8 +51,9 @@ describe("AssignedToMe", () => {
     mockGetMy.mockImplementationOnce(() => new Promise(() => {}))
     renderInbox()
 
-    // Match TeamsList: pulse card shell while the org inbox loads.
-    await waitFor(() => expect(document.querySelector(".animate-pulse")).toBeTruthy())
+    await waitFor(() => expect(screen.getByPlaceholderText("Search assignments…")).toBeInTheDocument())
+    expect(screen.getByRole("status", { name: "Loading assignments" })).toHaveAttribute("aria-busy", "true")
+    expect(document.querySelector(".animate-pulse")).toBeTruthy()
   })
 
   it("aggregates the caller's open assignments across projects with progress", async () => {

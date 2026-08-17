@@ -20,7 +20,7 @@ import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
-import { Page, EmptyState } from "@/components/ui/page"
+import { Page, EmptyState, TableEmptyState } from "@/components/ui/page"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -687,28 +687,7 @@ export function TeamDetail() {
                     </Dialog>
                   )}
 
-                  {team.projects.length === 0 ? (
-                    <div className="space-y-4">
-                      {isAdmin && (
-                        <div className="flex justify-end">
-                          <Button
-                            type="button"
-                            className="shrink-0"
-                            onClick={openAttachProject}
-                          >
-                            {t("org.teamDetail.attachProjectButton")}
-                          </Button>
-                        </div>
-                      )}
-                      <EmptyState
-                        variant="inline"
-                        icon={FolderGit2}
-                        title={t("org.teamDetail.noProjectsTitle")}
-                        description={isAdmin ? t("org.teamDetail.noProjectsAdminDescription") : undefined}
-                      />
-                    </div>
-                  ) : (
-                    <DataTable
+                  <DataTable
                       columns={projectColumns}
                       data={team.projects}
                       getRowId={(p) => p.id}
@@ -751,15 +730,22 @@ export function TeamDetail() {
                         ) : null
                       }
                       emptyState={
-                        <p className="py-10 text-center text-sm text-muted-foreground">
-                          {t("org.teamDetail.noProjectsMatchSearch")}
-                        </p>
+                        team.projects.length === 0 ? (
+                          <TableEmptyState
+                            icon={FolderGit2}
+                            title={t("org.teamDetail.noProjectsTitle")}
+                            description={isAdmin ? t("org.teamDetail.noProjectsAdminDescription") : undefined}
+                          />
+                        ) : (
+                          <p className="py-10 text-center text-sm text-muted-foreground">
+                            {t("org.teamDetail.noProjectsMatchSearch")}
+                          </p>
+                        )
                       }
                       testId="team-projects-table"
                       className={ADMIN_TABLE_PANEL_CLASS}
                       dense
                     />
-                  )}
                 </TabsContent>
 
                 <TabsContent value="members" className="space-y-4">
@@ -829,27 +815,7 @@ export function TeamDetail() {
                     </Dialog>
                   )}
 
-                  {team.members.length === 0 ? (
-                    <div className="space-y-4">
-                      {isAdmin && (
-                        <div className="flex justify-end">
-                          <Button
-                            type="button"
-                            onClick={() => { setAddingMember(true); setStagedUsernames([]); setAddError(null) }}
-                          >
-                            {t("org.membersPage.orgTable.addMemberTitle")}
-                          </Button>
-                        </div>
-                      )}
-                      <EmptyState
-                        variant="inline"
-                        icon={Users}
-                        title={t("org.teamDetail.noMembersTitle")}
-                        description={isAdmin ? t("org.teamDetail.noMembersAdminDescription") : undefined}
-                      />
-                    </div>
-                  ) : (
-                    <DataTable
+                  <DataTable
                       columns={memberColumns}
                       data={team.members}
                       getRowId={(m) => String(m.userId)}
@@ -895,15 +861,22 @@ export function TeamDetail() {
                         ) : null
                       }
                       emptyState={
-                        <p className="py-10 text-center text-sm text-muted-foreground">
-                          {t("org.membersPage.orgTable.noSearchMatch")}
-                        </p>
+                        team.members.length === 0 ? (
+                          <TableEmptyState
+                            icon={Users}
+                            title={t("org.teamDetail.noMembersTitle")}
+                            description={isAdmin ? t("org.teamDetail.noMembersAdminDescription") : undefined}
+                          />
+                        ) : (
+                          <p className="py-10 text-center text-sm text-muted-foreground">
+                            {t("org.membersPage.orgTable.noSearchMatch")}
+                          </p>
+                        )
                       }
                       testId="team-members-table"
                       className={ADMIN_TABLE_PANEL_CLASS}
                       dense
                     />
-                  )}
                 </TabsContent>
               </Tabs>
               </div>

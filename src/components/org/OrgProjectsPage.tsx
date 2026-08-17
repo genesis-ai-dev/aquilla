@@ -1,9 +1,6 @@
 import { useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
-import { FolderPlus } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
-import { LoadingOverlay } from "@/components/ui/loading-overlay"
-import { Skeleton } from "@/components/ui/skeleton"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -19,39 +16,10 @@ import {
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { Button, buttonVariants } from "@/components/ui/button"
-import { Page, PageHeader, EmptyState } from "@/components/ui/page"
+import { Page, PageHeader } from "@/components/ui/page"
 import { cn } from "@/lib/utils"
 import { readProjectLens } from "./OrgHome"
 import { useI18n } from "@/lib/i18n/I18nProvider"
-
-function ProjectsLoadingTemplate() {
-  return (
-    <div data-testid="org-projects-loading-template" className="h-full">
-      <AppShell
-        sidebar={
-          <div className="flex h-full flex-col gap-4 p-2">
-            <Skeleton className="h-9 w-full" />
-            <Skeleton className="h-8 w-full" />
-          </div>
-        }
-        header={
-          <div className="flex items-center gap-4 px-4">
-            <Skeleton className="h-5 w-40" />
-          </div>
-        }
-        statusBar={null}
-        main={
-          <Page size="full">
-            <div className="mb-12 max-w-6xl">
-              <Skeleton className="h-7 w-32" />
-            </div>
-            <Skeleton className="h-64 w-full rounded-lg" />
-          </Page>
-        }
-      />
-    </div>
-  )
-}
 
 /**
  * Teams-style projects list for a single org: search, status filter, New project,
@@ -101,16 +69,8 @@ export function OrgProjectsPage() {
   }
 
   const isPageLoading = sessionLoading || orgLoading || portfolio.isLoading
-
-  if (isPageLoading) {
-    return (
-      <LoadingOverlay label={t("org.projectsList.loadingLabel")} data-testid="org-projects-loading">
-        <ProjectsLoadingTemplate />
-      </LoadingOverlay>
-    )
-  }
-
-  const statusFilteredProjects = portfolio.filterByStatus(statusFilter)
+  const statusFilteredProjects = isPageLoading ? [] : portfolio.filterByStatus(statusFilter)
+  const noProjects = !isPageLoading && portfolio.projects.length === 0
 
   return (
     <AppShell
@@ -129,31 +89,6 @@ export function OrgProjectsPage() {
           </div>
           {portfolio.error ? (
             <p className="max-w-6xl text-sm text-destructive">{portfolio.error}</p>
-          ) : portfolio.projects.length === 0 ? (
-            <div className="max-w-6xl">
-              <EmptyState
-                icon={FolderPlus}
-                title={t("org.orgHome.readyTitle")}
-                description={t("org.orgHome.readyDescription")}
-                action={
-                  <div className="flex flex-wrap items-center justify-center gap-2">
-                    {activeOrgId != null && (
-                      <ProjectCreateDialog
-                        orgId={activeOrgId}
-                        onCreated={handleCreated}
-                        linkableProjects={accessibleProjects}
-                      />
-                    )}
-                    <Button
-                      variant="outline"
-                      onClick={() => activeOrgId != null && navigate(membersPath(activeOrgId))}
-                    >
-                      {t("org.orgHome.inviteYourTeam")}
-                    </Button>
-                  </div>
-                }
-              />
-            </div>
           ) : (
             <OrgProjectsDataTable
               projects={statusFilteredProjects}
@@ -167,6 +102,8 @@ export function OrgProjectsPage() {
               allowSelfAssignment={orgSettings.allowSelfAssignment}
               onLanesChanged={portfolio.bumpRefresh}
               initialLens={statusFilter === "attention" ? "attention" : projectLens}
+              loading={isPageLoading}
+              loadingLabel={t("org.projectsList.loadingLabel")}
               toolbarLeading={
                 <ProjectStatusFilter
                   value={statusFilter}
@@ -186,13 +123,26 @@ export function OrgProjectsPage() {
                 ) : null
               }
               emptyTitle={
-                statusFilter === "stalled"
-                  ? "No stalled projects."
-                  : statusFilter === "attention"
-                    ? "No projects need attention."
-                    : statusFilter === "overdue"
-                      ? "No overdue projects."
-                      : "No projects yet."
+                noProjects
+                  ? t("org.orgHome.readyTitle")
+                  : statusFilter === "stalled"
+                    ? t("org.orgHome.emptyTitle.stalled")
+                    : statusFilter === "attention"
+                      ? t("org.orgHome.emptyTitle.attention")
+                      : statusFilter === "overdue"
+                        ? t("org.orgHome.emptyTitle.overdue")
+                        : t("org.orgHome.projectsPanel.emptyTitle")
+              }
+              emptyDescription={noProjects ? t("org.orgHome.readyDescription") : undefined}
+              emptyAction={
+                noProjects && activeOrgId != null ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => navigate(membersPath(activeOrgId))}
+                  >
+                    {t("org.orgHome.inviteYourTeam")}
+                  </Button>
+                ) : undefined
               }
             />
           )}

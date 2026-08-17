@@ -4,7 +4,7 @@ import { type ColumnDef } from "@tanstack/react-table"
 import { FolderOpen } from "lucide-react"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
-import { EmptyState } from "@/components/ui/empty"
+import { TableEmptyState } from "@/components/ui/empty"
 import {
   Select,
   SelectContent,
@@ -169,9 +169,7 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
   }, [lens])
 
   const emptyState = (
-    <EmptyState
-      variant="inline"
-      className="flex-none py-12"
+    <TableEmptyState
       icon={FolderOpen}
       title={emptyCopy.title}
       description={emptyCopy.description}

@@ -15,11 +15,22 @@ import {
   laneCellKey,
   requiredRoleForCommand,
   type CreateProjectCommand,
+  type EmitEventsCommand,
   type LinkMediaCommand,
+  type PatchSettingsCommand,
   type PlanImportCommand,
   type SetTranslationCommand,
   type UpdateProjectSettingsCommand,
 } from './commands'
+import { changedPolicyKeys, commitPatchSettings } from './commands-patch-settings'
+import { commitEmitEvents } from './emit-events-engine'
+import {
+  buildProvenance,
+  receiptOnlyGates,
+  stampProvenance,
+  writeCommittedReceipt,
+  type EventsWriteResponse,
+} from './commit-gates'
 import { resolveCellStates } from './preconditions'
 import { compilePlanImport } from './import-manifest'
 import { loadChangeset } from './store'
@@ -33,6 +44,7 @@ import type {
   ChangesetReceipt,
   ChangesetWarning,
   ExternalEnv,
+  ProvenanceChannel,
   ReceiptOnlyReceipt,
   StoredChangeset,
 } from './types'
@@ -40,14 +52,16 @@ import { validateApiCredential, type ApiCredentialContext } from '../../../db/sh
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import {
   createProjectShared,
+  loadProjectSettings,
   updateProjectSettingsShared,
 } from '../../../db/shared/projects'
 
-/** Provenance channel for the commit request. MCP-originated commits arrive via
- *  a synthetic in-process Request carrying `x-aquilla-channel: mcp`
+/** Provenance channel for a PAT commit request. MCP-originated commits arrive
+ *  via a synthetic in-process Request carrying `x-aquilla-channel: mcp`
  *  (mcp-handlers.ts); everything else is a direct REST call. Only these two
- *  values are accepted — an unknown/absent header defaults to 'rest'. */
-function readChannel(request: Request): 'mcp' | 'rest' {
+ *  values are accepted — an unknown/absent header defaults to 'rest'. 'app' is
+ *  never header-derived: only the session routes pass it, as a code parameter. */
+function readChannel(request: Request): ProvenanceChannel {
   return request.headers.get('x-aquilla-channel') === 'mcp' ? 'mcp' : 'rest'
 }
 
@@ -56,13 +70,16 @@ function bearer(request: Request): string | null {
   return h.startsWith('Bearer ') ? h.slice(7) : null
 }
 
-interface EventsWriteResponse {
-  accepted: { id: string }[]
-  rejected: { id: string; status: number; reason: string }[]
-  stale?: { id: string; fileId: string | null; cellId: string | null }[]
-  staleSource?: { id: string; currentSourceEventId: string }[]
+/** Who is committing, under which ownership rule, on which channel (AQU-926).
+ *  'credential' = PAT rule (the credential that staged the changeset);
+ *  'creator' = session rule (the human who created it, via sync token). */
+export interface CommitCaller {
+  cred: ApiCredentialContext
+  ownership: 'credential' | 'creator'
+  channel: ProvenanceChannel
 }
 
+/** PAT-authenticated entrypoint (REST + the MCP adapter's synthetic request). */
 export async function handleCommit(
   request: Request,
   env: ExternalEnv,
@@ -76,12 +93,47 @@ export async function handleCommit(
   const cred = await validateApiCredential(db, bearer(request) ?? "")
   if (!cred) return errorResponse('permission_denied', 'invalid or missing API credential')
 
+  return commitChangesetCore(
+    request,
+    env,
+    projectId,
+    id,
+    { cred, ownership: 'credential', channel: readChannel(request) },
+    ctx,
+  )
+}
+
+/**
+ * Post-auth commit core, shared by the PAT entrypoint and the session-token
+ * routes. Everything below the ownership gate is identical for both surfaces —
+ * one pipeline, one state machine, one provenance shape.
+ */
+export async function commitChangesetCore(
+  request: Request,
+  env: ExternalEnv,
+  projectId: string,
+  id: string,
+  caller: CommitCaller,
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
+): Promise<Response> {
+  if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
+  const db = env.AQUILLA_PG
+  const { cred, channel } = caller
+
   const cs = await loadChangeset(db, projectId, id)
   if (!cs) return errorResponse('not_found', `changeset ${id} not found`)
 
-  // A changeset is committed by the credential that staged it.
-  if (cred.credentialId !== cs.credentialId) {
-    return errorResponse('permission_denied', 'credential did not create this changeset')
+  // Ownership: a PAT changeset is committed by the credential that staged it;
+  // a session commit requires the changeset's creating USER (the session
+  // holder) — which also lets a user drive their own PAT-staged changeset
+  // from the app (same human authority; confirmations still key on the
+  // changeset's own credential_id).
+  if (caller.ownership === 'credential') {
+    if (cred.credentialId !== cs.credentialId) {
+      return errorResponse('permission_denied', 'credential did not create this changeset')
+    }
+  } else if (String(cs.createdByUserId) !== String(cred.userId)) {
+    return errorResponse('permission_denied', 'only the changeset creator may commit it')
   }
 
   // ── Status gate ──────────────────────────────────────────────────────────
@@ -111,13 +163,21 @@ export async function handleCommit(
     (c): c is CreateProjectCommand => c.kind === 'CreateProject',
   )
   if (createProjectCmd) {
-    return commitCreateProject(request, env, db, cred, cs, createProjectCmd)
+    return commitCreateProject(db, cred, cs, createProjectCmd, channel)
   }
   const updateSettingsCmd = cs.commands.find(
     (c): c is UpdateProjectSettingsCommand => c.kind === 'UpdateProjectSettings',
   )
   if (updateSettingsCmd) {
-    return commitUpdateProjectSettings(request, env, db, cred, cs, updateSettingsCmd)
+    return commitUpdateProjectSettings(db, cred, cs, updateSettingsCmd, channel)
+  }
+  // AQU-926 PatchSettings: receipt-only like UpdateProjectSettings, with its
+  // own dynamic per-key floors — its module re-runs the full guard sequence.
+  const patchSettingsCmd = cs.commands.find(
+    (c): c is PatchSettingsCommand => c.kind === 'PatchSettings',
+  )
+  if (patchSettingsCmd) {
+    return commitPatchSettings(db, cred, cs, patchSettingsCmd, channel)
   }
 
   // ── Live role/membership precheck (§2) ────────────────────────────────────
@@ -245,7 +305,7 @@ export async function handleCommit(
     (c): c is PlanImportCommand => c.kind === 'PlanImport',
   )
   if (planImport) {
-    return commitPlanImport(request, env, db, cred, cs, planImport, confirmationId, ctx)
+    return commitPlanImport(request, env, db, cred, cs, planImport, confirmationId, channel, ctx)
   }
 
   // ── LinkMedia takes its own compile/commit path ───────────────────────────
@@ -253,7 +313,21 @@ export async function handleCommit(
     (c): c is LinkMediaCommand => c.kind === 'LinkMedia',
   )
   if (linkMedia.length > 0) {
-    return commitLinkMedia(request, env, db, cred, cs, linkMedia, confirmationId, ctx)
+    return commitLinkMedia(request, env, db, cred, cs, linkMedia, confirmationId, channel, ctx)
+  }
+
+  // ── EmitEvents takes its own compile/commit path (AQU-926) ────────────────
+  // The shared gates above already re-checked expiry, the ask confirmation,
+  // and head-pin drift over its stored preconditions; the engine adds the
+  // existence re-checks and the generic event compile.
+  const emitEvents = cs.commands.find(
+    (c): c is EmitEventsCommand => c.kind === 'EmitEvents',
+  )
+  if (emitEvents) {
+    return commitEmitEvents(
+      request, env, db, cred, cs, emitEvents, confirmationId, channel,
+      cs.status === 'staged', ctx,
+    )
   }
 
   // ── Compile commands → target.cell.commit events, grouped by file ─────────
@@ -341,32 +415,9 @@ export async function handleCommit(
   }
 
   // ── Stamp the server-verified provenance envelope on applied events ───────
-  let agentMeta: unknown = null
-  const agentHeader = request.headers.get('x-agent-meta')
-  if (agentHeader) {
-    try {
-      agentMeta = JSON.parse(agentHeader)
-    } catch {
-      agentMeta = null // invalid caller metadata is recorded as absent, not fatal.
-    }
-  }
-  const provenance = {
-    origin: 'agent',
-    human_authority: { user_id: cs.createdByUserId, credential_id: cs.credentialId },
-    agent: agentMeta,
-    channel: readChannel(request),
-    autonomy_mode: cs.autonomyMode,
-    changeset_id: cs.id,
-    ...(confirmationId ? { confirmation_id: confirmationId } : {}),
-  }
+  const provenance = buildProvenance(request, cs, confirmationId, channel)
   const appliedIds = allEventIds.filter((eid) => acceptedIds.has(eid))
-  if (appliedIds.length > 0) {
-    const placeholders = appliedIds.map(() => '?').join(', ')
-    await db
-      .prepare(`UPDATE events SET provenance = ?::text::jsonb WHERE id IN (${placeholders})`)
-      .bind(JSON.stringify(provenance), ...appliedIds)
-      .run()
-  }
+  await stampProvenance(db, provenance, appliedIds)
 
   // ── Receipt ───────────────────────────────────────────────────────────────
   const warnings: ChangesetWarning[] = [...cs.summary.warnings]
@@ -398,34 +449,6 @@ export async function handleCommit(
   return Response.json({ receipt })
 }
 
-/** Parse the caller-declared agent metadata header (recorded, never verified). */
-function readAgentMeta(request: Request): unknown {
-  const header = request.headers.get('x-agent-meta')
-  if (!header) return null
-  try {
-    return JSON.parse(header)
-  } catch {
-    return null
-  }
-}
-
-/** Build the server-verified provenance envelope (§2). */
-function buildProvenance(
-  request: Request,
-  cs: StoredChangeset,
-  confirmationId: string | null,
-): Record<string, unknown> {
-  return {
-    origin: 'agent',
-    human_authority: { user_id: cs.createdByUserId, credential_id: cs.credentialId },
-    agent: readAgentMeta(request),
-    channel: readChannel(request),
-    autonomy_mode: cs.autonomyMode,
-    changeset_id: cs.id,
-    ...(confirmationId ? { confirmation_id: confirmationId } : {}),
-  }
-}
-
 /** Statements per POST to the /events perimeter — mirrors the perimeter's own
  *  BATCH_LIMIT (100). A PlanImport can seed thousands of source cells, so the
  *  compiled events are chunked. The new file remains soft-hidden until every
@@ -449,6 +472,7 @@ async function commitPlanImport(
   cs: StoredChangeset,
   cmd: PlanImportCommand,
   confirmationId: string | null,
+  channel: ProvenanceChannel,
   ctx: Pick<ExecutionContext, 'waitUntil'> | undefined,
 ): Promise<Response> {
   const projectId = cs.projectId
@@ -673,7 +697,7 @@ async function commitPlanImport(
 
   // Stamp server-verified provenance on everything that did land, including a
   // partial hidden import. This keeps crash investigation fully auditable.
-  const provenance = buildProvenance(request, cs, confirmationId)
+  const provenance = buildProvenance(request, cs, confirmationId, channel)
   const appliedIds = allEventIds.filter((eventId) => acceptedIds.has(eventId))
   if (appliedIds.length > 0) {
     const placeholders = appliedIds.map(() => '?').join(', ')
@@ -741,71 +765,8 @@ async function commitOrgRoleLevel(
 }
 
 /**
- * Shared staged→committing gate sequence for receipt-only commits. There are no
- * per-cell preconditions, so no drift re-check — the CreateProject id-collision
- * / UpdateProjectSettings version guard is enforced by the apply step itself.
- * On the first attempt (status==='staged') this checks expiry, consumes the
- * one-time ask-mode confirmation, and flips to 'committing'; a crash-retry
- * (status==='committing') re-uses the persisted confirmation id and skips the
- * gates (matching the SetTranslation / PlanImport path). Returns the (possibly
- * consumed) confirmation id, or an error Response to short-circuit.
- */
-async function receiptOnlyGates(
-  db: AquillaDb,
-  cs: StoredChangeset,
-): Promise<{ confirmationId: string | null } | Response> {
-  if (cs.status !== 'staged') return { confirmationId: cs.confirmationId ?? null }
-
-  if (new Date(cs.expiresAt).getTime() < Date.now()) {
-    await db
-      .prepare(`UPDATE changesets SET status = 'expired' WHERE id = ? AND status IN ('staged','committing')`)
-      .bind(cs.id)
-      .run()
-    return errorResponse('validation_failed', 'changeset has expired')
-  }
-
-  let confirmationId: string | null = cs.confirmationId ?? null
-  if (cs.autonomyMode === 'ask') {
-    const consumed = await db
-      .prepare(
-        `UPDATE changeset_confirmations SET consumed_at = now()
-           WHERE changeset_id = ? AND credential_id = ? AND digest = ?
-             AND consumed_at IS NULL AND expires_at > now()
-         RETURNING id`,
-      )
-      .bind(cs.id, cs.credentialId, cs.digest)
-      .first<{ id: string }>()
-    if (!consumed) {
-      return errorResponse(
-        'confirmation_required',
-        'ask-mode changeset requires a valid, unconsumed human approval',
-      )
-    }
-    confirmationId = consumed.id
-  }
-
-  const flip = await db
-    .prepare(
-      `UPDATE changesets SET status = 'committing', confirmation_id = ?
-         WHERE id = ? AND status = 'staged'`,
-    )
-    .bind(confirmationId, cs.id)
-    .run()
-  // A 0-row flip means a concurrent commit of this same changeset won the
-  // staged→committing race. Return the winner's stored receipt if it already
-  // committed (idempotent), else refuse — never fall through to the apply +
-  // stale-write, which could clobber the winner's committed row.
-  if ((flip.meta?.changes ?? 0) === 0) {
-    const fresh = await loadChangeset(db, cs.projectId, cs.id)
-    if (fresh?.status === 'committed') return Response.json({ receipt: fresh.receipt })
-    return errorResponse('conflict', 'commit already in progress')
-  }
-  return { confirmationId }
-}
-
-/**
  * Commit a CreateProject (spec §2, receipt-only). Re-checks scope + org role
- * live, runs the shared gates, then applies the row write via
+ * live, runs the shared gates (commit-gates.ts), then applies the row write via
  * createProjectShared with writeCreatorMembership: true (the receipt-only apply
  * has no implicit creator-path resolver, so the owner-level 700 membership row
  * must be written explicitly). An id claimed by ANOTHER caller between prepare
@@ -813,12 +774,11 @@ async function receiptOnlyGates(
  * already inserted) is absorbed idempotently.
  */
 async function commitCreateProject(
-  request: Request,
-  _env: ExternalEnv,
   db: AquillaDb,
   cred: ApiCredentialContext,
   cs: StoredChangeset,
   cmd: CreateProjectCommand,
+  channel: ProvenanceChannel,
 ): Promise<Response> {
   const wasStaged = cs.status === 'staged'
   const planned = cs.plannedIds?.createProject
@@ -878,7 +838,7 @@ async function commitCreateProject(
 
   const receipt: ReceiptOnlyReceipt = {
     credentialId: cred.credentialId,
-    channel: readChannel(request),
+    channel,
     changesetId: cs.id,
     command: 'CreateProject',
     appliedAt: new Date().toISOString(),
@@ -918,6 +878,7 @@ async function commitLinkMedia(
   cs: StoredChangeset,
   cmds: LinkMediaCommand[],
   confirmationId: string | null,
+  channel: ProvenanceChannel,
   ctx: Pick<ExecutionContext, 'waitUntil'> | undefined,
 ): Promise<Response> {
   if (!env.SNAPSHOTS) return errorResponse('job_failed', 'SNAPSHOTS bucket not configured')
@@ -1062,7 +1023,7 @@ async function commitLinkMedia(
   }
 
   // Stamp the server-verified provenance envelope on applied events.
-  const provenance = buildProvenance(request, cs, confirmationId)
+  const provenance = buildProvenance(request, cs, confirmationId, channel)
   const appliedIds = allEventIds.filter((eid) => acceptedIds.has(eid))
   if (appliedIds.length > 0) {
     const placeholders = appliedIds.map(() => '?').join(', ')
@@ -1105,19 +1066,20 @@ async function commitLinkMedia(
 
 /**
  * Commit an UpdateProjectSettings (spec §2, receipt-only). Re-checks the project
- * role live (>= MAINTAINER), runs the shared gates, then applies the
- * version-guarded write via updateProjectSettingsShared — a conflict (the live
- * version drifted from the pinned `ifMatchVersion`) maps to plan_stale. When the
- * validation threshold changed, the shared module's re-projection statements run
- * locally here (sync-worker owns the projection).
+ * role live (>= MAINTAINER), re-runs the policy-key guard against the LIVE blob
+ * (AQU-926 — a policy value changed since prepare must not slip through on a
+ * pre-guard approval), runs the shared gates, then applies the version-guarded
+ * write via updateProjectSettingsShared — a conflict (the live version drifted
+ * from the pinned `ifMatchVersion`) maps to plan_stale. When the validation
+ * threshold changed, the shared module's re-projection statements run locally
+ * here (sync-worker owns the projection).
  */
 async function commitUpdateProjectSettings(
-  request: Request,
-  _env: ExternalEnv,
   db: AquillaDb,
   cred: ApiCredentialContext,
   cs: StoredChangeset,
   cmd: UpdateProjectSettingsCommand,
+  channel: ProvenanceChannel,
 ): Promise<Response> {
   const wasStaged = cs.status === 'staged'
   const projectId = cs.projectId
@@ -1139,11 +1101,27 @@ async function commitUpdateProjectSettings(
     return errorResponse('permission_denied', 'project role >= maintainer required to update settings')
   }
 
+  // AQU-926 policy guard, re-checked against the LIVE blob BEFORE the gates so
+  // a denied commit never consumes the ask-mode confirmation. Only when the
+  // live version still matches the pin: a drifted version is already doomed to
+  // the apply path's plan_stale (or a crash-retry's own-bump absorption) —
+  // labeling that drift permission_denied here would misdiagnose it.
+  const expectedVersion = cs.plannedIds?.updateProjectSettings?.version ?? cmd.ifMatchVersion
+  const live = await loadProjectSettings(db, projectId)
+  if (live.version === expectedVersion) {
+    const changedPolicy = changedPolicyKeys(cmd.settings, live.settings)
+    if (changedPolicy.length > 0) {
+      return errorResponse(
+        'permission_denied',
+        'policy settings keys are never writable through the agent surface',
+        { policyKeys: changedPolicy },
+      )
+    }
+  }
+
   const gate = await receiptOnlyGates(db, cs)
   if (gate instanceof Response) return gate
   const confirmationId = gate.confirmationId
-
-  const expectedVersion = cs.plannedIds?.updateProjectSettings?.version ?? cmd.ifMatchVersion
   const result = await updateProjectSettingsShared(db, {
     projectId,
     settings: cmd.settings,
@@ -1170,7 +1148,7 @@ async function commitUpdateProjectSettings(
       result.current.updatedBy != null &&
       String(result.current.updatedBy) === String(cred.userId)
     if (!wasStaged && bumpedByThisUser) {
-      return finishUpdateSettingsReceipt(request, db, cred, cs, projectId, result.current.version, confirmationId)
+      return finishUpdateSettingsReceipt(db, cred, cs, projectId, result.current.version, confirmationId, channel)
     }
     await db
       .prepare(`UPDATE changesets SET status = 'stale' WHERE id = ? AND status IN ('staged','committing')`)
@@ -1185,36 +1163,28 @@ async function commitUpdateProjectSettings(
     return errorResponse('job_failed', result.message)
   }
 
-  return finishUpdateSettingsReceipt(request, db, cred, cs, projectId, result.settings.version, confirmationId)
+  return finishUpdateSettingsReceipt(db, cred, cs, projectId, result.settings.version, confirmationId, channel)
 }
 
 /** Write the committed receipt for an UpdateProjectSettings commit. */
 async function finishUpdateSettingsReceipt(
-  request: Request,
   db: AquillaDb,
   cred: ApiCredentialContext,
   cs: StoredChangeset,
   projectId: string,
   version: number,
   confirmationId: string | null,
+  channel: ProvenanceChannel,
 ): Promise<Response> {
   const receipt: ReceiptOnlyReceipt = {
     credentialId: cred.credentialId,
-    channel: readChannel(request),
+    channel,
     changesetId: cs.id,
     command: 'UpdateProjectSettings',
     appliedAt: new Date().toISOString(),
     projectId,
     version,
   }
-  await db
-    .prepare(
-      `UPDATE changesets
-          SET status = 'committed', receipt = ?::text::jsonb, confirmation_id = ?, committed_at = now()
-        WHERE id = ?`,
-    )
-    .bind(JSON.stringify(receipt), confirmationId, cs.id)
-    .run()
-
+  await writeCommittedReceipt(db, cs.id, receipt, confirmationId)
   return Response.json({ receipt })
 }

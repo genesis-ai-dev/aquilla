@@ -93,6 +93,45 @@ export async function loadChangeset(
   return row ? rowToStored(row) : null
 }
 
+/** Statuses a changeset row can hold — mirrors the schema CHECK constraint. */
+export const CHANGESET_STATUSES = [
+  'staged', 'committing', 'committed', 'discarded', 'stale', 'expired',
+] as const
+
+/** Hard cap on the session list endpoint (AQU-926 §3). */
+export const LIST_CHANGESETS_MAX = 50
+
+/** List a creator's changesets in a project, newest-first (AQU-926 session
+ *  routes). `status` filters exactly; `limit` is clamped to 1..50. */
+export async function listChangesetsForCreator(
+  db: AquillaDb,
+  projectId: string,
+  createdByUserId: string,
+  opts: { status?: string; limit?: number } = {},
+): Promise<StoredChangeset[]> {
+  const limit = Math.min(LIST_CHANGESETS_MAX, Math.max(1, Math.floor(opts.limit ?? LIST_CHANGESETS_MAX)))
+  const binds: unknown[] = [projectId, createdByUserId]
+  let statusFilter = ''
+  if (opts.status) {
+    statusFilter = ' AND status = ?'
+    binds.push(opts.status)
+  }
+  binds.push(limit)
+  const { results } = await db
+    .prepare(
+      `SELECT id, project_id, created_by_user_id, credential_id, autonomy_mode,
+              status, commands, preconditions, summary, digest, receipt,
+              confirmation_id, created_at, expires_at, committed_at
+         FROM changesets
+        WHERE project_id = ? AND created_by_user_id = ?${statusFilter}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?`,
+    )
+    .bind(...binds)
+    .all<ChangesetRow>()
+  return results.map(rowToStored)
+}
+
 /** Shape a changeset for API responses — no secret fields exist, but this keeps
  *  the wire shape stable and camelCased. */
 export function changesetToResponse(cs: StoredChangeset): Record<string, unknown> {

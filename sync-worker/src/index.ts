@@ -28,6 +28,7 @@ import { handleCellAudioReadRequest } from "./events/cell-audio-read-route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
 import { handleExternalChangesetsRequest } from "./external/changesets-route"
+import { handleSessionChangesetsRequest } from "./external/session-routes"
 import { handleExternalArtifactsRequest } from "./external/artifacts-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleProgressReadRequest } from "./events/progress-read-route"
@@ -376,6 +377,13 @@ const worker = {
     // AQU-533: Agent API changeset engine (external command layer).
     const externalChangesetsResponse = await handleExternalChangesetsRequest(request, env, ctx)
     if (externalChangesetsResponse) return withCors(externalChangesetsResponse, request)
+
+    // AQU-926: session-token changeset routes (/api/v1/changesets/*) — the
+    // in-app agent harness + review card drive the same engine with the
+    // browser's sync token. Disjoint from /api/v1/external/* and
+    // /api/v1/projects/* so ordering here is not load-bearing.
+    const sessionChangesetsResponse = await handleSessionChangesetsRequest(request, env, ctx)
+    if (sessionChangesetsResponse) return withCors(sessionChangesetsResponse, request)
 
     // AQU-533: Agent API remote MCP server (tools-only, streamable HTTP).
     const externalMcpResponse = await handleExternalMcpRequest(request, env, ctx)

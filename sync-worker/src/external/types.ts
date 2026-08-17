@@ -23,6 +23,22 @@ export interface ChangesetWarning {
   message: string
 }
 
+/** Provenance channel a commit arrived on (AQU-926 command registry §3):
+ *  'mcp' = the MCP adapter's synthetic in-process request, 'rest' = a direct
+ *  PAT REST call, 'app' = the session-token routes (in-app agent harness).
+ *  Server-assigned — the session routes pass 'app' explicitly; external
+ *  callers can never claim it via headers. */
+export type ProvenanceChannel = 'mcp' | 'rest' | 'app'
+
+/** Per-kind effect line for an EmitEvents changeset. `testimony` marks
+ *  validation kinds (cell.validate / cell.unvalidate) so review UIs render
+ *  per-item confirmation and bulk auto-apply excludes them. */
+export interface EmitEventsSummaryEntry {
+  kind: string
+  count: number
+  testimony: boolean
+}
+
 /** Server-computed effect summary — facts come from the plan, not the agent.
  *  SetTranslation changesets populate translations*; PlanImport changesets
  *  populate filesCreated/sourceCellsAdded/artifactLinked. */
@@ -39,10 +55,11 @@ export interface ChangesetSummary {
   artifactLinked?: string
   /** LinkMedia: number of cells an audio artifact is attached to. */
   mediaLinked?: number
-  /** Receipt-only (CreateProject / UpdateProjectSettings): the command kind, so
-   *  the human on /approve/:id sees WHICH lifecycle op they're approving instead
-   *  of an empty "No changes summarized." box (design §2 / blind-approval fix). */
-  command?: 'CreateProject' | 'UpdateProjectSettings'
+  /** Receipt-only (CreateProject / UpdateProjectSettings / PatchSettings): the
+   *  command kind, so the human on /approve/:id sees WHICH lifecycle op they're
+   *  approving instead of an empty "No changes summarized." box (design §2 /
+   *  blind-approval fix). */
+  command?: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings'
   /** CreateProject: the project name being created. */
   projectName?: string
   /** CreateProject: the definitive new project id. */
@@ -53,11 +70,13 @@ export interface ChangesetSummary {
   projectId?: string
   /** UpdateProjectSettings: the pinned settings version this write guards on. */
   ifMatchVersion?: number
-  /** UpdateProjectSettings: one truncated "key → preview" per top-level settings
-   *  key being written. Rendered as individual lines on the approval page (an
-   *  object, so the page's flat number/string filter ignores it — the page reads
-   *  it explicitly). */
+  /** UpdateProjectSettings / PatchSettings: one truncated "key → preview" per
+   *  top-level settings key being written. Rendered as individual lines on the
+   *  approval page (an object, so the page's flat number/string filter ignores
+   *  it — the page reads it explicitly). */
   settingsChanges?: Record<string, string>
+  /** EmitEvents: per-kind effect lines (kind, count, testimony flag). */
+  events?: EmitEventsSummaryEntry[]
   warnings: ChangesetWarning[]
 }
 
@@ -96,6 +115,14 @@ export interface PlannedEventIds {
    *  pinned at prepare (the commit-time version guard, i.e. the drift check for
    *  a versioned blob rather than a per-cell head). */
   updateProjectSettings?: { version: number }
+  /** PatchSettings (receipt-only): the settings version pinned at prepare —
+   *  same guard semantics as updateProjectSettings. */
+  patchSettings?: { version: number }
+  /** EmitEvents: one entry per plan event, in event order — the compiled event
+   *  id plus any payload ids minted at prepare (comment.create's commentId /
+   *  assignment.create's assignmentId when the caller omitted them), so a
+   *  crash-retry re-posts IDENTICAL ids and payloads. */
+  emitEvents?: { eventId: string; commentId?: string; assignmentId?: string }[]
   /** LinkMedia: one entry per attach command — the target (fileId, cellId), the
    *  audio artifact id, and the minted cell.audio.attach + cell.audio.select
    *  event ids. A crash-and-retry re-posts these IDENTICAL ids, so the /events
@@ -125,14 +152,15 @@ export interface ChangesetReceipt {
  *  ChangesetReceipt does not fit — the receipt is a provenance stamp instead. */
 export interface ReceiptOnlyReceipt {
   credentialId: string
-  channel: 'mcp' | 'rest'
+  channel: ProvenanceChannel
   changesetId: string
-  command: 'CreateProject' | 'UpdateProjectSettings'
+  command: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings'
   appliedAt: string
-  /** CreateProject: the created project id. UpdateProjectSettings: the updated
-   *  project id. */
+  /** CreateProject: the created project id. UpdateProjectSettings /
+   *  PatchSettings: the updated project id. */
   projectId: string
-  /** UpdateProjectSettings: the new settings version after the write. */
+  /** UpdateProjectSettings / PatchSettings: the new settings version after the
+   *  write. */
   version?: number
 }
 

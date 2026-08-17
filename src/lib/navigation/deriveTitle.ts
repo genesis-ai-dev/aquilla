@@ -69,6 +69,7 @@ export function deriveNavTitleKey(pathname: string): NavTitle {
         return key("editor.navTitle.assignedToMe")
       case "settings": {
         if (parts.length === 1) return key("editor.navTitle.organizationSettings")
+        if (parts[1] === "knowledge") return key("knowledgeBase.title")
         // Retired per-floor slugs (`export`, `roster`, …) alias onto
         // `/settings/security`. Titles still come from a separate, unkeyed
         // English source (src/pages/settings/constants.ts).

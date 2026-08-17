@@ -18,6 +18,7 @@ not a micro-spec farm.
 | Projects | Open / delete / restore from trash | `e2e/specs/projects/project-trash.smoke.spec.ts` |
 | Projects | App shell still routes | `e2e/specs/projects/route-health.smoke.spec.ts` |
 | Projects | Project settings rename/save persists | `e2e/specs/projects/project-settings.smoke.spec.ts` |
+| Projects | Knowledge Base upload, extracted-text read, and delete persist through Postgres + R2 | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Setup checklist survives refresh | `e2e/specs/editor/setup-checklist-survives-refresh.smoke.spec.ts` |
 | Orgs | Add member to org, member sees it | `e2e/specs/orgs/members.smoke.spec.ts` |
 | Orgs | Account switcher sessions | `e2e/specs/orgs/account-switcher.smoke.spec.ts` |

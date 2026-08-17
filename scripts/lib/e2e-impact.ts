@@ -31,6 +31,10 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/ai/completion.smoke.spec.ts"],
   },
   {
+    source: /^(?:src\/(?:components|lib|pages)\/.*knowledge|auth-worker\/.*knowledge|db\/shared\/knowledge)/i,
+    sentinels: ["e2e/specs/projects/project-settings.smoke.spec.ts"],
+  },
+  {
     source: /^(?:src\/(?:components|lib)\/(?:collab|sync|comments)|sync-worker\/)/i,
     sentinels: ["e2e/specs/collab/concurrent-edit.smoke.spec.ts"],
   },

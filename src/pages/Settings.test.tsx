@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Navigate, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
-import { Settings, OrgSettingsIdentity, OrgSettingsSecurity } from "./Settings"
+import { Settings, OrgSettingsIdentity, OrgSettingsKnowledge, OrgSettingsSecurity } from "./Settings"
 import { renameOrg, listMyOrgs } from "@/lib/frontier/orgs"
 import { toast } from "@/components/ui/toast"
 
@@ -10,7 +10,6 @@ vi.mock("@/components/ui/toast", () => ({
   toast: { add: vi.fn(), close: vi.fn(), update: vi.fn(), promise: vi.fn() },
 }))
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockPatch = vi.fn<() => Promise<any>>(async () => ({ kind: "ok", value: { orgId: 1, settings: {}, version: 1, updatedAt: null, updatedBy: null } }))
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -21,6 +20,15 @@ vi.mock("@/lib/frontier/orgs", () => ({
   renameOrg: vi.fn(async () => {}),
 }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
+vi.mock("@/lib/frontier/knowledge-base", () => ({
+  listKnowledgeDocuments: vi.fn(async () => []),
+  getKnowledgeDocument: vi.fn(),
+  getKnowledgeDocumentContent: vi.fn(),
+  getKnowledgeDocumentOriginal: vi.fn(),
+  uploadKnowledgeDocument: vi.fn(),
+  deleteKnowledgeDocument: vi.fn(),
+  reindexKnowledgeDocument: vi.fn(),
+}))
 
 const rosterSettings = vi.hoisted(() => ({ canViewRoster: true }))
 vi.mock("@/hooks/useOrgSettings", () => ({
@@ -87,6 +95,7 @@ function renderSettings(path = "/orgs/1/settings") {
           <Route path="/orgs/:orgId/settings" element={<Settings />} />
           <Route path="/orgs/:orgId/settings/identity" element={<OrgSettingsIdentity />} />
           <Route path="/orgs/:orgId/settings/security" element={<OrgSettingsSecurity />} />
+          <Route path="/orgs/:orgId/settings/knowledge" element={<OrgSettingsKnowledge />} />
           <Route path="/orgs/:orgId/settings/export" element={<Navigate to="../security" replace relative="path" />} />
           <Route path="/orgs/:orgId/settings/roster" element={<Navigate to="../security" replace relative="path" />} />
         </Routes>
@@ -99,6 +108,17 @@ describe("Org Settings", () => {
   it("lists Billing & usage on the settings index", async () => {
     renderSettings("/orgs/1/settings")
     expect(await screen.findByRole("link", { name: /Billing & usage/i })).toBeDefined()
+  })
+
+  it("links to and renders the organization knowledge base", async () => {
+    const { unmount } = renderSettings("/orgs/1/settings")
+    const link = await screen.findByRole("link", { name: /Knowledge base/i })
+    expect(link).toHaveAttribute("href", "/orgs/1/settings/knowledge")
+    unmount()
+
+    renderSettings("/orgs/1/settings/knowledge")
+    expect(await screen.findByRole("heading", { name: "Knowledge base" })).toBeInTheDocument()
+    expect(screen.getAllByText(/every project in this organization/i)).toHaveLength(1)
   })
 
   it("shows the org name and an owner can rename it on blur", async () => {

@@ -10,6 +10,8 @@ export const knowledgeBase = defineNamespace({
     "knowledgeBase.title": "Knowledge base",
     "knowledgeBase.description":
       "Add style guides, cultural background, commentary, and other reference documents for this project.",
+    "knowledgeBase.orgDescription":
+      "Add reference documents that every project in this organization can use.",
     "knowledgeBase.useInDraftingLabel": "Use knowledge base in drafting",
     "knowledgeBase.useInDraftingDescription":
       "Use relevant passages from these documents when generating translations and predictions.",
@@ -21,6 +23,10 @@ export const knowledgeBase = defineNamespace({
     "knowledgeBase.emptyTitle": "No knowledge documents yet",
     "knowledgeBase.emptyDescription":
       "Upload reference material to make it available to this project and its agents.",
+    "knowledgeBase.orgEmptyDescription":
+      "Upload reference material to make it available to every project in this organization.",
+    "knowledgeBase.searchPlaceholder": "Search knowledge documents",
+    "knowledgeBase.noMatches": "No knowledge documents match your search.",
     "knowledgeBase.status.pending": "Indexing…",
     "knowledgeBase.status.ready": "Indexed",
     "knowledgeBase.status.failed": "Indexing failed",

@@ -80,6 +80,9 @@ const OrgSettingsProviders = lazy(() =>
 const OrgSettingsMonday = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsMonday })),
 )
+const OrgSettingsKnowledge = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsKnowledge })),
+)
 // Monday OAuth landing — Monday's registered redirect URI is this SPA route.
 const MondayOAuthCallback = lazy(() =>
   import("@/pages/settings/MondayOAuthCallback").then((m) => ({ default: m.MondayOAuthCallback })),
@@ -278,6 +281,7 @@ function AppRoutes() {
           <Route path="settings/assignment" element={<Navigate to="../security" replace relative="path" />} />
           <Route path="settings/terminology" element={<Navigate to="../security" replace relative="path" />} />
           <Route path="settings/providers" element={<OrgLazyRoute><OrgSettingsProviders /></OrgLazyRoute>} />
+          <Route path="settings/knowledge" element={<OrgLazyRoute><OrgSettingsKnowledge /></OrgLazyRoute>} />
           <Route path="settings/monday" element={<OrgLazyRoute><OrgSettingsMonday /></OrgLazyRoute>} />
         </Route>
 

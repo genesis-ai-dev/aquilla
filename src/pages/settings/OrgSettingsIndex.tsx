@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom"
-import { Archive, Building2, CreditCard, KeyRound, Shield, Workflow } from "lucide-react"
+import { Archive, BookOpen, Building2, CreditCard, KeyRound, Shield, Workflow } from "lucide-react"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { PageHeader } from "@/components/ui/page"
 import { NavList, NavRow } from "@/components/ui/nav-list"
@@ -43,6 +43,12 @@ export function OrgSettingsIndex() {
           <NavRow to={orgSettingsPath(activeOrgId, "security")} icon={Shield} title={t("settings.orgSettingsIndex.navSecurity")} hint="Visibility & permissions" />
           <NavRow to={orgSettingsPath(activeOrgId, "billing")} icon={CreditCard} title={t("billing.settings.billing")} hint="Field Plan" />
           <NavRow to={orgSettingsPath(activeOrgId, "providers")} icon={KeyRound} title={t("onboarding.preferences.section.providerKeys.title")} hint="Org keys" />
+          <NavRow
+            to={orgSettingsPath(activeOrgId, "knowledge")}
+            icon={BookOpen}
+            title={t("knowledgeBase.title")}
+            hint={t("knowledgeBase.orgDescription")}
+          />
           <NavRow to={orgSettingsPath(activeOrgId, "monday")} icon={Workflow} title="Monday.com" hint="Board sync" />
         </NavList>
 

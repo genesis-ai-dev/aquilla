@@ -105,6 +105,22 @@ async function uploadOrgDoc(
 
 const PROJECT = "proj-kb"
 
+describe("knowledge routes — browser preflight", () => {
+  it("allows the document-name upload header", async () => {
+    const res = await app.request(`/api/v2/projects/${PROJECT}/knowledge`, {
+      method: "OPTIONS",
+      headers: {
+        Origin: "http://127.0.0.1:5173",
+        "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "authorization,x-doc-name",
+      },
+    }, env)
+
+    expect(res.status).toBe(204)
+    expect(res.headers.get("Access-Control-Allow-Headers")?.toLowerCase()).toContain("x-doc-name")
+  })
+})
+
 describe("knowledge routes — project upload floor", () => {
   it("CONTRIBUTOR is rejected with 403", async () => {
     await seedUser(1, "owner")

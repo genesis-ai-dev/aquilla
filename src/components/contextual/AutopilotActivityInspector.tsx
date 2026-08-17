@@ -36,6 +36,7 @@ import { cn } from "@/lib/utils"
 import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { draftReviewHref } from "@/components/project-workspace-lane-deeplink"
+import { AutopilotProcessGraph } from "@/components/contextual/AutopilotProcessGraph"
 import {
   commandContextualRun,
   fetchContextualRunActivity,
@@ -1242,6 +1243,7 @@ export function AutopilotActivityInspector({
             {selectedRun && (
               <>
                 <Separator />
+                <AutopilotProcessGraph run={selectedRun} activity={activity} />
                 <Card size="sm">
                   <CardHeader>
                     <CardTitle>{fileNames?.get(selectedRun.fileId) ?? selectedRun.fileId}</CardTitle>

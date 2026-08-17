@@ -30,19 +30,18 @@ abandoned — if you find docs or memory describing `apps/workspace/`, `packages
 ├── infra/modal/        # Modal services: diarization.py, seed_vc.py, omnivoice_app.py
 ├── src-tauri/          # Tauri desktop shell
 ├── e2e/                # Playwright specs + page objects + JOURNEYS.md (see AGENTS.md)
-├── scripts/            # dev-stack.ts (local full stack), e2e-up.ts, prerender-marketing.ts,
-│                       #   brand/build helpers
+├── scripts/            # dev-stack.ts (local full stack), e2e-up.ts, brand/build helpers
 └── vite.config.ts      # drives the SPA + Tauri build; @/ → ./src
 ```
 
 `@/` resolves to `./src` (tsconfig + vite). Vitest runs in `happy-dom`; `src/test-setup.ts`
 loads `fake-indexeddb/auto` so IDB/idb tests run without a browser.
 
-The standalone marketing pages (`homepage.html`, `beta.html`, the case studies,
-`bible-translation.html`) are separate vite inputs with their own React entries. `pnpm build`
-prerenders each one to static HTML after `vite build` so crawlers and unfurlers see the whole
-page — `createRoot` then clears it and renders the live page over it. Anything those pages
-render must be DOM-free-safe. See **`docs/SEO.md`**.
+The public marketing surface lives in the sibling **`aquilla-marketing`** repo. Its
+Worker claims `/`, `/homepage`, `/beta`, `/bible-translation`, `/case-studies/*`,
+`/privacy`, `/terms`, sitemap/robots, and `/mkt/*` ahead of this repo's
+`aquilla.app/*` catch-all. This repo builds only `index.html`; marketing deploys do
+not ride the app's QA-gated release cycle. See **`docs/SEO.md`**.
 
 ## Commands
 

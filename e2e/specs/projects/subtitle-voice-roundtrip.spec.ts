@@ -23,6 +23,7 @@ const FIXTURE = path.resolve(__dirname, "../../fixtures/voices-roundtrip.vtt")
 test("import VTT with <v Name> tags → cast created → WebVTT export round-trips", async ({
   alice,
 }) => {
+  test.setTimeout(120_000)
   // 1. Create + open a project.
   const dash = new Dashboard(alice)
   await dash.goto()

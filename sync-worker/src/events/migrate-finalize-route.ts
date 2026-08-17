@@ -7,17 +7,19 @@
 // same aggregates once across all files in the project — correlated subqueries
 // scan each file's cells a single time, so total cost is O(total cells), one
 // statement. Result is identical to the incremental path (the counters are pure
-// aggregates over the final cells). Gated on SYNC_SECRET_KEY.
+// aggregates over the final cells). Gated on ADMIN_SECRET, with SYNC_SECRET_KEY
+// still accepted — see lib/admin-auth.ts.
 //
 // Idempotent: pure recompute from current cells, safe to call any number of times.
 
 import { fullProgressRecomputeStmts } from './progress-projection'
-import { secureCompare } from '../lib/secure-compare'
+import { isAuthorizedAdminBearer } from '../lib/admin-auth'
 
 const PATH = '/migrate/finalize'
 
 export interface MigrateFinalizeEnv {
   AQUILLA_PG?: AquillaDb
+  ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
 }
 
@@ -28,7 +30,7 @@ export async function handleMigrateFinalizeRequest(
   if (new URL(request.url).pathname !== PATH) return null
   if (request.method !== 'POST') return new Response('method not allowed', { status: 405 })
   if (!env.SYNC_SECRET_KEY) return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
-  if (!secureCompare(request.headers.get('Authorization') ?? '', `Bearer ${env.SYNC_SECRET_KEY}`)) {
+  if (!isAuthorizedAdminBearer(request.headers.get('Authorization') ?? '', env)) {
     return new Response('unauthorized', { status: 401 })
   }
   if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })

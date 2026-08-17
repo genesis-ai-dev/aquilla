@@ -27,8 +27,8 @@ const scope: Scope = {
   fileKind: "usfm",
 }
 
-// 4 validated examples / target 8 = 0.5 coverage — at the low-risk floor.
-const examples = Array.from({ length: 4 }, (_, i) => ({
+// 5 validated examples / target 10 = 0.5 coverage — at the low-risk floor.
+const examples = Array.from({ length: 5 }, (_, i) => ({
   cellId: `ex${i + 1}`,
   source: `example source ${i + 1}`,
   target: `example target ${i + 1}`,
@@ -114,8 +114,8 @@ describe("runSpan — happy path (low risk)", () => {
     // Staged draft carries provenance: sceneBriefId + hashed promptVersion + exampleIds.
     expect(captured.staged).toHaveLength(1)
     expect(captured.staged[0].sceneBriefId).toBe("sb1")
-    expect(captured.staged[0].promptVersion).toMatch(/^contextual-draft-v1:[0-9a-f]{8}$/)
-    expect(captured.staged[0].exampleIds).toEqual(["ex1", "ex2", "ex3", "ex4"])
+    expect(captured.staged[0].promptVersion).toMatch(/^contextual-draft-v2:[0-9a-f]{8}$/)
+    expect(captured.staged[0].exampleIds).toEqual(["ex1", "ex2", "ex3", "ex4", "ex5"])
 
     // Low risk → the panel never engaged: exactly one deep call (ambiguity).
     expect(calls.filter((c) => c.tier === "deep")).toHaveLength(1)

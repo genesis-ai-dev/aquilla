@@ -14,6 +14,8 @@ import { authMiddleware } from "../middleware/auth"
 import { resolveProjectRole } from "../services/project-permissions"
 import { runAiGuard } from "../lib/ai-budget"
 import { creditGuard, recordCredit } from "../lib/credits"
+import { countWords } from "../lib/billing/plans"
+import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
 import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { openRouterExtras } from "../lib/llm-vendor"
 import {
@@ -23,6 +25,7 @@ import {
   sandboxReadFile,
 } from "../lib/agent/sandbox-client"
 import { MAX_SANDBOX_PROGRAM_CHARS } from "../../../shared/import-contract"
+import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 
 const imports = new Hono<{ Bindings: Env; Variables: Variables }>()
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -301,7 +304,7 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
     || c.env.AGENT_MODEL_DEFAULT
     || settings.defaultLlmModel
     || c.env.DEFAULT_LLM_MODEL
-    || "anthropic/claude-sonnet-4.5"
+    || DEFAULT_LLM_MODEL_ID
   const aiGuard = await runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env)
   if (!aiGuard.ok) return c.json(aiGuard.body, aiGuard.status)
   const project = await c.env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
@@ -311,6 +314,8 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
   if (!credits.ok) {
     return c.json({ error: "credit_cap_exceeded", reason: credits.reason, message: "LLM credit cap reached. Contact your org admin." }, 429)
   }
+  const words = await wordGuard(c.env.AQUILLA_PG, orgId)
+  if (!words.ok) return c.json(wordCapBody(words.reason), 429)
 
   const sessionId = `import-${crypto.randomUUID()}`
   const key = r2Key(c.env, projectId, sessionId)
@@ -357,6 +362,7 @@ imports.post("/parse/:projectId", authMiddleware, async (c) => {
       }
       const rawCostCents = typeof body.usage?.cost === "number" && body.usage.cost > 0 ? body.usage.cost * 100 : 1
       await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", rawCostCents, 1)
+      await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", countWords(fileName))
       const content = body.choices?.[0]?.message?.content
       if (!content) {
         previousError = "The model returned no parser program"

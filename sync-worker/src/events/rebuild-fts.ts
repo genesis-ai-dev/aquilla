@@ -6,15 +6,17 @@
 // delete-then-insert pass in batches of 1000 rows (cursor-paginated by rowid)
 // so it doesn't time out on large projects.
 //
-// Auth: Authorization: Bearer ${SYNC_SECRET_KEY} — same shared secret used by
-// the projection-rebuild and all other admin endpoints.
+// Auth: Authorization: Bearer ${ADMIN_SECRET} — the dedicated operator
+// credential shared with the projection-rebuild and every other admin endpoint.
+// SYNC_SECRET_KEY is still accepted; see lib/admin-auth.ts for why.
 
-import { secureCompare } from '../lib/secure-compare'
+import { isAuthorizedAdminBearer } from '../lib/admin-auth'
 
 const REBUILD_FTS_PATH = /^\/admin\/projects\/([^/]+)\/rebuild-fts$/
 
 export interface RebuildFtsEnv {
   AQUILLA_PG?: AquillaDb
+  ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
 }
 
@@ -34,7 +36,7 @@ export async function handleRebuildFtsRequest(
     return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   }
   const auth = request.headers.get('Authorization') ?? ''
-  if (!secureCompare(auth, `Bearer ${env.SYNC_SECRET_KEY}`)) {
+  if (!isAuthorizedAdminBearer(auth, env)) {
     return new Response('unauthorized', { status: 401 })
   }
 

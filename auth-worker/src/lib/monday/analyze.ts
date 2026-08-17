@@ -7,6 +7,7 @@
 import type { Env } from "../../types"
 import { getPlatformSettingsCached } from "../platform-settings"
 import { openRouterUsage } from "../llm-vendor"
+import { DEFAULT_LLM_MODEL_ID } from "../model-defaults"
 import {
   sanitizeMapping,
   METRIC_KEYS,
@@ -286,7 +287,7 @@ export async function analyzeBoardMapping(env: Env, args: AnalyzeArgs): Promise<
   }
   const settings = await getPlatformSettingsCached(env)
   const model =
-    settings.defaultLlmModel || env.DEFAULT_LLM_MODEL || "anthropic/claude-sonnet-4.5"
+    settings.defaultLlmModel || env.DEFAULT_LLM_MODEL || DEFAULT_LLM_MODEL_ID
 
   const prompt = buildPrompt(args)
   let parsed = tryParseProposal(await callLlm(env, model, prompt))

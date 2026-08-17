@@ -73,13 +73,7 @@ test("sparkle in a secondary lane commits the draft into that lane only", async 
   mockLLM.setNextResponse("English default draft")
   await alice.reload()
   await ws.waitForEditor()
-  const sparkleDefault = alice
-    .locator("[data-tooltip*='Translate with AI'] button, button[aria-label*='Translate with AI']")
-    .first()
-  await sparkleDefault.scrollIntoViewIfNeeded()
-  await alice.locator("[data-cell-id]").first().hover()
-  await expect(sparkleDefault).toBeVisible()
-  await sparkleDefault.click()
+  await ws.clickSparkleOnFirstCell()
   await expect(alice.locator("[data-cell-id]").first().locator('[data-cell-type="target"]'))
     .toContainText("English default draft", { timeout: 15_000 })
 
@@ -97,13 +91,7 @@ test("sparkle in a secondary lane commits the draft into that lane only", async 
   expect(await ws.readTargetText(0)).toBe("")
 
   // Sparkle the first cell (same interaction dance as completion.smoke.spec.ts).
-  const sparkle = alice
-    .locator("[data-tooltip*='Translate with AI'] button, button[aria-label*='Translate with AI']")
-    .first()
-  await sparkle.scrollIntoViewIfNeeded()
-  await alice.locator("[data-cell-id]").first().hover()
-  await expect(sparkle).toBeVisible()
-  await sparkle.click()
+  await ws.clickSparkleOnFirstCell()
 
   // The draft lands in the es lane.
   const targetCell = alice.locator("[data-cell-id]").first().locator('[data-cell-type="target"]')

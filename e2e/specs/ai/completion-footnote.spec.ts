@@ -56,15 +56,7 @@ test("sparkle on a footnoted source commits translated base + reintegrated footn
   await alice.reload()
   await ws.waitForEditor()
 
-  // The sparkle lives in CellActionRail, hidden until the row is hovered
-  // (same interaction dance as completion.smoke.spec.ts).
-  const sparkle = alice
-    .locator("[data-tooltip*='Translate with AI'] button, button[aria-label*='Translate with AI']")
-    .first()
-  await sparkle.scrollIntoViewIfNeeded()
-  await alice.locator("[data-cell-id]").first().hover()
-  await expect(sparkle).toBeVisible()
-  await sparkle.click()
+  await ws.clickSparkleOnFirstCell()
 
   const targetCell = alice.locator("[data-cell-id]").first().locator('[data-cell-type="target"]')
 

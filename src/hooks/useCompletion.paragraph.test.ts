@@ -182,7 +182,7 @@ describe("completeParagraph (D3)", () => {
         approvedExampleCount: 0,
       },
     })
-    expect(commitMock.mock.calls[0][3].promptVersion).toMatch(/^translation-draft-v1:[0-9a-f]{8}$/)
+    expect(commitMock.mock.calls[0][3].promptVersion).toMatch(/^translation-draft-v2:[0-9a-f]{8}$/)
   })
 
   it("does NOT commit a cell that is MISSING from the model response (D11)", async () => {

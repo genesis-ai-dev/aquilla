@@ -55,6 +55,7 @@ import { extractBiblicaStudyNoteStrings } from "./parsers/biblica"
 import { extractTreasureHuntStrings } from "./parsers/biblica-treasure-hunt"
 import { extractReach4LifeStrings } from "./parsers/biblica-reach4life"
 import { extractHtmlStrings } from "./parsers/html"
+import { extractEpubImport, type EpubSpineMember } from "./parsers/epub"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
 import {
   assertSourceUploadByteLength,
@@ -441,6 +442,8 @@ export interface ImportResult {
   /** Exact container for a multi-book import. Stored once and bound to every
    * emitted book instead of becoming every book's export skeleton. */
   sharedSourceArtifact?: TargetImportArtifact
+  /** EPUB spine members shown in the chapter picker. Absent for other formats. */
+  epubMembers?: EpubSpineMember[]
 }
 
 export interface ImportContext {
@@ -691,7 +694,7 @@ export async function prepareImportFile(
     // or an XLIFF named .xml by an upstream tool, is not flattened as prose.
     if (isMediaFileType(extensionType)) return { fileType: extensionType, results: [] }
     try {
-      if (extensionType === "docx" || extensionType === "pptx" || extensionType === "idml") {
+      if (extensionType === "docx" || extensionType === "pptx" || extensionType === "idml" || extensionType === "epub") {
         return preparedParsedFile(
           file,
           extensionType,
@@ -749,7 +752,7 @@ export async function prepareImportFile(
           importNotices: [{
             code: "basic-parser-fallback",
             severity: "warning",
-            message: "Aquilla could not verify this structured layout with AI, so it used the basic parser. Check the preview carefully before importing.",
+            message: t("importExport.notices.basicParserFallback"),
           }],
         }))
       }
@@ -2577,6 +2580,18 @@ export async function parseFile(
       const bytes = await file.arrayBuffer()
       const text = decodeImportText(bytes, file.name)
       return [{ name: file.name, strings: extractHtmlStrings(text), rawBytes: bytes, rawSourceFormat: "html" }]
+    }
+    case "epub": {
+      const buffer = await file.arrayBuffer()
+      const extracted = await extractEpubImport(buffer)
+      return [{
+        name: file.name,
+        strings: extracted.strings,
+        rawBytes: buffer,
+        rawSourceFormat: "epub",
+        roundTripFidelity: "content-only",
+        epubMembers: extracted.members,
+      }]
     }
     case "xliff": {
       const bytes = await file.arrayBuffer()

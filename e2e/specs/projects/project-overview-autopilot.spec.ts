@@ -171,9 +171,9 @@ test("project overview shows autopilot start, outcome, and durable activity", as
   const activitySheet = alice.getByRole("dialog", { name: "Autopilot activity" })
   await expect(activitySheet).toBeVisible()
   await expect(activitySheet).toContainText(/\bIdle\b/i)
-  await expect(activitySheet.getByLabel("Autopilot step history")).toContainText(
-    stagedEvent!.summary,
-  )
+  await expect(
+    activitySheet.getByRole("log", { name: "Autopilot step history" }),
+  ).toContainText(stagedEvent!.summary)
 
   // A parked run is still controllable. Stopping it must invalidate the
   // project snapshot immediately so the PM sees a terminal, startable card

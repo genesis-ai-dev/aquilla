@@ -65,7 +65,8 @@ test.describe("agent changeset approval", () => {
     const approvalPath = `/approve/${staged.changeset.id}`
     await alice.goto(approvalPath)
     await expect(alice.getByText("Approve agent changes")).toBeVisible({ timeout: 30_000 })
-    await expect(alice.getByText(seeded.projectName)).toBeVisible()
+    // Exact: the page also has "Back to {projectName}", which substring-matches.
+    await expect(alice.getByText(seeded.projectName, { exact: true })).toBeVisible()
     await expect(alice.getByText("What will be applied")).toBeVisible()
     await expect(alice.getByText(/Translations added/i)).toBeVisible()
 
@@ -150,10 +151,10 @@ test.describe("agent changeset approval", () => {
     await expect(card).toHaveAttribute("data-changeset-status", "staged")
     await expect(card.getByText("Pending review")).toBeVisible()
 
-    // "Review & approve" opens the approval page in a new tab; approve there.
+    // "View full details" opens the approval page in a new tab; approve there.
     const [popup] = await Promise.all([
       alice.waitForEvent("popup"),
-      card.getByRole("link", { name: /Review & approve/ }).click(),
+      card.getByRole("link", { name: /View full details/ }).click(),
     ])
     await new AgentPage(popup).approveChangeset(approvalPath)
     await popup.close()

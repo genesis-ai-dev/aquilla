@@ -11,7 +11,7 @@ consultants — USFM/Paratext import-export fidelity is a hard requirement.
 | Layer | Tech |
 |---|---|
 | SPA | React 19 + Vite 8, TypeScript, Tailwind 4, shadcn/base-ui |
-| Edge router | Cloudflare Worker (`worker/`) — selects marketing vs app HTML |
+| App edge | Cloudflare Worker (`worker/`) — serves SPA routes and invite unfurls |
 | Identity | Cloudflare Worker (`auth-worker/`) — Hono, Neon Postgres via Hyperdrive |
 | Sync | Cloudflare Worker (`sync-worker/`) — event log + projection writer + ProjectSync DO |
 | Data | Neon Postgres (live); Docker `postgres:16` locally |
@@ -23,6 +23,10 @@ sync-worker projects into `cells`/`files` tables → ProjectSync DO broadcasts t
 WebSocket clients. Start with the [documentation index](docs/README.md),
 [system specification](docs/SPEC.md), and
 [deployment environment matrix](docs/DEPLOYMENT-ENVIRONMENTS.md).
+
+The public homepage, legal pages, case studies, sitemap, and robots policy live
+in the sibling `aquilla-marketing` repository and deploy independently through
+more-specific Cloudflare zone routes. This repository builds the SPA only.
 
 ## Fresh-clone setup
 

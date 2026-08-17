@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button"
 import { Field, FieldError, FieldGroup } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { optionalString } from "@/lib/forms/schemas"
@@ -29,6 +30,7 @@ interface OrgProviderSectionProps {
 }
 
 export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
+  const { t } = useI18n()
   const { orgProviderKeys, canEditOrgKeys, patch, hasFetched } = orgSettings
 
   const keys = orgProviderKeys ?? {}
@@ -62,8 +64,8 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
 
   if (!hasFetched) {
     return (
-      <SettingsGroup label="Provider keys">
-        <SettingsRow label="Gemini TTS API key" block>
+      <SettingsGroup label={t("settings.providerKeys.groupLabel")}>
+        <SettingsRow label={t("settings.providerKeys.geminiTtsLabel")} block>
           <div className="flex items-center text-muted-foreground">
             <Spinner className="size-3.5" />
           </div>
@@ -73,16 +75,15 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
   }
 
   return (
-    <SettingsGroup label="Provider keys">
+    <SettingsGroup label={t("settings.providerKeys.groupLabel")}>
       {!canEditOrgKeys && (
         <div className="px-5 py-4 text-xs text-muted-foreground">
-          Only org maintainers and owners can set org-level keys. You can still
-          save a personal key in your project or personal settings.
+          {t("settings.providerKeys.restrictedNotice")}
         </div>
       )}
       <SettingsRow
-        label="Gemini TTS API key"
-        description="Used by Gemini TTS synthesis for all org members when no project or personal key is present. Precedence: project key > personal key > org key."
+        label={t("settings.providerKeys.geminiTtsLabel")}
+        description={t("settings.providerKeys.geminiTtsDescription")}
         block
       >
         <form
@@ -133,7 +134,7 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
                   variant="outline"
                   onClick={() => form.setFieldValue("geminiKey", "")}
                 >
-                  Clear
+                  {t("common.clear")}
                 </Button>
               )}
             </div>

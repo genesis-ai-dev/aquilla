@@ -404,6 +404,7 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
             rel="noreferrer"
             className="underline"
           >
+            {/* i18n-exempt: proper-noun name of the external API this data is sourced from */}
             Free Use Bible API
           </a>
         </p>

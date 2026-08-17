@@ -77,6 +77,16 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: vi.fn(() => ({ session: { username: "alice", jwt: "tok" } })),
 }))
 
+vi.mock("@/lib/frontier/knowledge-base", () => ({
+  listKnowledgeDocuments: vi.fn(async () => []),
+  getKnowledgeDocument: vi.fn(),
+  getKnowledgeDocumentContent: vi.fn(),
+  getKnowledgeDocumentOriginal: vi.fn(),
+  uploadKnowledgeDocument: vi.fn(),
+  deleteKnowledgeDocument: vi.fn(),
+  reindexKnowledgeDocument: vi.fn(),
+}))
+
 import { useProject } from "@/hooks/useProject"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 

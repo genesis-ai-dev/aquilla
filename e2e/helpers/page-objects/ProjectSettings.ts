@@ -27,19 +27,55 @@ export class ProjectSettings {
     await settingsBtn.click()
     await this.page.waitForURL(/\/project\/[^/]+\/settings/, { timeout: 10_000 })
 
-    // Lands on the settings index (index path — no section segment yet) — drill into "General",
-    // which holds the Languages section. If a deep-link already put us inside
-    // a group (e.g. `/settings/general`), the section is already there and the
-    // index link never appears. NOTE: `isVisible()` reports the INSTANTANEOUS
-    // state (its timeout option is ignored), so guard-then-click races the
-    // index render — wait for whichever of the two states materializes first.
-    const generalLink = this.page.getByRole("link", { name: /General/i })
+    // Lands on the settings index — drill into "General", which holds Languages.
+    // A deep-link to /settings/general already has the section. Wait for
+    // whichever state hydrates; do not reload in a loop (that never lets the
+    // index finish rendering under shard load).
+    // NavRow accessible name is "General {projectName}" (title + hint).
+    const generalLink = this.page.getByRole("link", { name: /^General\b/ })
     const section = this.page.locator("#section-languages")
-    await expect(generalLink.or(section).first()).toBeVisible({ timeout: 10_000 })
-    if (!(await section.isVisible().catch(() => false))) {
+    await expect(generalLink.or(section).first()).toBeVisible({ timeout: 15_000 })
+    if (!(await section.isVisible())) {
       await generalLink.click()
     }
     await expect(section).toBeVisible({ timeout: 10_000 })
+  }
+
+  /** Open the Living Memory pane that owns project Knowledge Base documents. */
+  async openLivingMemory(projectId: string): Promise<void> {
+    await this.page.goto(`/project/${projectId}/settings/memory`)
+    await expect(this.page.getByRole("heading", { name: "Living Memory" })).toBeVisible({ timeout: 10_000 })
+    await expect(this.page.getByText("Knowledge base", { exact: true })).toBeVisible({ timeout: 10_000 })
+  }
+
+  /** Upload one Knowledge Base source document and wait for its server-returned row. */
+  async uploadKnowledgeDocument(name: string, content: string): Promise<void> {
+    const input = this.page.locator('input[type="file"][accept*=".md"]')
+    await input.setInputFiles({ name, mimeType: "text/markdown", buffer: Buffer.from(content) })
+    await expect(this.knowledgeDocumentCard(name)).toBeVisible({ timeout: 10_000 })
+  }
+
+  /** Open the server-extracted text for a Knowledge Base document. */
+  async openKnowledgeDocument(name: string): Promise<Locator> {
+    const card = this.knowledgeDocumentCard(name)
+    await card.getByRole("button", { name: "View document" }).click()
+    const dialog = this.page.getByRole("dialog", { name })
+    await expect(dialog).toBeVisible({ timeout: 10_000 })
+    return dialog
+  }
+
+  /** Delete a project-owned Knowledge Base document through its confirmation. */
+  async deleteKnowledgeDocument(name: string): Promise<void> {
+    const card = this.knowledgeDocumentCard(name)
+    await card.getByRole("button", { name: "Delete document" }).click()
+    const alert = this.page.getByRole("alertdialog")
+    await expect(alert).toBeVisible({ timeout: 5_000 })
+    await alert.getByRole("button", { name: "Delete document" }).click()
+    await expect(card).not.toBeVisible({ timeout: 10_000 })
+  }
+
+  private knowledgeDocumentCard(name: string): Locator {
+    return this.page.locator('[data-slot="card"]').filter({ hasText: name })
   }
 
   private laneRow(tag: string): Locator {
@@ -64,7 +100,14 @@ export class ProjectSettings {
 
   /** Navigate back to the project's workspace editor. */
   async backToEditor(): Promise<void> {
-    await this.page.getByRole("button", { name: /^Editor$/i }).click()
+    const editorBtn = this.page.getByRole("button", { name: /^Editor$/i })
+    if (await editorBtn.isVisible()) {
+      await editorBtn.click()
+    } else {
+      const current = new URL(this.page.url())
+      const returnTo = current.searchParams.get("return")
+      await this.page.goto(returnTo || `/project/${this.projectIdFromCurrentUrl()}/editor`)
+    }
     await this.page.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?(?:\?|$)/, { timeout: 10_000 })
   }
 

@@ -22,6 +22,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * at least REVIEWER role, and that the emerald indicator appears.
  */
 test("bob can validate alice's edit in a shared project", async ({ alice, bob }) => {
+  test.setTimeout(120_000)
   const aliceSession = await ensureAuthState("alice")
   const projectId = uuid()
   const projectName = `CrossValidate ${Date.now()}`

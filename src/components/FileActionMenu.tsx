@@ -41,10 +41,10 @@ export function FileActionMenu({
           </MenuItem>
         )}
         <MenuItem onClick={onRename}>
-          <Pencil /> Rename
+          <Pencil /> {t("fileDetails.rename")}
         </MenuItem>
         <MenuItem onClick={onMove}>
-          <FolderInput /> Move to corpus…
+          <FolderInput /> {t("fileDetails.moveToCorpus")}
         </MenuItem>
         {onAssignWork && (
           <MenuItem onClick={onAssignWork}>
@@ -58,7 +58,7 @@ export function FileActionMenu({
         )}
         {onExportSource && (
           <MenuItem onClick={onExportSource}>
-            <Download /> Export source (.SFM)
+            <Download /> {t("fileDetails.exportSource")}
           </MenuItem>
         )}
       </MenuGroup>

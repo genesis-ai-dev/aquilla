@@ -1,39 +1,45 @@
-// AQU-832 wave 3 (WS-08): FLOOR_LABEL used to duplicate the exact role
-// vocabulary now owned by `common.role.*` (src/lib/i18n/namespaces/common.ts)
-// as a second, hardcoded, English-only copy. Removed — OrgSettingsIndex.tsx
-// resolves the same labels via `resolveRoleName(t, level)` instead.
+import { ROLE } from "@/lib/frontier/roles"
+
+/** Short role labels for floor hints and compact Security-page selects. */
+export const FLOOR_LABEL: Record<number, string> = {
+  [ROLE.VIEWER]: "Viewer",
+  [ROLE.CONTRIBUTOR]: "Contributor",
+  [ROLE.PROJECT_LEAD]: "Project lead",
+  [ROLE.MAINTAINER]: "Maintainer",
+  [ROLE.OWNER]: "Owner",
+}
 
 export const ORG_SETTINGS_SECTIONS = [
   "identity",
-  "export",
-  "roster",
-  "assignment",
-  "terminology",
+  "security",
+  "billing",
   "providers",
   "monday",
 ] as const
 export type OrgSettingsSection = (typeof ORG_SETTINGS_SECTIONS)[number]
 
+/** Retired per-floor pages that now live on /settings/security. */
+export const ORG_SETTINGS_SECTION_ALIASES: Record<string, OrgSettingsSection> = {
+  export: "security",
+  roster: "security",
+  assignment: "security",
+  terminology: "security",
+}
+
 export const ORG_SETTINGS_SECTION_TITLES: Record<OrgSettingsSection, string> = {
   identity: "Identity",
-  export: "Export permissions",
-  roster: "Roster & progress visibility",
-  assignment: "Assignment authority",
-  terminology: "Terminology permissions",
+  security: "Security",
+  billing: "Billing & usage",
   providers: "AI provider keys",
   monday: "Monday.com",
 }
 
 export const ORG_SETTINGS_SECTION_DESCRIPTIONS: Record<OrgSettingsSection, string> = {
   identity: "The organization's display name, shown across the workspace.",
-  export:
-    "Minimum role required to download project deliverables — USFM export and project zip. Defaults to Maintainer.",
-  roster:
-    "Who can see the member roster and per-member progress. Both default to Maintainer.",
-  assignment:
-    "Whether members below project lead may claim work for themselves. Leads and maintainers can always assign.",
-  terminology:
-    "Minimum role required to manage a project's term base — add, edit, delete, and archive terms. Defaults to Project lead.",
+  security:
+    "Who can see members and who can export, assign, and manage terms.",
+  billing:
+    "Explore / Field / Enterprise agent credits for this organization.",
   providers:
     "Org-level keys act as a baseline for everyone in this organization. Projects or individuals can override with their own.",
   monday:

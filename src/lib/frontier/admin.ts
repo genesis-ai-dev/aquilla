@@ -274,6 +274,160 @@ export async function getAdminProjects(jwt: string): Promise<AdminProject[]> {
   return ((await res.json()) as { projects: AdminProject[] }).projects
 }
 
+export interface AdminFieldPlan {
+  name: string
+  intervalDays: number
+  priceCents: number
+  includedWords: number
+  addonWords: number
+  addonPriceCents: number
+  talkToUsWordsPerYear: number
+  stripePriceField: string | null
+  stripePriceAddon: string | null
+  wordsPerCredit: number
+  exploreCreditsPerCycle: number
+  fieldCreditsPerCycle: number
+  addonCredits: number
+  enterpriseCreditsPerLanguagePerYear: number
+}
+
+export interface AdminBillingPlans {
+  plan: AdminFieldPlan
+  version: number
+  stripeConfigured: boolean
+  note: string
+}
+
+export interface AdminBillingOrg {
+  orgId: number
+  orgName: string | null
+  plan: "none" | "explore" | "field" | "enterprise"
+  status: string
+  wordsUsed: number
+  allowanceWords: number | null
+  remainingWords: number | null
+  addonPacks: number
+  complimentaryWords: number
+  hardCapWords: number | null
+  periodStart: string | null
+  periodEnd: string | null
+  creditsUsed: number
+  allowanceCredits: number
+  remainingCredits: number
+  complimentaryCredits: number
+  includedCredits: number
+  languageCount: number
+  includedCreditsOverride: number | null
+  billedLanguageCountOverride: number | null
+  wordsPerCredit: number
+}
+
+export interface FieldPlanPatch {
+  priceCents?: number
+  addonPriceCents?: number
+  includedWords?: number
+  addonWords?: number
+  talkToUsWordsPerYear?: number
+  wordsPerCredit?: number
+  exploreCreditsPerCycle?: number
+  fieldCreditsPerCycle?: number
+  addonCredits?: number
+  enterpriseCreditsPerLanguagePerYear?: number
+  ifMatchVersion: number
+}
+
+export async function getAdminBillingPlans(jwt: string): Promise<AdminBillingPlans> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/billing/plans`, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return (await res.json()) as AdminBillingPlans
+}
+
+export async function updateAdminBillingPlans(
+  jwt: string,
+  patch: FieldPlanPatch,
+): Promise<{ plan: AdminFieldPlan; version: number; warnings: string[] }> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/billing/plans`, {
+    method: "PATCH",
+    headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return (await res.json()) as { plan: AdminFieldPlan; version: number; warnings: string[] }
+}
+
+export async function getAdminBillingOrgs(jwt: string): Promise<AdminBillingOrg[]> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/billing/orgs`, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return ((await res.json()) as { orgs: AdminBillingOrg[] }).orgs
+}
+
+export async function patchAdminBillingOrg(
+  jwt: string,
+  orgId: number,
+  patch: {
+    plan?: AdminBillingOrg["plan"]
+    complimentaryWords?: number
+    hardCapWords?: number | null
+    includedCredits?: number | null
+    billedLanguageCount?: number | null
+  },
+): Promise<void> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/billing/org/${encodeURIComponent(String(orgId))}`, {
+    method: "PATCH",
+    headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+}
+
+export async function grantAdminWords(jwt: string, orgId: number, words: number, reason: string): Promise<void> {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/admin/billing/org/${encodeURIComponent(String(orgId))}/grant-words`,
+    {
+      method: "POST",
+      headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+      body: JSON.stringify({ words, reason }),
+    },
+  )
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+}
+
+export async function resetAdminWords(jwt: string, orgId: number, reason: string): Promise<void> {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/admin/billing/org/${encodeURIComponent(String(orgId))}/reset-words`,
+    {
+      method: "POST",
+      headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    },
+  )
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+}
+
+export async function grantAdminCredits(jwt: string, orgId: number, credits: number, reason: string): Promise<void> {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/admin/billing/org/${encodeURIComponent(String(orgId))}/grant-credits`,
+    {
+      method: "POST",
+      headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+      body: JSON.stringify({ credits, reason }),
+    },
+  )
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+}
+
+export async function resetAdminCredits(jwt: string, orgId: number, reason: string): Promise<void> {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/admin/billing/org/${encodeURIComponent(String(orgId))}/reset-credits`,
+    {
+      method: "POST",
+      headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+      body: JSON.stringify({ reason }),
+    },
+  )
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+}
+
 export async function getAdminActivity(jwt: string, limit = 100): Promise<AdminActivity[]> {
   const url = `${FRONTIER_BASE}/api/v2/admin/activity?limit=${encodeURIComponent(String(limit))}`
   const res = await fetchWithTimeout(url, { headers: authHeaders(jwt) })

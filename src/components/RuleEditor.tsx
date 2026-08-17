@@ -500,7 +500,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
                 <Input
                   value={afFlags}
                   onChange={(e) => setAfFlags(e.target.value)}
-                  placeholder="gi"
+                  placeholder="gi" // i18n-exempt regex flags syntax example, not natural-language text
                   className="mt-1 font-mono text-xs"
                 />
               </div>

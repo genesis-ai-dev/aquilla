@@ -18,6 +18,41 @@ at this commit) or **JUDGMENT** (reasoned inference).
 
 ---
 
+## 0.1. Three documents, two numbering series — read this first
+
+_(Added 2026-08-13, after `origin/dev` was merged into this branch.)_
+
+There were **two independent OPSEC efforts running in parallel**, on branches that could not see
+each other. They have now met, and this repository currently holds three overlapping reviews:
+
+| Document | Series | Origin |
+|---|---|---|
+| `docs/OPSEC.md` | **V1–V9** | Authored 2026-08-06 on a separate branch; reached `dev` after this branch was cut |
+| `docs/OPSEC-REVIEW-2026-08-10.md` | **OPS-1–7** | On `dev` 08-10 |
+| `docs/OPSEC-REVIEW-2026-08-11.md` (this) | **OPS-8–11** | This branch |
+
+Neither series is wrong; they were written without knowledge of each other, and in several places
+they **independently found and independently fixed the same thing**:
+
+| V-series | OPS/SEC equivalent | Note |
+|---|---|---|
+| V2 — no HTTP security headers | **OPS-1** | Same finding, fixed twice on two branches |
+| V4 — the SPA Worker's tests never ran | **OPS-4** | Same finding, same fix |
+| V4a — GitHub Actions not producing meaningful results | OPS-4's `workflow_dispatch` note | Same root cause |
+| V5 — no credential scanning | **closes OPS-6's scanning half** | See §5.10 — this review's original recommendation was stale |
+| V6 — dependency vulnerabilities | **OPS-6 / OPS-8 / OPS-9** | V6 assessed them; OPS-6 adds the recurring gate |
+| V7 — signing keys shared prod/dev | **SEC-1** | Open in both |
+| V8 — 30-day access tokens | **SEC-2** | Open in both |
+| D1 "plaintext admin bearer" | **OPS-2** | Closed in code by this change |
+
+**Consolidation is deliberately not attempted here.** Rewriting someone else's review to fit this
+one's numbering is an editorial call for a maintainer, not something to do unattended in a
+security change — and picking the wrong survivor would lose findings (V1, V3 and V9 have no
+OPS-series equivalent at all). The two series should be merged into one standing document with one
+status table; until that happens, **`docs/OPSEC.md` §3 and this document's §6 must both be checked**
+before concluding that something is open or closed. That duplication is itself the argument for
+doing the merge soon.
+
 ## 0. A note on running this review again
 
 This is the second OPSEC pass in two days, which is faster than the 08-10 document's own stated
@@ -211,9 +246,18 @@ keys), OPS-3 (consent copy), SEC-9**.
    is the actual goal.
 9. **SEC-1 — split `SECRET_KEY`/`SYNC_SECRET_KEY` per environment.** Still the single
    highest-leverage change in the system, and still open since June.
-10. **OPS-6 settings half — enable GitHub secret scanning + push protection.** The new workflow
-    covers dependency advisories; it does not scan diffs for credentials. One-time repository
-    setting, and the only part of OPS-6 that code in this repo cannot close.
+10. **OPS-6 credential-scanning half — ~~enable GitHub secret scanning + push protection~~
+    already done on `dev`, as V5.** _(Revised 2026-08-13 — see §0.1.)_ This originally read
+    "the only part of OPS-6 that code in this repo cannot close." That was wrong at the time of
+    writing and is wrong now: `scripts/secret-scan.ts` (`pnpm scan:secrets`) landed on the 08-06
+    branch and runs in `scripts/cloudflare-ci-checks.mjs` — the lane that actually gates pull
+    requests — as well as in the `ci.yml` fallback. Verified passing on this branch.
+
+    What remains is genuinely a repository setting and still worth doing, because the two catch
+    different things: the local scanner sees only what reaches a commit in this repo, while
+    **GitHub push protection** blocks a credential at push time across every branch and fork, and
+    **secret scanning** retroactively finds one already in history. Enable both; do not treat V5
+    as making them redundant.
 11. **OPS-3 remainder — make the replay trade-off explicit in the consent copy.** Masking is
     defence in depth; the consent text still says "analytics" while the asset at stake is
     unpublished translation content. For any org self-identifying as working in a restricted
@@ -248,7 +292,7 @@ Re-verified against the tree at this commit, not assumed.
 | OPS-3 — session replay records draft translations | **Half closed (was: open)** | Masking landed with a drift guard (§5.7). The consent-copy half is still open — §5.11. |
 | OPS-4 — worker suite no CI lane ran | **Holds** | `pnpm test:worker` still present in `scripts/cloudflare-ci-checks.mjs:34` (the lane Cloudflare Workers Builds actually runs) and mirrored in `ci.yml:108`. |
 | OPS-5 — misleading dev-seed comment | **Holds** | Corrected comment still in place. |
-| OPS-6 — no dependency/secret scanning | **Closed for dependencies** | `scripts/audit-deps.mjs` + weekly workflow; gate currently green at 0 new / 8 accepted. Secret scanning is a repo setting — §5.10. |
+| OPS-6 — no dependency/secret scanning | **Closed, both halves** | Dependencies: `scripts/audit-deps.mjs` + weekly workflow; green at 0 new / 8 accepted. Credentials: `scripts/secret-scan.ts` (V5) runs in the gating lane — verified passing here. GitHub push protection is still worth enabling and catches a different case — §5.10. |
 | OPS-7 — assets bypass the Worker, headers reached one URL | **Holds** | `public/_headers` present; `worker/security-headers.test.ts` still enforces parity with `security-headers.ts`. Not re-measured against the live deployment this pass — worth a `curl` on the next one (§0). |
 | SEC-1 — shared signing keys across environments | **Open** | Unchanged. Highest-leverage item outstanding. |
 | SEC-2 — 30-day tokens, no revocation | **Substantially fixed** | Unchanged from 08-10. |

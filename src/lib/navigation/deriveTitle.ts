@@ -20,7 +20,7 @@
  * "Editor"`) and isn't in scope to migrate here; `useNavHistoryTitle` callers
  * should prefer `deriveNavTitleKey` + `useT()` for real localization.
  */
-import { ORG_SETTINGS_SECTION_TITLES, type OrgSettingsSection } from "@/pages/settings/constants"
+import { ORG_SETTINGS_SECTION_ALIASES, ORG_SETTINGS_SECTION_TITLES, type OrgSettingsSection } from "@/pages/settings/constants"
 import { parseOrgPath, ALL_ORGS_PARAM } from "@/lib/navigation/org-paths"
 import { translate } from "@/lib/i18n/translate"
 import type { MessageKey } from "@/lib/i18n/messages/en"
@@ -69,10 +69,12 @@ export function deriveNavTitleKey(pathname: string): NavTitle {
         return key("editor.navTitle.assignedToMe")
       case "settings": {
         if (parts.length === 1) return key("editor.navTitle.organizationSettings")
-        // These titles come from a separate, still-unkeyed English source
-        // (src/pages/settings/constants.ts) outside this module's scope —
-        // passed through as raw text rather than mis-keyed here.
-        const sectionTitle = ORG_SETTINGS_SECTION_TITLES[parts[1] as OrgSettingsSection]
+        if (parts[1] === "knowledge") return key("knowledgeBase.title")
+        // Retired per-floor slugs (`export`, `roster`, …) alias onto
+        // `/settings/security`. Titles still come from a separate, unkeyed
+        // English source (src/pages/settings/constants.ts).
+        const slug = ORG_SETTINGS_SECTION_ALIASES[parts[1]] ?? parts[1]
+        const sectionTitle = ORG_SETTINGS_SECTION_TITLES[slug as OrgSettingsSection]
         return sectionTitle ? raw(sectionTitle) : key("nav.settings")
       }
       case "members":

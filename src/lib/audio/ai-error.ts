@@ -9,6 +9,16 @@
 // plain-language and leave the verbatim message to the "Technical detail"
 // disclosure — a raw provider payload (an OpenRouter 413 JSON blob, say) is
 // never the primary message.
+//
+// `title` is translated via `t()` from src/lib/i18n/standalone.ts (this
+// module has no React tree to call the useT() hook from, and each `title` is
+// a fresh value computed per call, not frozen module-scope data — see that
+// module's header). The `m.includes(...)` pattern matching below stays keyed
+// against ENGLISH substrings deliberately: `rawMessage` is diagnostic text
+// produced elsewhere in the app and by upstream providers, most of which is
+// never itself translated, so the matches must not be run through `t()`.
+
+import { t } from "@/lib/i18n/standalone"
 
 export type ErrorCategory =
   | "missing-gemini-key"
@@ -64,7 +74,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   ) {
     return {
       category: "daily-quota-exceeded",
-      title: "Daily AI limit reached",
+      title: t("audio.aiError.dailyLimitTitle"),
       body: "Daily AI limit reached — resets at midnight UTC. Try again tomorrow, or switch this project to a custom AI provider.",
       raw,
     }
@@ -73,7 +83,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   if (m.includes("model_not_allowed") || m.includes("not available on this platform")) {
     return {
       category: "model-not-allowed",
-      title: "Model not available",
+      title: t("audio.aiError.modelNotAvailableTitle"),
       body: raw,
       raw,
     }
@@ -93,7 +103,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   ) {
     return {
       category: "request-too-large",
-      title: "Too much text for this model",
+      title: t("audio.aiError.tooLargeTitle"),
       body: "This request was larger than the selected model can handle. Draft fewer cells at once, lower the number of examples in AI settings, or pick a model with a larger context window.",
       raw,
     }
@@ -103,30 +113,35 @@ export function categorizeAiError(rawMessage: string): ActionableError {
       m.includes("gemini") && m.includes("key")) {
     return {
       category: "missing-gemini-key",
-      title: "Gemini API key required",
+      title: t("audio.aiError.geminiKeyRequiredTitle"),
       body: "Add your Gemini API key to use Gemini voices, or switch this project to a local TTS provider (Kokoro or MMS).",
       raw,
     }
   }
   if (m.includes("sign in") || m.includes("not authenticated") || m.includes("unauthenticated")) {
-    return { category: "sign-in-required", title: "Sign in required", body: raw, raw }
+    return { category: "sign-in-required", title: t("audio.aiError.signInRequiredTitle"), body: raw, raw }
   }
   if (m.includes("git project")) {
-    return { category: "git-project-unsupported", title: "Not yet supported on git projects", body: raw, raw }
+    return {
+      category: "git-project-unsupported",
+      title: t("audio.aiError.gitProjectUnsupportedTitle"),
+      body: raw,
+      raw,
+    }
   }
   if (m.includes("no source text") || m.includes("no text to synthesize")) {
-    return { category: "no-source-text", title: "Nothing to read aloud", body: raw, raw }
+    return { category: "no-source-text", title: t("audio.aiError.nothingToReadTitle"), body: raw, raw }
   }
   if (m.includes("translation isn't configured") || m.includes("translation is not configured")) {
     return {
       category: "translation-not-configured",
-      title: "Translation not configured",
+      title: t("audio.aiError.translationNotConfiguredTitle"),
       body: "Set up a completion provider for this project before generating voice on untranslated cells.",
       raw,
     }
   }
   if (m.startsWith("translation failed") || m.includes("translation failed:") || m.includes("translation produced no text")) {
-    return { category: "translation-failed", title: "Translation failed", body: raw, raw }
+    return { category: "translation-failed", title: t("audio.aiError.translationFailedTitle"), body: raw, raw }
   }
   if (
     m.includes("network") ||
@@ -137,7 +152,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   ) {
     return {
       category: "network",
-      title: "Network error",
+      title: t("audio.aiError.networkTitle"),
       body: "Check your connection and try again. Local voices keep working offline once their model is downloaded.",
       raw,
     }
@@ -146,7 +161,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
       m.includes("transformers")) {
     return {
       category: "model-load-failed",
-      title: "Couldn't load model",
+      title: t("audio.aiError.modelLoadFailedTitle"),
       body: raw,
       raw,
     }
@@ -154,7 +169,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   if (m.includes("decode") || m.includes("audio format") || m.includes("unsupported audio")) {
     return {
       category: "audio-format-unsupported",
-      title: "Audio format not supported",
+      title: t("audio.aiError.audioFormatUnsupportedTitle"),
       body: "Try uploading a .wav, .mp3, or .ogg file.",
       raw,
     }
@@ -162,7 +177,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   if (m.includes("timed out") || m.includes("timeout")) {
     return {
       category: "timed-out",
-      title: "The request timed out",
+      title: t("audio.aiError.timedOutTitle"),
       body: "The AI provider took too long to respond. Try again — if it keeps happening, send a smaller request or switch models.",
       raw,
     }
@@ -171,7 +186,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   if (status === 429 || m.includes("rate limit") || m.includes("too many requests")) {
     return {
       category: "rate-limited",
-      title: "Too many requests right now",
+      title: t("audio.aiError.rateLimitedTitle"),
       body: "The AI provider is rate-limiting requests. Wait a moment and try again.",
       raw,
     }
@@ -179,7 +194,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   if (status !== null && status >= 500) {
     return {
       category: "provider-unavailable",
-      title: "The AI service is unavailable",
+      title: t("audio.aiError.providerUnavailableTitle"),
       body: "The AI provider returned a server error. This is usually temporary — try again in a moment.",
       raw,
     }
@@ -187,7 +202,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   if (status !== null && status >= 400) {
     return {
       category: "provider-rejected",
-      title: "The AI provider rejected this request",
+      title: t("audio.aiError.providerRejectedTitle"),
       body: "The request didn't reach a model. Open the technical detail below and copy it to support if this keeps happening.",
       raw,
     }
@@ -199,12 +214,12 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   if (!raw || looksLikeMachineDump(raw)) {
     return {
       category: "unknown",
-      title: "Something went wrong",
+      title: t("audio.aiError.unknownTitle"),
       body: "The AI request didn't finish. Open the technical detail below and copy it to support if this keeps happening.",
       raw,
     }
   }
-  return { category: "unknown", title: "Something went wrong", body: raw, raw }
+  return { category: "unknown", title: t("audio.aiError.unknownTitle"), body: raw, raw }
 }
 
 /** Heuristic: does this read as a payload/stack rather than a sentence we'd

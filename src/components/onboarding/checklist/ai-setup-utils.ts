@@ -3,6 +3,7 @@
 // logic is unit-testable without rendering.
 
 import type { ModelPrefetchStatus } from "@/lib/audio/prefetch"
+import type { TFunction } from "@/lib/i18n/I18nProvider"
 
 /**
  * Format a byte count as megabytes for a download read-out. Uses one decimal
@@ -37,17 +38,36 @@ export interface DownloadReadout {
  * Turn a raw `downloading` status into a size-and-progress read-out for the UI.
  * `fallbackSizeMb` is the model's advertised size, shown when the CDN omits a
  * Content-Length (so the user still sees *what* and *how big*, not a stalled bar).
+ *
+ * `t` is injected rather than imported: this module lives under
+ * `src/components/**`, not `src/lib/**`, so it isn't the sanctioned home for
+ * `standalone.ts`'s module-scope `t()` — the caller (a component with
+ * `useT()`) passes its translator function through instead.
  */
 export function describeModelDownload(
   status: Extract<ModelPrefetchStatus, { kind: "downloading" }>,
   fallbackSizeMb: number,
+  t: TFunction,
 ): DownloadReadout {
   if (status.total > 0) {
     const pct = Math.min(100, Math.max(0, Math.round((status.loaded / status.total) * 100)))
-    return { pct, label: `${pct}% · ${formatMb(status.loaded)} / ${formatMb(status.total)}` }
+    return {
+      pct,
+      label: t("onboarding.checklist.aiModels.downloadProgress", {
+        pct,
+        loaded: formatMb(status.loaded),
+        total: formatMb(status.total),
+      }),
+    }
   }
   if (status.loaded > 0) {
-    return { pct: null, label: `${formatMb(status.loaded)} of ~${fallbackSizeMb} MB` }
+    return {
+      pct: null,
+      label: t("onboarding.checklist.aiModels.downloadPartial", {
+        loaded: formatMb(status.loaded),
+        size: fallbackSizeMb,
+      }),
+    }
   }
-  return { pct: null, label: `Starting download… (~${fallbackSizeMb} MB)` }
+  return { pct: null, label: t("onboarding.checklist.aiModels.downloadStarting", { size: fallbackSizeMb }) }
 }

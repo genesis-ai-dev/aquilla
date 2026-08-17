@@ -303,6 +303,90 @@ export const terminology = defineNamespace({
     "terminology.store.mergeMinConcepts": "mergeConcepts requires at least 2 concept ids.",
     "terminology.store.survivorNotInMergeIds": "survivorId must be one of the mergeIds.",
     "terminology.store.conceptNotFound": "Concept {id} not found.",
+
+    // ── Shared field labels reused across TerminologyPage.tsx's own dialogs ──
+    "terminology.common.notesLabel": "Notes",
+    "terminology.common.statusLabel": "Status",
+
+    // ── AddConceptDialog.tsx ("Add to term base" confirm dialog) ────────────
+    "terminology.addConcept.title": "Add to term base",
+    "terminology.addConcept.description":
+      "Creates a draft concept with this source term. Add renderings and " +
+      "activate it from the Terminology page.",
+    "terminology.addConcept.sourceTermPlaceholder": "Source term…",
+    "terminology.addConcept.sourceTermAriaLabel": "Source term for new concept",
+    "terminology.addConcept.createDraftAriaLabel": "Create draft concept",
+
+    // ── RenameSuggestionsDialog.tsx (bulk file/corpus rename suggestions) ───
+    "terminology.renameSuggestions.title": "Review suggested names",
+    "terminology.renameSuggestions.corpusChange": "Corpus: {current} → {suggested}",
+    "terminology.renameSuggestions.applyButton": plural({
+      one: "Apply {count} change",
+      other: "Apply {count} changes",
+    }),
+
+    // ── TerminologyPage.tsx: ConceptDialog (add/edit concept form) ──────────
+    "terminology.conceptDialog.renderingPlaceholder": "rendering",
+    "terminology.conceptDialog.targetRenderingsLabel": "Target renderings",
+
+    // ── TerminologyPage.tsx: ConceptRow (main concepts table row) ───────────
+    "terminology.page.editConceptAria": "Edit concept {term}",
+    "terminology.page.deleteConceptAria": "Delete concept {term}",
+
+    // ── TerminologyPage.tsx: tab strip (counted variants of the tab labels
+    // below reuse terminology.page.conceptsHeading / reviewQueueHeading /
+    // candidateTermsHeading / terminology.violations.title for the bare and
+    // "Concepts (N)" forms — these two are only for the "N pending" forms
+    // those keys don't cover) ────────────────────────────────────────────
+    "terminology.page.reviewQueueCountLabel": "Review queue ({count})",
+    "terminology.page.candidateTermsCountLabel": "Candidate terms ({count})",
+
+    // ── TerminologyPage.tsx: TermbaseImportDialog ────────────────────────────
+    "terminology.importDialog.title": "Import term base",
+    "terminology.importDialog.parsing": "Parsing…",
+    "terminology.importDialog.dropZoneText": "Drop a .{format} file here, or",
+    "terminology.importDialog.chooseFileButton": "Choose {format} file",
+    "terminology.importDialog.csvColumnsHint":
+      "Columns: source_lemma · target_lemma · target_status · definition (optional)",
+    "terminology.importDialog.tbxDialectsHint": "TBX-Basic and TBX-Min dialects supported",
+
+    // ── TerminologyPage.tsx: LibraryStatsHeader ──────────────────────────────
+    "terminology.libraryStats.heading": "Library Overview",
+    "terminology.libraryStats.noActiveConcepts": "(no active concepts)",
+    "terminology.libraryStats.activeConceptsLabel": "Active concepts",
+    "terminology.libraryStats.enforcedLabel": "Enforced",
+    "terminology.libraryStats.infringedLabel": "Infringed",
+    "terminology.libraryStats.cellsAnalyzedLabel": "Cells analyzed",
+    "terminology.libraryStats.mostInfringedLabel": "Most infringed",
+
+    // ── TerminologyPage.tsx: candidate-terms tab intro paragraph ────────────
+    "terminology.candidates.minedFromSummary": plural({
+      one:
+        "Mined from {count} source/WIP cell text{note}. Mining runs off the main " +
+        "thread. Keyness (G²) uses a derived rest-of-corpus baseline. Promoting " +
+        "adds a suggested concept you can then give renderings.",
+      other:
+        "Mined from {count} source/WIP cell texts{note}. Mining runs off the main " +
+        "thread. Keyness (G²) uses a derived rest-of-corpus baseline. Promoting " +
+        "adds a suggested concept you can then give renderings.",
+    }),
+    "terminology.candidates.corpusScopeFull": " — the full loaded project",
+    "terminology.candidates.corpusScopeCapped":
+      " (capped at the first {ceiling} of {total} loaded cells — corpus exceeds the safety ceiling)",
+    "terminology.candidates.miningLabel": "Mining candidate terms…",
+
+    // ── TerminologyPage.tsx: main page chrome ────────────────────────────────
+    "terminology.loadingLabel": "Loading terminology",
+    "terminology.page.addConceptButton": "Add concept",
+    "terminology.page.mergeDuplicatesButton": "Merge duplicates",
+    "terminology.page.reviewQueueHeading": "Review queue",
+    "terminology.page.candidateTermsHeading": "Candidate terms",
+    "terminology.page.conceptsHeading": "Concepts ({count})",
+    "terminology.page.noConceptsTitle": "No concepts yet.",
+    "terminology.page.noConceptsDescription": "Add a concept manually or import a CSV / TBX file.",
+    "terminology.page.addFirstConceptButton": "Add first concept",
+    "terminology.page.renderingsColumnHeader": "Renderings",
+    "terminology.page.deleteConceptDialogTitle": "Delete concept",
   },
   context: {
     _context: {
@@ -565,6 +649,268 @@ export const terminology = defineNamespace({
           "exists — an invariant guard, not an expected user-facing flow; {id} is the " +
           "missing concept's own id (not translated).",
         placeholders: { id: "The missing concept's own id, verbatim (not translated)." },
+      },
+      "terminology.common.notesLabel": {
+        description:
+          "Field label for the free-text notes field on a concept — used both as the " +
+          "'Add/edit concept' dialog's field label and as the concepts table's column " +
+          "heading. 'Notes' here means translator-facing usage guidance for the term, " +
+          "not code comments.",
+      },
+      "terminology.common.statusLabel": {
+        description:
+          "Field label for a concept's review status (draft/active/deprecated) — used " +
+          "both as the 'Add/edit concept' dialog's select label and as the concepts " +
+          "table's column heading. Terminology status, not a system/network status.",
+      },
+      "terminology.addConcept.title": {
+        description:
+          "Title of the confirm dialog shown when the user selects source text and " +
+          "chooses 'Add to term base' — creates a draft concept from the selection. " +
+          "'Term base' is this project's terminology/glossary store.",
+      },
+      "terminology.addConcept.description": {
+        description:
+          "Body text under the 'Add to term base' dialog title, explaining what " +
+          "confirming will do: create a draft concept the user can flesh out later on " +
+          "the Terminology page.",
+      },
+      "terminology.addConcept.sourceTermPlaceholder": {
+        description:
+          "Placeholder text in the empty source-term input of the 'Add to term base' " +
+          "dialog, before the user has typed or the selection has pre-filled it.",
+      },
+      "terminology.addConcept.sourceTermAriaLabel": {
+        description:
+          "Accessible name for the source-term input in the 'Add to term base' dialog. " +
+          "The field also has a visible label (terminology.common's 'Source term' — see " +
+          "terminology.editor.sourceTermLabel), but this aria-label is the value " +
+          "react-aria/the input actually announces, so it must independently read as a " +
+          "complete description of the field.",
+      },
+      "terminology.addConcept.createDraftAriaLabel": {
+        description:
+          "Accessible name for the primary submit button in the 'Add to term base' " +
+          "dialog. The button's visible text toggles to a busy 'Saving…' label while " +
+          "the request is in flight; this accessible name states what the button DOES " +
+          "regardless of that transient visible state.",
+      },
+      "terminology.renameSuggestions.title": {
+        description:
+          "Dialog title for reviewing a batch of AI-suggested file renames (and, where " +
+          "applicable, corpus reassignments) detected from file content.",
+      },
+      "terminology.renameSuggestions.corpusChange": {
+        description:
+          "Small caption under a rename suggestion, shown only when the suggestion also " +
+          "moves the file to a different corpus grouping. 'Corpus' here is a file-" +
+          "labeling/grouping term (a named collection of files), not a linguistics " +
+          "corpus.",
+        placeholders: {
+          current: "The file's current corpus name, or an em dash placeholder if unset — not translated.",
+          suggested: "The suggested new corpus name — not translated.",
+        },
+      },
+      "terminology.renameSuggestions.applyButton": {
+        description:
+          "Primary button applying the checked rename suggestions; {count} is how many " +
+          "are currently checked.",
+        placeholders: { count: "Number of rename suggestions currently checked." },
+      },
+      "terminology.conceptDialog.renderingPlaceholder": {
+        description:
+          "Placeholder text in an empty rendering-text input, inside the add/edit " +
+          "concept dialog's list of target renderings. A generic noun naming what goes " +
+          "in the field, not an example value.",
+      },
+      "terminology.conceptDialog.targetRenderingsLabel": {
+        description:
+          "Field label over the list of target-language renderings in the add/edit " +
+          "concept dialog — each rendering is one approved/alternate/forbidden " +
+          "translation of the source term.",
+      },
+      "terminology.page.editConceptAria": {
+        description:
+          "Accessible name for the pencil button opening the edit-concept dialog on a " +
+          "concepts-table row; {term} is the concept's own source headword (not translated).",
+        placeholders: { term: "The concept's source headword, verbatim (not translated)." },
+      },
+      "terminology.page.deleteConceptAria": {
+        description:
+          "Accessible name for the trash button opening the delete-concept confirm dialog " +
+          "on a concepts-table row; {term} is the concept's own source headword (not translated).",
+        placeholders: { term: "The concept's source headword, verbatim (not translated)." },
+      },
+      "terminology.page.reviewQueueCountLabel": {
+        description:
+          "Tab-strip button label for the review-queue tab once it has at least one draft " +
+          "concept awaiting review; falls back to the bare terminology.page.reviewQueueHeading " +
+          "text when the count is zero.",
+        placeholders: { count: "Number of draft concepts awaiting review." },
+      },
+      "terminology.page.candidateTermsCountLabel": {
+        description:
+          "Tab-strip button label for the candidate-terms tab once mining has produced " +
+          "results; falls back to the bare terminology.page.candidateTermsHeading text " +
+          "before mining has run.",
+        placeholders: { count: "Number of mined candidate terms." },
+      },
+      "terminology.importDialog.title": {
+        description:
+          "Title of the dialog for bulk-importing terms into the project's term base " +
+          "from a CSV or TBX file.",
+      },
+      "terminology.importDialog.parsing": {
+        description: "Transient status shown in the import dialog's drop zone while the dropped file is being parsed.",
+      },
+      "terminology.importDialog.dropZoneText": {
+        description:
+          "Instruction in the import dialog's drop zone, naming the currently-selected " +
+          "file format tab's extension. Continues into a 'Choose {format} file' button " +
+          "immediately after it, so keep this able to lead into a button label.",
+        placeholders: {
+          format: "The active tab's file extension without the dot, lowercase (e.g. 'csv', 'tbx').",
+        },
+      },
+      "terminology.importDialog.chooseFileButton": {
+        description: "Button opening the native file picker, naming the expected format.",
+        placeholders: {
+          format: "The active tab's file extension, uppercase (e.g. 'CSV', 'TBX').",
+        },
+      },
+      "terminology.importDialog.csvColumnsHint": {
+        description:
+          "Small caption under the CSV import tab's drop zone, listing the expected " +
+          "column names. The column names themselves (source_lemma, target_lemma, " +
+          "target_status, definition) are the CSV format's own field identifiers — keep " +
+          "them verbatim, do not translate them, only the surrounding words.",
+      },
+      "terminology.importDialog.tbxDialectsHint": {
+        description:
+          "Small caption under the TBX import tab's drop zone. 'TBX-Basic' and " +
+          "'TBX-Min' are the names of specific TermBase eXchange format dialects — " +
+          "proper names, keep verbatim.",
+      },
+      "terminology.libraryStats.heading": {
+        description: "Small heading over the Terminology page's summary stats panel.",
+      },
+      "terminology.libraryStats.noActiveConcepts": {
+        description:
+          "Parenthetical qualifier shown beside the stats panel heading when the " +
+          "project has zero active concepts yet, so the stats below all read as " +
+          "placeholders.",
+      },
+      "terminology.libraryStats.activeConceptsLabel": {
+        description: "Stat-tile label above the count of active (non-draft, non-deprecated) concepts.",
+      },
+      "terminology.libraryStats.enforcedLabel": {
+        description:
+          "Stat-tile label above the percentage of scanned occurrences using an " +
+          "approved rendering. Distinct from terminology.termDetail.verdictEnforced " +
+          "(a lowercase inline verdict word on one occurrence) — this is a stat-tile " +
+          "heading and may need different capitalization/register in the target " +
+          "language.",
+      },
+      "terminology.libraryStats.infringedLabel": {
+        description:
+          "Stat-tile label above the percentage of scanned occurrences that violate a " +
+          "concept's approved/forbidden renderings. Distinct from " +
+          "terminology.termDetail.verdictInfringed for the same reason as the Enforced " +
+          "label above.",
+      },
+      "terminology.libraryStats.cellsAnalyzedLabel": {
+        description: "Stat-tile label above the total count of cells the terminology scan covered.",
+      },
+      "terminology.libraryStats.mostInfringedLabel": {
+        description: "Small heading over the list of the concepts with the most violations, shown when any exist.",
+      },
+      "terminology.candidates.minedFromSummary": {
+        description:
+          "Intro paragraph above the candidate-terms tab's ranked list, stating how " +
+          "many cells the term-mining pass covered and how it works. {note} is a whole " +
+          "already-localized trailing clause (see terminology.candidates.corpusScopeFull " +
+          "/ corpusScopeCapped) — insert it exactly where the placeholder sits, it " +
+          "already carries its own leading space/punctuation. Plural category is chosen " +
+          "by {count}.",
+        placeholders: {
+          count: "Number of cells the mining pass covered; also selects the plural form.",
+          note:
+            "Already-localized trailing clause naming the scan's scope — either " +
+            "terminology.candidates.corpusScopeFull or ...corpusScopeCapped, verbatim " +
+            "including its own leading space.",
+        },
+      },
+      "terminology.candidates.corpusScopeFull": {
+        description:
+          "Trailing clause appended into terminology.candidates.minedFromSummary when " +
+          "the mining pass covered the whole loaded project (not capped). Keep the " +
+          "leading space — it is the only separator between this clause and the word " +
+          "it follows.",
+      },
+      "terminology.candidates.corpusScopeCapped": {
+        description:
+          "Trailing clause appended into terminology.candidates.minedFromSummary when " +
+          "the loaded corpus exceeded the mining safety ceiling and was truncated. Keep " +
+          "the leading space — it is the only separator between this clause and the " +
+          "word it follows.",
+        placeholders: {
+          ceiling: "The fixed safety-ceiling cell count the scan capped at.",
+          total: "The total number of loaded cells before capping.",
+        },
+      },
+      "terminology.candidates.miningLabel": {
+        description: "Transient status shown while the candidate-term mining pass is running off the main thread.",
+      },
+      "terminology.loadingLabel": {
+        description:
+          "Loading-panel label shown while the Terminology surface's initial data " +
+          "is still loading. Rendered from two places for the same surface — the " +
+          "Terminology page itself and the workspace shell's Suspense fallback — " +
+          "so it is worded without naming either container.",
+      },
+      "terminology.page.addConceptButton": {
+        description: "Header button opening the add-concept dialog.",
+      },
+      "terminology.page.mergeDuplicatesButton": {
+        description:
+          "Button opening the merge-duplicate-concepts dialog, shown only once the " +
+          "project has 2+ concepts. Visible text; distinct from the same button's " +
+          "accessible name (terminology.mergeDialog.title, reused here since identical).",
+      },
+      "terminology.page.reviewQueueHeading": {
+        description:
+          "Card heading over the review-queue tab's content (draft concepts awaiting " +
+          "approval); also the tab-strip button's own label when there are zero pending " +
+          "concepts (see terminology.page.reviewQueueCountLabel for the counted form).",
+      },
+      "terminology.page.candidateTermsHeading": {
+        description:
+          "Card heading over the candidate-terms tab's content (mined term suggestions); " +
+          "also the tab-strip button's own label before mining has produced results (see " +
+          "terminology.page.candidateTermsCountLabel for the counted form).",
+      },
+      "terminology.page.conceptsHeading": {
+        description:
+          "Card heading over the main concepts list/table, with the total concept count; " +
+          "also reused verbatim as the tab-strip button's own label for the same tab.",
+        placeholders: { count: "Total number of concepts in the project's term base." },
+      },
+      "terminology.page.noConceptsTitle": {
+        description: "Empty-state title shown when the project's term base has no concepts yet.",
+      },
+      "terminology.page.noConceptsDescription": {
+        description: "Empty-state body text under terminology.page.noConceptsTitle, suggesting how to add the first concept.",
+      },
+      "terminology.page.addFirstConceptButton": {
+        description: "Empty-state call-to-action button opening the add-concept dialog.",
+      },
+      "terminology.page.renderingsColumnHeader": {
+        description: "Column heading over the renderings column in the concepts table.",
+      },
+      "terminology.page.deleteConceptDialogTitle": {
+        description:
+          "Title of the checkbox-confirm dialog shown before permanently deleting a " +
+          "concept and all its renderings.",
       },
     },
   },

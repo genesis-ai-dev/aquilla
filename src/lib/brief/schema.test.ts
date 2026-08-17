@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest"
+import { en } from "@/lib/i18n/messages/en"
 import { BRIEF_FIELDS, L1_MAX_CHARS } from "./schema"
 
 describe("BRIEF_FIELDS", () => {
@@ -20,10 +21,10 @@ describe("BRIEF_FIELDS", () => {
     expect(byId.qualityBar).toBe("standards")
   })
 
-  it("gives every field a non-empty label and helperText (the interview needs both)", () => {
+  it("gives every field a labelKey/helperTextKey resolving to non-empty English (the interview needs both)", () => {
     for (const f of BRIEF_FIELDS) {
-      expect(f.label.trim().length).toBeGreaterThan(0)
-      expect(f.helperText.trim().length).toBeGreaterThan(0)
+      expect(String(en[f.labelKey]).trim().length).toBeGreaterThan(0)
+      expect(String(en[f.helperTextKey]).trim().length).toBeGreaterThan(0)
     }
   })
 

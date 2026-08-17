@@ -124,7 +124,7 @@ export function ValidationSettingsSection({
               value={validationCount}
               onChange={(e) => onChange({ validationCount: clamp(e.target.value) })}
               className="w-24 bg-background"
-              aria-label="Required validators (text)"
+              aria-label={t("projectSettings.validation.requiredTextLabel")}
             />
           </DisabledFieldTooltip>
         }
@@ -150,7 +150,7 @@ export function ValidationSettingsSection({
               value={validationCountAudio}
               onChange={(e) => onChange({ validationCountAudio: clamp(e.target.value) })}
               className="w-24 bg-background"
-              aria-label="Required validators (audio)"
+              aria-label={t("projectSettings.validation.requiredAudioLabel")}
             />
           </DisabledFieldTooltip>
         }
@@ -173,7 +173,7 @@ export function ValidationSettingsSection({
               <SelectTrigger
                 id="validation-role-floor"
                 className="w-48 bg-background"
-                aria-label="Minimum validator role"
+                aria-label={t("projectSettings.validation.minRoleLabel")}
               >
                 <SelectValue />
               </SelectTrigger>
@@ -200,7 +200,7 @@ export function ValidationSettingsSection({
               disabled={disabled}
               checked={allowSelfValidation}
               onCheckedChange={(checked) => onChange({ allowSelfValidation: checked })}
-              aria-label="Allow self-validation"
+              aria-label={t("projectSettings.validation.allowSelfLabel")}
             />
           </DisabledFieldTooltip>
         }
@@ -221,7 +221,7 @@ export function ValidationSettingsSection({
             value={validationNamedUsers}
             disabled={disabled}
             placeholder={t("projectSettings.validation.namedValidatorsPlaceholder")}
-            aria-label="Named validators"
+            aria-label={t("projectSettings.validation.namedValidatorsLabel")}
             onValueChange={(next) => onChange({ validationNamedUsers: next })}
           />
         </DisabledFieldTooltip>

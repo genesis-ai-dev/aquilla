@@ -35,6 +35,21 @@ export interface MilestonePlanOptions {
  * document structure, timeline buckets, and finally deterministic 50-cell
  * parts. The result is positional (one entry per unit) so callers cannot
  * accidentally leave a content cell unassigned.
+ *
+ * i18n-exempt persisted wire-format content — every `label`/`shortLabel`
+ * this function (and its helpers below) builds is written into
+ * `NormalizedImportUnit.milestone`, which `normalized-manifest.ts` attaches
+ * to each unit and `import.ts` persists into cell metadata at import time
+ * (the `aquillaImport` envelope) — see `readImportMilestone` in
+ * `src/lib/milestone-navigation.ts`. A label baked in here is fixed in
+ * stored data forever, in whatever locale happened to be active at import;
+ * resolving it via `t()` would only translate that one import moment, not
+ * the label a translator sees months later. `milestone-navigation.ts`'s own
+ * doc comment investigated exactly this (its read-time vocabulary words
+ * route through `translate(undefined, key, …)`, always English) and
+ * concluded that fully localizing this half requires an
+ * `ImportMilestone` wire-format change plus a `ChapterNavigator.tsx` update
+ * — both explicitly out of scope there, and out of scope here too.
  */
 export function planImportMilestones(
   units: readonly MilestonePlanUnit[],
@@ -77,7 +92,7 @@ export function planImportMilestones(
     return worksheetMilestones(units, options.fileName)
   }
 
-  if (options.fileType === "md" || options.fileType === "docx" || options.fileType === "html") {
+  if (options.fileType === "md" || options.fileType === "docx" || options.fileType === "html" || options.fileType === "epub") {
     const milestones = headingMilestones(units)
     if (milestones) return milestones
   }
@@ -171,7 +186,7 @@ function scriptureMilestones(
       return {
         key: `story:OBS:${address.chapter}`,
         kind: "story",
-        label: `Story ${address.chapter}`,
+        label: `Story ${address.chapter}`, // i18n-exempt persisted wire-format content, see file header
         shortLabel: String(address.chapter),
       }
     }
@@ -213,7 +228,7 @@ function headingMilestones(
   let current: ImportMilestone = {
     key: "section:start",
     kind: "section",
-    label: "Start",
+    label: "Start", // i18n-exempt persisted wire-format content, see file header
     shortLabel: "S",
   }
   return units.map((unit) => {
@@ -315,7 +330,7 @@ function idmlStoryMilestones(
     return {
       key: `story:${story}`,
       kind: "story",
-      label: `Story ${ordinal}`,
+      label: `Story ${ordinal}`, // i18n-exempt persisted wire-format content, see file header
       shortLabel: String(ordinal),
     }
   })
@@ -422,7 +437,7 @@ function timelineMilestones(units: readonly MilestonePlanUnit[]): ImportMileston
       return {
         key: "time:untimed",
         kind: "time-range",
-        label: "Untimed",
+        label: "Untimed", // i18n-exempt persisted wire-format content, see file header
         shortLabel: "—",
       }
     }
@@ -444,7 +459,7 @@ function fallbackMilestones(units: readonly MilestonePlanUnit[]): ImportMileston
     const milestone: ImportMilestone = {
       key: `part:${units[index]?.unitKey ?? part}`,
       kind: "part",
-      label: `Part ${part}`,
+      label: `Part ${part}`, // i18n-exempt persisted wire-format content, see file header
       shortLabel: String(part),
     }
     for (

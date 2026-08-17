@@ -52,7 +52,7 @@ describe("ProposalReceipt", () => {
       />,
     )
     expect(screen.queryByRole("button", { name: /Review/ })).toBeNull()
-    expect(screen.getByText("done")).toBeInTheDocument()
+    expect(screen.getByText("Done")).toBeInTheDocument()
   })
 
   it("offers Undo while applied rows exist, then reports them undone", () => {

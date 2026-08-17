@@ -17,6 +17,7 @@ import {
 import { AppTooltip } from "@/components/ui/tooltip"
 import { prefetchFileProgress } from "@/lib/progress/file-progress-resource"
 import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
+import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 interface FileStats { translated: number; validated: number; total: number }
@@ -53,6 +54,7 @@ interface Props {
   canExportByOrgPolicy?: boolean
   /** When set, opens inline rename for the given file (sidebar + file-options menu). */
   renameSignal?: { fileId: string; nonce: number } | null
+  activeChapterHealth?: BookHealthChapter[]
 }
 
 export function ExpandableFileList({
@@ -60,7 +62,7 @@ export function ExpandableFileList({
   suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onDelete,
   targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
-  renameSignal,
+  renameSignal, activeChapterHealth,
 }: Props) {
   const t = useT()
   const { expanded, toggle } = useSidebarExpansion(projectId)
@@ -133,6 +135,10 @@ export function ExpandableFileList({
             </p>
           )}
           {groups.map((group) => {
+            // group.label is the stable identity string (compared/keyed on
+            // below); group.labelKey, set only on the synthetic "Ungrouped"
+            // bucket, is what's actually shown to the user.
+            const displayLabel = group.labelKey ? t(group.labelKey) : group.label
             const showHeader = groups.length > 1 || group.label !== "Ungrouped"
             const isCollapsed = showHeader && collapsed.has(group.label)
             const canEditCorpus =
@@ -149,8 +155,8 @@ export function ExpandableFileList({
                       aria-expanded={!isCollapsed}
                       aria-label={
                         isCollapsed
-                          ? t("nav.fileList.expandGroup", { group: group.label })
-                          : t("nav.fileList.collapseGroup", { group: group.label })
+                          ? t("nav.fileList.expandGroup", { group: displayLabel })
+                          : t("nav.fileList.collapseGroup", { group: displayLabel })
                       }
                     >
                       <ChevronDown
@@ -174,15 +180,15 @@ export function ExpandableFileList({
                           className="flex-1 rounded-lg bg-background px-1.5 text-[11px] normal-case tracking-normal outline-none"
                         />
                       ) : (
-                        <span>{group.label}</span>
+                        <span>{displayLabel}</span>
                       )}
                     </button>
                     {canEditCorpus && !isEditingCorpus && (
-                      <AppTooltip content={t("nav.fileList.renameGroup", { group: group.label })} side="right">
+                      <AppTooltip content={t("nav.fileList.renameGroup", { group: displayLabel })} side="right">
                         <button
                           className="rounded-md p-0.5 opacity-0 transition-shadow group-hover/corpus:opacity-100"
                           onClick={(e) => { e.stopPropagation(); setEditingCorpus(group.label) }}
-                          aria-label={t("nav.fileList.renameGroup", { group: group.label })}
+                          aria-label={t("nav.fileList.renameGroup", { group: displayLabel })}
                         >
                           <Pencil className="h-3 w-3" />
                         </button>
@@ -194,6 +200,7 @@ export function ExpandableFileList({
                   <div className="space-y-0.5">
                     {group.files.map((file) => {
                       const canExpand = fileHasSections(file)
+                        || (file.id === activeFileId && Boolean(activeChapterHealth?.length))
                       const isExpanded = canExpand && expanded.has(file.id)
                       const isEditing = editingFileId === file.id
                       return (
@@ -206,6 +213,7 @@ export function ExpandableFileList({
                             file={file}
                             active={file.id === activeFileId}
                             expanded={isExpanded}
+                            expandable={canExpand}
                             progress={fileProgress.get(file.id)}
                             hasSuggestion={suggestionFileIds.has(file.id)}
                             editing={isEditing}
@@ -237,6 +245,7 @@ export function ExpandableFileList({
                               fileId={file.id}
                               validationCount={validationCount}
                               getTokenForFile={getTokenForFile}
+                              chapters={file.id === activeFileId ? activeChapterHealth : undefined}
                               onSectionClick={(label) => {
                                 if (file.id !== activeFileId) {
                                   onSelectFile(file.id, { sectionLabel: label })

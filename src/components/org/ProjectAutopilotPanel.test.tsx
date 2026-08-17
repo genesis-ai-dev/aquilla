@@ -355,6 +355,7 @@ describe("ProjectAutopilotPanel", () => {
     const panel = await screen.findByTestId("project-autopilot-panel")
 
     expect(within(panel).getByText("Working")).toBeInTheDocument()
+    expect(within(panel).getByTestId("autopilot-process-graph-mini")).toBeInTheDocument()
     expect(within(panel).getByRole("button", { name: "View 1 needs attention" })).toBeInTheDocument()
     expect(within(panel).queryByRole("button", { name: "Run Autopilot" })).not.toBeInTheDocument()
   })

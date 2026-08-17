@@ -63,6 +63,21 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "labels the switcher that changes the language of the interface itself. Two " +
     "unrelated referents that happen to share one English word; conflating them " +
     "would mislabel one of the two controls.",
+  "importExport.dcs.languageFilterLabel":
+    "Labels the form field naming the CONTENT language being searched for in an " +
+    "external resource catalog — the language of the Bible resource, a piece of " +
+    "data. language.label is the accessible name of the control that changes the " +
+    "language of the interface itself. This is the same content-vs-interface split " +
+    "already recorded above for audio.newVoice.mmsLanguageLabel, and several " +
+    "target languages also distinguish an editable filter field's label from " +
+    "interface chrome and from a table column heading.",
+  "importExport.dcs.ownerFilterLabel":
+    "Here Owner means the organization ACCOUNT that publishes a resource on an " +
+    "external repository host — a namespace, not a person's standing in this " +
+    "product. common.role.owner is the top rung of the permission ladder, whoever " +
+    "has full control of a project. Unrelated referents that English spells the " +
+    "same; languages that borrow a repository-hosting term for one and a " +
+    "governance term for the other need both.",
   "editor.state.empty":
     "A cell-status word read mid-phrase inside the editor's accessible name ('… " +
     "empty'), alongside 'draft' and 'validated'. audio.recordingModal.emptySource " +
@@ -73,6 +88,13 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "audio.recordingModal.recordingStatus is the present participle shown beside a " +
     "pulsing dot while the microphone is live. Noun vs progressive verb: English " +
     "spells both 'Recording', almost nothing else does.",
+  "auth.signup.usernameLabel":
+    "Labels the account identifier being chosen at sign-up and sent to the identity " +
+    "server — the name this person will type to sign in from then on. " +
+    "projectSettings.user.usernameLabel labels the local author name recorded " +
+    "against edits in a project's history, a per-device display preference that " +
+    "never authenticates anything. Languages that distinguish a chosen login " +
+    "handle from a displayed personal name need the two separately.",
   "auth.login.submitDefault":
     "The submit button of the sign-in form. auth.login.title is the heading naming " +
     "the whole form. Languages that nominalize headings ('Anmeldung') while keeping " +
@@ -91,12 +113,29 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "resuming it automatically. autopilot.status.paused is a person deliberately " +
     "pausing an autopilot run. Automatic vs deliberate pausing are different " +
     "concepts a translator would render with different verbs in most languages.",
+  "autopilot.proposal.applying":
+    "Transient label of the Apply button on a staged agent proposal while the " +
+    "approved events are written to the outbox. search.replace.applying is the " +
+    "find-and-replace panel rewriting matched cells, and nav.fileMenu.applying is " +
+    "diarization results being written back. Three unrelated async operations that " +
+    "share one English gerund; nothing ties their wording together.",
+  "autopilot.proposal.applyFailed":
+    "Error label when writing an approved agent proposal's events failed, so nothing " +
+    "was saved and the user can retry. importExport.ebible.applyFailed is an eBible " +
+    "corpus import failing to apply a downloaded delta. Approving someone else's " +
+    "staged edits and importing a corpus are different acts, and the object of " +
+    "'apply' differs, which several target languages spell differently.",
   "nav.fileMenu.applying":
     "Transient state of the file-options-menu 'Diarize' item while its speaker-" +
     "detection results are being written back to cells. search.replace.applying " +
     "is the transient state of the unrelated find-and-replace panel's Apply " +
     "button while it rewrites matched cells. Two independent async operations " +
     "that happen to share an English gerund; nothing ties their wording together.",
+  "autopilot.proposal.apply":
+    "Imperative button that commits every supported event in a staged agent proposal. " +
+    "terminology.lookup.applyButton applies one selected glossary rendering to an " +
+    "editor cell. English uses the same generic verb, but the operations and their " +
+    "objects are distinct and may be translated differently.",
   "terminology.editor.showArchived":
     "Toggle revealing archived (deprecated) GLOSSARY TERMS in the termbase editor. " +
     "editor.lane.showArchived is a menu item revealing retired LANGUAGE LANES in the " +
@@ -502,4 +541,254 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "run wrote into. One describes an input's language, the other identifies a " +
     "destination track; languages that mark that difference with case or an " +
     "adposition cannot share a single rendering.",
+  "agent.approve":
+    "Imperative button that accepts a translation agent's staged, human-gated " +
+    "proposal (a changeset, a memory, or a brief update) — reused across the " +
+    "agent workbench, the changeset approval gate, and the memory/brief review " +
+    "queues, all the same act. rules.surface.approveButton is the unrelated " +
+    "button that promotes a project-level translation rule up to org scope. Two " +
+    "independent human-gate actions that happen to share the English verb " +
+    "'Approve'.",
+  "agent.memory.tabApproved":
+    "Tab-trigger heading over the list of already-approved agent-authored " +
+    "memories, in the translation-agent's Memory tab (paired with sibling tabs " +
+    "'Proposed' / 'Project brief') — the counterpart split to agent.memory." +
+    "tabProposed just below, against the same unrelated autopilot evidence-" +
+    "status enum documented at org.projectOverview.columnApproved above.",
+  "agent.memory.tabProposed":
+    "Tab-trigger heading over the queue of agent-authored memories awaiting human " +
+    "review, in the translation-agent's Memory tab (paired with sibling tabs " +
+    "'Approved' / 'Project brief'). autopilot.evidence.status.proposed is one " +
+    "value of the fixed, unrelated evidence-review lifecycle enum (Proposed/" +
+    "Applied/Rejected/Superseded/Approved/Archived/Unknown) in the autopilot " +
+    "readiness inspector, the same kind of split already documented for " +
+    "terminology.common.statusApproved vs autopilot.evidence.status.approved " +
+    "above. A tab heading naming a queue and one fixed value of an unrelated " +
+    "status enum happen to share one English participle.",
+  "agent.workingSet.openLink":
+    "Lower-case imperative LINK text in the agent workbench's working-set row that " +
+    "jumps the editor to that cell ('open' — a shortened 'open in editor'). " +
+    "comments.status.open is a lower-case adjectival status badge on a comment " +
+    "thread ('this thread is open'), the same split already documented for " +
+    "org.overviewLaneTable.openAction above. Imperative verb vs. adjectival status " +
+    "take different forms in most languages, so one shared string would be wrong " +
+    "for one of the two roles.",
+  "org.accessModelLegend.creator.label":
+    "Title-Case, standalone table-cell value in AccessModelLegend's grant-path " +
+    "table, sibling of 'Direct'/'Via group'/'Org-wide' in the same column — a " +
+    "grant-path NAME. org.memberAccessPanel.creatorGrantLabel is lower-case " +
+    "'creator', one item comma-joined inline into a badge fragment alongside " +
+    "'direct:'/'org:'/'team {name}:'. A standalone Title-Case table value and a " +
+    "lower-case inline fragment take different forms in languages that case- or " +
+    "register-mark that distinction, mirroring this catalog's other such splits " +
+    "(e.g. org.membersPage.orgPage.expired vs onboarding.apiTokens.expiredBadge).",
+  "org.membersMatrixView.memberColumnHeader":
+    "Table column heading over the whole 'who' column of the members × projects " +
+    "matrix (sibling of the project-name column headings beside it) — the NAME " +
+    "OF A CATEGORY of table content. org.teamsList.memberBadge is a small pill " +
+    "on a team card meaning 'the current viewer's own role in this team is " +
+    "Member' — a role/STATUS VALUE, not a column name. A table heading and a " +
+    "status badge take different grammatical forms in languages that mark that " +
+    "distinction, mirroring this catalog's other heading-vs-badge splits.",
+  "org.membersPanel.sourceViaGroup":
+    "Lower-case inline badge fragment next to a username in MembersPanel's " +
+    "roster row ('via group'), sibling register to org.membersPage." +
+    "sourceViaOrg/sourceViaTeam on this same row. org.accessModelLegend." +
+    "viaGroup.label is a Title-Case, standalone table-cell value in " +
+    "AccessModelLegend's grant-path table, sibling of 'Direct'/'Org-wide' — " +
+    "the same heading-vs-inline-fragment split already recorded for " +
+    "org.accessModelLegend.creator.label just above.",
+  "org.multiProjectInviteDialog.projectsFieldLabel":
+    "Form-field label above a checklist of projects to invite someone to, in " +
+    "the multi-project invite dialog — labels an in-dialog form control. " +
+    "nav.projects is the primary left-sidebar navigation entry that opens the " +
+    "whole projects list as a destination. A dialog field label and a nav " +
+    "destination name read as different grammatical roles in languages that " +
+    "distinguish an editable-form label from a place you navigate to, mirroring " +
+    "this catalog's other field-label-vs-nav-entry splits (e.g. " +
+    "projectSettings.section.terminology vs nav.sidebarSection.terminology).",
+  "org.archivedProjects.deletedColumnLabel":
+    "Title-Case table column heading (sibling of 'Project'/'Archived' in the " +
+    "same admin table) AND the DateTooltip accessible label naming that " +
+    "column's date — a heading naming a category. comments.file.deletedBadge " +
+    "is lower-case 'deleted', a small inline status badge on a file reference " +
+    "inside a comment thread. A table-column heading and a lower-case inline " +
+    "status badge take different forms in languages that case- or register-" +
+    "mark that distinction, mirroring this catalog's other such splits (e.g. " +
+    "org.accessModelLegend.creator.label vs org.memberAccessPanel.creatorGrantLabel).",
+  "org.overview.needsAttentionHeading":
+    "Section HEADING on the org Overview page, titling a list of at-risk " +
+    "projects (sibling of 'Pending invitations', reads as a page-region " +
+    "name). autopilot.status.needsAttention is one value of a fixed-" +
+    "vocabulary STATUS enum badging a single Autopilot readiness checklist " +
+    "item (alongside 'Ready'/'Missing'/'Partly set up'). A section heading " +
+    "and a per-item status badge are different grammatical roles that " +
+    "happen to share one English phrase, mirroring this catalog's other " +
+    "heading-vs-status-word splits.",
+  "org.joinOrgPage.roleLine":
+    "Second line of the org-invite preview card on JoinOrgPage, always written to " +
+    "open a clause mid-register ('you'll join as …') even when it starts the " +
+    "paragraph, because the same lowercase clause continues an 'Invited by X — ' " +
+    "opener elsewhere on this same card. auth.join.roleLineSingle is a capitalized, " +
+    "standalone sentence opener on the unrelated project-JoinPage summary card " +
+    "('You'll join as …'). Not a bare case split: the org-invite card's own " +
+    "inviter variant (auth.join.roleLineSingleInviter, reused directly here) is " +
+    "byte-identical in both places precisely because register, not case alone, is " +
+    "what's being preserved — collapsing this one onto auth.join.roleLineSingle " +
+    "would put a capital letter mid-sentence the one time no inviter is known.",
+  "org.joinOrgPage.roleLineEmail":
+    "Email-bound sibling of org.joinOrgPage.roleLine, same lowercase mid-register " +
+    "clause, same reasoning: auth.join.roleLineSingleEmail is the capitalized " +
+    "standalone sentence opener on the unrelated project-JoinPage card.",
+  "importExport.columnMapping.sourceColumnLabel":
+    "Labels the SOURCE-TEXT column picker in the spreadsheet column-mapping " +
+    "step during import — a form-field label naming which uploaded column " +
+    "holds source text. editor.source.textAria is the accessible name of the " +
+    "source-column text region inside the cell editor. A mapping-field label " +
+    "and an accessibility name for an existing pane serve different purposes " +
+    "and different audiences (sighted vs. screen-reader users).",
+
+  // -- AQU-832 (Monday.com integration wave) -----------------------------
+  "projectSettings.monday.orgSettingsLinkText":
+    "Lower-case words spliced mid-sentence into projectSettings.monday." +
+    "orgNotConnectedInstructions ('...connect it in organization settings, " +
+    "or ask...'), read as a continuation of that sentence — sometimes plain " +
+    "text, sometimes the visible text of an inline link, never read alone. " +
+    "editor.navTitle.organizationSettings is a capitalized, standalone " +
+    "sidebar/breadcrumb nav title ('Organization settings') naming a whole " +
+    "page. A mid-sentence lower-case fragment and a standalone Title-Case " +
+    "page name take different forms in languages that case- or " +
+    "register-mark that distinction, mirroring this catalog's other " +
+    "inline-fragment-vs-standalone-title splits (e.g. " +
+    "org.membersPage.orgPage.noExpiry vs org.membersPage.expiryNone above).",
+  "projectSettings.monday.applyButton":
+    "Imperative button that commits the AI-proposed Monday column↔metric mapping " +
+    "shown in the review panel. terminology.lookup.applyButton applies one " +
+    "selected glossary rendering to an editor cell; autopilot.proposal.apply " +
+    "commits every supported event in a staged translation-agent proposal. " +
+    "Three unrelated 'apply a proposed change' operations across three " +
+    "features that happen to share the generic English verb — the object " +
+    "being applied differs in each, and several target languages would " +
+    "translate the verb differently depending on that object.",
+  "terminology.libraryStats.enforcedLabel":
+    "Stat-tile HEADING above a percentage figure on the Terminology page's " +
+    "summary panel — a title-case label naming what the number below it means. " +
+    "terminology.termDetail.verdictEnforced is a lowercase inline VERDICT word " +
+    "describing a single occurrence's outcome ('enforced' / 'infringed' / 'n/a') " +
+    "in a table cell. A panel-heading noun and an inline verdict adjective are " +
+    "different grammatical roles that many languages inflect or phrase " +
+    "differently depending on which one they are.",
+  "terminology.libraryStats.infringedLabel":
+    "Stat-tile heading counterpart to terminology.libraryStats.enforcedLabel, " +
+    "for the infringed-percentage tile. Distinct from " +
+    "terminology.termDetail.verdictInfringed (lowercase inline verdict word) for " +
+    "the same heading-vs-verdict reason documented on enforcedLabel above.",
+  "terminology.conceptDialog.renderingPlaceholder":
+    "Inline placeholder hint shown INSIDE an empty rendering-text input in the " +
+    "add/edit concept dialog's renderings list — a terse, lowercase instructional " +
+    "hint per normal placeholder convention. terminology.editor.renderingLabel is " +
+    "a visible FIELD LABEL heading (title case) above a single-rendering input " +
+    "elsewhere in GlossaryEditor. A heading noun and an inline instructional hint " +
+    "are different grammatical registers that several languages phrase " +
+    "differently (e.g. an imperative or truncated hint vs. a standalone noun).",
+  "terminology.common.statusLabel":
+    "Field/column label for a TERM's review status (draft/active/deprecated) in " +
+    "the Terminology page's own add/edit-concept dialog and concepts table. " +
+    "org.orgHome.projectsPanel.statusLabel is the column header for a PROJECT's " +
+    "own status in the org-home projects table — an unrelated entity with its own " +
+    "status vocabulary. Both happen to be the single English word 'Status', but " +
+    "many languages lexicalize 'a term's review state' and 'a project's state' " +
+    "differently, or decline the noun differently depending on the thing it " +
+    "describes.",
+  "rules.createDialog.descriptionLabel":
+    "Visible field label above the free-text description input in the standalone " +
+    "rule-creation dialog — a sighted user reads it beside the input. " +
+    "nav.report.descriptionFieldLabel is a visually-hidden (screen-reader-only) " +
+    "label for a bug-report textarea that shows a placeholder instead of a visible " +
+    "label. A visible form label and an sr-only accessible name serve different " +
+    "audiences and often take different phrasing (e.g. a visible label can be " +
+    "terser since layout already implies context; an sr-only label must stand " +
+    "alone).",
+  "audio.voice.clear":
+    "One of a fixed set of one-word Gemini TTS voice tone descriptions (see " +
+    "audio.voice.bright) — an ADJECTIVE describing how a voice sounds ('distinct, " +
+    "easy to make out'). common.clear is the imperative 'Clear' BUTTON that resets " +
+    "a filter, search box, or field. Adjective vs. imperative verb read " +
+    "differently in most target languages, so one shared string would be wrong " +
+    "for one of the two roles.",
+  "audio.voice.forward":
+    "One of the same fixed set of Gemini TTS voice tone descriptions as " +
+    "audio.voice.clear above — an ADJECTIVE describing a voice's personality " +
+    "('direct, confident'). nav.historyControls.forward is the accessible name of " +
+    "the browser-style forward-navigation arrow button — a NAVIGATION COMMAND, " +
+    "unrelated in meaning. Several target languages would not use the same word " +
+    "for 'go forward' and 'a forward manner of speaking'.",
+  "audio.aiError.unknownTitle":
+    "Fallback popover heading from categorizeAiError()'s heuristic AI-error " +
+    "classifier (TTS/transcription/drafting failures), shown inline beside a " +
+    "retry affordance. error.generic.title is the heading of a full-page error-" +
+    "boundary screen shown when the whole app crashes. Distinct registers — an " +
+    "inline popover heading and a full failure-screen title — mirroring the " +
+    "audio.recordingModal.genericError vs error.generic.title split this " +
+    "namespace's own context notes already document.",
+  "agent.workingSet.outcome.rejected":
+    "Lower-case state-stripe label on a decided working-set row (WorkingSetPanel), " +
+    "sibling of its own '✓ accepted'/'✓ edited & accepted'/'↩ undone' outcome labels " +
+    "on the identical stripe — a per-row record of what the reviewer just did with " +
+    "one draft cell. autopilot.evidence.status.rejected is a capitalized value of the " +
+    "unrelated, fixed evidence-review lifecycle enum (Proposed/Applied/Rejected/" +
+    "Superseded/Approved/Archived/Unknown) badging a piece of AI-gathered evidence in " +
+    "the Autopilot readiness inspector — the same heading/badge-vs-lowercase-status " +
+    "split already documented elsewhere in this file (e.g. org.projectOverview." +
+    "columnApproved vs autopilot.evidence.status.approved).",
+  "agent.run.tool.stage":
+    "Lower-case, font-mono technical label naming the 'emit' TOOL the agent called in " +
+    "one run-timeline chip (AgentRunView) — staging draft events for review, sibling " +
+    "of the equally terse 'sql'/'docs'/'read'/'examples'/'draft' tool-kind labels on " +
+    "identical chips, the same class of split already documented for agent.run.tool." +
+    "search/draft just below. importExport.dcs.stageFilterLabel is a capitalized " +
+    "form-field LABEL above a picker choosing a DCS repository RELEASE MATURITY " +
+    "(Latest/Pre-release/Production) in the import flow — an unrelated content-" +
+    "pipeline concept that happens to share the English word.",
+  "agent.run.tool.draft":
+    "Lower-case, font-mono technical label naming which TOOL the agent called in one " +
+    "run-timeline chip (AgentRunView), sibling of the equally terse 'sql'/'docs'/" +
+    "'read'/'examples'/'search' tool-kind labels on identical chips — the same class " +
+    "of split already documented for agent.run.tool.search just below. " +
+    "autopilot.inspector.review.draftTitle is a capitalized panel/section TITLE " +
+    "heading a single AI-drafted cell proposal in the Autopilot review inspector. A " +
+    "lower-case technical chip label and a capitalized section heading take " +
+    "different forms in most languages.",
+  "agent.run.tool.search":
+    "Lower-case, font-mono technical label naming which TOOL the agent called in one " +
+    "run-timeline chip (AgentRunView), sibling of the equally terse 'sql'/'docs'/" +
+    "'read'/'examples'/'draft' tool-kind labels on identical chips. nav.search is the " +
+    "capitalized nav-sidebar destination and dock tab-rail label that opens the " +
+    "project's search feature — a navigation entry, not a tool-call badge. Case and " +
+    "register both differ for the same reason: one names a place you navigate to, the " +
+    "other names a machine-readable kind on a technical chip.",
+  "agent.proposal.kind.edit":
+    "Badge naming the KIND of a staged agent-authored proposal row ('target.cell." +
+    "commit') in ProposalCard, a noun-phrase operation name read alongside sibling " +
+    "kind badges 'New source row'/'New target row'/'Comment'/'Validate' on the same " +
+    "row. common.edit is the imperative Edit button that starts editing a cell. The " +
+    "same operation-name-vs-imperative-button split already documented for " +
+    "nav.outbox.eventEdit above — a different feature (the outbox diagnostics feed) " +
+    "with the identical register distinction.",
+  "agent.proposal.kind.validate":
+    "Badge naming the KIND of a staged agent-authored proposal row ('cell.validate') " +
+    "in ProposalCard, the same noun-phrase operation-name register as its sibling " +
+    "kind badges on that row ('Edit', 'Comment', …). editor.selection.validate is " +
+    "the imperative toolbar button that performs the sign-off action itself. The " +
+    "same split already documented for nav.outbox.eventValidate above.",
+  "org.teamDetail.teamSettingsAriaLabel":
+    "Accessible NAME of an icon-only gear Link on the team-detail header that " +
+    "NAVIGATES to the team-settings page — a screen reader announces it as the " +
+    "link's name with no visible text and no surrounding layout to lean on, so " +
+    "several languages want a verb here ('Go to team settings' / 'Open team " +
+    "settings'). settings.teamSettings.title is the PageHeader heading of the " +
+    "destination page itself: a standalone noun phrase naming the page a user " +
+    "has already arrived at. Same English words, different grammatical role — " +
+    "the same navigate-vs-heading split already documented for the language " +
+    "switcher in namespaces/language.ts.",
 }

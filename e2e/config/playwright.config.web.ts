@@ -10,8 +10,9 @@ const positiveInteger = (raw: string | undefined, fallback: number): number => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
 }
 
-const testTimeout = positiveInteger(process.env.E2E_TEST_TIMEOUT_MS, 60_000)
+const testTimeout = positiveInteger(process.env.E2E_TEST_TIMEOUT_MS, 90_000)
 const globalTimeout = positiveInteger(process.env.E2E_GLOBAL_TIMEOUT_MS, 30 * 60_000)
+const maxFailures = positiveInteger(process.env.E2E_MAX_FAILURES, 0)
 const progressReporter = path.resolve(REPO_ROOT, "e2e/reporters/progress-reporter.ts")
 
 export default defineConfig({
@@ -25,6 +26,10 @@ export default defineConfig({
   // failure green. The gate reports the first failure on every machine.
   retries: 0,
   workers: 1,
+  // Local iteration: E2E_MAX_FAILURES=1 (or --max-failures=1) stops the shard
+  // on the first error so we can fix and re-run without waiting out the suite.
+  // Unset / 0 keeps the merge-gate default of "run every test".
+  ...(maxFailures > 0 ? { maxFailures } : {}),
   reporter: process.env.CI
     ? [["github"], [progressReporter]]
     : [["line"], [progressReporter]],

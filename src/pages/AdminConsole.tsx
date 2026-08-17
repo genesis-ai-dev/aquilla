@@ -3,7 +3,7 @@ import { Navigate, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
-import { Page, PageHeader, Section } from "@/components/ui/page"
+import { Page, PageHeader, Section, STAT_TILE_GRID } from "@/components/ui/page"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -51,7 +51,7 @@ const TABS: Array<{ key: Tab; label: string }> = [
 /**
  * Site-wide admin console (/admin). Cross-tenant: read-only oversight
  * (Overview, Tenants, Teams, People, Projects, Activity) plus the editable
- * Platform tab (global AI settings + per-org credits). Gated by
+ * Platform tab (AI settings, compute credits, Field Plan billing). Gated by
  * `useAdminElevation` — UX only; every /api/v2/admin/* call is enforced
  * server-side against the ADMIN_EMAILS allowlist behind the step-up elevation
  * gate. A non-admin who forces the route is redirected to their org overview.
@@ -251,9 +251,9 @@ function ConsoleSkeleton() {
     >
       <div className="flex flex-col gap-6">
         <Skeleton className="h-8 w-72 rounded-md" />
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
+        <div className={STAT_TILE_GRID}>
           {Array.from({ length: 6 }).map((_, i) => (
-            <Skeleton key={i} className="h-20 rounded-lg border bg-card" />
+            <Skeleton key={i} className="h-[88px] rounded-lg border bg-card" />
           ))}
         </div>
         <Skeleton className="h-48 rounded-lg border bg-card" />

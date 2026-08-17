@@ -84,12 +84,12 @@ async function main() {
 
   // ── Item 1: workbench loads ──
   await page.goto(agentUrl)
-  await page.getByRole("tab", { name: "Sessions" }).waitFor({ timeout: 15000 })
+  await page.getByRole("tab", { name: "Chat" }).waitFor({ timeout: 15000 })
   await page.waitForTimeout(800)
   await shot(page, "01-agent-workbench.png")
 
   // ── Item 2: memory proposed → approve → edit → human-edited badge ──
-  await page.getByRole("tab", { name: "Memory" }).click()
+  await page.getByRole("tab", { name: "Project knowledge" }).click()
   await page.getByRole("tab", { name: "Proposed" }).click()
   await page.locator('[data-memory-path="observations/evidence-note.md"]').first().waitFor({ timeout: 10000 })
   await shot(page, "02-memory-proposed.png")
@@ -109,7 +109,7 @@ async function main() {
   await page.waitForTimeout(800)
   // reload to pick up the (non-auto-revalidated) human-edited state
   await page.goto(agentUrl)
-  await page.getByRole("tab", { name: "Memory" }).click()
+  await page.getByRole("tab", { name: "Project knowledge" }).click()
   await page.getByRole("tab", { name: "Approved" }).click()
   await page.getByText(/Human.?edited/i).first().waitFor({ timeout: 10000 })
   await shot(page, "04-memory-human-edited-badge.png")
@@ -121,7 +121,7 @@ async function main() {
 
   // ── Item 3: artifact attach → pill ──
   await page.goto(agentUrl)
-  await page.getByRole("tab", { name: "Sessions" }).waitFor({ timeout: 15000 })
+  await page.getByRole("tab", { name: "Chat" }).waitFor({ timeout: 15000 })
   await page.waitForTimeout(600)
   await page.locator('input[type="file"]').first().setInputFiles(FIXTURE)
   try {

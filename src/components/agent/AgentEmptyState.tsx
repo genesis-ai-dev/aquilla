@@ -8,6 +8,8 @@
 import { useState } from "react"
 import { Bot, ExternalLink } from "lucide-react"
 import { SLASH_COMMANDS } from "@/lib/agent/slash-commands"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
 const DOCS_URL =
   (import.meta.env.VITE_DOCS_URL as string | undefined)?.trim() ||
@@ -45,6 +47,7 @@ export interface AgentEmptyStateProps {
 }
 
 export function AgentEmptyState({ onPromptSelect }: AgentEmptyStateProps) {
+  const t = useT()
   const [dismissed, setDismissed] = useState(readDismissed)
 
   if (dismissed) {
@@ -52,7 +55,7 @@ export function AgentEmptyState({ onPromptSelect }: AgentEmptyStateProps) {
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 px-3 text-center text-muted-foreground">
         <Bot className="h-5 w-5" />
         <p className="text-xs">
-          Ask the agent to draft, check, or explain — it proposes changes you review and apply.
+          {t("agent.emptyState.dismissedNotice")}
         </p>
         <a
           href={AGENT_GUIDE_URL}
@@ -60,7 +63,7 @@ export function AgentEmptyState({ onPromptSelect }: AgentEmptyStateProps) {
           rel="noreferrer"
           className="inline-flex items-center gap-1 text-[11px] underline underline-offset-2 hover:text-foreground"
         >
-          User guide <ExternalLink className="h-3 w-3" />
+          {t("agent.emptyState.userGuideLink")} <ExternalLink className="h-3 w-3" />
         </a>
       </div>
     )
@@ -72,14 +75,15 @@ export function AgentEmptyState({ onPromptSelect }: AgentEmptyStateProps) {
         <div className="flex items-center gap-2">
           <Bot className="h-4 w-4 shrink-0" />
           <p className="text-xs">
-            The agent works inside this project — it can search, draft, and check.
-            Every change arrives as a proposal <span className="font-medium text-foreground">you</span> review
-            and apply.
+            <RichMessage
+              k="agent.emptyState.intro"
+              values={{ you: <span className="font-medium text-foreground">{t("agent.emptyState.introYou")}</span> }}
+            />
           </p>
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <p className="text-[11px] font-medium">Try asking</p>
+          <p className="text-[11px] font-medium">{t("agent.emptyState.tryAsking")}</p>
           {EXAMPLE_PROMPTS.map((prompt) => (
             <button
               key={prompt}
@@ -93,12 +97,12 @@ export function AgentEmptyState({ onPromptSelect }: AgentEmptyStateProps) {
         </div>
 
         <div className="flex flex-col gap-1">
-          <p className="text-[11px] font-medium">Shortcuts</p>
+          <p className="text-[11px] font-medium">{t("agent.emptyState.shortcuts")}</p>
           <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-[11px]">
             {SLASH_COMMANDS.map((cmd) => (
               <div key={cmd.name} className="contents">
                 <dt className="font-mono text-foreground/80">/{cmd.name}</dt>
-                <dd>{cmd.description}</dd>
+                <dd>{t(cmd.descriptionKey)}</dd>
               </div>
             ))}
           </dl>
@@ -111,7 +115,7 @@ export function AgentEmptyState({ onPromptSelect }: AgentEmptyStateProps) {
             rel="noreferrer"
             className="inline-flex items-center gap-1 text-[11px] underline underline-offset-2 hover:text-foreground"
           >
-            User guide <ExternalLink className="h-3 w-3" />
+            {t("agent.emptyState.userGuideLink")} <ExternalLink className="h-3 w-3" />
           </a>
           <button
             type="button"
@@ -121,7 +125,7 @@ export function AgentEmptyState({ onPromptSelect }: AgentEmptyStateProps) {
             }}
             className="text-[11px] hover:text-foreground"
           >
-            Don't show this again
+            {t("agent.emptyState.dismiss")}
           </button>
         </div>
       </div>

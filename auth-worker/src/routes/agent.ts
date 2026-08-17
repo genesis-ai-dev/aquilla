@@ -17,6 +17,8 @@ import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, creditsFor, recordCredit, resolveCreditConfig } from "../lib/credits"
+import { countWords } from "../lib/billing/plans"
+import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
 import { makeCostMeter } from "../lib/cost-meter"
 import { resolveProjectRole } from "../services/project-permissions"
 import { AliasMap, compressRows } from "../lib/agent/compress"
@@ -44,6 +46,7 @@ import { buildMemoryContext, type MemoryContext } from "../../../db/shared/agent
 import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
 import { sandboxDestroy } from "../lib/agent/sandbox-client"
 import { openRouterExtras, streamUsageOptions } from "../lib/llm-vendor"
+import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 import {
   runCode,
   loadArtifact,
@@ -70,12 +73,9 @@ function resolveOpenRouterUrl(env: Env): string {
     ? `${env.OPENROUTER_BASE_URL.replace(/\/$/, "")}/chat/completions`
     : OPENROUTER_URL
 }
-/** Haiku-class default from the existing allowlist (lib/ai-budget.ts). Used
- *  when neither platform_settings.agentModel nor AGENT_MODEL_DEFAULT is set. */
-const DEFAULT_AGENT_MODEL = "anthropic/claude-haiku-4-5"
 /** Resolve the agent model: admin-set store wins, then env, then the default. */
 function resolveAgentModel(env: Env, settings: PlatformSettings): string {
-  return settings.agentModel || env.AGENT_MODEL_DEFAULT || DEFAULT_AGENT_MODEL
+  return settings.agentModel || env.AGENT_MODEL_DEFAULT || DEFAULT_LLM_MODEL_ID
 }
 /** The draft tool's translation model — may be stronger than the orchestrator. */
 function resolveDraftModel(env: Env, settings: PlatformSettings, agentModel: string): string {
@@ -204,7 +204,7 @@ function buildTools(bibleResourcesEnabled: boolean) {
       function: {
         name: "draft",
         description:
-          "Draft untranslated cells in scope with the project's drafting pipeline (exemplars + discourse context + rule lint) and STAGE the results as a proposal for user approval. Preferred over writing translations yourself. One call handles up to 50 cells; the result says how many remain.",
+          "Draft untranslated cells with a separate evidence-research pass followed by generation from validated exemplars, discourse context, the project brief, and rules; then STAGE the results for user approval. Preferred over writing translations yourself. One call handles up to 10 cells; the result says how many remain.",
         parameters: {
           type: "object",
           properties: {
@@ -492,6 +492,10 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
       429,
     )
   }
+  const agentWordCheck = await wordGuard(c.env.AQUILLA_PG, orgId)
+  if (!agentWordCheck.ok) {
+    return c.json(wordCapBody(agentWordCheck.reason), 429)
+  }
 
   // Session-native conversation (v2): load the stored convo — including tool
   // results — so a follow-up reuses what prior runs discovered. Ownership is
@@ -696,20 +700,22 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         targetLanguage: languages.targetLanguage,
         bibleResourcesEnabled,
         translatorProfile: body.translatorProfile,
-        // Profile language is the sole driver for the agent — it never had a
-        // response-language setting, and defaulting to the project target
-        // language would force target-language replies on owners/PMs who don't
-        // read it. Unset → current English-default behavior.
+        // A configured profile language wins. When unset, the augmentation
+        // prompt below tells the agent to follow the user's latest message —
+        // never the project's translation target.
         responseLanguage: body.translatorProfile?.responseLanguage,
         briefSummary,
       }),
     },
     // AQU-AGENT §2 — second system message: verbatim brief + approved-memory
-    // index + new-tool guidance + reply-language rule. Kept separate so the
+    // index + new-tool guidance + conversation-language rule. Kept separate so the
     // existing schema-card prompt stays byte-identical.
     {
       role: "system" as const,
-      content: buildAugmentSystemPrompt({ memory, workingLanguage: languages.targetLanguage }),
+      content: buildAugmentSystemPrompt({
+        memory,
+        responseLanguage: body.translatorProfile?.responseLanguage,
+      }),
     },
     // AQU-AGENT Wave-2 — attached artifacts. The user attached these files in
     // the composer; they're already uploaded as project artifacts. Tell the
@@ -957,6 +963,8 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
               ok: true,
             })
           },
+          canContinuePaidWork: () =>
+            costCents < costCapCents && promptTokens + completionTokens <= TOKEN_CEILING,
           // Acceptance-rate denominator (0051): staged commits per run. The
           // numerator lands in the event log when the user Applies.
           countStaged: (n) => {
@@ -1037,6 +1045,13 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   // Record agent cost in org credit ledger (graceful-degrade — never throws).
   // costCents is the sum of OpenRouter usage.cost×100 across all iterations.
   await recordCredit(env.AQUILLA_PG, orgId, user.id, "agent", costCents, 1)
+  await recordWords(
+    env.AQUILLA_PG,
+    orgId,
+    user.id,
+    "agent",
+    countWords(body.messages.map((m) => m.content).join(" ")),
+  )
 }
 
 interface ToolCallEnv {
@@ -1058,6 +1073,8 @@ interface ToolCallEnv {
   }
   /** Folds a tool-internal model call's usage into the run totals. */
   addUsage: (usage: { prompt_tokens?: number; completion_tokens?: number; cost?: number }) => void
+  /** True while another paid sub-call fits under the run's cost/token caps. */
+  canContinuePaidWork: () => boolean
   /** Folds staged target.cell.commit events into the run's staged_count. */
   countStaged: (n: number) => void
   /** AQU-AGENT §2 harness context (sandbox / import / memory tools). */
@@ -1206,6 +1223,7 @@ async function runDraftTool(args: DraftArgs, t: ToolCallEnv): Promise<string> {
       signal: t.signal,
       sendProgress: (label, done, total) => t.send({ type: "progress", label, done, total }),
       addUsage: t.addUsage,
+      canContinuePaidWork: t.canContinuePaidWork,
     },
     { model: t.draft.model, apiKey: t.draft.apiKey, url: t.draft.url },
   )

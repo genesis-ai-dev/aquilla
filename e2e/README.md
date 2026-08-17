@@ -16,6 +16,10 @@ states, and keyboard chrome belong in Vitest/RTL (`src/**/*.test.tsx`).
 
 - **Docker** must be running. `scripts/e2e-up.ts` (via `pnpm test:e2e`) starts a
   `postgres:16` container named `aquilla-dev-pg` on port 5432.
+  On a Mac that runtime is Colima (`colima start`). On a dedicated Linux CI box
+  use Docker Engine — see [docs/runbooks/hetzner-ci.md](../docs/runbooks/hetzner-ci.md).
+  `e2e-up.ts` execs into `aquilla-dev-pg`; it does not create the container.
+  `scripts/dev-stack.ts` and `scripts/hetzner-ci/ensure-e2e-runtime.sh` do.
 - **Three `pnpm install` runs** — one at the repo root, one in `auth-worker/`, one in
   `sync-worker/`:
 

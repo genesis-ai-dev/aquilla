@@ -159,6 +159,7 @@ describe("AutopilotActivityInspector", () => {
     expect(screen.getByRole("dialog")).toHaveAccessibleName("Autopilot activity")
     expect(screen.getByText(/evidence behind each step/i)).toBeInTheDocument()
     expect(await screen.findByText("3 reviewable drafts staged")).toBeInTheDocument()
+    expect(screen.getByRole("img", { name: "Autopilot process graph" })).toBeInTheDocument()
     expect(screen.getByRole("log", { name: "Autopilot step history" })).toHaveAttribute("aria-live", "off")
     expect(screen.getByLabelText("3 of 10 passages complete")).toBeInTheDocument()
     expect(screen.getByText(/7 calls/)).toBeInTheDocument()

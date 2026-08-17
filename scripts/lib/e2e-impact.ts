@@ -31,6 +31,10 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/ai/completion.smoke.spec.ts"],
   },
   {
+    source: /^(?:src\/(?:components|lib|pages)\/.*knowledge|auth-worker\/.*knowledge|db\/shared\/knowledge)/i,
+    sentinels: ["e2e/specs/projects/project-settings.smoke.spec.ts"],
+  },
+  {
     source: /^(?:src\/(?:components|lib)\/(?:collab|sync|comments)|sync-worker\/)/i,
     sentinels: ["e2e/specs/collab/concurrent-edit.smoke.spec.ts"],
   },
@@ -41,10 +45,6 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   {
     source: /^(?:src\/(?:components|lib)\/(?:editor|cell|workspace-actions|import|export|audio|voice|video|search|sidebar|timeline|storage)|packages\/idml)/i,
     sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
-  },
-  {
-    source: /^(?:src\/(?:pages\/Homepage|branding)|scripts\/prerender-marketing)/i,
-    sentinels: ["e2e/specs/marketing/book-call.smoke.spec.ts"],
   },
 ]
 

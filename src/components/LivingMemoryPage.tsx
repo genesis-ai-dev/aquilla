@@ -47,11 +47,13 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { LivingMemoryEntry } from "@/lib/parsers/types"
 import { BriefSection } from "@/components/brief/BriefSection"
 import { BriefBuilder } from "@/components/brief/BriefBuilder"
+import { KnowledgeBaseSurface } from "@/components/knowledge/KnowledgeBaseSurface"
 import { emptyBrief, isL1Stale } from "@/lib/brief/brief"
 import { useTranslationBrief } from "@/hooks/useTranslationBrief"
 import { generateL1Summary, extractBriefFromDocument, draftField } from "@/lib/brief/brief-generator"
 import { checkInputSize } from "@/lib/rules/rule-extractor"
 import { editorReturnFromLocation, withEditorReturn } from "@/lib/navigation/org-paths"
+import { ROLE } from "@/lib/frontier/roles"
 
 // ── Pure helpers (add/update/delete for living memory entries) ─────────────
 
@@ -643,6 +645,21 @@ export function LivingMemoryPage({ embedded = false }: { embedded?: boolean }) {
             onEdit={() => setBuilderOpen(true)}
             onGenerate={handleGenerate}
           />
+
+          {projectId ? (
+            <KnowledgeBaseSurface
+              scope={{ kind: "project", id: projectId }}
+              jwt={session?.jwt ?? null}
+              canManage={entriesReady && roleLevel != null && roleLevel >= ROLE.PROJECT_LEAD}
+              drafting={{
+                checked: settings.knowledgeBaseEnabled ?? false,
+                disabled: !(entriesReady && canEdit),
+                onCheckedChange: async (checked) => {
+                  await patchSettings({ knowledgeBaseEnabled: checked })
+                },
+              }}
+            />
+          ) : null}
 
           {builderOpen && (
             <BriefBuilder

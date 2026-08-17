@@ -1,0 +1,87 @@
+/**
+ * changeset-review.ts — pure display/gating logic shared by the two
+ * ChangesetCard variants (AQU-926). Kept out of the component files so the
+ * cards stay fast-refreshable and the gating ladder is unit-testable without
+ * rendering.
+ */
+
+import type { ChangesetItem } from "./run-state"
+import type { ChangesetApproval } from "./changeset-api"
+import { KIND_TIER } from "@/components/agent/cards/registry"
+
+/** Server statuses after which a changeset can no longer be acted on. */
+const TERMINAL_STATUSES = new Set(["committed", "discarded", "stale", "expired"])
+
+export function isTerminalChangesetStatus(status: string): boolean {
+  return TERMINAL_STATUSES.has(status)
+}
+
+/** Status vocabulary for the card chip. Matches the legacy card's original
+ *  hardcoded labels so e2e/RTL selectors keep working; 'committing' is the
+ *  live card's client-side mid-commit phase. */
+export function changesetStatusLabel(status: string, approvedLocally: boolean): string {
+  switch (status) {
+    case "committing":
+      return "Applying"
+    case "committed":
+      return "Committed"
+    case "discarded":
+      return "Discarded"
+    case "stale":
+      return "Stale"
+    case "expired":
+      return "Expired"
+    default:
+      return approvedLocally ? "Approved" : "Pending review"
+  }
+}
+
+export function changesetStatusVariant(
+  status: string,
+  approvedLocally: boolean,
+): "default" | "secondary" | "outline" {
+  if (status === "committed" || approvedLocally) return "default"
+  if (isTerminalChangesetStatus(status)) return "outline"
+  return "secondary"
+}
+
+/** One testimony line the reviewer must individually confirm. */
+export interface TestimonyEntry {
+  key: string
+  /** Technical identifier line (event/command kind, optionally × count) —
+   *  rendered font-mono and untranslated, like ProposalCard's kind badges. */
+  label: string
+}
+
+/**
+ * Which lines need per-item confirmation before Approve & apply enables
+ * (COMMAND-REGISTRY §5 — testimony is never bulk-approved). Summary marks are
+ * authoritative (§2: `summary.events[].testimony`); the frame's tier/kinds are
+ * the fallback for approval payloads that don't itemize events.
+ */
+export function testimonyEntriesFor(
+  item: Pick<ChangesetItem, "summary" | "tier" | "kinds">,
+  approval: ChangesetApproval | null,
+): TestimonyEntry[] {
+  const events = approval?.summary.events ?? []
+  const marked = events.filter(
+    (ev) => ev.testimony === true || KIND_TIER[ev.kind] === "testimony",
+  )
+  if (marked.length > 0) {
+    return marked.map((ev) => ({ key: `event:${ev.kind}`, label: `${ev.kind} × ${ev.count}` }))
+  }
+  if (item.tier === "testimony") {
+    // The whole changeset is testimony-tier: every itemizable line confirms.
+    if (events.length > 0) {
+      return events.map((ev) => ({ key: `event:${ev.kind}`, label: `${ev.kind} × ${ev.count}` }))
+    }
+    if (item.kinds && item.kinds.length > 0) {
+      return item.kinds.map((kind) => ({ key: `kind:${kind}`, label: kind }))
+    }
+    return [{ key: "changeset", label: item.summary }]
+  }
+  // Not testimony-tier overall, but the frame may still name testimony kinds.
+  return (item.kinds ?? [])
+    .filter((kind) => KIND_TIER[kind] === "testimony")
+    .map((kind) => ({ key: `kind:${kind}`, label: kind }))
+}

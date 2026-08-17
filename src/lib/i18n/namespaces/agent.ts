@@ -114,6 +114,19 @@ export const agent = defineNamespace({
     "agent.changeset.changesHeading": "Changes ({count})",
     "agent.changeset.warnings": "Warnings",
     "agent.changeset.digestLabel": "Digest:",
+    // ── AQU-926 live review card (LiveChangesetCard): the card itself
+    //    approves AND commits, then reports the execution receipt. The
+    //    testimony gate reuses agent.validation.testimonyNotice; the per-item
+    //    checkbox is named by its technical label (label wrap), untranslated. ──
+    "agent.changeset.approveAndApply": "Approve & apply",
+    "agent.changeset.receiptApplied": plural({
+      one: "Applied {count} change.",
+      other: "Applied {count} changes.",
+    }),
+    "agent.changeset.receiptStale": plural({
+      one: "{count} was stale and skipped.",
+      other: "{count} were stale and skipped.",
+    }),
 
     // ── Staged proposal rows (ProposalCard's KIND_META + destination badge) ──
     "agent.proposal.kind.edit": "Edit",
@@ -472,6 +485,19 @@ export const agent = defineNamespace({
           "Heading over the sampled per-cell change list on the approval page, with " +
           "the total change count in parentheses.",
         placeholders: { count: "Total number of changes in the changeset (may exceed how many are listed below it)." },
+      },
+      "agent.changeset.receiptApplied": {
+        description:
+          "Execution receipt shown in the changeset review card after Approve & " +
+          "apply commits server-side: how many staged changes were actually written.",
+        placeholders: { count: "Number of changes the commit applied; also selects the plural form." },
+      },
+      "agent.changeset.receiptStale": {
+        description:
+          "Appended to the execution receipt when some staged changes were NOT " +
+          "applied because the underlying cells changed after staging (stale pins). " +
+          "Follows the 'Applied N changes.' sentence, so it refers back to changes.",
+        placeholders: { count: "Number of staged changes skipped as stale; also selects the plural form." },
       },
       "agent.proposal.landsInFile": {
         description:

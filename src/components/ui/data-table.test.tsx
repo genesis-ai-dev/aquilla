@@ -247,6 +247,12 @@ describe("DataTable", () => {
     const search = screen.getByLabelText("Search…")
     expect(search).toBeInTheDocument()
     expect(search).toBeDisabled()
+    expect(search).toHaveClass("disabled:opacity-100")
+    expect(search.closest("[data-slot='input-group']")).toHaveClass(
+      "bg-card",
+      "has-disabled:bg-card",
+      "has-disabled:opacity-100",
+    )
     expect(screen.getByRole("status", { name: "Loading rows" })).toHaveAttribute("aria-busy", "true")
     expect(screen.getByRole("table")).toBeInTheDocument()
     expect(screen.queryByTestId("custom-empty")).not.toBeInTheDocument()

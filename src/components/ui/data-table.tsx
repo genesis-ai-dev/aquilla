@@ -54,6 +54,13 @@ const SKELETON_WIDTHS = [
   "w-[44%]",
 ] as const
 
+/** Idle search chrome. Loading disables the field but must not swap in
+ *  InputGroup's muted `has-disabled:bg-input/*` / opacity — that flash is
+ *  the only difference between page-load and ready. */
+const TABLE_SEARCH_GROUP_CLASS =
+  "max-w-xs bg-card has-disabled:bg-card has-disabled:opacity-100 dark:has-disabled:bg-input/30"
+const TABLE_SEARCH_INPUT_CLASS = "disabled:opacity-100"
+
 function columnMetaClass(meta: unknown) {
   const m = meta as { align?: "right"; className?: string; hidden?: boolean } | undefined
   return cn(m?.align === "right" && "text-end", m?.className)
@@ -228,11 +235,12 @@ function DataTable<TData, TValue>({
       {(searchPlaceholder || toolbarNode) && (
         <div className="flex shrink-0 flex-wrap items-center gap-3">
           {searchPlaceholder ? (
-            <InputGroup className="max-w-xs bg-card">
+            <InputGroup className={TABLE_SEARCH_GROUP_CLASS}>
               <InputGroupAddon>
                 <Search />
               </InputGroupAddon>
               <InputGroupInput
+                className={TABLE_SEARCH_INPUT_CLASS}
                 placeholder={searchPlaceholder}
                 value={globalFilter}
                 onChange={(event) => setGlobalFilter(event.target.value)}
@@ -495,11 +503,12 @@ function DataTablePanelSkeleton({
       {(searchPlaceholder || toolbar) && (
         <div className="flex shrink-0 flex-wrap items-center gap-3">
           {searchPlaceholder ? (
-            <InputGroup className="max-w-xs bg-card">
+            <InputGroup className={TABLE_SEARCH_GROUP_CLASS}>
               <InputGroupAddon>
                 <Search />
               </InputGroupAddon>
               <InputGroupInput
+                className={TABLE_SEARCH_INPUT_CLASS}
                 placeholder={searchPlaceholder}
                 aria-label={searchPlaceholder}
                 disabled

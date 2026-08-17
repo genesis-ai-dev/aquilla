@@ -47,7 +47,9 @@ says "deprecated: prefer PatchSettings") · **PatchSettings** (structural, 500) 
 ```
 
 - Sole command in its changeset. Version-guarded like UpdateProjectSettings (plan_stale on drift),
-  reusing `updateProjectSettingsShared` merge semantics per key.
+  reusing `updateProjectSettingsShared` merge semantics per key (via the additive
+  `patchProjectSettingsShared` in `db/shared/projects.ts`). One op per key — a duplicate key is
+  `validation_failed` (a settings op is authored intent, not a loop batch; last-wins would hide a bug).
 - Per-key floors: `terminology` → org `termbaseEditMinRole` (read `org_settings`, default 500);
   everything else 600 (MAINTAINER).
 - **POLICY_SETTINGS_KEYS** (exported const) always rejected with `permission_denied`:
@@ -65,10 +67,19 @@ says "deprecated: prefer PatchSettings") · **PatchSettings** (structural, 500) 
             payload?: Record<string, unknown> }[] }
 ```
 
+- Sole command in its changeset (one command already batches many events); max 200 events.
 - Compiles each event through the same precondition/parent-resolution doctrine as
   SetTranslation, then routes through the `/events` perimeter at commit (same internal token
   bridge). Floors per inner kind from `REQUIRED_ROLE` (role-policy — single source of truth);
-  changeset floor = max over events.
+  changeset floor = max over events; foreign unvalidate / foreign comment mutation add the
+  perimeter's dynamic MAINTAINER bump at prepare. Every allowed kind is non-chain-mutating, so
+  compiled events carry `parentId: null`; the head-referencing kinds (validate/unvalidate/
+  backtranslation/repin) pin the live head as standard CellPreconditions instead — their pin
+  payload fields (`editEventId`/`targetEventId`/`sourceEventId`/`expectedTargetEventId`) are
+  SERVER-RESOLVED at prepare and rejected if caller-supplied. Every referenced
+  cell/comment/file/assignment must exist at prepare; one bad reference rejects the whole plan
+  (`validation_failed` naming the index — no silent skips), and existence is re-checked on the
+  first commit attempt (plan_stale).
 - **ALLOWED_EMIT_KINDS v1** (exported const — start here, shrink rather than guess if a kind's
   chain semantics aren't cleanly resolvable at prepare):
   `comment.create`, `comment.edit`, `comment.delete`, `comment.resolve`,

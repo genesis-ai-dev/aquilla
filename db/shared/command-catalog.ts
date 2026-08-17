@@ -95,7 +95,7 @@ Gotcha: when \`projectId\` is omitted the changeset URL's project id becomes the
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### PatchSettings
-Params: \`{ projectId, ops: [{ key, value }], ifMatchVersion }\` — sole command; top-level settings keys only; each op replaces that key's value.
+Params: \`{ projectId, ops: [{ key, value }], ifMatchVersion }\` — sole command; top-level settings keys only; each op replaces that key's value wholesale (one op per key — duplicates are rejected).
 Floors: \`terminology\` needs the org's termbase-edit floor (default PROJECT_LEAD 500); every other key needs MAINTAINER 600.
 Policy keys are NEVER writable by agents (permission_denied): agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, contributeToGlobalTm.
 Gotchas:
@@ -122,11 +122,14 @@ Kept for compatibility. Rejected if any policy key's value would change (see Pat
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### EmitEvents
-Params: \`{ events: [{ kind, fileId?, cellId?, laneId?, payload? }] }\`.
+Params: \`{ events: [{ kind, fileId?, cellId?, laneId?, payload? }] }\` — sole command; max 200 events per changeset.
 The generalized escape hatch: stages role-allowed event kinds through the same precondition doctrine as SetTranslation. The changeset floor is the max floor across events (per-kind floors come from role-policy).
 Allowed kinds v1: comment.create/edit/delete/resolve · cell.waive/unwaive · cell.validate/unvalidate (testimony — reviewed per item, never bulk) · cell.backtranslation.set · target.cell.repin · file.rename/delete/restore · assignment.create/reassign/unassign.
 Not here: target text (use SetTranslation), source edits, audio (use LinkMedia), imports (use PlanImport), reorders/retimes.
-Gotcha: payload shapes match the app's event vocabulary — call describe_command or docs before hand-building unfamiliar payloads.`,
+Gotchas:
+- Head pins (editEventId / targetEventId / sourceEventId / expectedTargetEventId) are SERVER-RESOLVED from the live projection at prepare — omit them; a supplied value is rejected. Commit re-checks the pins (plan_stale on drift).
+- Every referenced cell/comment/file/assignment must exist at prepare — one bad reference rejects the whole plan (no silent skips).
+- payload shapes match the app's event vocabulary — call describe_command or docs before hand-building unfamiliar payloads.`,
   },
 ] as const
 

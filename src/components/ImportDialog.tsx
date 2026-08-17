@@ -53,6 +53,7 @@ import {
   type MaculaProgress,
   type TnProgress,
   type BiblicaProgress,
+  type BiblicaEdition,
   type ParatextImportProgress,
   type SourceCellRef,
   type ImportResult,
@@ -904,7 +905,7 @@ const SPECIALIZED_OPTIONS: ImportOption[] = [
   { id: "tn", title: "Translation Notes", hint: "TSV", icon: StickyNote, badge: "beta",
     description: "unfoldingWord notes, shown beside the matching verse as you translate." },
   { id: "biblica", title: "Biblica Study Bible Notes", hint: "IDML", icon: BookOpen, badge: "beta",
-    description: "Study notes from an InDesign study Bible — imports the notes only and leaves the scripture untouched." },
+    description: "Notes from an InDesign study Bible, Treasure Hunt Bible or Reach 4 Life package — imports the notes only and leaves the scripture untouched." },
   { id: "obs", title: "Open Bible Stories", hint: "door43", icon: BookImage, badge: "beta",
     description: "Narrative stories with reference images, from unfoldingWord/door43." },
   { id: "dcs", title: "Door43 (DCS)", hint: "upstream", icon: Cloud, badge: "beta",
@@ -3444,6 +3445,11 @@ function BiblicaPanel({
   const [file, setFile] = useState<File | null>(null)
   // Off by default: each InDesign line stays one cell unless the translator opts in.
   const [splitSentences, setSplitSentences] = useState(false)
+  // The three Biblica templates disagree about what a paragraph style means —
+  // a study Bible marks its notes, the other two mark scripture instead — and
+  // nothing in the package says which title it is, so the person importing it
+  // does. One edition at a time, hence a single value rather than two flags.
+  const [edition, setEdition] = useState<BiblicaEdition>("study-notes")
 
   async function handleImport() {
     if (!file || importing) return
@@ -3461,7 +3467,7 @@ function BiblicaPanel({
           getToken,
         },
         setProgress,
-        { splitSentences },
+        { splitSentences, edition },
       )
       await onImported(ref)
     } catch (err) {
@@ -3472,21 +3478,61 @@ function BiblicaPanel({
     }
   }
 
+  function chooseEdition(next: BiblicaEdition, checked: boolean) {
+    setEdition(checked ? next : "study-notes")
+    setError(null)
+  }
+
   return (
     <div className="flex flex-col gap-4 py-2">
       <p className="text-xs text-muted-foreground">
-        Upload the InDesign (.idml) package for a Biblica study Bible. Only the study
-        notes are imported — the Bible text is skipped, because it comes from the
-        published scripture files rather than being retyped here. Each note keeps its
-        InDesign formatting locked, and the notes carry the book and chapter range they
-        belong to so they stay in step with the passage. Lists that InDesign holds in a
-        single paragraph — cross-references, glossaries, outlines — always arrive as one
-        cell per line. Optionally, longer note blocks can also be split into one cell per
-        sentence; export puts each block back together as InDesign set it.
+        {edition === "treasure-hunt" ? (
+          <>
+            Upload the InDesign (.idml) package for a Treasure Hunt Bible volume.
+            Everything set around the Bible text is imported — the fact and hunt blocks,
+            the book introductions, and the front matter — while the Bible text itself is
+            skipped, because it comes from the published scripture files rather than being
+            retyped here. Each note keeps its InDesign formatting locked, and the facts and
+            hunts carry the book and chapter they belong to so they stay in step with the
+            passage. Lists that InDesign holds in a single paragraph — hunt steps, fact
+            bullets, contents entries — always arrive as one cell per line. Optionally,
+            longer blocks can also be split into one cell per sentence; export puts each
+            block back together as InDesign set it.
+          </>
+        ) : edition === "reach4life" ? (
+          <>
+            Upload the InDesign (.idml) package for a Reach 4 Life section or scripture
+            volume. The workbook around the Bible text is imported — the lessons and
+            journeys, the hot topics, the book introductions, and the front and back
+            matter — while the continuous Bible text is skipped, because it comes from the
+            published scripture files rather than being retyped here. Verses quoted inside
+            a lesson stay with the lesson. Each cell keeps its InDesign formatting locked
+            and carries the section it belongs to, so the workbook stays navigable. Lists
+            that InDesign holds in a single paragraph — contents entries, journey steps,
+            bullet advice — always arrive as one cell per line. Optionally, longer
+            paragraphs can also be split into one cell per sentence; export puts each one
+            back together as InDesign set it.
+          </>
+        ) : (
+          <>
+            Upload the InDesign (.idml) package for a Biblica study Bible. Only the study
+            notes are imported — the Bible text is skipped, because it comes from the
+            published scripture files rather than being retyped here. Each note keeps its
+            InDesign formatting locked, and the notes carry the book and chapter range they
+            belong to so they stay in step with the passage. Lists that InDesign holds in a
+            single paragraph — cross-references, glossaries, outlines — always arrive as one
+            cell per line. Optionally, longer note blocks can also be split into one cell per
+            sentence; export puts each block back together as InDesign set it.
+          </>
+        )}
       </p>
       <div className="flex flex-col gap-2">
-        <Button variant="outline" nativeButton={false} render={<label className="cursor-pointer" />}>
-          {file ? file.name : "Choose study Bible IDML file"}
+        <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+          {file
+            ? file.name
+            : edition === "treasure-hunt" ? "Choose Treasure Hunt IDML file"
+            : edition === "reach4life" ? "Choose Reach 4 Life IDML file"
+            : "Choose study Bible IDML file"}
           <input
             type="file"
             className="hidden"
@@ -3504,6 +3550,40 @@ function BiblicaPanel({
             {file.name} — {(file.size / 1024 / 1024).toFixed(2)} MB
           </p>
         )}
+        <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
+          <Checkbox
+            className="mt-0.5"
+            checked={edition === "treasure-hunt"}
+            disabled={importing}
+            onCheckedChange={(checked) => chooseEdition("treasure-hunt", checked === true)}
+            aria-label="This is a Treasure Hunt Bible file"
+          />
+          <span className="flex flex-col gap-0.5">
+            <span>This is a Treasure Hunt Bible file</span>
+            <span className="text-xs text-muted-foreground">
+              The Treasure Hunt Bible uses a different InDesign template. Tick this to
+              import its facts, hunts, book introductions and front matter instead of
+              looking for study notes.
+            </span>
+          </span>
+        </label>
+        <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
+          <Checkbox
+            className="mt-0.5"
+            checked={edition === "reach4life"}
+            disabled={importing}
+            onCheckedChange={(checked) => chooseEdition("reach4life", checked === true)}
+            aria-label="This is a Reach 4 Life file"
+          />
+          <span className="flex flex-col gap-0.5">
+            <span>This is a Reach 4 Life file</span>
+            <span className="text-xs text-muted-foreground">
+              Reach 4 Life uses a third InDesign template. Tick this to import its
+              lessons, journeys, hot topics, book introductions and front matter instead
+              of looking for study notes.
+            </span>
+          </span>
+        </label>
         <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
           <Checkbox
             className="mt-0.5"

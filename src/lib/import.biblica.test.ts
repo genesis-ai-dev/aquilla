@@ -3,8 +3,10 @@ import {
   SAMPLE_NOTES,
   makeBiblicaIdml,
   note,
+  noteWithTrailingVerseMarker,
   paragraph,
   run,
+  verseMarkerOnlyNote,
 } from "./biblica/__fixtures__/biblica-idml"
 
 // The production path parses in a transferable Web Worker, which does not exist
@@ -211,6 +213,33 @@ describe("Biblica study-notes import", () => {
       { version: 1, index: 1, count: 3, ranges: [expect.objectContaining({ slot: 0 })] },
       { version: 1, index: 2, count: 3, ranges: [expect.objectContaining({ slot: 0 })] },
     ])
+  })
+
+  it("commits no cell for the chapter/verse markers InDesign leaves in the notes", async () => {
+    const requests = captureRequests()
+    const withMarkers = await biblicaFile([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "MRK")),
+      note("p-title", "The Gospel of Mark", "intro%3aimt1"),
+      noteWithTrailingVerseMarker("p-n", "Jesus sends his followers out.", "20"),
+      // Matthew's closing "28:20", flushed into Mark's preface by InDesign.
+      verseMarkerOnlyNote("p-ie", "28", "20"),
+    ])
+
+    const ref = await importBiblicaStudyNotes(withMarkers, {
+      projectId: "p1",
+      author: "alice",
+      getToken: async () => "tok",
+    })
+
+    expect(ref.cellCount).toBe(2)
+    const cells = importBodies(requests).flatMap((body) => body.cells ?? [])
+    expect(cells.map((cell) => cell.value)).toEqual([
+      "The Gospel of Mark",
+      "Jesus sends his followers out.",
+    ])
+    // The note that swallowed a marker is now part of its paragraph, so it
+    // carries the ranges export needs to write it back without the marker.
+    expect(cells[1]?.metadata?.idmlRejoin).toMatchObject({ version: 1, index: 0, count: 1 })
   })
 
   it("rejects an oversized package before buffering or creating server state", async () => {

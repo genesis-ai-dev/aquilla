@@ -14,6 +14,9 @@ const ACE_MARKER_PATTERN = /<\?ACE\s+\d+\?>/gi
 /** Apostrophe characters used as structural glue in English Biblica IDML (source serif). */
 const STRUCTURAL_APOSTROPHE_PATTERN = /^['\u02BC\u2019\u2032\u00B4]+$/
 
+/** Character styles that carry a chapter/verse delimiter (USFM `\c` and `\v`). */
+const VERSE_MARKER_STYLE_PATTERN = /(?:^|\/)meta(?:%3a|:)[cv](?:_sp)?$/i
+
 function hasStyleToken(styleName: string, prefix: string, suffix = ""): boolean {
   return styleName.includes(`${prefix}%3a${suffix}`) || styleName.includes(`${prefix}:${suffix}`)
 }
@@ -51,6 +54,21 @@ export function isMetaChapterCharacterStyle(characterStyle: string): boolean {
 /** Verse bookend markers (`meta:v`) that open and close a verse body. */
 export function isMetaVerseCharacterStyle(characterStyle: string): boolean {
   return hasStyleToken(characterStyle, "meta", "v")
+}
+
+/**
+ * Chapter/verse delimiter runs (`meta:c`, `meta:v` and their `_sp` variants).
+ *
+ * InDesign flushes the closing markers of a book's final verse into the next
+ * paragraph of the text flow — usually the following book's `intro:ie` — so
+ * Matthew's closing "28:20" lands in Mark's preface, and a note that follows a
+ * verse can end with a bare "21". The markers are invisible in the printed
+ * layout and hold no translatable words, so they never belong to a note cell.
+ * Unlike structural apostrophes they are never cleared on export: IDML needs
+ * them to delimit verses, so their slots keep the publisher's text.
+ */
+export function isBiblicaVerseMarkerCharacterStyle(characterStyle: string): boolean {
+  return VERSE_MARKER_STYLE_PATTERN.test(characterStyle)
 }
 
 /** True for InDesign "source serif" apostrophe glue. */

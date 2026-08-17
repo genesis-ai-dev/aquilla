@@ -23,6 +23,10 @@ const NOTE_BLOCK_SENTENCES = [
   "Each day is introduced by the same formula and closed by an evening refrain.",
 ] as const
 const NOTE_BLOCK = NOTE_BLOCK_SENTENCES.join("")
+/** A note that InDesign flushed the previous verse's closing marker into. */
+const MARKER_NOTE = "The account closes where the next book begins."
+/** The chapter/verse markers that end a book: no words, so no cell. */
+const STRAY_MARKER = "50:26"
 
 const PLAIN = "$ID/[No character style]"
 
@@ -40,8 +44,9 @@ function paragraph(self: string, paragraphStyle: string, inner: string): string 
 /**
  * A Biblica study-Bible page: a document-level note before `meta:bk`, a
  * book-level note before any scripture, one fully marked-up verse, a note about
- * that chapter, a reference list set as a single line-broken paragraph, and a
- * multi-sentence note block.
+ * that chapter, a reference list set as a single line-broken paragraph, a
+ * multi-sentence note block, and the chapter/verse markers InDesign flushes out
+ * of the last verse into the paragraphs that follow it.
  */
 async function writeBiblicaFixture(filePath: string): Promise<void> {
   const zip = new JSZip()
@@ -82,6 +87,8 @@ async function writeBiblicaFixture(filePath: string): Promise<void> {
           + `</CharacterStyleRange>`,
       ),
       paragraph("p-n2", "intro%3aip", run(PLAIN, NOTE_BLOCK)),
+      paragraph("p-n3", "intro%3aipi", run(PLAIN, MARKER_NOTE) + run("meta%3av", "26")),
+      paragraph("p-ie", "intro%3aie", run("meta%3ac", "50:") + run("meta%3av", "26")),
       "</Story></idPkg:Story>",
     ].join(""),
     { compression: "DEFLATE", createFolders: false },
@@ -116,7 +123,9 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   await ws.waitForEditor()
 
   const rows = alice.locator("[data-cell-id]")
-  await expect(rows).toHaveCount(6, { timeout: 15_000 })
+  // Six note cells from the original fixture, plus the flushed-marker note;
+  // the marker-only paragraph owns no cell. Sentence splitting is off.
+  await expect(rows).toHaveCount(7, { timeout: 15_000 })
   await expect(ws.cellRow(0)).toContainText(GLOBAL_PREFACE_NOTE)
   await expect(ws.cellRow(1)).toContainText(PREFACE_NOTE)
   await expect(ws.cellRow(2)).toContainText(CHAPTER_ONE_NOTE)
@@ -130,6 +139,13 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   // With sentence splitting off (default), the note block stays one cell.
   await expect(ws.cellRow(5)).toContainText(NOTE_BLOCK_SENTENCES[0].trim())
   await expect(ws.cellRow(5)).toContainText(NOTE_BLOCK_SENTENCES[1])
+
+  // InDesign flushes a book's closing chapter/verse markers into the paragraphs
+  // that follow it. They hold no words, so the note they landed on keeps its own
+  // text and the paragraph that holds nothing else owns no cell at all.
+  await expect(ws.cellRow(6)).toContainText(MARKER_NOTE)
+  await expect(ws.cellRow(6)).not.toContainText("26")
+  await expect(alice.getByText(STRAY_MARKER)).toHaveCount(0)
 
   // Notes retain Biblica's richer Preface/chapter grouping in the universal
   // navigator while verse paragraphs remain protected source structure.
@@ -153,6 +169,10 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   // The whole point of this importer: the Bible text is not imported for
   // translation, even though it was present in the package.
   await expect(alice.getByText(SCRIPTURE)).toHaveCount(0)
+
+  // Each Biblica edition lands in a folder of its own, so one project can hold
+  // all three without their files mixing in the sidebar.
+  await expect(alice.getByRole("button", { name: "Collapse Biblica Study Notes" })).toBeVisible()
 
   // AQU-742: reproduce the real replace failure — an existing multi-style
   // target, followed by a model response that keeps every slot identity/text

@@ -43,7 +43,7 @@ export function planImportMilestones(
 ): ImportMilestone[] {
   if (units.length === 0) return []
 
-  const biblicaProfile = options.profileId.startsWith("builtin:biblica-study")
+  const biblicaProfile = options.profileId.startsWith("builtin:biblica-")
   const explicit = units.map((_, index) => (
     sources[index]?.milestone
     ?? (biblicaProfile ? biblicaMilestone(sources[index]?.metadata) : undefined)
@@ -110,16 +110,25 @@ export function planImportMilestones(
   return fallbackMilestones(units)
 }
 
+/**
+ * Both Biblica IDML importers fill the same `biblica` metadata bucket, so one
+ * planner serves them. A note that precedes any chapter labels itself "Preface"
+ * (study Bible) or "Intro" (Treasure Hunt); either way it is the book's opening
+ * material and groups ahead of chapter 1.
+ */
+const BIBLICA_OPENING_LABELS: ReadonlySet<string> = new Set(["Preface", "Intro"])
+
 function biblicaMilestone(metadata: Record<string, unknown> | undefined): ImportMilestone | undefined {
   const value = record(metadata?.biblica)
   if (!value) return undefined
   const rawChapter = string(value.chapterLabel)
   if (!rawChapter) return undefined
+  const opening = BIBLICA_OPENING_LABELS.has(rawChapter)
   const bookCode = string(value.bookCode)?.toUpperCase()
   const bookName = bookCode ? getBookName(bookCode) ?? bookCode : undefined
-  const shortLabel = rawChapter === "Preface" ? "P" : rawChapter.replace("-", "–")
-  const chapterLabel = rawChapter === "Preface" ? "Preface" : rawChapter.replace("-", "–")
-  const kind = rawChapter === "Preface"
+  const shortLabel = opening ? rawChapter[0]! : rawChapter.replace("-", "–")
+  const chapterLabel = opening ? rawChapter : rawChapter.replace("-", "–")
+  const kind = opening
     ? "preface"
     : rawChapter.includes("-")
       ? "chapter-range"

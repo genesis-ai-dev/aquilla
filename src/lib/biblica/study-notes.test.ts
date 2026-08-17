@@ -11,9 +11,11 @@ import {
   makeBiblicaIdml,
   note,
   noteList,
+  noteWithTrailingVerseMarker,
   openVerse,
   paragraph,
   run,
+  verseMarkerOnlyNote,
 } from "./__fixtures__/biblica-idml"
 
 /**
@@ -327,6 +329,72 @@ describe("Biblica study-note selection", () => {
     const selection = selectBiblicaStudyNotes(units)
 
     expect(selection.notes[0].chapterLabel).toBe("23")
+  })
+
+  it("imports no cell for a preface paragraph that is only the previous book's markers", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "MRK")),
+      note("p-title", "The Gospel of Mark", "intro%3aimt1"),
+      // Matthew's closing "28:20", flushed into Mark's preface by InDesign.
+      verseMarkerOnlyNote("p-ie", "28", "20"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => entry.unit.sourceText)).toEqual([
+      "The Gospel of Mark",
+    ])
+    expect(selection.otherUnitCount).toBe(2)
+  })
+
+  it("cuts a verse marker off the end of the note it was flushed into", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "REV")),
+      noteWithTrailingVerseMarker("p-n", "The fourth vision John wrote about.", "21"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes).toHaveLength(1)
+    const [only] = selection.notes
+    expect(only.unit.sourceText).toBe("The fourth vision John wrote about.")
+    // The cell is no longer the whole paragraph, so it says which part it owns:
+    // the marker slot is left out and keeps the publisher's text on export.
+    expect(only.rejoin).toEqual({
+      index: 0,
+      count: 1,
+      ranges: [{ slot: 0, start: 0, end: "The fourth vision John wrote about.".length }],
+    })
+  })
+
+  it("keeps the sentences of a note whose paragraph ends with a verse marker", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "GEN")),
+      noteWithTrailingVerseMarker("p-n", SAMPLE_NOTES.noteBlock, "7"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units, { splitSentences: true })
+
+    expect(selection.notes.map((entry) => entry.unit.sourceText))
+      .toEqual([...SAMPLE_NOTES.noteBlockSentences])
+    // The dropped marker slice is not counted, so the siblings still number
+    // 0..n-1 of n — which is what the exporter checks before it merges them.
+    expect(selection.notes.map((entry) => entry.rejoin?.index)).toEqual([0, 1, 2])
+    expect(selection.notes.every((entry) => entry.rejoin?.count === 3)).toBe(true)
+    expect(selection.notes.flatMap((entry) => entry.rejoin?.ranges ?? [])
+      .every((range) => range.slot === 0)).toBe(true)
+  })
+
+  it("keeps a note whose only marker sits between its words", async () => {
+    const units = [
+      syntheticUnit("ParagraphStyle/meta%3abk", [["PSA", PLAIN]], 0),
+      syntheticUnit("ParagraphStyle/intro%3aimi", [
+        ["Creation: Genesis 1:1 – 2:25.", PLAIN],
+        ["8:", "CharacterStyle/meta%3ac"],
+      ], 1),
+    ]
+
+    const selection = selectBiblicaStudyNotes(units)
+
+    expect(selection.notes.map((entry) => entry.unit.sourceText))
+      .toEqual(["Creation: Genesis 1:1 – 2:25."])
   })
 
   it("returns nothing for a package with no note paragraphs", async () => {

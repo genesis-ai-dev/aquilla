@@ -65,6 +65,28 @@ export function note(self: string, body: string, style = "intro%3aip"): string {
 }
 
 /**
+ * A note whose paragraph ends with the closing `meta:v` bookend of the verse
+ * that came before it — InDesign flushes those markers into the next paragraph
+ * of the text flow, so they surface inside the notes.
+ */
+export function noteWithTrailingVerseMarker(
+  self: string,
+  body: string,
+  verse: string,
+  style = "intro%3aipi",
+): string {
+  return paragraph(self, style, run(PLAIN, body) + run("meta%3av", verse))
+}
+
+/**
+ * The `intro:ie` paragraph that closes a book: nothing but the previous book's
+ * final chapter/verse markers, which is how "28:20" ends up in Mark's preface.
+ */
+export function verseMarkerOnlyNote(self: string, chapter: string, verse: string): string {
+  return paragraph(self, "intro%3aie", run("meta%3ac", `${chapter}:`) + run("meta%3av", verse))
+}
+
+/**
  * One note paragraph whose lines are separated by `<Br/>` — how Biblica sets a
  * cross-reference list, a glossary, or an outline.
  */

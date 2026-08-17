@@ -7,6 +7,11 @@
  * scripture files, not translated here. Verse runs are still walked, because
  * they are what tells us which book and chapter each note section belongs to.
  *
+ * The chapter/verse delimiters InDesign leaves inside note paragraphs are cut
+ * out of the cells (see `isBiblicaVerseMarkerCharacterStyle`): a preface that
+ * ends with the previous book's "28:20" holds no translatable words there, and
+ * a paragraph that is nothing but those markers owns no cell at all.
+ *
  * Note paragraphs are always split at line breaks, because Biblica sets lists —
  * cross-references, glossary entries, outlines — as a single paragraph with a
  * `<Br/>` between items. Sentence splitting within each line is optional
@@ -25,6 +30,7 @@ import {
   sliceIdmlUnit,
   type IdmlSliceRange,
   type IdmlTranslationUnit,
+  type IdmlUnitSlice,
 } from "@aquilla/idml-roundtrip"
 import { biblicaSentenceCutPoints } from "./sentence-cuts"
 import {
@@ -33,6 +39,7 @@ import {
   isBiblicaBookMarkerStyle,
   isBiblicaChapterHeadingStyle,
   isBiblicaNoteSectionStyle,
+  isBiblicaVerseMarkerCharacterStyle,
   isChapterNumberCharacterStyle,
   isMetaChapterCharacterStyle,
   isMetaVerseCharacterStyle,
@@ -167,9 +174,46 @@ function slotText(unit: IdmlTranslationUnit): string {
   return unit.slots.map((slot) => slot.text).join("")
 }
 
+/** Slot positions holding a chapter/verse delimiter rather than note text. */
+function verseMarkerSlots(unit: IdmlTranslationUnit): ReadonlySet<number> {
+  const positions = new Set<number>()
+  for (const [position, slot] of unit.slots.entries()) {
+    if (isBiblicaVerseMarkerCharacterStyle(slot.characterStyleId)) positions.add(position)
+  }
+  return positions
+}
+
+/**
+ * Cuts that put every delimiter run in a slice of its own, in the slot-text
+ * coordinates the sentence cutter also works in.
+ */
+function verseMarkerCutPoints(
+  unit: IdmlTranslationUnit,
+  markers: ReadonlySet<number>,
+): number[] {
+  const cuts: number[] = []
+  let offset = 0
+  for (const [position, slot] of unit.slots.entries()) {
+    const start = offset
+    offset += slot.text.length
+    if (slot.text.length > 0 && markers.has(position)) cuts.push(start, offset)
+  }
+  return cuts
+}
+
+/** True for a slice that holds delimiters and no words of its own. */
+function isVerseMarkerSlice(slice: IdmlUnitSlice, markers: ReadonlySet<number>): boolean {
+  if (!slice.ranges.some((range) => markers.has(range.slot))) return false
+  return !slice.ranges.some((range, position) => (
+    !markers.has(range.slot) && (slice.unit.slots[position]?.text.trim().length ?? 0) > 0
+  ))
+}
+
 function noteHasVisibleText(unit: IdmlTranslationUnit): boolean {
-  return unit.slots.some((slot) => (
+  const markers = verseMarkerSlots(unit)
+  return unit.slots.some((slot, position) => (
     slot.text.trim().length > 0
+    && !markers.has(position)
     && !isStructuralApostropheSegment(slot.text, slot.characterStyleId)
   ))
 }
@@ -296,24 +340,25 @@ export function selectBiblicaStudyNotes(
       ) {
         continue
       }
-      if (!splitSentences) {
-        notes.push({
-          unit: line,
-          ...(currentBook ? { bookCode: currentBook } : {}),
-          chapterLabel: currentLabel,
-        })
-        continue
-      }
-
-      // One cell per sentence. Slices are kept whole and in order, however
-      // little text a slice holds, because their ranges have to tile the line for
-      // the exporter to rebuild it.
-      const slices = sliceIdmlUnit(line, biblicaSentenceCutPoints(slotText(line)))
-      for (const [index, slice] of slices.entries()) {
+      // One cell per sentence when splitting is on, and in either mode the
+      // chapter/verse delimiters are cut away from the words around them.
+      // Sentence slices are kept whole and in order, however little text a slice
+      // holds; only the delimiter slices are dropped, and the exporter keeps the
+      // publisher's text wherever no cell covers the line.
+      const markers = verseMarkerSlots(line)
+      const slices = sliceIdmlUnit(line, [
+        ...(splitSentences ? biblicaSentenceCutPoints(slotText(line)) : []),
+        ...verseMarkerCutPoints(line, markers),
+      ])
+      const cells = slices.filter((slice) => !isVerseMarkerSlice(slice, markers))
+      // A cell that is not the whole line has to record which part of it it owns,
+      // even when it is the only one left after the delimiters were dropped.
+      const isPartOfLine = cells.length > 1 || cells.length !== slices.length
+      for (const [index, slice] of cells.entries()) {
         notes.push({
           unit: slice.unit,
-          ...(slices.length > 1
-            ? { rejoin: { index, count: slices.length, ranges: slice.ranges } }
+          ...(isPartOfLine
+            ? { rejoin: { index, count: cells.length, ranges: slice.ranges } }
             : {}),
           ...(currentBook ? { bookCode: currentBook } : {}),
           chapterLabel: currentLabel,

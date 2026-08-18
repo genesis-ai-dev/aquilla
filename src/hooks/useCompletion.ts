@@ -53,7 +53,7 @@ import { measureTranslationEvidence, type TranslationEvidenceSnapshot } from "@/
 import {
   idmlCompletionPromptSource,
   idmlCompletionSystemAddendum,
-  normalizeProtectedCompletion,
+  normalizeProtectedCompletionWithRepair,
 } from "@/lib/idml/completion"
 
 // Cap per LLM call. Above this we split into independent review packages.
@@ -411,7 +411,21 @@ export function useCompletion(
       // AQU-211: auto-commit like the batch path. The cell lands unvalidated
       // and flows through the validation workflow — no inline accept/reject.
       const llmAuthor = modelName
-      const completed = normalizeProtectedCompletion(cell, finalText)
+      // IDML: reconstruct safe multi-slot damage locally; if anchors are still
+      // broken, run one repair pass that rebuilds the source shell with the
+      // draft's translated wording.
+      const completed = await normalizeProtectedCompletionWithRepair(
+        cell,
+        finalText,
+        async (messages) => complete({
+          settings: generationSettings,
+          session,
+          messages: [...messages],
+          stream: false,
+          signal,
+        }),
+      )
+      finalText = completed.valueHtml ?? completed.value
       if (opts?.commitGuard && !opts.commitGuard()) {
         setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
         setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
@@ -681,7 +695,17 @@ export function useCompletion(
           if (text !== undefined && text.trim()) {
             if (commitCompletedCell) {
               try {
-                const completed = normalizeProtectedCompletion(cell, text)
+                const completed = await normalizeProtectedCompletionWithRepair(
+                  cell,
+                  text,
+                  async (messages) => complete({
+                    settings: effectiveSettings,
+                    session,
+                    messages: [...messages],
+                    stream: false,
+                    signal: getBatchCompletionSignal(runId),
+                  }),
+                )
                 await commitCompletedCell(
                   cell,
                   completed.valueHtml ?? completed.value,
@@ -943,7 +967,17 @@ export function useCompletion(
         if (!idmlCompletionSystemAddendum([cell])) {
           setPreviews((p) => new Map(p).set(cellId, text))
         }
-        const completed = normalizeProtectedCompletion(cell, text)
+        const completed = await normalizeProtectedCompletionWithRepair(
+          cell,
+          text,
+          async (messages) => complete({
+            settings: effectiveSettings,
+            session,
+            messages: [...messages],
+            stream: false,
+            signal,
+          }),
+        )
         await commitCompletedCell?.(
           cell,
           completed.valueHtml ?? completed.value,

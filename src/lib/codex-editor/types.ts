@@ -75,6 +75,10 @@ export interface CodexCellAttachment {
   /** SUB-48: this clip's event is still queued locally (saved on this device,
    *  not yet at the server). Drives the "saving…" hint on chips/rows. */
   pendingSync?: true;
+  /** AQU-924: this clip's attach event was quarantined / exhausted its retries,
+   *  so the server has no attachment for it and won't without user action. The
+   *  clip stays visible in this state instead of silently disappearing. */
+  syncFailed?: true;
 }
 
 // Per-word timing for karaoke / forced-alignment / ASR output. Character

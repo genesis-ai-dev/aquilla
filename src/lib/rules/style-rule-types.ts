@@ -122,6 +122,55 @@ export interface CellCoordinates {
   genre?: string
 }
 
+// ── Mutation inputs (client → server bodies for the six phase-2 routes) ─────
+
+/**
+ * PUT …/style-rules/:ruleId/applicability body — upserted on
+ * (rule, targetType, targetId). `assignedBy: "inherited"` is reserved for
+ * deliberate materialization of computed inheritance (audit/perf only).
+ */
+export interface UpsertApplicabilityInput {
+  targetType: ApplicabilityTargetType
+  targetId: string
+  relationship: ApplicabilityRelationship
+  confidence?: number
+  reason?: string
+  assignedBy: RuleApplicability["assignedBy"]
+}
+
+/**
+ * POST …/style-rules body. The server forces `status: "proposed"` and creates
+ * any initial `applicability` rows atomically with the rule.
+ */
+export interface CreateStyleRuleInput {
+  instruction: string
+  category: StyleRuleCategory
+  scope: StyleRuleScope
+  conditions?: string
+  examples?: StyleRuleExample[]
+  exceptions?: string
+  source?: StyleRuleSource
+  checkSpec?: RuleCheck
+  severity?: StyleRule["severity"]
+  applicability?: UpsertApplicabilityInput[]
+}
+
+/**
+ * PATCH …/style-rules/:ruleId body — any editable subset. The server sets
+ * `humanEdited: true` and bumps `version`. `null` clears a nullable column.
+ */
+export interface UpdateStyleRuleInput {
+  instruction?: string
+  category?: StyleRuleCategory
+  scope?: StyleRuleScope
+  conditions?: string | null
+  examples?: StyleRuleExample[] | null
+  exceptions?: string | null
+  checkSpec?: RuleCheck | null
+  severity?: StyleRule["severity"]
+  enabled?: boolean
+}
+
 /** Candidate emitted by extraction before it is posted as a proposed rule. */
 export interface StyleRuleCandidate {
   instruction: string

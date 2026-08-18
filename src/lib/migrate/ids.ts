@@ -80,21 +80,41 @@ export const sourceArtifactBindingIdFor = (
 /** event id for the `source.cell.delete` that retracts a cell deleted in Codex.
  *  Keyed only by (project, file, cell) so a re-migration derives the same id and
  *  the delete stays idempotent (INSERT OR IGNORE), which is what lets a re-run
- *  purge a cell an earlier (pre-AQU-673) migration already created (AQU-747). */
+ *  purge a cell an earlier (pre-AQU-673) migration already created (AQU-747).
+ *
+ *  `generation` (AQU-933): a tombstone can be UNDONE — a projection
+ *  rebuild/replay under the pre-AQU-931 arbitration rule dropped parent-null
+ *  deletes and resurrected the rows, and the logged gen-1 id then delta-filters
+ *  every re-emission forever. Generation N ≥ 2 mints a fresh deterministic id
+ *  so the reconciliation pass can re-kill the zombie; generation 1 is the
+ *  exact legacy seed (byte-identical ids for fresh migrations). */
 export const sourceCellDeleteEventId = (
   projectId: string,
   fileId: string,
   cellId: string,
-): string => u5(`cell-delete-source:${projectId}:${fileId}:${cellId}`)
+  generation = 1,
+): string =>
+  u5(
+    generation <= 1
+      ? `cell-delete-source:${projectId}:${fileId}:${cellId}`
+      : `cell-delete-source:${projectId}:${fileId}:${cellId}:gen${generation}`,
+  )
 
 /** event id for the `target.cell.delete` companion of a Codex-deleted cell —
  *  removes the target-lane row a prior migration's `target.cell.commit`
- *  materialized. Distinct seed prefix from the source delete (AQU-747). */
+ *  materialized. Distinct seed prefix from the source delete (AQU-747);
+ *  same generation escalation as the source delete (AQU-933). */
 export const targetCellDeleteEventId = (
   projectId: string,
   fileId: string,
   cellId: string,
-): string => u5(`cell-delete-target:${projectId}:${fileId}:${cellId}`)
+  generation = 1,
+): string =>
+  u5(
+    generation <= 1
+      ? `cell-delete-target:${projectId}:${fileId}:${cellId}`
+      : `cell-delete-target:${projectId}:${fileId}:${cellId}:gen${generation}`,
+  )
 
 /** event id for a `source.cell.reanchor` repair (AQU-931), keyed by the
  *  INTENDED anchor: a re-run that derives the same chain dedupes (INSERT OR

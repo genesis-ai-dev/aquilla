@@ -131,7 +131,31 @@ describe("mapOrphanRetractions", () => {
     expect(orphans).toEqual([])
   })
 
-  it("is a no-op once the retraction is in the log (re-run stays quiet)", () => {
+  it("is a no-op once the retraction stuck (row gone → cell never enters the pass)", () => {
+    // The true idempotent case: the tombstone applied, so /migrate/cell-ids no
+    // longer returns the cell at all. (A logged tombstone with the row STILL
+    // present is the AQU-933 zombie — covered below.)
+    const orphans = mapOrphanRetractions({
+      projectId: OPTS.projectId,
+      fileId: FILE_ID,
+      liveCellIds: new Set(),
+      projectionCells: [],
+      existingEventIds: new Set([
+        ...migratedEventIds(["c2"]),
+        sourceCellDeleteEventId(OPTS.projectId, FILE_ID, "c2"),
+        targetCellDeleteEventId(OPTS.projectId, FILE_ID, "c2"),
+      ]),
+      fallbackAuthor: OPTS.fallbackAuthor,
+      fallbackTs: OPTS.fallbackTs,
+    })
+    expect(orphans).toEqual([])
+  })
+
+  it("re-kills a zombie: tombstone in the log but the row survived a pre-AQU-931 rebuild (AQU-933)", () => {
+    // The Burmese duplicate-heading case: c2's gen-1 retractions landed in an
+    // earlier run, a rebuild under the old arbitration rule resurrected the
+    // rows, and the logged ids delta-filter every re-emission. The pass must
+    // escalate to generation 2 — deterministic, so a re-run dedupes it too.
     const existing = new Set([
       ...migratedEventIds(["c2"]),
       sourceCellDeleteEventId(OPTS.projectId, FILE_ID, "c2"),
@@ -146,7 +170,82 @@ describe("mapOrphanRetractions", () => {
       fallbackAuthor: OPTS.fallbackAuthor,
       fallbackTs: OPTS.fallbackTs,
     })
-    expect(orphans).toEqual([])
+    expect(orphans.map((e) => `${e.kind}:${e.id}`)).toEqual([
+      `source.cell.delete:${sourceCellDeleteEventId(OPTS.projectId, FILE_ID, "c2", 2)}`,
+      `target.cell.delete:${targetCellDeleteEventId(OPTS.projectId, FILE_ID, "c2", 2)}`,
+    ])
+    // Generation 2 is a genuinely different id (gen 1 is the exact legacy seed).
+    expect(sourceCellDeleteEventId(OPTS.projectId, FILE_ID, "c2", 2))
+      .not.toBe(sourceCellDeleteEventId(OPTS.projectId, FILE_ID, "c2"))
+    expect(sourceCellDeleteEventId(OPTS.projectId, FILE_ID, "c2", 1))
+      .toBe(sourceCellDeleteEventId(OPTS.projectId, FILE_ID, "c2"))
+  })
+
+  it("escalates past every logged generation, and stops at the cap", () => {
+    const genIds = (upTo: number) =>
+      Array.from({ length: upTo }, (_, i) => [
+        sourceCellDeleteEventId(OPTS.projectId, FILE_ID, "c2", i + 1),
+        targetCellDeleteEventId(OPTS.projectId, FILE_ID, "c2", i + 1),
+      ]).flat()
+    const twoGens = mapOrphanRetractions({
+      projectId: OPTS.projectId,
+      fileId: FILE_ID,
+      liveCellIds: new Set(),
+      projectionCells: [bothSides("c2")],
+      existingEventIds: new Set([...migratedEventIds(["c2"]), ...genIds(2)]),
+      fallbackAuthor: OPTS.fallbackAuthor,
+      fallbackTs: OPTS.fallbackTs,
+    })
+    expect(twoGens.map((e) => e.id)).toEqual([
+      sourceCellDeleteEventId(OPTS.projectId, FILE_ID, "c2", 3),
+      targetCellDeleteEventId(OPTS.projectId, FILE_ID, "c2", 3),
+    ])
+    const exhausted = mapOrphanRetractions({
+      projectId: OPTS.projectId,
+      fileId: FILE_ID,
+      liveCellIds: new Set(),
+      projectionCells: [bothSides("c2")],
+      existingEventIds: new Set([...migratedEventIds(["c2"]), ...genIds(8)]),
+      fallbackAuthor: OPTS.fallbackAuthor,
+      fallbackTs: OPTS.fallbackTs,
+    })
+    expect(exhausted).toEqual([])
+  })
+
+  it("re-kills a soft-deleted cell's zombie even though the mapper re-emits gen 1 this run (AQU-933)", () => {
+    // c2 is still IN the notebook, soft-deleted: the mapper emits the gen-1
+    // retraction every run — but that id is already in the log, so the CLI
+    // delta-filters it and it never re-projects. The pass must see through the
+    // skip set and mint gen 2.
+    const pair: FilePairInput = {
+      relPath: "GEN",
+      name: "GEN",
+      target: {
+        metadata: { id: "f", originalName: "f" },
+        cells: [
+          { kind: 2, languageId: "html", value: "<p>b</p>", metadata: { id: "c2", type: "text", data: { deleted: true } } },
+        ],
+      },
+    }
+    const events = mapFilePairToEvents(pair, OPTS)
+    const orphans = mapOrphanRetractions({
+      projectId: OPTS.projectId,
+      fileId: FILE_ID,
+      liveCellIds: liveCellIdsByFile(events).get(FILE_ID)!,
+      projectionCells: [bothSides("c2")],
+      existingEventIds: new Set([
+        ...migratedEventIds(["c2"]),
+        sourceCellDeleteEventId(OPTS.projectId, FILE_ID, "c2"),
+        targetCellDeleteEventId(OPTS.projectId, FILE_ID, "c2"),
+      ]),
+      skipEventIds: new Set(events.map((e) => e.id)),
+      fallbackAuthor: OPTS.fallbackAuthor,
+      fallbackTs: OPTS.fallbackTs,
+    })
+    expect(orphans.map((e) => e.id)).toEqual([
+      sourceCellDeleteEventId(OPTS.projectId, FILE_ID, "c2", 2),
+      targetCellDeleteEventId(OPTS.projectId, FILE_ID, "c2", 2),
+    ])
   })
 
   it("does not double-emit the retraction the mapper already produced for a soft-deleted cell", () => {

@@ -66,10 +66,40 @@ export interface OrphanRetractionArgs {
   fallbackTs: number
 }
 
+/** Safety cap on retraction-generation escalation (AQU-933). Each generation
+ *  beyond 1 means a logged tombstone was undone by a pre-AQU-931 rebuild —
+ *  with that arbitration rule fixed, more than a couple should never occur. */
+const MAX_RETRACTION_GENERATION = 8
+
+/**
+ * The first retraction id that can still APPLY, escalating generations
+ * (AQU-933). A generation already in the log did not stick — the caller only
+ * reaches this for a cell the projection STILL HOLDS, so a logged tombstone
+ * means a pre-AQU-931 rebuild/replay resurrected the row and the id can never
+ * re-project (re-runs delta-filter it). Returns null when this pass already
+ * emits the id elsewhere (the mapper's own retraction — it will land and
+ * project), or when the escalation cap is exhausted.
+ */
+function nextRetractionId(
+  idForGeneration: (generation: number) => string,
+  existingEventIds: ReadonlySet<string>,
+  skipEventIds: ReadonlySet<string> | undefined,
+): string | null {
+  for (let generation = 1; generation <= MAX_RETRACTION_GENERATION; generation++) {
+    const id = idForGeneration(generation)
+    if (existingEventIds.has(id)) continue // logged but undone → escalate
+    if (skipEventIds?.has(id)) return null // this run already emits it
+    return id
+  }
+  return null
+}
+
 /**
  * Retract the cells the projection still holds for `fileId` that the current
  * Codex parse no longer produces. Ids are the same deterministic ones AQU-747
- * mints, so a re-run dedupes and a project that never had the cell is untouched.
+ * mints, so a re-run dedupes and a project that never had the cell is
+ * untouched — escalating to a fresh generation when a logged tombstone was
+ * undone by a pre-AQU-931 rebuild (AQU-933).
  */
 export function mapOrphanRetractions(args: OrphanRetractionArgs): IngestEvent[] {
   const {
@@ -90,8 +120,12 @@ export function mapOrphanRetractions(args: OrphanRetractionArgs): IngestEvent[] 
     if (!existingEventIds.has(sourceCellCreateEventId(projectId, fileId, cell.cellId))) continue
 
     if (cell.hasSource) {
-      const id = sourceCellDeleteEventId(projectId, fileId, cell.cellId)
-      if (!existingEventIds.has(id) && !skipEventIds?.has(id)) {
+      const id = nextRetractionId(
+        (generation) => sourceCellDeleteEventId(projectId, fileId, cell.cellId, generation),
+        existingEventIds,
+        skipEventIds,
+      )
+      if (id) {
         events.push({
           id,
           kind: "source.cell.delete",
@@ -105,8 +139,12 @@ export function mapOrphanRetractions(args: OrphanRetractionArgs): IngestEvent[] 
       }
     }
     if (cell.hasTarget) {
-      const id = targetCellDeleteEventId(projectId, fileId, cell.cellId)
-      if (!existingEventIds.has(id) && !skipEventIds?.has(id)) {
+      const id = nextRetractionId(
+        (generation) => targetCellDeleteEventId(projectId, fileId, cell.cellId, generation),
+        existingEventIds,
+        skipEventIds,
+      )
+      if (id) {
         events.push({
           id,
           kind: "target.cell.delete",

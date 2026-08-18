@@ -124,8 +124,46 @@ export const importExport = defineNamespace({
       "belong to so they stay in step with the passage. Lists that InDesign holds in a " +
       "single paragraph — cross-references, glossaries, outlines — always arrive as one " +
       "cell per line. Optionally, longer note blocks can also be split into one cell per " +
-      "sentence; export puts each block back together as InDesign set it.",
+      "sentence; export puts each block back together as InDesign set it. The study " +
+      "Bible's front and back matter — contents, “how to use”, the Bible Dictionary, " +
+      "the timelines, the maps, the cover — imports here too: those volumes hold no " +
+      "Bible text, so all of their text is imported, grouped by their headings.",
+    "importExport.biblica.descriptionTreasureHunt":
+      "Upload the InDesign (.idml) package for a Treasure Hunt Bible volume. " +
+      "Everything set around the Bible text is imported — the fact and hunt blocks, " +
+      "the book introductions, and the front matter — while the Bible text itself is " +
+      "skipped, because it comes from the published scripture files rather than being " +
+      "retyped here. Each note keeps its InDesign formatting locked, and the facts and " +
+      "hunts carry the book and chapter they belong to so they stay in step with the " +
+      "passage. Lists that InDesign holds in a single paragraph — hunt steps, fact " +
+      "bullets, contents entries — always arrive as one cell per line. Optionally, " +
+      "longer blocks can also be split into one cell per sentence; export puts each " +
+      "block back together as InDesign set it.",
+    "importExport.biblica.descriptionReach4Life":
+      "Upload the InDesign (.idml) package for a Reach 4 Life section or scripture " +
+      "volume. The workbook around the Bible text is imported — the lessons and " +
+      "journeys, the hot topics, the book introductions, and the front and back " +
+      "matter — while the continuous Bible text is skipped, because it comes from the " +
+      "published scripture files rather than being retyped here. Verses quoted inside " +
+      "a lesson stay with the lesson. Each cell keeps its InDesign formatting locked " +
+      "and carries the section it belongs to, so the workbook stays navigable. Lists " +
+      "that InDesign holds in a single paragraph — contents entries, journey steps, " +
+      "bullet advice — always arrive as one cell per line. Optionally, longer " +
+      "paragraphs can also be split into one cell per sentence; export puts each one " +
+      "back together as InDesign set it.",
     "importExport.biblica.chooseFile": "Choose study Bible IDML file",
+    "importExport.biblica.chooseFileTreasureHunt": "Choose Treasure Hunt IDML file",
+    "importExport.biblica.chooseFileReach4Life": "Choose Reach 4 Life IDML file",
+    "importExport.biblica.treasureHuntLabel": "This is a Treasure Hunt Bible file",
+    "importExport.biblica.treasureHuntHint":
+      "The Treasure Hunt Bible uses a different InDesign template. Tick this to " +
+      "import its facts, hunts, book introductions and front matter instead of " +
+      "looking for study notes.",
+    "importExport.biblica.reach4lifeLabel": "This is a Reach 4 Life file",
+    "importExport.biblica.reach4lifeHint":
+      "Reach 4 Life uses a third InDesign template. Tick this to import its " +
+      "lessons, journeys, hot topics, book introductions and front matter instead " +
+      "of looking for study notes.",
     "importExport.biblica.splitSentencesLabel": "Split long notes into one cell per sentence",
     "importExport.biblica.splitSentencesHint":
       "Leave unchecked to import each note line as one larger cell. Lists still split per line either way.",
@@ -183,7 +221,7 @@ export const importExport = defineNamespace({
     "importExport.landing.biblica.title": "Biblica Study Bible Notes",
     "importExport.landing.biblica.hint": "IDML",
     "importExport.landing.biblica.description":
-      "Study notes from an InDesign study Bible — imports the notes only and leaves the scripture untouched.",
+      "Notes from an InDesign study Bible, Treasure Hunt Bible or Reach 4 Life package — imports the notes only and leaves the scripture untouched.",
     "importExport.landing.obs.title": "Open Bible Stories",
     "importExport.landing.obs.hint": "door43",
     "importExport.landing.obs.description": "Narrative stories with reference images, from unfoldingWord/door43.",
@@ -964,6 +1002,14 @@ export const importExport = defineNamespace({
       "importExport.biblica.splitSentencesLabel": {
         description:
           "Visible label AND the checkbox's own accessible name (identical text, reused directly rather than duplicated as a separate aria-label key) for splitting long Biblica study notes into one cell per sentence.",
+      },
+      "importExport.biblica.treasureHuntLabel": {
+        description:
+          "Visible label AND the checkbox's own accessible name (identical text, reused directly) for switching the Biblica importer to the Treasure Hunt Bible InDesign template. 'Treasure Hunt Bible' is a product title — keep it recognizable.",
+      },
+      "importExport.biblica.reach4lifeLabel": {
+        description:
+          "Visible label AND the checkbox's own accessible name (identical text, reused directly) for switching the Biblica importer to the Reach 4 Life InDesign template. 'Reach 4 Life' is a product title — keep it recognizable.",
       },
       "importExport.biblica.readingPackageWithProgress": {
         description: "Parse-phase progress line on the Biblica panel while unpacking the IDML package, once a file count is known.",

@@ -38,6 +38,7 @@ import { handleMigrateIngestRequest } from "./events/migrate-ingest-route"
 import { handleMigrateSettingsRequest } from "./events/migrate-settings-route"
 import { handleMigrateProjectRequest } from "./events/migrate-project-route"
 import { handleMigrateEventIdsRequest } from "./events/migrate-event-ids-route"
+import { handleMigrateCellIdsRequest } from "./events/migrate-cell-ids-route"
 import { handleMigrateFinalizeRequest } from "./events/migrate-finalize-route"
 import { handleMigrateAudioRequest } from "./events/migrate-audio-route"
 import { handleMigrateAudioCopyRequest } from "./events/migrate-audio-copy-route"
@@ -350,6 +351,8 @@ const worker = {
     if (migrateProjectResponse) return migrateProjectResponse
     const migrateEventIdsResponse = await handleMigrateEventIdsRequest(request, env)
     if (migrateEventIdsResponse) return migrateEventIdsResponse
+    const migrateCellIdsResponse = await handleMigrateCellIdsRequest(request, env)
+    if (migrateCellIdsResponse) return migrateCellIdsResponse
     const migrateFinalizeResponse = await handleMigrateFinalizeRequest(request, env)
     if (migrateFinalizeResponse) return migrateFinalizeResponse
     const migrateAudioResponse = await handleMigrateAudioRequest(request, env)

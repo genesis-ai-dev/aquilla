@@ -4,11 +4,18 @@
 import { describe, it, expect } from "vitest"
 import type { CodexNotebookFile } from "../codex-editor/types"
 import { mapFilePairToEvents, type FilePairInput, type MapOptions } from "./map"
-import { liveCellIdsByFile, mapOrphanRetractions, type ProjectionCell } from "./orphans"
+import {
+  liveCellIdsByFile,
+  liveSourceAnchorsByFile,
+  mapAnchorRepairs,
+  mapOrphanRetractions,
+  type ProjectionCell,
+} from "./orphans"
 import {
   fileIdFor,
   sourceCellCreateEventId,
   sourceCellDeleteEventId,
+  sourceCellReanchorEventId,
   targetCellDeleteEventId,
 } from "./ids"
 
@@ -182,5 +189,136 @@ describe("mapOrphanRetractions", () => {
       fallbackTs: OPTS.fallbackTs,
     })
     expect(orphans).toEqual([])
+  })
+})
+
+// AQU-931 — anchor repair. Retractions hard-delete rows that surviving cells'
+// stored anchors still point at; the deterministic creates never re-project,
+// so without a repair the read order scrambles (the Pattani Malay report).
+describe("mapAnchorRepairs", () => {
+  const anchored = (cellId: string, sourceAnchorCellId: string | null): ProjectionCell => ({
+    cellId,
+    hasSource: true,
+    hasTarget: true,
+    sourceAnchorCellId,
+  })
+
+  it("re-anchors a survivor whose stored anchor was retracted (the AQU-910/930 fallout)", () => {
+    // Old chain: m1 → v1 → v2. m1 (a heading/milestone) is gone from today's
+    // parse, so v1's intended anchor is now null; v2 is unchanged.
+    const events = mapFilePairToEvents(pairOf(["v1", "v2"]), OPTS)
+    const repairs = mapAnchorRepairs({
+      projectId: OPTS.projectId,
+      fileId: FILE_ID,
+      intendedAnchors: liveSourceAnchorsByFile(events).get(FILE_ID)!,
+      projectionCells: [anchored("v1", "m1"), anchored("v2", "v1")],
+      existingEventIds: migratedEventIds(["v1", "v2", "m1"]),
+      fallbackAuthor: OPTS.fallbackAuthor,
+      fallbackTs: OPTS.fallbackTs,
+    })
+    expect(repairs).toEqual([
+      {
+        id: sourceCellReanchorEventId(OPTS.projectId, FILE_ID, "v1", null),
+        kind: "source.cell.reanchor",
+        fileId: FILE_ID,
+        cellId: "v1",
+        parentId: null,
+        author: OPTS.fallbackAuthor,
+        clientTs: OPTS.fallbackTs,
+        payload: { anchorCellId: null },
+      },
+    ])
+  })
+
+  it("emits nothing when the projection already matches today's chain (fresh or repaired)", () => {
+    const events = mapFilePairToEvents(pairOf(["v1", "v2"]), OPTS)
+    const repairs = mapAnchorRepairs({
+      projectId: OPTS.projectId,
+      fileId: FILE_ID,
+      intendedAnchors: liveSourceAnchorsByFile(events).get(FILE_ID)!,
+      projectionCells: [anchored("v1", null), anchored("v2", "v1")],
+      existingEventIds: migratedEventIds(["v1", "v2"]),
+      fallbackAuthor: OPTS.fallbackAuthor,
+      fallbackTs: OPTS.fallbackTs,
+    })
+    expect(repairs).toEqual([])
+  })
+
+  it("never re-anchors a cell the migration did not create, or one not in today's parse", () => {
+    const events = mapFilePairToEvents(pairOf(["v1"]), OPTS)
+    const repairs = mapAnchorRepairs({
+      projectId: OPTS.projectId,
+      fileId: FILE_ID,
+      intendedAnchors: liveSourceAnchorsByFile(events).get(FILE_ID)!,
+      projectionCells: [
+        // v1 is mis-anchored but was NOT created by the migration (no create in
+        // the log) — an Aquilla-authored cell keeps its author's anchor.
+        anchored("v1", "somewhere"),
+        // c9 is mis-anchored but absent from today's parse — retraction
+        // territory, not repair territory.
+        anchored("c9", "gone"),
+      ],
+      existingEventIds: new Set([sourceCellCreateEventId(OPTS.projectId, FILE_ID, "c9")]),
+      fallbackAuthor: OPTS.fallbackAuthor,
+      fallbackTs: OPTS.fallbackTs,
+    })
+    expect(repairs).toEqual([])
+  })
+
+  it("is a no-op once the repair is in the log — a later manual reorder is not re-fought", () => {
+    const events = mapFilePairToEvents(pairOf(["v1", "v2"]), OPTS)
+    const repairs = mapAnchorRepairs({
+      projectId: OPTS.projectId,
+      fileId: FILE_ID,
+      intendedAnchors: liveSourceAnchorsByFile(events).get(FILE_ID)!,
+      projectionCells: [anchored("v1", "m1"), anchored("v2", "v1")],
+      existingEventIds: new Set([
+        ...migratedEventIds(["v1", "v2"]),
+        sourceCellReanchorEventId(OPTS.projectId, FILE_ID, "v1", null),
+      ]),
+      fallbackAuthor: OPTS.fallbackAuthor,
+      fallbackTs: OPTS.fallbackTs,
+    })
+    expect(repairs).toEqual([])
+  })
+
+  it("treats a missing sourceAnchorCellId (pre-AQU-931 server) as a null stored anchor", () => {
+    const events = mapFilePairToEvents(pairOf(["v1", "v2"]), OPTS)
+    const repairs = mapAnchorRepairs({
+      projectId: OPTS.projectId,
+      fileId: FILE_ID,
+      intendedAnchors: liveSourceAnchorsByFile(events).get(FILE_ID)!,
+      projectionCells: [bothSides("v1"), bothSides("v2")], // no anchor field at all
+      existingEventIds: migratedEventIds(["v1", "v2"]),
+      fallbackAuthor: OPTS.fallbackAuthor,
+      fallbackTs: OPTS.fallbackTs,
+    })
+    // v1's intended anchor is null == treated-stored null → quiet; v2 intends
+    // "v1" ≠ null → repaired. Never a crash on the old response shape.
+    expect(repairs.map((e) => `${e.cellId}→${(e.payload as { anchorCellId: string | null }).anchorCellId}`))
+      .toEqual(["v2→v1"])
+  })
+})
+
+describe("liveSourceAnchorsByFile", () => {
+  it("captures each live cell's mapped anchor, skipping retracted cells in the chain", () => {
+    // m2 is soft-deleted in Codex: v3 must anchor THROUGH it to v1.
+    const pair: FilePairInput = {
+      relPath: "GEN",
+      name: "GEN",
+      target: {
+        metadata: { id: "f", originalName: "f" },
+        cells: [
+          { kind: 2, languageId: "html", value: "<p>a</p>", metadata: { id: "v1", type: "text" } },
+          { kind: 2, languageId: "html", value: "<p>b</p>", metadata: { id: "m2", type: "text", data: { deleted: true } } },
+          { kind: 2, languageId: "html", value: "<p>c</p>", metadata: { id: "v3", type: "text" } },
+        ],
+      },
+    }
+    const anchors = liveSourceAnchorsByFile(mapFilePairToEvents(pair, OPTS)).get(FILE_ID)!
+    expect([...anchors.entries()]).toEqual([
+      ["v1", null],
+      ["v3", "v1"],
+    ])
   })
 })

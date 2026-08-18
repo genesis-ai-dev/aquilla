@@ -96,6 +96,17 @@ export const targetCellDeleteEventId = (
   cellId: string,
 ): string => u5(`cell-delete-target:${projectId}:${fileId}:${cellId}`)
 
+/** event id for a `source.cell.reanchor` repair (AQU-931), keyed by the
+ *  INTENDED anchor: a re-run that derives the same chain dedupes (INSERT OR
+ *  IGNORE), while a later chain change mints a fresh event — replay applies
+ *  them in server_seq order, so the newest repair wins on rebuild too. */
+export const sourceCellReanchorEventId = (
+  projectId: string,
+  fileId: string,
+  cellId: string,
+  anchorCellId: string | null,
+): string => u5(`cell-reanchor:${projectId}:${fileId}:${cellId}:${anchorCellId ?? "∅"}`)
+
 /** event id for the i-th `target.cell.commit` in a cell's edit history.
  *  `editIdx` is the 0-based index into the legacy `metadata.edits[]` (the
  *  source of full-history fidelity); commit_sha is deliberately excluded so a

@@ -526,7 +526,7 @@ async function doProject(
   // has AT ALL (hard-deleted, or merged away). The mapper can only skip/retract
   // cells still present in the notebook, so these are invisible to it and no
   // amount of re-running purges them.
-  const orphans = await computeOrphanRetractions({
+  const { retractions, repairs } = await computeOrphanRetractions({
     syncBase: SYNC,
     secret: process.env.SYNC_SECRET_KEY!,
     projectId,
@@ -535,9 +535,16 @@ async function doProject(
     fallbackAuthor: FALLBACK_AUTHOR,
     fallbackTs: Date.now(),
   })
-  if (orphans.length) {
-    console.log(`  ↳ retracting ${orphans.length} cell(s) removed from Codex since the last migration`)
-    events.push(...orphans)
+  if (retractions.length) {
+    console.log(`  ↳ retracting ${retractions.length} cell(s) removed from Codex since the last migration`)
+    events.push(...retractions)
+  }
+  // AQU-931: retractions delete rows that surviving cells still anchor to (the
+  // deterministic creates never re-project), which scrambles the read order —
+  // re-anchor every survivor whose stored anchor differs from today's chain.
+  if (repairs.length) {
+    console.log(`  ↳ re-anchoring ${repairs.length} cell(s) whose chain changed since the last migration`)
+    events.push(...repairs)
   }
   const newEvents = existing.size ? events.filter((e) => !existing.has(e.id)) : events
   if (existing.size) {

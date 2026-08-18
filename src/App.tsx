@@ -250,7 +250,7 @@ function AppRoutes() {
         {/* Org shell — path is authoritative for active org. `/orgs/all` is home-only. */}
         <Route path="/orgs/all" element={<OrgHome />} />
         <Route path="/orgs/:orgId" element={<OrgRouteGate />}>
-          {/* AQU-790: index → guest list or redirect to overview; overview/projects split for members. */}
+          {/* AQU-790: index → guest /projects or member /overview. */}
           <Route index element={<OrgHomeRoute />} />
           <Route path="overview" element={<OrgOverview />} />
           <Route path="projects" element={<OrgProjectsPage />} />

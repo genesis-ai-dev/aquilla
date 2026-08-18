@@ -79,13 +79,12 @@ export function OrgSidebar() {
         <OrgSwitcher />
       </div>
       <nav className="mt-2 flex flex-1 flex-col gap-0.5">
-        {/* Guest org: single project list at org index. Member: Overview + Projects. */}
+        {/* Guest org: Projects table only. Member: Overview + Projects. */}
         {isGuestOrg && activeOrgId != null ? (
           <OrgNavLink
-            to={orgHomePath(activeOrgId)}
-            end
+            to={orgProjectsPath(activeOrgId)}
             className={link}
-            data-tour="nav-overview"
+            data-tour="nav-projects"
           >
             <NavIcon icon={NAV_PAGE_ICONS.projects} />
             {t("nav.projects")}

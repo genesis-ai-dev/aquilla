@@ -235,7 +235,7 @@ describe("OrgSwitcher", () => {
   // AQU-790: clicking a guest org switches to it using the SAME path convention
   // as an owned org (`/orgs/<id>`, not the divergent `/shared?org=<id>`), and
   // reflects the selection (checkmark + trigger label).
-  it("guest org: click navigates to its /orgs/:id overview and marks it selected", async () => {
+  it("guest org: click navigates to its /orgs/:id/projects page and marks it selected", async () => {
     listMyOrgs.mockResolvedValue([
       { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
     ])
@@ -251,8 +251,8 @@ describe("OrgSwitcher", () => {
     await waitFor(() => expect(screen.getByTestId("guest-orgs")).toBeInTheDocument())
     await act(async () => { screen.getByRole("option", { name: /guest org/i }).click() })
 
-    // Lands on the guest org's path overview — same shape as an owned org…
-    await waitFor(() => expect(screen.getByTestId("loc")).toHaveTextContent("/orgs/2"))
+    // Lands on the guest org's projects table — guests have no Overview.
+    await waitFor(() => expect(screen.getByTestId("loc")).toHaveTextContent("/orgs/2/projects"))
     // …and the trigger now names the guest org as the current scope.
     expect(screen.getByRole("combobox", { name: /guest org/i })).toBeInTheDocument()
 

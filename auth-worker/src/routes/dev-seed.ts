@@ -34,10 +34,12 @@ const DEV_PROJECT_NAME = "Dev Project"
 // Extra projects + collaborators so the org Members matrix has something to
 // render locally (AQU-218). All under the dev org, created_by dev. The access
 // configs below deliberately exercise each of the four resolution paths:
-//   - creator: dev on every project
-//   - org:     alice (org maintainer) inherits on every project
+//   - creator:  dev on every project
+//   - org:      alice (org maintainer) inherits on every project
 //   - override: alice has a direct OWNER row on Genesis that beats her org tier
-//   - group:   bob (NOT an org member) reaches Exodus only via the Reviewers group
+//   - group:    bob (NOT an org member) reaches Exodus only via the Reviewers group
+//   - invite:   `dev` is a contributor on Partner Org projects with no org
+//               membership — the dashboard "Shared with you" section
 const GENESIS_PROJECT_ID = "dev-project-genesis"
 const GENESIS_PROJECT_NAME = "Genesis"
 const EXODUS_PROJECT_ID = "dev-project-exodus"
@@ -51,6 +53,11 @@ const ALICE_EMAIL = "alice@local.test"
 const BOB_USERNAME = "bob"
 const BOB_EMAIL = "bob@local.test"
 const REVIEWERS_GROUP_NAME = "Reviewers"
+const PARTNER_ORG_NAME = "Partner Org"
+const SHARED_MATTHEW_PROJECT_ID = "dev-project-shared-matthew"
+const SHARED_MATTHEW_PROJECT_NAME = "Matthew"
+const SHARED_AUDIO_PROJECT_ID = "dev-project-shared-audio"
+const SHARED_AUDIO_PROJECT_NAME = "Audio dubbing"
 
 interface UserIdRow {
   id: number
@@ -293,6 +300,46 @@ async function seedDev(db: AquillaDb): Promise<{
     )
     .bind(groupId, EXODUS_PROJECT_ID, ROLE.REVIEWER, userId)
     .run()
+
+  // Partner Org is alice's. `dev` gets project_members only — no org_members
+  // row — so partitionSharedProjects() lists these under "Shared with you".
+  let partnerOrg = await db
+    .prepare("SELECT id FROM organizations WHERE owner_user_id = ? AND name = ?")
+    .bind(aliceId, PARTNER_ORG_NAME)
+    .first<OrgIdRow>()
+  if (!partnerOrg) {
+    await db
+      .prepare(
+        `INSERT INTO organizations (name, owner_user_id, created_at, updated_at)
+         VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      )
+      .bind(PARTNER_ORG_NAME, aliceId)
+      .run()
+    partnerOrg = await db
+      .prepare("SELECT id FROM organizations WHERE owner_user_id = ? AND name = ?")
+      .bind(aliceId, PARTNER_ORG_NAME)
+      .first<OrgIdRow>()
+  }
+  if (!partnerOrg) throw new Error("partner org not found after insert")
+  await upsertOrgMember(db, partnerOrg.id, aliceId, ROLE.OWNER, aliceId)
+  await upsertProject(
+    db,
+    SHARED_MATTHEW_PROJECT_ID,
+    SHARED_MATTHEW_PROJECT_NAME,
+    partnerOrg.id,
+    aliceId,
+  )
+  await upsertProject(
+    db,
+    SHARED_AUDIO_PROJECT_ID,
+    SHARED_AUDIO_PROJECT_NAME,
+    partnerOrg.id,
+    aliceId,
+  )
+  await upsertProjectMember(db, SHARED_MATTHEW_PROJECT_ID, aliceId, ROLE.OWNER, aliceId)
+  await upsertProjectMember(db, SHARED_AUDIO_PROJECT_ID, aliceId, ROLE.OWNER, aliceId)
+  await upsertProjectMember(db, SHARED_MATTHEW_PROJECT_ID, userId, ROLE.CONTRIBUTOR, aliceId)
+  await upsertProjectMember(db, SHARED_AUDIO_PROJECT_ID, userId, ROLE.CONTRIBUTOR, aliceId)
 
   await applyDemoTimestamps(db, { userId, aliceId, bobId, orgId })
 

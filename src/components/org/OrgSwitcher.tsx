@@ -11,6 +11,7 @@ import type { OrgSummary } from "@/lib/frontier/orgs"
 import {
   ALL_ORGS_PARAM,
   orgHomePath,
+  orgProjectsPath,
   parseOrgPath,
   swapOrgInPath,
 } from "@/lib/navigation/org-paths"
@@ -427,10 +428,10 @@ export function OrgSwitcher() {
 
     // AQU-790: guest orgs use the same path convention as owned orgs
     // (`/orgs/<id>`). Selecting one records it as the active scope (persisted for
-    // reload, which drives `activeGuestOrg`) and navigates to that org's overview
-    // — no longer the divergent `/shared?org=<id>` query param.
+    // reload, which drives `activeGuestOrg`) and navigates to that org's
+    // projects table — guests have no Overview, so `/projects` is the home.
     setActiveOrg(item.id)
-    navigate(orgHomePath(item.id))
+    navigate(orgProjectsPath(item.id))
   }
 
   async function handleCreated(orgId: number) {

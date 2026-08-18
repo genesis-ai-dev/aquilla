@@ -14,7 +14,7 @@
 import type { ReactNode } from "react"
 import { Link, Navigate, Outlet, useLocation, useParams } from "react-router-dom"
 import { useActiveOrg } from "@/context/OrgContext"
-import { orgKeyFromParam, ALL_ORGS_PARAM, orgHomePath, parseOrgPath } from "@/lib/navigation/org-paths"
+import { orgKeyFromParam, ALL_ORGS_PARAM, orgHomePath, orgProjectsPath, parseOrgPath } from "@/lib/navigation/org-paths"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { Button } from "@/components/ui/button"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
@@ -54,10 +54,11 @@ export function OrgRouteGate() {
 
   // AQU-790: a guest has project-level access only — the org's member-only tool
   // routes (members/settings/teams/archived/assigned) don't apply. Keep them
-  // out of the guest overview even via a typed URL, rather than rendering a
-  // member surface for an org they aren't a member of.
-  if (isGuest && (parseOrgPath(location.pathname)?.rest ?? "") !== "") {
-    return <Navigate to={orgHomePath(orgKey)} replace />
+  // out of the guest overview even via a typed URL. `/projects` is the guest
+  // org's real home, matching a member org's projects table.
+  const rest = parseOrgPath(location.pathname)?.rest ?? ""
+  if (isGuest && rest !== "" && rest !== "/projects") {
+    return <Navigate to={orgProjectsPath(orgKey)} replace />
   }
 
   return <Outlet />

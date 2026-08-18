@@ -115,7 +115,7 @@ describe("OrgSidebar in a guest org (AQU-790)", () => {
     )
 
     await waitFor(() =>
-      expect(screen.getByRole("link", { name: "Projects" })).toHaveAttribute("href", "/orgs/2"),
+      expect(screen.getByRole("link", { name: "Projects" })).toHaveAttribute("href", "/orgs/2/projects"),
     )
     expect(screen.queryByRole("link", { name: "Shared with you" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Overview" })).not.toBeInTheDocument()

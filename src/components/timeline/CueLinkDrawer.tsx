@@ -280,6 +280,19 @@ export function CueLinkDrawer({
         </Button>
       </header>
 
+      {/* SAYS THE MODE IS ON. (Sam, 2026-08-18.) Opening this drawer also arms
+          linking — one state, deliberately — but it is now reached from a menu
+          item, which reads like "show me a list" rather than "put me in a
+          mode". A line here is present exactly while the mode is, which a
+          toast cannot be; the confusing state was one where nothing on screen
+          said which way it was set. */}
+      <p
+        data-testid="cue-link-mode-note"
+        className="border-b border-border bg-violet-50 px-3 py-1.5 text-[11px] text-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
+      >
+        Linking is on — click a heard line, then the subtitle it performs.
+      </p>
+
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3">
         {/* Its natural home: this is where you are when you decide the pairings
             need redoing. It used to be reachable only by re-picking a VTT you

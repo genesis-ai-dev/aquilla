@@ -139,7 +139,7 @@ const PROXIMITY_WEIGHT = 0.5
  * Typed arrays and a plain O(n·m) table: 550×550 is 300k cells, a few
  * milliseconds, once, at import.
  */
-function alignPairs(
+export function alignPairs(
   a: readonly string[],
   b: readonly string[],
   aStartMs: readonly number[],

@@ -20,6 +20,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { render, screen, cleanup } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 
 import { RecordingVideoSurface, seekTargetSec } from "./RecordingVideoSurface"
 
@@ -64,7 +65,6 @@ describe("RecordingVideoSurface — the rolling lead-in", () => {
         startSec={120}
         running={false}
         armNonce={1}
-        overrun={false}
         leadIn={{ zeroAtMs: Date.now() + LEAD_SEC * 1000 }}
       />,
     )
@@ -83,7 +83,6 @@ describe("RecordingVideoSurface — the rolling lead-in", () => {
         startSec={1}
         running={false}
         armNonce={1}
-        overrun={false}
         leadIn={{ zeroAtMs }}
       />,
     )
@@ -105,7 +104,6 @@ describe("RecordingVideoSurface — the rolling lead-in", () => {
         startSec={120}
         running={false}
         armNonce={1}
-        overrun={false}
         leadIn={null}
       />,
     )
@@ -117,7 +115,7 @@ describe("RecordingVideoSurface — the rolling lead-in", () => {
     const leadIn = { zeroAtMs: Date.now() + LEAD_SEC * 1000 }
     const { rerender } = render(
       <RecordingVideoSurface
-        src="film.webm" startSec={120} running={false} armNonce={1} overrun={false} leadIn={leadIn}
+        src="film.webm" startSec={120} running={false} armNonce={1} leadIn={leadIn}
       />,
     )
     // Stand in for the lead-in having rolled: the picture is on the line now.
@@ -127,7 +125,7 @@ describe("RecordingVideoSurface — the rolling lead-in", () => {
     // Zero: the countdown clears the lead-in and the take starts, in one commit.
     rerender(
       <RecordingVideoSurface
-        src="film.webm" startSec={120} running={true} armNonce={1} overrun={false} leadIn={null}
+        src="film.webm" startSec={120} running={true} armNonce={1} leadIn={null}
       />,
     )
     // The picture is where the lead-in left it. A re-seek here would be a jump
@@ -140,16 +138,67 @@ describe("RecordingVideoSurface — the rolling lead-in", () => {
     const leadIn = { zeroAtMs: Date.now() + LEAD_SEC * 1000 }
     const { rerender } = render(
       <RecordingVideoSurface
-        src="film.webm" startSec={120} running={false} armNonce={1} overrun={false} leadIn={leadIn}
+        src="film.webm" startSec={120} running={false} armNonce={1} leadIn={leadIn}
       />,
     )
     pause.mockClear()
     rerender(
       <RecordingVideoSurface
-        src="film.webm" startSec={120} running={false} armNonce={1} overrun={false} leadIn={null}
+        src="film.webm" startSec={120} running={false} armNonce={1} leadIn={null}
       />,
     )
     expect(pause).toHaveBeenCalled()
+  })
+
+  // Sam, 2026-08-16: "when I unmute the video, a warning in yellow text pops up
+  // at the bottom… it is this text that makes it very difficult to click the
+  // re-mute button." Exactly right. The warning is a full-width box pinned to
+  // the same bottom edge, and being LATER in the DOM at equal z-index it
+  // painted over the button and took its clicks. `pr-12` kept only the text
+  // clear, not the box.
+  describe("the audible warning must not swallow the mute button", () => {
+    const renderSurface = () =>
+      render(
+        <RecordingVideoSurface
+          src="film.webm" startSec={120} running={false} armNonce={1} leadIn={null}
+        />,
+      )
+
+    it("lets the click through to re-mute the film", async () => {
+      const user = userEvent.setup()
+      renderSurface()
+      // Unmute, which is what raises the warning in the first place.
+      await user.click(screen.getByTestId("rec-film-audible"))
+      expect(screen.getByTestId("rec-film-audible-warning")).toBeInTheDocument()
+      // …and back. This is the click that used to land on the warning.
+      await user.click(screen.getByTestId("rec-film-audible"))
+      expect(screen.getByTestId("rec-film-audible")).toHaveAttribute("aria-pressed", "false")
+    })
+
+    it("is inert to the pointer, so no part of it can intercept anything", async () => {
+      // The mechanism, not just the symptom: the two elements still overlap by
+      // design (the warning belongs on the letterbox bar beside the button it
+      // argues with), so the fix has to be that the warning cannot be hit.
+      const user = userEvent.setup()
+      renderSurface()
+      await user.click(screen.getByTestId("rec-film-audible"))
+      expect(screen.getByTestId("rec-film-audible-warning").className).toContain(
+        "pointer-events-none",
+      )
+    })
+  })
+
+  // Removed 2026-08-16 (Sam: "get rid of it"). A take running past the end of
+  // the line used to ring the whole picture in red, which read as something
+  // being wrong with the FILM. The overrun still says so where it belongs — in
+  // the duration bar and the red line under it.
+  it("never rings the picture in red", () => {
+    render(
+      <RecordingVideoSurface
+        src="film.webm" startSec={120} running={true} armNonce={1} leadIn={null}
+      />,
+    )
+    expect(document.querySelector(".ring-red-500")).toBeNull()
   })
 
   describe("seekTargetSec", () => {

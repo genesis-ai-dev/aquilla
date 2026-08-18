@@ -413,18 +413,14 @@ export function TimelineCard({
       // mid-glyph by the card's overflow — which is what made narrow chips look
       // like garbage and what the old 72px threshold was really hiding.
       <div className="flex min-w-0 items-center gap-1.5 pl-1 text-[9px] text-muted-foreground">
-        {isDialogue && cell.cameraState && (
-          <span
-            className={cn(
-              "rounded-md px-1.5 py-px text-[8.5px] font-semibold",
-              cell.cameraState === "on"
-                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-                : "bg-muted text-muted-foreground",
-            )}
-          >
-            cam {cell.cameraState}
-          </span>
-        )}
+        {/* NO CAMERA BADGE HERE (Sam, 2026-08-18: "way over cluttered… renders
+            poorly at different zooms"). A chip is sized by the clip's duration
+            and the vertical zoom, so a fixed-width pill inside it competes with
+            the speaker and the clock for room that narrow chips do not have.
+            The camera state still shows where it is both readable and useful:
+            the header above the dialogue table, which describes ONE selected
+            line at a fixed height, and the recording modal, where "on camera"
+            is the fact that changes how a take is performed. */}
         {castName && <span className="font-medium text-foreground/80">{castName}</span>}
         <span className="truncate font-mono tabular-nums">
           {/* SUB-11: while dragging, show the live preview bounds (ms) rather

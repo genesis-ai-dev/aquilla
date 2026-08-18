@@ -262,6 +262,52 @@ describe("MediaTextHeader", () => {
     expect(screen.queryByText(/Diff:/)).toBeNull()
   })
 
+  // AQU-646 stage 6. The character sheet is keyed to the SUBTITLE cells, and
+  // since stage 4 the chip you select is an audio CUE, which carries no
+  // `cast_name` of its own — so this header named nobody exactly when it
+  // mattered. TimelineEditor now resolves the character through the cue's
+  // links and hands the answer down.
+  describe("a resolved character, for a cue that has none of its own", () => {
+    /** What a cue looks like here: a text cell with no cast metadata. */
+    const cueCell = cell({ medium: "text", startTime: 1, endTime: 3 })
+
+    it("names the character resolved through the links", () => {
+      render(<MediaTextHeader cell={cueCell} castName="Mary" cameraState="on" />)
+      expect(screen.getByText("Mary")).toBeInTheDocument()
+    })
+
+    it("shows a resolved camera state even though the cell is not a dub", () => {
+      // The pill is otherwise gated on `isDialogue`, which is correctly false
+      // here. A state that arrived through a link has already earned its way
+      // in — showing it is the entire point of resolving it.
+      render(<MediaTextHeader cell={cueCell} castName="Mary" cameraState="on" />)
+      expect(screen.getByText("on")).toBeInTheDocument()
+    })
+
+    it("shows both speakers of a cue that covers two lines", () => {
+      // Five do, in episode 101 — 10:53's "Rabbi." is two students. The
+      // resolver joins them; this header just prints what it is given,
+      // rather than picking one.
+      render(<MediaTextHeader cell={cueCell} castName="Jesus / Mary" cameraState="mixed" />)
+      expect(screen.getByText("Jesus / Mary")).toBeInTheDocument()
+      expect(screen.getByText("mixed")).toBeInTheDocument()
+    })
+
+    it("names nobody for an unlinked cue rather than guessing", () => {
+      render(<MediaTextHeader cell={cueCell} castName={null} cameraState={null} />)
+      expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Subtitle")
+      expect(screen.queryByText(/Speaker/)).toBeNull()
+      expect(screen.queryByText(/Camera/)).toBeNull()
+    })
+
+    it("leaves the cell's own character in charge when nothing is resolved", () => {
+      // The dialogue-table arrangement, and every file without audio cues.
+      render(<MediaTextHeader cell={cell({ metadata: { cast_name: "Mary" }, cameraState: "off" })} />)
+      expect(screen.getByText("Mary")).toBeInTheDocument()
+      expect(screen.getByText("off")).toBeInTheDocument()
+    })
+  })
+
   it("hosts the segment navigator's portal slot in every state", () => {
     const { rerender } = render(<MediaTextHeader cell={null} />)
     const slot = screen.getByTestId("tl-strip-nav")

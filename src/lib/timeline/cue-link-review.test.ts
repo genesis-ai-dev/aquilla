@@ -213,6 +213,39 @@ describe("what the matcher declines to pair", () => {
     })
     expect(r.crossScriptCandidates).toEqual([])
   })
+
+  it("never proposes one the matcher itself judged redundant", () => {
+    // A pairing the claiming pass threw out is the matcher's own answer that
+    // this is NOT a pair. Putting it in front of a person as a finding would
+    // hand back the exact junk that was just removed — and the drawer's
+    // else-branch would have filed it under weak wording, where it looks like
+    // a judgement call rather than a rejected one.
+    //
+    // Two students each saying "Rabbi.", verbatim from 10:53.
+    const textCells = [
+      cue("s0", 0, 2, "One"),
+      cue("student-1", 653.3, 654.2, "Rabbi."),
+      cue("student-2", 654.2, 655.0, "Rabbi."),
+      cue("s3", 900, 902, "Three"),
+    ]
+    const audioCues = [
+      cue("c0", 0, 2, "One"),
+      cue("c-rabbi", 653.279, 654.28, "Rabbi."),
+      cue("c3", 900, 902, "Three"),
+    ]
+    // The redundant one is the only thing the matcher declined here.
+    expect(
+      planCueLinks({ textCells, audioCues }).filter((p) => p.basis === "redundant"),
+    ).toHaveLength(1)
+
+    const r = reviewCueLinks({
+      textCells,
+      audioCues,
+      links: [link("s0", "c0"), link("student-1", "c-rabbi"), link("s3", "c3")],
+    })
+    const proposed = [...r.crossScriptCandidates, ...r.weakCandidates].map((c) => c.textCellId)
+    expect(proposed).not.toContain("student-2")
+  })
 })
 
 describe("existing pairings worth a second look", () => {
@@ -255,7 +288,7 @@ it("survives empty input", () => {
 })
 
 // ── The real episode ─────────────────────────────────────────────────────
-const DL = path.join(os.homedir(), "Downloads")
+const DL = path.join(os.homedir(), "Code", "aquilla-app", "the-chosen-media", "101")
 const TEXT_VTT = path.join(DL, "TheChosen_101_en_5&2.vtt")
 const AUDIO_VTT = path.join(DL, "TheChosen_101_en_AUDIO_ONLY_5&2.vtt")
 const haveSamples = fs.existsSync(TEXT_VTT) && fs.existsSync(AUDIO_VTT)

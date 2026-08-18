@@ -23,6 +23,7 @@ import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { uiSlotRef } from "@/lib/ui-slots"
 import type { CellData } from "@/hooks/useCells"
+import type { CameraState } from "@/lib/sync/cells-read-types"
 
 /** The current dub chip's own numbers, computed by TimelineEditor (this
  *  component never reads lane geometry). Null when there is no measured dub. */
@@ -258,6 +259,8 @@ export function TimelineTimingRow({ cell, chipStats, audioMissing }: TimelineChi
 export function MediaTextHeader({
   cell,
   headingLabel,
+  castName: castNameOverride,
+  cameraState: cameraStateOverride,
 }: {
   cell: CellData | null
   /**
@@ -272,12 +275,31 @@ export function MediaTextHeader({
    * boolean.
    */
   headingLabel?: string
+  /**
+   * AQU-646 stage 6: the character, resolved through the cue's LINKS by
+   * `resolveCueCharacter` (already "A / B" when a heard line covers two
+   * speakers). An audio cue carries no `cast_name` of its own — the
+   * spreadsheet is keyed to the subtitle cells — so without this the header
+   * went blank the moment a cue was selected, which since stage 4 is always.
+   *
+   * Optional, and undefined leaves the cell's own name in charge, so every
+   * arrangement without audio cues renders exactly as it did.
+   */
+  castName?: string | null
+  /** Ditto for the camera, merged to "mixed" when the linked lines disagree. */
+  cameraState?: CameraState | null
 }) {
   const isDialogue = (cell?.medium ?? "media") === "media"
-  const castName =
+  const ownCastName =
     cell?.metadata && typeof cell.metadata.cast_name === "string"
       ? (cell.metadata.cast_name as string)
       : null
+  const castName = castNameOverride ?? ownCastName
+  // The cell's own state stays gated on `isDialogue` — a text cell's camera
+  // pill was hidden on purpose. A RESOLVED state has already earned its way
+  // here through a link, so it is shown whatever kind of cell is selected;
+  // that is the entire point of resolving it.
+  const cameraState = cameraStateOverride ?? (cell && isDialogue ? cell.cameraState : null)
 
   // ONE shared row in every state: the nav slot must keep its DOM identity
   // across selection changes, because the table portals into it.
@@ -299,9 +321,9 @@ export function MediaTextHeader({
           Speaker <b className="font-semibold text-foreground">{castName}</b>
         </Pill>
       )}
-      {cell && isDialogue && cell.cameraState && (
+      {cameraState && (
         <Pill>
-          Camera <b className="font-semibold text-foreground">{cell.cameraState}</b>
+          Camera <b className="font-semibold text-foreground">{cameraState}</b>
         </Pill>
       )}
       <StripNavSlot />

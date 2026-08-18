@@ -89,6 +89,13 @@ vi.mock("@/lib/audio/audio-coordinator", () => ({
 const cell = (o: Partial<CellData>): CellData =>
   ({ fileId: "f1", original: "", translated: "", ...o }) as unknown as CellData
 
+/** Arm linking mode. It used to be its own toolbar button; since 2026-08-18 it
+ *  is an item in the Check menu, which importing and reviewing no longer share. */
+function armLinking() {
+  fireEvent.click(screen.getByTestId("tl-check-menu"))
+  fireEvent.click(screen.getByText("Check links"))
+}
+
 describe("TimelineEditor", () => {
   // The timeline is the innermost shortcut claimant unless a test says otherwise.
   beforeEach(() => { topOwner.value = 1 })
@@ -1516,7 +1523,7 @@ describe("TimelineEditor — linking mode's know-nothing states", () => {
         {...over}
       />,
     )
-    fireEvent.click(screen.getByTestId("tl-linking-mode"))
+    armLinking()
   }
 
   const amberCount = () =>
@@ -1648,25 +1655,26 @@ describe("TimelineEditor — pairing in progress", () => {
 
   it("says it is pairing rather than offering to", () => {
     renderPairing({ cueLinksPending: true })
-    expect(screen.getByTestId("tl-linking-mode")).toHaveTextContent("Pairing…")
+    expect(screen.getByTestId("tl-check-menu")).toHaveTextContent("Check")
   })
 
   it("goes back to offering once the pairings have landed", () => {
     renderPairing({ cueLinksPending: false })
-    expect(screen.getByTestId("tl-linking-mode")).toHaveTextContent("Link cues")
+    fireEvent.click(screen.getByTestId("tl-check-menu"))
+    expect(screen.getByText("Check links")).toBeInTheDocument()
   })
 
   it("does not claim 'never been paired' while pairing is still running", () => {
     // The notice is for a standing state. Mid-write it is a state actively
     // being left, and saying so would send you off to fix what is fixing itself.
     renderPairing({ cueLinksPending: true })
-    fireEvent.click(screen.getByTestId("tl-linking-mode"))
+    armLinking()
     expect(screen.queryByTestId("tl-linking-notice")).not.toBeInTheDocument()
   })
 
   it("still says it once pairing has finished and found nothing", () => {
     renderPairing({ cueLinksPending: false })
-    fireEvent.click(screen.getByTestId("tl-linking-mode"))
+    armLinking()
     expect(screen.getByTestId("tl-linking-notice")).toHaveTextContent(/never been paired/)
   })
 })

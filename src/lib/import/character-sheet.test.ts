@@ -25,7 +25,9 @@ import {
 import { parseXlsxToSheets } from "@/lib/parsers/spreadsheet"
 
 const HEADER = ["ID", "Source", "endTime", "startTime", "timeStamp", "Character Label", "VTT_closest", "Camera"]
-const COLS: CharacterSheetColumns = { character: 5, camera: 7, start: 3, range: 4 }
+// `text` is null: the subtitle sheet carries no copy of the line. Only the
+// AUDIO sheet does, which is what lets that one match by wording.
+const COLS: CharacterSheetColumns = { character: 5, camera: 7, start: 3, range: 4, text: null }
 
 const row = (start: string, character: string, camera = ""): string[] => [
   "1", "text", "", start, `${start} --> 00:00:00.000`, character, "", camera,
@@ -35,7 +37,12 @@ const cell = (id: string, startTime: number) => ({ cellId: id, startTime })
 
 describe("guessCharacterColumns", () => {
   it("finds the real workbook's columns from its headers", () => {
-    expect(guessCharacterColumns(HEADER)).toEqual({ character: 5, camera: 7, start: 3, range: 4 })
+    // `text` finds "Source" — this sheet's copy of the line. Unused here (it
+    // keys on timestamps) but the same guesser serves the AUDIO sheet, which
+    // matches on wording and needs it.
+    expect(guessCharacterColumns(HEADER)).toEqual({
+      character: 5, camera: 7, start: 3, range: 4, text: 1,
+    })
   })
 
   it("refuses when there is no character column — nothing else can be inferred", () => {
@@ -44,7 +51,7 @@ describe("guessCharacterColumns", () => {
 
   it("tolerates the naming a different studio might use", () => {
     const g = guessCharacterColumns(["speaker", "in", "angle"])
-    expect(g).toEqual({ character: 0, camera: 2, start: 1, range: null })
+    expect(g).toEqual({ character: 0, camera: 2, start: 1, range: null, text: null })
   })
 })
 
@@ -263,8 +270,10 @@ describe("keying rows to cells", () => {
 })
 
 // ── The real workbook ────────────────────────────────────────────────────
-const XLSX = path.join(os.homedir(), "Downloads", "101_split subs_characters.xlsx")
-const VTT = path.join(os.homedir(), "Downloads", "TheChosen_101_en_5&2.vtt")
+// Client source files live outside the repo so they are never committed.
+const MEDIA = path.join(os.homedir(), "Code", "aquilla-app", "the-chosen-media", "101")
+const XLSX = path.join(MEDIA, "101_split subs_characters.xlsx")
+const VTT = path.join(MEDIA, "TheChosen_101_en_5&2.vtt")
 const haveSamples = fs.existsSync(XLSX) && fs.existsSync(VTT)
 
 const TS = /^(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\.(\d{3})\s*-->/
@@ -291,7 +300,7 @@ describe.skipIf(!haveSamples)("against The Chosen episode 101", () => {
     expect(sheet.rows).toHaveLength(651) // 650 data rows + header
 
     const cols = guessCharacterColumns(sheet.rows[0])!
-    expect(cols).toEqual({ character: 5, camera: 7, start: 3, range: 4 })
+    expect(cols).toEqual({ character: 5, camera: 7, start: 3, range: 4, text: 1 })
 
     const rows = readCharacterRows(sheet.rows, cols)
     expect(rows).toHaveLength(650)

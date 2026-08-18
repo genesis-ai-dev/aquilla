@@ -52,6 +52,11 @@ export interface CharacterSheetColumns {
   /** A full range (`00:00:22.940 --> 00:00:24.441`), used when there is no
    *  separate start column. */
   range: number | null
+  /** The line's own words, when the sheet carries them. The AUDIO character
+   *  sheet does, under "Translation", and that column is what lets its rows be
+   *  matched to cues by wording instead of by timestamp — see
+   *  `audio-character-sheet.ts`. Null on the subtitle sheet, which has none. */
+  text: number | null
 }
 
 const HEADER_PATTERNS: { key: keyof CharacterSheetColumns; test: RegExp }[] = [
@@ -59,6 +64,7 @@ const HEADER_PATTERNS: { key: keyof CharacterSheetColumns; test: RegExp }[] = [
   { key: "camera", test: /^(camera|camera state|angle|on[/ ]off)$/i },
   { key: "start", test: /^(start|start[_ ]?time|begin|in)$/i },
   { key: "range", test: /^(timestamp|time[_ ]?stamp|timecode|range|cue)$/i },
+  { key: "text", test: /^(translation|text|line|dialogue|dialog|source)$/i },
 ]
 
 /**
@@ -84,6 +90,7 @@ export function guessCharacterColumns(header: readonly string[]): CharacterSheet
     camera: found.camera ?? null,
     start: found.start ?? null,
     range: found.range ?? null,
+    text: found.text ?? null,
   }
 }
 
@@ -122,6 +129,8 @@ export interface CharacterRow {
    *  than resolved loudly — see `planCharacterAssignments`. */
   cameraDisagrees: boolean
   startSec: number | undefined
+  /** The line's own words when the sheet carries them; "" when it does not. */
+  text: string
 }
 
 /**
@@ -160,6 +169,7 @@ export function readCharacterRows(
       cameraState,
       cameraDisagrees: Boolean(fromColumn && embedded && fromColumn !== embedded),
       startSec,
+      text: cols.text == null ? "" : (row[cols.text] ?? "").trim(),
     })
   })
   return out

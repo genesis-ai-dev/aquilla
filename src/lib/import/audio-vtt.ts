@@ -180,10 +180,15 @@ export function scaleCueTimes(
  *  so a timeline that looks half a second off can be traced to a decision
  *  rather than re-derived by whoever is looking at it next. */
 export interface AudioVttTimebaseRecord {
-  /** The rate the file was authored at, as written for people ("24"). */
-  fromFps: string
-  /** The rate it was corrected onto — the anchor file's own. */
-  toFps: string
+  /** The rate the file was authored at, as written for people ("24").
+   *  ABSENT when the drift was measured but the rates could not be named —
+   *  24/23.976 and 30/29.97 are the same ratio, so an exact correction can
+   *  still be one nobody can put a frame rate to. */
+  fromFps?: string
+  /** The rate it was corrected onto — the anchor file's own. Absent under the
+   *  same condition. */
+  toFps?: string
+  /** Always present: this is what was actually applied. */
   scale: number
 }
 

@@ -32,7 +32,6 @@ import {
   setRecordingFilmAudible,
   useRecordingFilmAudible,
 } from "@/lib/store/recording-film-audible-pref"
-import { cn } from "@/lib/utils"
 
 /** `HAVE_METADATA` — the element knows its duration, which is the bar a
  *  `currentTime` write has to clear to land. Below it the write is dropped (or
@@ -94,10 +93,11 @@ export interface RecordingVideoSurfaceProps {
    *  to a line you already recorded — must re-fire, which a boolean cannot
    *  express. */
   armNonce: number
-  /** The caller's existing overrun signal: the take has run past the end of the
-   *  line. Drawn on the picture rather than raised as its own state, so there is
-   *  one overrun in the dialog and not two that can disagree. */
-  overrun: boolean
+  // An `overrun` prop used to draw a red ring round the whole picture when the
+  // take ran past the end of the line. Removed 2026-08-16 (Sam: "get rid of
+  // it") — the overrun already says so twice, in the duration bar and in the
+  // red line under it, and ringing the FILM in red read as something being
+  // wrong with the film. The picture is reference, not a status light.
 }
 
 export function RecordingVideoSurface({
@@ -105,7 +105,6 @@ export function RecordingVideoSurface({
   startSec,
   running,
   armNonce,
-  overrun,
   leadIn,
 }: RecordingVideoSurfaceProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
@@ -273,14 +272,7 @@ export function RecordingVideoSurface({
     // clutter). The panel is black and the video is object-contain inside it,
     // so the bars above and below fall out of the geometry — they are
     // letterboxing, not wasted space, and nothing is drawn to "fill" them.
-    <div
-      className={cn(
-        "relative flex h-full w-full items-center justify-center overflow-hidden bg-black",
-        // The caller's overrun flag, drawn inset so the ring reads against
-        // the black rather than being clipped by the dialog's rounding.
-        overrun && "ring-2 ring-inset ring-red-500",
-      )}
-    >
+    <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-black">
         <video
           ref={videoRef}
           key={src}
@@ -328,7 +320,9 @@ export function RecordingVideoSurface({
             // is wanted. The pref is device-wide and sticky, which is why the
             // warning below is permanent rather than a one-time confirmation.
             onClick={() => setRecordingFilmAudible(!audible)}
-            className="absolute bottom-2 right-2 z-10 bg-black/55 text-white/70 backdrop-blur-sm hover:bg-black/70 hover:text-white"
+            // Above the warning below it, which is a full-width box sharing
+            // this corner — see the comment there.
+            className="absolute bottom-2 right-2 z-20 bg-black/55 text-white/70 backdrop-blur-sm hover:bg-black/70 hover:text-white"
           >
             {audible ? <Headphones className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
           </Button>
@@ -345,7 +339,15 @@ export function RecordingVideoSurface({
       {audible && (
         <p
           data-testid="rec-film-audible-warning"
-          className="absolute inset-x-0 bottom-0 z-10 flex items-start gap-1.5 bg-gradient-to-t from-black/80 to-transparent py-2 pl-3 pr-12 text-[11px] leading-snug text-amber-400"
+          // POINTER-EVENTS-NONE, and this is the bug fix, not a nicety (Sam,
+          // 2026-08-16: unmuting made the re-mute button very hard to click).
+          // This is a full-width box pinned to bottom-0 and it comes AFTER the
+          // button in the DOM, so at equal z it painted over the button and ate
+          // its clicks. The `pr-12` only keeps the TEXT clear of the button —
+          // padding is inside the box, so the box itself still covered it. The
+          // warning is passive: nothing in it is clickable, so it has no
+          // business intercepting anything.
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-start gap-1.5 bg-gradient-to-t from-black/80 to-transparent py-2 pl-3 pr-12 text-[11px] leading-snug text-amber-400"
         >
           <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
           <span>

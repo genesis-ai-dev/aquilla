@@ -47,6 +47,11 @@ interface Props {
    */
   triggerLabel?: string
   triggerIcon?: ComponentType<{ className?: string }>
+  /** A count carried on the TRIGGER, so it is visible without opening the
+   *  menu. The character check's disagreement count lives here: putting it on
+   *  an item would make the thing you wanted a badge for one click further
+   *  away than it already is. */
+  triggerBadge?: ReactNode
 }
 
 /**
@@ -91,6 +96,7 @@ export function OverflowMenu({
   triggerRef,
   triggerLabel,
   triggerIcon,
+  triggerBadge,
 }: Props) {
   if (items.length === 0) return null
 
@@ -109,6 +115,7 @@ export function OverflowMenu({
         >
           <TriggerIcon className="h-4 w-4" />
           {triggerLabel}
+          {triggerBadge}
         </Button>
       }
     />

@@ -20,6 +20,7 @@ import {
   AudioLines,
   ChevronsDownUp,
   ChevronsUpDown,
+  ClipboardCheck,
   Film,
   FolderInput,
   GripVertical,
@@ -43,6 +44,7 @@ import { SourceRegionLane } from "./SourceRegionLane"
 import type { LaneLinkOverlay } from "./CueLinkOverlay"
 import { EMPTY_CUE_LINK_INDEX, type CueLinkIndex } from "@/lib/sync/cell-links-read"
 import { chipOverlaps, MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
+import { resolveCueCharacter, formatCueCharacter } from "@/lib/timeline/cue-character"
 import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
 import { deriveTracksForFile, type TimelineTrack, type TrackKind } from "@/lib/timeline/tracks"
 import { computeFollowScroll } from "@/lib/timeline/follow"
@@ -151,6 +153,17 @@ export interface TimelineEditorProps {
   canImportCharacters?: boolean
   /** How many cells already carry a cast name — the Characters row's state. */
   characterCount?: number
+  /** How many HEARD lines carry a character — the audio sheet's own count. */
+  audioCharacterCount?: number
+  /** A character write is in flight — hundreds of events, so the row says so
+   *  rather than showing a count that is about to change. */
+  charactersWriting?: boolean
+  /** Links where the two character sheets contradict each other. Non-zero puts
+   *  an amber count on the Characters row: two independent opinions disagreeing
+   *  is the one signal neither sheet can give on its own. */
+  characterDisagreements?: number
+  /** Open the list of those disagreements. */
+  onReviewCharacterDisagreements?(): void
   /**
    * Stage 4: the cells that CARRY TARGET AUDIO, when that is not this file's
    * own cells — the audio cues, merged with their attachments.
@@ -485,6 +498,10 @@ export function TimelineEditor({
   onRequestImportCharacters,
   canImportCharacters = false,
   characterCount = 0,
+  audioCharacterCount = 0,
+  charactersWriting = false,
+  characterDisagreements = 0,
+  onReviewCharacterDisagreements,
   targetCells,
   onLinkingModeChange,
   linkingModeRequest,
@@ -890,6 +907,53 @@ export function TimelineEditor({
   // than per button, which is strictly better than the buttons were: linking a
   // film is contributor-level, while both cell-writing imports sit at the
   // source.cell.create floor.
+  /**
+   * The CHECK menu — reviewing, as against Sources' importing. (Sam,
+   * 2026-08-18: "make a check drop down for link cues and for characters".)
+   *
+   * "Check links" is where the old "Link cues" button went, and it still ARMS
+   * LINKING MODE rather than only opening a list. That is deliberate: the
+   * drawer being open IS the mode. Because a dropdown item reads like "show me
+   * a list", the drawer says in its header that linking is on — a line that is
+   * present exactly while the mode is, which a toast cannot be.
+   */
+  const checkMenuItems = useMemo<OverflowMenuItem[]>(() => {
+    const items: OverflowMenuItem[] = []
+    if (linkingAvailable) {
+      items.push({
+        id: "check-links",
+        label: linkingMode ? "Stop linking" : "Check links",
+        icon: Link2,
+        badge: cueLinksPending ? (
+          <span className="text-[11px] text-muted-foreground">pairing…</span>
+        ) : undefined,
+        onClick: () =>
+          setLinkingMode((on) => {
+            onLinkingModeChange?.(!on)
+            return !on
+          }),
+      })
+    }
+    if (onReviewCharacterDisagreements) {
+      items.push({
+        id: "check-characters",
+        label: "Check characters",
+        icon: Users,
+        badge:
+          characterDisagreements > 0 ? (
+            <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
+              {characterDisagreements}
+            </span>
+          ) : undefined,
+        onClick: onReviewCharacterDisagreements,
+      })
+    }
+    return items
+  }, [
+    linkingAvailable, linkingMode, cueLinksPending, onLinkingModeChange,
+    onReviewCharacterDisagreements, characterDisagreements,
+  ])
+
   const sourceMenuItems = useMemo<OverflowMenuItem[]>(() => {
     const items: OverflowMenuItem[] = []
     if (onRequestLinkVideo) {
@@ -926,9 +990,20 @@ export function TimelineEditor({
         label: "Characters",
         icon: Users,
         disabled: !canImportCharacters,
-        badge: (
+        badge: charactersWriting ? (
+          <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+            <Spinner className="h-3 w-3" /> saving…
+          </span>
+        ) : (
           <span className="text-[11px] text-muted-foreground">
-            {characterCount > 0 ? `${characterCount} named` : "not imported"}
+            {characterCount === 0 && audioCharacterCount === 0
+              ? "not imported"
+              : [
+                  characterCount > 0 ? `${characterCount} subtitle` : null,
+                  audioCharacterCount > 0 ? `${audioCharacterCount} heard` : null,
+                ]
+                  .filter(Boolean)
+                  .join(" + ")}
           </span>
         ),
         onClick: onRequestImportCharacters,
@@ -938,7 +1013,8 @@ export function TimelineEditor({
   }, [
     onRequestLinkVideo, canLinkVideo, coreMediaUrl,
     onRequestImportAudioVtt, canImportAudioVtt, hasAudioCueTrack, audioCues?.length,
-    onRequestImportCharacters, canImportCharacters, characterCount,
+    onRequestImportCharacters, canImportCharacters, characterCount, audioCharacterCount,
+    charactersWriting,
   ])
 
   const links = cueLinks ?? EMPTY_CUE_LINK_INDEX
@@ -1081,6 +1157,24 @@ export function TimelineEditor({
       null,
     [cells, audioCues, currentCellId],
   )
+  // AQU-646 stage 6: who speaks the current chip, and whether the camera is on
+  // them. Resolved HERE because this is the one place that holds both halves —
+  // the links and the subtitle cells the character sheet was keyed to. A cue
+  // has no character of its own, so without this the header opposite the video
+  // named nobody for the only kind of chip stage 4 leaves you selecting.
+  const currentCharacter = useMemo(
+    () => resolveCueCharacter({ cell: currentCell, links, textCells: cells }),
+    [currentCell, links, cells],
+  )
+  // One object for the header's two call sites below — portalled and inline.
+  // They render the SAME thing and used to say so twice; a third prop was one
+  // more chance for the two to drift apart.
+  const mediaTextHeaderProps = {
+    cell: currentCell,
+    headingLabel: textHeadingLabel,
+    castName: formatCueCharacter(currentCharacter.names),
+    cameraState: currentCharacter.cameraState ?? null,
+  }
   // Meeting note (2026-08-05): the detail readout carries the dub's own
   // numbers — its range, its duration, and ALWAYS the end-to-end difference
   // (original end − dub end). 2026-08-06 (Sam): the diff is INFORMATIONAL (a
@@ -2046,39 +2140,35 @@ export function TimelineEditor({
               while it is off clicking must stay exactly what it always was —
               seek, select, drag, trim. Only offered once there are cues to pair
               with and the file is editable. */}
-          {linkingAvailable && (
-            <AppTooltip
-              content={
-                cueLinksPending
-                  ? "Working out which subtitle each heard line performs — this takes a few seconds"
-                  : "Pair each heard line with the subtitle it performs"
+          {checkMenuItems.length > 0 && (
+            <OverflowMenu
+              items={checkMenuItems}
+              triggerVariant="outline"
+              triggerLabel={linkingMode ? "Linking" : "Check"}
+              triggerIcon={cueLinksPending ? Spinner : ClipboardCheck}
+              // Armed linking is a MODE, so the control has to look different
+              // while it is on — the confusing state Sam hit was one where
+              // nothing on screen said which way it was set.
+              triggerClassName={cn(
+                linkingMode &&
+                  "bg-violet-100 text-violet-700 hover:bg-violet-100 dark:bg-violet-950 dark:text-violet-300",
+              )}
+              // THE COUNT RIDES ON THE TRIGGER, not on an item — a badge you
+              // have to open a menu to see is not doing a badge's job.
+              triggerBadge={
+                characterDisagreements > 0 ? (
+                  <span
+                    data-testid="tl-check-count"
+                    className="ml-0.5 rounded-full bg-amber-500/20 px-1.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
+                  >
+                    {characterDisagreements}
+                  </span>
+                ) : undefined
               }
-            >
-              <button
-                type="button"
-                data-testid="tl-linking-mode"
-                aria-pressed={linkingMode}
-                onClick={() =>
-                  setLinkingMode((on) => {
-                    onLinkingModeChange?.(!on)
-                    return !on
-                  })
-                }
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-xs",
-                  linkingMode
-                    ? "bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300"
-                    : "bg-background text-foreground/80 hover:bg-muted",
-                )}
-              >
-                {cueLinksPending ? (
-                  <Spinner className="h-3.5 w-3.5" />
-                ) : (
-                  <Link2 className="h-3.5 w-3.5" />
-                )}
-                {cueLinksPending ? "Pairing…" : linkingMode ? "Linking" : "Link cues"}
-              </button>
-            </AppTooltip>
+              testId="tl-check-menu"
+              ariaLabel="Check this file's pairings and characters"
+              tooltip="Review the pairings, or where the character sheets disagree"
+            />
           )}
           {/* The two states in which the overlay would otherwise lie by
               omission get a sentence instead of paint (2026-08-14: a dead
@@ -2405,8 +2495,8 @@ export function TimelineEditor({
           The slot is owned by the workspace; portal when it exists, render
           inline when this editor is mounted alone (tests). */}
       {chipStripSlot
-        ? createPortal(<MediaTextHeader cell={currentCell} headingLabel={textHeadingLabel} />, chipStripSlot)
-        : <MediaTextHeader cell={currentCell} headingLabel={textHeadingLabel} />}
+        ? createPortal(<MediaTextHeader {...mediaTextHeaderProps} />, chipStripSlot)
+        : <MediaTextHeader {...mediaTextHeaderProps} />}
     </div>
   )
 }

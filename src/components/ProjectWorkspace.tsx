@@ -96,10 +96,16 @@ import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
 import { ImportCharactersDialog } from "./timeline/ImportCharactersDialog"
+import { CharacterCheckDrawer, type ResolveChoice } from "./timeline/CharacterCheckDrawer"
 import type { CueReconcilePlan } from "@/lib/import/cue-reconcile"
 import { diffCueLinks } from "@/lib/timeline/cue-link-diff"
 import { useFileCellLinks } from "@/hooks/useFileCellLinks"
 import { reviewCueLinks } from "@/lib/timeline/cue-link-review"
+import { compareCharacterSources, resolutionKey } from "@/lib/timeline/character-agreement"
+import type { CharacterAgreement } from "@/lib/timeline/character-agreement"
+import type { CameraState } from "@/lib/sync/cells-read-types"
+import type { AudioCharacterPlan } from "@/lib/import/audio-character-sheet"
+import { resolveCueCharacter, formatCueCharacter } from "@/lib/timeline/cue-character"
 import { CueLinkDrawer } from "./timeline/CueLinkDrawer"
 import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
@@ -1997,14 +2003,19 @@ export function ProjectWorkspace() {
   // gated on the media arrangement and can legitimately be empty here — the
   // check has to work on any timed file, and an empty reference silently
   // disables it rather than reporting a mismatch it cannot see.
-  const anchorCueTimesSec = useMemo(() => {
-    const out: number[] = []
-    for (const c of cellSummaries) {
-      if (typeof c.startTime === "number") out.push(c.startTime)
-      if (typeof c.endTime === "number") out.push(c.endTime)
-    }
-    return out
-  }, [cellSummaries])
+  const anchorCueLines = useMemo(
+    // Words as well as times: the drift check pairs lines by their WORDING and
+    // measures how far apart they pull, which is the only method that survives
+    // a file whose timestamps have been requantised by re-splitting. See
+    // `timebase.ts`.
+    () =>
+      cellSummaries.map((c) => ({
+        startTime: c.startTime,
+        endTime: c.endTime,
+        original: c.original,
+      })),
+    [cellSummaries],
+  )
   /** The pairing review drawer. Open IS linking mode — one state rather than
    *  two that can disagree. */
   const [cueLinkDrawerOpen, setCueLinkDrawerOpen] = useState(false)
@@ -2013,24 +2024,340 @@ export function ProjectWorkspace() {
     setCueLinkDrawerOpen(false)
     setLinkingModeRequest((r) => ({ on: false, nonce: (r?.nonce ?? 0) + 1 }))
   }, [])
+
+  /**
+   * LEAVING A FILE PUTS THE DRAWERS AWAY. (Sam, 2026-08-18)
+   *
+   * The bug this fixes: arm "Check links", move to another file, come back —
+   * the drawer is still open and the mode is silently off. There is a comment
+   * on CueLinkDrawer claiming "open IS linking mode, one state rather than two
+   * that can disagree", and it was aspirational: the open flag lives here and
+   * `linkingMode` lives inside TimelineEditor, where an effect turns it off as
+   * soon as a file has no audio cues — without telling this side. Two states,
+   * disagreeing, exactly as the comment warned.
+   *
+   * `closeCueLinkDrawer` already does both halves, so calling it on every file
+   * change makes the comment true and leaves the two in step.
+   */
+  useEffect(() => {
+    closeCueLinkDrawer()
+    setCharacterCheckOpen(false)
+  }, [activeFileId, closeCueLinkDrawer])
   /** The auto-linker is writing pairings right now. Several hundred events and
    *  a handful of round trips, so without a sign of life the timeline just
    *  looks like the matcher did nothing. */
   const [cueLinksPending, setCueLinksPending] = useState(false)
   const [importAudioVttOpen, setImportAudioVttOpen] = useState(false)
   const [importCharactersOpen, setImportCharactersOpen] = useState(false)
-  /** How many lines already carry a character — the Sources row's state, and
-   *  what makes the dialog say "Replace" rather than "Import". */
-  const characterCount = useMemo(
+  const [characterCheckOpen, setCharacterCheckOpen] = useState(false)
+  /** ONE DRAWER AT A TIME. They share a single 80-wide slot, and one of them is
+   *  a mode — three at once would be a mess nobody asked for. */
+  const openCharacterCheck = useCallback(() => {
+    closeCueLinkDrawer()
+    setCheckOpen(false)
+    setCharacterCheckOpen(true)
+  }, [closeCueLinkDrawer])
+  /**
+   * Every line that carries a character, by cell id.
+   *
+   * From the cell VIEWS, not the summaries: `cast_name` lives in `metadata`,
+   * which summaries do not carry — reading them would report nothing forever,
+   * which is the exact shape of the bug this whole round exists to fix.
+   *
+   * One pass feeds both callers: the Sources row's count (what makes the
+   * import dialog say "Replace" rather than "Import") and the recorder's
+   * lookup for the line being performed.
+   */
+  const castByCellId = useMemo(
     () =>
-      // From the cell VIEWS, not the summaries: `cast_name` lives in
-      // `metadata`, which summaries do not carry — counting off them would
-      // report zero forever.
-      readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews()).filter(
-        (c) => typeof c.metadata?.cast_name === "string" && c.metadata.cast_name !== "",
-      ).length,
+      new Map(
+        readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews())
+          .filter((c) => typeof c.metadata?.cast_name === "string" && c.metadata.cast_name !== "")
+          .map((c) => [c.id, c]),
+      ),
     [cellStore, cellStoreVersion],
   )
+  const characterCount = castByCellId.size
+
+  /**
+   * ONE CHARACTER WRITE AT A TIME. (Sam, 2026-08-18: clicking during a bulk
+   * resolve "seems buggy".)
+   *
+   * It was, and worse than mis-clicks. Each of these handlers snapshots the
+   * resolution records, works through ~150 events, then saves the whole object
+   * — so a second handler started mid-flight begins from a second snapshot and
+   * whichever save lands last OVERWRITES the other's decisions. Real loss, not
+   * a visual glitch. All four writes share this lock because they all touch the
+   * same records and the same cells.
+   *
+   * THE REF IS THE GUARD, not the state: a `useState` value read inside a
+   * `useCallback` can be stale at exactly the moment two clicks race, which is
+   * the case this exists for. The state is only what the UI draws.
+   */
+  const characterWriteBusy = useRef(false)
+  const [characterWrite, setCharacterWrite] = useState<
+    { done: number; total: number; phase: "writing" | "syncing" } | null
+  >(null)
+  /** Report progress every tenth item and on the last. The loops `await` per
+   *  item, so each iteration breaks React's batching — setting state 150 times
+   *  would re-render this very large component 150 times and make the thing it
+   *  is reporting on slower. */
+  const reportCharacterWrite = useCallback((done: number, total: number) => {
+    if (done % 10 === 0 || done === total) setCharacterWrite({ done, total, phase: "writing" })
+  }, [])
+  /** …and the same for the CUES, which the audio sheet writes to. Separate
+   *  counts because they are separate sheets: replacing one must not claim to
+   *  be replacing the other. */
+  const audioCharacterCount = useMemo(
+    () =>
+      (audioCues ?? []).filter(
+        (c) => typeof c.metadata?.cast_name === "string" && c.metadata.cast_name !== "",
+      ).length,
+    [audioCues],
+  )
+
+  /**
+   * Where the two character sheets contradict each other.
+   *
+   * Only says anything once BOTH are in — with one sheet there is no second
+   * opinion to differ from. Computed from the store rather than frozen at
+   * import, so it shrinks as corrections are made instead of going stale.
+   */
+  /** The list as it looked when the current write began — see below. */
+  const frozenAgreement = useRef<CharacterAgreement | null>(null)
+  const characterAgreement = useMemo(
+    () =>
+      // FROZEN WHILE WRITING. Worth more than dimming: the cells update as the
+      // events land, so this would otherwise recompute over ~650 cells and
+      // links a hundred and fifty times, with rows migrating to Resolved and
+      // everything below them shifting under the cursor. It refreshes once, at
+      // the end, in one jump.
+      characterWrite
+        ? frozenAgreement.current
+        : audioCharacterCount === 0 || characterCount === 0
+        ? null
+        : compareCharacterSources({
+            cues: audioCues ?? [],
+            textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews()),
+            links: cueLinks,
+            resolutions: tts.settings?.characterResolutions,
+          }),
+    [
+      audioCues,
+      audioCharacterCount,
+      characterCount,
+      cellStore,
+      cellStoreVersion,
+      cueLinks,
+      tts.settings?.characterResolutions,
+      characterWrite,
+    ],
+  )
+  const bothCharacterSheets = audioCharacterCount > 0 && characterCount > 0
+
+  /**
+   * Settle one axis of one disagreement.
+   *
+   * WRITES BOTH CELLS. The winning value goes to the subtitle row AND to the
+   * cue, so no surface is left showing the answer that was set aside — the
+   * dialogue table and the recorder read different cells and would otherwise
+   * contradict each other about the same moment of film. Safe because only
+   * one-row-one-cue links are offered as work: a row covering several heard
+   * lines is counted, never given buttons (see `character-agreement.ts`).
+   *
+   * The record is what remembers the argument, since the cells afterwards
+   * cannot: it keeps which sheet was believed and what the other one said.
+   */
+  const handleResolveCharacter = useCallback(
+    async (choices: readonly ResolveChoice[]) => {
+      const cueFileId = audioCueSibling?.id
+      if (!project?.id || !activeFileId || !cueFileId || choices.length === 0) return
+      if (characterWriteBusy.current) return
+      if (!navigator.onLine) {
+        toast.error("Characters can't be changed while offline.")
+        return
+      }
+      characterWriteBusy.current = true
+      frozenAgreement.current = characterAgreement
+      setCharacterWrite({ done: 0, total: choices.length, phase: "writing" })
+      // Only the long ones get a toast — a single resolve is two events and
+      // the drawer's own progress is already in view.
+      const toastId = choices.length > 1 ? toast.loading(`Saving ${choices.length} decisions…`) : null
+      // THE DRAWER'S VALUES ARE THE TRUTH, never re-derived from the cells.
+      // After a resolution both cells hold the winner, so reading them here is
+      // exactly wrong twice over: a re-click would record the winner as its own
+      // "rejected" (destroying the only copy of the losing answer — the
+      // QUINTUS bug, 2026-08-18), and a flip would re-write the winner while
+      // claiming to change the choice. The buttons carry both candidates in
+      // every state; what they display is what gets written.
+      //
+      // The cells are still consulted for the OTHER axis — writing a camera
+      // pick must not blank the name — but never for the axis being decided.
+      const views = readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews())
+      const textById = new Map(views.map((c) => [c.id, c]))
+      const nameOf = (c: { metadata?: Record<string, unknown> | null } | undefined) =>
+        c?.metadata && typeof c.metadata.cast_name === "string" ? c.metadata.cast_name : ""
+
+      const records = { ...(tts.settings?.characterResolutions ?? {}) }
+      try {
+        let done = 0
+        for (const choice of choices) {
+          const text = textById.get(choice.textCellId)
+          const cue = (audioCues ?? []).find((c) => c.id === choice.cueCellId)
+          if (!text || !cue) continue
+          for (const [fileId, cell] of [
+            [activeFileId, text],
+            [cueFileId, cue],
+          ] as const) {
+            await emitCastAssign({
+              projectId: project.id,
+              fileId,
+              cellId: cell.id,
+              castName: choice.axis === "name" ? choice.value : nameOf(cell),
+              ...(choice.axis === "camera"
+                ? { cameraState: choice.value as CameraState }
+                : cell.cameraState !== undefined
+                  ? { cameraState: cell.cameraState }
+                  : {}),
+              author: currentUsername,
+            })
+          }
+          const key = resolutionKey(choice.textCellId, choice.cueCellId)
+          records[key] = {
+            ...(records[key] ?? {}),
+            [choice.axis]: { chose: choice.side, rejected: choice.rejected },
+            at: Date.now(),
+          } as (typeof records)[string]
+          reportCharacterWrite(++done, choices.length)
+        }
+        setCharacterWrite({ done: choices.length, total: choices.length, phase: "syncing" })
+        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        await tts.saveTts({ characterResolutions: records })
+        if (toastId != null) {
+          toast.success(`${choices.length} decisions saved.`, { id: toastId })
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? `Couldn't save that: ${e.message}` : "Couldn't save that."
+        if (toastId != null) toast.error(msg, { id: toastId })
+        else toast.error(msg)
+        return
+      } finally {
+        // ALWAYS releases: a throw must not leave the drawer inert forever.
+        characterWriteBusy.current = false
+        setCharacterWrite(null)
+      }
+      refreshAudioCues()
+      revalidateCells()
+    },
+    [
+      project?.id,
+      activeFileId,
+      audioCueSibling?.id,
+      audioCues,
+      cellStore,
+      cellStoreVersion,
+      currentUsername,
+      getTokenForProjectFile,
+      refreshAudioCues,
+      revalidateCells,
+      tts,
+      characterAgreement,
+      reportCharacterWrite,
+    ],
+  )
+
+  /**
+   * Undo every character resolution. (Sam, 2026-08-18.)
+   *
+   * The exact inverse of resolving: each rejected value is written back to the
+   * cell on the side that was NOT believed — the chosen side's cell already
+   * holds what it always held — and the records are cleared, so every
+   * disagreement reopens with both answers restored. Nothing touches a link
+   * where the loser's cell has since been edited to the rejected value anyway.
+   *
+   * Iterates the RECORDS, not the resolved list: a half-settled link (one axis
+   * decided, the other still open) must reopen too.
+   */
+  const handleResetResolutions = useCallback(async () => {
+    const cueFileId = audioCueSibling?.id
+    const records = tts.settings?.characterResolutions
+    if (!project?.id || !activeFileId || !cueFileId || !records) return
+    if (characterWriteBusy.current) return
+    if (!navigator.onLine) {
+      toast.error("Characters can't be changed while offline.")
+      return
+    }
+    const entries = Object.entries(records)
+    characterWriteBusy.current = true
+    frozenAgreement.current = characterAgreement
+    setCharacterWrite({ done: 0, total: entries.length, phase: "writing" })
+    const toastId = toast.loading(`Undoing ${entries.length} decisions…`)
+    const views = readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews())
+    const textById = new Map(views.map((c) => [c.id, c]))
+    const cueById = new Map((audioCues ?? []).map((c) => [c.id, c]))
+    const nameOf = (c: { metadata?: Record<string, unknown> | null } | undefined) =>
+      c?.metadata && typeof c.metadata.cast_name === "string" ? c.metadata.cast_name : ""
+    try {
+      let done = 0
+      for (const [key, record] of entries) {
+        const [textCellId, cueCellId] = key.split(" ")
+        const text = textById.get(textCellId)
+        const cue = cueById.get(cueCellId)
+        if (!text || !cue) continue
+        for (const axis of ["name", "camera"] as const) {
+          const choice = record[axis]
+          if (!choice) continue
+          const loser = choice.chose === "subtitle" ? cue : text
+          const loserFileId = choice.chose === "subtitle" ? cueFileId : activeFileId
+          const current = axis === "name" ? nameOf(loser) : loser.cameraState
+          if (current === choice.rejected) continue // already back, or self-healed
+          await emitCastAssign({
+            projectId: project.id,
+            fileId: loserFileId,
+            cellId: loser.id,
+            castName: axis === "name" ? String(choice.rejected) : nameOf(loser),
+            ...(axis === "camera"
+              ? { cameraState: choice.rejected as CameraState }
+              : loser.cameraState !== undefined
+                ? { cameraState: loser.cameraState }
+                : {}),
+            author: currentUsername,
+          })
+        }
+        reportCharacterWrite(++done, entries.length)
+      }
+      setCharacterWrite({ done: entries.length, total: entries.length, phase: "syncing" })
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      await tts.saveTts({ characterResolutions: {} })
+      toast.success("Every character decision was undone — the disagreements are back in the list.", {
+        id: toastId,
+      })
+    } catch (e) {
+      toast.error(e instanceof Error ? `Couldn't reset: ${e.message}` : "Couldn't reset.", {
+        id: toastId,
+      })
+      return
+    } finally {
+      characterWriteBusy.current = false
+      setCharacterWrite(null)
+    }
+    refreshAudioCues()
+    revalidateCells()
+  }, [
+    project?.id,
+    activeFileId,
+    audioCueSibling?.id,
+    audioCues,
+    cellStore,
+    cellStoreVersion,
+    currentUsername,
+    getTokenForProjectFile,
+    refreshAudioCues,
+    revalidateCells,
+    tts,
+    characterAgreement,
+    reportCharacterWrite,
+  ])
 
   /**
    * Apply the character sheet. (AQU-646 stage 6)
@@ -2056,10 +2383,18 @@ export function ProjectWorkspace() {
   const handleImportCharacters = useCallback(
     async (plan: CharacterAssignmentPlan) => {
       if (!project?.id || !activeFileId) return
+      if (characterWriteBusy.current) return
       if (!navigator.onLine) {
         toast.error("Characters can't be imported while offline.")
         return
       }
+      // The dialog has already closed — deliberately, so toasts are not hidden
+      // behind a modal — which used to leave several seconds of silence.
+      const toastId = toast.loading(`Assigning ${plan.assignments.length} characters…`)
+      characterWriteBusy.current = true
+      frozenAgreement.current = characterAgreement
+      setCharacterWrite({ done: 0, total: plan.assignments.length, phase: "writing" })
+      let done = 0
       try {
         for (const a of plan.assignments) {
           await emitCastAssign({
@@ -2070,12 +2405,21 @@ export function ProjectWorkspace() {
             ...(a.cameraState !== undefined ? { cameraState: a.cameraState } : {}),
             author: currentUsername,
           })
+          reportCharacterWrite(++done, plan.assignments.length)
         }
+        setCharacterWrite({
+          done: plan.assignments.length,
+          total: plan.assignments.length,
+          phase: "syncing",
+        })
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       } catch (e) {
         toast.error(
           e instanceof Error ? `Couldn't import the characters: ${e.message}` : "Couldn't import the characters.",
+          { id: toastId },
         )
+        characterWriteBusy.current = false
+        setCharacterWrite(null)
         return
       }
       // One voice per distinct character, and the cell→voice map that makes
@@ -2105,15 +2449,125 @@ export function ProjectWorkspace() {
         toast.warning("Characters imported, but the cast list could not be updated.")
       }
 
+      characterWriteBusy.current = false
+      setCharacterWrite(null)
       revalidateCells()
       toast.success(
         `${plan.assignments.length} lines now carry a character — ${plan.distinctCharacters} people` +
           (newVoices > 0 ? `, ${newVoices} added to the cast` : "") +
           (plan.blankRows > 0 ? `. ${plan.blankRows} rows skipped as unspoken text.` : "."),
+        { id: toastId },
       )
     },
-    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, revalidateCells, tts],
+    [
+      project?.id,
+      activeFileId,
+      currentUsername,
+      getTokenForProjectFile,
+      revalidateCells,
+      tts,
+      characterAgreement,
+      reportCharacterWrite,
+    ],
   )
+
+  /**
+   * The same import, for the sheet keyed to the HEARD lines.
+   *
+   * Identical in every respect but the file it writes to: `cast.assign` is
+   * file-scoped, so pointing it at the audio-cue sibling puts the characters on
+   * the cues themselves. Nothing downstream needs to know — `resolveCueCharacter`
+   * already prefers a cell's own name and only falls back to the links when it
+   * has none, so a cue that now carries its own character simply answers with
+   * it, and every cue that does not goes on resolving exactly as before.
+   */
+  const handleImportAudioCharacters = useCallback(
+    async (plan: AudioCharacterPlan) => {
+      const cueFileId = audioCueSibling?.id
+      if (!project?.id || !cueFileId) return
+      if (characterWriteBusy.current) return
+      if (!navigator.onLine) {
+        toast.error("Characters can't be imported while offline.")
+        return
+      }
+      const toastId = toast.loading(`Assigning ${plan.assignments.length} characters…`)
+      characterWriteBusy.current = true
+      frozenAgreement.current = characterAgreement
+      setCharacterWrite({ done: 0, total: plan.assignments.length, phase: "writing" })
+      let done = 0
+      try {
+        for (const a of plan.assignments) {
+          await emitCastAssign({
+            projectId: project.id,
+            fileId: cueFileId,
+            cellId: a.cellId,
+            castName: a.castName,
+            ...(a.cameraState !== undefined ? { cameraState: a.cameraState } : {}),
+            author: currentUsername,
+          })
+          reportCharacterWrite(++done, plan.assignments.length)
+        }
+        setCharacterWrite({
+          done: plan.assignments.length,
+          total: plan.assignments.length,
+          phase: "syncing",
+        })
+        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      } catch (e) {
+        toast.error(
+          e instanceof Error ? `Couldn't import the characters: ${e.message}` : "Couldn't import the characters.",
+          { id: toastId },
+        )
+        characterWriteBusy.current = false
+        setCharacterWrite(null)
+        return
+      }
+      let newVoices = 0
+      try {
+        const before = new Set(getVoiceLibrary(tts.settings).map((v) => v.name))
+        const additions = buildCastAdditions(
+          plan.assignments.map((a) => ({ cellId: a.cellId, speaker: a.castName })),
+          tts.settings,
+          uuidv7,
+        )
+        newVoices = additions.voices.filter((v) => !before.has(v.name)).length
+        await tts.saveTts({
+          voices: additions.voices,
+          castAssignments: {
+            ...(tts.settings?.castAssignments ?? {}),
+            ...additions.castAssignments,
+          },
+        })
+      } catch (e) {
+        console.warn("[characters] minting voices failed", e)
+        toast.warning("Characters imported, but the cast list could not be updated.")
+      }
+
+      characterWriteBusy.current = false
+      setCharacterWrite(null)
+      refreshAudioCues()
+      revalidateCells()
+      toast.success(
+        `${plan.assignments.length} heard lines now carry a character — ` +
+          `${plan.distinctCharacters} people` +
+          (newVoices > 0 ? `, ${newVoices} added to the cast` : "") +
+          (plan.blankRows > 0 ? `. ${plan.blankRows} rows skipped as unspoken text.` : "."),
+        { id: toastId },
+      )
+    },
+    [
+      characterAgreement,
+      reportCharacterWrite,
+      project?.id,
+      audioCueSibling?.id,
+      currentUsername,
+      getTokenForProjectFile,
+      refreshAudioCues,
+      revalidateCells,
+      tts,
+    ],
+  )
+
   /**
    * Write the picked cues as this file's audio-cue sibling.
    *
@@ -2153,6 +2607,10 @@ export function ProjectWorkspace() {
       // honest clock instead of each surface remembering to apply a factor.
       // What was done rides along in the import manifest.
       const cues = timebase ? scaleCueTimes(parsed.cues, timebase.scale) : parsed.cues
+      // The slowest thing in the app — ~650 cells written, then ~650 links —
+      // behind a dialog that has already closed. Silence until it finishes
+      // reads as nothing having happened.
+      const importToastId = toast.loading(`Importing ${cues.length} audio cues…`)
       let uploaded
       try {
         uploaded = await uploadAudioCueFile({
@@ -2164,8 +2622,13 @@ export function ProjectWorkspace() {
           ...(timebase
             ? {
                 timebase: {
-                  fromFps: timebase.cue.label,
-                  toFps: timebase.reference.label,
+                  // Only when the rates are actually known. A drift measured
+                  // from the words can be exact without naming a frame rate —
+                  // 24-against-23.976 and 30-against-29.97 are the same ratio
+                  // — and the manifest is provenance, so it records the scale
+                  // it applied and stays quiet about what it could not tell.
+                  ...(timebase.cue.fps > 0 ? { fromFps: timebase.cue.label } : {}),
+                  ...(timebase.reference.fps > 0 ? { toFps: timebase.reference.label } : {}),
                   scale: timebase.scale,
                 },
               }
@@ -2175,6 +2638,7 @@ export function ProjectWorkspace() {
       } catch (e) {
         toast.error(
           e instanceof Error ? `Couldn't import the audio cues: ${e.message}` : "Couldn't import the audio cues.",
+          { id: importToastId },
         )
         return
       }
@@ -2243,6 +2707,7 @@ export function ProjectWorkspace() {
         linkCount > 0
           ? `Imported ${uploaded.cellCount} audio cues${retimed}, and paired ${linkCount} of them with subtitle lines.`
           : `Imported ${uploaded.cellCount} audio cues${retimed}.`,
+        { id: importToastId },
       )
     },
     [project?.id, activeFile, audioCueSiblings, currentUsername, getTokenForFile, getTokenForProjectFile, refresh, refreshCueLinks, cellStore, cellStoreVersion],
@@ -5689,7 +6154,9 @@ export function ProjectWorkspace() {
       // it — about ten per episode. There is nothing to read, so the transcript
       // is all we can offer, and it is offered as reference rather than as
       // words to say.
-      if (textIds.length === 0) return { text: "", reference: transcript }
+      if (textIds.length === 0) {
+        return { text: "", reference: transcript, castName: null, cameraState: null }
+      }
       const byId = new Map(cellSummaries.map((c) => [c.id, c]))
       const linked = textIds
         .map((id) => byId.get(id))
@@ -5703,9 +6170,28 @@ export function ProjectWorkspace() {
       // other cues — that is the only case where the performer has to work out
       // which part of the line in front of them belongs to this take.
       const shared = textIds.some((id) => (cueLinks.cuesForText.get(id) ?? []).length > 1)
-      return { text, reference: shared ? transcript : null }
+      // Who says this, and is the camera on them. The character sheet is keyed
+      // to the SUBTITLE cells, so it reaches a cue only through these links —
+      // and only off the cell VIEWS, since the summaries sorted above carry no
+      // `metadata` and would report nobody, forever.
+      //
+      // The views go in already ordered by the sort above, which is what makes
+      // a two-speaker cue read "A / B" the way it is performed.
+      const character = resolveCueCharacter({
+        cell: cue ?? null,
+        links: cueLinks,
+        textCells: linked
+          .map((c) => castByCellId.get(c.id))
+          .filter((c): c is NonNullable<typeof c> => Boolean(c)),
+      })
+      return {
+        text,
+        reference: shared ? transcript : null,
+        castName: formatCueCharacter(character.names),
+        cameraState: character.cameraState ?? null,
+      }
     },
-    [audioCueCells, cueLinks, cellSummaries],
+    [audioCueCells, cueLinks, cellSummaries, castByCellId],
   )
   // Publish the resolver declared near the top of the component. Assigned on
   // every render, deliberately: it closes over this render's cue cells, and a
@@ -6867,7 +7353,14 @@ export function ProjectWorkspace() {
       checkOpen={checkOpen}
       checkRunning={checkRunning}
       checkResult={checkResult}
-      onCheckToggle={() => { if (checkOpen) setCheckOpen(false); else void runCheck() }}
+      onCheckToggle={() => {
+        if (checkOpen) setCheckOpen(false)
+        else {
+          closeCueLinkDrawer()
+          setCharacterCheckOpen(false)
+          void runCheck()
+        }
+      }}
       menuItems={fileMenuItems}
       fileOptionsAnchorRef={fileOptionsAnchorRef}
       viewSettingsMenu={(
@@ -7536,6 +8029,10 @@ export function ProjectWorkspace() {
                     onRequestImportCharacters={() => setImportCharactersOpen(true)}
                     canImportCharacters={canPerform("cast.assign", project?.syncRole?.level ?? null)}
                     characterCount={characterCount}
+                    audioCharacterCount={audioCharacterCount}
+                    charactersWriting={characterWrite != null}
+                    characterDisagreements={characterAgreement?.open.length ?? 0}
+                    onReviewCharacterDisagreements={openCharacterCheck}
                     hasAudioCueTrack={audioCueSibling !== null}
                     audioCues={audioCues}
                     targetCells={audioCueCells}
@@ -7569,7 +8066,13 @@ export function ProjectWorkspace() {
                         : undefined
                     }
                     onReorderTrack={canReorderTracks ? handleReorderTrack : undefined}
-                    onLinkingModeChange={setCueLinkDrawerOpen}
+                    onLinkingModeChange={(on) => {
+                      setCueLinkDrawerOpen(on)
+                      if (on) {
+                        setCharacterCheckOpen(false)
+                        setCheckOpen(false)
+                      }
+                    }}
                     linkingModeRequest={linkingModeRequest}
                   />
                   </ResizablePanel>
@@ -7797,6 +8300,20 @@ export function ProjectWorkspace() {
                 onPair={(t, c) => handleReviewPair(t, c, true)}
                 onReject={(t, c) => handleReviewPair(t, c, false)}
                 onRepairAll={() => void handleRepairAllCueLinks()}
+              />
+            )}
+            {characterCheckOpen && (
+              <CharacterCheckDrawer
+                agreement={characterAgreement}
+                bothSheetsImported={bothCharacterSheets}
+                onClose={() => setCharacterCheckOpen(false)}
+                onNavigate={(cueCellId, textCellIds) => {
+                  setTimelineActivateRequest({ cellId: cueCellId, nonce: Date.now() })
+                  handleCueActivated(cueCellId, textCellIds)
+                }}
+                onResolve={(choices) => void handleResolveCharacter(choices)}
+                onResetAll={() => void handleResetResolutions()}
+                pending={characterWrite}
               />
             )}
             {checkOpen && (
@@ -8206,7 +8723,7 @@ export function ProjectWorkspace() {
         open={importAudioVttOpen}
         replacing={audioCueSibling !== null}
         textFileName={activeFile?.name ?? ""}
-        referenceTimesSec={anchorCueTimesSec}
+        referenceLines={anchorCueLines}
         existingCues={audioCues ?? undefined}
         takeCount={cueTakeCountRef.current()}
         // Deleting a file is PROJECT_LEAD, a step above the contributor floor
@@ -8240,13 +8757,19 @@ export function ProjectWorkspace() {
           open={importCharactersOpen}
           textFileName={activeFile.name}
           cells={cellSummaries}
+          audioCues={audioCues ?? undefined}
           existingCount={characterCount}
+          existingAudioCount={audioCharacterCount}
           onCancel={() => setImportCharactersOpen(false)}
           onConfirm={(plan) => {
             // Close FIRST: the import runs for a few seconds over hundreds of
             // lines and reports with toasts, which a modal covers.
             setImportCharactersOpen(false)
             void handleImportCharacters(plan)
+          }}
+          onConfirmAudio={(plan) => {
+            setImportCharactersOpen(false)
+            void handleImportAudioCharacters(plan)
           }}
         />
       )}

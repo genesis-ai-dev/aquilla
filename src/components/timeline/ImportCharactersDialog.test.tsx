@@ -179,3 +179,111 @@ describe("wording", () => {
     expect(screen.getByText("Import characters")).toBeInTheDocument()
   })
 })
+
+// ── The other sheet ──────────────────────────────────────────────────────
+//
+// The client ships two character spreadsheets per episode, keyed to opposite
+// sides of the same script. Either can be imported first. The button says which
+// you meant; the dialog then checks the file against that and says so when they
+// disagree, because "this sheet matches no line" is a true and useless message
+// when the real answer is that it belongs under the other button.
+
+const AUDIO_HEADER = "Line #,startTime,endTime,Character,Translation,Camera"
+const audioRow = (start: string, character: string, text: string, camera = "") =>
+  `10,${start},,${character},${text},${camera}`
+const AUDIO_CSV = (...rows: string[]) => [AUDIO_HEADER, ...rows].join("\n")
+
+const audioCues = [
+  { id: "q1", startTime: 10, original: "Abba?" },
+  { id: "q2", startTime: 20, original: "I can't sleep." },
+  { id: "q3", startTime: 30, original: "Sit down." },
+]
+
+async function pickAudio(csv: string, over: Record<string, unknown> = {}) {
+  const onConfirmAudio = vi.fn()
+  render(
+    <ImportCharactersDialog
+      open
+      textFileName="ep101.vtt"
+      cells={cells}
+      audioCues={audioCues}
+      existingCount={0}
+      onConfirm={vi.fn()}
+      onConfirmAudio={onConfirmAudio}
+      onCancel={() => {}}
+      {...over}
+    />,
+  )
+  const file = new File([csv], "audio-characters.csv", { type: "text/csv" })
+  fireEvent.change(screen.getByTestId("import-characters-audio-input"), {
+    target: { files: [file] },
+  })
+  return { onConfirmAudio }
+}
+
+describe("the audio character sheet", () => {
+  it("assigns characters to the HEARD lines, matched on their words", () => {
+    // Deliberately at times that match no cue: this sheet carries the delivered
+    // file's own 24fps stamps while the cues have been corrected onto 23.976.
+    // The wording is what pairs them.
+    return pickAudio(
+      AUDIO_CSV(
+        audioRow("00:09:99.000", "LITTLE MARY MAGDALENE (ON)", "Abba?", "ON"),
+        audioRow("00:19:99.000", "LITTLE MARY MAGDALENE (ON)", "I can't sleep.", "ON"),
+      ),
+    ).then(async ({ onConfirmAudio }) => {
+      await waitFor(() =>
+        expect(screen.getByTestId("import-characters-summary")).toHaveTextContent(
+          "2 heard lines get a character",
+        ),
+      )
+      fireEvent.click(screen.getByTestId("import-characters-confirm"))
+      const [plan] = onConfirmAudio.mock.calls[0]
+      expect(plan.assignments).toEqual([
+        { cellId: "q1", castName: "LITTLE MARY MAGDALENE", cameraState: "on", rowNumber: 2 },
+        { cellId: "q2", castName: "LITTLE MARY MAGDALENE", cameraState: "on", rowNumber: 3 },
+      ])
+    })
+  })
+
+  it("is not offered when the file has no audio cues", () => {
+    render(
+      <ImportCharactersDialog
+        open textFileName="ep101.vtt" cells={cells} existingCount={0}
+        onConfirm={vi.fn()} onCancel={() => {}}
+      />,
+    )
+    expect(screen.queryByTestId("import-characters-audio-input")).not.toBeInTheDocument()
+    expect(screen.getByTestId("import-characters-input")).toBeInTheDocument()
+  })
+
+  it("says which button a misfiled sheet belongs under", async () => {
+    // A SUBTITLE sheet handed to the audio button. Its rows key to the subtitle
+    // timestamps and match almost no heard line.
+    await pickAudio(CSV(row("00:00:10.000", "JESUS."), row("00:00:20.000", "MARY")))
+    await waitFor(() =>
+      expect(screen.getByTestId("import-characters-wrongkind")).toBeInTheDocument(),
+    )
+    expect(screen.getByTestId("import-characters-wrongkind")).toHaveTextContent(
+      "subtitle character sheet",
+    )
+    expect(screen.getByTestId("import-characters-confirm")).toBeDisabled()
+  })
+
+  it("REFUSES an audio sheet from a different episode", async () => {
+    // Times well outside this file too, so it cannot be mistaken for the
+    // subtitle sheet either — this is the wrong EPISODE, not the wrong button.
+    const { onConfirmAudio } = await pickAudio(
+      AUDIO_CSV(
+        audioRow("00:41:10.000", "PILATE (ON)", "What is truth?", "ON"),
+        audioRow("00:41:20.000", "CLAUDIA (ON)", "You did not sleep.", "ON"),
+      ),
+    )
+    await waitFor(() =>
+      expect(screen.getByTestId("import-characters-mismatch")).toBeInTheDocument(),
+    )
+    expect(screen.getByTestId("import-characters-mismatch")).toHaveTextContent("heard line")
+    fireEvent.click(screen.getByTestId("import-characters-confirm"))
+    expect(onConfirmAudio).not.toHaveBeenCalled()
+  })
+})

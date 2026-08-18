@@ -124,6 +124,11 @@ export function reviewCueLinks({
   const weakCandidates: ReviewCandidate[] = []
   for (const plan of planCueLinks({ textCells, audioCues })) {
     if (plan.basis === "words") continue
+    // Scored well and then explained nothing the cue did not already have
+    // explained — the matcher's own answer is that this is not a pairing.
+    // Proposing it here would put the junk back in front of a person as if it
+    // were a finding. (The `else` below would file it under weak wording.)
+    if (plan.basis === "redundant") continue
     if (cueToText.has(plan.cueCellId) || textToCue.has(plan.textCellId)) continue
     if (declined.has(key(plan.textCellId, plan.cueCellId))) continue
     const cue = audioCues.find((c) => c.id === plan.cueCellId)

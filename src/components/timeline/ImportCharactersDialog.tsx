@@ -35,6 +35,20 @@ import {
   type CharacterAssignmentPlan,
   type KeyableCell,
 } from "@/lib/import/character-sheet"
+import {
+  planAudioCharacterAssignments,
+  type AlignableCue,
+  type AudioCharacterPlan,
+} from "@/lib/import/audio-character-sheet"
+
+/**
+ * Which of the client's two character spreadsheets this is.
+ *
+ * They are keyed to opposite sides of the same script — one row per SUBTITLE
+ * line, or one row per HEARD line — and either can be imported first. Whichever
+ * exists reaches the other side through the links; both together are compared.
+ */
+export type CharacterSheetKind = "subtitle" | "audio"
 
 interface Props {
   open: boolean
@@ -42,9 +56,16 @@ interface Props {
   textFileName: string
   /** That file's cells, for timestamp keying. */
   cells: readonly KeyableCell[]
+  /** The audio cues, when the file has them. Absent ⇒ only the subtitle sheet
+   *  can be imported, because there is nothing for an audio sheet to key to. */
+  audioCues?: readonly AlignableCue[]
   /** How many already carry a cast name; drives the replacing wording. */
   existingCount: number
+  /** …and how many CUES do. The two counts are separate because the two sheets
+   *  are, and replacing one must not claim to be replacing the other. */
+  existingAudioCount?: number
   onConfirm(plan: CharacterAssignmentPlan): void
+  onConfirmAudio?(plan: AudioCharacterPlan): void
   onCancel(): void
 }
 
@@ -52,14 +73,19 @@ interface Picked {
   fileName: string
   sheets: SpreadsheetSheet[]
   sheetIndex: number
+  /** Which button was used. The file is then checked against it. */
+  kind: CharacterSheetKind
 }
 
 export function ImportCharactersDialog({
   open,
   textFileName,
   cells,
+  audioCues,
   existingCount,
+  existingAudioCount = 0,
   onConfirm,
+  onConfirmAudio,
   onCancel,
 }: Props) {
   const [picked, setPicked] = useState<Picked | null>(null)
@@ -74,16 +100,38 @@ export function ImportCharactersDialog({
 
   const sheet = picked?.sheets[picked.sheetIndex]
   const columns = sheet ? guessCharacterColumns(sheet.rows[0] ?? []) : null
-  const plan =
-    sheet && columns
-      ? planCharacterAssignments({ rows: readCharacterRows(sheet.rows, columns), cells })
-      : null
+  const rows = sheet && columns ? readCharacterRows(sheet.rows, columns) : null
+
+  // BOTH READINGS, ALWAYS — which is also how the wrong button is caught.
+  //
+  // Header sniffing looked tempting and is wrong: the subtitle sheet's "Source"
+  // column holds its own copy of the line, so "has the text" does not separate
+  // them. What does separate them is the only thing that matters anyway —
+  // WHICH SIDE THE SHEET ACTUALLY FITS. A sheet keyed to the heard lines aligns
+  // to the cues and matches almost nothing among the subtitles, and vice versa.
+  //
+  // Worth catching before the refusal below, which would otherwise report "this
+  // sheet matches no line" — true, and useless, when the real answer is that it
+  // belongs under the other button.
+  const asSubtitle = rows ? planCharacterAssignments({ rows, cells }) : null
+  const asAudio =
+    rows && audioCues?.length ? planAudioCharacterAssignments({ rows, cues: audioCues }) : null
+
+  const fitsSubtitle = asSubtitle ? asSubtitle.assignments.length : 0
+  const fitsAudio = asAudio ? asAudio.assignments.length : 0
+  const wrongKind =
+    picked != null &&
+    (picked.kind === "audio" ? fitsSubtitle > fitsAudio * 2 : fitsAudio > fitsSubtitle * 2)
+
+  const plan = !wrongKind && picked?.kind === "subtitle" ? asSubtitle : null
+  const audioPlan = !wrongKind && picked?.kind === "audio" ? asAudio : null
+  const active: { assignments: unknown[]; unmatchedRows: number[] } | null = plan ?? audioPlan
   // THE refusal. A row that matches no line means this sheet is not this
   // episode's — going ahead would put hundreds of characters on lines they do
   // not belong to, silently. A CELL with no row is the opposite and is fine.
-  const mismatched = plan != null && plan.unmatchedRows.length > 0
+  const mismatched = active != null && active.unmatchedRows.length > 0
 
-  const handleFile = async (file: File) => {
+  const handleFile = async (file: File, kind: CharacterSheetKind) => {
     setPicked(null)
     setError(null)
     if (file.size === 0) return setError("That file is empty.")
@@ -97,7 +145,7 @@ export function ImportCharactersDialog({
       if (sheets.length === 0 || (sheets[0].rows.length ?? 0) < 2) {
         return setError("That spreadsheet has no rows.")
       }
-      setPicked({ fileName: file.name, sheets, sheetIndex: 0 })
+      setPicked({ fileName: file.name, sheets, sheetIndex: 0, kind })
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
     }
@@ -142,6 +190,21 @@ export function ImportCharactersDialog({
                 No character column found in this sheet. Expected a column named something like
                 "Character Label", "Cast" or "Speaker".
               </p>
+            ) : wrongKind ? (
+              <div
+                data-testid="import-characters-wrongkind"
+                className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs"
+              >
+                <p>
+                  This looks like the{" "}
+                  <span className="font-medium">
+                    {picked!.kind === "audio" ? "subtitle" : "audio"} character sheet
+                  </span>
+                  , not the {picked!.kind === "audio" ? "audio" : "subtitle"} one — its rows line
+                  up with the {picked!.kind === "audio" ? "subtitles" : "heard lines"} instead.
+                  Use the other button and it will import fine.
+                </p>
+              </div>
             ) : mismatched ? (
               <div
                 data-testid="import-characters-mismatch"
@@ -149,10 +212,10 @@ export function ImportCharactersDialog({
               >
                 <p>
                   <span className="font-medium">
-                    {plan!.unmatchedRows.length} of this sheet's rows match no line in "
-                    {textFileName}"
+                    {active!.unmatchedRows.length} of this sheet's rows match no{" "}
+                    {picked!.kind === "audio" ? "heard line" : "line"} in "{textFileName}"
                   </span>{" "}
-                  — starting at row {plan!.unmatchedRows[0]}. That normally means the spreadsheet
+                  — starting at row {active!.unmatchedRows[0]}. That normally means the spreadsheet
                   belongs to a different episode. Nothing has been changed.
                 </p>
               </div>
@@ -163,66 +226,107 @@ export function ImportCharactersDialog({
               >
                 <p>
                   <span className="font-medium">
-                    {plan!.assignments.length} lines get a character
+                    {active!.assignments.length}{" "}
+                    {picked!.kind === "audio" ? "heard lines" : "lines"} get a character
                   </span>
-                  , {plan!.distinctCharacters} people in all. Camera state comes across with
-                  them.
+                  , {(plan ?? audioPlan)!.distinctCharacters} people in all. Camera state comes
+                  across with them.
                 </p>
-                {plan!.blankRows > 0 && (
+                {(plan ?? audioPlan)!.blankRows > 0 && (
                   <p className="mt-1 text-muted-foreground">
-                    {plan!.blankRows} rows have no character and are skipped — screen text and
-                    the like.
+                    {(plan ?? audioPlan)!.blankRows} rows have no character and are skipped —
+                    screen text and the like.
                   </p>
                 )}
-                {plan!.cellsWithoutRow > 0 && (
+                {(plan?.cellsWithoutRow ?? audioPlan?.cuesWithoutRow ?? 0) > 0 && (
                   <p className="mt-1 text-muted-foreground">
-                    {plan!.cellsWithoutRow} lines are not in the sheet and keep whatever they
-                    have.
+                    {plan?.cellsWithoutRow ?? audioPlan?.cuesWithoutRow}{" "}
+                    {picked!.kind === "audio" ? "heard lines are" : "lines are"} not in the sheet
+                    and keep whatever they have.
                   </p>
                 )}
-                {plan!.filledByPosition > 0 && (
+                {(plan ?? audioPlan)!.filledByPosition > 0 && (
                   <p
                     data-testid="import-characters-drift"
                     className="mt-1 text-muted-foreground"
                   >
-                    {plan!.filledByPosition} rows have a timestamp that does not quite match
-                    their line; the lines either side pin them, so they are matched by position.
+                    {(plan ?? audioPlan)!.filledByPosition} rows do not quite match their line;
+                    the lines either side pin them, so they are matched by position.
                   </p>
                 )}
-                {plan!.cameraDisagreements > 0 && (
+                {(plan ?? audioPlan)!.cameraDisagreements > 0 && (
                   <p
                     data-testid="import-characters-camera-warning"
                     className="mt-1 text-amber-600 dark:text-amber-400"
                   >
-                    In {plan!.cameraDisagreements} rows the Camera column and the angle written
-                    into the name disagree. The column wins.
+                    In {(plan ?? audioPlan)!.cameraDisagreements} rows the Camera column and the
+                    angle written into the name disagree. The column wins.
                   </p>
                 )}
               </div>
             )}
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-muted p-6 text-center">
-            <label>
-              <span className="inline-flex cursor-pointer items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent">
-                Choose spreadsheet
-              </span>
-              <input
-                type="file"
-                accept=".xlsx,.csv"
-                className="sr-only"
-                data-testid="import-characters-input"
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  // Clear so picking the SAME file again re-fires change — the
-                  // usual second attempt after a refusal.
-                  e.target.value = ""
-                  if (file) void handleFile(file)
-                }}
-              />
-            </label>
+          <div className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed border-muted p-6 text-center">
+            {/* TWO SHEETS, KEYED TO OPPOSITE SIDES of the same script — one row
+                per subtitle line, one per heard line. Either can come first;
+                whichever exists reaches the other side through the links, and
+                both together get compared. The kind is chosen rather than
+                sniffed, because the two files are not reliably distinguishable
+                from their headers — the subtitle sheet carries the line's text
+                too — and a person always knows which they downloaded. */}
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <label>
+                <span className="inline-flex cursor-pointer items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent">
+                  Subtitle characters
+                </span>
+                <input
+                  type="file"
+                  accept=".xlsx,.csv"
+                  className="sr-only"
+                  data-testid="import-characters-input"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    // Clear so picking the SAME file again re-fires change —
+                    // the usual second attempt after a refusal.
+                    e.target.value = ""
+                    if (file) void handleFile(file, "subtitle")
+                  }}
+                />
+              </label>
+              {audioCues && audioCues.length > 0 && (
+                <label>
+                  <span className="inline-flex cursor-pointer items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent">
+                    Audio characters
+                  </span>
+                  <input
+                    type="file"
+                    accept=".xlsx,.csv"
+                    className="sr-only"
+                    data-testid="import-characters-audio-input"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      e.target.value = ""
+                      if (file) void handleFile(file, "audio")
+                    }}
+                  />
+                </label>
+              )}
+            </div>
             <p className="text-xs text-muted-foreground">
-              The episode's character spreadsheet — .xlsx or .csv.
+              One row per line of "{textFileName}", or per heard line of its audio track.
+              .xlsx or .csv.
+              {existingCount > 0 || existingAudioCount > 0 ? (
+                <>
+                  {" "}
+                  <span className="text-foreground">
+                    {existingCount > 0 && `${existingCount} subtitle lines`}
+                    {existingCount > 0 && existingAudioCount > 0 && " and "}
+                    {existingAudioCount > 0 && `${existingAudioCount} heard lines`} already have a
+                    character.
+                  </span>
+                </>
+              ) : null}
             </p>
           </div>
         )}
@@ -239,11 +343,15 @@ export function ImportCharactersDialog({
           </Button>
           <Button
             data-testid="import-characters-confirm"
-            disabled={!plan || mismatched || plan.assignments.length === 0}
-            onClick={() => { if (plan && !mismatched) onConfirm(plan) }}
+            disabled={!active || mismatched || wrongKind || active.assignments.length === 0}
+            onClick={() => {
+              if (mismatched || wrongKind) return
+              if (plan) onConfirm(plan)
+              else if (audioPlan) onConfirmAudio?.(audioPlan)
+            }}
           >
-            {plan && !mismatched && plan.assignments.length > 0
-              ? `Assign ${plan.assignments.length} characters`
+            {active && !mismatched && !wrongKind && active.assignments.length > 0
+              ? `Assign ${active.assignments.length} characters`
               : "Assign characters"}
           </Button>
         </DialogFooter>

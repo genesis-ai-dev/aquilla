@@ -17,6 +17,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils"
 import { MIN_USEFUL_REGION_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
 import { takeTrims } from "@/lib/audio/take-margins"
+import { cameraLabel } from "@/lib/timeline/cue-character"
+import type { CameraState } from "@/lib/sync/cells-read-types"
 import { isLinkableVideoUrl } from "@/components/timeline/LinkVideoUrlDialog"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -79,9 +81,20 @@ interface Props {
    * subtitle spans several cues the performer is handed the whole subtitle and
    * needs to know which part of it is this cue's.
    *
+   * `castName` and `cameraState` (stage 6) are who performs this line and
+   * whether the camera is on them, resolved through the same links — the
+   * character sheet is keyed to subtitle cells, so a cue can only learn its
+   * character this way. Camera state is here because "on camera" means the
+   * take has to lip-sync, which changes how it is performed.
+   *
    * Absent ⇒ the historic behaviour, the cell's own translated text.
    */
-  readAloudFor?: (cellId: string) => { text: string; reference?: string | null } | null
+  readAloudFor?: (cellId: string) => {
+    text: string
+    reference?: string | null
+    castName?: string | null
+    cameraState?: CameraState | null
+  } | null
   /**
    * AQU-646 stage 4: the file whose linked picture this recording is against.
    *
@@ -257,6 +270,8 @@ export function AudioRecordingModal({
   const readAloud = activeCell && readAloudFor ? readAloudFor(activeCell.id) : null
   const readAloudText = readAloud?.text ?? activeCell?.translated ?? ""
   const readAloudReference = readAloud?.reference ?? null
+  const readAloudCast = readAloud?.castName ?? null
+  const readAloudCamera = cameraLabel(readAloud?.cameraState ?? undefined)
   // Re-fit when the column's WIDTH changes (window resize) — a narrower box
   // rewraps and can need a smaller size. Width only: the box's height is what
   // the fit itself moves, and observing that would chase its own tail.
@@ -1059,7 +1074,6 @@ export function AudioRecordingModal({
               // it runs ON past the end of the line so an overrun is visible.
               running={displayPhase === "recording"}
               armNonce={armNonce}
-              overrun={targetOverrun}
               leadIn={leadIn}
             />
             <AppTooltip content="Hide the film and use the narrow recorder">
@@ -1204,8 +1218,43 @@ export function AudioRecordingModal({
             <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-muted-foreground">
               {activeCell.original || <span className="text-muted-foreground/60 italic">empty</span>}
             </p>
-            <div className="mt-3 text-[10px] font-medium tracking-wide text-muted-foreground/60 uppercase">
-              Read aloud
+            {/* Who is speaking, and whether the camera is on them — the two
+                things a performer settles BEFORE the first word, so they sit
+                above the line rather than beside the meter.
+
+                OUTSIDE `readAloudBoxRef` on purpose. That box is a measured
+                five-line fit whose font size is binary-searched against
+                `readAloudBudget`; anything added inside it silently shrinks
+                the performer's type. Sharing the label's row costs the line
+                nothing at all. */}
+            <div className="mt-3 flex items-baseline gap-2">
+              <div className="text-[10px] font-medium tracking-wide text-muted-foreground/60 uppercase">
+                Read aloud
+              </div>
+              {readAloudCast && (
+                <div
+                  data-testid="rec-read-aloud-cast"
+                  className="ml-auto flex min-w-0 items-baseline gap-1.5 text-right"
+                >
+                  <span className="truncate text-xs font-semibold">{readAloudCast}</span>
+                  {readAloudCamera && (
+                    <span
+                      data-testid="rec-read-aloud-camera"
+                      className={cn(
+                        "shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase",
+                        // "On camera" is the one that changes the take — it
+                        // means lip-sync — so it is the one that carries
+                        // colour. Off camera is the quiet default.
+                        readAloud?.cameraState === "on"
+                          ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                          : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      {readAloudCamera}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
             <div
               ref={readAloudBoxRef}

@@ -117,6 +117,50 @@ describe("parseXlsxToSheets", () => {
     }])
   })
 
+  it("decodes entities in a workbook with no shared-strings table", async () => {
+    // The client's audio character sheet, in miniature: no sharedStrings.xml,
+    // every cell `t="str"`, apostrophes as `&apos;`. That type is a STRING but
+    // lands on the number/formula branch, which was the one place the decode
+    // had not been wired — so "MARY MAGDALENE&apos;S FATHER" would have been
+    // filed as a different person from the "MARY MAGDALENE'S FATHER" already
+    // in the roster, quietly doubling the cast.
+    const zip = new JSZip()
+    zip.file("xl/workbook.xml", `
+      <workbook xmlns:r="relationships"><sheets>
+        <sheet name="F001 DL" sheetId="1" r:id="rId1"/>
+      </sheets></workbook>`)
+    zip.file("xl/_rels/workbook.xml.rels", `
+      <Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>`)
+    zip.file("xl/worksheets/sheet1.xml", `
+      <worksheet><sheetData>
+        <row r="1"><c r="A1" t="str"><v>Character</v></c><c r="B1" t="str"><v>Translation</v></c></row>
+        <row r="2"><c r="A2" t="str"><v>MARY MAGDALENE&amp;apos;S FATHER</v></c><c r="B2" t="str"><v>I can&amp;apos;t sleep.</v></c></row>
+      </sheetData></worksheet>`)
+    const bytes = await zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" })
+
+    const [sheet] = await parseXlsxToSheets(bytes)
+    expect(sheet.rows[1]).toEqual(["MARY MAGDALENE'S FATHER", "I can't sleep."])
+  })
+
+  it("reads a <t> that carries attributes", async () => {
+    // `xml:space="preserve"` is ordinary on a value with leading or trailing
+    // spaces, and the inline-string branch used to require a bare `<t>`.
+    const zip = new JSZip()
+    zip.file("xl/workbook.xml", `
+      <workbook xmlns:r="relationships"><sheets>
+        <sheet name="S" sheetId="1" r:id="rId1"/>
+      </sheets></workbook>`)
+    zip.file("xl/_rels/workbook.xml.rels", `
+      <Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>`)
+    zip.file("xl/worksheets/sheet1.xml", `
+      <worksheet><sheetData>
+        <row r="1"><c r="A1" t="inlineStr"><is><t xml:space="preserve">JESUS. </t></is></c></row>
+      </sheetData></worksheet>`)
+    const bytes = await zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" })
+    const [sheet] = await parseXlsxToSheets(bytes)
+    expect(sheet.rows[0][0]).toBe("JESUS. ")
+  })
+
   it("rejects invalid or empty workbooks instead of showing a blank mapper", async () => {
     await expect(parseXlsxToSheets(new TextEncoder().encode("not a zip").buffer))
       .rejects.toThrow(/Could not read XLSX archive/)

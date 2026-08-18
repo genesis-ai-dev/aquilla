@@ -12,6 +12,7 @@
 // translation, unchanged.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import type { ComponentProps } from "react"
 import { render, screen } from "@testing-library/react"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -88,7 +89,9 @@ const cue = {
   endTime: 9,
 } as unknown as CellData
 
-function renderModal(readAloudFor?: (id: string) => { text: string; reference?: string | null } | null) {
+type ReadAloudFor = ComponentProps<typeof AudioRecordingModal>["readAloudFor"]
+
+function renderModal(readAloudFor?: ReadAloudFor) {
   render(
     <AudioRecordingModal
       open
@@ -201,5 +204,78 @@ describe("what the performer reads", () => {
     // what makes the read-aloud line's provenance readable at a glance.
     renderModal(() => ({ text: "Paie-moi" }))
     expect(screen.getByText("Pay me, pay me")).toBeInTheDocument()
+  })
+})
+
+// AQU-646 stage 6. The character spreadsheet imported 637 names and 637 camera
+// states correctly and there was nowhere to see them — the recorder had no
+// reference to cast anywhere in it. These are the two things a performer
+// settles before the first word, so they sit above the line.
+describe("who is speaking, and whether the camera is on them", () => {
+  beforeEach(() => localStorage.clear())
+
+  it("names the character above the line", () => {
+    renderModal(() => ({ text: "Paie-moi", castName: "Mary", cameraState: "on" }))
+    expect(screen.getByTestId("rec-read-aloud-cast")).toHaveTextContent("Mary")
+  })
+
+  it("says on camera, which is the fact that changes the take", () => {
+    // Lip-sync. This is the whole reason the sheet's Camera column was worth
+    // importing, so it must not read as a bare "on".
+    renderModal(() => ({ text: "Paie-moi", castName: "Mary", cameraState: "on" }))
+    expect(screen.getByTestId("rec-read-aloud-camera")).toHaveTextContent("on camera")
+  })
+
+  it("says off camera when it is", () => {
+    renderModal(() => ({ text: "Paie-moi", castName: "Mary", cameraState: "off" }))
+    expect(screen.getByTestId("rec-read-aloud-camera")).toHaveTextContent("off camera")
+  })
+
+  it("shows both speakers when one heard line covers two", () => {
+    renderModal(() => ({ text: "Paie-moi", castName: "Jesus / Mary", cameraState: "mixed" }))
+    expect(screen.getByTestId("rec-read-aloud-cast")).toHaveTextContent("Jesus / Mary")
+    expect(screen.getByTestId("rec-read-aloud-camera")).toHaveTextContent("mixed")
+  })
+
+  it("shows nothing for an unlinked cue rather than 'unknown'", () => {
+    // The ~10 unsubtitled utterances an episode. Same honesty as the
+    // read-aloud line itself, which says nothing rather than inventing words.
+    renderModal(() => ({ text: "", reference: "Whoa!" }))
+    expect(screen.queryByTestId("rec-read-aloud-cast")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("rec-read-aloud-camera")).not.toBeInTheDocument()
+  })
+
+  it("keeps the camera pill out when the character is unknown", () => {
+    // A camera state with nobody to attach it to is a floating fact.
+    renderModal(() => ({ text: "Paie-moi", castName: null, cameraState: "on" }))
+    expect(screen.queryByTestId("rec-read-aloud-camera")).not.toBeInTheDocument()
+  })
+
+  // THE REGRESSION THIS COULD HAVE CAUSED. The read-aloud box is a measured
+  // five-line fit whose font size is binary-searched against a pixel budget —
+  // put the character line INSIDE it and the performer's type silently shrinks
+  // to make room. It shares the label's row instead, outside the box.
+  it("does not shrink the line the performer reads", () => {
+    const size = () => screen.getByTestId("rec-read-aloud").style.fontSize
+    const { unmount } = render(
+      <AudioRecordingModal
+        open project={project} cells={[cue]} activeCellId="cue-1" username="sam"
+        onActiveCellChange={() => {}} onClose={() => {}}
+        readAloudFor={() => ({ text: "Paie-moi, paie-moi, on y va." })}
+      />,
+    )
+    const withoutCast = size()
+    unmount()
+    renderModal(() => ({
+      text: "Paie-moi, paie-moi, on y va.",
+      castName: "Mary",
+      cameraState: "on",
+    }))
+    expect(size()).toBe(withoutCast)
+    // And the header is genuinely outside the measured element, not merely
+    // equal-sized by luck in jsdom.
+    expect(screen.getByTestId("rec-read-aloud")).not.toContainElement(
+      screen.getByTestId("rec-read-aloud-cast"),
+    )
   })
 })

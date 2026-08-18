@@ -303,6 +303,40 @@ export interface ProjectTtsSettings {
    * files. Absent for projects that never opened the Studio.
    */
   castAssignments?: Record<string, string>
+  /**
+   * Character disagreements a person has settled. (AQU-646, 2026-08-18)
+   *
+   * Keyed `"<textCellId> <cueCellId>"` — the link the decision is about.
+   *
+   * WHY THIS EXISTS AT ALL. The two character sheets are keyed to opposite
+   * sides of the script and sometimes contradict each other. Resolving one
+   * writes the winning value to BOTH cells, so no screen is left showing an
+   * overruled name — which means the cells afterwards cannot tell you there was
+   * ever an argument, or what the losing answer said. This remembers both, so a
+   * decision can be re-read and reversed weeks later.
+   *
+   * Per axis, because one line can disagree about the speaker AND the shot.
+   *
+   * Stored here rather than as an event kind on purpose: a new kind means two
+   * exhaustive test maps plus a sync-worker path `tsc -b` does not check, and
+   * this is a note about a judgement, not a change to the script.
+   */
+  characterResolutions?: Record<string, CharacterResolution>
+}
+
+export interface CharacterResolutionChoice<T> {
+  /** Which sheet was believed. */
+  chose: "subtitle" | "audio"
+  /** What the other one said — kept because once both cells agree it exists
+   *  nowhere else, and it is the whole basis for reconsidering. */
+  rejected: T
+}
+
+export interface CharacterResolution {
+  name?: CharacterResolutionChoice<string>
+  camera?: CharacterResolutionChoice<"on" | "mixed" | "off">
+  /** When it was settled, for ordering the resolved list. */
+  at: number
 }
 
 export interface CellTtsSettings {

@@ -212,3 +212,126 @@ describe("removing the cues", () => {
     expect(screen.queryByTestId("import-audio-vtt-remove")).not.toBeInTheDocument()
   })
 })
+
+// ── The timing verdict ───────────────────────────────────────────────────
+//
+// THE STATE THAT COST US AN EPISODE WAS THE ONE THAT SAID NOTHING. Episode
+// 306's subtitles are cut fine enough that their frame grid could not be read,
+// so the check declined, returned nothing, and the dialog rendered no word of
+// it. The cues imported drifting and only 61% of them ever found a subtitle.
+// A refusal to guess is fine; an invisible refusal is not — so every outcome
+// now has a name and a place on screen.
+
+/**
+ * A script long enough to measure a drift on: distinct wording, ten minutes,
+ * and — importantly — landing on a real frame grid.
+ *
+ * The times are whole frame counts so the fingerprint can READ the rate. A
+ * script at arbitrary decimal seconds sits on no grid, and the dialog then
+ * correctly declines to name the rates, which is a different case with
+ * different copy (see the ambiguous test below).
+ */
+// Deliberately NOT a whole number of seconds at any candidate rate: 288 frames
+// is exactly 12s at 24fps, and 12.000 sits on the 25 and 30 grids too, so every
+// rate fits perfectly and the detector rightly refuses to choose. 289 lands
+// between frames on every grid but its own.
+const FRAMES_PER_LINE = 289
+const script = (n: number, fps = 24000 / 1001) =>
+  Array.from({ length: n }, (_, i) => {
+    const start = Math.round(((i * FRAMES_PER_LINE) / fps) * 1000) / 1000
+    const end = Math.round(((i * FRAMES_PER_LINE + 73) / fps) * 1000) / 1000
+    const clock = (s: number) =>
+      `00:${String(Math.floor(s / 60)).padStart(2, "0")}:${(s % 60).toFixed(3).padStart(6, "0")}`
+    return { start, end, clock, text: `line number ${i} about something quite distinct ${i * 7}` }
+  })
+
+const scriptVtt = (n: number, fps?: number) =>
+  ["WEBVTT", ...script(n, fps).map((l, i) =>
+    `\n${i + 1}\n${l.clock(l.start)} --> ${l.clock(l.end)}\n${l.text}`)].join("\n")
+
+const scriptLines = (n: number, fps?: number) =>
+  script(n, fps).map((l) => ({ startTime: l.start, endTime: l.end, original: l.text }))
+
+const NTSC = 24 / (24000 / 1001)
+
+describe("the timing verdict is never silent", () => {
+  it("names the correction and shows what it buys", async () => {
+    // Cues on a 24 grid, subtitles on 23.976 — the pulldown mistake, with both
+    // sides readable so the rates can be named.
+    await pick(scriptVtt(80, 24), { referenceLines: scriptLines(80) })
+    await waitFor(() =>
+      expect(screen.getByTestId("import-audio-vtt-timebase")).toBeInTheDocument(),
+    )
+    const box = screen.getByTestId("import-audio-vtt-timebase")
+    expect(box).toHaveTextContent("24 frames per second")
+    expect(box).toHaveTextContent("23.976")
+    // The coverage preview: the claim a person can actually judge.
+    expect(screen.getByTestId("import-audio-vtt-coverage")).toHaveTextContent(
+      /% of the heard lines find a subtitle/,
+    )
+  })
+
+  it("says so when the two files already agree", async () => {
+    await pick(scriptVtt(80), { referenceLines: scriptLines(80) })
+    await waitFor(() =>
+      expect(screen.getByTestId("import-audio-vtt-timebase-aligned")).toBeInTheDocument(),
+    )
+    expect(screen.queryByTestId("import-audio-vtt-timebase")).not.toBeInTheDocument()
+  })
+
+  it("WARNS when it could not tell, instead of saying nothing at all", async () => {
+    // The 306 case: nothing to measure and no readable grid. This used to
+    // render as empty space, which is indistinguishable from "they agree".
+    await pick(VTT("10.000", "20.000"), {
+      referenceLines: [{ startTime: 10, endTime: 12, original: "unrelated" }],
+    })
+    await waitFor(() =>
+      expect(screen.getByTestId("import-audio-vtt-timebase-unknown")).toBeInTheDocument(),
+    )
+    expect(screen.getByTestId("import-audio-vtt-timebase-unknown")).toHaveTextContent(
+      "imported exactly as delivered",
+    )
+  })
+
+  it("still imports when there is nothing to check against", async () => {
+    // No reference file at all: no verdict is honest, and must not block.
+    const { onConfirm } = await pick(VTT("10.000", "20.000"))
+    expect(screen.queryByTestId("import-audio-vtt-timebase")).not.toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("import-audio-vtt-confirm"))
+    expect(onConfirm).toHaveBeenCalled()
+  })
+
+  it("states the drift as a percentage when the rates cannot be told apart", async () => {
+    // Times on no particular grid: the drift is measurable from the words and
+    // exactly correctable, but 24-against-23.976 and 30-against-29.97 are the
+    // same ratio, so naming one would be a guess dressed as a fact.
+    const off = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        startTime: i * 12.0007,
+        endTime: i * 12.0007 + 3,
+        original: `line number ${i} about something quite distinct ${i * 7}`,
+      }))
+    const vtt = ["WEBVTT", ...off(80).map((l, i) => {
+      const c = (s: number) =>
+        `00:${String(Math.floor(s / 60)).padStart(2, "0")}:${(s % 60).toFixed(3).padStart(6, "0")}`
+      return `\n${i + 1}\n${c(l.startTime / NTSC)} --> ${c(l.endTime / NTSC)}\n${l.original}`
+    })].join("\n")
+    await pick(vtt, { referenceLines: off(80) })
+    await waitFor(() =>
+      expect(screen.getByTestId("import-audio-vtt-timebase")).toBeInTheDocument(),
+    )
+    const box = screen.getByTestId("import-audio-vtt-timebase")
+    expect(box).toHaveTextContent("0.1% fast")
+    expect(box).not.toHaveTextContent("frames per second")
+  })
+
+  it("passes the correction through only while the box is ticked", async () => {
+    const { onConfirm } = await pick(scriptVtt(80, 24), { referenceLines: scriptLines(80) })
+    await waitFor(() =>
+      expect(screen.getByTestId("import-audio-vtt-timebase-toggle")).toBeInTheDocument(),
+    )
+    fireEvent.click(screen.getByTestId("import-audio-vtt-confirm"))
+    expect(onConfirm.mock.calls[0][2]).not.toBeNull()
+    expect(onConfirm.mock.calls[0][2].scale).toBeCloseTo(NTSC, 6)
+  })
+})

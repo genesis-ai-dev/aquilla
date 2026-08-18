@@ -89,14 +89,26 @@ function parseSheetXml(xml: string, sharedStrings: string[]): string[][] {
           value = sharedStrings[idx] ?? ""
         }
       } else if (cellType === "inlineStr") {
-        const tMatch2 = /<t>([^<]*)<\/t>/.exec(inner)
+        // `<t>` may carry attributes — xml:space="preserve" is normal when a
+        // value has leading or trailing spaces.
+        const tMatch2 = /<t(?:\s[^>]*)?>([^<]*)<\/t>/.exec(inner)
         value = decodeXmlEntities(tMatch2?.[1] ?? "")
       } else {
-        // Number, boolean, or formula result
+        // Number, boolean, or formula result — AND `t="str"`, which is a
+        // STRING despite living on this branch. Everything here must therefore
+        // be decoded like any other text.
+        //
+        // It was not, until 2026-08-18, and the client's audio character sheet
+        // is the file that found it: written with no shared-strings table and
+        // every cell as `t="str"`, so `MARY MAGDALENE&apos;S FATHER` arrived
+        // with the entity intact and would have been filed as a second,
+        // separate character from the `MARY MAGDALENE'S FATHER` already in the
+        // roster. Silently doubling a cast is a bad way to learn that the
+        // decode was attached to the two branches that happened to be tested.
         const vMatch = /<v>([^<]*)<\/v>/.exec(inner)
-        value = vMatch?.[1] ?? ""
+        value = decodeXmlEntities(vMatch?.[1] ?? "")
         // For formulas, also check <is><t> inline string override
-        const isMatch = /<is><t>([^<]*)<\/t><\/is>/.exec(inner)
+        const isMatch = /<is><t(?:\s[^>]*)?>([^<]*)<\/t><\/is>/.exec(inner)
         if (isMatch) value = decodeXmlEntities(isMatch[1])
       }
 

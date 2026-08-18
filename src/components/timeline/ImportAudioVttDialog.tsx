@@ -31,9 +31,14 @@ import {
   type CueReconcilePlan,
   type ReconcilableCue,
 } from "@/lib/import/cue-reconcile"
-import { planTimebaseCorrection, type TimebaseCorrection } from "@/lib/import/timebase"
+import {
+  planTimebaseCorrection,
+  type TimebaseCorrection,
+  type TimebaseVerdict,
+} from "@/lib/import/timebase"
 import { decodeImportText, MAX_UNKNOWN_TEXT_BYTES } from "@/lib/import/ai-recipe"
 import { fmtClock } from "./format"
+import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 
 interface Props {
   open: boolean
@@ -42,10 +47,11 @@ interface Props {
   /** The text file whose timeline gains the track — named so it is obvious
    *  which file the cues are about to be attached to. */
   textFileName: string
-  /** Every start and end already on that text file, in seconds. The frame grid
-   *  the incoming cues are checked against — see `timebase.ts`. Empty is fine
-   *  and simply means no check is possible. */
-  referenceTimesSec?: readonly number[]
+  /** The lines already on that text file — times AND words. The times give the
+   *  frame grid the incoming cues are checked against; the words let the drift
+   *  be measured directly, which is the check that actually holds up. See
+   *  `timebase.ts`. Empty is fine and simply means no check is possible. */
+  referenceLines?: readonly { startTime?: number; endTime?: number; original?: string }[]
   /** The cues already imported, if any. Lets the dialog reconcile against them
    *  — updating the cells that are already there instead of minting a new file
    *  — so takes and pairings survive. See `cue-reconcile.ts`. */
@@ -84,7 +90,7 @@ export function ImportAudioVttDialog({
   open,
   replacing,
   textFileName,
-  referenceTimesSec,
+  referenceLines,
   existingCues,
   cueHasTake,
   onConfirm,
@@ -114,8 +120,8 @@ export function ImportAudioVttDialog({
     }
   }, [open])
 
-  const timebase = useMemo<TimebaseCorrection | null>(() => {
-    if (!picked || !referenceTimesSec?.length) return null
+  const verdict = useMemo<TimebaseVerdict | null>(() => {
+    if (!picked || !referenceLines?.length) return null
     const cueTimes: number[] = []
     let lastCueSec = 0
     for (const cue of picked.parsed.cues) {
@@ -125,8 +131,31 @@ export function ImportAudioVttDialog({
         lastCueSec = Math.max(lastCueSec, cue.end)
       }
     }
-    return planTimebaseCorrection({ cueTimes, referenceTimes: referenceTimesSec, lastCueSec })
-  }, [picked, referenceTimesSec])
+    const referenceTimes: number[] = []
+    for (const line of referenceLines) {
+      if (typeof line.startTime === "number") referenceTimes.push(line.startTime)
+      if (typeof line.endTime === "number") referenceTimes.push(line.endTime)
+    }
+    return planTimebaseCorrection({
+      cueTimes,
+      referenceTimes,
+      lastCueSec,
+      cueLines: picked.parsed.cues.map((c) => ({ startTime: c.start, original: c.original })),
+      referenceLines,
+    })
+  }, [picked, referenceLines])
+
+  /** The correction to APPLY, or null when there is nothing to apply. Keeps
+   *  every downstream caller on the shape it already understands. */
+  const timebase: TimebaseCorrection | null =
+    verdict?.kind === "correct"
+      ? {
+          cue: verdict.cue,
+          reference: verdict.reference,
+          scale: verdict.scale,
+          driftAtEndSec: verdict.driftAtEndSec,
+        }
+      : null
 
   /** The cues as they would actually be STORED — timebase applied if the user
    *  has left the correction on. Everything downstream compares against these,
@@ -138,6 +167,46 @@ export function ImportAudioVttDialog({
       ? scaleCueTimes(picked.parsed.cues, timebase.scale)
       : picked.parsed.cues
   }, [picked, timebase, correctTimebase])
+
+  /**
+   * How well the two files will actually line up — run BOTH ways when a
+   * correction is on offer.
+   *
+   * The timebase question is otherwise a statistical claim a person has no way
+   * to check. This turns it into one they can: "96% of the heard lines find a
+   * subtitle with the correction, 61% without" is the same fact stated as the
+   * thing they actually care about. Episode 306 imported wrong and stayed wrong
+   * for days; those two numbers side by side would have made it obvious at the
+   * moment of import.
+   */
+  const coverage = useMemo(() => {
+    if (!picked || !referenceLines?.length) return null
+    const textCells = referenceLines.map((l, i) => ({
+      id: `r${i}`,
+      startTime: l.startTime,
+      endTime: l.endTime,
+      original: l.original,
+    }))
+    const linkedFraction = (cues: readonly { start?: number; end?: number; original?: string }[]) => {
+      const audioCues = cues.map((c, i) => ({
+        id: `c${i}`,
+        startTime: c.start,
+        endTime: c.end,
+        original: c.original,
+      }))
+      const paired = new Set(
+        autoLinkable(planCueLinks({ textCells, audioCues })).map((p) => p.cueCellId),
+      )
+      return audioCues.length === 0 ? 0 : paired.size / audioCues.length
+    }
+    const applied = linkedFraction(incomingCues)
+    return {
+      applied,
+      // Only worth computing — and only meaningful — when a correction is
+      // actually on the table.
+      raw: timebase ? linkedFraction(picked.parsed.cues) : null,
+    }
+  }, [picked, referenceLines, incomingCues, timebase])
 
   /**
    * Same cues, different timings? Then this is not a replacement.
@@ -258,27 +327,72 @@ export function ImportAudioVttDialog({
           </div>
         )}
 
-        {/* A frame-rate mismatch is stated in seconds of drift, not in fps: the
-            rates are the evidence, but "two and a half seconds late by the end"
-            is the thing anyone can check against the picture. */}
-        {picked && timebase && (
+        {/* THE TIMING VERDICT, ALWAYS. Rendered in every state — corrected,
+            already aligned, and couldn't tell — because the state that cost us
+            a whole episode was the one that said nothing at all. Episode 306's
+            subtitles were cut fine enough that their frame grid could not be
+            read, so no correction was planned and no word of it appeared here;
+            it imported drifting and only 61% of its lines ever found a partner.
+            A refusal to guess is fine. An invisible refusal is not.
+
+            The drift is stated in seconds, not in frame rates: the rates are
+            the evidence, but "three seconds late by the end" is the thing
+            anyone can check against the picture. */}
+        {picked && verdict?.kind === "correct" && (
           <div
             data-testid="import-audio-vtt-timebase"
             className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs"
           >
             <p>
-              These cues are timed at{" "}
-              <span className="font-medium">{timebase.cue.label} frames per second</span>, but
-              "{textFileName}" is at{" "}
-              <span className="font-medium">{timebase.reference.label}</span>. Left alone they
-              run about{" "}
+              {verdict.namedRatio ? (
+                <>
+                  These cues are timed at{" "}
+                  <span className="font-medium">{verdict.cue.label} frames per second</span>, but
+                  "{textFileName}" is at{" "}
+                  <span className="font-medium">{verdict.reference.label}</span>.
+                </>
+              ) : verdict.ambiguousRates ? (
+                <>
+                  These cues run{" "}
+                  <span className="font-medium">
+                    {Math.abs((verdict.scale - 1) * 100).toFixed(1)}%{" "}
+                    {verdict.scale > 1 ? "fast" : "slow"}
+                  </span>{" "}
+                  against "{textFileName}" — the usual frame-rate mistake. Several pairs
+                  of rates produce exactly this, so which one it is cannot be told from
+                  the files; the correction is the same either way.
+                </>
+              ) : (
+                <>
+                  These cues run at a different speed from "{textFileName}" — by a
+                  ratio that matches no frame-rate mistake we recognise, so it may be a
+                  different cut of the episode rather than a timing error.
+                </>
+              )}{" "}
+              Left alone they run about{" "}
               <span className="font-medium">
-                {Math.abs(timebase.driftAtEndSec).toFixed(1)} seconds{" "}
-                {timebase.driftAtEndSec > 0 ? "early" : "late"}
+                {Math.abs(verdict.driftAtEndSec).toFixed(1)} seconds{" "}
+                {verdict.driftAtEndSec > 0 ? "early" : "late"}
               </span>{" "}
               by the end of the file. The error starts at nothing and grows, so the opening
               minutes look right even when the rest has drifted.
             </p>
+            {verdict.measured && (
+              <p className="text-muted-foreground">
+                Measured on {verdict.measured.anchors} lines worded the same in both files.
+                {verdict.disputed &&
+                  " The files' own timing grids suggest something different — worth a look at the numbers below before accepting."}
+              </p>
+            )}
+            {coverage && coverage.raw != null && (
+              <p data-testid="import-audio-vtt-coverage">
+                Lined up,{" "}
+                <span className="font-medium">
+                  {Math.round(coverage.applied * 100)}% of the heard lines find a subtitle
+                </span>
+                ; left as delivered, {Math.round(coverage.raw * 100)}%.
+              </p>
+            )}
             <label className="flex items-center gap-2">
               <Checkbox
                 data-testid="import-audio-vtt-timebase-toggle"
@@ -287,6 +401,47 @@ export function ImportAudioVttDialog({
               />
               Line them up with "{textFileName}" on import
             </label>
+          </div>
+        )}
+
+        {picked && verdict?.kind === "aligned" && (
+          <div
+            data-testid="import-audio-vtt-timebase-aligned"
+            className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground"
+          >
+            These cues and "{textFileName}" keep the same time — no correction needed.
+            {coverage && (
+              <>
+                {" "}
+                <span className="font-medium text-foreground">
+                  {Math.round(coverage.applied * 100)}% of the heard lines find a subtitle.
+                </span>
+              </>
+            )}
+          </div>
+        )}
+
+        {picked && verdict?.kind === "unmeasurable" && (
+          <div
+            data-testid="import-audio-vtt-timebase-unknown"
+            className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs"
+          >
+            <p>
+              <span className="font-medium">
+                Couldn't check these cues against "{textFileName}"
+              </span>{" "}
+              — {verdict.reason}. They will be imported exactly as delivered. If the
+              pairings look wrong afterwards, this is the first thing to check.
+            </p>
+            {coverage && (
+              <p data-testid="import-audio-vtt-coverage">
+                As delivered,{" "}
+                <span className="font-medium">
+                  {Math.round(coverage.applied * 100)}% of the heard lines find a subtitle
+                </span>
+                .
+              </p>
+            )}
           </div>
         )}
 

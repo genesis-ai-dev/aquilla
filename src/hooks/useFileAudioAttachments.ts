@@ -41,11 +41,17 @@ function emptyEntry(): CellAudioEntry {
   return { attachments: {}, selectedAudioId: null, selectedGeneratedVoiceAudioId: null, audioTimings: {} }
 }
 
-/** Paint one overlay onto an entry. `pending` marks the clip as not-yet-saved. */
+/** How the overlay's own sync state should be painted onto the clip it asserts.
+ *  "saving" → still queued (safe, in flight); "failed" → the event will not send
+ *  without user action (AQU-924); "settled" → stop annotating, server truth is
+ *  arriving. */
+export type ShadowSyncView = "saving" | "failed" | "settled"
+
+/** Paint one overlay onto an entry. `sync` marks the clip's save state. */
 function applyShadow(
   entry: CellAudioEntry | undefined,
   shadow: OptimisticShadow,
-  pending: boolean,
+  sync: ShadowSyncView,
 ): CellAudioEntry {
   const base = entry ?? emptyEntry()
   if (shadow.kind === "remove") {
@@ -67,11 +73,25 @@ function applyShadow(
   const att = shadow.att
   // The flag rides the APPLIED copy only — the stored overlay stays pristine so
   // confirmation comparisons never trip over it.
-  const applied: AudioAttachmentOut = pending ? { ...att, pendingSync: true } : att
+  const applied: AudioAttachmentOut =
+    sync === "saving"
+      ? { ...att, pendingSync: true }
+      : sync === "failed"
+        ? { ...att, syncFailed: true }
+        : att
+  // AQU-924: a FAILED overlay keeps its attachment but surrenders its selection
+  // claim. Those two halves of "this clip is here and it's the active one" fail
+  // differently: the attachment is the only surviving record that the clip
+  // exists (dropping it is the data loss), while the selection is a claim the
+  // server will never agree with — asserting it would report the cell as voiced
+  // to progress counts, export and playback on the strength of an event that
+  // never landed. So the take stays listed and badged "not saved", and which
+  // take is *active* reverts to server truth.
+  const claimsSelection = shadow.claimsSelection && sync !== "failed"
   return {
     ...base,
     attachments: { ...base.attachments, [att.audioId]: applied },
-    ...(shadow.claimsSelection
+    ...(claimsSelection
       ? att.slot === "recording"
         ? { selectedAudioId: att.audioId }
         : { selectedGeneratedVoiceAudioId: att.audioId }
@@ -105,6 +125,18 @@ function shadowConfirmed(entry: CellAudioEntry | undefined, shadow: OptimisticSh
   return true
 }
 
+/** AQU-924: which save state to paint for a surviving overlay. A `failed` outbox
+ *  record outranks the phase — a quarantined attach is neither "saving" nor
+ *  settling into server truth, and mislabelling it "saving" would promise a
+ *  delivery that is never coming. */
+function syncViewFor(
+  shadow: OptimisticShadow,
+  outboxStatus: Map<string, "pending" | "failed">,
+): ShadowSyncView {
+  if (shadow.eventId && outboxStatus.get(shadow.eventId) === "failed") return "failed"
+  return shadow.phase !== "settled" ? "saving" : "settled"
+}
+
 function keepShadow(
   shadow: OptimisticShadow,
   entry: CellAudioEntry | undefined,
@@ -119,9 +151,24 @@ function keepShadow(
     // has landed yet", not "the delete happened" — confirming on that would
     // drop the overlay and let the take flash back when the attach projects.
     if (status === "pending") return true
-    // Quarantined after repeated failures: it will not send without user
-    // action, so the overlay must stop asserting something that isn't true.
-    if (status === "failed") return false
+    // AQU-924: quarantined / retry-exhausted. This used to return false, on the
+    // reasoning that the overlay "must stop asserting something that isn't
+    // true" — but dropping it is what turned a failed upload into SILENT DATA
+    // LOSS: the take vanished from the strip and timeline on the very next read
+    // (and stayed gone after reload), while its bytes sat in R2 and its event
+    // sat undelivered in the outbox. This device still owns the change, so the
+    // overlay is kept — repainted as `syncFailed` rather than "saving", which is
+    // the honest assertion: "this take exists here and has NOT reached the
+    // server." It is the user's cue (and the inspector's Retry target) instead
+    // of an empty cell. It stops being painted only when the record leaves the
+    // outbox — delivered (confirmed below) or explicitly discarded.
+    //
+    // ATTACH only. A failed REMOVE is the mirror case and keeps the OLD rule:
+    // nothing is at risk when a delete fails to apply (the clip is still on the
+    // server), so continuing to hide it would assert a deletion that never
+    // happened — and unlike an attach there is no attachment to badge, so the
+    // lie would be silent. Letting the clip reappear IS the honest signal.
+    if (status === "failed") return shadow.kind === "attach"
   }
   if (shadowConfirmed(entry, shadow)) return false
   if (shadow.phase === "settled") return now - shadow.graceStartedAt <= SETTLED_GRACE_MS
@@ -212,7 +259,7 @@ export function useFileAudioAttachments(
         registry.set(cellId, live)
         // Chronological replay so delete-then-rerecord composes correctly.
         let entry = map.get(cellId)
-        for (const s of live) entry = applyShadow(entry, s, s.phase !== "settled")
+        for (const s of live) entry = applyShadow(entry, s, syncViewFor(s, outboxStatus))
         map.set(cellId, entry as CellAudioEntry)
       }
       setByCellId(map)
@@ -301,7 +348,9 @@ export function useFileAudioAttachments(
     return subscribeOptimisticAudioAttachment(fileId, (cellId, shadow) => {
       setByCellId((prev) => {
         const next = new Map(prev)
-        next.set(cellId, applyShadow(prev.get(cellId), shadow, true))
+        // A just-injected overlay is always in flight; the next fetch re-derives
+        // its real state (including AQU-924's failed case) from the outbox.
+        next.set(cellId, applyShadow(prev.get(cellId), shadow, "saving"))
         return next
       })
     })
@@ -336,6 +385,8 @@ export function mergeCellsWithAudio(
         ...(a.trimEndMs != null ? { trimEndMs: a.trimEndMs } : {}),
         // SUB-48: "saved here, not yet at the server" — drives the saving hint.
         ...(a.pendingSync ? { pendingSync: true as const } : {}),
+        // AQU-924: "saved here, and it will NOT reach the server on its own."
+        ...(a.syncFailed ? { syncFailed: true as const } : {}),
       }
     }
     return {

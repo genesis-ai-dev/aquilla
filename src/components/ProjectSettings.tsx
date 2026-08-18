@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react"
-import { useLocation, useParams, useNavigate, useSearchParams, type Location } from "react-router-dom"
+import { Navigate, useLocation, useParams, useNavigate, useSearchParams, type Location } from "react-router-dom"
 import {
   isProjectEditorPath,
+  projectMemoryPath,
   projectSettingsPath,
   safeReturnPath,
   withSettingsReturn,
@@ -9,7 +10,7 @@ import {
 import {
   Check, CheckCircle, XCircle, ChevronDown, Save, Sparkles,
   SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines, Plug, FlaskConical,
-  Users, SpellCheck, BrainCircuit,
+  Users,
 } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { Button } from "@/components/ui/button"
@@ -36,7 +37,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
-import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
   DialogBody,
@@ -82,8 +82,7 @@ import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
 import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSection"
 import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
 import { MembersSection } from "./ProjectSettings/MembersSection"
-import { RulesSettingsSection } from "./ProjectSettings/RulesSection"
-import { LivingMemoryPage } from "./LivingMemoryPage"
+import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
 import { readCursor } from "@/lib/dcs/cursor"
 import { UpstreamChangesPanel } from "./linked/UpstreamChangesPanel"
@@ -205,7 +204,6 @@ interface Baseline {
   model: string
   maxTokens: number
   temperature: number
-  systemPrompt: string
   llmHealthPenalty: number
   top_k: number
   contextSize: ContextSize
@@ -249,7 +247,6 @@ function buildBaseline(project: ProjectRecord): Baseline {
     // default snapshots (512/4096) are upgraded to the current default.
     maxTokens: normalizeCompletionMaxTokens(project.completionSettings?.maxTokens),
     temperature: project.completionSettings?.temperature ?? 0.3,
-    systemPrompt: project.completionSettings?.systemPrompt || DEFAULT_SYSTEM_PROMPT,
     llmHealthPenalty: project.completionSettings?.llmHealthPenalty ?? 0.1,
     top_k: project.completionSettings?.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT,
     contextSize: project.completionSettings?.contextSize ?? "medium",
@@ -415,7 +412,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [model, setModel] = useState("")
   const [maxTokens, setMaxTokens] = useState(DEFAULT_COMPLETION_MAX_TOKENS)
   const [temperature, setTemperature] = useState(0.3)
-  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT)
   const [llmHealthPenalty, setLlmHealthPenalty] = useState(0.1)
   const [topK, setTopK] = useState(DEFAULT_APPROVED_EXAMPLE_COUNT)
   const [contextSize, setContextSize] = useState<ContextSize>("medium")
@@ -475,7 +471,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setModel(b.model)
     setMaxTokens(b.maxTokens)
     setTemperature(b.temperature)
-    setSystemPrompt(b.systemPrompt)
     setLlmHealthPenalty(b.llmHealthPenalty)
     setTopK(b.top_k)
     setContextSize(b.contextSize)
@@ -574,7 +569,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       model !== baseline.model ||
       maxTokens !== baseline.maxTokens ||
       temperature !== baseline.temperature ||
-      systemPrompt !== baseline.systemPrompt ||
       llmHealthPenalty !== baseline.llmHealthPenalty ||
       topK !== baseline.top_k ||
       contextSize !== baseline.contextSize ||
@@ -600,7 +594,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     )
   }, [
     baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
-    model, maxTokens, temperature, systemPrompt, llmHealthPenalty,
+    model, maxTokens, temperature, llmHealthPenalty,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
@@ -810,7 +804,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       const sharedUpdates: ProjectWideSettings = {}
       if (sourceLanguage !== baseline.sourceLanguage) { sharedUpdates.sourceLanguage = sourceLanguage; changedFieldLabels.push("source language") }
       if (targetLanguage !== baseline.targetLanguage) { sharedUpdates.targetLanguage = targetLanguage; changedFieldLabels.push("target language") }
-      if (systemPrompt !== baseline.systemPrompt) { sharedUpdates.systemPrompt = systemPrompt; changedFieldLabels.push("AI instructions") }
       if (validationCount !== baseline.validationCount) { sharedUpdates.validationCount = validationCount; changedFieldLabels.push("validation count") }
       if (validationCountAudio !== baseline.validationCountAudio) {
         sharedUpdates.validationCountAudio = validationCountAudio
@@ -878,7 +871,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         model,
         maxTokens,
         temperature,
-        systemPrompt,
         llmHealthPenalty,
         top_k: topK,
         contextSize,
@@ -929,7 +921,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     }
   }, [
     id, baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
-    model, maxTokens, temperature, systemPrompt, llmHealthPenalty,
+    model, maxTokens, temperature, llmHealthPenalty,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
@@ -1002,13 +994,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot"] },
-    { id: "section-system-prompt", label: "System prompt", keywords: ["system prompt", "ai instructions", "prompt", "product", "tone", "style", "domain", "guidance"] },
     { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
     { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
     { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "kokoro", "mms", "transcription", "model", "download", "offline", "local ai"] },
-    { id: "section-rules", label: "Rules", keywords: ["rules", "checks", "lqa", "autofix", "forbidden", "pattern", "org rules"] },
-    { id: "section-memory", label: "Living Memory", keywords: ["living memory", "memory", "brief", "instructions", "standards", "examples", "validated"] },
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-decay", label: "Retrieval support", keywords: ["decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
@@ -1096,39 +1085,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       description: "Instructions, draft context, provider, voice, terminology",
       icon: Sparkles,
       hub: "AI & media",
-      // System prompt is a nested detail page (linked with a chevron from this
-      // pane); it is not listed again on the settings index.
+      // The system prompt (and the rest of Living Memory) lives on the
+      // standalone /project/:id/memory surface; this pane keeps a cross-link
+      // NavRow to memory/instructions instead of a nested settings page.
       sectionIds: [
         "section-ai-instructions", "section-draft-context", "section-advanced-llm",
         "section-voice", "section-local-models", "section-terminology", "section-termbase-sharing",
       ],
-    },
-    {
-      id: "system-prompt",
-      label: "System prompt",
-      description: "How translations should read for this project — used on every AI completion",
-      icon: Sparkles,
-      hub: "AI & media",
-      /** Nested under AI & completion — only deep-linked / opened from that pane. */
-      hideFromIndex: true,
-      parentId: "ai",
-      sectionIds: ["section-system-prompt"],
-    },
-    {
-      id: "rules",
-      label: "Rules",
-      description: "Translation checks, custom rules, and org-wide rules",
-      icon: SpellCheck,
-      hub: "Quality",
-      sectionIds: ["section-rules"],
-    },
-    {
-      id: "memory",
-      label: "Living Memory",
-      description: "Instructions, standards, and validated examples the AI draws on",
-      icon: BrainCircuit,
-      hub: "Quality",
-      sectionIds: ["section-memory"],
     },
     {
       id: "validation",
@@ -1178,9 +1141,28 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const visibleGroups = SETTINGS_GROUPS
     .map((g) => ({ ...g, sectionIds: g.sectionIds.filter((id) => visibleSectionIdSet.has(id)) }))
     .filter((g) => g.sectionIds.length > 0)
-  // Index lists only hub-level entries; nested panes (e.g. system-prompt) are
-  // opened from a parent pane NavRow.
+  // Index lists only hub-level entries; a `hideFromIndex` pane stays
+  // deep-linkable but is opened from a parent pane NavRow.
   const indexGroups = visibleGroups.filter((g) => !g.hideFromIndex)
+
+  // Living Memory extraction: `memory`, `rules`, and `system-prompt` moved out
+  // of settings onto the standalone /project/:id/memory surface. Old section
+  // ids redirect (replace) instead of falling back to the index so deep links
+  // keep working — the server-sent `settings/memory` readiness href, and
+  // RuleDrawer's `settings/rules?ruleId=…` — with query params carried along.
+  // Returning here, before either shell renders, covers both the routed page
+  // and the route-modal dialog.
+  const movedSectionRedirects: Record<string, string> = id
+    ? {
+        memory: projectMemoryPath(id),
+        rules: projectMemoryPath(id, "quality"),
+        "system-prompt": projectMemoryPath(id, "instructions"),
+      }
+    : {}
+  const movedSectionTarget = sectionParam ? movedSectionRedirects[sectionParam] : undefined
+  if (movedSectionTarget) {
+    return <Navigate to={`${movedSectionTarget}${location.search}`} replace />
+  }
 
   // Navigation between the index and a pane uses `/settings/:section` —
   // deep-linkable and back-button friendly.
@@ -1214,9 +1196,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       "section-bible-resources",
       "section-user",
       "section-members",
-      "section-rules",
-      "section-memory",
-      "section-system-prompt",
       "section-ai-instructions",
       "section-draft-context",
       "section-advanced-llm",
@@ -1239,7 +1218,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (!group || claimedGroups.has(group.id)) continue
       claimedGroups.add(group.id)
       // Nested panes that are hidden from the index still show their own title
-      // (e.g. "System prompt") rather than the parent hub name in search.
+      // rather than the parent hub name in search.
       headers.set(sectionId, group.label)
     }
     return headers
@@ -1269,8 +1248,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const groupHints: Record<string, string> = {
     general: name.trim() || "Untitled",
     members: "Roles & invites",
-    rules: "Checks",
-    memory: "Brief & examples",
     "source-sync": hasSourceLink ? "Linked" : hasGitOrigin ? "Git" : "None",
     ai: provider === "frontier" ? "Frontier" : "Custom",
     validation: validationRoleFloor.replace(/_/g, " "),
@@ -1390,6 +1367,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       />
     )
   }
+
+  // Living Memory cross-link hint (Custom vs Default): the prompt itself is
+  // edited on memory/instructions now, so read the saved value straight off
+  // the project record — the same source the removed form baseline used.
+  const savedSystemPrompt = project?.completionSettings?.systemPrompt || DEFAULT_SYSTEM_PROMPT
 
   const settingsContent = (
     <Page size={pageSize}>
@@ -1665,68 +1647,22 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           <MembersSection projectId={id} />
         )}
 
-        {searchGroupLabel("section-rules")}
-        {id && sectionsToRender.some((s) => s.id === "section-rules") && (
-          <div id="section-rules">
-            <RulesSettingsSection projectId={id} />
-          </div>
-        )}
-
-        {searchGroupLabel("section-memory")}
-        {sectionsToRender.some((s) => s.id === "section-memory") && (
-          <div id="section-memory">
-            <LivingMemoryPage embedded />
-          </div>
-        )}
-
-        {searchGroupLabel("section-system-prompt")}
-        {sectionsToRender.some((s) => s.id === "section-system-prompt") && (
-          <div id="section-system-prompt">
-            <SettingsGroup>
-              <SettingsRow
-                label={<label htmlFor="sp">{t("projectSettings.systemPrompt.label")}</label>}
-                description={withStyledTerms(
-                  t("projectSettings.ai.instructionsHelp", {
-                    sourceVar: "{sourceLanguage}",
-                    targetVar: "{targetLanguage}",
-                  }),
-                  [
-                    { text: "{sourceLanguage}", as: "code" },
-                    { text: "{targetLanguage}", as: "code" },
-                  ],
-                )}
-                block
-              >
-                <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
-                  <Textarea
-                    id="sp"
-                    value={systemPrompt}
-                    onChange={(e) => setSystemPrompt(e.target.value)}
-                    rows={24}
-                    disabled={!canEditShared}
-                    className="min-h-[28rem] bg-background font-mono text-sm leading-relaxed"
-                    placeholder={DEFAULT_SYSTEM_PROMPT}
-                    aria-label={t("projectSettings.systemPrompt.label")}
-                  />
-                </DisabledFieldTooltip>
-              </SettingsRow>
-            </SettingsGroup>
-          </div>
-        )}
-
         {searchGroupLabel("section-ai-instructions")}
         {sectionsToRender.some((s) => s.id === "section-ai-instructions") && (
           <div id="section-ai-instructions" className="flex flex-col gap-12">
-            {/* Nested detail: system prompt lives on its own page; open via chevron row. */}
+            {/* Cross-link: the system prompt is edited on the Living Memory
+                surface (memory/instructions). A real navigation out of
+                settings — deliberately no modal `state` (unlike sibling
+                NavRows), so the route-modal doesn't try to stack it. */}
             {!lowerQuery && id ? (
               <NavList>
                 <NavRow
-                  to={settingsHref("system-prompt")}
-                  state={nextModalState}
-                  title={t("projectSettings.systemPrompt.label")}
+                  to={projectMemoryPath(id, "instructions")}
+                  icon={LIVING_MEMORY_ICON}
+                  title={t("terminology.livingMemory.title")}
                   description={t("projectSettings.systemPrompt.navDescription")}
                   hint={
-                    systemPrompt.trim() && systemPrompt !== DEFAULT_SYSTEM_PROMPT
+                    savedSystemPrompt.trim() && savedSystemPrompt !== DEFAULT_SYSTEM_PROMPT
                       ? "Custom"
                       : "Default"
                   }

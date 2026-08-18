@@ -130,7 +130,8 @@ const STATE_FILE = ".migrate-state.json"
 // the fix never reached the data — a large part of why deleted headings kept
 // coming back. BUMP THIS whenever the mapped event stream changes so the next
 // sweep re-derives every project once.
-const CONTENT_LOGIC_VERSION = 2
+// v3: milestone cells are retracted instead of migrated as pairs (AQU-930).
+const CONTENT_LOGIC_VERSION = 3
 type MigState = Record<
   string,
   { contentSha?: string; contentLogic?: number; audioSha?: string; audioFastSha?: string }

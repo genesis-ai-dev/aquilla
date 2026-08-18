@@ -315,9 +315,54 @@ export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | '
  * The returned `touches` list lets the route layer compute the
  * `projection.dirty` broadcast payload.
  */
+/**
+ * AQU-927: payload keys that are projected into a Postgres **BIGINT** column
+ * (`cells.start_ms/end_ms`, `cell_audio.duration_ms/trim_start_ms/trim_end_ms`)
+ * or into a ms-valued metadata key compared against them.
+ */
+const INTEGER_MS_PAYLOAD_KEYS = [
+  'durationMs',
+  'startMs',
+  'endMs',
+  'trimStartMs',
+  'trimEndMs',
+  'subtitleStartMs',
+  'subtitleEndMs',
+  'targetStartMs',
+] as const
+
+/**
+ * AQU-927: round fractional millisecond payload values before they are bound
+ * into a BIGINT column.
+ *
+ * Postgres rejects a fractional bigint literal, and a `/events` flush is
+ * applied as ONE batch — so a single stray float (e.g. a duration of `2403.5`
+ * from an un-rounded client producer) failed *every* event in that flush, which
+ * is how whole groups of cells silently lost their audio on refresh. Clients
+ * now round at the source and again at the emit boundary; this is the server's
+ * last line of defence, and it also covers clients already deployed with the
+ * old code.
+ *
+ * Returns the event unchanged (same object identity) when nothing needed
+ * rounding, which is the overwhelmingly common case. Non-finite values are left
+ * alone so the existing `Number.isFinite` guards still reject them.
+ */
+export function coerceIntegerMsPayload(event: PersistedEvent): PersistedEvent {
+  const payload = event.payload
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return event
+  let fixed: Record<string, unknown> | null = null
+  for (const key of INTEGER_MS_PAYLOAD_KEYS) {
+    const value = (payload as Record<string, unknown>)[key]
+    if (typeof value !== 'number' || !Number.isFinite(value) || Number.isInteger(value)) continue
+    fixed ??= { ...(payload as Record<string, unknown>) }
+    fixed[key] = Math.round(value)
+  }
+  return fixed === null ? event : { ...event, payload: fixed }
+}
+
 export function buildEventProjectionStmts(
   db: AquillaDb,
-  event: PersistedEvent,
+  rawEvent: PersistedEvent,
   stmts: AquillaStatement[],
   opts?: {
     deferFileCounters?: boolean
@@ -337,6 +382,8 @@ export function buildEventProjectionStmts(
     validationCount?: number
   },
 ): ProjectionTouches[] {
+  // AQU-927: one un-rounded ms value would otherwise reject the whole batch.
+  const event = coerceIntegerMsPayload(rawEvent)
   // Gate fragments for chain-advancing cells writes. `gateWhere` suffixes an
   // INSERT…SELECT row source; `gateAnd` extends an UPDATE/DELETE WHERE.
   const gate = opts?.chainGate

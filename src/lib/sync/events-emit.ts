@@ -120,6 +120,30 @@ export class InsufficientRoleError extends Error {
   }
 }
 
+/**
+ * AQU-927: coerce a millisecond value to an integer at the emit boundary.
+ *
+ * Every ms field below is projected into a Postgres **BIGINT** column
+ * (`cells.start_ms/end_ms`, `cell_audio.duration_ms/trim_start_ms/trim_end_ms`).
+ * Postgres rejects a fractional literal outright, and because a flush is
+ * applied as one batch, a single stray float fails *every* event in it — which
+ * is how whole groups of cells silently lost their audio. Producers should
+ * still round at the source (a rounded value is the correct value); this is the
+ * last line of defence so one un-rounded producer can never poison a batch.
+ *
+ * Non-finite input (NaN/Infinity) is passed through untouched so the existing
+ * validation/`Number.isFinite` guards downstream keep reporting it, rather than
+ * being silently rewritten to 0.
+ */
+export function intMs(value: number): number
+export function intMs(value: number | null): number | null
+export function intMs(value: number | undefined): number | undefined
+export function intMs(value: number | null | undefined): number | null | undefined
+export function intMs(value: number | null | undefined): number | null | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return value
+  return Math.round(value)
+}
+
 export async function enqueueEvent<K extends OutboxEventKind>(
   input: BuildEventInput<K>,
 ): Promise<{ event: OutboxRawEvent<K>; eventId: string }> {
@@ -436,10 +460,10 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
       ...(input.voiceId !== undefined ? { voiceId: input.voiceId } : {}),
       ...(input.referenceAudioId !== undefined ? { referenceAudioId: input.referenceAudioId } : {}),
-      ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+      ...(input.durationMs !== undefined ? { durationMs: intMs(input.durationMs) } : {}),
       ...(input.label !== undefined ? { label: input.label } : {}),
-      ...(input.trimStartMs !== undefined ? { trimStartMs: input.trimStartMs } : {}),
-      ...(input.trimEndMs !== undefined ? { trimEndMs: input.trimEndMs } : {}),
+      ...(input.trimStartMs !== undefined ? { trimStartMs: intMs(input.trimStartMs) } : {}),
+      ...(input.trimEndMs !== undefined ? { trimEndMs: intMs(input.trimEndMs) } : {}),
       ...(input.timings !== undefined ? { timings: input.timings } : {}),
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
     },
@@ -498,7 +522,7 @@ export async function emitCellAudioMeasure(input: CellAudioMeasureInput): Promis
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId, durationMs: input.durationMs },
+    payload: { audioId: input.audioId, durationMs: intMs(input.durationMs) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -550,7 +574,7 @@ export async function emitCellRetime(input: CellRetimeInput): Promise<string> {
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { startMs: input.startMs, endMs: input.endMs },
+    payload: { startMs: intMs(input.startMs), endMs: intMs(input.endMs) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -589,9 +613,9 @@ export async function emitCellLaneRetime(input: CellLaneRetimeInput): Promise<st
     parentId: null,
     author: input.author,
     payload: {
-      ...(input.subtitleStartMs !== undefined ? { subtitleStartMs: input.subtitleStartMs } : {}),
-      ...(input.subtitleEndMs !== undefined ? { subtitleEndMs: input.subtitleEndMs } : {}),
-      ...(input.targetStartMs !== undefined ? { targetStartMs: input.targetStartMs } : {}),
+      ...(input.subtitleStartMs !== undefined ? { subtitleStartMs: intMs(input.subtitleStartMs) } : {}),
+      ...(input.subtitleEndMs !== undefined ? { subtitleEndMs: intMs(input.subtitleEndMs) } : {}),
+      ...(input.targetStartMs !== undefined ? { targetStartMs: intMs(input.targetStartMs) } : {}),
     },
     clientTs: input.clientTs,
   })
@@ -854,8 +878,8 @@ export async function emitSourceCellCreate(
       ...(input.type !== undefined ? { type: input.type } : {}),
       ...(input.canonicalRef !== undefined ? { canonicalRef: input.canonicalRef } : {}),
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
-      ...(input.startMs !== undefined ? { startMs: input.startMs } : {}),
-      ...(input.endMs !== undefined ? { endMs: input.endMs } : {}),
+      ...(input.startMs !== undefined ? { startMs: intMs(input.startMs) } : {}),
+      ...(input.endMs !== undefined ? { endMs: intMs(input.endMs) } : {}),
       ...(input.medium !== undefined ? { medium: input.medium } : {}),
       ...(input.sequenceIndex !== undefined ? { sequenceIndex: input.sequenceIndex } : {}),
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),

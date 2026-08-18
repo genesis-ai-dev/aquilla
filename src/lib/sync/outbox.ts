@@ -347,11 +347,20 @@ export async function getOutboxRecords(ids: readonly string[]): Promise<OutboxRe
  * current cell's unflushed commit outside an arbitrary batch window.
  */
 /**
- * FORTIFY (SUB-48 across reloads): every still-PENDING cell.audio.* record for
+ * FORTIFY (SUB-48 across reloads): every UNDELIVERED cell.audio.* record for
  * a file, in enqueue order. The optimistic-shadow registry is memory-only, so
  * after a reload a queued attach/remove was invisible until the flusher
  * delivered it — the take "vanished" for up to minutes. The bus rehydrates
  * shadows from these on a file's first read of the session.
+ *
+ * AQU-924: `failed` records are returned alongside `pending` ones. Restricting
+ * this to `pending` meant a quarantined / retry-exhausted attach was skipped on
+ * reload, so an uploaded clip disappeared from the cell entirely — no waveform,
+ * no error, no retry — even though its bytes were in R2 and its event was still
+ * durable right here. A record that never reached the server is exactly the one
+ * the user most needs to see; the bus paints it as `syncFailed` (not "saving"),
+ * and delivered records are DELETED from the store, so nothing already saved
+ * can be resurrected by this.
  */
 export async function getOutboxFileAudioRecords(
   projectId: string,
@@ -373,7 +382,7 @@ export async function getOutboxFileAudioRecords(
         const record = cursor.value as OutboxRecord
         const event = record.event
         if (
-          record.status === "pending" &&
+          (record.status === "pending" || record.status === "failed") &&
           event.projectId === projectId &&
           event.fileId === fileId &&
           typeof event.kind === "string" &&

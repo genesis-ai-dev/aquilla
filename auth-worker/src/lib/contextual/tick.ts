@@ -53,6 +53,7 @@ import type { ExamplePair } from "./draft"
 import type { NeighborBrief, LayerAboveBlock } from "./closure"
 import type { LlmCall, SpanSeed, SpanPhase, SpanReport, Tier } from "./types"
 import { DEFAULT_LLM_MODEL_ID } from "../model-defaults"
+import { formatSpanRange } from "../../../../shared/span-label"
 
 // ── Model + endpoint resolution ─────────────────────────────────────────────
 
@@ -525,15 +526,12 @@ export function orderSeedsFromAnchor(
 // ── Span label ("LUK 1:1–1:8") — display only, never authoritative ──────────
 
 function spanLabel(seed: StoredSpanSeed, pairs: CellPair[]): string {
-  const byId = new Map(pairs.map((p) => [p.cellId, p]))
-  const start = byId.get(seed.startCellId)
-  const end = byId.get(seed.endCellId)
-  if (start?.canonicalRef && end?.canonicalRef) {
-    return start.canonicalRef === end.canonicalRef
-      ? start.canonicalRef
-      : `${start.canonicalRef}–${end.canonicalRef}`
-  }
-  return `${seed.startCellId.slice(0, 8)}…${seed.endCellId.slice(0, 8)}`
+  const startIdx = pairs.findIndex((pair) => pair.cellId === seed.startCellId)
+  const endIdx = pairs.findIndex((pair) => pair.cellId === seed.endCellId)
+  return formatSpanRange(
+    startIdx >= 0 ? { canonicalRef: pairs[startIdx]?.canonicalRef, ordinal: startIdx + 1 } : null,
+    endIdx >= 0 ? { canonicalRef: pairs[endIdx]?.canonicalRef, ordinal: endIdx + 1 } : null,
+  ) ?? ""
 }
 
 // ── Context assembly ────────────────────────────────────────────────────────
@@ -863,6 +861,7 @@ async function processSpan(
             text: c.text,
             provenance: {
               spanId: draft.spanId,
+              spanLabel: label,
               promptVersion: draft.promptVersion,
               exampleIds: draft.exampleIds,
             },

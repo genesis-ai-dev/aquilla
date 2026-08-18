@@ -23,6 +23,16 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/rules/violation.smoke.spec.ts"],
   },
   {
+    // Style-rule library + applicability graph (AQU-934). `src/lib/scripture`
+    // (the book→genre map feeding applicability) matches no other domain.
+    // NOTE: the graph's shared module lives at `db/shared/style-rules.ts`, and
+    // `db/` sits outside PRODUCT_RUNTIME, so no domain rule can select for it —
+    // same dead spot the `db/shared/knowledge` alternative above already has.
+    // Its auth-worker route and client consumers are covered here instead.
+    source: /^(?:auth-worker\/src\/routes\/style-rules|src\/lib\/scripture\/|src\/hooks\/useStyleRules)/i,
+    sentinels: ["e2e/specs/rules/violation.smoke.spec.ts"],
+  },
+  {
     source: /^src\/(?:components|lib)\/(?:terminology|termbase)/i,
     sentinels: ["e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts"],
   },

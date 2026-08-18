@@ -84,6 +84,7 @@ export const org = defineNamespace({
     "org.orgHome.projectsPanel.clearFilterAria": "Clear project filter",
     "org.orgHome.projectsPanel.statusLabel": "Status",
     "org.orgHome.projectsPanel.statusFilterAria": "Project status filter",
+    "org.orgHome.originFilter.aria": "Filter projects by origin",
     "org.orgHome.projectsPanel.sortByLabel": "Sort by",
     "org.orgHome.projectsPanel.sortAria": "Project sort",
     "org.orgHome.projectsPanel.sortProjectsAria": "Sort projects",
@@ -131,7 +132,7 @@ export const org = defineNamespace({
     "org.orgHome.table.sourceTargetLanguageAria": "Source and target language",
     "org.orgHome.table.audioPctAria": "{pct}% audio",
 
-    // -- GuestOrgHome: overview for a project-only guest viewing an org they don't belong to --
+    // -- Guest org projects page: same table as a member org, guest copy --
     "org.guestOrgHome.orgFallbackWithId": "Org #{id}",
     "org.guestOrgHome.description":
       "Projects in {orgName} shared with you. You’re a guest here — you have access to these projects, but not to the organization itself.",
@@ -1191,7 +1192,11 @@ export const org = defineNamespace({
       },
       "org.orgHome.projectsPanel.statusFilterAria": {
         description:
-          "Accessible name for the project status filter control (All / Stalled / Overdue / Needs attention) on OrgHome. Shared grants use a separate chip beside it.",
+          "Accessible name for the project status filter control (All / Stalled / Overdue / Needs attention) on OrgHome.",
+      },
+      "org.orgHome.originFilter.aria": {
+        description:
+          "Accessible name for the All / Shared / Org tabs that filter the all-orgs projects table by whether a project comes from an organization the caller belongs to or was shared with them. The Org tab is omitted when the caller has no organization memberships.",
       },
       "org.orgHome.projectsPanel.sortProjectsAria": {
         description: "Accessible name for the 'Sort by' project-lens select control on OrgHome.",
@@ -1209,16 +1214,16 @@ export const org = defineNamespace({
       },
       "org.guestOrgHome.orgFallbackWithId": {
         description:
-          "Heading fallback on GuestOrgHome when the guest org's name hasn't loaded yet but its id is known.",
+          "Heading fallback on the guest-org projects page when the org's name hasn't loaded yet but its id is known.",
         placeholders: { id: "Numeric id of the guest organization." },
       },
       "org.guestOrgHome.description": {
         description:
-          "Subheading on GuestOrgHome explaining the caller's guest access: they can see this org's shared projects but aren't a member of the organization itself.",
+          "Subheading on the guest-org projects page explaining the caller's guest access: they can see this org's shared projects but aren't a member of the organization itself.",
         placeholders: { orgName: "Display name of the guest organization — not translated." },
       },
       "org.guestOrgHome.emptyTitle": {
-        description: "Empty-state title on GuestOrgHome when no projects in the guest org are shared with the caller.",
+        description: "Empty-state title on the guest-org projects page when no projects in the guest org are shared with the caller.",
         placeholders: { orgName: "Display name of the guest organization — not translated." },
       },
       "org.membersPage.removeDirectAccessTooltip": {

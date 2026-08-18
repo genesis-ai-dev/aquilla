@@ -167,7 +167,7 @@ export function OrgProjectsDataTable({
                   {p.name}
                 </span>
                 {p.origin === "shared" && (
-                  <Badge variant="secondary" className="shrink-0" data-testid="project-shared-badge">
+                  <Badge variant="soft" className="shrink-0" data-testid="project-shared-badge">
                     {t("org.orgHome.statusFilter.shared")}
                   </Badge>
                 )}

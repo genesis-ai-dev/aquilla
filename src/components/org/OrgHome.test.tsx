@@ -990,8 +990,14 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
     expect(await screen.findByText("Guest Gospel")).toBeInTheDocument()
     expect(screen.getByText("Legacy Translation")).toBeInTheDocument()
     expect(screen.getByTestId("project-shared-badge")).toBeInTheDocument()
+    // Soft fill — secondary/muted match the table surface in this theme.
+    expect(screen.getByTestId("project-shared-badge")).toHaveClass("bg-foreground/25")
     expect(screen.getByText("Host Org")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "All" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Org" })).toBeInTheDocument()
     expect(screen.getByTestId("shared-filter-chip")).toBeInTheDocument()
+    const originTabs = within(screen.getByRole("tablist")).getAllByRole("tab")
+    expect(originTabs.map((tab) => tab.textContent)).toEqual(["All", "SharedNew", "Org"])
     expect(screen.getByTestId("new-shared-nav-badge")).toBeInTheDocument()
     expect(screen.getByTestId("organizations-panel")).toBeInTheDocument()
     // Member rollup only — mixing the 0%-of-N shared stub would make this 2
@@ -1006,5 +1012,11 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
       expect(screen.queryByText("Legacy Translation")).not.toBeInTheDocument()
     })
     expect(screen.getByText("Guest Gospel")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("tab", { name: "Org" }))
+    await waitFor(() => {
+      expect(screen.queryByText("Guest Gospel")).not.toBeInTheDocument()
+    })
+    expect(screen.getByText("Legacy Translation")).toBeInTheDocument()
   })
 })

@@ -26,6 +26,7 @@ import { displayLanes } from "./project-lanes"
 import { ProjectStatusFilter } from "./ProjectStatusFilter"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import type { StatusFilter } from "@/hooks/useOrgPortfolio"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   partitionSharedProjects,
   toSharedPortfolioRow,
@@ -560,6 +561,7 @@ export function OrgHome() {
   // real org there is nothing to create a project in, so the offer is the org.
   const [orgCreateOpen, setOrgCreateOpen] = useState(false)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
+  const [originFilter, setOriginFilter] = useState<"all" | "member" | "shared">("all")
   const projectLens = readProjectLens()
 
   useEffect(() => {
@@ -803,10 +805,13 @@ export function OrgHome() {
     navigate(orgHomePath(orgId))
   }
 
-  // Filter bar — narrows the listed projects only; the rollup strip above
-  // continues to reflect the member-org portfolio (shared grants stay out of
-  // avg translated / stalled / overdue). Search/sort live in the DataTable.
+  // Filter bar — origin tabs (All / Shared / Org) plus status select. The
+  // rollup strip above continues to reflect the member-org portfolio (shared
+  // grants stay out of avg translated / stalled / overdue). Search/sort live
+  // in the DataTable.
   const filteredProjects = tableProjects.filter((p) => {
+    if (originFilter === "shared" && p.origin !== "shared") return false
+    if (originFilter === "member" && p.origin === "shared") return false
     switch (statusFilter) {
       case "stalled":
         return activityStatus(p, now) === "stalled"
@@ -814,8 +819,6 @@ export function OrgHome() {
         return portfolioAttentionReasons(p, now).length > 0
       case "overdue":
         return deadlineStatus(p, now) === "overdue"
-      case "shared":
-        return p.origin === "shared"
       default:
         return true
     }
@@ -941,30 +944,48 @@ export function OrgHome() {
                         initialLens={statusFilter === "attention" ? "attention" : projectLens}
                         toolbarLeading={
                           <div className="flex flex-wrap items-center gap-2">
+                            {sharedRows.length > 0 && (
+                              <Tabs
+                                value={originFilter}
+                                onValueChange={(next) => {
+                                  if (next === "all" || next === "member" || next === "shared") {
+                                    setOriginFilter(next)
+                                  }
+                                }}
+                                className="gap-0"
+                              >
+                                <TabsList aria-label={t("org.orgHome.originFilter.aria")}>
+                                  <TabsTrigger value="all">
+                                    {t("org.orgHome.statusFilter.all")}
+                                  </TabsTrigger>
+                                  <TabsTrigger
+                                    value="shared"
+                                    data-testid="shared-filter-chip"
+                                    attentionDot={hasNewSharedProjects ? "amber" : undefined}
+                                    aria-label={
+                                      hasNewSharedProjects
+                                        ? `${t("org.orgHome.statusFilter.shared")} ${t("org.guestOrgHome.newBadge")}`
+                                        : undefined
+                                    }
+                                  >
+                                    {t("org.orgHome.statusFilter.shared")}
+                                    {hasNewSharedProjects && (
+                                      <span className="sr-only" data-testid="new-shared-nav-badge">
+                                        {t("org.guestOrgHome.newBadge")}
+                                      </span>
+                                    )}
+                                  </TabsTrigger>
+                                  {showOrgRollup && (
+                                    <TabsTrigger value="member">{t("common.org")}</TabsTrigger>
+                                  )}
+                                </TabsList>
+                              </Tabs>
+                            )}
                             <ProjectStatusFilter
-                              value={statusFilter === "shared" ? "all" : statusFilter}
+                              value={statusFilter}
                               onValueChange={setStatusFilter}
                               className="bg-background"
                             />
-                            {sharedRows.length > 0 && (
-                              <Button
-                                type="button"
-                                variant={statusFilter === "shared" ? "secondary" : "outline"}
-                                size="sm"
-                                aria-pressed={statusFilter === "shared"}
-                                data-testid="shared-filter-chip"
-                                onClick={() =>
-                                  setStatusFilter(statusFilter === "shared" ? "all" : "shared")
-                                }
-                              >
-                                {t("org.orgHome.statusFilter.shared")}
-                                {hasNewSharedProjects && (
-                                  <Badge className="shrink-0" data-testid="new-shared-nav-badge">
-                                    {t("org.guestOrgHome.newBadge")}
-                                  </Badge>
-                                )}
-                              </Button>
-                            )}
                           </div>
                         }
                         emptyTitle={
@@ -974,7 +995,7 @@ export function OrgHome() {
                               ? t("org.orgHome.emptyTitle.attention")
                               : statusFilter === "overdue"
                                 ? t("org.orgHome.emptyTitle.overdue")
-                                : statusFilter === "shared"
+                                : originFilter === "shared"
                                   ? t("org.sharedProjectsPage.emptyUnscopedTitle")
                                   : t("org.orgHome.projectsPanel.emptyTitle")
                         }

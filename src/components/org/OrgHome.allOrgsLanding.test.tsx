@@ -114,6 +114,8 @@ describe("OrgHome — /orgs/all landing (AQU-864)", () => {
     expect(screen.getByText("Guest Gospel")).toBeInTheDocument()
     expect(screen.getByText("Other Shared")).toBeInTheDocument()
     expect(screen.getByTestId("shared-filter-chip")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "All" })).toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: "Org" })).not.toBeInTheDocument()
     expect(screen.queryByTestId("organizations-panel")).not.toBeInTheDocument()
     expect(screen.queryByText("Avg translated")).not.toBeInTheDocument()
     expect(screen.queryByText(/your organization is ready/i)).not.toBeInTheDocument()
@@ -142,6 +144,7 @@ describe("OrgHome — /orgs/all landing (AQU-864)", () => {
     expect(await screen.findByTestId("project-table")).toBeInTheDocument()
     expect(screen.getByText("Guest Gospel")).toBeInTheDocument()
     expect(screen.getByTestId("shared-filter-chip")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Org" })).toBeInTheDocument()
     expect(screen.queryByText("ORG HOME")).not.toBeInTheDocument()
   })
 

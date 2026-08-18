@@ -75,6 +75,7 @@ vi.mock("@/lib/sync/member-scopes", () => ({
   putMemberScopes: vi.fn(async () => []),
 }))
 const setProjectPm = vi.fn(async (_jwt: string, _projectId: string, _pmUserId: number | null): Promise<{ id: number; username: string } | null> => null)
+const setProjectDeadline = vi.fn(async (_jwt: string, _projectId: string, _deadline: string | null): Promise<void> => {})
 // OrgSidebar (rendered by ProjectOverview's AppShell) calls
 // useProjectsForNavigation -> fetchAccessibleProjects for the "Shared with
 // you" nav section (AQU-474), and OrgProvider fetches the same directory
@@ -88,7 +89,7 @@ const fetchAccessibleProjects = vi.fn(async (_jwt: string): Promise<unknown[]> =
 // "export is not defined on the mock" failure the moment a new caller appears.
 vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/sync/cloud-projects")>()),
-  setProjectDeadline: vi.fn(),
+  setProjectDeadline: (jwt: string, projectId: string, deadline: string | null) => setProjectDeadline(jwt, projectId, deadline),
   setProjectPm: (jwt: string, projectId: string, pmUserId: number | null) => setProjectPm(jwt, projectId, pmUserId),
   fetchAccessibleProjects: (jwt: string) => fetchAccessibleProjects(jwt),
   // MembersTab → useProjectOrgId reads this; keep it quiet so overview chrome still mounts.
@@ -757,6 +758,7 @@ describe("ProjectOverview PM assignment", () => {
     renderOverview()
 
     expect(await screen.findByTestId("overview-pm-name")).toHaveTextContent("wendi")
+    expect(screen.getByTestId("overview-project-meta")).toBeInTheDocument()
     // Let the provider's mount-time directory fetch resolve first: OrgContext
     // dedupes refreshes into an in-flight request for the same JWT, so a
     // still-pending initial fetch would absorb the post-save revalidation.
@@ -770,6 +772,34 @@ describe("ProjectOverview PM assignment", () => {
     await waitFor(() =>
       expect(fetchAccessibleProjects.mock.calls.length).toBeGreaterThan(callsBeforeSave),
     )
+  })
+
+  it("clears the deadline from the header Clear control", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 600 }),
+      status: "ready",
+      refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1",
+      name: "John",
+      totalCells: 10,
+      filledCells: 1,
+      validatedCells: 0,
+      aiDraftedCells: 0,
+      audioCells: 0,
+      validatedAudioCells: 0,
+      recordedMs: 0,
+      lastEditAt: null,
+      deadlineAt: "2026-07-01",
+      sourceLanguage: null,
+      targetLanguage: null,
+    }])
+    renderOverview()
+
+    await screen.findByText("2026-07-01")
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }))
+    await waitFor(() => expect(setProjectDeadline).toHaveBeenCalledWith("jwt", "p1", null))
   })
 })
 

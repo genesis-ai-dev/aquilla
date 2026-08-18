@@ -133,6 +133,16 @@ function ProjectOverviewSkeleton() {
         </div>
         <Skeleton className="h-4 w-32" />
         <Skeleton className="h-4 w-20" />
+        <div className="flex items-start gap-4 pt-2">
+          <div className="space-y-1.5">
+            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-8 w-48" />
+          </div>
+          <div className="space-y-1.5">
+            <Skeleton className="h-3 w-16" />
+            <Skeleton className="h-8 w-56" />
+          </div>
+        </div>
       </div>
       <div className="rounded-lg border bg-card shadow-sm p-5 space-y-4">
         <Skeleton className="h-3 w-20" />
@@ -191,7 +201,7 @@ export function deriveProjectStatus(
 }
 
 function StatusChip({ status }: { status: ProjectStatus }) {
-  // Overdue / due-soon live only on the Deadline card — avoid duplicating them in the header.
+  // Overdue / due-soon live only next to the deadline field — avoid duplicating them on the title.
   if (status === "no-deadline" || status === "overdue" || status === "due-soon") return null
   return <ProjectStatusChip kind="on-track" testId="status-chip" />
 }
@@ -861,7 +871,7 @@ export function ProjectOverview() {
       // AQU-507: the org overview's PM column joins from the app-wide
       // accessible-projects directory (OrgContext, fetched once per session) —
       // revalidate it so the new PM shows there without a hard reload. Not
-      // awaited: the PM card above reads useProject, not the directory.
+      // awaited: the header PM field reads useProject, not the directory.
       void refreshAccessibleProjects()
       setPmDialogOpen(false)
     } catch (e) {
@@ -1098,6 +1108,194 @@ export function ProjectOverview() {
                     )}
                   </div>
                 </div>
+
+                <div className="mt-4 flex flex-wrap items-start gap-4" data-testid="overview-project-meta">
+                  <Field className="w-auto min-w-48">
+                    <FieldLabel className="text-xs font-semibold text-muted-foreground">
+                      {t("org.projectOverview.projectManagerHeading")}
+                    </FieldLabel>
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      {pm ? (
+                        <UsernameWithAvatar username={pm.username} nameTestId="overview-pm-name" />
+                      ) : (
+                        <span className="text-muted-foreground" data-testid="overview-pm-name">
+                          {t("org.projectOverview.unassigned")}
+                        </span>
+                      )}
+                      {canManage && (
+                        <ButtonGroup>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={busy}
+                            data-testid="overview-pm-edit"
+                            onClick={() => {
+                              setPmSelection(pm ? String(pm.id) : "")
+                              setPmDialogOpen(true)
+                            }}
+                          >
+                            {pm ? t("org.projectOverview.change") : t("dialog.assign.submit")}
+                          </Button>
+                          {pm && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() => savePm(null)}
+                            >
+                              {t("common.clear")}
+                            </Button>
+                          )}
+                        </ButtonGroup>
+                      )}
+                    </div>
+                  </Field>
+                  <Field className="w-auto min-w-56">
+                    <FieldLabel className="text-xs font-semibold text-muted-foreground">
+                      {t("org.projectOverview.deadlineHeading")}
+                    </FieldLabel>
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      {audio?.deadlineAt ? (
+                        <span className="flex items-center gap-2 font-medium">
+                          {audio.deadlineAt}
+                          <DeadlineChip status={dstatus} />
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">{t("org.projectOverview.noDeadlineSet")}</span>
+                      )}
+                      {canManage && (
+                        <ButtonGroup>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            disabled={busy}
+                            onClick={() => {
+                              setDeadlineDate(deadlineStringToDate(audio?.deadlineAt))
+                              setDeadlineDialogOpen(true)
+                            }}
+                          >
+                            {audio?.deadlineAt ? t("org.projectOverview.change") : t("org.projectOverview.setDeadline")}
+                          </Button>
+                          {audio?.deadlineAt && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              disabled={busy}
+                              onClick={() => saveDeadline(null)}
+                            >
+                              {t("common.clear")}
+                            </Button>
+                          )}
+                        </ButtonGroup>
+                      )}
+                    </div>
+                  </Field>
+                </div>
+
+                <Dialog open={deadlineDialogOpen} onOpenChange={setDeadlineDialogOpen}>
+                  <DialogContent className="sm:max-w-sm">
+                    <DialogHeader>
+                      <DialogTitle>
+                        {audio?.deadlineAt ? t("org.projectOverview.changeDeadlineDialogTitle") : t("org.projectOverview.setDeadlineDialogTitle")}
+                      </DialogTitle>
+                      <DialogDescription>
+                        {t("org.projectOverview.deadlineDialogDescription")}
+                      </DialogDescription>
+                    </DialogHeader>
+                    <FieldGroup>
+                      <Field>
+                        <FieldLabel htmlFor="project-deadline">{t("org.projectOverview.deadlineDateLabel")}</FieldLabel>
+                        <DatePicker
+                          id="project-deadline"
+                          value={deadlineDate}
+                          onChange={setDeadlineDate}
+                          disabled={busy}
+                          placeholder={t("org.projectOverview.deadlineDatePlaceholder")}
+                        />
+                      </Field>
+                    </FieldGroup>
+                    <DialogFooter>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => setDeadlineDialogOpen(false)}
+                      >
+                        {t("common.cancel")}
+                      </Button>
+                      <Button
+                        type="button"
+                        disabled={busy || !deadlineDate}
+                        onClick={() => saveDeadline(deadlineDate ? dateToDeadlineString(deadlineDate) : null)}
+                      >
+                        {t("common.save")}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+
+                <Dialog open={pmDialogOpen} onOpenChange={setPmDialogOpen}>
+                  <DialogContent className="sm:max-w-sm">
+                    <DialogHeader>
+                      <DialogTitle>{pm ? t("org.projectOverview.changeProjectManagerDialogTitle") : t("org.projectOverview.assignProjectManagerDialogTitle")}</DialogTitle>
+                      <DialogDescription>
+                        {t("org.projectOverview.pmDialogDescription")}
+                      </DialogDescription>
+                    </DialogHeader>
+                    <FieldGroup>
+                      <Field>
+                        <FieldLabel htmlFor="project-pm">{t("org.projectOverview.projectManagerHeading")}</FieldLabel>
+                        <Select
+                          value={pmSelection}
+                          onValueChange={(v) => setPmSelection(v ?? "")}
+                          items={[
+                            { value: "", label: t("org.projectOverview.unassigned") },
+                            ...pmCandidates.map((m) => ({
+                              value: String(m.userId),
+                              label: m.username,
+                            })),
+                          ]}
+                        >
+                          <SelectTrigger id="project-pm" aria-label={t("org.projectOverview.projectManagerHeading")}>
+                            <SelectValue placeholder={t("org.projectOverview.selectMemberPlaceholder")} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectGroup>
+                              <SelectItem value="">{t("org.projectOverview.unassigned")}</SelectItem>
+                              {pmCandidates.map((m) => (
+                                <SelectItem key={m.userId} value={String(m.userId)}>
+                                  <UsernameWithAvatar
+                                    username={m.username}
+                                    size="xs"
+                                    menuSafe
+                                    nameClassName="text-sm font-normal"
+                                  />
+                                </SelectItem>
+                              ))}
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                    </FieldGroup>
+                    <DialogFooter>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => setPmDialogOpen(false)}
+                      >
+                        {t("common.cancel")}
+                      </Button>
+                      <Button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => savePm(pmSelection === "" ? null : Number(pmSelection))}
+                      >
+                        {t("common.save")}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
 
                 <ConfirmActionDialog
                   open={archiveConfirmOpen}
@@ -1594,191 +1792,6 @@ export function ProjectOverview() {
                   </div>
                 )
               })()}
-
-              {/* ── Deadline card ── */}
-              <div className="rounded-lg border bg-card p-5">
-                <h2 className="mb-2 text-xs font-semibold text-muted-foreground">{t("org.projectOverview.deadlineHeading")}</h2>
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  {audio?.deadlineAt ? (
-                    <span className="flex items-center gap-2 font-medium">
-                      {audio.deadlineAt}
-                      <DeadlineChip status={dstatus} />
-                    </span>
-                  ) : (
-                    <span className="text-muted-foreground">{t("org.projectOverview.noDeadlineSet")}</span>
-                  )}
-                  {canManage && (
-                    <ButtonGroup>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={busy}
-                        onClick={() => {
-                          setDeadlineDate(deadlineStringToDate(audio?.deadlineAt))
-                          setDeadlineDialogOpen(true)
-                        }}
-                      >
-                        {audio?.deadlineAt ? t("org.projectOverview.change") : t("org.projectOverview.setDeadline")}
-                      </Button>
-                      {audio?.deadlineAt && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={busy}
-                          onClick={() => saveDeadline(null)}
-                        >
-                          {t("common.clear")}
-                        </Button>
-                      )}
-                    </ButtonGroup>
-                  )}
-                </div>
-              </div>
-
-              <Dialog open={deadlineDialogOpen} onOpenChange={setDeadlineDialogOpen}>
-                <DialogContent className="sm:max-w-sm">
-                  <DialogHeader>
-                    <DialogTitle>
-                      {audio?.deadlineAt ? t("org.projectOverview.changeDeadlineDialogTitle") : t("org.projectOverview.setDeadlineDialogTitle")}
-                    </DialogTitle>
-                    <DialogDescription>
-                      {t("org.projectOverview.deadlineDialogDescription")}
-                    </DialogDescription>
-                  </DialogHeader>
-                  <FieldGroup>
-                    <Field>
-                      <FieldLabel htmlFor="project-deadline">{t("org.projectOverview.deadlineDateLabel")}</FieldLabel>
-                      <DatePicker
-                        id="project-deadline"
-                        value={deadlineDate}
-                        onChange={setDeadlineDate}
-                        disabled={busy}
-                        placeholder={t("org.projectOverview.deadlineDatePlaceholder")}
-                      />
-                    </Field>
-                  </FieldGroup>
-                  <DialogFooter>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={busy}
-                      onClick={() => setDeadlineDialogOpen(false)}
-                    >
-                      {t("common.cancel")}
-                    </Button>
-                    <Button
-                      type="button"
-                      disabled={busy || !deadlineDate}
-                      onClick={() => saveDeadline(deadlineDate ? dateToDeadlineString(deadlineDate) : null)}
-                    >
-                      {t("common.save")}
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
-
-              {/* ── Project manager card (AQU-507) ── */}
-              <div className="rounded-lg border bg-card p-5">
-                <h2 className="mb-2 text-xs font-semibold tracking-wide text-muted-foreground">{t("org.projectOverview.projectManagerHeading")}</h2>
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  {pm ? (
-                    <UsernameWithAvatar username={pm.username} nameTestId="overview-pm-name" />
-                  ) : (
-                    <span className="text-muted-foreground" data-testid="overview-pm-name">{t("org.projectOverview.unassigned")}</span>
-                  )}
-                  {canManage && (
-                    <ButtonGroup>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        disabled={busy}
-                        data-testid="overview-pm-edit"
-                        onClick={() => {
-                          setPmSelection(pm ? String(pm.id) : "")
-                          setPmDialogOpen(true)
-                        }}
-                      >
-                        {pm ? t("org.projectOverview.change") : t("dialog.assign.submit")}
-                      </Button>
-                      {pm && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          disabled={busy}
-                          onClick={() => savePm(null)}
-                        >
-                          {t("common.clear")}
-                        </Button>
-                      )}
-                    </ButtonGroup>
-                  )}
-                </div>
-              </div>
-
-              <Dialog open={pmDialogOpen} onOpenChange={setPmDialogOpen}>
-                <DialogContent className="sm:max-w-sm">
-                  <DialogHeader>
-                    <DialogTitle>{pm ? t("org.projectOverview.changeProjectManagerDialogTitle") : t("org.projectOverview.assignProjectManagerDialogTitle")}</DialogTitle>
-                    <DialogDescription>
-                      {t("org.projectOverview.pmDialogDescription")}
-                    </DialogDescription>
-                  </DialogHeader>
-                  <FieldGroup>
-                    <Field>
-                      <FieldLabel htmlFor="project-pm">{t("org.projectOverview.projectManagerHeading")}</FieldLabel>
-                      {/* `items` maps values → labels so the trigger shows the
-                          member's username, not the raw stringified userId. */}
-                      <Select
-                        value={pmSelection}
-                        onValueChange={(v) => setPmSelection(v ?? "")}
-                        items={[
-                          { value: "", label: t("org.projectOverview.unassigned") },
-                          ...pmCandidates.map((m) => ({
-                            value: String(m.userId),
-                            label: m.username,
-                          })),
-                        ]}
-                      >
-                        <SelectTrigger id="project-pm" aria-label={t("org.projectOverview.projectManagerHeading")}>
-                          <SelectValue placeholder={t("org.projectOverview.selectMemberPlaceholder")} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectGroup>
-                            <SelectItem value="">{t("org.projectOverview.unassigned")}</SelectItem>
-                            {pmCandidates.map((m) => (
-                              <SelectItem key={m.userId} value={String(m.userId)}>
-                                <UsernameWithAvatar
-                                  username={m.username}
-                                  size="xs"
-                                  menuSafe
-                                  nameClassName="text-sm font-normal"
-                                />
-                              </SelectItem>
-                            ))}
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                  </FieldGroup>
-                  <DialogFooter>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={busy}
-                      onClick={() => setPmDialogOpen(false)}
-                    >
-                      {t("common.cancel")}
-                    </Button>
-                    <Button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => savePm(pmSelection === "" ? null : Number(pmSelection))}
-                    >
-                      {t("common.save")}
-                    </Button>
-                  </DialogFooter>
-                </DialogContent>
-              </Dialog>
 
               {/* ── Team / Assignments card ── */}
               {/* AQU-486: per-assignee progress is gated by the AQU-485

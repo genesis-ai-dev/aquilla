@@ -91,6 +91,7 @@ import sceneBriefRoutes from "./routes/scene-briefs"
 import contextualRoutes from "./routes/contextual"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
 import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
+import styleRulesRoutes from "./routes/style-rules"
 import mondayRoutes from "./routes/monday"
 import contactRoutes from "./routes/contact"
 import billingRoutes from "./routes/billing"
@@ -256,6 +257,10 @@ app.route("/api/v2/projects", agentArtifactsRoutes)
 // (routes/knowledge.ts). Org router mounted below with the other /api/v2/orgs
 // sub-routers.
 app.route("/api/v2/projects", projectKnowledge)
+// Style-rule library + applicability graph (AQU-934 phase 2). Sibling router
+// — propose CONTRIBUTOR+, review/applicability PROJECT_LEAD+, org rows
+// read-only through project routes (routes/style-rules.ts).
+app.route("/api/v2/projects", styleRulesRoutes)
 app.route("/api/v2/projects", projectsRoutes)
 // Multi-project invite surface.
 app.route("/api/v2/invites", invitesRoutes)

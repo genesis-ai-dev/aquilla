@@ -160,6 +160,23 @@ export interface CompleteSingleOptions {
   commitGuard?: () => boolean
 }
 
+/**
+ * Union of the style instructions in force across a group of cells, in first-seen
+ * order. A batch/paragraph call shares ONE system prompt, so it must carry the
+ * union of what applies to its members rather than any single cell's set.
+ */
+function unionStyleInstructions(
+  cells: CellData[],
+  resolve: ((cell: CellData) => string[]) | undefined,
+): string[] | undefined {
+  if (!resolve) return undefined
+  const seen = new Set<string>()
+  for (const cell of cells) {
+    for (const instruction of resolve(cell)) seen.add(instruction)
+  }
+  return seen.size > 0 ? [...seen] : undefined
+}
+
 export function useCompletion(
   settings: CompletionSettings | undefined,
   sourceLanguage: string,
@@ -178,6 +195,9 @@ export function useCompletion(
   /** The project brief's L1 summary — injected into every prompt (Task 6). */
   briefSummary?: string,
   draftContext: DraftContextSettings = DEFAULT_DRAFT_CONTEXT,
+  /** Style-rule instructions in force for one cell, resolved from the
+   *  applicability graph (AQU-934). Omitted → no style block is injected. */
+  styleInstructionsFor?: (cell: CellData) => string[],
 ) {
   const [completing, setCompleting] = useState<Map<string, string>>(new Map())
   const [examples, setExamples] = useState<Map<string, ScoredPair[]>>(new Map())
@@ -338,6 +358,7 @@ export function useCompletion(
         sourceText: idmlCompletionPromptSource(cell, prepared.promptSource),
         examples: [],
         rules,
+        ...(styleInstructionsFor && { styleInstructions: styleInstructionsFor(cell) }),
         validatedPairs: approvedExamples,
         exampleFormat: effectiveSettings.fewShotExampleFormat,
         briefSummary,
@@ -462,7 +483,7 @@ export function useCompletion(
       setErrors((p) => new Map(p).set(cell.id, err instanceof Error ? err.message : "Failed"))
       return false
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, briefSummary, draftProvenance, prepareSingleEvidence])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, briefSummary, draftProvenance, prepareSingleEvidence])
 
   // Segmented batch translation: each small sub-batch goes out as one
   // <vN>-framed prompt and the response is demuxed back to cells. This preserves
@@ -597,6 +618,9 @@ export function useCompletion(
           })),
           examples: [],
           rules,
+          ...(styleInstructionsFor && {
+            styleInstructions: unionStyleInstructions(chunk, styleInstructionsFor),
+          }),
           validatedPairs: batchApprovedExamples,
           exampleFormat: effectiveSettings.fewShotExampleFormat,
           briefSummary,
@@ -796,7 +820,7 @@ export function useCompletion(
       clearBatchCompletionProgress(runId)
       memMark(`completeBatch.end(${cells.length}c)`)
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, rules, getAllCells, briefSummary, draftContext, draftProvenance])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance])
 
   // completeParagraph: draft a whole paragraph group as ONE model call, fan results
   // out to per-cell commits via the existing commitCompletedCell path (D3, D11).
@@ -892,6 +916,9 @@ export function useCompletion(
         examples: [],
         validatedPairs: approvedExamples,
         rules,
+        ...(styleInstructionsFor && {
+          styleInstructions: unionStyleInstructions(groupCells, styleInstructionsFor),
+        }),
         briefSummary,
         exampleFormat: effectiveSettings.fewShotExampleFormat,
         precedingContext,
@@ -1027,7 +1054,7 @@ export function useCompletion(
         setErrors((p) => new Map(p).set(c.id, msg))
       }
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, getAllCells, briefSummary, draftContext, draftProvenance])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, styleInstructionsFor, getAllCells, briefSummary, draftContext, draftProvenance])
 
   /**
    * AQU-913: forget a cell's failure entirely — the visible message AND the

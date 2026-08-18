@@ -147,6 +147,28 @@ export function buildRulesBlock(rules: TranslationRule[]): string {
 }
 
 /**
+ * Render the style-rule instructions in force for the cell(s) being drafted
+ * (AQU-934). Unlike `buildRulesBlock`, which can only speak the three regex
+ * check shapes, these are natural-language rules resolved per passage from the
+ * applicability graph — so the block carries exactly the guidance that applies
+ * here, instead of every project rule on every call.
+ *
+ * Blank/duplicate instructions are dropped; empty input → "" (caller skips).
+ */
+export function buildStyleRulesBlock(instructions: string[] | undefined | null): string {
+  const seen = new Set<string>()
+  const lines: string[] = []
+  for (const raw of instructions ?? []) {
+    const instruction = raw.trim()
+    if (!instruction || seen.has(instruction)) continue
+    seen.add(instruction)
+    lines.push(`- ${instruction}`)
+  }
+  if (!lines.length) return ""
+  return "Style rules that apply to this passage (MUST follow):\n" + lines.join("\n")
+}
+
+/**
  * Render the brief's L1 summary as a labeled block for the system prompt.
  * Empty/blank input → "" (caller skips injection). The brief states the
  * project's purpose, audience, register, and constraints; it sits ABOVE the
@@ -244,6 +266,9 @@ export function buildPrompt(options: {
   sourceText: string; examples: { source: string; target: string }[]
   /** Active project rules — injected as a "must follow" block in the system prompt. */
   rules?: TranslationRule[]
+  /** Style-rule instructions resolved for this cell from the applicability
+   *  graph (AQU-934) — injected after the rules block. */
+  styleInstructions?: string[]
   /** Pre-filtered validated pairs from the project — prepended to examples. */
   validatedPairs?: ValidatedPair[]
   /** How to render few-shot examples. Default "source-and-target". */
@@ -279,6 +304,9 @@ export function buildPrompt(options: {
     const block = buildRulesBlock(options.rules)
     if (block) sys = sys + "\n\n" + block
   }
+
+  const styleBlock = buildStyleRulesBlock(options.styleInstructions)
+  if (styleBlock) sys = sys + "\n\n" + styleBlock
 
   if (options.systemAddendum) sys = sys + "\n\n" + options.systemAddendum
 
@@ -342,6 +370,9 @@ export function buildBatchPrompt(options: {
   examples: PassageExample[]
   /** Active project rules — injected as a "must follow" block in the system prompt. */
   rules?: TranslationRule[]
+  /** Style-rule instructions in force across the batch (AQU-934) — the union
+   *  of what applies to its cells, since the batch shares one system prompt. */
+  styleInstructions?: string[]
   /** Pre-filtered validated pairs from the project — prepended as a passage example. */
   validatedPairs?: ValidatedPair[]
   /** How to render few-shot examples. Default "source-and-target". */
@@ -363,6 +394,8 @@ export function buildBatchPrompt(options: {
     const block = buildRulesBlock(options.rules)
     if (block) baseSys = baseSys + "\n\n" + block
   }
+  const batchStyleBlock = buildStyleRulesBlock(options.styleInstructions)
+  if (batchStyleBlock) baseSys = baseSys + "\n\n" + batchStyleBlock
   if (options.systemAddendum) baseSys = baseSys + "\n\n" + options.systemAddendum
   if (targetOnly) {
     baseSys = baseSys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."
@@ -456,6 +489,8 @@ export function buildParagraphPrompt(options: {
   validatedPairs?: ValidatedPair[]
   /** Active project rules injected into the system prompt. */
   rules?: TranslationRule[]
+  /** Style-rule instructions in force across the paragraph group (AQU-934). */
+  styleInstructions?: string[]
   /** Project brief L1 summary. */
   briefSummary?: string
   /** Format-specific output contract appended after project rules. */
@@ -487,6 +522,8 @@ export function buildParagraphPrompt(options: {
     const block = buildRulesBlock(options.rules)
     if (block) sys = sys + "\n\n" + block
   }
+  const paragraphStyleBlock = buildStyleRulesBlock(options.styleInstructions)
+  if (paragraphStyleBlock) sys = sys + "\n\n" + paragraphStyleBlock
   if (options.systemAddendum) sys = sys + "\n\n" + options.systemAddendum
 
   if (targetOnly) {

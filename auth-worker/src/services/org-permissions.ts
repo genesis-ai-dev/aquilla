@@ -118,6 +118,35 @@ export async function listUserOrgs(env: Env, user: AuthUser): Promise<UserOrgSum
   return Array.from(byId.values()).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""))
 }
 
+/**
+ * Orgs the caller can reach via a project-level grant (direct, group, or
+ * creator) — including orgs they also belong to. GET /orgs uses this to keep
+ * those orgs off the platform-admin append, so a real guest grant surfaces as
+ * Guest in the org picker instead of Admin.
+ */
+export async function listProjectGrantOrgIds(env: Env, userId: number): Promise<Set<number>> {
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT DISTINCT p.org_id AS id
+       FROM projects p
+      WHERE p.org_id IS NOT NULL
+        AND (
+          p.created_by = ?
+          OR EXISTS (
+            SELECT 1 FROM project_members pm
+             WHERE pm.project_id = p.id AND pm.user_id = ?
+          )
+          OR EXISTS (
+            SELECT 1 FROM group_project_grants gpg
+            JOIN group_members gm ON gm.group_id = gpg.group_id
+            WHERE gpg.project_id = p.id AND gm.user_id = ?
+          )
+        )`,
+  )
+    .bind(userId, userId, userId)
+    .all<{ id: number }>()
+  return new Set((rows.results ?? []).map((r) => r.id))
+}
+
 /** Return the role_level of (org_id, user_id) or null if no row. */
 export async function getOrgMemberRole(
   env: Env,

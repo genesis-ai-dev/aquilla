@@ -168,6 +168,7 @@ import { ExpandableFileList } from "./ExpandableFileList"
 import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
 import { FileDetailsModal } from "./FileDetailsModal"
 import { SidebarProjectSection } from "./SidebarProjectSection"
+import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { SuggestionBanner } from "./SuggestionBanner"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { LinkVideoTimingDialog } from "./timeline/LinkVideoTimingDialog"
@@ -273,6 +274,15 @@ const CommentsPageContent = lazy(() =>
 const GlossaryEditorContent = lazy(() =>
   import("./GlossaryEditor").then((mod) => ({ default: mod.GlossaryEditor })),
 )
+const LivingMemoryPageContent = lazy(() =>
+  import("./LivingMemoryPage").then((mod) => ({ default: mod.LivingMemoryPage })),
+)
+
+// Living Memory overlay — matches /project/:id/memory and /project/:id/memory/:section.
+// Anchored on the /project/:id prefix so a path like /project/:id/settings/memory
+// (now a redirect, but the derivation stays conservative) can never match.
+// Keep in sync with the local copy in shell-routing.test.ts.
+const PROJECT_MEMORY_PATH_RE = /^\/project\/[^/]+\/memory(\/[^/]+)?$/
 // FRO-249 fix (Fix 2): module-level promise chain that serializes
 // handleImported's getProject→updateProject read-modify-write so that
 // concurrent imports don't race and the last write doesn't silently drop
@@ -753,16 +763,17 @@ export function ProjectWorkspace() {
   useEffect(() => {
     if (!project || !projectId) return
 
-    // The in-project overlay surfaces (/comments, /terminology, /agent)
-    // deliberately carry no file in the URL — don't treat that as
-    // "no file selected" and bounce back to the editor, or these surfaces become
-    // unreachable. (FRO-254 added comments/terminology; agent is a takeover.)
-    // Rules and Living Memory live at /project/:id/settings/{rules,memory}.
+    // The in-project overlay surfaces (/comments, /terminology, /agent,
+    // /memory[/:section]) deliberately carry no file in the URL — don't treat
+    // that as "no file selected" and bounce back to the editor, or these
+    // surfaces become unreachable. (FRO-254 added comments/terminology; agent
+    // is a takeover; Living Memory joined as /project/:id/memory[/:section].)
     // Members live at /project/:id/settings/members (not a workspace surface).
     if (
       location.pathname.endsWith("/comments") ||
       location.pathname.endsWith("/terminology") ||
-      location.pathname.endsWith("/agent")
+      location.pathname.endsWith("/agent") ||
+      PROJECT_MEMORY_PATH_RE.test(location.pathname)
     ) return
 
     // A file is already in the URL: leave it unless the project genuinely
@@ -829,12 +840,13 @@ export function ProjectWorkspace() {
 
   // Center surface — derived from the URL path so deep-links work and the
   // shell (sidebar + top bar + bottom status bar) never unmounts.
-  // FRO-254: comments / terminology. Agent is a takeover surface.
-  // Rules and Living Memory live under /project/:id/settings/{rules,memory}.
-  const centerSurface: "editor" | "comments" | "terminology" | "agent" =
+  // FRO-254: comments / terminology. Agent is a takeover surface. Living
+  // Memory is /project/:id/memory[/:section] (index + detail panes).
+  const centerSurface: "editor" | "comments" | "terminology" | "agent" | "memory" =
     location.pathname.endsWith("/comments") ? "comments" :
     location.pathname.endsWith("/terminology") ? "terminology" :
     location.pathname.endsWith("/agent") ? "agent" :
+    PROJECT_MEMORY_PATH_RE.test(location.pathname) ? "memory" :
     "editor"
   const agentOpen = centerSurface === "agent"
   const [translateAsReadEnabled, setTranslateAsReadEnabled] = useTranslateAsReadPreference(projectId)
@@ -860,7 +872,7 @@ export function ProjectWorkspace() {
   }, [projectId, centerSurface, activeFileId, location.pathname, location.search])
 
   const openOverlay = useCallback((
-    surface: "comments" | "terminology" | "agent",
+    surface: "comments" | "terminology" | "agent" | "memory",
   ) => {
     if (!projectId) return
     navigate(withEditorReturn(`/project/${projectId}/${surface}`, editorReturnPath))
@@ -4877,6 +4889,8 @@ export function ProjectWorkspace() {
         onClick: () => openOverlay("comments") },
       { id: "terminology", labelKey: "nav.sidebarSection.terminology" as const, icon: BookOpen, pinned: true,
         onClick: () => openOverlay("terminology") },
+      { id: "memory", labelKey: "terminology.livingMemory.title" as const, icon: LIVING_MEMORY_ICON, pinned: true,
+        onClick: () => openOverlay("memory") },
       // Project settings is a header cog beside Import. Audio/Media lens lives
       // in the header EditorModeToggle. Sharing lives in Settings → Members.
       // FRO-272: trash opens a dialog (project_lead+). Pinned in the same
@@ -6504,6 +6518,14 @@ export function ProjectWorkspace() {
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<LoadingPanel label={t("terminology.loadingLabel")} />}>
               <GlossaryEditorContent files={projectFiles} />
+            </Suspense>
+          </div>
+        ) : centerSurface === "memory" ? (
+          // Living Memory inside the shell — section index + detail panes; the
+          // page reads :section from the URL itself.
+          <div className="h-full overflow-y-auto">
+            <Suspense fallback={<LoadingPanel label={t("workspace.loadingMemory")} />}>
+              <LivingMemoryPageContent />
             </Suspense>
           </div>
         ) : centerSurface === "agent" ? (

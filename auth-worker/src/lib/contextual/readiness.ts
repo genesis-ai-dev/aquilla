@@ -85,8 +85,9 @@ export function computeContextReadiness(input: ReadinessInput): ContextReadiness
       answered === 0 && !hasL1
         ? "No brief. Autopilot has to guess your audience, register, and how literal to be — the decisions that shape every sentence."
         : `${answered} of the brief's questions answered${hasL1 ? ", summarised for every passage" : ""}. Audience, register, and literalness ride in each draft prompt.`,
-        // The brief builder lives on Living Memory in project settings.
-        href: "settings/memory",
+        // The brief builder is Living Memory's "brief" pane
+        // (/project/:id/memory/brief) — deep-link straight to it.
+        href: "memory/brief",
   })
 
   // ── Examples of your team's own work ──

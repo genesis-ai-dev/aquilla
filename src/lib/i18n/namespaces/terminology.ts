@@ -116,6 +116,10 @@ export const terminology = defineNamespace({
     "terminology.livingMemory.offlineTooltip": "You are offline. Reconnect to edit.",
     "terminology.livingMemory.maintainerRequiredTooltip":
       "Editing requires Maintainer role (600) or above.",
+    "terminology.livingMemory.contributorRequiredTooltip":
+      "This requires Contributor role (400) or above.",
+    "terminology.livingMemory.projectLeadRequiredTooltip":
+      "This requires Project lead role (500) or above.",
     "terminology.livingMemory.addEntryAria": "Add {section} entry",
     "terminology.livingMemory.exampleLabel": "Example:",
     "terminology.livingMemory.editEntryAria": "Edit entry",
@@ -178,6 +182,105 @@ export const terminology = defineNamespace({
     // Default-prediction-prompt block (instructions pane, collapsed by default).
     "terminology.livingMemory.prompt.defaultBadge": "Default",
     "terminology.livingMemory.prompt.customBadge": "Custom",
+
+    // ── Style-rule library + applicability (quality pane, AQU-934) ───────────
+    // Reused keys (no duplicates added): agent.approve / agent.reject for the
+    // candidate verdicts (the same human-gate act as every other agent review
+    // queue), common.edit / common.save / common.cancel / common.add /
+    // common.close for generic actions, common.file for the `file` target type,
+    // rules.editor.severityLabel + rules.severity.major/minor for severity, and
+    // rules.surface.enabledLabel for the enabled toggle.
+    "terminology.livingMemory.styleRules.title": "Style rules",
+    "terminology.livingMemory.styleRules.description":
+      "Rules extracted from your knowledge base or written by hand. Approved rules steer " +
+      "every AI draft, and each one can be narrowed to the books, sections, or passages " +
+      "it governs.",
+    "terminology.livingMemory.styleRules.loadError":
+      "Couldn't load the style-rule library: {message}",
+    "terminology.livingMemory.styleRules.candidates.heading": "Proposed rules",
+    "terminology.livingMemory.styleRules.candidates.pendingCount": plural({
+      one: "{count} awaiting review",
+      other: "{count} awaiting review",
+    }),
+    "terminology.livingMemory.styleRules.candidates.empty": "Nothing is waiting for review.",
+    "terminology.livingMemory.styleRules.candidates.citation": "Extracted from {doc}",
+    "terminology.livingMemory.styleRules.candidates.editTitle": "Edit proposed rule",
+    "terminology.livingMemory.styleRules.candidates.editDescription":
+      "Reword or reclassify the rule before deciding on it. Saving an edit does not " +
+      "approve it.",
+    "terminology.livingMemory.styleRules.field.instruction": "Instruction",
+    "terminology.livingMemory.styleRules.field.instructionPlaceholder":
+      "Say what the translator must do…",
+    "terminology.livingMemory.styleRules.field.category": "Category",
+    "terminology.livingMemory.styleRules.field.conditions": "Conditions",
+    "terminology.livingMemory.styleRules.field.conditionsPlaceholder":
+      "When it applies, e.g. only in direct speech",
+    "terminology.livingMemory.styleRules.category.terminology": "Terminology rules",
+    "terminology.livingMemory.styleRules.category.register": "Register rules",
+    "terminology.livingMemory.styleRules.category.formatting": "Formatting rules",
+    "terminology.livingMemory.styleRules.category.grammar": "Grammar rules",
+    "terminology.livingMemory.styleRules.category.orthography": "Orthography rules",
+    "terminology.livingMemory.styleRules.category.style": "General style rules",
+    "terminology.livingMemory.styleRules.category.other": "Other rules",
+    "terminology.livingMemory.styleRules.scope.global": "Project-wide",
+    "terminology.livingMemory.styleRules.scope.genre": "Genre",
+    "terminology.livingMemory.styleRules.scope.document": "Document",
+    "terminology.livingMemory.styleRules.scope.section": "Chapter or section",
+    "terminology.livingMemory.styleRules.scope.passage": "Verse range",
+    "terminology.livingMemory.styleRules.scope.segment": "Segment",
+    "terminology.livingMemory.styleRules.target.book": "Scripture book",
+    "terminology.livingMemory.styleRules.relationship.applies": "Applies",
+    "terminology.livingMemory.styleRules.relationship.likelyApplies": "Likely applies",
+    "terminology.livingMemory.styleRules.relationship.excluded": "Excluded",
+    "terminology.livingMemory.styleRules.assignedBy.human": "Set by a person",
+    "terminology.livingMemory.styleRules.assignedBy.model": "Suggested by AI",
+    "terminology.livingMemory.styleRules.assignedBy.inherited": "Inherited",
+    "terminology.livingMemory.styleRules.library.heading": "Approved rules",
+    "terminology.livingMemory.styleRules.library.empty":
+      "No approved style rules yet. Extract them from a knowledge-base document, or " +
+      "approve one that is waiting for review.",
+    "terminology.livingMemory.styleRules.library.applicability": "Where it applies",
+    "terminology.livingMemory.styleRules.applicability.title": "Where this rule applies",
+    "terminology.livingMemory.styleRules.applicability.empty":
+      "This rule has no targets yet, so only project-wide rules stay active.",
+    "terminology.livingMemory.styleRules.applicability.removeAria": "Remove this target",
+    "terminology.livingMemory.styleRules.applicability.typeLabel": "Target type",
+    "terminology.livingMemory.styleRules.applicability.valueLabel": "Target value",
+    "terminology.livingMemory.styleRules.applicability.relationshipLabel": "Relationship",
+    "terminology.livingMemory.styleRules.applicability.hint.genre":
+      "A genre name, for example: poetry",
+    "terminology.livingMemory.styleRules.applicability.hint.book":
+      "A three-letter USFM book code, for example: PSA",
+    "terminology.livingMemory.styleRules.applicability.hint.file":
+      "A file id from this project's file list",
+    "terminology.livingMemory.styleRules.applicability.hint.section":
+      "A chapter label, for example: PSA 23",
+    "terminology.livingMemory.styleRules.applicability.hint.passage":
+      "A verse range inside one chapter, for example: LUK 1:1-4",
+    "terminology.livingMemory.styleRules.applicability.hint.segment":
+      "A single segment (cell) id",
+    "terminology.livingMemory.styleRules.extract.button": "Extract from knowledge base",
+    "terminology.livingMemory.styleRules.extract.title": "Extract style rules",
+    "terminology.livingMemory.styleRules.extract.description":
+      "Read one knowledge-base document section by section and propose the rules it " +
+      "states. Nothing reaches a draft until you approve it.",
+    "terminology.livingMemory.styleRules.extract.docLabel": "Knowledge document",
+    "terminology.livingMemory.styleRules.extract.noDocs":
+      "No indexed knowledge documents yet. Upload one from the Knowledge base section first.",
+    "terminology.livingMemory.styleRules.extract.start": "Start extraction",
+    "terminology.livingMemory.styleRules.extract.progress": "Section {current} of {total}",
+    "terminology.livingMemory.styleRules.extract.found": plural({
+      one: "{count} rule found",
+      other: "{count} rules found",
+    }),
+    "terminology.livingMemory.styleRules.extract.saved": plural({
+      one: "Added {count} proposed rule.",
+      other: "Added {count} proposed rules.",
+    }),
+    "terminology.livingMemory.styleRules.extract.none": "That document produced no rules.",
+    "terminology.livingMemory.styleRules.extract.needsModel":
+      "Set up an AI model for this project before extracting rules.",
+    "terminology.livingMemory.styleRules.extract.failed": "Extraction stopped: {message}",
 
     // ── TerminologyTermDetail.tsx ────────────────────────────────────────────
     "terminology.termDetail.closeAria": "Close detail",
@@ -647,6 +750,56 @@ export const terminology = defineNamespace({
           "Badge on the collapsed prediction-prompt row: the project overrides the " +
           "default prompt (adjective, one word). Paired with the 'Default' badge.",
         maxLength: 16,
+      },
+      "terminology.livingMemory.styleRules.loadError": {
+        description:
+          "Inline alert shown above the Style rules section when its library fetch " +
+          "fails; {message} is the underlying error's own text (not translated).",
+        placeholders: { message: "The underlying fetch error's message, verbatim." },
+      },
+      "terminology.livingMemory.styleRules.candidates.pendingCount": {
+        description:
+          "Badge beside the 'Proposed rules' heading counting the extracted style rules " +
+          "still awaiting a human verdict; {count} is that count.",
+        placeholders: { count: "Number of proposed style rules awaiting review." },
+      },
+      "terminology.livingMemory.styleRules.candidates.citation": {
+        description:
+          "Small caption under a proposed rule naming the knowledge-base document the " +
+          "rule was extracted from; {doc} is that document's own file name, verbatim.",
+        placeholders: { doc: "The knowledge document's own name, verbatim (not translated)." },
+      },
+      "terminology.livingMemory.styleRules.applicability.removeAria": {
+        description:
+          "Accessible name for the trash button that deletes one applicability row " +
+          "(one target a style rule is scoped to) in the 'Where this rule applies' dialog.",
+      },
+      "terminology.livingMemory.styleRules.extract.progress": {
+        description:
+          "Live progress line while extraction walks a knowledge document's sections; " +
+          "{current} is the 1-based section being read and {total} the section count.",
+        placeholders: {
+          current: "1-based index of the section currently being read.",
+          total: "Total number of sections in the chosen document.",
+        },
+      },
+      "terminology.livingMemory.styleRules.extract.found": {
+        description:
+          "Running tally beside the extraction progress line: how many candidate rules " +
+          "the pass has produced so far; {count} is that count.",
+        placeholders: { count: "Number of candidate rules found so far." },
+      },
+      "terminology.livingMemory.styleRules.extract.saved": {
+        description:
+          "Completion summary after extraction finishes, stating how many rules were " +
+          "added to the review queue; {count} is that count.",
+        placeholders: { count: "Number of rules added as proposed." },
+      },
+      "terminology.livingMemory.styleRules.extract.failed": {
+        description:
+          "Inline alert in the extraction dialog when the run stops on an error; " +
+          "{message} is the underlying error's own text (not translated).",
+        placeholders: { message: "The underlying error's message, verbatim." },
       },
       "terminology.common.occurrenceCount": {
         description:

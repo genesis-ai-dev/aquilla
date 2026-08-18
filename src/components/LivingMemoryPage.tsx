@@ -56,6 +56,7 @@ import { AuthoredEntriesSection } from "@/components/living-memory/AuthoredEntri
 import { RecentExamplesSection } from "@/components/living-memory/ExamplesSection"
 import { BriefPane } from "@/components/living-memory/BriefPane"
 import { PredictionPromptSection } from "@/components/living-memory/PredictionPromptSection"
+import { QualityStyleRules } from "@/components/living-memory/QualityStyleRules"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 // Pure entry helpers live in living-memory/entries.ts; re-exported so existing
@@ -384,6 +385,14 @@ export function LivingMemoryPage({
                   roleLevel={roleLevel}
                 />
               </section>
+            ) : null}
+            {projectId ? (
+              <QualityStyleRules
+                projectId={projectId}
+                roleLevel={entriesReady ? roleLevel : null}
+                completionSettings={completionSettings}
+                session={session ?? null}
+              />
             ) : null}
           </>
         )

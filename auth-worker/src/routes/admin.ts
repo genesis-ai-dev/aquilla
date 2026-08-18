@@ -12,7 +12,7 @@
 //   GET /overview              — top-line counts (orgs, users, projects, active-7d)
 //   GET /orgs                  — every org + owner + member/project counts
 //   GET /users                 — every user
-//   GET /projects              — every project + org/creator + cell/word rollup
+//   GET /projects              — every project + org/creator + cell/word rollup + shared flag
 //   GET /activity              — cross-tenant activity_logs feed (?limit, ?since)
 //   GET /credits/orgs          — all orgs with day/week credit spend + caps
 //   PATCH /credits/org/:orgId  — update per-org credit config (org_settings.credits)
@@ -380,7 +380,12 @@ admin.get("/users", async (c) => {
   })
 })
 
-/** GET /api/v2/admin/projects — every project with org/creator + rollup. */
+/** True when a PG boolean / 0-1 flag is on. */
+function asBool(value: boolean | number | null | undefined): boolean {
+  return value === true || value === 1
+}
+
+/** GET /api/v2/admin/projects — every project with org/creator + rollup + shared flag. */
 admin.get("/projects", async (c) => {
   const { results } = await c.env.AQUILLA_PG.prepare(
     `SELECT p.id, p.name, p.org_id, p.archived_at, p.created_at, p.deadline_at,
@@ -389,7 +394,28 @@ admin.get("/projects", async (c) => {
             COALESCE(SUM(f.cell_count), 0) AS total_cells,
             COALESCE(SUM(f.approved_count), 0) AS validated_cells,
             COALESCE(SUM(f.word_count), 0) AS word_count,
-            MAX(f.last_edit_at) AS last_edit_at
+            MAX(f.last_edit_at) AS last_edit_at,
+            (
+              EXISTS (
+                SELECT 1 FROM project_members pm
+                 WHERE pm.project_id = p.id
+                   AND p.org_id IS NOT NULL
+                   AND NOT EXISTS (
+                     SELECT 1 FROM org_members om
+                      WHERE om.org_id = p.org_id AND om.user_id = pm.user_id
+                   )
+              ) OR EXISTS (
+                SELECT 1
+                  FROM group_project_grants gpg
+                  JOIN group_members gm ON gm.group_id = gpg.group_id
+                 WHERE gpg.project_id = p.id
+                   AND p.org_id IS NOT NULL
+                   AND NOT EXISTS (
+                     SELECT 1 FROM org_members om
+                      WHERE om.org_id = p.org_id AND om.user_id = gm.user_id
+                   )
+              )
+            ) AS shared
        FROM projects p
        LEFT JOIN organizations o ON o.id = p.org_id
        LEFT JOIN users u ON u.id = p.created_by
@@ -409,6 +435,7 @@ admin.get("/projects", async (c) => {
     validated_cells: number
     word_count: number
     last_edit_at: number | null
+    shared: boolean | number | null
   }>()
   return c.json({
     projects: results.map((r) => ({
@@ -424,6 +451,7 @@ admin.get("/projects", async (c) => {
       validatedCells: r.validated_cells,
       wordCount: r.word_count,
       lastEditAt: r.last_edit_at,
+      shared: asBool(r.shared),
     })),
   })
 })

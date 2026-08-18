@@ -30,6 +30,7 @@ function proj(over: Partial<AdminProject>): AdminProject {
     validatedCells: 100,
     wordCount: 1000,
     lastEditAt: Date.now(),
+    shared: false,
     ...over,
   }
 }
@@ -199,5 +200,39 @@ describe("AdminProjectsSection", () => {
     expect(screen.getByText("No archived projects")).toBeInTheDocument()
     expect(screen.getByTestId("admin-projects-table")).toBeInTheDocument()
     expect(screen.queryByRole("table")).not.toBeInTheDocument()
+  })
+
+  it("shows a Shared badge only on guest-granted projects", () => {
+    render(
+      <MemoryRouter>
+        <AdminProjectsSection
+          projects={[
+            proj({ id: "own", name: "In Org" }),
+            proj({ id: "guest", name: "Guest Gospel", shared: true }),
+          ]}
+        />
+      </MemoryRouter>,
+    )
+    const sharedRow = screen.getByText("Guest Gospel").closest("tr")!
+    expect(within(sharedRow).getByTestId("project-shared-badge")).toHaveTextContent("Shared")
+    expect(within(sharedRow).getByTestId("project-shared-badge")).toHaveClass("bg-foreground/25")
+    const ownRow = screen.getByText("In Org").closest("tr")!
+    expect(within(ownRow).queryByTestId("project-shared-badge")).not.toBeInTheDocument()
+  })
+
+  it("finds shared projects by the Shared label", () => {
+    render(
+      <MemoryRouter>
+        <AdminProjectsSection
+          projects={[
+            proj({ id: "own", name: "In Org" }),
+            proj({ id: "guest", name: "Guest Gospel", shared: true }),
+          ]}
+        />
+      </MemoryRouter>,
+    )
+    fireEvent.change(screen.getByLabelText("Search projects…"), { target: { value: "shared" } })
+    expect(screen.getByText("Guest Gospel")).toBeInTheDocument()
+    expect(screen.queryByText("In Org")).not.toBeInTheDocument()
   })
 })

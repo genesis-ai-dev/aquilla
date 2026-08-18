@@ -20,7 +20,9 @@ import type { AdminProject } from "@/lib/frontier/admin"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { Badge } from "@/components/ui/badge"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 type Lens = "all" | "needs-attention" | "active" | "archived"
 const LENSES: { value: Lens; label: string }[] = [
@@ -37,6 +39,7 @@ const LENSES: { value: Lens; label: string }[] = [
  * flat table into something an operator can triage from.
  */
 export function AdminProjectsSection({ projects }: { projects: AdminProject[] }) {
+  const t = useT()
   const navigate = useNavigate()
   const [now] = useState(() => Date.now())
   const [lens, setLens] = useState<Lens>("all")
@@ -62,8 +65,15 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
         cell: ({ row }) => {
           const p = row.original
           return (
-            <span className={p.archived ? "text-muted-foreground" : "font-medium text-foreground"}>
-              {p.name}
+            <span className="flex min-w-0 items-center gap-2">
+              <span className={p.archived ? "text-muted-foreground" : "font-medium text-foreground"}>
+                {p.name}
+              </span>
+              {p.shared && (
+                <Badge variant="soft" className="shrink-0" data-testid="project-shared-badge">
+                  {t("org.orgHome.statusFilter.shared")}
+                </Badge>
+              )}
             </span>
           )
         },
@@ -140,7 +150,7 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
         },
       },
     ],
-    [now],
+    [now, t],
   )
 
   const emptyCopy = useMemo(() => {
@@ -201,7 +211,7 @@ export function AdminProjectsSection({ projects }: { projects: AdminProject[] })
         const q = String(filterValue).trim().toLowerCase()
         if (!q) return true
         const p = row.original
-        return `${p.name} ${p.orgName ?? ""} ${p.creatorUsername ?? ""}`
+        return `${p.name} ${p.orgName ?? ""} ${p.creatorUsername ?? ""} ${p.shared ? "shared" : ""}`
           .toLowerCase()
           .includes(q)
       }}

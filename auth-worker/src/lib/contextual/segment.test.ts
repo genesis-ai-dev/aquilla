@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest"
-import { deriveSpanSeeds } from "./segment"
+import { coalesceRuns, deriveSpanSeeds, MAX_FIXED_SIZE, MIN_FIXED_SIZE } from "./segment"
 import { pair } from "./test-helpers"
+
+/** Span sizes in cell counts, in order — the property every branch must hold. */
+function sizes(seeds: { startCellId: string; endCellId: string }[], pairs: { cellId: string }[]): number[] {
+  return seeds.map(
+    (s) =>
+      pairs.findIndex((p) => p.cellId === s.endCellId) -
+      pairs.findIndex((p) => p.cellId === s.startCellId) +
+      1,
+  )
+}
 
 describe("deriveSpanSeeds", () => {
   it("splits scripture-style pairs on canonical_ref chapter transitions", () => {
@@ -52,14 +62,68 @@ describe("deriveSpanSeeds", () => {
   })
 
   it("uses paragraph boundaries when there are no refs but paragraph starts are provided", () => {
-    const pairs = Array.from({ length: 6 }, (_, i) => pair(`p${i + 1}`))
-    const seeds = deriveSpanSeeds("f1", pairs, { paragraphStartCellIds: ["p3", "p5"] })
+    // Three 5-cell paragraphs: the first two merge (10 ≤ 12), the third would
+    // overflow, so it starts a new span — on a real paragraph edge.
+    const pairs = Array.from({ length: 15 }, (_, i) => pair(`p${i + 1}`))
+    const seeds = deriveSpanSeeds("f1", pairs, { paragraphStartCellIds: ["p6", "p11"] })
     expect(seeds.map((s) => [s.startCellId, s.endCellId])).toEqual([
-      ["p1", "p2"],
-      ["p3", "p4"],
-      ["p5", "p6"],
+      ["p1", "p10"],
+      ["p11", "p15"],
     ])
     expect(seeds.every((s) => s.seedSource === "paragraph")).toBe(true)
+  })
+
+  it("coalesces short paragraphs instead of making a span out of each one", () => {
+    // Six 2-cell paragraphs. Un-merged this is six spans, each paying a full
+    // construe → summarize → draft → verify pipeline for two sentences.
+    const pairs = Array.from({ length: 12 }, (_, i) => pair(`p${i + 1}`))
+    const seeds = deriveSpanSeeds("f1", pairs, {
+      paragraphStartCellIds: ["p3", "p5", "p7", "p9", "p11"],
+    })
+    expect(seeds).toHaveLength(1)
+    expect(seeds[0]).toMatchObject({ startCellId: "p1", endCellId: "p12", seedSource: "paragraph" })
+  })
+
+  it("never splits a paragraph across spans, and subdivides one that is too long", () => {
+    const pairs = Array.from({ length: 40 }, (_, i) => pair(`p${i + 1}`))
+    // p1..p4 (short), then one 36-cell paragraph.
+    const seeds = deriveSpanSeeds("f1", pairs, { paragraphStartCellIds: ["p5"] })
+    expect(seeds[0]).toMatchObject({ startCellId: "p1", endCellId: "p4" })
+    // The oversized paragraph is subdivided; its continuation pieces are chunks.
+    expect(seeds.slice(1).map((s) => s.seedSource)).toEqual(
+      expect.arrayContaining(["chunk"]),
+    )
+    for (const size of sizes(seeds, pairs)) expect(size).toBeLessThanOrEqual(12)
+    expect(seeds[seeds.length - 1].endCellId).toBe("p40")
+  })
+
+  it("paragraph spans cover the file exactly once, in order", () => {
+    const pairs = Array.from({ length: 37 }, (_, i) => pair(`p${i + 1}`))
+    const starts = ["p4", "p9", "p11", "p20", "p21", "p33"]
+    const seeds = deriveSpanSeeds("f1", pairs, { paragraphStartCellIds: starts })
+    expect(sizes(seeds, pairs).reduce((a, b) => a + b, 0)).toBe(37)
+    expect(seeds[0].startCellId).toBe("p1")
+    expect(seeds[seeds.length - 1].endCellId).toBe("p37")
+    // Every boundary lands on a paragraph start (or the file start).
+    for (const seed of seeds.slice(1)) expect(starts).toContain(seed.startCellId)
+  })
+
+  it("canonical-ref chapters are NOT coalesced — a chapter edge is a real boundary", () => {
+    const pairs = [
+      ...[1, 2, 3].map((v) => pair(`a${v}`, { canonicalRef: `2JN 1:${v}` })),
+      ...[1, 2].map((v) => pair(`b${v}`, { canonicalRef: `2JN 2:${v}` })),
+    ]
+    const seeds = deriveSpanSeeds("f1", pairs)
+    expect(seeds).toHaveLength(2) // 3 + 2 = 5 ≤ 12, and still not merged
+  })
+
+  it("paragraph starts are ignored when the file carries canonical refs", () => {
+    const pairs = [
+      ...[1, 2, 3].map((v) => pair(`a${v}`, { canonicalRef: `MRK 1:${v}` })),
+      ...[1, 2].map((v) => pair(`b${v}`, { canonicalRef: `MRK 2:${v}` })),
+    ]
+    const seeds = deriveSpanSeeds("f1", pairs, { paragraphStartCellIds: ["a2", "b2"] })
+    expect(seeds.every((s) => s.seedSource === "canonical-ref")).toBe(true)
   })
 
   it("falls back to fixed-size chunks (8-12 cells) for unstructured cells", () => {
@@ -78,5 +142,60 @@ describe("deriveSpanSeeds", () => {
 
   it("returns no seeds for an empty file", () => {
     expect(deriveSpanSeeds("f1", [])).toEqual([])
+    expect(deriveSpanSeeds("f1", [], { fixedSize: 5 })).toEqual([])
+  })
+})
+
+describe("deriveSpanSeeds — fixedSize override", () => {
+  const pairs = Array.from({ length: 25 }, (_, i) => pair(`c${i + 1}`, { canonicalRef: `MRK 4:${i + 1}` }))
+
+  it("overrides derived structure, including canonical refs", () => {
+    const seeds = deriveSpanSeeds("f1", pairs, { fixedSize: 5 })
+    expect(seeds).toHaveLength(5)
+    expect(sizes(seeds, pairs)).toEqual([5, 5, 5, 5, 5])
+    expect(seeds.every((s) => s.seedSource === "chunk")).toBe(true)
+  })
+
+  it("leaves a short remainder as its own span rather than dropping it", () => {
+    const seeds = deriveSpanSeeds("f1", pairs, { fixedSize: 10 })
+    expect(sizes(seeds, pairs)).toEqual([10, 10, 5])
+    expect(seeds[seeds.length - 1].endCellId).toBe("c25")
+  })
+
+  it("clamps out-of-range and fractional sizes instead of failing", () => {
+    expect(sizes(deriveSpanSeeds("f1", pairs, { fixedSize: 0 }), pairs).every((n) => n <= MIN_FIXED_SIZE)).toBe(true)
+    expect(deriveSpanSeeds("f1", pairs, { fixedSize: 999 })).toHaveLength(1)
+    expect(MAX_FIXED_SIZE).toBeGreaterThan(MIN_FIXED_SIZE)
+    expect(sizes(deriveSpanSeeds("f1", pairs, { fixedSize: 5.9 }), pairs)).toEqual([5, 5, 5, 5, 5])
+  })
+
+  it("wins over paragraph starts too", () => {
+    const prose = Array.from({ length: 9 }, (_, i) => pair(`p${i + 1}`))
+    const seeds = deriveSpanSeeds("f1", prose, {
+      paragraphStartCellIds: ["p4", "p7"],
+      fixedSize: 3,
+    })
+    expect(seeds.map((s) => s.seedSource)).toEqual(["chunk", "chunk", "chunk"])
+  })
+})
+
+describe("coalesceRuns", () => {
+  const run = (n: number, prefix: string) => Array.from({ length: n }, (_, i) => pair(`${prefix}${i}`))
+
+  it("merges consecutive runs up to the cap", () => {
+    expect(coalesceRuns([run(2, "a"), run(3, "b"), run(4, "c")], 12).map((r) => r.length)).toEqual([9])
+  })
+
+  it("starts a new group rather than exceeding the cap", () => {
+    expect(coalesceRuns([run(7, "a"), run(7, "b")], 12).map((r) => r.length)).toEqual([7, 7])
+  })
+
+  it("passes an oversized run through untouched for subdivision", () => {
+    expect(coalesceRuns([run(30, "a"), run(2, "b")], 12).map((r) => r.length)).toEqual([30, 2])
+  })
+
+  it("drops empty runs and handles an empty input", () => {
+    expect(coalesceRuns([], 12)).toEqual([])
+    expect(coalesceRuns([[], run(3, "a"), []], 12).map((r) => r.length)).toEqual([3])
   })
 })

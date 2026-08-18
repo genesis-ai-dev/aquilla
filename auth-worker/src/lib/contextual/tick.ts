@@ -573,6 +573,41 @@ async function loadNeighborBriefs(
   }
 }
 
+/**
+ * Cell ids the importer flagged as paragraph starts.
+ *
+ * Parsers record `paragraphStart` on the first cell of every prose paragraph
+ * (docx.ts, markdown.ts, the Paratext path), `src/lib/import.ts` folds it into
+ * the create event's metadata, and the projection lands it in
+ * `cells.metadata`. Nothing server-side read it until now, so `deriveSpanSeeds`
+ * was called with no options and its paragraph branch was unreachable: every
+ * non-Scripture discourse file — docx, epub, markdown, subtitles — was cut
+ * into fixed 10-cell chunks that ignore where the prose actually breaks.
+ *
+ * Degrades to [] on any error. Segmentation is a heuristic; failing to read a
+ * heuristic's input must never fail the run that depends on it.
+ */
+async function loadParagraphStarts(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+): Promise<string[]> {
+  try {
+    const { results } = await db
+      .prepare(
+        `SELECT cell_id FROM cells
+          WHERE project_id = ? AND file_id = ? AND side = 'source' AND target_lang = ''
+            AND metadata ->> 'paragraphStart' = 'true'`,
+      )
+      .bind(projectId, fileId)
+      .all<{ cell_id: string }>()
+    return (results ?? []).map((r) => r.cell_id)
+  } catch (err) {
+    console.error("[contextual] failed to read paragraph starts (falling back):", err)
+    return []
+  }
+}
+
 function validatedExamples(pairs: CellPair[]): ExamplePair[] {
   return pairs
     .filter((p) => p.validated && p.target.trim())
@@ -1023,8 +1058,18 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
   let cursor = run.spanCursor
   if (!cursor) {
     // First wave: derive the segmentation, then rotate it so work starts where
-    // the user was last looking (run.anchorCellId, set at start).
-    const seeds = orderSeedsFromAnchor(deriveSpanSeeds(run.fileId, pairs), run.anchorCellId, pairs)
+    // the user was last looking (run.anchorCellId, set at start). Paragraph
+    // starts are read once here, not per wave — the cursor is derived once.
+    const paragraphStartCellIds = await loadParagraphStarts(db, run.projectId, run.fileId)
+    const seeds = orderSeedsFromAnchor(
+      deriveSpanSeeds(
+        run.fileId,
+        pairs,
+        paragraphStartCellIds.length > 0 ? { paragraphStartCellIds } : undefined,
+      ),
+      run.anchorCellId,
+      pairs,
+    )
     cursor = { seeds, nextIndex: 0 }
     const updated = await setSpanCursor(db, runId, cursor)
     if (updated) await notify(runStateFrame(updated))

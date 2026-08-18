@@ -81,6 +81,7 @@ by `lintTerminology`. The decision is made once by a human and never re-asked.
 | **G2** | `summarize` — compress a construal to ≤1600 chars — runs at `fast` tier, i.e. on the frontier model. One call per span. Textbook small-model work. | `lib/contextual/summarize.ts` | Falls out of G1. |
 | **G3** | **Vacuous deep-tier calls.** `verify_ambiguity` is `tier: "deep"`, mandatory, and barrier-required. When the ambiguity register is *empty* it is asked to find violations of an empty list — there is nothing it can find. On a clean span that is a 25-weight call whose answer is structurally predetermined. | `lib/contextual/verify.ts:22-36`, `pipeline.ts` barrier | Route the empty-register case to `fast`, or answer it in code. Guarantee-affecting — needs a product call, so **not implemented here**. |
 | **G4** | `exampleCoverage` is not a support signal. `min(validated examples / 10, 1)` measures how many validated pairs the **file** has — it never looks at the draft. It was the router's only retrieval-quality input. | `pipeline.ts:238` | **Implemented** — see below. |
+| **G4b** | **The paragraph branch of `deriveSpanSeeds` was unreachable.** `tick.ts` called it with no options, so its `paragraphStartCellIds` input was never supplied and every non-Scripture discourse file — docx, epub, markdown, subtitles — was cut into fixed 10-cell chunks. The importer had recorded every paragraph start in `cells.metadata` all along. | `lib/contextual/tick.ts:1063`, `lib/contextual/segment.ts` | **Fixed** — the tick now reads them, and short paragraphs coalesce to the design's 8–12 band instead of becoming one span each. |
 | **G5** | **Autopilot retrieval is unranked.** `validatedExamples()` takes the *first 10 validated pairs in the file*, in file order, ignoring the span's source text — while the agent's `examples` tool does proper FTS ranking against the same database. The more expensive surface gets the worse retrieval. | `lib/contextual/tick.ts:576` vs `lib/agent/tools/examples.ts` | Reuse the FTS query. Pure code, no model cost, and it directly improves G4's signal. |
 | **G6** | **Import classification runs on the frontier default.** Pick one of six categories plus a declarative recipe from a file sample. The repo already has the precedent one directory over: `knowledge/index-doc.ts` defaults to `anthropic/claude-haiku-4-5`. | `routes/import-classify.ts:131` | Give it its own `IMPORT_CLASSIFY_MODEL`, defaulting small. |
 | **G7** | **One model for every agent round.** `runAgentLoop` runs up to 30 rounds on `agentModel`; only `draft` gets a separate `draftModel`. Read-shaped rounds (`read`/`examples`/`search`/`docs`/`aquifer`) are free in the *iteration* budget but each still costs a full frontier round-trip whose only job is choosing the next tool. Measured: **~41:1 input:output, ~10,500 input tokens per turn** (`docs/COST-METERING.md`). | `routes/agent.ts:81-83, 618+` | Two levers, in order: prompt caching on the fixed prefix (~15 tool schemas re-sent every turn), then a cheaper orchestrator with `draftModel` kept strong. |
@@ -144,6 +145,39 @@ itself if it prevents one escalation in thirty.
 Files: `support.ts` (new), `router.ts` (consumes the signal), `pipeline.ts`
 (node placement, after lint, before route), `scripts/mock-openrouter.ts`
 (`[[ctx:support]]` branch).
+
+---
+
+## Also landed: paragraph-aligned span seeds (G4b)
+
+`segment.ts` documents a three-way priority — canonical refs, then paragraph
+starts, then fixed chunks — but the middle branch had no caller. `tick.ts`
+invoked `deriveSpanSeeds(run.fileId, pairs)` with no options, so
+`paragraphStartCellIds` was always empty and prose files fell straight through
+to 10-cell chunks that ignore where the text actually breaks.
+
+The data was already there: `docx.ts` and `markdown.ts` set `paragraphStart` on
+the first cell of every paragraph, `src/lib/import.ts` folds it into the create
+event's metadata, and the projection lands it in `cells.metadata`. The tick now
+reads it with one query, on the first wave only (the cursor is derived once).
+
+Subdivision alone was half a policy. It caps a run that is too big but does
+nothing about runs that are too small, and a prose paragraph is one to three
+cells — so honouring paragraph marks naively would have made a span per
+paragraph and paid a whole construe → summarize → draft → verify pipeline for
+two sentences, strictly worse than the chunking it replaces. `coalesceRuns`
+merges consecutive paragraphs up to the 12-cell cap without ever splitting one,
+so spans stay in the design's band while every boundary lands on a real edge.
+
+Canonical-ref files are deliberately unchanged: chapter runs are already
+chapter-sized, and a chapter boundary is a navigation unit a translator
+recognizes, so merging across one would trade a real edge for a marginal
+saving.
+
+`SegmentOptions.fixedSize` is also in place — a clamped "just cut it every N
+cells" override that wins over all derived structure. It has no caller yet; it
+is the server-side primitive behind the planned re-segment affordance, so that
+work is a route plus UI rather than a route plus UI plus a core change.
 
 ---
 

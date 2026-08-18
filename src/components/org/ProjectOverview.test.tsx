@@ -273,6 +273,63 @@ describe("deriveProjectStatus", () => {
   })
 })
 
+function portfolioWithDeadline(deadlineAt: string): PortfolioProject {
+  return {
+    id: "p1",
+    name: "John",
+    totalCells: 10,
+    filledCells: 1,
+    validatedCells: 0,
+    aiDraftedCells: 0,
+    audioCells: 0,
+    validatedAudioCells: 0,
+    recordedMs: 0,
+    lastEditAt: null,
+    deadlineAt,
+    sourceLanguage: null,
+    targetLanguage: null,
+  }
+}
+
+describe("ProjectOverview status chip placement", () => {
+  beforeEach(() => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 600 }),
+      status: "ready",
+      refresh,
+    })
+  })
+
+  it("shows On track only next to the title, not next to the deadline", async () => {
+    _deadlineStatusResult = "ok"
+    getPortfolio.mockResolvedValue([portfolioWithDeadline("2033-12-31")])
+    renderOverview()
+
+    await screen.findByText("2033-12-31")
+    expect(screen.getAllByText("On track")).toHaveLength(1)
+    expect(
+      within(screen.getByRole("heading", { name: "John" }).parentElement!).getByText("On track"),
+    ).toBeInTheDocument()
+    expect(within(screen.getByTestId("overview-project-meta")).queryByText("On track")).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ["overdue", "Overdue"],
+    ["soon", "Due soon"],
+  ] as const)("shows %s only next to the deadline, not next to the title", async (status, label) => {
+    _deadlineStatusResult = status
+    getPortfolio.mockResolvedValue([portfolioWithDeadline("2026-07-01")])
+    renderOverview()
+
+    await screen.findByText("2026-07-01")
+    expect(screen.getAllByText(label)).toHaveLength(1)
+    expect(
+      within(screen.getByRole("heading", { name: "John" }).parentElement!).queryByText(label),
+    ).not.toBeInTheDocument()
+    expect(within(screen.getByTestId("overview-project-meta")).getByText(label)).toBeInTheDocument()
+  })
+})
+
 describe("ProjectOverview load states", () => {
   it("shows explicit progress over the project-shaped template while details load", () => {
     useProject.mockReturnValue({

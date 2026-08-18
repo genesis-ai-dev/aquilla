@@ -209,7 +209,7 @@ function StatusChip({ status }: { status: ProjectStatus }) {
 // ── Deadline chip ─────────────────────────────────────────────────────────────
 
 function DeadlineChip({ status }: { status: "overdue" | "soon" | "ok" | null }) {
-  if (status === "ok") return <ProjectStatusChip kind="on-track" />
+  // On-track lives only next to the title — avoid duplicating it on the deadline.
   return <ProjectDeadlineStatuses deadline={status} testId="status-chip" />
 }
 

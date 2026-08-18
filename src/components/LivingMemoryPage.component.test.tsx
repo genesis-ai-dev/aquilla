@@ -98,6 +98,14 @@ vi.mock("@/components/ProjectSettings/RulesSection", () => ({
   ),
 }))
 
+// Same for the style-rule library section — it owns its own useStyleRules
+// fetch; its behaviour is covered by living-memory/QualityStyleRules.test.tsx.
+vi.mock("@/components/living-memory/QualityStyleRules", () => ({
+  QualityStyleRules: ({ projectId }: { projectId: string }) => (
+    <div data-testid="quality-style-rules" data-project-id={projectId} />
+  ),
+}))
+
 import { useProject } from "@/hooks/useProject"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { useLivingMemory } from "@/hooks/useLivingMemory"
@@ -330,6 +338,7 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
     ).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: "Rules" })).toBeInTheDocument()
     expect(screen.getByTestId("rules-settings-section")).toBeInTheDocument()
+    expect(screen.getByTestId("quality-style-rules")).toBeInTheDocument()
   })
 })
 

@@ -323,6 +323,37 @@ describe("GET /api/v2/changesets/:id/approval", () => {
     const body = (await res.json()) as { error: { code: string } }
     expect(body.error.code).toBe("permission_denied")
   })
+
+  it("403s and hides cell content when the owning user is no longer a project member", async () => {
+    // Alice owns/created the project; Mallory staged the changeset from a
+    // credential while she still had project access, but has since been
+    // removed (no project_members row, no group/org grant, not the project
+    // creator). created_by_user_id alone must not resurrect access to the
+    // project's cell content.
+    await seedUser(1, "alice")
+    await seedUser(2, "mallory")
+    await seedProject("proj-1", "Blackfoot", 1)
+    const credId = await seedCredential(2)
+    await seedFile("proj-1", "file-1", "Genesis")
+    await seedCell({ projectId: "proj-1", fileId: "file-1", cellId: "c-a", side: "source", value: "Secret source text" })
+    await seedChangeset({
+      id: "cs-1",
+      projectId: "proj-1",
+      createdByUserId: 2,
+      credentialId: credId,
+      commands: [{ kind: "SetTranslation", fileId: "file-1", cellId: "c-a", value: "Secret translation" }],
+    })
+
+    const res = await app.request(
+      "/api/v2/changesets/cs-1/approval",
+      { method: "GET", headers: authHeader(await jwtFor("mallory")) },
+      env,
+    )
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { error: { code: string } }
+    expect(body.error.code).toBe("permission_denied")
+    expect(JSON.stringify(body)).not.toMatch(/Secret/)
+  })
 })
 
 describe("POST /api/v2/changesets/:id/approve", () => {
@@ -385,6 +416,34 @@ describe("POST /api/v2/changesets/:id/approve", () => {
     expect(res.status).toBe(403)
     const body = (await res.json()) as { error: { code: string } }
     expect(body.error.code).toBe("permission_denied")
+  })
+
+  it("403s when the owning user is no longer a project member", async () => {
+    await seedUser(1, "alice")
+    await seedUser(2, "mallory")
+    await seedProject("proj-1", "Blackfoot", 1)
+    const credId = await seedCredential(2)
+    await seedChangeset({ id: "cs-1", projectId: "proj-1", createdByUserId: 2, credentialId: credId })
+
+    const res = await app.request(
+      "/api/v2/changesets/cs-1/approve",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("mallory")),
+        body: JSON.stringify({ digest: DEFAULT_DIGEST }),
+      },
+      env,
+    )
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { error: { code: string } }
+    expect(body.error.code).toBe("permission_denied")
+
+    const count = await env.AQUILLA_PG.prepare(
+      "SELECT COUNT(*)::int AS n FROM changeset_confirmations WHERE changeset_id = ?",
+    )
+      .bind("cs-1")
+      .first<{ n: number }>()
+    expect(count?.n).toBe(0)
   })
 
   it("409s on digest mismatch", async () => {
@@ -532,6 +591,28 @@ describe("POST /api/v2/changesets/:id/reject", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as { status: string }
     expect(body.status).toBe("discarded")
+  })
+
+  it("403s when the owning user is no longer a project member", async () => {
+    await seedUser(1, "alice")
+    await seedUser(2, "mallory")
+    await seedProject("proj-1", "Blackfoot", 1)
+    const credId = await seedCredential(2)
+    await seedChangeset({ id: "cs-1", projectId: "proj-1", createdByUserId: 2, credentialId: credId })
+
+    const res = await app.request(
+      "/api/v2/changesets/cs-1/reject",
+      { method: "POST", headers: authHeader(await jwtFor("mallory")) },
+      env,
+    )
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { error: { code: string } }
+    expect(body.error.code).toBe("permission_denied")
+
+    const row = await env.AQUILLA_PG.prepare("SELECT status FROM changesets WHERE id = ?")
+      .bind("cs-1")
+      .first<{ status: string }>()
+    expect(row?.status).toBe("staged")
   })
 
   it("409s when the changeset is already committed", async () => {

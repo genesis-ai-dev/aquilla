@@ -30,6 +30,9 @@ import { effectiveSourceText } from "@/lib/cell-text"
 import type { DirectionMode, TextDirection } from "@/lib/text-direction"
 import { cellIdAtSec } from "@/lib/timeline/source-regions"
 import {
+  getVideoBuffering,
+  getVideoClockPlaying,
+  getVideoClockSec,
   setVideoBuffering,
   setVideoRate,
   setVideoSoundingCellId,
@@ -37,7 +40,15 @@ import {
   useVideoSoundingCellId,
 } from "@/lib/timeline/video-clock"
 import { clearVideoControllerIf, setVideoController, type VideoController } from "@/lib/timeline/video-controller"
+import { useHlsVideo } from "@/hooks/useHlsVideo"
 import { videoSyncAction } from "./video-sync"
+import {
+  forgetStallSample,
+  IDLE_STALL_STATE,
+  stallStep,
+  STALL_TICK_MS,
+  type StallState,
+} from "./video-stall"
 import { DEFAULT_VIDEO_ASPECT, fitPictureRect, intrinsicAspect } from "./video-frame"
 import { VideoPaneHeader } from "./VideoPaneHeader"
 import { VideoPaneErrorCard } from "./VideoPaneErrorCard"
@@ -68,6 +79,9 @@ const VIDEO_READY_STATE = 3
  *  an ordinary seek into an unbuffered range over a slow link, short enough
  *  that a stream which will never report ready is not a dead button. */
 const VIDEO_READY_TIMEOUT_MS = 4000
+
+/** The stall watchdog's grace, its ladder and its arithmetic all live in
+ *  `./video-stall`; only the sampling interval is needed here. */
 
 export interface MediaVideoPaneProps {
   src: string
@@ -139,8 +153,20 @@ export function MediaVideoPane({
   /** Bumped by loadedmetadata/durationchange: the media load algorithm resets
    *  playbackRate when the source changes, so rate has to be re-applied. */
   const [mediaEpoch, setMediaEpoch] = useState(0)
-  /** Bumped by "Try again" so the element is rebuilt against the same URL. */
+  /** Bumped by "Try again", and by the stall ladder's last rung, so the element
+   *  is rebuilt against the same URL. */
   const [loadAttempt, setLoadAttempt] = useState(0)
+  /**
+   * The player. These films are HLS playlists rather than files, which only
+   * Safari can open on its own — so without this the picture, and the
+   * recorder's film beside it, simply do not exist in Chrome, Edge or Firefox.
+   * It also puts a ceiling on how large a rendition we ask a machine to decode,
+   * which is the likeliest cure for the freeze the watchdog below exists to
+   * survive. An ordinary file or a recording goes on being handled by the
+   * browser, and `pipeline` says which is driving.
+   */
+  const stream = useHlsVideo(videoRef, src, { attachKey: loadAttempt })
+  const pipeline = stream.pipeline
   /** The caption toggle rides faded on the picture; this shows it briefly when
    *  playback starts so the control is discoverable without hovering. */
   const [modeRevealed, setModeRevealed] = useState(false)
@@ -377,6 +403,134 @@ export function MediaVideoPane({
     [requestPlay, cancelPendingPlay],
   )
 
+  /**
+   * A STALL IS NOT A PAUSE, and the element will not tell us which it is.
+   * (Sam, 2026-08-18, twice a round apart: "it buffers, then 'plays' for half a
+   * second, then gets stuck again but the button still indicates that it is
+   * playing.")
+   *
+   * The first attempt at this listened for `waiting` and `stalled`. Safari does
+   * not fire either for the wedge Sam hits — it keeps `paused === false`, keeps
+   * reporting a healthy `readyState`, and simply stops producing frames — so
+   * nothing here ever ran, and the one guard that did exist asked the wedged
+   * element whether it was wedged and believed the answer.
+   *
+   * The clock is the only honest witness, so this samples it once a second and
+   * `./video-stall` decides. Two things follow, and both were broken before:
+   *
+   * FIRST, SAY SO. `selectTransportForFile` suppresses the loading spinner
+   * while anything reports playback (a film rebuffering mid-play is its own
+   * business), and nothing ever cleared `playing`, because clearing it is what
+   * a `pause` event does. So the button could not have shown a spinner however
+   * well we detected the stall. A stalled picture is NOT playing; saying that
+   * is both true and what turns the lie into a spinner.
+   *
+   * SECOND, CLIMB. Each rung is a different attempt, not the same one louder:
+   * re-fetch where we are; ask the player to rebuild its decoder; then throw
+   * the element away and, where the streaming player was driving, hand the
+   * address to the browser instead — the one remaining thing that is genuinely
+   * a different decoder. Then stop, and offer the click that does work.
+   */
+  const stallRef = useRef<StallState>(IDLE_STALL_STATE)
+  /** Where to put the picture back after a reload or a rebuild. */
+  const resumeAtRef = useRef<number | null>(null)
+  /** Props reached from inside the interval, which must not re-arm on every
+   *  render a caller passes a fresh arrow. */
+  const onVideoPlayingRef = useRef(onVideoPlaying)
+  useEffect(() => {
+    onVideoPlayingRef.current = onVideoPlaying
+  }, [onVideoPlaying])
+  const streamRef = useRef(stream)
+  useEffect(() => {
+    streamRef.current = stream
+  })
+
+  useEffect(() => {
+    // Slaved, the queue re-issues play and corrective seeks every tick, which
+    // is its own watchdog — and a second one would fight it.
+    if (slaved) {
+      stallRef.current = IDLE_STALL_STATE
+      return
+    }
+    const id = window.setInterval(() => {
+      const video = videoRef.current
+      if (!video) return
+      const step = stallStep(stallRef.current, {
+        sec: video.currentTime,
+        // What the TRANSPORT wants. The element's own flag is the thing that
+        // lies here.
+        wantPlay: wantPlayRef.current,
+        paused: video.paused,
+        ended: video.ended,
+        seeking: video.seeking,
+        pendingPlay: pendingPlayRef.current != null,
+      })
+      stallRef.current = step.state
+      const action = step.action
+      if (action.kind === "none") return
+
+      if (action.kind === "recovered") {
+        setVideoBuffering(false)
+        onVideoPlayingRef.current?.(true)
+        return
+      }
+
+      if (action.kind === "giveUp") {
+        setVideoBuffering(false)
+        wantPlayRef.current = false
+        onVideoPlayingRef.current?.(false)
+        // Stop the element too, so its own flag agrees with the intent we just
+        // abandoned. A wedged picture that unwedges itself an hour later must
+        // not start playing at a user who has long since moved on.
+        video.pause()
+        setNeedsGesture(true)
+        return
+      }
+
+      // A rung. Whatever we are about to try, stop claiming playback first.
+      setVideoBuffering(true)
+      onVideoPlayingRef.current?.(false)
+      const stream = streamRef.current
+      const at = video.currentTime
+
+      if (action.rung === "nudge") {
+        // Same position, fresh fetch — the standard way to make a stalled
+        // stream re-request. `restartLoad` is a no-op on the native path.
+        stream.restartLoad()
+        try {
+          video.currentTime = at
+        } catch {
+          /* not seekable yet */
+        }
+        void video.play().catch(() => {})
+        return
+      }
+
+      if (action.rung === "recover") {
+        if (stream.pipeline === "hls") {
+          stream.recoverMedia()
+          void video.play().catch(() => {})
+        } else {
+          // The native equivalent: re-open the source, and put the picture back
+          // where it was once the element reports its shape.
+          resumeAtRef.current = at
+          stallRef.current = forgetStallSample(stallRef.current)
+          video.load()
+        }
+        return
+      }
+
+      // Rebuild: a different element, and where the streaming player was
+      // driving, a different player too. Both rungs above reused the same
+      // decoder, which for this wedge is the thing that is broken.
+      resumeAtRef.current = at
+      stallRef.current = forgetStallSample(stallRef.current)
+      if (stream.pipeline === "hls") stream.fallbackToNative()
+      setLoadAttempt((n) => n + 1)
+    }, STALL_TICK_MS)
+    return () => window.clearInterval(id)
+  }, [slaved])
+
   // Handing the transport to the queue abandons any start we were waiting for.
   //
   // Deliberately its own effect keyed on `slaved` alone, rather than folded
@@ -462,6 +616,10 @@ export function MediaVideoPane({
       video.currentTime = sec
       lastSeekAtRef.current = Date.now()
       prevTickRef.current = null
+      // The clock is about to jump, and a jump BACKWARDS looks exactly like a
+      // frozen one to the watchdog. Drop its baseline rather than let a scrub
+      // raise a spinner over a film that is fine.
+      stallRef.current = forgetStallSample(stallRef.current)
     } catch {
       /* not seekable yet */
     }
@@ -484,10 +642,12 @@ export function MediaVideoPane({
         const video = videoRef.current
         if (!video) return
         wantPlayRef.current = true
+        stallRef.current = IDLE_STALL_STATE
         requestPlayWhenReady(video)
       },
       pause: () => {
         wantPlayRef.current = false
+        stallRef.current = IDLE_STALL_STATE
         // Also abandons a readiness wait: a press during the spinner has to
         // mean "stop waiting", or the only way out of it is to sit through it.
         cancelPendingPlay()
@@ -504,6 +664,7 @@ export function MediaVideoPane({
           // arrangement's seek-storm guard had a blind spot on bar scrubs.
           lastSeekAtRef.current = Date.now()
           prevTickRef.current = null
+          stallRef.current = forgetStallSample(stallRef.current)
         } catch {
           /* not seekable yet */
         }
@@ -540,11 +701,23 @@ export function MediaVideoPane({
       cancelPendingPlay()
       return
     }
-    if (video.paused) {
+    // INTENT, NOT THE ELEMENT'S FLAG. A stalled picture has `paused === false`
+    // while sounding and showing nothing, so branching on it made the next
+    // press PAUSE a thing that was not playing — and the press after that play
+    // for another half second. What the transport wants is the honest question.
+    if (!wantPlayRef.current || video.paused) {
       wantPlayRef.current = true
+      // A press is a fresh start, so it is also a fresh ladder — including for
+      // a picture that had run out of attempts.
+      stallRef.current = IDLE_STALL_STATE
       requestPlayWhenReady(video)
     } else {
       wantPlayRef.current = false
+      // Stop waiting AND stop saying we are waiting — a stall reported through
+      // `setVideoBuffering` has no pending-play object for `cancelPendingPlay`
+      // to find, so the spinner would outlive the press that dismissed it.
+      stallRef.current = IDLE_STALL_STATE
+      setVideoBuffering(false)
       video.pause()
     }
     // The NONCE is the command; re-running on `slaved` or on either callback
@@ -579,6 +752,10 @@ export function MediaVideoPane({
     playFailuresRef.current = 0
     prevTickRef.current = null
     lastSeekAtRef.current = null
+    // A different film is a different episode: neither the ladder we spent on
+    // the last one nor a position we were trying to get back to applies here.
+    stallRef.current = IDLE_STALL_STATE
+    resumeAtRef.current = null
     // A wait belongs to the element that was open when it started; the new one
     // will never fire that element's events.
     cancelPendingPlay()
@@ -598,6 +775,77 @@ export function MediaVideoPane({
       onVideoPlaying?.(false)
     }
   }, [slaved, onVideoTime, onVideoPlaying])
+
+  /**
+   * The console seam. `__aqQueueState()` is what ended the last argument about
+   * the transport — three confident theories of mine died on one line of Sam's
+   * output — and the picture has had no equivalent, which is why this stall got
+   * diagnosed twice from code reading and fixed once wrongly.
+   *
+   * It deliberately reports what the element CLAIMS (`paused`, `readyState`,
+   * `networkState`) beside what is actually true (whether the clock and the
+   * decoder are moving, and how much is buffered ahead). A stall lives exactly
+   * in the gap between those, and the two numbers that close it are Safari's
+   * frame counters — frames that stop arriving while `readyState` still claims
+   * data IS the wedge — and `videoHeight`, which says whether we are decoding
+   * 4K into a pane a few hundred pixels wide.
+   */
+  useEffect(() => {
+    if (!import.meta.env.DEV || typeof window === "undefined") return
+    const snapshot = () => {
+      const video = videoRef.current
+      const buffered: [number, number][] = []
+      if (video) {
+        for (let i = 0; i < video.buffered.length; i += 1) {
+          buffered.push([video.buffered.start(i), video.buffered.end(i)])
+        }
+      }
+      const frames = video as
+        | (HTMLVideoElement & { webkitDecodedFrameCount?: number; webkitDroppedFrameCount?: number })
+        | null
+      return {
+        src,
+        arrangement: slaved ? "slaved" : "standalone",
+        player: stream.snapshot(),
+        element: video && {
+          paused: video.paused,
+          ended: video.ended,
+          seeking: video.seeking,
+          readyState: video.readyState,
+          networkState: video.networkState,
+          currentTime: video.currentTime,
+          duration: video.duration,
+          videoWidth: video.videoWidth,
+          videoHeight: video.videoHeight,
+          playbackRate: video.playbackRate,
+          muted: video.muted,
+          volume: video.volume,
+          error: video.error ? { code: video.error.code, message: video.error.message } : null,
+          buffered,
+          decodedFrames: frames?.webkitDecodedFrameCount ?? null,
+          droppedFrames: frames?.webkitDroppedFrameCount ?? null,
+        },
+        pane: {
+          wantPlay: wantPlayRef.current,
+          pendingPlay: pendingPlayRef.current != null,
+          needsGesture,
+          failed,
+          playFailures: playFailuresRef.current,
+          resumeAt: resumeAtRef.current,
+          stall: { ...stallRef.current },
+        },
+        clock: {
+          buffering: getVideoBuffering(),
+          playing: getVideoClockPlaying(),
+          sec: getVideoClockSec(),
+        },
+      }
+    }
+    ;(window as unknown as Record<string, unknown>).__aqVideoState = snapshot
+    return () => {
+      delete (window as unknown as Record<string, unknown>).__aqVideoState
+    }
+  }, [src, slaved, stream, needsGesture, failed])
 
   const targetText = soundingCell?.translated?.trim() ?? ""
   // `effectiveSourceText` is blank for an untranscribed media segment, which is
@@ -660,9 +908,15 @@ export function MediaVideoPane({
       >
         <video
           ref={videoRef}
-          key={`${src}#${loadAttempt}`}
-          src={src}
+          // The pipeline is part of the identity: switching players has to
+          // start from a clean element, never one holding the other's buffer.
+          key={`${src}#${loadAttempt}#${pipeline}`}
+          // NO `src` WHERE THE STREAMING PLAYER IS DRIVING. It attaches its own
+          // buffered source to the element, and an address sitting in `src`
+          // beside it is a second source for the same picture.
+          src={pipeline === "hls" ? undefined : src}
           data-testid="video-pane-media"
+          data-video-pipeline={pipeline}
           aria-label="Linked video"
           className="h-full w-full object-contain"
           playsInline
@@ -700,6 +954,11 @@ export function MediaVideoPane({
           // driving nothing, after you navigated away. The recording modal
           // refuses it for the same reason.
           disablePictureInPicture
+          // NO `waiting`/`stalled` HANDLERS, and their absence is the fix rather
+          // than an oversight. Safari fires neither for the wedge this pane
+          // exists to survive, so a stall detector built on them ran never; the
+          // watchdog above samples the clock instead and needs nothing from the
+          // element beyond the time it is willing to admit to.
           onError={() => {
             setFailed(true)
             // Whatever length we had is no longer trustworthy — a track sized
@@ -713,12 +972,31 @@ export function MediaVideoPane({
             const real = intrinsicAspect(e.currentTarget.videoWidth, e.currentTarget.videoHeight)
             if (real != null) setAspect(real)
             onVideoDuration?.(src, e.currentTarget.duration)
+            // A reload or a rebuild left the picture at the start of the film.
+            // Put it back where the stall caught it, and start it again if that
+            // is still what the transport wants — otherwise recovering from a
+            // freeze would cost the user their place.
+            const resumeAt = resumeAtRef.current
+            if (resumeAt != null) {
+              resumeAtRef.current = null
+              try {
+                e.currentTarget.currentTime = resumeAt
+              } catch {
+                /* not seekable yet — the watchdog will come round again */
+              }
+              publishPositionRef.current(resumeAt)
+              if (wantPlayRef.current) requestPlay(e.currentTarget)
+            }
           }}
           onDurationChange={(e) => {
             setMediaEpoch((n) => n + 1)
             onVideoDuration?.(src, e.currentTarget.duration)
           }}
-          onTimeUpdate={slaved ? undefined : (e) => publishPosition(e.currentTarget.currentTime)}
+          onTimeUpdate={
+            slaved
+              ? undefined
+              : (e) => publishPosition(e.currentTarget.currentTime)
+          }
           // Round 6: a seek's own landing. `timeupdate` is silent for the whole
           // duration of a seek, so on a paused film this is the ONLY event that
           // says where the picture actually ended up.
@@ -756,6 +1034,9 @@ export function MediaVideoPane({
             onClick={() => {
               setNeedsGesture(false)
               playFailuresRef.current = 0
+              // ...and a fresh ladder, so a picture that recovers and wedges
+              // again gets every rung again rather than none.
+              stallRef.current = IDLE_STALL_STATE
               // The click IS the transport asking for it — say so, or a second
               // refusal would find `wantPlayRef` false and never re-offer this.
               wantPlayRef.current = true

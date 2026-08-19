@@ -80,6 +80,9 @@ importers:
       dompurify:
         specifier: ^3.4.12
         version: 3.4.12
+      hls.js:
+        specifier: ^1.6.19
+        version: 1.6.19
       idb:
         specifier: ^8.0.3
         version: 8.0.3
@@ -3362,8 +3365,8 @@ packages:
   hls-video-element@1.5.11:
     resolution: {integrity: sha512-tJJ65/52CDxj8XFyIve6zT9nVVdUIc6mqvKR25X0ycPKHk07rpjp4xxVteeCefDUBSf/tFLhlICFmn3KWj37xA==}
 
-  hls.js@1.6.16:
-    resolution: {integrity: sha512-VSIRpLfRwlAAdGL4wiTucx2ScRipo0ed1FBatWkyt832jC4CReKstga6yIhYVwGu9LOBjuX9wzmRMeQdBJtzEA==}
+  hls.js@1.6.19:
+    resolution: {integrity: sha512-A//aZeaAgM5rgUCbTURD4gkfyw5Uag2/4Jky7CfDOukL/DN+P5DjbgK2BYteyP3/KnCkPfkGVkbLxQG2T0AbUQ==}
 
   hmac-drbg@1.0.1:
     resolution: {integrity: sha512-Tti3gMqLdZfhOQY1Mzf/AanLiqh1WTiJgEj26ZuYQ9fbkLomzGchCws4FyrSd4VkpBfiNhaE1On+lOz894jvXg==}
@@ -6360,7 +6363,7 @@ snapshots:
 
   '@mux/playback-core@0.34.1':
     dependencies:
-      hls.js: 1.6.16
+      hls.js: 1.6.19
       mux-embed: 5.18.0
 
   '@napi-rs/wasm-runtime@1.1.6(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)':
@@ -8507,10 +8510,10 @@ snapshots:
   hls-video-element@1.5.11:
     dependencies:
       custom-media-element: 1.4.6
-      hls.js: 1.6.16
+      hls.js: 1.6.19
       media-tracks: 0.3.5
 
-  hls.js@1.6.16: {}
+  hls.js@1.6.19: {}
 
   hmac-drbg@1.0.1:
     dependencies:

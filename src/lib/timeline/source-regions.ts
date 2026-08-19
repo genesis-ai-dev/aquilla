@@ -80,8 +80,13 @@ function timedInMs(segments: readonly RegionSegment[]): TimedMs[] {
 
 /**
  * Build the band. `videoDurationSec` may be null — the element has not reported
- * yet, or cannot (Chromium and an HLS playlist) — in which case the band spans
- * the cells' own extent, which is exactly what the row showed before.
+ * yet, or cannot — in which case the band spans the cells' own extent, which is
+ * exactly what the row showed before.
+ *
+ * (The standing example of "cannot" used to be Chromium and an HLS playlist,
+ * which it could not open at all. `useHlsVideo` plays those everywhere now, so
+ * a length does arrive there; the null case is still real for a cold element
+ * and for a source that will not load.)
  */
 export function deriveSourceRegions(
   segments: readonly RegionSegment[],

@@ -27,6 +27,7 @@ import { useEffect, useRef, useState } from "react"
 import { AlertTriangle, Headphones, VolumeX } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { useHlsVideo } from "@/hooks/useHlsVideo"
 import { AppTooltip } from "@/components/ui/tooltip"
 import {
   setRecordingFilmAudible,
@@ -109,6 +110,18 @@ export function RecordingVideoSurface({
 }: RecordingVideoSurfaceProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const audible = useRecordingFilmAudible()
+  /**
+   * The same player the main pane uses, for the same two reasons: these films
+   * are HLS playlists, which no Chromium or Firefox `<video>` can open at all,
+   * and left to itself a player climbs to a rendition far larger than this
+   * panel. It is a reference picture beside a live mic — the last thing it
+   * should be doing is asking a machine to decode 4K while recording.
+   *
+   * It does NOT breach this file's invariant: the hook touches the element and
+   * nothing else. No controller, no clock, nothing published.
+   */
+  const stream = useHlsVideo(videoRef, src)
+  const pipeline = stream.pipeline
   /** A source that will not load leaves NOTHING behind — see the render. */
   const [failed, setFailed] = useState(false)
   useEffect(() => {
@@ -275,8 +288,13 @@ export function RecordingVideoSurface({
     <div className="relative flex h-full w-full items-center justify-center overflow-hidden bg-black">
         <video
           ref={videoRef}
-          key={src}
-          src={src}
+          // The pipeline is part of the identity: a switch between players has
+          // to start from a clean element.
+          key={`${src}#${pipeline}`}
+          // NO `src` where the streaming player is driving — it attaches its
+          // own buffered source, and an address sitting here beside it would be
+          // a second source for the same picture.
+          src={pipeline === "hls" ? undefined : src}
           data-testid="rec-video"
           aria-label="Film for the line being recorded"
           className="h-full w-full object-contain"

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from "vitest"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 
 import type { CellData } from "@/hooks/useCells"
 import type { QueueForFile } from "@/lib/audio/queue-scope"
@@ -624,5 +624,228 @@ describe("MediaVideoPane", () => {
       )
       expect(onVideoTime).not.toHaveBeenCalledWith(12)
     })
+  })
+})
+
+// ── A stall is not a pause (Sam, 2026-08-18, twice) ──────────────────────
+//
+// "It buffers, then 'plays' for half a second, then gets stuck again but the
+// button still indicates that it is playing."
+//
+// The first attempt listened for `waiting` and `stalled`. Safari fires NEITHER
+// for this: the element keeps `paused === false`, keeps reporting a healthy
+// `readyState`, and just stops producing frames. So these tests never touch an
+// event — they freeze the clock, which is the only honest witness, and let the
+// watchdog find it.
+
+describe("a stalled picture is noticed, and gets out of it", () => {
+  const subs = [
+    cell({ id: "s1", medium: "text", original: "Line one", translated: "Ligne un", startTime: 0, endTime: 5 }),
+    cell({ id: "s2", medium: "text", original: "Line two", translated: "Ligne deux", startTime: 10, endTime: 15 }),
+  ]
+
+  /** One second of wall clock, flushed into the tree. */
+  const tick = (n = 1) => act(() => { vi.advanceTimersByTime(1000 * n) })
+  /** The clock frozen through the grace: a baseline sample, then two frozen. */
+  const STALL_TICKS = 3
+
+  const mount = (o: { onVideoPlaying?: (playing: boolean) => void } = {}) => {
+    const onVideoPlaying = o.onVideoPlaying ?? vi.fn()
+    const props = {
+      src: "https://cdn/episode.webm",
+      fileId: "f1",
+      cells: subs,
+      onVideoTime: vi.fn(),
+      onVideoPlaying,
+    }
+    const view = render(<MediaVideoPane {...props} />)
+    /** Make an element look like one that is running. */
+    const equip = (video: HTMLVideoElement, at = 12) => {
+      Object.defineProperty(video, "readyState", { value: 4, configurable: true })
+      Object.defineProperty(video, "seeking", { value: false, configurable: true, writable: true })
+      Object.defineProperty(video, "paused", { value: false, configurable: true, writable: true })
+      Object.defineProperty(video, "ended", { value: false, configurable: true, writable: true })
+      Object.defineProperty(video, "currentTime", { value: at, writable: true, configurable: true })
+      video.play = vi.fn(() => Promise.resolve()) as unknown as HTMLVideoElement["play"]
+      video.pause = vi.fn() as unknown as HTMLVideoElement["pause"]
+      video.load = vi.fn() as unknown as HTMLVideoElement["load"]
+      return video
+    }
+    const element = () => equip(screen.getByTestId("video-pane-media") as HTMLVideoElement)
+    const video = element()
+    const press = (nonce: number) => view.rerender(<MediaVideoPane {...props} togglePlay={{ nonce }} />)
+    return { video, press, view, onVideoPlaying, equip }
+  }
+
+  beforeEach(() => {
+    resetVideoClockForTests()
+    vi.useFakeTimers()
+  })
+  afterEach(() => vi.useRealTimers())
+
+  it("notices a frozen clock even though the element fires nothing at all", () => {
+    const { press } = mount()
+    press(1) // the transport wants playback
+    tick(STALL_TICKS)
+    expect(getVideoBuffering()).toBe(true)
+  })
+
+  it("stops the button claiming playback", () => {
+    // THE SYMPTOM. `selectTransportForFile` suppresses the spinner while
+    // anything reports playback, and a stall fires no `pause` to clear it — so
+    // saying "not playing" is the whole of what turns the lie into a spinner.
+    const onVideoPlaying = vi.fn()
+    const { press } = mount({ onVideoPlaying })
+    press(1)
+    onVideoPlaying.mockClear()
+    tick(STALL_TICKS)
+    expect(onVideoPlaying).toHaveBeenCalledWith(false)
+  })
+
+  it("nudges the element at the same position", () => {
+    const { video, press } = mount()
+    press(1)
+    const before = (video.play as ReturnType<typeof vi.fn>).mock.calls.length
+    tick(STALL_TICKS)
+    expect((video.play as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(before)
+    expect(video.currentTime).toBe(12)
+  })
+
+  it("says nothing about a film the user paused", () => {
+    const { video, press } = mount()
+    press(1)
+    Object.defineProperty(video, "paused", { value: true, configurable: true })
+    tick(10)
+    expect(getVideoBuffering()).toBe(false)
+    expect(video.load).not.toHaveBeenCalled()
+  })
+
+  it("says nothing while a seek is still landing", () => {
+    const { video, press } = mount()
+    press(1)
+    Object.defineProperty(video, "seeking", { value: true, configurable: true })
+    tick(10)
+    expect(getVideoBuffering()).toBe(false)
+  })
+
+  it("says nothing at the end of the film", () => {
+    const { video, press } = mount()
+    press(1)
+    Object.defineProperty(video, "ended", { value: true, configurable: true })
+    tick(10)
+    expect(getVideoBuffering()).toBe(false)
+  })
+
+  it("takes the spinner down the moment the clock moves again", () => {
+    const onVideoPlaying = vi.fn()
+    const { video, press } = mount({ onVideoPlaying })
+    press(1)
+    tick(STALL_TICKS)
+    expect(getVideoBuffering()).toBe(true)
+    onVideoPlaying.mockClear()
+    video.currentTime = 13
+    tick(1)
+    expect(getVideoBuffering()).toBe(false)
+    expect(onVideoPlaying).toHaveBeenCalledWith(true)
+  })
+
+  it("does not hand the ladder back for the twitch a nudge buys", () => {
+    // The failure mode that would have replaced the old one: each rung produces
+    // a moment of playback, and a budget reset by any motion at all would sit on
+    // rung one forever — nudge, twitch, freeze, nudge, twitch, freeze.
+    const { video, press } = mount()
+    press(1)
+    tick(STALL_TICKS) // nudge
+    video.currentTime = 13 // …half a second of picture…
+    tick(1)
+    tick(STALL_TICKS) // …and stuck again. The NEXT rung, not the same one.
+    expect(video.load).toHaveBeenCalled()
+  })
+
+  /** Drive the whole ladder: nudge, reopen, rebuild, and finally give up.
+   *  Each rung waits out its own patience window, and the two that replace the
+   *  element or its source drop the sampling baseline — so the next window
+   *  starts with a fresh reading rather than a stale one. */
+  const climbToGivingUp = (m: ReturnType<typeof mount>) => {
+    tick(STALL_TICKS) // nudge
+    tick(2) // reopen the source
+    tick(3) // rebuild the element
+    const rebuilt = m.equip(screen.getByTestId("video-pane-media") as HTMLVideoElement)
+    tick(3) // still stuck: out of ideas
+    return rebuilt
+  }
+
+  it("escalates to reopening the source, then rebuilding, then offering the click", () => {
+    const m = mount()
+    m.press(1)
+    tick(STALL_TICKS) // nudge
+    tick(2)
+    expect(m.video.load).toHaveBeenCalled()
+    tick(3)
+    // A different element entirely: both earlier rungs reused the same decoder,
+    // which for this wedge is the thing that is broken.
+    expect(screen.getByTestId("video-pane-media")).not.toBe(m.video)
+    m.equip(screen.getByTestId("video-pane-media") as HTMLVideoElement)
+    tick(3)
+    expect(screen.getByTestId("video-pane-play-gesture")).toBeInTheDocument()
+    // Stop pretending it is loading, having stopped trying.
+    expect(getVideoBuffering()).toBe(false)
+  })
+
+  it("puts the picture back where the freeze caught it after a rebuild", () => {
+    // Recovering from a stall must not cost the user their place in the film.
+    const { video, press, equip } = mount()
+    press(1)
+    tick(STALL_TICKS)
+    tick(2)
+    tick(3) // rebuilt
+    const rebuilt = equip(screen.getByTestId("video-pane-media") as HTMLVideoElement, 0)
+    expect(rebuilt).not.toBe(video)
+    act(() => { fireEvent(rebuilt, new Event("loadedmetadata")) })
+    expect(rebuilt.currentTime).toBe(12)
+    expect(rebuilt.play).toHaveBeenCalled()
+  })
+
+  it("PLAYS rather than pauses once recovery has given up", () => {
+    // The loop Sam hit: a stalled element has paused === false, so branching on
+    // that flag alone made the press pause a thing that was not playing, and
+    // the press after play for another half second. Asking what the TRANSPORT
+    // wants — not what the element claims — ends it.
+    const m = mount()
+    m.press(1)
+    const current = climbToGivingUp(m)
+    expect(screen.getByTestId("video-pane-play-gesture")).toBeInTheDocument()
+    ;(current.pause as ReturnType<typeof vi.fn>).mockClear()
+    ;(current.play as ReturnType<typeof vi.fn>).mockClear()
+    m.press(2)
+    expect(current.pause).not.toHaveBeenCalled()
+    expect(current.play).toHaveBeenCalled()
+  })
+
+  it("a press DURING an active stall cancels it, as the spinner implies", () => {
+    // Not a contradiction of the above: while recovery is running the button is
+    // showing a spinner, and pressing a spinner means "stop waiting" — the same
+    // rule the readiness gate and the queue already follow.
+    const { press } = mount()
+    press(1)
+    tick(STALL_TICKS)
+    expect(getVideoBuffering()).toBe(true)
+    press(2)
+    expect(getVideoBuffering()).toBe(false)
+  })
+
+  it("leaves a slaved picture alone — the queue is its watchdog", () => {
+    mockQueue = { ...mockQueue, active: true, playing: true, kind: "playing" }
+    try {
+      render(<MediaVideoPane src="https://cdn/episode.webm" fileId="f1" cells={CELLS} />)
+      const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+      Object.defineProperty(video, "paused", { value: false, configurable: true })
+      Object.defineProperty(video, "currentTime", { value: 12, writable: true, configurable: true })
+      video.load = vi.fn() as unknown as HTMLVideoElement["load"]
+      tick(10)
+      expect(video.load).not.toHaveBeenCalled()
+    } finally {
+      mockQueue = { ...mockQueue, active: false, playing: false, kind: "idle" }
+    }
   })
 })

@@ -24,11 +24,18 @@ export type ContextualRunStatus =
   | "pausing"
   | "paused"
   | "parked"
+  | "waiting"
   | "done"
   | "failed"
   | "terminated"
 
-const ACTIVE_STATUSES: ContextualRunStatus[] = ["running", "pausing", "paused", "parked"]
+const ACTIVE_STATUSES: ContextualRunStatus[] = [
+  "running",
+  "pausing",
+  "paused",
+  "parked",
+  "waiting",
+]
 
 /** Serialized span seed — the same shape slice C's `deriveSpanSeeds` emits
  *  (auth-worker/src/lib/contextual/types.ts SpanSeed), stored verbatim so a
@@ -69,6 +76,16 @@ export interface ContextualRun {
   callsSpent: number
   lastError: string | null
   steeringCursor: string | null
+  /** Set by `blockRunOnDecision` when the run enters 'waiting' and cleared by
+   *  `unblockRun` when it resumes. Deliberately NOT cleared by
+   *  `terminateRun`/`failRun` — both go through the shared `transitionRun`,
+   *  which only ever writes `status`/`last_error`/`updated_at`, so a
+   *  terminated or failed run that was blocked keeps naming the decision it
+   *  died waiting on. Consequence for whoever wires this up: terminating or
+   *  failing a waiting run leaves that decision `open` with no live run
+   *  behind it, so the wiring needs to resolve it too (`dismissDecision` /
+   *  `supersedeDecisions` in `./contextual-decisions`). */
+  blockedOnDecisionId: string | null
   /** Where the user was looking at start — rotates the first wave's seeds. */
   anchorCellId: string | null
   /** Shared across every run one project-wide start created. */
@@ -293,6 +310,7 @@ interface RunRow {
   calls_spent: number
   last_error: string | null
   steering_cursor: unknown
+  blocked_on_decision_id: string | null
   anchor_cell_id: string | null
   scope_group: string | null
   created_at: unknown
@@ -324,6 +342,7 @@ function rowToRun(r: RunRow): ContextualRun {
     // sanitizer shipped cannot leak a provider credential through snapshots.
     lastError: sanitizeRunError(r.last_error),
     steeringCursor: r.steering_cursor == null ? null : toIso(r.steering_cursor),
+    blockedOnDecisionId: r.blocked_on_decision_id ?? null,
     anchorCellId: r.anchor_cell_id ?? null,
     scopeGroup: r.scope_group ?? null,
     createdAt: toIso(r.created_at),
@@ -333,7 +352,8 @@ function rowToRun(r: RunRow): ContextualRun {
 
 const RUN_COLS = `id, project_id, file_id, target_lang, status, initiated_by, role_snapshot,
   span_cursor, done_spans, total_spans, failed_spans, units_spent, calls_spent,
-  last_error, steering_cursor, anchor_cell_id, scope_group, created_at, updated_at`
+  last_error, steering_cursor, blocked_on_decision_id, anchor_cell_id, scope_group,
+  created_at, updated_at`
 
 interface SteeringRow {
   id: string
@@ -790,14 +810,15 @@ export type CreateRunResult =
  *  (contextual_runs_active) closes the check-then-insert race. */
 export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<CreateRunResult> {
   const lane = input.targetLang ?? ""
+  const activePlaceholders = ACTIVE_STATUSES.map(() => "?").join(",")
   const active = await db
     .prepare(
       `SELECT id FROM contextual_runs
         WHERE project_id = ? AND file_id = ? AND target_lang = ?
-          AND status IN ('running','pausing','paused','parked')
+          AND status IN (${activePlaceholders})
         LIMIT 1`,
     )
-    .bind(input.projectId, input.fileId, lane)
+    .bind(input.projectId, input.fileId, lane, ...ACTIVE_STATUSES)
     .first<{ id: string }>()
   if (active) return { status: "active_exists", runId: active.id }
 
@@ -830,10 +851,10 @@ export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<C
       .prepare(
         `SELECT id FROM contextual_runs
           WHERE project_id = ? AND file_id = ? AND target_lang = ?
-            AND status IN ('running','pausing','paused','parked')
+            AND status IN (${activePlaceholders})
           LIMIT 1`,
       )
-      .bind(input.projectId, input.fileId, lane)
+      .bind(input.projectId, input.fileId, lane, ...ACTIVE_STATUSES)
       .first<{ id: string }>()
     if (racing) return { status: "active_exists", runId: racing.id }
     throw err
@@ -951,14 +972,15 @@ export async function getActiveRun(
   fileId: string,
   targetLang = "",
 ): Promise<ContextualRun | null> {
+  const activePlaceholders = ACTIVE_STATUSES.map(() => "?").join(",")
   const row = await db
     .prepare(
       `SELECT ${RUN_COLS} FROM contextual_runs
         WHERE project_id = ? AND file_id = ? AND target_lang = ?
-          AND status IN ('running','pausing','paused','parked')
+          AND status IN (${activePlaceholders})
         LIMIT 1`,
     )
-    .bind(projectId, fileId, targetLang)
+    .bind(projectId, fileId, targetLang, ...ACTIVE_STATUSES)
     .first<RunRow>()
   return row ? rowToRun(row) : null
 }
@@ -1042,6 +1064,49 @@ export const parkRun = (db: AquillaDb, runId: string) =>
 /** Any active state → failed, recording the error. */
 export const failRun = (db: AquillaDb, runId: string, error: string) =>
   transitionRun(db, runId, [...ACTIVE_STATUSES], "failed", error)
+
+/** Block a live run on a decision (§4.5). `waiting` means "something left to
+ *  do, but it needs a human" — distinct from `parked`, which means there is
+ *  nothing left to do. Conflating them is how a blocked run silently looks
+ *  finished. */
+export async function blockRunOnDecision(
+  db: AquillaDb,
+  runId: string,
+  decisionId: string,
+): Promise<TransitionResult> {
+  const row = await db
+    .prepare(
+      `UPDATE contextual_runs
+          SET status = 'waiting', blocked_on_decision_id = ?, updated_at = now()
+        WHERE id = ? AND status = 'running'
+        RETURNING ${RUN_COLS}`,
+    )
+    .bind(decisionId, runId)
+    .first<RunRow>()
+  if (row) return { status: "ok", run: rowToRun(row) }
+  const current = await getRun(db, runId)
+  if (!current) return { status: "not_found" }
+  return { status: "invalid_state", current: current.status }
+}
+
+/** Resume a waiting run. Reached two ways (§4.5): the decision was answered,
+ *  or the next wake's sweep found it superseded. The second should be the
+ *  common one. */
+export async function unblockRun(db: AquillaDb, runId: string): Promise<TransitionResult> {
+  const row = await db
+    .prepare(
+      `UPDATE contextual_runs
+          SET status = 'running', blocked_on_decision_id = NULL, updated_at = now()
+        WHERE id = ? AND status = 'waiting'
+        RETURNING ${RUN_COLS}`,
+    )
+    .bind(runId)
+    .first<RunRow>()
+  if (row) return { status: "ok", run: rowToRun(row) }
+  const current = await getRun(db, runId)
+  if (!current) return { status: "not_found" }
+  return { status: "invalid_state", current: current.status }
+}
 
 /** Persist the derived seed list (first tick). Sets total_spans. */
 export async function setSpanCursor(
@@ -1766,7 +1831,7 @@ export interface AutopilotCandidateFile {
 export interface ActiveAutopilotRunFile {
   fileId: string
   runId: string
-  status: Extract<ContextualRunStatus, "running" | "pausing" | "paused" | "parked">
+  status: Extract<ContextualRunStatus, "running" | "pausing" | "paused" | "parked" | "waiting">
   workQueued: boolean
 }
 
@@ -1777,16 +1842,17 @@ export async function listActiveAutopilotRunFiles(
   db: AquillaDb,
   projectId: string,
 ): Promise<ActiveAutopilotRunFile[]> {
+  const activePlaceholders = ACTIVE_STATUSES.map(() => "?").join(",")
   const { results } = await db
     .prepare(
       `SELECT file_id, id, status,
               (status = 'parked' AND done_spans + failed_spans < total_spans) AS work_queued
          FROM contextual_runs
         WHERE project_id = ? AND target_lang = ''
-          AND status IN ('running','pausing','paused','parked')
+          AND status IN (${activePlaceholders})
         ORDER BY file_id ASC`,
     )
-    .bind(projectId)
+    .bind(projectId, ...ACTIVE_STATUSES)
     .all<{
       file_id: string
       id: string

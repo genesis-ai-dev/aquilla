@@ -15,6 +15,14 @@ describe("Button press and open states", () => {
     expect(btn.className).toMatch(/aria-expanded:bg-accent/)
   })
 
+  it("transitions the press translate without easing color changes", () => {
+    render(<Button>Save</Button>)
+    const btn = screen.getByRole("button", { name: "Save" })
+    expect(btn.className).toMatch(/\btransition-transform\b/)
+    expect(btn.className).not.toMatch(/\btransition-(all|colors|none)\b/)
+    expect(btn.className).toMatch(/active:not-aria-\[haspopup\]:translate-y-px/)
+  })
+
   it("uses a stronger fill than hover for default, secondary, and ghost", () => {
     const { rerender } = render(<Button>Save</Button>)
     expect(screen.getByRole("button", { name: "Save" }).className).toMatch(

@@ -262,3 +262,115 @@ describe("runSpan — partial failure paths", () => {
     expect(captured.staged).toHaveLength(0)
   })
 })
+
+// ── Support check (code tier → fast tier → panel) ────────────────────────────
+
+/** Examples rich enough to clear the support check's applicability floors. */
+const richExamples = [
+  "the teacher went up the mountain and sat down with his followers",
+  "he opened his mouth and began to teach them saying",
+  "blessed are those who mourn for they shall be comforted",
+  "blessed are the gentle for they shall inherit the earth",
+  "you are the salt of the earth but if salt loses its taste",
+  "a city built on a hill cannot be hidden from anyone",
+  "let your light shine before others so they may see your good works",
+  "do not think that I came to abolish the law or the prophets",
+].map((target, i) => ({ cellId: `rx${i + 1}`, source: `rich source ${i + 1}`, target, validated: true }))
+
+describe("runSpan — support check", () => {
+  it("abstains on a thin corpus and never spends a call on confirmation", async () => {
+    const { llm, calls } = scriptedLlm([
+      construalJson({ closed: true }),
+      "a scene brief",
+      draftJson([{ i: 1, t: "wholly unattested wording appears here" }, { i: 2, t: "b" }, { i: 3, t: "c" }]),
+      voteJson(true, [{ i: 1, approve: true }, { i: 2, approve: true }, { i: 3, approve: true }]),
+    ])
+    const { deps } = makeDeps(llm) // 5 short examples — below the vocabulary floor
+    const report = await runSpan(deps)
+    expect(calls.map((c) => c.label)).toEqual(["construe", "summarize", "draft", "verify:ambiguity"])
+    expect(report.notes.join(" ")).toContain("support check abstained")
+  })
+
+  it("a fully attested draft costs one fast call and stays low risk", async () => {
+    const { llm, calls } = scriptedLlm([
+      construalJson({ closed: true }),
+      "a scene brief",
+      draftJson([
+        { i: 1, t: "blessed are those who mourn for they shall be comforted" },
+        { i: 2, t: "blessed are the gentle for they shall inherit the earth" },
+        { i: 3, t: "you are the salt of the earth" },
+      ]),
+      voteJson(true, [{ i: 1, approve: true }, { i: 2, approve: true }, { i: 3, approve: true }]),
+    ])
+    const { deps } = makeDeps(llm, { examples: richExamples })
+    const report = await runSpan(deps)
+    // Nothing flagged in code ⇒ no confirmation call, and the panel stays at
+    // the single mandatory ambiguity verifier.
+    expect(calls.map((c) => c.label)).toEqual(["construe", "summarize", "draft", "verify:ambiguity"])
+    expect(report.cellsStaged).toHaveLength(3)
+    expect(report.notes.join(" ")).not.toContain("support:")
+  })
+
+  it("code flags off-corpus wording, the FAST model clears it, the deep panel never runs", async () => {
+    const { llm, calls } = scriptedLlm([
+      construalJson({ closed: true }),
+      "a scene brief",
+      draftJson([
+        { i: 1, t: "comforting the mourners upon that mountainside" },
+        { i: 2, t: "quarterly amortization schedules reconcile depreciation entries" },
+        { i: 3, t: "let your light shine before others" },
+      ]),
+      '{"cells":[{"i":1,"risky":false,"reason":"ordinary inflection"}]}',
+      voteJson(true, [{ i: 1, approve: true }, { i: 2, approve: true }, { i: 3, approve: true }]),
+    ])
+    const { deps } = makeDeps(llm, { examples: richExamples })
+    const report = await runSpan(deps)
+    const support = calls.find((c) => c.label === "support")
+    expect(support?.tier).toBe("fast")
+    expect(calls.map((c) => c.label)).toEqual(["construe", "summarize", "draft", "support", "verify:ambiguity"])
+    expect(report.notes.join(" ")).toContain("0 confirmed risky")
+  })
+
+  it("a CONFIRMED unsupported cell escalates the span to the full verifier panel", async () => {
+    const { llm, calls } = scriptedLlm([
+      construalJson({ closed: true }),
+      "a scene brief",
+      draftJson([
+        { i: 1, t: "blessed are those who mourn for they shall be comforted" },
+        { i: 2, t: "quarterly amortization schedules reconcile depreciation entries" },
+        { i: 3, t: "let your light shine before others" },
+      ]),
+      '{"cells":[{"i":1,"risky":true,"reason":"content absent from the source"}]}',
+      // Panel dispatches concurrently — reply by stance, not by position.
+      (req) => voteJson(true, [{ i: 1, approve: true }, { i: 2, approve: true }, { i: 3, approve: true }], req.label ?? ""),
+      (req) => voteJson(true, [{ i: 1, approve: true }, { i: 2, approve: true }, { i: 3, approve: true }], req.label ?? ""),
+      (req) => voteJson(true, [{ i: 1, approve: true }, { i: 2, approve: true }, { i: 3, approve: true }], req.label ?? ""),
+    ])
+    const { deps } = makeDeps(llm, { examples: richExamples })
+    const report = await runSpan(deps)
+    const labels = calls.map((c) => c.label)
+    expect(labels.slice(0, 4)).toEqual(["construe", "summarize", "draft", "support"])
+    expect(labels.slice(4).sort()).toEqual(["verify:ambiguity", "verify:force", "verify:naturalness"])
+    expect(report.notes.join(" ")).toContain("1 confirmed risky")
+  })
+
+  it("escalates when the fast confirmation is unavailable — fail-safe, and says so", async () => {
+    const { llm, calls } = scriptedLlm([
+      construalJson({ closed: true }),
+      "a scene brief",
+      draftJson([
+        { i: 1, t: "blessed are those who mourn for they shall be comforted" },
+        { i: 2, t: "quarterly amortization schedules reconcile depreciation entries" },
+        { i: 3, t: "let your light shine before others" },
+      ]),
+      "not json at all",
+      (req) => voteJson(true, [{ i: 1, approve: true }, { i: 2, approve: true }, { i: 3, approve: true }], req.label ?? ""),
+      (req) => voteJson(true, [{ i: 1, approve: true }, { i: 2, approve: true }, { i: 3, approve: true }], req.label ?? ""),
+      (req) => voteJson(true, [{ i: 1, approve: true }, { i: 2, approve: true }, { i: 3, approve: true }], req.label ?? ""),
+    ])
+    const { deps } = makeDeps(llm, { examples: richExamples })
+    const report = await runSpan(deps)
+    expect(calls.filter((c) => c.label?.startsWith("verify:"))).toHaveLength(3)
+    expect(report.notes.join(" ")).toContain("confirmation unavailable")
+  })
+})

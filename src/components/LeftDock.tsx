@@ -28,7 +28,6 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { HelpMenu } from "@/components/HelpMenu"
-import { VersionTag } from "@/components/VersionBadge"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -283,12 +282,6 @@ export function LeftDock({
         <HelpMenu compact={!isOpen} showTour={false} />
         <div data-tour="account-switcher">
           <AccountSwitcher variant="sidebar" compact={!isOpen} />
-        </div>
-      </div>
-
-      <div className="flex shrink-0 items-center">
-        <div className="min-w-0 flex-1">
-          <VersionTag />
         </div>
       </div>
     </div>

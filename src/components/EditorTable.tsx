@@ -18,7 +18,6 @@ import {
   Bold,
   Loader2,
   VolumeX,
-  Bot,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -805,8 +804,6 @@ interface EditorTableProps {
   /** Move chapter navigation into a shell-owned header slot. `null` reserves
    *  the slot while it mounts; `undefined` keeps the legacy in-editor row. */
   chapterNavPortalTarget?: HTMLElement | null
-  /** Open the Agent as the center pane between Source and Target. */
-  onAgentToggle?: () => void
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -849,7 +846,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onFootnoteCreated,
   chapterNavTrailing,
   chapterNavPortalTarget,
-  onAgentToggle,
 }, ref) {
   const t = useT()
   // DCS lockdown: while this project is pinned to a Door43 upstream, the
@@ -2423,19 +2419,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             )}
           </div>
           <div className="relative flex items-center justify-end gap-2 ps-6 pe-2 text-end">
-            {onAgentToggle ? (
-              <AppTooltip content={t("nav.dock.agentTab")}>
-                <button
-                  type="button"
-                  aria-label={t("nav.dock.agentTab")}
-                  onClick={onAgentToggle}
-                  className="absolute start-0 top-1/2 z-10 flex h-8 -translate-y-1/2 items-center justify-center gap-1.5 rounded-full border border-primary/40 bg-background px-2.5 text-primary shadow-md ring-4 ring-background transition-all hover:scale-105 hover:bg-primary/10 hover:text-primary ltr:-translate-x-1/2 rtl:translate-x-1/2"
-                >
-                  <Bot className="h-4 w-4" />
-                  <span className="text-[11px] font-semibold">{t("nav.dock.agentTab")}</span>
-                </button>
-              </AppTooltip>
-            ) : null}
             {t("editor.column.target")}
             {/* AQU-602 / AQU-583: the target-language tag doubles as the lane
                 switcher AND the entry point to change the target language.

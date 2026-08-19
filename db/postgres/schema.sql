@@ -386,10 +386,22 @@ CREATE TABLE events (
 -- MAX(events.server_seq) — the GET /cells delta/ETag watermark — does not
 -- move; any `?since=` cursor below rebuilt_seq is told to resync and the
 -- value is folded into the ETag. 0 = never rebuilt.
+--
+-- project_epoch (0079, AQU-943): the project's INCARNATION marker, stamped
+-- when this counter row is created. Wiping a project's rows and re-migrating
+-- it under the same deterministic ids restarts the allocator near 1, which
+-- inverts every warm client's `?since=` cursor — deltas answer "nothing newer"
+-- and the client renders its pre-wipe cache forever. The counter row is
+-- exactly what a wipe destroys, so its birth stamp distinguishes incarnations:
+-- it is folded into the cells-read ETag, and a client whose declared `?epoch=`
+-- doesn't match is told to resync (cells-read-route.ts). clock_timestamp() so
+-- a delete + re-create inside one transaction still changes it.
 CREATE TABLE IF NOT EXISTS project_seq_counters (
     project_id  TEXT PRIMARY KEY,
     last_seq    BIGINT NOT NULL,
-    rebuilt_seq BIGINT NOT NULL DEFAULT 0
+    rebuilt_seq BIGINT NOT NULL DEFAULT 0,
+    project_epoch BIGINT NOT NULL
+        DEFAULT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000000)::BIGINT
 );
 
 -- AD-2 first-child arbitration (audit RACE-2 / M1-1). One row per chain slot

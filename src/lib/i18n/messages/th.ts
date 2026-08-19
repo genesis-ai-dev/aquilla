@@ -1242,6 +1242,7 @@ export const th: Catalog = {
   "fileDetails.orderingTimeline": "ไทม์ไลน์ (ตามไทม์โค้ด)",
   "fileDetails.orderingSequence": "ตามลำดับ",
   "fileDetails.languages": "คู่ภาษา",
+  "fileDetails.sourceLanguage": "ภาษาต้นฉบับ",
   "fileDetails.imported": "นำเข้าเมื่อ",
   "fileDetails.progress": "ความคืบหน้า",
   "fileDetails.progressValue": "แปลแล้ว {translated}% · ตรวจสอบแล้ว {validated}%",

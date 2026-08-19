@@ -12,6 +12,7 @@ export const fileDetails = defineNamespace({
     "fileDetails.orderingTimeline": "Timeline (timecodes)",
     "fileDetails.orderingSequence": "Sequence",
     "fileDetails.languages": "Languages",
+    "fileDetails.sourceLanguage": "Source language",
     "fileDetails.imported": "Imported",
     "fileDetails.progress": "Progress",
     "fileDetails.progressValue": "{translated}% translated · {validated}% validated",
@@ -92,6 +93,13 @@ export const fileDetails = defineNamespace({
           "Metadata row label for the file's language pair. The value is rendered as " +
           "'source → target' language codes.",
         maxLength: 20,
+      },
+      "fileDetails.sourceLanguage": {
+        description:
+          "Metadata row label for the language of the file's source content. The value " +
+          "is a language name or code. This row does not show a target language because " +
+          "targets belong to lanes and the file's import-time target stamp may be stale.",
+        maxLength: 24,
       },
       "fileDetails.imported": {
         description:

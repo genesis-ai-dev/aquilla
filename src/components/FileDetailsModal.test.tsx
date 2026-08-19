@@ -44,6 +44,20 @@ describe("FileDetailsModal", () => {
     expect(screen.getByText("1533")).toBeTruthy()
   })
 
+  it("shows only the source language, not the file's stale target-language stamp", () => {
+    renderModal({
+      file: {
+        ...usfmFile,
+        sourceLanguage: "English",
+        targetLanguage: "Spanish",
+      },
+    })
+
+    expect(screen.getByText("Source language")).toBeTruthy()
+    expect(screen.getByText("English")).toBeTruthy()
+    expect(screen.queryByText("Spanish")).toBeNull()
+  })
+
   it("does not render file actions", () => {
     renderModal()
     expect(screen.queryByRole("button", { name: /rename/i })).toBeNull()

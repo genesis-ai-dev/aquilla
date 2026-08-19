@@ -1243,6 +1243,7 @@ export const my: Catalog = {
   "fileDetails.orderingTimeline": "အချိန်ဇယား (အချိန်ကုဒ်များ)",
   "fileDetails.orderingSequence": "အစဉ်လိုက်",
   "fileDetails.languages": "ဘာသာစကားများ",
+  "fileDetails.sourceLanguage": "မူရင်းဘာသာစကား",
   "fileDetails.imported": "တင်သွင်းသည့်ရက်",
   "fileDetails.progress": "တိုးတက်မှု",
   "fileDetails.progressValue": "{translated}% ဘာသာပြန်ပြီး · {validated}% စိစစ်ပြီး",

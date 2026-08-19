@@ -44,6 +44,9 @@ export interface CodexData {
   chapter?: string;
   verse?: string;
   deleted?: boolean;
+  /** Codex cell-merge marker: the cell's content was absorbed into another
+   *  cell (heading consolidation, verse-range merge) and Codex hides it. */
+  merged?: boolean;
   originalText?: string;
   globalReferences?: string[];
   /**

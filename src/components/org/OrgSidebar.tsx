@@ -17,7 +17,6 @@ import {
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { OrgSwitcher } from "./OrgSwitcher"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
-import { HelpMenu } from "@/components/HelpMenu"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 const link = ({ isActive }: { isActive: boolean }) =>
@@ -192,11 +191,10 @@ export function OrgSidebar() {
           </>
         )}
       </nav>
-      <div className="mt-auto flex items-center gap-1 pt-2">
-        <div className="min-w-0 flex-1" data-tour="account-switcher">
+      <div className="mt-auto pt-2" data-tour="account-switcher">
+        <div className="min-w-0">
           <AccountSwitcher variant="sidebar" />
         </div>
-        <HelpMenu compact />
       </div>
     </div>
   )

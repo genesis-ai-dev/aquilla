@@ -181,6 +181,10 @@ describe("AppShell main-content error containment", () => {
     // the two apart.
     const trigger = await screen.findByRole("button", { name: "Quick language switch" })
     expect(trigger).toBeInTheDocument()
+    const help = screen.getByRole("button", { name: /help & community/i })
+    const footer = trigger.closest('[data-slot="app-shell-sidebar-footer"]')
+    expect(footer).toContainElement(help)
+    expect(help.nextElementSibling).toBe(trigger)
     // The picker must list endonyms, not English names — a Burmese speaker
     // looking for their language will not scan for the word "Burmese".
     await userEvent.click(trigger)
@@ -203,8 +207,14 @@ describe("AppShell main-content error containment", () => {
     // ProjectWorkspace is the only caller that passes leftDock, and it is the
     // screen a translator works in all day. If the switcher only rendered in the
     // org-chrome layout, changing UI language would mean leaving your work.
-    expect(
-      await screen.findByRole("button", { name: "Quick language switch" }),
-    ).toBeInTheDocument()
+    const language = await screen.findByRole("button", { name: "Quick language switch" })
+    const help = screen.getByRole("button", { name: /help & community/i })
+    const footer = language.closest('[data-slot="app-shell-sidebar-footer"]')
+    expect(footer).toContainElement(help)
+    expect(help).toHaveClass("size-8")
+
+    await userEvent.click(help)
+    expect(await screen.findByRole("menuitem", { name: /homepage/i })).toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: /take the tour/i })).not.toBeInTheDocument()
   })
 })

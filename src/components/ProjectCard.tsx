@@ -99,11 +99,11 @@ export function ProjectCard({
     (project.syncRole ? roleName(project.syncRole.level) : null)
 
   // While a card's workspace is opening it must not fire again — the click is
-  // swallowed and the cursor reflects the wait (AQU-737).
+  // swallowed and a spinner overlay shows the wait (AQU-737).
   const clickable = !isTrashed && !pending
   return (
     <Card
-      className={`relative ${isTrashed ? "opacity-70" : pending ? "cursor-wait" : "hover:bg-muted/50"} ${isInactive && !isTrashed ? "opacity-60" : ""} transition-colors`}
+      className={`relative ${isTrashed ? "opacity-70" : pending ? "" : "hover:bg-muted/50"} ${isInactive && !isTrashed ? "opacity-60" : ""} transition-colors`}
       onClick={clickable ? onClick : undefined}
       aria-busy={pending || undefined}
       data-testid={isInactive && !isTrashed ? "inactive-project-card" : undefined}

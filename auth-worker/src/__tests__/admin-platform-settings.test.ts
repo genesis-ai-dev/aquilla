@@ -9,6 +9,8 @@ import { env } from "cloudflare:test"
 import { describe, it, expect, afterEach, vi } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
+import { resolveContextualModels } from "../lib/contextual/tick"
+import { getPlatformSettingsCached } from "../lib/platform-settings"
 
 const get = (jwt: string) =>
   app.request("/api/v2/admin/settings", { headers: authHeader(jwt) }, env)
@@ -103,7 +105,88 @@ describe("GET/PATCH /api/v2/admin/settings", () => {
 })
 
 describe("platform_settings overrides the env default on the chat hot path", () => {
-  it("a 'default' chat request uses the admin-set model", async () => {
+  it("GET reports the autopilot tiers as they actually resolve, fallback included", async () => {
+    await seedUser(7, "root")
+    const body = (await (await get(await jwtFor("root"))).json()) as {
+      effective: { contextualFastModel: string; contextualDeepModel: string }
+    }
+    // Nothing stored and no CONTEXTUAL_* env in pg-test-env: every tier lands
+    // on the one frontier model. Showing an empty field here would hide that.
+    expect(body.effective.contextualFastModel).toBe("openai/gpt-5.6-luna")
+    expect(body.effective.contextualDeepModel).toBe("openai/gpt-5.6-luna")
+  })
+
+  it("an admin-set fast tier reaches resolveContextualModels", async () => {
+    await seedUser(7, "root")
+    const jwt = await jwtFor("root")
+    const res = await patch(jwt, {
+      contextualFastModel: "anthropic/claude-haiku-4-5",
+      ifMatchVersion: 0,
+    })
+    expect(res.status).toBe(200)
+
+    const settings = await getPlatformSettingsCached(env)
+    const models = resolveContextualModels(env, settings)
+    expect(models.fast).toBe("anthropic/claude-haiku-4-5")
+    // Setting one tier must not disturb the others.
+    expect(models.mid).toBe("openai/gpt-5.6-luna")
+    expect(models.deep).toBe("openai/gpt-5.6-luna")
+  })
+
+  it("an empty string CLEARS a tier back to the fallback", async () => {
+    await seedUser(7, "root")
+    const jwt = await jwtFor("root")
+    await patch(jwt, { contextualFastModel: "anthropic/claude-haiku-4-5", ifMatchVersion: 0 })
+    const cleared = await patch(jwt, { contextualFastModel: "", ifMatchVersion: 1 })
+    expect(cleared.status).toBe(200)
+
+    const body = (await (await get(jwt)).json()) as {
+      settings: Record<string, unknown>
+      effective: { contextualFastModel: string }
+    }
+    // Not stored as "" — the key is gone, so the env/default fallback resolves.
+    expect(body.settings.contextualFastModel).toBeUndefined()
+    expect(body.effective.contextualFastModel).toBe("openai/gpt-5.6-luna")
+    expect(resolveContextualModels(env, await getPlatformSettingsCached(env)).fast).toBe(
+      "openai/gpt-5.6-luna",
+    )
+  })
+
+  it("PATCH rejects a tier that is not in the allowed list", async () => {
+    await seedUser(7, "root")
+    const res = await patch(await jwtFor("root"), {
+      contextualFastModel: "some/unvetted-model",
+      ifMatchVersion: 0,
+    })
+    expect(res.status).toBe(400)
+    const body = (await res.json()) as { error: string; message: string }
+    expect(body.error).toBe("model_not_allowed")
+    expect(body.message).toContain("contextualFastModel")
+  })
+
+  it("accepts a tier added to allowedModels in the same patch", async () => {
+    await seedUser(7, "root")
+    const res = await patch(await jwtFor("root"), {
+      allowedModels: ["openai/gpt-5.6-luna", "vendor/tiny-fast"],
+      contextualFastModel: "vendor/tiny-fast",
+      ifMatchVersion: 0,
+    })
+    expect(res.status).toBe(200)
+    expect(resolveContextualModels(env, await getPlatformSettingsCached(env)).fast).toBe(
+      "vendor/tiny-fast",
+    )
+  })
+
+  it("a stored tier beats the env var, which beats the default", () => {
+    const envWith = { CONTEXTUAL_FAST_MODEL: "env/fast" }
+    expect(resolveContextualModels(envWith, {}).fast).toBe("env/fast")
+    expect(resolveContextualModels(envWith, { contextualFastModel: "store/fast" }).fast).toBe(
+      "store/fast",
+    )
+    expect(resolveContextualModels({}, {}).fast).toBe("openai/gpt-5.6-luna")
+  })
+
+    it("a 'default' chat request uses the admin-set model", async () => {
     await seedUser(1, "wendi")
     await seedUser(7, "root")
     // Admin pins the default chat model to Haiku.

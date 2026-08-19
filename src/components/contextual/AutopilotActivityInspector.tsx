@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { Link } from "react-router-dom"
 import {
   AlertTriangle,
   ChevronDown,
@@ -33,6 +34,7 @@ import {
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { LivingMemoryButton } from "@/components/LivingMemoryButton"
 import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { draftReviewHref } from "@/components/project-workspace-lane-deeplink"
@@ -1136,7 +1138,16 @@ export function AutopilotActivityInspector({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-2xl!" data-testid="autopilot-activity-inspector">
         <SheetHeader className="pe-12">
-          <SheetTitle>{t("autopilot.inspector.title")}</SheetTitle>
+          <div className="flex items-center gap-1">
+            <SheetTitle>{t("autopilot.inspector.title")}</SheetTitle>
+            {/* Co-referential Living Memory entry point: what autopilot knows
+                lives there, so the surface reporting its work links to it. */}
+            <LivingMemoryButton
+              projectId={projectId}
+              iconOnly
+              onNavigate={() => onOpenChange(false)}
+            />
+          </div>
           <SheetDescription>
             {t("autopilot.inspector.description")}
           </SheetDescription>
@@ -1467,15 +1478,19 @@ export function AutopilotActivityInspector({
                             <div className="flex shrink-0 items-center gap-2">
                               <Badge variant="outline">{readinessLevelLabel(item, t)}</Badge>
                               {item.href && item.level !== "ready" && (
-                                <a
+                                <Link
                                   aria-label={t("autopilot.inspector.context.setupNamed", {
                                     label: itemLabel,
                                   })}
-                                  href={`/project/${projectId}/${item.href}`}
+                                  to={`/project/${projectId}/${item.href}`}
                                   className="text-xs text-primary underline-offset-2 hover:underline"
+                                  // SPA navigation keeps this sheet mounted (the old
+                                  // raw <a> reloaded the page) — close it so the
+                                  // destination isn't hidden behind the overlay.
+                                  onClick={() => onOpenChange(false)}
                                 >
                                   {t("autopilot.inspector.context.setup")}
-                                </a>
+                                </Link>
                               )}
                             </div>
                           </div>

@@ -40,6 +40,52 @@ afterEach(() => {
 })
 
 describe("useProject — thin-client fetch (Phase 2c-β)", () => {
+  it("renders an initial project immediately while revalidating in the background", () => {
+    global.fetch = vi.fn<typeof fetch>(() => new Promise(() => {})) as unknown as typeof fetch
+
+    const initialProject = {
+      id: "p-seeded",
+      name: "Seeded project",
+      sourceLanguage: "English",
+      targetLanguage: "French",
+      createdAt: "",
+      files: [],
+      members: [],
+      syncRole: { level: 700, name: "owner", source: "creator", fetchedAt: "" },
+    } as never
+
+    const { result } = renderHook(() => useProject("p-seeded", {
+      initialProject,
+      includeSettings: false,
+    }))
+
+    expect(result.current.status).toBe("ready")
+    expect(result.current.loading).toBe(false)
+    expect(result.current.project?.name).toBe("Seeded project")
+  })
+
+  it("reuses an ancestor-owned project without starting another resolve", () => {
+    const fetchSpy = vi.fn<typeof fetch>(() => new Promise(() => {}))
+    global.fetch = fetchSpy as unknown as typeof fetch
+    const initialProject = {
+      id: "p-owned",
+      name: "Workspace project",
+      files: [],
+      members: [],
+      syncRole: { level: 700, name: "owner", source: "creator", fetchedAt: "" },
+    } as never
+
+    const { result } = renderHook(() => useProject("p-owned", {
+      initialProject,
+      enabled: false,
+      includeSettings: false,
+    }))
+
+    expect(result.current.status).toBe("ready")
+    expect(result.current.project?.name).toBe("Workspace project")
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
   it("populates project.files from the single-project endpoint", async () => {
     global.fetch = vi.fn<typeof fetch>(async (input) => {
       const url = typeof input === "string" ? input : (input as Request).url

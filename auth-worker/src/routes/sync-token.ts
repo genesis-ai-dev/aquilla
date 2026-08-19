@@ -32,9 +32,34 @@ import { resolveProjectRole } from "../services/project-permissions"
 
 const syncToken = new Hono<AuthHonoEnv>()
 
+// projectId/fileId are minted straight into the JWT's claims, which every
+// downstream sync-worker route trusts verbatim (verifyTokenForFile just
+// checks string equality against the claim — it does no shape validation of
+// its own). Several of those routes (tts.ts, voice-convert.ts) then
+// interpolate the id directly into an R2 key template, so a `/`, `\`, or `..`
+// here would let a project member mint a token whose claims collide with a
+// different R2 object outside the id's own namespace. Real ids are UUIDv7
+// strings; this only rejects unsafe characters, not shape, so it doesn't
+// constrain legitimate ids.
+function isPathSafeId(id: string): boolean {
+  if (id === "." || id === "..") return false
+  for (let i = 0; i < id.length; i++) {
+    const c = id.charCodeAt(i)
+    if (c === 0x2f || c === 0x5c || c === 0) return false // "/" or "\" or NUL
+  }
+  return true
+}
+
+const safeId = (label: string) =>
+  z
+    .string()
+    .min(1)
+    .max(256)
+    .refine(isPathSafeId, { message: `${label} contains unsafe characters` })
+
 const syncTokenSchema = z.object({
-  projectId: z.string().min(1),
-  fileId: z.string().min(1),
+  projectId: safeId("projectId"),
+  fileId: safeId("fileId"),
   // Optional bootstrap so an unknown projectId can be auto-registered
   // on the caller's first request.
   projectName: z.string().optional(),

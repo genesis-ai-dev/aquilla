@@ -19,7 +19,7 @@
 // (projectId, fileId). Reading the project-scoped reference clip is gated by the
 // verified projectId claim.
 
-import { audioObjectKey, r2KeyPrefix } from "./audio"
+import { audioObjectKey, isPathSafeId, r2KeyPrefix } from "./audio"
 import { verifyTokenForFile, verifyTokenForProject, WRITE_ROLE_LEVEL } from "./auth"
 
 export interface VoiceConvertEnv {
@@ -144,6 +144,12 @@ export async function handleVoiceConvertRequest(
   const sourceEntry = form.get("source")
   if (!projectId || !fileId || !referenceAudioId) {
     return new Response("missing projectId, fileId, or referenceAudioId", { status: 400 })
+  }
+  // projectId/fileId are form fields (unlike /audio, whose ids are URL-path
+  // segments matched by `[^/]+`) and land directly in an R2 key below, so
+  // reject anything that could act as a path separator there.
+  if (!isPathSafeId(projectId) || !isPathSafeId(fileId)) {
+    return new Response("invalid projectId or fileId", { status: 400 })
   }
 
   // Auth: sync-token scoped to this (projectId, fileId), same as /audio.

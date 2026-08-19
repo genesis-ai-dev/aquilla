@@ -1331,6 +1331,7 @@ export const ar: Catalog = {
   "fileDetails.orderingTimeline": "الخط الزمني (الرموز الزمنية)",
   "fileDetails.orderingSequence": "التسلسل",
   "fileDetails.languages": "اللغات",
+  "fileDetails.sourceLanguage": "لغة المصدر",
   "fileDetails.imported": "تاريخ الاستيراد",
   "fileDetails.progress": "التقدّم",
   "fileDetails.progressValue": "{translated}% مُترجَم · {validated}% مُتحقَّق منه",

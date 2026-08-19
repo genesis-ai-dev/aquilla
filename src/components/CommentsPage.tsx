@@ -9,7 +9,7 @@ import { useMemo, useState, useRef, useEffect } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import {
   MessageCircle, CheckCircle, ChevronDown, ChevronRight,
-  AlertCircle, Search, Funnel, ArrowUpRight,
+  AlertCircle, Search, Settings2, ArrowUpRight,
   MoreHorizontal, Pencil, Trash2, RefreshCw,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -634,7 +634,7 @@ function FilterControls({
 
   return (
     <div className="flex items-center gap-2">
-      <InputGroup className="h-8 flex-1">
+      <InputGroup className="h-8 flex-1 bg-card">
         <InputGroupAddon>
           <Search />
         </InputGroupAddon>
@@ -657,10 +657,11 @@ function FilterControls({
                 type="button"
                 variant="outline"
                 size="icon"
+                className="bg-card"
                 aria-label={t("comments.filter.filtersButton")}
                 aria-pressed={activeFilterCount > 0}
               >
-                <Funnel />
+                <Settings2 />
               </Button>
             }
           />
@@ -755,6 +756,7 @@ function FilterControls({
           type="button"
           variant="outline"
           size="icon"
+          className="bg-card"
           onClick={onRefresh}
           disabled={isRefreshing}
           aria-label={t("common.refresh")}

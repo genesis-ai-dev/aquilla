@@ -98,6 +98,9 @@ describe("CommentsPage chrome", () => {
     const filters = screen.getByRole("button", { name: /^Filters$/i })
     const refresh = screen.getByRole("button", { name: /^Refresh$/i })
     expect(filters.compareDocumentPosition(refresh) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByPlaceholderText("Search comments…").closest("[data-slot='input-group']")).toHaveClass("bg-card")
+    expect(filters).toHaveClass("bg-card")
+    expect(refresh).toHaveClass("bg-card")
     expect(screen.queryByRole("button", { name: /Back to project/i })).not.toBeInTheDocument()
   })
 

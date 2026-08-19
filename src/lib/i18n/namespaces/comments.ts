@@ -67,6 +67,7 @@ export const comments = defineNamespace({
     "comments.loadError": "Failed to load comments. Check your connection and try refreshing.",
     "comments.empty.title": "No comments yet",
     "comments.empty.body": "Comments can be added from the cell menu in the editor.",
+    "comments.empty.noneVisible": "No comments",
     "comments.noMatch.title": "No threads match your filters",
     "comments.noMatch.clear": "Clear filters",
 
@@ -262,8 +263,9 @@ export const comments = defineNamespace({
       },
       "comments.filter.filtersButton": {
         description:
-          "Button that expands/collapses the advanced filter row (sort, show-resolved, " +
-          "file, author, participant). Toggles state; label doesn't change.",
+          "Tooltip and accessible name of the icon-only button that expands/collapses " +
+          "the advanced filter row (sort, show-resolved, file, author, participant). " +
+          "Toggles state; the name does not change.",
       },
       "comments.filter.sortLabel": {
         description: "Form label beside the sort-order picker in the filter row.",
@@ -322,10 +324,16 @@ export const comments = defineNamespace({
           "Supporting text under comments.empty.title, telling the user where to add " +
           "a first comment.",
       },
+      "comments.empty.noneVisible": {
+        description:
+          "Heading of the empty-state card when the project has comments, but none " +
+          "are visible under the default filters (resolved threads are hidden). Not " +
+          "the filtered no-match state — that uses comments.noMatch.title.",
+      },
       "comments.noMatch.title": {
         description:
           "Heading of the empty-state card shown when the project has comments, but " +
-          "the active filters exclude all of them.",
+          "user-applied (non-default) filters exclude all of them.",
       },
       "comments.noMatch.clear": {
         description:

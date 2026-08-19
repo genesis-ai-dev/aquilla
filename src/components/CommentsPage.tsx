@@ -10,7 +10,7 @@ import { useNavigate, useParams } from "react-router-dom"
 import {
   MessageCircle, CheckCircle, ChevronDown, ChevronRight,
   AlertCircle, Search, SlidersHorizontal, ArrowUpRight,
-  MoreHorizontal, Pencil, Trash2,
+  MoreHorizontal, Pencil, Trash2, RefreshCw,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -18,6 +18,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import { EmptyState } from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
@@ -680,14 +681,18 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
             onChange={(e) => onChange({ ...filter, search: e.target.value })}
           />
         </InputGroup>
-        <Button
-          variant={expanded ? "secondary" : "outline"}
-          className="h-8 gap-1.5 text-xs"
-          onClick={() => setExpanded((v) => !v)}
-        >
-          <SlidersHorizontal className="h-3.5 w-3.5" />
-          {t("comments.filter.filtersButton")}
-        </Button>
+        <AppTooltip content={t("comments.filter.filtersButton")} side="bottom">
+          <Button
+            type="button"
+            variant={expanded ? "secondary" : "outline"}
+            size="icon"
+            aria-expanded={expanded}
+            aria-label={t("comments.filter.filtersButton")}
+            onClick={() => setExpanded((v) => !v)}
+          >
+            <SlidersHorizontal />
+          </Button>
+        </AppTooltip>
       </div>
 
       {expanded && (
@@ -940,9 +945,18 @@ export function CommentsPage() {
           </Badge>
         )}
         <div className="flex-1" />
-        <Button variant="outline" onClick={refresh} disabled={isLoading}>
-          {isLoading ? <Spinner className="size-3.5" /> : t("common.refresh")}
-        </Button>
+        <AppTooltip content={t("common.refresh")} side="bottom">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={refresh}
+            disabled={isLoading}
+            aria-label={t("common.refresh")}
+          >
+            {isLoading ? <Spinner /> : <RefreshCw />}
+          </Button>
+        </AppTooltip>
       </div>
 
       <FilterControls
@@ -968,27 +982,25 @@ export function CommentsPage() {
       )}
 
       {!isLoading && !isError && roots.length === 0 && (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-            <MessageCircle className="h-10 w-10 text-muted-foreground" />
-            <div className="text-lg font-medium">{t("comments.empty.title")}</div>
-            <p className="max-w-md text-sm text-muted-foreground">
-              {t("comments.empty.body")}
-            </p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={MessageCircle}
+          title={t("comments.empty.title")}
+          description={t("comments.empty.body")}
+        />
       )}
 
       {roots.length > 0 && displayedRoots.length === 0 && (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-8 text-center">
-            <Search className="h-8 w-8 text-muted-foreground" />
-            <div className="text-base font-medium">{t("comments.noMatch.title")}</div>
-            <Button variant="outline" onClick={() => setFilter(DEFAULT_FILTER)}>
+        <EmptyState
+          icon={MessageCircle}
+          title={activeFilterCount > 0
+            ? t("comments.noMatch.title")
+            : t("comments.empty.noneVisible")}
+          action={activeFilterCount > 0 ? (
+            <Button type="button" variant="outline" onClick={() => setFilter(DEFAULT_FILTER)}>
               {t("comments.noMatch.clear")}
             </Button>
-          </CardContent>
-        </Card>
+          ) : undefined}
+        />
       )}
 
       {displayedRoots.length > 0 && (

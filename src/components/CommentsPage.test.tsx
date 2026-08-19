@@ -93,7 +93,15 @@ describe("CommentsPage chrome", () => {
 
     expect(screen.getByRole("heading", { name: /Comments/i })).toBeInTheDocument()
     expect(screen.getByText(/No comments yet/i)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^Refresh$/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /^Filters$/i })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /Back to project/i })).not.toBeInTheDocument()
+  })
+
+  it("calls refresh from the icon button", () => {
+    renderPage()
+    fireEvent.click(screen.getByRole("button", { name: /^Refresh$/i }))
+    expect(mockRefresh).toHaveBeenCalledTimes(1)
   })
 
   it("expands Filters to show Sort combobox and collapses to hide it", () => {
@@ -134,5 +142,14 @@ describe("CommentsPage chrome", () => {
     expect(search).toHaveValue("")
     expect(screen.getByText("unique-search-token")).toBeInTheDocument()
     expect(screen.getByTestId("comments-count-badge")).toHaveTextContent("1")
+  })
+
+  it("shows No comments without Clear filters when only resolved threads exist", () => {
+    mockComments.mockReturnValue([makeComment({ resolved: true })])
+    renderPage()
+
+    expect(screen.getByText(/^No comments$/i)).toBeInTheDocument()
+    expect(screen.queryByText(/No threads match your filters/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Clear filters/i })).not.toBeInTheDocument()
   })
 })

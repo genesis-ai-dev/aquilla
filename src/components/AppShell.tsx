@@ -335,7 +335,6 @@ export function AppShell({
           <HelpMenu compact showTour={!useDockResize} />
           {i18n && (
             <LanguageSwitcher
-              className="h-6 shrink-0 rounded-md border border-border/50 bg-transparent px-1 text-xs"
               ariaLabel={i18n.t("language.switcher.chrome")}
             />
           )}

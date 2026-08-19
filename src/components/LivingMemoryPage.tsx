@@ -15,6 +15,7 @@
  * optimistic-overlay note below).
  */
 
+import { useCallback } from "react"
 import type { ComponentType } from "react"
 import { useParams, useNavigate, useLocation } from "react-router-dom"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
@@ -57,6 +58,12 @@ import { RecentExamplesSection } from "@/components/living-memory/ExamplesSectio
 import { BriefPane } from "@/components/living-memory/BriefPane"
 import { PredictionPromptSection } from "@/components/living-memory/PredictionPromptSection"
 import { QualityStyleRules } from "@/components/living-memory/QualityStyleRules"
+import type { RefineSegment } from "@/components/living-memory/RefineApplicabilityDialog"
+import { cellCoordinates } from "@/lib/rules/applicability"
+import { resolveFileGenre } from "@/lib/rules/file-genre"
+import { bookGenre } from "@/lib/scripture/book-genres"
+import { fetchAllFileCells } from "@/lib/sync/cells-read"
+import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 // Pure entry helpers live in living-memory/entries.ts; re-exported so existing
@@ -317,6 +324,48 @@ export function LivingMemoryPage({
 
   // Pane bodies keyed off the section id here (not inline in JSX) — the
   // MAINTAINER-gated pieces share the page-level settings instance via props.
+  // AQU-934 phase 3c: source segments for AI applicability refinement. Reading
+  // cells is the page's job, not the section's. Coordinates come from the SAME
+  // `cellCoordinates` the resolver uses, so a proposal cannot address a cell
+  // differently from the rule that will later match it.
+  const jwtForCells = session?.jwt
+  const loadSegments = useCallback(
+    async (fileId: string | null, signal: AbortSignal): Promise<readonly RefineSegment[]> => {
+      if (!projectId || !jwtForCells) return []
+      const files = (project?.files ?? []).filter((file) => fileId == null || file.id === fileId)
+      if (files.length === 0) return []
+      const getToken = buildFileScopedTokenFetcher(() => jwtForCells, projectId)
+      const segments: RefineSegment[] = []
+      for (const file of files) {
+        if (signal.aborted) break
+        const token = await getToken(file.id)
+        if (!token) continue
+        const rows = await fetchAllFileCells(projectId, file.id, token, "source")
+        const genre = resolveFileGenre(file.id, file.bookCode, settings.fileGenres)
+        for (const row of rows) {
+          const text = row.value.trim()
+          if (!text) continue
+          segments.push({
+            id: row.cellId,
+            text,
+            ...(row.canonicalRef ? { ref: row.canonicalRef } : {}),
+            coords: cellCoordinates(
+              { id: row.cellId, ...(row.canonicalRef ? { globalReferences: [row.canonicalRef] } : {}) },
+              {
+                fileId: file.id,
+                ...(file.bookCode ? { bookCode: file.bookCode } : {}),
+                ...(genre ? { genre } : {}),
+              },
+              bookGenre,
+            ),
+          })
+        }
+      }
+      return segments
+    },
+    [projectId, jwtForCells, project?.files, settings.fileGenres],
+  )
+
   const paneBody = (id: LivingMemorySectionId) => {
     switch (id) {
       case "brief":
@@ -397,6 +446,7 @@ export function LivingMemoryPage({
                 canEditSettings={entriesReady && canEdit}
                 reasonCannotEditSettings={entriesReady ? reasonCannotEdit : "role"}
                 patchFileGenres={patchSettings}
+                loadSegments={loadSegments}
               />
             ) : null}
           </>

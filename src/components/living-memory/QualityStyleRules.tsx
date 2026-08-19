@@ -42,6 +42,7 @@ import { suggestFileGenres } from "@/lib/rules/file-genre"
 import { RoleLockTooltip } from "./AuthoredEntriesSection"
 import { DocumentGenres, type GenreFile } from "./DocumentGenres"
 import { ExtractRulesDialog } from "./ExtractRulesDialog"
+import { RefineApplicabilityDialog, type RefineSegment } from "./RefineApplicabilityDialog"
 import { RuleApplicabilityDialog } from "./RuleApplicabilityDialog"
 import { StyleRuleCandidates } from "./StyleRuleCandidates"
 import { StyleRuleLibrary, type StyleRuleLabels } from "./StyleRuleLibrary"
@@ -99,6 +100,12 @@ interface QualityStyleRulesProps {
   reasonCannotEditSettings?: "offline" | "role" | null
   /** The PAGE's useProjectSettings patch (optimistic overlay lives there). */
   patchFileGenres?: (partial: { fileGenres: Record<string, string> }) => Promise<unknown>
+  /**
+   * Segment source for AI applicability refinement (phase 3c): one file, or
+   * the whole project when `fileId` is null. Reading cells is the page's job,
+   * not this section's — without it the Refine action is not offered.
+   */
+  loadSegments?: (fileId: string | null, signal: AbortSignal) => Promise<readonly RefineSegment[]>
 }
 
 export function QualityStyleRules({
@@ -111,6 +118,7 @@ export function QualityStyleRules({
   canEditSettings = false,
   reasonCannotEditSettings = "role",
   patchFileGenres,
+  loadSegments,
 }: QualityStyleRulesProps) {
   const t = useT()
   const { locale } = useI18n()
@@ -129,6 +137,7 @@ export function QualityStyleRules({
   const [docs, setDocs] = useState<KnowledgeDocument[]>([])
   const [extractOpen, setExtractOpen] = useState(false)
   const [applicabilityRule, setApplicabilityRule] = useState<StyleRule | null>(null)
+  const [refineRule, setRefineRule] = useState<StyleRule | null>(null)
 
   const jwt = session?.jwt ?? null
   const scope: KnowledgeScope = useMemo(
@@ -263,6 +272,7 @@ export function QualityStyleRules({
             labels={labels}
             onToggleEnabled={(rule, enabled) => { void updateRule(rule.id, { enabled }) }}
             onOpenApplicability={setApplicabilityRule}
+            onRefine={loadSegments && completionSettings ? setRefineRule : undefined}
           />
         </div>
 
@@ -288,6 +298,26 @@ export function QualityStyleRules({
         }}
         onRemove={(applicabilityId) => {
           if (applicabilityRule) void removeApplicability(applicabilityRule.id, applicabilityId)
+        }}
+      />
+
+      <RefineApplicabilityDialog
+        rule={refineRule}
+        files={files ?? []}
+        loadSegments={loadSegments}
+        rows={applicability}
+        settings={completionSettings}
+        session={session}
+        canManage={canReview}
+        onClose={() => setRefineRule(null)}
+        onConfirm={(confirmed) => {
+          const rule = refineRule
+          if (!rule) return
+          // Sequential on purpose: every row lands through the same upsert the
+          // manual editor uses, and each one refetches the library.
+          void (async () => {
+            for (const row of confirmed) await setApplicability(rule.id, row)
+          })()
         }}
       />
 

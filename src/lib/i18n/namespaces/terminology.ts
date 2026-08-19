@@ -282,6 +282,44 @@ export const terminology = defineNamespace({
       "Set up an AI model for this project before extracting rules.",
     "terminology.livingMemory.styleRules.extract.failed": "Extraction stopped: {message}",
 
+    // ── Applicability refinement (quality pane, AQU-934 phase 3c) ───────────
+    // Reused keys (no duplicates added): styleRules.relationship.applies /
+    // .excluded head the two proposal groups, styleRules.scope.* +
+    // styleRules.target.book + common.file name each proposed target's type
+    // (the same vocabulary the manual applicability editor uses), common.cancel
+    // stops a run, common.discard drops the proposals, and common.selectAll /
+    // common.clear drive the bulk selection.
+    "terminology.livingMemory.styleRules.refine.button": "Refine",
+    "terminology.livingMemory.styleRules.refine.title": "Refine where this rule applies",
+    "terminology.livingMemory.styleRules.refine.description":
+      "Read the segments in one scope and propose the targets this rule really governs, " +
+      "grouped as broadly as the evidence allows. Nothing is saved until you confirm it.",
+    "terminology.livingMemory.styleRules.refine.scopeLabel": "Segments to inspect",
+    "terminology.livingMemory.styleRules.refine.scopeProject": "All documents",
+    "terminology.livingMemory.styleRules.refine.start": "Start inspection",
+    "terminology.livingMemory.styleRules.refine.progress": "Segment {current} of {total}",
+    "terminology.livingMemory.styleRules.refine.matched": plural({
+      one: "{count} match so far",
+      other: "{count} matches so far",
+    }),
+    "terminology.livingMemory.styleRules.refine.truncated":
+      "Only the first {count} segments of this scope were inspected.",
+    "terminology.livingMemory.styleRules.refine.needsModel":
+      "Set up an AI model for this project before inspecting segments.",
+    "terminology.livingMemory.styleRules.refine.none":
+      "Nothing new to propose — the rule already reaches these segments the way they read.",
+    "terminology.livingMemory.styleRules.refine.failed": "Inspection stopped: {message}",
+    "terminology.livingMemory.styleRules.refine.coverage": plural({
+      one: "{count} segment",
+      other: "{count} segments",
+    }),
+    "terminology.livingMemory.styleRules.refine.confidence": "{percent} confident",
+    "terminology.livingMemory.styleRules.refine.includeAria": "Include {target}",
+    "terminology.livingMemory.styleRules.refine.confirm": plural({
+      one: "Confirm {count} target",
+      other: "Confirm {count} targets",
+    }),
+
     // ── Document genres (quality pane, AQU-934 phase 3b) ────────────────────
     // Reused keys (no duplicates added): styleRules.assignedBy.human labels a
     // genre a person set (same "how did this value get here" vocabulary as the
@@ -838,6 +876,65 @@ export const terminology = defineNamespace({
           "Inline alert in the extraction dialog when the run stops on an error; " +
           "{message} is the underlying error's own text (not translated).",
         placeholders: { message: "The underlying error's message, verbatim." },
+      },
+      "terminology.livingMemory.styleRules.refine.button": {
+        description:
+          "Button on an approved style rule's row that opens the dialog where AI reads " +
+          "the project's segments and proposes finer targets for the rule. Sits beside " +
+          "the 'Where it applies' button, so it must read as a distinct action.",
+        maxLength: 16,
+      },
+      "terminology.livingMemory.styleRules.refine.progress": {
+        description:
+          "Live progress line while the refinement run reads segments; {current} is how " +
+          "many segments have been judged and {total} how many the run will judge.",
+        placeholders: {
+          current: "Number of segments judged so far.",
+          total: "Total number of segments this run inspects.",
+        },
+      },
+      "terminology.livingMemory.styleRules.refine.matched": {
+        description:
+          "Running tally beside the refinement progress line: how many inspected " +
+          "segments the rule was judged to govern; {count} is that count.",
+        placeholders: { count: "Number of segments judged to match the rule so far." },
+      },
+      "terminology.livingMemory.styleRules.refine.truncated": {
+        description:
+          "Notice shown when the chosen scope holds more segments than one run may " +
+          "inspect, so only the first {count} were read. Never silently sampled.",
+        placeholders: { count: "Maximum number of segments one run inspects." },
+      },
+      "terminology.livingMemory.styleRules.refine.failed": {
+        description:
+          "Inline alert in the refinement dialog when the run stops on an error; " +
+          "{message} is the underlying error's own text (not translated).",
+        placeholders: { message: "The underlying error's message, verbatim." },
+      },
+      "terminology.livingMemory.styleRules.refine.coverage": {
+        description:
+          "Badge on one proposed target saying how many inspected segments it covers — " +
+          "the evidence behind the proposal; {count} is that count.",
+        placeholders: { count: "Number of inspected segments this proposed target covers." },
+      },
+      "terminology.livingMemory.styleRules.refine.confidence": {
+        description:
+          "Badge on one proposed target carrying how sure the AI was; {percent} is an " +
+          "already-localized percentage such as '90%'.",
+        placeholders: { percent: "Confidence as a formatted percentage, e.g. '90%'." },
+      },
+      "terminology.livingMemory.styleRules.refine.includeAria": {
+        description:
+          "Accessible name for the checkbox that keeps one proposed target in the set " +
+          "about to be saved; {target} is the target's own address (a chapter label, " +
+          "verse range or segment id), verbatim.",
+        placeholders: { target: "The proposed target's own address, verbatim." },
+      },
+      "terminology.livingMemory.styleRules.refine.confirm": {
+        description:
+          "Primary button in the refinement dialog: saves the ticked proposals as " +
+          "targets a person confirmed; {count} is how many are ticked.",
+        placeholders: { count: "Number of proposed targets currently ticked." },
       },
       "terminology.livingMemory.genres.pickerAria": {
         description:

@@ -547,6 +547,8 @@ interface FilterControlsProps {
 }
 
 const filterLabelClass = "font-normal text-muted-foreground"
+/** Matches FieldGroup `gap-3` so select popups sit the same distance from their trigger. */
+const FILTER_MENU_GAP_PX = 12
 
 /** Base UI treats "" as no value (`data-placeholder`), which mutes the trigger. */
 const ALL_SELECT_VALUE = "__all__"
@@ -565,12 +567,14 @@ function FilterSelectRow({
   items,
   value,
   onValueChange,
+  side = "bottom",
 }: {
   id: string
   label: string
   items: { value: string; label: string }[]
   value: string
   onValueChange: (value: string) => void
+  side?: "top" | "bottom"
 }) {
   const selectItems = items.map((item) => ({
     ...item,
@@ -589,7 +593,12 @@ function FilterSelectRow({
         <SelectTrigger id={id} size="sm" aria-label={label}>
           <SelectValue className="truncate" />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent
+          align="end"
+          side={side}
+          alignItemWithTrigger={false}
+          sideOffset={FILTER_MENU_GAP_PX}
+        >
           <SelectGroup>
             {selectItems.map((item) => (
               <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
@@ -610,6 +619,8 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
   const showResolvedLabel = t("comments.filter.showResolved")
   const activeFilterCount = countActiveFilters(filter)
   const canReset = activeFilterCount > 0 || filter.sort !== DEFAULT_FILTER.sort
+  const hasFiles = fileOptions.length > 0
+  const hasAuthors = authorOptions.length > 0
 
   return (
     <div className="flex items-center gap-2">
@@ -659,6 +670,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
               items={sortItemsList}
               value={filter.sort}
               onValueChange={(value) => onChange({ ...filter, sort: value as SortOrder })}
+              side={!hasFiles && !hasAuthors ? "top" : "bottom"}
             />
             <Field orientation="horizontal">
               <FieldLabel htmlFor="comments-filter-show-resolved" className={filterLabelClass}>
@@ -671,7 +683,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
                 aria-label={showResolvedLabel}
               />
             </Field>
-            {fileOptions.length > 0 && (
+            {hasFiles && (
               <FilterSelectRow
                 id="comments-filter-file"
                 label={t("common.file")}
@@ -681,9 +693,10 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
                 ]}
                 value={filter.fileId}
                 onValueChange={(value) => onChange({ ...filter, fileId: value })}
+                side={!hasAuthors ? "top" : "bottom"}
               />
             )}
-            {authorOptions.length > 0 && (
+            {hasAuthors && (
               <FilterSelectRow
                 id="comments-filter-author"
                 label={t("comments.filter.authorLabel")}
@@ -695,7 +708,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
                 onValueChange={(value) => onChange({ ...filter, authorId: value })}
               />
             )}
-            {authorOptions.length > 0 && (
+            {hasAuthors && (
               <FilterSelectRow
                 id="comments-filter-participant"
                 label={t("comments.filter.participantLabel")}
@@ -705,6 +718,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
                 ]}
                 value={filter.participant}
                 onValueChange={(value) => onChange({ ...filter, participant: value })}
+                side="top"
               />
             )}
           </FieldGroup>

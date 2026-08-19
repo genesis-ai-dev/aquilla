@@ -152,6 +152,19 @@ describe("CommentsPage chrome", () => {
       expect(trigger).not.toHaveAttribute("data-placeholder")
       expect(trigger.className).toMatch(/text-foreground/)
     }
+
+    const sortTrigger = screen.getByRole("combobox", { name: /^Sort$/i })
+    fireEvent.click(sortTrigger)
+    expect(document.querySelector("[data-slot=select-content]")?.closest("[data-side]")).toHaveAttribute(
+      "data-side",
+      "bottom",
+    )
+    fireEvent.click(sortTrigger)
+    fireEvent.click(screen.getByRole("combobox", { name: /^Participant$/i }))
+    expect(document.querySelector("[data-slot=select-content]")?.closest("[data-side]")).toHaveAttribute(
+      "data-side",
+      "top",
+    )
   })
 
   it("filters threads by search, shows filter badge and clear-filters empty state", () => {

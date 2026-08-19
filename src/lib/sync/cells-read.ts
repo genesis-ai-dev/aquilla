@@ -191,6 +191,9 @@ export interface FetchFileCellsOptions {
  *  is absent when talking to a pre-M2-1 server. */
 export interface CellsPageWithMeta extends CellsPage {
   maxServerSeq?: number | null
+  /** AQU-943: the project incarnation this page's watermark belongs to.
+   *  Absent when talking to a pre-AQU-943 server. */
+  projectEpoch?: number | null
 }
 
 /**
@@ -224,14 +227,27 @@ export type CellsDeltaResult =
   /** Changed cells since the cursor. A `changedCellIds` entry with no row in
    *  `cells` was deleted. Empty arrays = nothing changed (the cheap common
    *  case for focus revalidation). */
-  | { kind: "delta"; changedCellIds: string[]; cells: CellRow[]; maxServerSeq: number }
-  /** Server says the delta is bigger than a full read is worth — or this is
+  | {
+      kind: "delta"
+      changedCellIds: string[]
+      cells: CellRow[]
+      maxServerSeq: number
+      /** AQU-943: incarnation to store beside the new cursor. */
+      projectEpoch?: number
+    }
+  /** Server says the delta is bigger than a full read is worth, the cursor
+   *  belongs to a previous incarnation of the project (AQU-943) — or this is
    *  a pre-M2-1 server that ignored `since` (no `delta` marker in the body).
    *  Caller falls back to the full stream. */
   | { kind: "resync" }
 
 /**
  * One conditional request against the cells read route: `?since=<serverSeq>`.
+ *
+ * `projectEpoch` (AQU-943) is the incarnation `since` was minted against, sent
+ * as `?epoch=`. Pass it whenever it is known: without it the server cannot
+ * tell a live cursor from one minted against a wiped-and-re-created project,
+ * whose restarted seq allocator makes every delta answer "nothing newer".
  *
  * Deliberately NOT using `If-None-Match`: the sync-worker's CORS allowlist
  * (`Access-Control-Allow-Headers` in sync-worker/src/cors.ts) doesn't cover
@@ -244,10 +260,12 @@ export async function fetchCellsDelta(
   since: number,
   jwt: string,
   lane?: string,
+  projectEpoch?: number | null,
 ): Promise<CellsDeltaResult> {
   const params = new URLSearchParams()
   params.set("since", String(since))
   if (lane) params.set("lane", lane)
+  if (typeof projectEpoch === "number") params.set("epoch", String(projectEpoch))
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
     `/files/${encodeURIComponent(fileId)}/cells?${params.toString()}`
@@ -257,6 +275,7 @@ export async function fetchCellsDelta(
     changedCellIds?: string[]
     cells?: CellRow[]
     maxServerSeq?: number
+    projectEpoch?: number
   }>(url, jwt)
   if (body.delta === true && typeof body.maxServerSeq === "number") {
     return {
@@ -264,6 +283,7 @@ export async function fetchCellsDelta(
       changedCellIds: body.changedCellIds ?? [],
       cells: normalizeRowsMetadata(body.cells ?? []),
       maxServerSeq: body.maxServerSeq,
+      ...(typeof body.projectEpoch === "number" ? { projectEpoch: body.projectEpoch } : {}),
     }
   }
   return { kind: "resync" }
@@ -330,7 +350,9 @@ export async function fetchCellsByIds(
  * the in-flight result is no longer wanted.
  *
  * `onMeta` (optional) fires once per page, BEFORE that page's `onPage`, with
- * the page's `maxServerSeq`. The FIRST page's watermark is the safe `?since=`
+ * the page's `maxServerSeq` and `projectEpoch` (AQU-943 — the incarnation that
+ * watermark belongs to, stored beside the cursor and echoed on the next
+ * delta). The FIRST page's watermark is the safe `?since=`
  * cursor for the stream: anything that lands mid-stream has a higher seq, so
  * the next delta re-fetches it. A page-to-page difference means events landed
  * mid-stream — and because the server paginates by offset, a row that shifted
@@ -343,7 +365,7 @@ export async function streamFileCells(
   jwt: string,
   onPage: (rows: CellRow[], isLast: boolean) => boolean | void | Promise<boolean | void>,
   side?: "source" | "target",
-  onMeta?: (meta: { maxServerSeq?: number | null }) => void,
+  onMeta?: (meta: { maxServerSeq?: number | null; projectEpoch?: number | null }) => void,
   lane?: string,
 ): Promise<void> {
   let cursor: string | undefined
@@ -352,7 +374,7 @@ export async function streamFileCells(
   const MAX_PAGES = 100
   for (let i = 0; i < MAX_PAGES; i++) {
     const page = await fetchFileCells(projectId, fileId, { side, cursor, lane }, jwt)
-    if (onMeta) onMeta({ maxServerSeq: page.maxServerSeq })
+    if (onMeta) onMeta({ maxServerSeq: page.maxServerSeq, projectEpoch: page.projectEpoch })
     const nextCursor = page.nextCursor ?? undefined
     const isLast = nextCursor === undefined
     const cont = await onPage(page.cells, isLast)

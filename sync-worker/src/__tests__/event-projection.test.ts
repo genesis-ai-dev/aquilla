@@ -878,6 +878,9 @@ describe('isChainMutatingKind', () => {
     'source.cell.delete': true,
     'source.cell.reorder': true,
     'source.cell.metadata.patch': false,
+    // AQU-931: anchor-only repair — must NOT arbitrate (a parent-null event
+    // would lose the genesis slot to the cell's own create on rebuild).
+    'source.cell.reanchor': false,
     'target.cell.create': true,
     'target.cell.commit': true,
     'target.cell.delete': true,

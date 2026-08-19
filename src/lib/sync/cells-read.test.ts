@@ -163,6 +163,30 @@ describe("AQU-538: lane query param", () => {
     expect(fetchMock.mock.calls[1][0] as string).toContain("lane=fr")
   })
 
+  // AQU-943: the epoch is what lets the server tell a live cursor from one
+  // minted against a wiped-and-re-created project, whose restarted allocator
+  // makes every delta answer "nothing newer than your cursor".
+  it("fetchCellsDelta declares the cursor's incarnation only when known, and keeps the one it is handed", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(pageResponse({ delta: true, changedCellIds: [], cells: [], maxServerSeq: 1 }))
+      .mockResolvedValueOnce(
+        pageResponse({
+          delta: true, changedCellIds: [], cells: [], maxServerSeq: 1, projectEpoch: 2_000,
+        }),
+      )
+    vi.stubGlobal("fetch", fetchMock)
+
+    const withoutEpoch = await fetchCellsDelta("proj", "file", 1, "jwt")
+    expect(fetchMock.mock.calls[0][0] as string).not.toContain("epoch=")
+    expect(withoutEpoch).toMatchObject({ kind: "delta" })
+    expect((withoutEpoch as { projectEpoch?: number }).projectEpoch).toBeUndefined()
+
+    const withEpoch = await fetchCellsDelta("proj", "file", 1, "jwt", undefined, 2_000)
+    expect(fetchMock.mock.calls[1][0] as string).toContain("epoch=2000")
+    expect(withEpoch).toMatchObject({ kind: "delta", projectEpoch: 2_000 })
+  })
+
   it("fetchCellsByIds appends lane only when set", async () => {
     const fetchMock = vi
       .fn()

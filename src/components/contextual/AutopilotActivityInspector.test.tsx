@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { AutopilotActivityInspector } from "./AutopilotActivityInspector"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
@@ -53,6 +54,7 @@ const activity: ContextualRunActivity = {
     status: "proposed",
     startCellId: "c1",
     endCellId: "c3",
+    spanLabel: "LUK 1:1–1:8",
     l1Summary: "A teacher addresses a crowd.",
     construal: "The teacher warns the crowd.",
     ambiguityRegister: [{ id: "a1", question: "Is the warning ironic?" }],
@@ -62,6 +64,8 @@ const activity: ContextualRunActivity = {
     runId: RUN_ID,
     fileId: "file-1",
     cellId: "c2",
+    cellLabel: "LUK 1:2",
+    spanLabel: "LUK 1:1–1:8",
     text: "Draft text",
     status: "proposed",
     provenance: { runId: RUN_ID, sceneBriefId: "brief-1" },
@@ -140,16 +144,20 @@ afterEach(() => {
   CATALOGS.my = originalMyanmarCatalog
 })
 
+// Router context is required: the inspector renders react-router Links (the
+// readiness "Set up" links) and the LivingMemoryButton (useNavigate).
 function renderInspector(props: Partial<React.ComponentProps<typeof AutopilotActivityInspector>> = {}) {
   return render(
-    <AutopilotActivityInspector
-      projectId="p1"
-      open
-      onOpenChange={vi.fn()}
-      fileNames={new Map([["file-1", "LUK.usfm"]])}
-      canControl
-      {...props}
-    />,
+    <MemoryRouter>
+      <AutopilotActivityInspector
+        projectId="p1"
+        open
+        onOpenChange={vi.fn()}
+        fileNames={new Map([["file-1", "LUK.usfm"]])}
+        canControl
+        {...props}
+      />
+    </MemoryRouter>,
   )
 }
 
@@ -179,14 +187,16 @@ describe("AutopilotActivityInspector", () => {
     }
 
     render(
-      <I18nProvider>
-        <AutopilotActivityInspector
-          projectId="p1"
-          open
-          onOpenChange={vi.fn()}
-          fileNames={new Map([["file-1", "LUK.usfm"]])}
-        />
-      </I18nProvider>,
+      <MemoryRouter>
+        <I18nProvider>
+          <AutopilotActivityInspector
+            projectId="p1"
+            open
+            onOpenChange={vi.fn()}
+            fileNames={new Map([["file-1", "LUK.usfm"]])}
+          />
+        </I18nProvider>
+      </MemoryRouter>,
     )
 
     expect(screen.getByRole("dialog")).toHaveAccessibleName("အလိုအလျောက် လုပ်ဆောင်မှု")
@@ -281,12 +291,15 @@ describe("AutopilotActivityInspector", () => {
   it("progressively reveals drafts, construal, L1 summary, ambiguities, and provenance", async () => {
     renderInspector({ initialSection: "review" })
     expect(await screen.findByText("Draft text")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Review in editor: cell c2" })).toHaveAttribute(
+    expect(screen.getByText("LUK 1:2")).toBeInTheDocument()
+    expect(screen.getByText("Drafted from LUK 1:1–1:8")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Review in editor: cell LUK 1:2" })).toHaveAttribute(
       "href",
       "/project/p1/editor/file/file-1?cellId=c2&lane=",
     )
-    expect(screen.getByText(/sceneBriefId/)).toBeInTheDocument()
+    expect(screen.queryByText(/sceneBriefId/)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: /Context/ }))
+    expect(screen.getAllByText("LUK 1:1–1:8").length).toBeGreaterThan(0)
     expect(screen.getByText("A teacher addresses a crowd.")).toBeInTheDocument()
     expect(screen.getByText("The teacher warns the crowd.")).toBeInTheDocument()
     expect(screen.getByText("Is the warning ironic?")).toBeInTheDocument()
@@ -561,15 +574,17 @@ describe("AutopilotActivityInspector", () => {
     // Mirrors the editor parent refreshing its fallback snapshot after the
     // mutation while focusRunId still points at the failed run.
     rerender(
-      <AutopilotActivityInspector
-        projectId="p1"
-        open
-        onOpenChange={vi.fn()}
-        fileNames={new Map([["file-1", "LUK.usfm"]])}
-        focusRunId={failed.runId}
-        focusFileId={failed.fileId}
-        fallbackRun={{ ...failed, updatedAt: "2026-08-11T10:03:00.000Z" }}
-      />,
+      <MemoryRouter>
+        <AutopilotActivityInspector
+          projectId="p1"
+          open
+          onOpenChange={vi.fn()}
+          fileNames={new Map([["file-1", "LUK.usfm"]])}
+          focusRunId={failed.runId}
+          focusFileId={failed.fileId}
+          fallbackRun={{ ...failed, updatedAt: "2026-08-11T10:03:00.000Z" }}
+        />
+      </MemoryRouter>,
     )
 
     const selected = screen.getAllByRole("button").find((button) => button.getAttribute("aria-pressed") === "true")
@@ -761,7 +776,7 @@ describe("AutopilotActivityInspector", () => {
         blockingGaps: 2,
         items: [
           { id: "terminology", label: "Key terms", level: "missing", detail: "Missing", href: "terminology" },
-          { id: "brief", label: "Translation brief", level: "missing", detail: "Missing", href: "settings/memory" },
+          { id: "brief", label: "Translation brief", level: "missing", detail: "Missing", href: "memory/brief" },
         ],
       },
     })
@@ -772,7 +787,7 @@ describe("AutopilotActivityInspector", () => {
     )
     expect(screen.getByRole("link", { name: "Set up Translation brief" })).toHaveAttribute(
       "href",
-      "/project/p1/settings/memory",
+      "/project/p1/memory/brief",
     )
   })
 

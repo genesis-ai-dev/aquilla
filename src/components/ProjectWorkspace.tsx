@@ -167,7 +167,9 @@ import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { ExpandableFileList } from "./ExpandableFileList"
 import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
 import { FileDetailsModal } from "./FileDetailsModal"
+import { FileSegmentationDialog } from "./FileSegmentationDialog"
 import { SidebarProjectSection } from "./SidebarProjectSection"
+import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { SuggestionBanner } from "./SuggestionBanner"
 import { ConfirmActionDialog } from "./ConfirmActionDialog"
 import { LinkVideoTimingDialog } from "./timeline/LinkVideoTimingDialog"
@@ -273,6 +275,15 @@ const CommentsPageContent = lazy(() =>
 const GlossaryEditorContent = lazy(() =>
   import("./GlossaryEditor").then((mod) => ({ default: mod.GlossaryEditor })),
 )
+const LivingMemoryPageContent = lazy(() =>
+  import("./LivingMemoryPage").then((mod) => ({ default: mod.LivingMemoryPage })),
+)
+
+// Living Memory overlay — matches /project/:id/memory and /project/:id/memory/:section.
+// Anchored on the /project/:id prefix so a path like /project/:id/settings/memory
+// (now a redirect, but the derivation stays conservative) can never match.
+// Keep in sync with the local copy in shell-routing.test.ts.
+const PROJECT_MEMORY_PATH_RE = /^\/project\/[^/]+\/memory(\/[^/]+)?$/
 // FRO-249 fix (Fix 2): module-level promise chain that serializes
 // handleImported's getProject→updateProject read-modify-write so that
 // concurrent imports don't race and the last write doesn't silently drop
@@ -485,7 +496,15 @@ export function ProjectWorkspace() {
           : orgHomePath(ALL_ORGS_PARAM),
     )
   }, [activeOrgId, isAllOrgs, navigate])
-  const { project: loadedProject, status, refresh, patchSettings, roleLevel: serverRoleLevel, settingsFetched } = useProject(projectId!)
+  const {
+    project: loadedProject,
+    status,
+    refresh,
+    patchSettings,
+    projectSettings,
+    roleLevel: serverRoleLevel,
+    settingsFetched,
+  } = useProject(projectId!)
   // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt,
   // aiSetupSkipped) live in IDB; merge them onto the server-fetched record on
   // load and after each local patch so rename suggestions don't loop on every
@@ -753,16 +772,17 @@ export function ProjectWorkspace() {
   useEffect(() => {
     if (!project || !projectId) return
 
-    // The in-project overlay surfaces (/comments, /terminology, /agent)
-    // deliberately carry no file in the URL — don't treat that as
-    // "no file selected" and bounce back to the editor, or these surfaces become
-    // unreachable. (FRO-254 added comments/terminology; agent is a takeover.)
-    // Rules and Living Memory live at /project/:id/settings/{rules,memory}.
+    // The in-project overlay surfaces (/comments, /terminology, /agent,
+    // /memory[/:section]) deliberately carry no file in the URL — don't treat
+    // that as "no file selected" and bounce back to the editor, or these
+    // surfaces become unreachable. (FRO-254 added comments/terminology; agent
+    // is a takeover; Living Memory joined as /project/:id/memory[/:section].)
     // Members live at /project/:id/settings/members (not a workspace surface).
     if (
       location.pathname.endsWith("/comments") ||
       location.pathname.endsWith("/terminology") ||
-      location.pathname.endsWith("/agent")
+      location.pathname.endsWith("/agent") ||
+      PROJECT_MEMORY_PATH_RE.test(location.pathname)
     ) return
 
     // A file is already in the URL: leave it unless the project genuinely
@@ -829,12 +849,13 @@ export function ProjectWorkspace() {
 
   // Center surface — derived from the URL path so deep-links work and the
   // shell (sidebar + top bar + bottom status bar) never unmounts.
-  // FRO-254: comments / terminology. Agent is a takeover surface.
-  // Rules and Living Memory live under /project/:id/settings/{rules,memory}.
-  const centerSurface: "editor" | "comments" | "terminology" | "agent" =
+  // FRO-254: comments / terminology. Agent is a takeover surface. Living
+  // Memory is /project/:id/memory[/:section] (index + detail panes).
+  const centerSurface: "editor" | "comments" | "terminology" | "agent" | "memory" =
     location.pathname.endsWith("/comments") ? "comments" :
     location.pathname.endsWith("/terminology") ? "terminology" :
     location.pathname.endsWith("/agent") ? "agent" :
+    PROJECT_MEMORY_PATH_RE.test(location.pathname) ? "memory" :
     "editor"
   const agentOpen = centerSurface === "agent"
   const [translateAsReadEnabled, setTranslateAsReadEnabled] = useTranslateAsReadPreference(projectId)
@@ -860,7 +881,7 @@ export function ProjectWorkspace() {
   }, [projectId, centerSurface, activeFileId, location.pathname, location.search])
 
   const openOverlay = useCallback((
-    surface: "comments" | "terminology" | "agent",
+    surface: "comments" | "terminology" | "agent" | "memory",
   ) => {
     if (!projectId) return
     navigate(withEditorReturn(`/project/${projectId}/${surface}`, editorReturnPath))
@@ -2471,7 +2492,7 @@ export function ProjectWorkspace() {
     revalidateCell(cell.id)
   }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
-  const { completeSingle, prepareSingleEvidence, completeBatch, completeParagraph, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
+  const { completeSingle, prepareSingleEvidence, completeBatch, completeParagraph, clearCellError, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
     // language for few-shot/completion; default lane falls back to the file's
     // (then project's) targetLanguage exactly as before. Shares the same
@@ -2977,6 +2998,24 @@ export function ProjectWorkspace() {
 
   const backtranslating = backtranslatingState
   const backtranslationErrors = backtranslationErrorsState
+
+  /**
+   * AQU-913: both of a cell's inline AI failure surfaces — the draft error under
+   * the target editor and the back-translation error in the expanded panel —
+   * are dismissed together when focus leaves that cell's row. They're stored in
+   * two separate per-cell maps owned up here, so the row is handed one clear
+   * function rather than two. Per-cell by construction: only `cellId`'s entries
+   * are removed, so a second cell's error stays put until its own row blurs.
+   */
+  const clearCellErrors = useCallback((cellId: string) => {
+    clearCellError(cellId)
+    setBacktranslationErrorsState((prev) => {
+      if (!prev.has(cellId)) return prev
+      const next = new Map(prev)
+      next.delete(cellId)
+      return next
+    })
+  }, [clearCellError])
 
   const requiredValidations = project ? readValidationCount(project) : 1
   const healthFileCells = useMemo(() => {
@@ -4455,6 +4494,7 @@ export function ProjectWorkspace() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   // "File details" modal (sidebar file row ⋯ menu).
   const [detailsFileId, setDetailsFileId] = useState<string | null>(null)
+  const [segmentationFileId, setSegmentationFileId] = useState<string | null>(null)
   // Latest project for the suggestion-apply undo toast action (avoids stale closure).
   const projectForUndoRef = useRef(project)
   projectForUndoRef.current = project
@@ -4846,9 +4886,21 @@ export function ProjectWorkspace() {
         projectId,
         returnTo: workspaceReturnPath(projectId, activeFileId),
       }),
-      { state: { backgroundLocation: location, projectSettingsModalDepth: 1 } },
+      {
+        state: {
+          backgroundLocation: location,
+          projectSettingsModalDepth: 1,
+          projectSnapshot: project,
+        },
+      },
     )
-  }, [projectId, activeFileId, location, navigate])
+  }, [projectId, activeFileId, location, navigate, project])
+
+  // Project Settings is a large route chunk. Warm it after the editor mounts
+  // so opening the modal never suspends behind the first module download.
+  useEffect(() => {
+    void import("./ProjectSettings")
+  }, [])
 
   const projectNavItems = useMemo(() => {
     const items = [
@@ -4859,6 +4911,8 @@ export function ProjectWorkspace() {
         onClick: () => openOverlay("comments") },
       { id: "terminology", labelKey: "nav.sidebarSection.terminology" as const, icon: BookOpen, pinned: true,
         onClick: () => openOverlay("terminology") },
+      { id: "memory", labelKey: "terminology.livingMemory.title" as const, icon: LIVING_MEMORY_ICON, pinned: true,
+        onClick: () => openOverlay("memory") },
       // Project settings is a header cog beside Import. Audio/Media lens lives
       // in the header EditorModeToggle. Sharing lives in Settings → Members.
       // FRO-272: trash opens a dialog (project_lead+). Pinned in the same
@@ -5974,6 +6028,7 @@ export function ProjectWorkspace() {
         switchLens(l)
         if (l === "audio") setDockTab("voices")
       }}
+      onAgentSelect={openAgentTab}
       timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
       checkOpen={checkOpen}
       checkRunning={checkRunning}
@@ -6117,6 +6172,7 @@ export function ProjectWorkspace() {
                     setAssignTargetFileId(fileId)
                     setAssignModalOpen(true)
                   } : undefined}
+                  onSegmentation={setSegmentationFileId}
                   onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? (fileId) => setPendingDeleteId(fileId) : undefined}
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
@@ -6478,14 +6534,30 @@ export function ProjectWorkspace() {
           // button; breadcrumb + history arrows + sidebar own navigation.
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<LoadingPanel label={t("workspace.loadingComments")} />}>
-              <CommentsPageContent />
+              <CommentsPageContent project={project} />
             </Suspense>
           </div>
         ) : centerSurface === "terminology" ? (
           // FRO-254: Terminology page inside the shell.
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<LoadingPanel label={t("terminology.loadingLabel")} />}>
-              <GlossaryEditorContent files={projectFiles} />
+              <GlossaryEditorContent
+                files={projectFiles}
+                project={project}
+                patchSettings={patchSettings}
+              />
+            </Suspense>
+          </div>
+        ) : centerSurface === "memory" ? (
+          // Living Memory inside the shell — section index + detail panes; the
+          // page reads :section from the URL itself.
+          <div className="h-full overflow-y-auto">
+            <Suspense fallback={<LoadingPanel label={t("workspace.loadingMemory")} />}>
+              <LivingMemoryPageContent
+                project={project}
+                refreshProject={refresh}
+                projectSettings={projectSettings}
+              />
             </Suspense>
           </div>
         ) : centerSurface === "agent" ? (
@@ -6640,6 +6712,7 @@ export function ProjectWorkspace() {
             }
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
+            onClearCellErrors={clearCellErrors}
             onCompleteSingle={handleCompleteSingle} onCompleteBatch={completeBatch}
             onCompleteParagraph={handleCompleteParagraph}
             healthMap={effectiveHealthMap} infractions={infractions} rules={rules}
@@ -6696,7 +6769,6 @@ export function ProjectWorkspace() {
             // above the timeline — don't render it twice.
             chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
             chapterNavPortalTarget={editorHeaderNavTarget}
-            onAgentToggle={openAgentTab}
           />
               </div>
               </div>
@@ -6971,6 +7043,11 @@ export function ProjectWorkspace() {
           cells={legacyCells}
           activeCellId={recordingCellId}
           username={currentUsername}
+          // AQU-906: hand the recorder the file's linked video so the actor can
+          // watch the scene while dubbing. Withheld in audio-first timing for
+          // the same reason the timeline hides it there — the programme is
+          // re-flowed, so cell times no longer address the video's clock.
+          videoUrl={timingMode === "audioFirst" ? null : (activeFile?.coreMediaUrl ?? null)}
           onActiveCellChange={(cellId) => {
             setRecordingCellId(cellId)
             // Scroll the underlying editor to the new cell so the row is visible
@@ -7146,6 +7223,18 @@ export function ProjectWorkspace() {
         />
       )}
       {/* "File details" modal — metadata for a sidebar file row. */}
+      <FileSegmentationDialog
+        projectId={projectId!}
+        fileId={segmentationFileId}
+        fileName={
+          segmentationFileId
+            ? project.files.find((f) => f.id === segmentationFileId)?.name ?? ""
+            : ""
+        }
+        open={segmentationFileId !== null}
+        onOpenChange={(v) => { if (!v) setSegmentationFileId(null) }}
+        canEdit={currentRoleLevel >= ROLE.PROJECT_LEAD}
+      />
       <FileDetailsModal
         open={detailsFileId !== null}
         onOpenChange={(v) => { if (!v) setDetailsFileId(null) }}

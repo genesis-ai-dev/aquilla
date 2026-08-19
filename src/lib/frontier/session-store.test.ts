@@ -177,6 +177,35 @@ describe("aq_hint cookie", () => {
     expect(getHint()).toBeNull()
   })
 
+  it("[Pen test 2026-08-17] writes Secure on an https origin, omits it on http", async () => {
+    const { saveSession, clearSession } = await import("./session-store")
+    const writes: string[] = []
+    const spy = vi
+      .spyOn(document, "cookie", "set")
+      .mockImplementation((v: string) => {
+        writes.push(v)
+      })
+    const originalProtocol = location.protocol
+
+    try {
+      Object.defineProperty(location, "protocol", { value: "https:", configurable: true })
+      await saveSession({ jwt: "tok", username: "alice", createdAt: "2026-01-01T00:00:00Z" })
+      expect(writes.some((w) => w.startsWith("aq_hint=1") && w.includes("Secure"))).toBe(true)
+
+      writes.length = 0
+      await clearSession()
+      expect(writes.some((w) => w.startsWith("aq_hint=") && w.includes("Secure"))).toBe(true)
+
+      writes.length = 0
+      Object.defineProperty(location, "protocol", { value: "http:", configurable: true })
+      await saveSession({ jwt: "tok", username: "alice", createdAt: "2026-01-01T00:00:00Z" })
+      expect(writes.some((w) => w.startsWith("aq_hint=1") && !w.includes("Secure"))).toBe(true)
+    } finally {
+      spy.mockRestore()
+      Object.defineProperty(location, "protocol", { value: originalProtocol, configurable: true })
+    }
+  })
+
   it("keeps aq_hint=1 when switching between two active sessions", async () => {
     const { addSession, activateSession, sessionKey } = await import("./session-store")
     const a = { jwt: "tok-a", username: "alice", createdAt: "2026-01-01T00:00:00Z" }

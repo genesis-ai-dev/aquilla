@@ -16,6 +16,10 @@ import { notifyProjectDo } from "./archive-broadcast"
 import { handleCorsPreflight, withCors } from "./cors"
 import { handleProjectArchiveRequest } from "./project-archive"
 import { handleMemberRemovedRequest, notifyProjectDoMemberRemoved } from "./member-removed"
+import {
+  handleMemberRoleChangedRequest,
+  notifyProjectDoMemberRoleChanged,
+} from "./member-role-changed"
 import { handleProjectSettingsChangedRequest } from "./project-settings-notify"
 import { handleContextualActivityRequest } from "./contextual-activity-notify"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
@@ -38,6 +42,7 @@ import { handleMigrateIngestRequest } from "./events/migrate-ingest-route"
 import { handleMigrateSettingsRequest } from "./events/migrate-settings-route"
 import { handleMigrateProjectRequest } from "./events/migrate-project-route"
 import { handleMigrateEventIdsRequest } from "./events/migrate-event-ids-route"
+import { handleMigrateCellIdsRequest } from "./events/migrate-cell-ids-route"
 import { handleMigrateFinalizeRequest } from "./events/migrate-finalize-route"
 import { handleMigrateAudioRequest } from "./events/migrate-audio-route"
 import { handleMigrateAudioCopyRequest } from "./events/migrate-audio-copy-route"
@@ -269,6 +274,14 @@ const worker = {
       notifyProjectDoMemberRemoved,
     )
     if (memberRemovedResponse) return memberRemovedResponse
+    // [Pen test 2026-08-17] sync a live connection's cached role after a
+    // direct project-member role change, without forcing a reconnect.
+    const memberRoleChangedResponse = await handleMemberRoleChangedRequest(
+      request,
+      env,
+      notifyProjectDoMemberRoleChanged,
+    )
+    if (memberRoleChangedResponse) return memberRoleChangedResponse
     const projectSettingsChangedResponse = await handleProjectSettingsChangedRequest(request, env)
     if (projectSettingsChangedResponse) return projectSettingsChangedResponse
     const contextualActivityResponse = await handleContextualActivityRequest(request, env)
@@ -350,6 +363,8 @@ const worker = {
     if (migrateProjectResponse) return migrateProjectResponse
     const migrateEventIdsResponse = await handleMigrateEventIdsRequest(request, env)
     if (migrateEventIdsResponse) return migrateEventIdsResponse
+    const migrateCellIdsResponse = await handleMigrateCellIdsRequest(request, env)
+    if (migrateCellIdsResponse) return migrateCellIdsResponse
     const migrateFinalizeResponse = await handleMigrateFinalizeRequest(request, env)
     if (migrateFinalizeResponse) return migrateFinalizeResponse
     const migrateAudioResponse = await handleMigrateAudioRequest(request, env)

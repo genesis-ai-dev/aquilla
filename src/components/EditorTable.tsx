@@ -18,7 +18,6 @@ import {
   Bold,
   Loader2,
   VolumeX,
-  Bot,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -87,6 +86,7 @@ import {
   railFocusOwnerOnBlur,
   railFocusOwnerOnFocus,
 } from "@/lib/editor/cell-rail-pin"
+import { shouldDismissCellErrorsOnBlur } from "@/lib/editor/cell-error-dismiss"
 import { CellExpansion } from "./CellExpansion"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
 import { tokenizeWords, activeWordRange } from "@/lib/audio/timings"
@@ -694,6 +694,11 @@ interface EditorTableProps {
    *  so the user sees progress immediately instead of waiting for the
    *  commit + outbox flush to land. */
   previews: Map<string, string>
+  /** AQU-913: forget this cell's inline AI failures — the draft error, the
+   *  back-translation error, and the per-cell "error" status behind them.
+   *  Called when focus leaves the cell's row so a failure stops following the
+   *  user around the file. Omit to keep errors sticky (legacy callers). */
+  onClearCellErrors?: (cellId: string) => void
   onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   onCompleteBatch: (cells: CellData[]) => void
   /** p1-paragraph-ui-wiring: draft the whole paragraph group containing
@@ -799,15 +804,13 @@ interface EditorTableProps {
   /** Move chapter navigation into a shell-owned header slot. `null` reserves
    *  the slot while it mounts; `undefined` keeps the legacy in-editor row. */
   chapterNavPortalTarget?: HTMLElement | null
-  /** Open the Agent as the center pane between Source and Target. */
-  onAgentToggle?: () => void
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
   project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, defaultLaneLabel,
   onEditTargetLanguage,
   isCompletionConfigured, isCompletionAvailable,
-  completing, examples, errors, previews,
+  completing, examples, errors, previews, onClearCellErrors,
   onCompleteSingle, onCompleteBatch, onCompleteParagraph, healthMap,
   infractions = new Map(), rules = [],
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
@@ -843,7 +846,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onFootnoteCreated,
   chapterNavTrailing,
   chapterNavPortalTarget,
-  onAgentToggle,
 }, ref) {
   const t = useT()
   // DCS lockdown: while this project is pinned to a Door43 upstream, the
@@ -2107,6 +2109,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           isRowFocused={isRailFocusPinned(focusedRailCellId, cell.id)}
           onRowFocusPin={handleRowFocusPin}
           onRowFocusRelease={handleRowFocusRelease}
+          onClearCellErrors={onClearCellErrors}
           onActivateEditor={handleActivateEditor}
           getEditorActivationVersion={getEditorActivationVersion}
           onDeactivateEditor={handleDeactivateEditor}
@@ -2212,6 +2215,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     focusedRailCellId,
     handleRowFocusPin,
     handleRowFocusRelease,
+    onClearCellErrors,
     activeLane,
     audioByCellId,
     audioLens,
@@ -2415,19 +2419,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             )}
           </div>
           <div className="relative flex items-center justify-end gap-2 ps-6 pe-2 text-end">
-            {onAgentToggle ? (
-              <AppTooltip content={t("nav.dock.agentTab")}>
-                <button
-                  type="button"
-                  aria-label={t("nav.dock.agentTab")}
-                  onClick={onAgentToggle}
-                  className="absolute start-0 top-1/2 z-10 flex h-8 -translate-y-1/2 items-center justify-center gap-1.5 rounded-full border border-primary/40 bg-background px-2.5 text-primary shadow-md ring-4 ring-background transition-all hover:scale-105 hover:bg-primary/10 hover:text-primary ltr:-translate-x-1/2 rtl:translate-x-1/2"
-                >
-                  <Bot className="h-4 w-4" />
-                  <span className="text-[11px] font-semibold">{t("nav.dock.agentTab")}</span>
-                </button>
-              </AppTooltip>
-            ) : null}
             {t("editor.column.target")}
             {/* AQU-602 / AQU-583: the target-language tag doubles as the lane
                 switcher AND the entry point to change the target language.
@@ -2680,6 +2671,8 @@ interface MemoizedRowProps {
   onRowFocusPin: (cellId: string) => void
   /** AQU-669: called when focus leaves this row — clears the owner if still ours. */
   onRowFocusRelease: (cellId: string) => void
+  /** AQU-913: called when focus leaves this row — dismisses this cell's AI errors. */
+  onClearCellErrors?: (cellId: string) => void
   onActivateEditor: ActivateEditor
   getEditorActivationVersion: () => number
   onDeactivateEditor: (cellId: string) => void
@@ -2836,6 +2829,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     isRowFocused,
     onRowFocusPin,
     onRowFocusRelease,
+    onClearCellErrors,
     onActivateEditor,
     getEditorActivationVersion,
     onDeactivateEditor,
@@ -2949,6 +2943,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         isRowFocused={isRowFocused}
         onRowFocusPin={onRowFocusPin}
         onRowFocusRelease={onRowFocusRelease}
+        onClearCellErrors={onClearCellErrors}
         onActivateEditor={onActivateEditor}
         getEditorActivationVersion={getEditorActivationVersion}
         onDeactivateEditor={onDeactivateEditor}
@@ -3053,6 +3048,8 @@ interface EditorRowProps {
   /** AQU-669: report focus entering / leaving this row to the exclusive owner. */
   onRowFocusPin: (cellId: string) => void
   onRowFocusRelease: (cellId: string) => void
+  /** AQU-913: dismiss this cell's inline AI errors when focus leaves the row. */
+  onClearCellErrors?: (cellId: string) => void
   onActivateEditor: ActivateEditor
   getEditorActivationVersion: () => number
   onDeactivateEditor: (cellId: string) => void
@@ -3905,7 +3902,7 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
 }
 
 function EditorRow({
-  project, cell, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
+  project, cell, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, highlights, error, healthRibbonPoint,
@@ -5239,6 +5236,13 @@ function EditorRow({
   }
   const handleRowBlurCapture = (e: React.FocusEvent) => {
     const next = e.relatedTarget as Node | null
+    // AQU-913: dismiss this cell's inline AI errors (draft + back-translation)
+    // once focus has really left the cell. Evaluated BEFORE the containment
+    // early-return below because it uses a wider notion of "still in the cell":
+    // the error's info popover is portaled out of the row, so reading it must
+    // not count as leaving, while the focus-pin release deliberately still
+    // fires for that case (AQU-669).
+    if (shouldDismissCellErrorsOnBlur(rowRef.current, next)) onClearCellErrors?.(cell.id)
     if (next && rowRef.current?.contains(next)) return
     // AQU-669: focus left the row entirely — relinquish the pin (only if this
     // row still holds it; a newer focus may already own it).

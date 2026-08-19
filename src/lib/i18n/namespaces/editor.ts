@@ -870,7 +870,6 @@ export const editor = defineNamespace({
     "editor.navTitle.projectSettings": "Project settings",
     "editor.navTitle.checksAndRules": "Checks & rules",
     "editor.navTitle.voice": "Voice",
-    "editor.navTitle.projectMemory": "Project memory",
     "editor.navTitle.projectMembers": "Project members",
 
     // — Per-file sync status chip (WS connection to the sync-worker) ————
@@ -4179,11 +4178,6 @@ export const editor = defineNamespace({
         description: "Label for the project's voice/audio production surface.",
         screenshot: "workspace-nav",
         maxLength: 16,
-      },
-      "editor.navTitle.projectMemory": {
-        description: "Label for the project's AI agent memory surface.",
-        screenshot: "workspace-nav",
-        maxLength: 24,
       },
       "editor.navTitle.projectMembers": {
         description: "Label for a project's member list.",

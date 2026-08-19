@@ -23,6 +23,7 @@ import {
   type ProcessNodeLayout,
   type ProcessNodeState,
 } from "@/lib/contextual/process-graph"
+import { joinPassageLabels } from "../../../shared/span-label"
 import type {
   ContextualOverview,
   ContextualRunActivity,
@@ -138,13 +139,12 @@ function HoverBody({ inspect, t }: { inspect: ProcessNodeInspect; t: TFunction }
   const copy = NODE_COPY[inspect.nodeId]
   const decision = decisionLine(inspect.decision, t)
   const brief = inspect.sceneBrief?.l1Summary ?? inspect.sceneBrief?.construal
+  const passage = joinPassageLabels(inspect.spanLabels)
   return (
     <div className="flex max-w-xs flex-col gap-1.5 text-start">
       <p className="font-medium">{t(copy.label)}</p>
       <p className="text-muted-foreground">{t(copy.role)}</p>
-      {inspect.spanLabels.length > 0 && (
-        <p>{inspect.spanLabels.join(" · ")}</p>
-      )}
+      {passage && <p>{passage}</p>}
       {brief && <p className="line-clamp-3 text-muted-foreground">{brief}</p>}
       {decision && <p>{decision}</p>}
     </div>
@@ -321,7 +321,7 @@ function InspectPanel({
         <p className="text-muted-foreground">{t(copy.role)}</p>
         <div>
           <p className="text-xs font-medium">{t("autopilot.graph.inspect.passage")}</p>
-          <p>{inspect.spanLabels.length > 0 ? inspect.spanLabels.join(" · ") : t("autopilot.graph.noLiveSpan")}</p>
+          <p>{joinPassageLabels(inspect.spanLabels) ?? t("autopilot.graph.noLiveSpan")}</p>
         </div>
         <div>
           <p className="text-xs font-medium">{t("autopilot.graph.inspect.brief")}</p>

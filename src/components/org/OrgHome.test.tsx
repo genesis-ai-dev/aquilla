@@ -541,7 +541,7 @@ describe("OrgOverview / OrgProjects", () => {
 
   it("renders no Pending invitations card when there are none", async () => {
     renderMemberOverview()
-    await waitFor(() => expect(screen.getByTestId("org-overview-attention-table")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId("org-overview-projects-table")).toBeInTheDocument())
     expect(screen.queryByTestId("pending-invitations")).not.toBeInTheDocument()
   })
 
@@ -558,6 +558,64 @@ describe("OrgOverview / OrgProjects", () => {
     renderMemberOverview()
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
     expect(screen.getAllByText("Overdue").length).toBeGreaterThan(0)
+  })
+
+  it("shows every project directly in recent-update order and marks attention projects", async () => {
+    renderMemberOverview()
+
+    const table = await screen.findByTestId("org-overview-projects-table")
+    const recentProject = within(table).getByText("New Testament")
+    const staleProject = within(table).getByText("Legacy Translation")
+
+    expect(staleProject.compareDocumentPosition(recentProject) & Node.DOCUMENT_POSITION_PRECEDING)
+      .toBeTruthy()
+    expect(within(staleProject.closest("tr")!).getByRole("img", {
+      name: "Needs attention: Overdue, Stalled",
+    })).toHaveClass("text-amber-600")
+    expect(within(recentProject.closest("tr")!).queryByRole("img", { name: /needs attention/i }))
+      .not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /view projects/i })).not.toBeInTheDocument()
+  })
+
+  it("shows the ten most recently updated projects first and expands the rest inline", async () => {
+    const { getPortfolio } = await import("@/lib/frontier/portfolio")
+    const now = Date.now()
+    vi.mocked(getPortfolio).mockResolvedValue(
+      Array.from({ length: 12 }, (_, index) => ({
+        id: `project-${index + 1}`,
+        name: `Project ${String(index + 1).padStart(2, "0")}`,
+        totalCells: 100,
+        validatedCells: 50,
+        filledCells: 50,
+        aiDraftedCells: 0,
+        lastEditAt: now - index * 1_000,
+        audioCells: 0,
+        validatedAudioCells: 0,
+        recordedMs: 0,
+        deadlineAt: null,
+        sourceLanguage: null,
+        targetLanguage: null,
+      })),
+    )
+
+    renderMemberOverview()
+
+    const table = await screen.findByTestId("org-overview-projects-table")
+    expect(within(table).getByText("Project 01")).toBeInTheDocument()
+    expect(within(table).getByText("Project 10")).toBeInTheDocument()
+    expect(within(table).queryByText("Project 11")).not.toBeInTheDocument()
+
+    const showAll = screen.getByRole("button", { name: "Show all 12" })
+    expect(showAll).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(showAll)
+
+    expect(within(table).getByText("Project 11")).toBeInTheDocument()
+    expect(within(table).getByText("Project 12")).toBeInTheDocument()
+    const showFewer = screen.getByRole("button", { name: "Show fewer" })
+    expect(showFewer).toHaveAttribute("aria-expanded", "true")
+
+    fireEvent.click(showFewer)
+    expect(within(table).queryByText("Project 11")).not.toBeInTheDocument()
   })
 
   it("shows the audio rollup card and per-project audio % on the projects table", async () => {

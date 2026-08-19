@@ -135,6 +135,36 @@ export class Workspace {
     await this.waitForImportSettled()
   }
 
+  /**
+   * Start the same specialized import but stop at the panel, so a test can
+   * assert what the panel says when the importer rejects the file. Returns the
+   * open dialog.
+   */
+  async attemptImportViaSpecializedPanel(
+    optionName: RegExp,
+    filePath: string | FilePayload,
+    configure?: (dialog: Locator) => Promise<void>,
+  ): Promise<Locator> {
+    await this.dismissSetupChecklist()
+    await this.openImportDialog()
+
+    const dialog = this.page.getByRole("dialog")
+    const option = dialog.getByRole("button", { name: optionName }).first()
+    await expect(option).toBeVisible({ timeout: 8_000 })
+    await option.click()
+
+    const chooseBtn = dialog.getByRole("button", { name: /^Choose .*file$/i }).first()
+    await expect(chooseBtn).toBeVisible({ timeout: 5_000 })
+    await chooseBtn.locator('input[type="file"]').setInputFiles(filePath)
+
+    if (configure) await configure(dialog)
+
+    const importBtn = dialog.getByRole("button", { name: /^Import$/i }).last()
+    await expect(importBtn).toBeEnabled({ timeout: 5_000 })
+    await importBtn.click()
+    return dialog
+  }
+
   /** AQU-244 auto-opens the "Project setup" checklist sheet once per fresh
    * project, and the modal sheet intercepts workspace clicks. Pre-mark it as
    * already-shown for this project, then dismiss it if it beat us to it. */

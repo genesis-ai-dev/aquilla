@@ -77,6 +77,7 @@ import {
   MAX_WAVE_CONCURRENCY,
   type ContextualProgressFrame,
 } from "../lib/contextual/tick"
+import { decorateActivityLabels, loadCellDisplayIndex } from "../lib/contextual/activity-labels"
 import type { LlmCall } from "../lib/contextual/types"
 
 const contextual = new Hono<AuthHonoEnv>()
@@ -967,11 +968,23 @@ contextual.get("/:projectId/contextual/runs/:runId/activity", authMiddleware, as
     sceneBriefs: briefsTruncated,
     drafts: draftPage.truncated,
   }
+  const sceneBriefs = briefsTruncated ? briefRows.slice(-evidenceLimit) : briefRows
+  let labelled = {
+    events: activity.events,
+    sceneBriefs,
+    drafts: draftPage.drafts,
+  }
+  try {
+    const cells = await loadCellDisplayIndex(c.env.AQUILLA_PG, projectId, run.fileId)
+    labelled = decorateActivityLabels(labelled, cells)
+  } catch (err) {
+    console.warn(`[contextual] activity label lookup failed for run ${runId}:`, err)
+  }
   return c.json({
     run: runSnapshot(run, { proposedDrafts: runDraftCounts.proposed }),
-    events: activity.events,
-    sceneBriefs: briefsTruncated ? briefRows.slice(-evidenceLimit) : briefRows,
-    drafts: draftPage.drafts,
+    events: labelled.events,
+    sceneBriefs: labelled.sceneBriefs,
+    drafts: labelled.drafts,
     draftCounts: runDraftCounts,
     draftNextCursor: draftPage.nextCursor,
     truncated: Object.values(truncatedCollections).some(Boolean),

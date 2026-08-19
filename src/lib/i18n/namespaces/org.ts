@@ -981,7 +981,7 @@ export const org = defineNamespace({
     // ("No matching organizations.", with a period) — same split as above.
     "org.orgHome.organizationsPanel.searchEmptyTitle": "No matching organizations",
 
-    // -- OrgOverview: single-org operator home (rollup tiles + needs-attention) --
+    // -- OrgOverview: single-org operator home (rollup tiles + recent projects) --
     "org.overview.loadingLabel": "Loading overview",
     "org.overview.needsAttentionHeading": "Needs attention",
     "org.overview.needsAttentionDescription":
@@ -989,6 +989,11 @@ export const org = defineNamespace({
     "org.overview.allClearTitle": "All clear",
     "org.overview.allClearDescription":
       "No active project is overdue, due soon, or stalled right now.",
+    "org.overview.projectsDescription":
+      "Most recently updated first. Yellow warnings mark projects that need attention.",
+    "org.overview.attentionAriaLabel": "Needs attention: {reasons}",
+    "org.overview.showAllProjects": "Show all {count}",
+    "org.overview.emptyDescription": "Create a project to start translating.",
 
     // -- OrgProjectsDataTable: shared portfolio projects DataTable (page/embedded) --
     // "Project" header → common.project (identical text)
@@ -1079,6 +1084,19 @@ export const org = defineNamespace({
         "Organizations, teams, members and invitations — the permanent chrome above a project: the org switcher, breadcrumb trail, member and team management, invite flows and permission surfaces. Most of these strings sit in a narrow header or sidebar that is on screen on every route, so they compete for horizontal space with the project's own content.",
     },
     keys: {
+      "org.overview.attentionAriaLabel": {
+        description:
+          "Accessible name for the yellow warning icon beside a project on the single-organization Overview.",
+        placeholders: {
+          reasons:
+            "Comma-separated localized attention reasons for the project, such as Overdue and Stalled.",
+        },
+      },
+      "org.overview.showAllProjects": {
+        description:
+          "Button that expands the single-organization Overview's ten-project preview to reveal every project inline.",
+        placeholders: { count: "Total number of accessible projects in the organization." },
+      },
       "org.switcher.triggerAriaLabel": {
         description:
           "Accessible name for the sidebar button that opens the org switcher dropdown. {org} is the currently selected organization's name (or 'All organizations'/'Workspace').",

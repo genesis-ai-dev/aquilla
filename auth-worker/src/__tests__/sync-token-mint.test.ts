@@ -113,6 +113,23 @@ describe("mintSyncTokenForUser", () => {
     const res = await mintSyncTokenForUser(bare, authUser(1, "alice"), "p1", "f")
     expect(res).toEqual({ ok: false, reason: "not_configured" })
   })
+
+  // [Pen test 2026-08-18] ids reach R2 key templates verbatim through the
+  // token claims; the mint core must reject path characters for EVERY caller,
+  // not just the browser route's zod schema (the agent harness's
+  // propose_command mints here directly).
+  it("denies unsafe_id when projectId or fileId carries path characters", async () => {
+    await seedProjectWithMember(700)
+    for (const [pid, fid] of [
+      ["p1/../other", "f"],
+      ["p1", "f/audio"],
+      ["p1", ".."],
+      ["p1\\evil", "f"],
+    ] as const) {
+      const res = await mintSyncTokenForUser(env as unknown as Env, authUser(1, "alice"), pid, fid)
+      expect(res).toEqual({ ok: false, reason: "unsafe_id" })
+    }
+  })
 })
 
 describe("signSyncTokenWithRole", () => {

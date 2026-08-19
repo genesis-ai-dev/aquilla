@@ -1328,6 +1328,7 @@ export const mfa: Catalog = {
   "fileDetails.orderingTimeline": "Garis masa (kod masa)",
   "fileDetails.orderingSequence": "Jujukan",
   "fileDetails.languages": "Pasangan bahasa",
+  "fileDetails.sourceLanguage": "Bahasa sumber",
   "fileDetails.imported": "Diimport",
   "fileDetails.progress": "Kemajuan",
   "fileDetails.progressValue": "{translated}% diterjemah · {validated}% disahkan",

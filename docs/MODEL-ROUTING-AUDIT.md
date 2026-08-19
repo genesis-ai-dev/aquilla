@@ -77,10 +77,11 @@ by `lintTerminology`. The decision is made once by a human and never re-asked.
 
 | # | Gap | Where | Fix |
 |---|---|---|---|
-| **G1** | **All three tiers resolve to one frontier model.** The tier architecture exists and is unwired. | `lib/contextual/tick.ts:76-87` | Set `CONTEXTUAL_FAST_MODEL` (and a distinct `CONTEXTUAL_DEEP_MODEL`) per environment. Config, not code. |
+| **G1** | **All three tiers resolve to one frontier model.** The tier architecture exists and is unwired. | `lib/contextual/tick.ts:76-87` | **Now settable in the admin console** (Settings → the model list's ⚡ Fast / 🔬 Deep toggles) — no deploy needed. Still unset by default: someone has to pick a model. |
 | **G2** | `summarize` — compress a construal to ≤1600 chars — runs at `fast` tier, i.e. on the frontier model. One call per span. Textbook small-model work. | `lib/contextual/summarize.ts` | Falls out of G1. |
 | **G3** | **Vacuous deep-tier calls.** `verify_ambiguity` is `tier: "deep"`, mandatory, and barrier-required. When the ambiguity register is *empty* it is asked to find violations of an empty list — there is nothing it can find. On a clean span that is a 25-weight call whose answer is structurally predetermined. | `lib/contextual/verify.ts:22-36`, `pipeline.ts` barrier | Route the empty-register case to `fast`, or answer it in code. Guarantee-affecting — needs a product call, so **not implemented here**. |
 | **G4** | `exampleCoverage` is not a support signal. `min(validated examples / 10, 1)` measures how many validated pairs the **file** has — it never looks at the draft. It was the router's only retrieval-quality input. | `pipeline.ts:238` | **Implemented** — see below. |
+| **G4b** | **The paragraph branch of `deriveSpanSeeds` was unreachable.** `tick.ts` called it with no options, so its `paragraphStartCellIds` input was never supplied and every non-Scripture discourse file — docx, epub, markdown, subtitles — was cut into fixed 10-cell chunks. The importer had recorded every paragraph start in `cells.metadata` all along. | `lib/contextual/tick.ts:1063`, `lib/contextual/segment.ts` | **Fixed** — the tick now reads them, and short paragraphs coalesce to the design's 8–12 band instead of becoming one span each. |
 | **G5** | **Autopilot retrieval is unranked.** `validatedExamples()` takes the *first 10 validated pairs in the file*, in file order, ignoring the span's source text — while the agent's `examples` tool does proper FTS ranking against the same database. The more expensive surface gets the worse retrieval. | `lib/contextual/tick.ts:576` vs `lib/agent/tools/examples.ts` | Reuse the FTS query. Pure code, no model cost, and it directly improves G4's signal. |
 | **G6** | **Import classification runs on the frontier default.** Pick one of six categories plus a declarative recipe from a file sample. The repo already has the precedent one directory over: `knowledge/index-doc.ts` defaults to `anthropic/claude-haiku-4-5`. | `routes/import-classify.ts:131` | Give it its own `IMPORT_CLASSIFY_MODEL`, defaulting small. |
 | **G7** | **One model for every agent round.** `runAgentLoop` runs up to 30 rounds on `agentModel`; only `draft` gets a separate `draftModel`. Read-shaped rounds (`read`/`examples`/`search`/`docs`/`aquifer`) are free in the *iteration* budget but each still costs a full frontier round-trip whose only job is choosing the next tool. Measured: **~41:1 input:output, ~10,500 input tokens per turn** (`docs/COST-METERING.md`). | `routes/agent.ts:81-83, 618+` | Two levers, in order: prompt caching on the fixed prefix (~15 tool schemas re-sent every turn), then a cheaper orchestrator with `draftModel` kept strong. |
@@ -147,12 +148,164 @@ Files: `support.ts` (new), `router.ts` (consumes the signal), `pipeline.ts`
 
 ---
 
+## Also landed: paragraph-aligned span seeds (G4b)
+
+`segment.ts` documents a three-way priority — canonical refs, then paragraph
+starts, then fixed chunks — but the middle branch had no caller. `tick.ts`
+invoked `deriveSpanSeeds(run.fileId, pairs)` with no options, so
+`paragraphStartCellIds` was always empty and prose files fell straight through
+to 10-cell chunks that ignore where the text actually breaks.
+
+The data was already there: `docx.ts` and `markdown.ts` set `paragraphStart` on
+the first cell of every paragraph, `src/lib/import.ts` folds it into the create
+event's metadata, and the projection lands it in `cells.metadata`. The tick now
+reads it with one query, on the first wave only (the cursor is derived once).
+
+Subdivision alone was half a policy. It caps a run that is too big but does
+nothing about runs that are too small, and a prose paragraph is one to three
+cells — so honouring paragraph marks naively would have made a span per
+paragraph and paid a whole construe → summarize → draft → verify pipeline for
+two sentences, strictly worse than the chunking it replaces. `coalesceRuns`
+merges consecutive paragraphs up to the 12-cell cap without ever splitting one,
+so spans stay in the design's band while every boundary lands on a real edge.
+
+Canonical-ref files are deliberately unchanged: chapter runs are already
+chapter-sized, and a chapter boundary is a navigation unit a translator
+recognizes, so merging across one would trade a real edge for a marginal
+saving.
+
+`SegmentOptions.fixedSize` is also in place — a clamped "just cut it every N
+cells" override that wins over all derived structure. It has no caller yet; it
+is the server-side primitive behind the planned re-segment affordance, so that
+work is a route plus UI rather than a route plus UI plus a core change.
+
+---
+
+## Also landed: a per-file segmentation surface
+
+`file_segmentation` (migration 0079) stores one row per file, keyed by
+`(project, file)` with **no `target_lang`** — segmentation is a property of the
+source, so every language lane reads the same boundaries. Before it, the
+segmentation was derived per RUN into `contextual_runs.span_cursor`: two lanes
+of the same file recomputed it independently, it was discarded when the run
+ended, and nothing outside the run could see or correct it.
+
+Three strategies, resolved by `resolveSpanSeeds` in `tick.ts`, most-specific
+first:
+
+- **`explicit`** — an ordered boundary list, stored verbatim. This is the shape
+  a re-segmentation pass writes; each entry may carry `title`/`gist`/`depth`, so
+  the same rows can later drive a navigation outline.
+- **`fixed`** — cut every N cells. The blunt human override.
+- **`auto`** — derive from file structure (the default; an absent row is `auto`).
+
+Every stored strategy degrades to `auto` rather than failing — an unreadable
+row, a boundary list whose endpoints no longer resolve, a file that changed
+shape underneath a saved segmentation. A run with imperfect boundaries still
+translates the file; a run with no boundaries translates nothing.
+
+The validation in `db/shared/file-segmentation.ts` is the load-bearing part,
+and it is **code, not judgment**. A boundary list is checked against the file's
+real ordered cell ids for unknown endpoints, gaps, overlaps, ordering, and full
+coverage before it is ever stored. Each of those rules exists because breaking
+it loses work *silently*: cells that belong to no span are never drafted by any
+run and are never reported as skipped, because nothing knows they were meant to
+be covered. When a model starts proposing boundaries, that check is the only
+thing standing between a plausible-looking list and a quietly half-translated
+book.
+
+`GET /contextual/segmentation` returns the **effective** segmentation, resolved
+through the same `resolveSpanSeeds` the run itself calls. A preview computed by
+a second, parallel implementation would drift from the real boundaries, and it
+would drift silently — so the dialog renders what the server resolved and
+computes nothing itself.
+
+The UI is the file row's ⋯ → **Segmentation…**, read-only below Project Lead
+(the dialog says why rather than hiding how the file is divided).
+
+---
+
+## Also landed: fast-tier passage detection (the LLM re-segmentation pass)
+
+`segment-model.ts` is the 90/9/1 split applied to segmentation itself, and it
+is the first surface in the repo that exists specifically to be served by a
+cheap model. It sits behind the Segmentation dialog's third option and
+`POST /contextual/segmentation/generate`.
+
+The division of labour is the whole design:
+
+- **The model proposes break points and names each passage.** That is the only
+  part needing judgment — where one scene stops being the same scene.
+- **Code turns break points into the segmentation.** `buildBoundaries` builds
+  segment *k* as the run between break *k* and break *k+1*, with the last
+  reaching the end of the file, so contiguity and full coverage are
+  **structural** — not something a model can get wrong.
+
+That asymmetry is deliberate and worth preserving. Asking a model for
+start/end pairs and validating them means a model that emits a gap loses those
+cells from every future run silently. Asking only "where does a new passage
+begin" makes the worst case a mediocre boundary rather than missing work. The
+stored result still goes through `validateSegmentationInput` before it lands —
+a generator writing straight to the table would be the one path into that row
+that skips the check every other path takes.
+
+Windowing: 120 cells per call, and each window advances to the model's **last**
+proposed break rather than to the window edge, so a passage straddling a
+boundary is decided by a call that can see all of it. A window that proposes
+nothing still advances (or the loop could not terminate) and says so in
+`notes`; the run cap is 40 windows, and a file longer than that keeps its tail
+as one passage with a note rather than losing it. Every degradation is
+reported — the dialog renders `notes` as a warning next to the passage count.
+
+Cost: one fast-tier call per ~120 cells, once per file, amortized across every
+span, every language lane, and every future run over that file — against a
+closure loop that spends up to six **mid**-tier calls per span rediscovering
+the same boundaries. This is the clearest single case in the audit for wiring
+`CONTEXTUAL_FAST_MODEL` (G1): until it is set, this pass runs on the frontier
+model, which inverts the entire argument for having built it.
+
+---
+
+## Also landed: the tiers are admin-settable
+
+`CONTEXTUAL_FAST_MODEL` and `CONTEXTUAL_DEEP_MODEL` were env-only, so acting on
+G1 — the audit's top finding — needed a deploy per environment. Both now
+resolve **admin store → env var → default**, the same precedence the chat and
+agent models already used, and both are set from the platform admin console.
+
+They live on the existing managed model list rather than in new free-text
+fields, which is what makes them safe: a tier can only point at a model already
+in the allowlist, so the AI guard can never reject a model an admin configured.
+The route re-validates on the merged post-patch state, catching both "set a
+tier to an unlisted model" and "shrink the list out from under a set tier".
+
+Two behaviours distinguish these from the chat and agent models, because they
+are **optional** where those are required:
+
+- Adding the first model to the list claims chat and agent, and **does not**
+  claim the tiers. Claiming them implicitly would silently change what the
+  pipeline runs on.
+- Removing a model reassigns chat and agent to another list entry, but
+  **clears** a tier back to the fallback. Reassigning a tier an admin never
+  chose is a worse surprise than falling back to the documented default.
+
+The console seeds the toggles from the **stored** value, never from `effective`
+— `effective` reports what is in force including the fallback, so seeding from
+it would render an unset tier as pinned and turn the next save into a real
+change nobody asked for. Sending `""` clears a tier, and the store drops the key
+rather than persisting an empty string that would beat the env fallback.
+
+The env vars remain as a fallback: `docs/COST-METERING.md` drives offline
+costing runs through `.dev.vars`, which has no admin console.
+
+---
+
 ## Recommended order of work
 
-1. **G1 + G2** — set `CONTEXTUAL_FAST_MODEL` to a small model per environment.
-   Config-only, immediately measurable via the existing meter, and it turns the
-   entire tier architecture (including the new support check) from accounting
-   into money. Everything else is smaller.
+1. **G1 + G2** — mark a small model ⚡ Fast in the admin console. One click, no
+   deploy, immediately measurable via the existing meter, and it turns the
+   entire tier architecture (the support check and the segmentation pass
+   included) from accounting into money. Everything else is smaller.
 2. **G5** — reuse the FTS retrieval in the autopilot. Pure code, no model cost,
    improves both draft quality and the support signal's precision.
 3. **G8** — turn the meter on somewhere and start reading per-label cost. Nothing

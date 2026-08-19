@@ -8,10 +8,11 @@
 //                                          original author + legacy timestamp)
 //
 // Pairing: source (.source) and target (.codex) cells share `metadata.id`.
-// Canonical order + structural (milestone) cells come from the target file;
-// the source side is matched in by id. Ids are deterministic (see ids.ts), so
-// re-running yields the identical stream — the server's INSERT OR IGNORE makes
-// the whole thing idempotent.
+// Canonical order comes from the target file; the source side is matched in by
+// id. Structural `milestone` cells are markers only — they are never
+// materialized as pairs, and get an explicit retraction instead (AQU-930).
+// Ids are deterministic (see ids.ts), so re-running yields the identical
+// stream — the server's INSERT OR IGNORE makes the whole thing idempotent.
 
 import type { CodexNotebookFile, CodexCell, EditHistory } from "../codex-editor/types"
 import {
@@ -56,6 +57,23 @@ function canonicalRefOf(cell: CodexCell): string | undefined {
   return undefined
 }
 
+// Latest-edit-wins read of a boolean `metadata.data.*` flag from the cell's
+// edit ledger; undefined when the ledger never touched the path (fall back to
+// the materialized flag then).
+function latestLedgerFlag(cell: CodexCell, path: string): boolean | undefined {
+  let latestTs = -Infinity
+  let latestVal: boolean | undefined
+  for (const e of cell.metadata.edits ?? []) {
+    if (e.editMap?.join(".") !== path) continue
+    const ts = typeof e.timestamp === "number" ? e.timestamp : -Infinity
+    if (ts >= latestTs) {
+      latestTs = ts
+      latestVal = e.value === true
+    }
+  }
+  return latestVal
+}
+
 // A cell soft-deleted in Codex is retained in the notebook's `cells` array with
 // `metadata.data.deleted === true` (the deletion is recorded as an edit on the
 // `metadata.data.deleted` path — see codex-editor merge/cells resolver). The
@@ -64,18 +82,17 @@ function canonicalRefOf(cell: CodexCell): string | undefined {
 // delete-then-restore correctly reads as present.
 function isCellDeleted(cell: CodexCell | undefined): boolean {
   if (!cell) return false
-  let latestTs = -Infinity
-  let latestVal: boolean | undefined
-  for (const e of cell.metadata.edits ?? []) {
-    if (e.editMap?.join(".") !== "metadata.data.deleted") continue
-    const ts = typeof e.timestamp === "number" ? e.timestamp : -Infinity
-    if (ts >= latestTs) {
-      latestTs = ts
-      latestVal = e.value === true
-    }
-  }
-  if (latestVal !== undefined) return latestVal
-  return cell.metadata.data?.deleted === true
+  return latestLedgerFlag(cell, "metadata.data.deleted") ?? (cell.metadata.data?.deleted === true)
+}
+
+// A cell MERGED away in Codex (its content absorbed into another cell — a
+// heading consolidation or a verse-range merge) likewise stays in the array,
+// flagged `metadata.data.merged === true`, and Codex hides it. It must not
+// surface as a pair in Aquilla either: the surviving merge-target cell carries
+// the content. Latest-edit-wins so an unmerge reads as present (AQU-944).
+function isCellMerged(cell: CodexCell | undefined): boolean {
+  if (!cell) return false
+  return latestLedgerFlag(cell, "metadata.data.merged") ?? (cell.metadata.data?.merged === true)
 }
 
 // Timestamp of the latest edit that set `metadata.data.deleted = true`, used as
@@ -103,6 +120,14 @@ function earliestEditTs(cell: CodexCell | undefined): number | undefined {
     if (typeof e.timestamp === "number" && e.timestamp < min) min = e.timestamp
   }
   return Number.isFinite(min) ? min : undefined
+}
+
+// A Codex `milestone` cell is a structural marker (a chapter/section boundary
+// whose value is typically just the chapter number). It is not translatable
+// content and must never surface as a source/target pair in the editor
+// (AQU-930).
+function isMilestoneCell(cell: CodexCell | undefined): boolean {
+  return cell?.metadata.type === "milestone"
 }
 
 const isValueEdit = (e: EditHistory): boolean => e.editMap?.[0] === "value"
@@ -233,7 +258,20 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
     // created and is a harmless no-op on a project that never had the cell
     // (AQU-747). Deleted cells still do NOT advance the anchor chain, so
     // surviving cells anchor to the prior live cell (AQU-673).
-    if (isCellDeleted(ordered) || isCellDeleted(t) || isCellDeleted(s)) {
+    //
+    // Milestone cells take the exact same path: they are structural markers,
+    // not content, so they must not materialize as an editable source/target
+    // pair — and projects migrated before this fix already hold them as rows,
+    // so they need the same explicit retraction to purge on re-run (AQU-930).
+    //
+    // So do cells MERGED away in Codex: the surviving merge-target cell holds
+    // the content, and Codex hides the absorbed cell — migrating it duplicated
+    // headings and verse cells (AQU-944).
+    if (
+      isCellDeleted(ordered) || isCellDeleted(t) || isCellDeleted(s)
+      || isCellMerged(ordered) || isCellMerged(t) || isCellMerged(s)
+      || isMilestoneCell(ordered) || isMilestoneCell(t) || isMilestoneCell(s)
+    ) {
       const deleteTs =
         deletionTsOf(ordered) ?? deletionTsOf(t) ?? deletionTsOf(s) ?? fallbackTs
       events.push({
@@ -337,9 +375,10 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
       .filter(({ e }) => isValueEdit(e))
 
     if (valueEdits.length === 0) {
-      // No value-history. Emit one synthetic commit for a real (non-structural)
-      // translation that exists but predates the edit ledger; skip milestones.
-      if (t.value && t.value.trim() !== "" && t.metadata.type !== "milestone") {
+      // No value-history. Emit one synthetic commit for a translation that
+      // exists but predates the edit ledger. (Milestone cells never get here —
+      // they are retracted above, AQU-930.)
+      if (t.value && t.value.trim() !== "") {
         const targetHtml = canonicalTargetWithProof(proof, s, t, t.value)
         events.push({
           id: targetCommitEventId(projectId, fileId, cellId, 0),
@@ -410,6 +449,8 @@ export function collectSpeakers(
   const out: { cellId: string; speaker: string }[] = []
   for (const c of cells) {
     if (isCellDeleted(c)) continue // deleted cells contribute no cast (AQU-673)
+    if (isCellMerged(c)) continue // absorbed cells contribute no cast (AQU-944)
+    if (isMilestoneCell(c)) continue // markers are not speakers (AQU-930)
     const speaker = c.metadata.cellLabel?.trim()
     if (speaker) out.push({ cellId: c.metadata.id, speaker })
   }

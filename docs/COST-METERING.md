@@ -67,6 +67,11 @@ prove it is unset.)
 
 ### 2. Point at whichever model you want to price
 
+**In a deployed environment the autopilot tiers are set in the admin console**
+(Settings → the model list's ⚡ Fast and 🔬 Deep toggles), which beats the env
+vars below. The `.dev.vars` route stays because a local costing run has no
+console.
+
 Also in `.dev.vars`:
 
 ```

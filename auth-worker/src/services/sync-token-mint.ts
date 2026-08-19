@@ -29,6 +29,29 @@ export function roleNameFor(level: number): string {
   }
 }
 
+/**
+ * [Pen test 2026-08-18] projectId/fileId are minted straight into the JWT's
+ * claims, which every downstream sync-worker route trusts verbatim
+ * (verifyTokenForFile just checks string equality against the claim — it does
+ * no shape validation of its own). Several of those routes (tts.ts,
+ * voice-convert.ts) then interpolate the id directly into an R2 key template,
+ * so a `/`, `\`, or `..` here would let a project member mint a token whose
+ * claims collide with a different R2 object outside the id's own namespace.
+ * Real ids are UUIDv7 strings; this only rejects unsafe characters, not
+ * shape, so it doesn't constrain legitimate ids. Enforced here in the mint
+ * core so EVERY mint path is covered (the browser route also rejects earlier
+ * via its zod schema; the agent harness's propose_command mint has no other
+ * guard).
+ */
+export function isPathSafeId(id: string): boolean {
+  if (id === "." || id === "..") return false
+  for (let i = 0; i < id.length; i++) {
+    const c = id.charCodeAt(i)
+    if (c === 0x2f || c === 0x5c || c === 0) return false // "/" or "\" or NUL
+  }
+  return true
+}
+
 export type SyncTokenMintFailure =
   /** SYNC_SECRET_KEY unset — deployment config, not a caller problem. */
   | "not_configured"
@@ -39,6 +62,8 @@ export type SyncTokenMintFailure =
   | "project_frozen"
   /** Project exists but AD-12 resolution found no role for the user. */
   | "no_access"
+  /** projectId/fileId contains R2-key-unsafe characters (see isPathSafeId). */
+  | "unsafe_id"
 
 export type SyncTokenMintResult =
   | { ok: true; token: string; expiresIn: number; role: RoleResolution }
@@ -104,6 +129,9 @@ export async function mintSyncTokenForUser(
   fileId: string,
 ): Promise<SyncTokenMintResult> {
   if (!env.SYNC_SECRET_KEY) return { ok: false, reason: "not_configured" }
+  if (!isPathSafeId(projectId) || !isPathSafeId(fileId)) {
+    return { ok: false, reason: "unsafe_id" }
+  }
 
   const project = await env.AQUILLA_PG.prepare(
     `SELECT id, archived_at, is_active FROM projects WHERE id = ?`,

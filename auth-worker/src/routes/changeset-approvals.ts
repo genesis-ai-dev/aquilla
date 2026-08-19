@@ -106,7 +106,11 @@ function floorDenied(required: number, verb: string) {
  * Approval authority (P1 §2.1). The caller's LIVE project role must be at or
  * above the floor the plan was staged against. A caller with no role on the
  * changeset's project resolves to null and is denied — that is also the
- * cross-tenant guard, since this route is keyed by changeset id alone.
+ * cross-tenant guard, since this route is keyed by changeset id alone, and it
+ * covers the [Pen test] Authorization & access control finding (2026-08-18):
+ * having staged a changeset in the past must not resurrect access after the
+ * caller's project standing ends, on reads (cell text on the approval page)
+ * or writes alike.
  *
  * Returns the denial envelope, or null when the caller may act.
  */

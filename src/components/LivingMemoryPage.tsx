@@ -143,12 +143,6 @@ export function LivingMemoryPage({
   const navigate = useNavigate()
   const location = useLocation()
 
-  const { cells, isLoading, isEmpty, error: cellsError } = useLivingMemory({
-    projectId: projectId ?? "",
-  })
-
-  const { state: livenessState, label: livenessLabel } = useLiveness(cells.length)
-
   const ownedProject = useProject(projectId ?? "", {
     initialProject: workspaceProject,
     enabled: workspaceProject == null,
@@ -158,6 +152,21 @@ export function LivingMemoryPage({
   const project = workspaceProject ?? ownedProject.project
   const projectLoading = workspaceProject == null && ownedProject.loading
   const refreshProject = workspaceRefreshProject ?? ownedProject.refresh
+
+  // Unknown/missing section → the index (mirrors the ProjectSettings fallback).
+  const activeSection = section
+    ? LIVING_MEMORY_SECTIONS.find((candidate) => candidate.id === section) ?? null
+    : null
+  // The full validated-cell corpus is an expensive all-files query. Only the
+  // Examples pane consumes it; every other pane renders from project/settings.
+  const validatedExamplesEnabled = activeSection?.id === "examples"
+  const { cells, isLoading, isEmpty, error: cellsError } = useLivingMemory({
+    projectId: projectId ?? "",
+    project,
+    enabled: validatedExamplesEnabled,
+  })
+
+  const { state: livenessState, label: livenessLabel } = useLiveness(cells.length)
 
   // Role-aware edit gate: mirrors the AQU-255 pattern — get roleLevel from
   // syncRole, pass to useProjectSettings which enforces MAINTAINER (600) floor.
@@ -210,11 +219,6 @@ export function LivingMemoryPage({
     await patchSettings({ livingMemoryEntries: next })
   }
 
-  // Unknown/missing section → the index (mirrors the ProjectSettings fallback).
-  const activeSection = section
-    ? LIVING_MEMORY_SECTIONS.find((s) => s.id === section) ?? null
-    : null
-
   // ── Index-row hints: short current-value summaries (settings pattern) ────
   const storedPrompt = settings.systemPrompt ?? ""
   const promptIsCustom =
@@ -252,7 +256,7 @@ export function LivingMemoryPage({
           ? t("terminology.livingMemory.section.knowledge.hintOn")
           : t("terminology.livingMemory.section.knowledge.hintOff")
       case "examples":
-        return isLoading
+        return !validatedExamplesEnabled || isLoading
           ? undefined
           : t("terminology.livingMemory.validatedCount", {
               count: formatCount(cells.length, locale),
@@ -275,18 +279,20 @@ export function LivingMemoryPage({
           ].join(" ")}
         />
       </AppTooltip>
-      {isLoading ? (
-        <Skeleton
-          className="h-4 w-20 rounded-md"
-          aria-label={t("terminology.livingMemory.loadingCountAria")}
-        />
-      ) : (
-        <Badge variant="secondary" className="text-[10px] tabular-nums">
-          {t("terminology.livingMemory.validatedCount", {
-            count: formatCount(cells.length, locale),
-          })}
-        </Badge>
-      )}
+      {validatedExamplesEnabled ? (
+        isLoading ? (
+          <Skeleton
+            className="h-4 w-20 rounded-md"
+            aria-label={t("terminology.livingMemory.loadingCountAria")}
+          />
+        ) : (
+          <Badge variant="secondary" className="text-[10px] tabular-nums">
+            {t("terminology.livingMemory.validatedCount", {
+              count: formatCount(cells.length, locale),
+            })}
+          </Badge>
+        )
+      ) : null}
       <div className="flex-1" />
       <Button
         variant="outline"

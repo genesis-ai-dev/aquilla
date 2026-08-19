@@ -23,6 +23,7 @@ import { authMiddleware } from "../middleware/auth"
 import type { AuthHonoEnv } from "../middleware/auth"
 import { ROLE, type RoleResolution, type SyncTokenResponse } from "../types"
 import {
+  isPathSafeId,
   mintSyncTokenForUser,
   roleNameFor,
   signSyncTokenWithRole,
@@ -30,9 +31,22 @@ import {
 
 const syncToken = new Hono<AuthHonoEnv>()
 
+// projectId/fileId flow verbatim into the JWT's claims and from there into
+// R2 key templates on the sync-worker side — see isPathSafeId in
+// services/sync-token-mint.ts for the full threat note. The mint core
+// re-checks; rejecting here too keeps the caller-facing error a plain 400
+// validation failure (and covers the auto-register path, which signs without
+// going through mintSyncTokenForUser).
+const safeId = (label: string) =>
+  z
+    .string()
+    .min(1)
+    .max(256)
+    .refine(isPathSafeId, { message: `${label} contains unsafe characters` })
+
 const syncTokenSchema = z.object({
-  projectId: z.string().min(1),
-  fileId: z.string().min(1),
+  projectId: safeId("projectId"),
+  fileId: safeId("fileId"),
   // Optional bootstrap so an unknown projectId can be auto-registered
   // on the caller's first request.
   projectName: z.string().optional(),
@@ -102,6 +116,10 @@ syncToken.post(
       }
       case "no_access":
         return c.json({ error: "No access to project" }, 403)
+      // Unreachable via this route (safeId already rejected at validation),
+      // but the mint core's union requires the case.
+      case "unsafe_id":
+        return c.json({ error: "projectId or fileId contains unsafe characters" }, 400)
     }
   },
 )

@@ -1905,7 +1905,6 @@ export const mfa: Catalog = {
   "org.projectOverview.openAssignmentsStat": "{count} terbuka · {percent}",
   "org.projectOverview.viewActivityAria": "Lihat aktiviti untuk {username}",
   "org.projectOverview.hide": "Sembunyi",
-  "org.projectOverview.membersVisibilityDescription": "Siapa yang boleh melihat senarai ahli dalam projek ini.",
   "org.projectOverview.noFilesToExport": "Projek ini belum mempunyai fail untuk dieksport.",
   "org.projectOverview.archiveForbidden": "Hanya pemilik boleh mengarkibkan projek.",
   "org.projectOverview.restoreForbidden": "Hanya pemilik boleh memulihkan projek.",

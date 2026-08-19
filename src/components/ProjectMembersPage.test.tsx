@@ -1,8 +1,7 @@
 // Unit tests for project members building blocks (MembersTab / InviteLinkTab).
 //
 // Canonical route is `/project/:id/settings/members` (MembersSection tests).
-// These cover the shared MembersTab embedded on ProjectOverview and the
-// invite/revoke helpers reused by settings.
+// These cover MembersTab itself and the invite/revoke helpers reused by settings.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"

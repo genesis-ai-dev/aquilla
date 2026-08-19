@@ -1908,7 +1908,6 @@ export const ar: Catalog = {
   "org.projectOverview.openAssignmentsStat": "{count} مفتوحة · {percent}",
   "org.projectOverview.viewActivityAria": "عرض نشاط {username}",
   "org.projectOverview.hide": "إخفاء",
-  "org.projectOverview.membersVisibilityDescription": "من يمكنه رؤية قائمة الأعضاء في هذا المشروع.",
   "org.projectOverview.noFilesToExport": "لا يحتوي هذا المشروع على ملفات للتصدير بعد.",
   "org.projectOverview.archiveForbidden": "يمكن للمالكين فقط أرشفة المشروع.",
   "org.projectOverview.restoreForbidden": "يمكن للمالكين فقط استعادة المشروع.",

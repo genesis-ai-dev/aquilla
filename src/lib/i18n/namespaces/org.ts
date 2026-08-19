@@ -430,7 +430,6 @@ export const org = defineNamespace({
     "org.projectOverview.openAssignmentsStat": "{count} open · {percent}",
     "org.projectOverview.viewActivityAria": "View activity for {username}",
     "org.projectOverview.hide": "Hide",
-    "org.projectOverview.membersVisibilityDescription": "Who can see the member roster on this project.",
     "org.projectOverview.noFilesToExport": "This project has no files to export yet.",
     "org.projectOverview.archiveForbidden": "Only owners can archive a project.",
     "org.projectOverview.restoreForbidden": "Only owners can restore a project.",

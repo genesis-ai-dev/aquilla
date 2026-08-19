@@ -1908,7 +1908,6 @@ export const my: Catalog = {
   "org.projectOverview.openAssignmentsStat": "{count} ဖွင့်ထား · {percent}",
   "org.projectOverview.viewActivityAria": "{username} ၏ လှုပ်ရှားမှု ကြည့်ရန်",
   "org.projectOverview.hide": "ဖျောက်ရန်",
-  "org.projectOverview.membersVisibilityDescription": "ဤပရောဂျက်တွင် အဖွဲ့ဝင်စာရင်းကို မည်သူမြင်နိုင်သနည်း။",
   "org.projectOverview.noFilesToExport": "ဤပရောဂျက်တွင် ထုတ်ယူရန် ဖိုင် မရှိသေးပါ။",
   "org.projectOverview.archiveForbidden": "ပိုင်ရှင်များသာ ပရောဂျက်ကို မော်ကွန်းတင်နိုင်သည်။",
   "org.projectOverview.restoreForbidden": "ပိုင်ရှင်များသာ ပရောဂျက်ကို ပြန်လည်ရယူနိုင်သည်။",

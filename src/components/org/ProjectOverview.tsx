@@ -26,7 +26,6 @@ import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { InactiveProjectBanner } from "@/components/InactiveProjectBanner"
 import { downloadProjectBundle } from "@/lib/sync/export-bundle"
 import { AssignWork } from "./AssignWork"
-import { MembersTab } from "@/components/ProjectMembersPage"
 import { MemberActivityPanel } from "./MemberActivityPanel"
 import { ProjectAutopilotPanel } from "./ProjectAutopilotPanel"
 import { isFlagEnabled } from "@/lib/features/flags"
@@ -1887,37 +1886,6 @@ export function ProjectOverview() {
                   )}
                 </div>
               </SectionVisibilityGate>
-
-              {/* ── Members card (AQU-335) — same add / change-role / revoke
-                  surface as Project Settings → Team members, so access can be
-                  managed from the overview without opening settings. ──
-                  AQU-486: gated by AQU-485's rosterViewMinRole — the same
-                  policy MembersTab itself enforces server-side, applied here
-                  one layer up so a below-floor caller never sees the card
-                  shell at all. */}
-              {canManage && !isArchived && (
-                <SectionVisibilityGate
-                  minRole={orgSettings.rosterViewMinRole}
-                  viewerRoleLevel={projectRoleLevel}
-                  ready={orgSettings.hasFetched}
-                >
-                  <div
-                    className={cn("relative rounded-lg border bg-card p-5", sectionTintClass(orgSettings.rosterViewMinRole))}
-                    data-testid="overview-members-card"
-                  >
-                    <div className="mb-3 flex items-center justify-between gap-2">
-                      <h2 className="text-xs font-semibold text-muted-foreground">{t("editor.navTitle.members")}</h2>
-                      <SectionVisibilityBadge
-                        minRole={orgSettings.rosterViewMinRole}
-                        canEdit={canEditVisibility}
-                        onChangeMinRole={async (next) => { await orgSettings.patch({ rosterViewMinRole: next }) }}
-                        description={t("org.projectOverview.membersVisibilityDescription")}
-                      />
-                    </div>
-                    <MembersTab projectId={id} className="space-y-6" />
-                  </div>
-                </SectionVisibilityGate>
-              )}
             </div>
           )}
           </div>

@@ -1908,7 +1908,6 @@ export const th: Catalog = {
   "org.projectOverview.openAssignmentsStat": "{count} เปิดอยู่ · {percent}",
   "org.projectOverview.viewActivityAria": "ดูกิจกรรมของ {username}",
   "org.projectOverview.hide": "ซ่อน",
-  "org.projectOverview.membersVisibilityDescription": "ใครสามารถเห็นรายชื่อสมาชิกในโปรเจกต์นี้",
   "org.projectOverview.noFilesToExport": "โปรเจกต์นี้ยังไม่มีไฟล์ให้ส่งออก",
   "org.projectOverview.archiveForbidden": "เฉพาะเจ้าของเท่านั้นที่เก็บถาวรโปรเจกต์ได้",
   "org.projectOverview.restoreForbidden": "เฉพาะเจ้าของเท่านั้นที่กู้คืนโปรเจกต์ได้",

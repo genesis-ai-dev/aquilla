@@ -38,7 +38,7 @@ import type { OutboxRawEvent } from "./project-do-types"
 import { mondayNotifyProject, notifyMondayProgress } from "./monday-notify"
 import { mirrorSync, type MirrorSyncResult } from "./events/link-sync"
 import { makePostgres } from "../../db/shim/postgres"
-import { secureCompare } from "./lib/secure-compare"
+import { serviceBearerMatches } from "./lib/service-auth"
 
 const LEASE_SWEEP_INTERVAL_MS = 5_000
 
@@ -151,9 +151,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // that only one fold ran (the second awaited the first's in-flight
     // promise) and B's cells match A's head afterward.
     if (request.method === "POST" && url.pathname === "/__link-sync") {
-      const auth = request.headers.get("Authorization") ?? ""
-      const expected = this.env.SYNC_SECRET_KEY ? `Bearer ${this.env.SYNC_SECRET_KEY}` : null
-      if (!expected || !secureCompare(auth, expected)) {
+      if (!serviceBearerMatches(request.headers.get("Authorization"), this.env)) {
         return new Response("unauthorized", { status: 401 })
       }
       const projectId = url.searchParams.get("project")
@@ -184,11 +182,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // Internal broadcast hook (POST /events fans out to us here). Pre-built
     // ServerMessage; we forward to every connection.
     if (request.method === "POST" && url.pathname === "/__broadcast") {
-      const auth = request.headers.get("Authorization") ?? ""
-      const expected = this.env.SYNC_SECRET_KEY
-        ? `Bearer ${this.env.SYNC_SECRET_KEY}`
-        : null
-      if (!expected || !secureCompare(auth, expected)) {
+      if (!serviceBearerMatches(request.headers.get("Authorization"), this.env)) {
         return new Response("unauthorized", { status: 401 })
       }
       let body: unknown
@@ -221,11 +215,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // and denylist the numeric userId for longer than the token TTL so a
     // cached still-valid token can't just reconnect.
     if (request.method === "POST" && url.pathname === "/__member-removed") {
-      const auth = request.headers.get("Authorization") ?? ""
-      const expected = this.env.SYNC_SECRET_KEY
-        ? `Bearer ${this.env.SYNC_SECRET_KEY}`
-        : null
-      if (!expected || !secureCompare(auth, expected)) {
+      if (!serviceBearerMatches(request.headers.get("Authorization"), this.env)) {
         return new Response("unauthorized", { status: 401 })
       }
       let body: { project?: string; userId?: number; username?: string }

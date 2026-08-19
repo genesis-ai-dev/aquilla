@@ -7,9 +7,9 @@ import { ExpandableName } from "@/components/ui/expandable-name"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { Button, buttonVariants } from "@/components/ui/button"
+import { ButtonGroup } from "@/components/ui/button-group"
 import { orgProjectsPath, projectSettingsPath } from "@/lib/navigation/org-paths"
 import { Spinner } from "@/components/ui/spinner"
-import { ButtonGroup } from "@/components/ui/button-group"
 import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
@@ -1676,7 +1676,7 @@ export function ProjectOverview() {
                         <SelectTrigger aria-label={t("org.projectOverview.sortFilesByAria")} className="w-44!">
                           <SelectValue />
                         </SelectTrigger>
-                        <SelectContent align="start" alignItemWithTrigger={false} className="w-(--anchor-width)">
+                        <SelectContent>
                           <SelectGroup>
                             {fileSortItems.map((m) => (
                               <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>

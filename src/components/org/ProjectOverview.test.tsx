@@ -5,6 +5,7 @@ import { OrgProvider } from "@/context/OrgContext"
 import { ProjectOverview, deriveProjectStatus } from "./ProjectOverview"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
+import { fmtDeadlineDate } from "@/lib/format-date"
 
 const navigate = vi.fn()
 vi.mock("react-router-dom", async (importActual) => {
@@ -302,7 +303,7 @@ describe("ProjectOverview status chip placement", () => {
     getPortfolio.mockResolvedValue([portfolioWithDeadline("2033-12-31")])
     renderOverview()
 
-    await screen.findByText("2033-12-31")
+    await screen.findByText(fmtDeadlineDate("2033-12-31"))
     expect(screen.getAllByText("On track")).toHaveLength(1)
     expect(
       within(screen.getByRole("heading", { name: "John" }).parentElement!).getByText("On track"),
@@ -318,7 +319,7 @@ describe("ProjectOverview status chip placement", () => {
     getPortfolio.mockResolvedValue([portfolioWithDeadline("2026-07-01")])
     renderOverview()
 
-    await screen.findByText("2026-07-01")
+    await screen.findByText(fmtDeadlineDate("2026-07-01"))
     expect(screen.getAllByText(label)).toHaveLength(1)
     expect(
       within(screen.getByRole("heading", { name: "John" }).parentElement!).queryByText(label),
@@ -857,7 +858,7 @@ describe("ProjectOverview PM assignment", () => {
     }])
     renderOverview()
 
-    await screen.findByText("2026-07-01")
+    await screen.findByText(fmtDeadlineDate("2026-07-01"))
     const meta = screen.getByTestId("overview-project-meta")
     expect(within(meta).queryByRole("button", { name: "Change" })).not.toBeInTheDocument()
     expect(within(meta).queryByRole("button", { name: "Clear" })).not.toBeInTheDocument()

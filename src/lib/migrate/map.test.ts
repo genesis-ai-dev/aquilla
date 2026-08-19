@@ -503,6 +503,78 @@ describe("mapFilePairToEvents", () => {
     expect(collectSpeakers(pair)).toEqual([{ cellId: "c1", speaker: "MARY MAGDALENE" }])
   })
 
+  it("never migrates merged-away cells; retracts them like deleted ones (AQU-944)", () => {
+    // v1 (live) → m (merged into v1) → v2 (live). The absorbed cell must not
+    // become a pair (its content lives in the survivor), must carry two-lane
+    // retractions, and must not advance the anchor chain.
+    const pair: FilePairInput = {
+      relPath: "F",
+      name: "F",
+      target: {
+        metadata: { id: "f", originalName: "f" },
+        cells: [
+          { kind: 2, languageId: "html", value: "<p>a b</p>", metadata: { id: "v1", type: "text" } },
+          { kind: 2, languageId: "html", value: "<p>b</p>", metadata: { id: "m", type: "text", data: { merged: true } } },
+          { kind: 2, languageId: "html", value: "<p>c</p>", metadata: { id: "v2", type: "text" } },
+        ],
+      },
+    }
+    const ev = mapFilePairToEvents(pair, OPTS)
+    expect(ev.some((e) => e.cellId === "m" && e.kind === "source.cell.create")).toBe(false)
+    expect(ev.some((e) => e.cellId === "m" && e.kind === "target.cell.commit")).toBe(false)
+    expect(ev.some((e) => e.cellId === "m" && e.kind === "source.cell.delete")).toBe(true)
+    expect(ev.some((e) => e.cellId === "m" && e.kind === "target.cell.delete")).toBe(true)
+    const creates = ev.filter((e) => e.kind === "source.cell.create")
+    expect(creates.map((e) => e.cellId)).toEqual(["v1", "v2"])
+    expect(creates[1]!.payload.anchorCellId).toBe("v1")
+  })
+
+  it("treats merge recorded in the edit ledger as latest-edit-wins (merge then unmerge = present)", () => {
+    const pair: FilePairInput = {
+      relPath: "F",
+      name: "F",
+      target: {
+        metadata: { id: "f", originalName: "f" },
+        cells: [
+          // merged at ts 10, unmerged at ts 20 → still a normal pair even
+          // though the materialized flag was left true.
+          {
+            kind: 2,
+            languageId: "html",
+            value: "<p>kept</p>",
+            metadata: {
+              id: "keep",
+              type: "text",
+              data: { merged: true },
+              edits: [
+                { author: "a", timestamp: 10, type: "user-edit", editMap: ["metadata", "data", "merged"], value: true },
+                { author: "a", timestamp: 20, type: "user-edit", editMap: ["metadata", "data", "merged"], value: false },
+              ],
+            },
+          },
+        ],
+      },
+    }
+    const ev = mapFilePairToEvents(pair, OPTS)
+    expect(ev.some((e) => e.cellId === "keep" && e.kind === "source.cell.create")).toBe(true)
+    expect(ev.some((e) => e.cellId === "keep" && e.kind === "source.cell.delete")).toBe(false)
+  })
+
+  it("collectSpeakers skips merged-away cells (AQU-944)", () => {
+    const pair: FilePairInput = {
+      relPath: "F",
+      name: "F",
+      target: {
+        metadata: { id: "f", originalName: "f" },
+        cells: [
+          { kind: 2, languageId: "html", value: "x", metadata: { id: "c1", type: "text", cellLabel: "MARY MAGDALENE" } },
+          { kind: 2, languageId: "html", value: "y", metadata: { id: "c2", type: "text", cellLabel: "PETER", data: { merged: true } } },
+        ],
+      },
+    }
+    expect(collectSpeakers(pair)).toEqual([{ cellId: "c1", speaker: "MARY MAGDALENE" }])
+  })
+
   it("collectSpeakers skips milestone cells — a chapter label is not a speaker (AQU-930)", () => {
     const pair: FilePairInput = {
       relPath: "F",

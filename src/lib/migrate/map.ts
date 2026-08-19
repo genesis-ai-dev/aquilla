@@ -57,6 +57,23 @@ function canonicalRefOf(cell: CodexCell): string | undefined {
   return undefined
 }
 
+// Latest-edit-wins read of a boolean `metadata.data.*` flag from the cell's
+// edit ledger; undefined when the ledger never touched the path (fall back to
+// the materialized flag then).
+function latestLedgerFlag(cell: CodexCell, path: string): boolean | undefined {
+  let latestTs = -Infinity
+  let latestVal: boolean | undefined
+  for (const e of cell.metadata.edits ?? []) {
+    if (e.editMap?.join(".") !== path) continue
+    const ts = typeof e.timestamp === "number" ? e.timestamp : -Infinity
+    if (ts >= latestTs) {
+      latestTs = ts
+      latestVal = e.value === true
+    }
+  }
+  return latestVal
+}
+
 // A cell soft-deleted in Codex is retained in the notebook's `cells` array with
 // `metadata.data.deleted === true` (the deletion is recorded as an edit on the
 // `metadata.data.deleted` path — see codex-editor merge/cells resolver). The
@@ -65,18 +82,17 @@ function canonicalRefOf(cell: CodexCell): string | undefined {
 // delete-then-restore correctly reads as present.
 function isCellDeleted(cell: CodexCell | undefined): boolean {
   if (!cell) return false
-  let latestTs = -Infinity
-  let latestVal: boolean | undefined
-  for (const e of cell.metadata.edits ?? []) {
-    if (e.editMap?.join(".") !== "metadata.data.deleted") continue
-    const ts = typeof e.timestamp === "number" ? e.timestamp : -Infinity
-    if (ts >= latestTs) {
-      latestTs = ts
-      latestVal = e.value === true
-    }
-  }
-  if (latestVal !== undefined) return latestVal
-  return cell.metadata.data?.deleted === true
+  return latestLedgerFlag(cell, "metadata.data.deleted") ?? (cell.metadata.data?.deleted === true)
+}
+
+// A cell MERGED away in Codex (its content absorbed into another cell — a
+// heading consolidation or a verse-range merge) likewise stays in the array,
+// flagged `metadata.data.merged === true`, and Codex hides it. It must not
+// surface as a pair in Aquilla either: the surviving merge-target cell carries
+// the content. Latest-edit-wins so an unmerge reads as present (AQU-944).
+function isCellMerged(cell: CodexCell | undefined): boolean {
+  if (!cell) return false
+  return latestLedgerFlag(cell, "metadata.data.merged") ?? (cell.metadata.data?.merged === true)
 }
 
 // Timestamp of the latest edit that set `metadata.data.deleted = true`, used as
@@ -247,8 +263,13 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
     // not content, so they must not materialize as an editable source/target
     // pair — and projects migrated before this fix already hold them as rows,
     // so they need the same explicit retraction to purge on re-run (AQU-930).
+    //
+    // So do cells MERGED away in Codex: the surviving merge-target cell holds
+    // the content, and Codex hides the absorbed cell — migrating it duplicated
+    // headings and verse cells (AQU-944).
     if (
       isCellDeleted(ordered) || isCellDeleted(t) || isCellDeleted(s)
+      || isCellMerged(ordered) || isCellMerged(t) || isCellMerged(s)
       || isMilestoneCell(ordered) || isMilestoneCell(t) || isMilestoneCell(s)
     ) {
       const deleteTs =
@@ -428,6 +449,7 @@ export function collectSpeakers(
   const out: { cellId: string; speaker: string }[] = []
   for (const c of cells) {
     if (isCellDeleted(c)) continue // deleted cells contribute no cast (AQU-673)
+    if (isCellMerged(c)) continue // absorbed cells contribute no cast (AQU-944)
     if (isMilestoneCell(c)) continue // markers are not speakers (AQU-930)
     const speaker = c.metadata.cellLabel?.trim()
     if (speaker) out.push({ cellId: c.metadata.id, speaker })

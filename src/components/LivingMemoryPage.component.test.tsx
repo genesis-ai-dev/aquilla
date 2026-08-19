@@ -104,12 +104,15 @@ import { useLivingMemory } from "@/hooks/useLivingMemory"
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function renderPage(path = "/project/proj-1/memory") {
+function renderPage(
+  path = "/project/proj-1/memory",
+  props: React.ComponentProps<typeof LivingMemoryPage> = {},
+) {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
-        <Route path="/project/:id/memory" element={<LivingMemoryPage />} />
-        <Route path="/project/:id/memory/:section" element={<LivingMemoryPage />} />
+        <Route path="/project/:id/memory" element={<LivingMemoryPage {...props} />} />
+        <Route path="/project/:id/memory/:section" element={<LivingMemoryPage {...props} />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -180,6 +183,26 @@ beforeEach(() => {
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe("LivingMemoryPage — index", () => {
+  it("renders from the workspace-owned project while the standalone query is unresolved", () => {
+    mockProject({}, true)
+    const workspaceProject = {
+      ...mockProjectBase,
+      name: "Workspace-owned project",
+    } as ProjectRecord
+
+    renderPage("/project/proj-1/memory", {
+      project: workspaceProject,
+      projectSettings: mockProjectSettingsReturn as unknown as UseProjectSettingsReturn,
+    })
+
+    expect(screen.getByRole("heading", { name: /Living Memory/i })).toBeInTheDocument()
+    expect(vi.mocked(useProject)).toHaveBeenLastCalledWith("proj-1", expect.objectContaining({
+      enabled: false,
+      includeSettings: false,
+    }))
+    expect(vi.mocked(useProjectSettings)).toHaveBeenLastCalledWith(null, ROLE.MAINTAINER)
+  })
+
   it("shows the Living Memory heading and the intro copy", () => {
     renderPage()
     expect(screen.getByRole("heading", { name: /Living Memory/i })).toBeInTheDocument()

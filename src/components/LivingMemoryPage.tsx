@@ -37,7 +37,7 @@ import { LIVING_MEMORY_ICON } from "@/components/LivingMemoryButton"
 import { useLivingMemory } from "@/hooks/useLivingMemory"
 import { useLiveness } from "@/hooks/useLiveness"
 import { useProject } from "@/hooks/useProject"
-import { useProjectSettings } from "@/hooks/useProjectSettings"
+import { useProjectSettings, type UseProjectSettings } from "@/hooks/useProjectSettings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { LivingMemoryEntry } from "@/lib/parsers/types"
 import type { MessageKey } from "@/lib/i18n/messages/en"
@@ -56,6 +56,7 @@ import { AuthoredEntriesSection } from "@/components/living-memory/AuthoredEntri
 import { RecentExamplesSection } from "@/components/living-memory/ExamplesSection"
 import { BriefPane } from "@/components/living-memory/BriefPane"
 import { PredictionPromptSection } from "@/components/living-memory/PredictionPromptSection"
+import type { ProjectRecord } from "@/lib/parsers/types"
 
 // Pure entry helpers live in living-memory/entries.ts; re-exported so existing
 // imports (LivingMemoryPage.test.ts, agent harness) keep resolving.
@@ -123,7 +124,19 @@ const PANES_WITH_CHROME_DESCRIPTION: readonly LivingMemorySectionId[] = [
 
 // ── Page ──────────────────────────────────────────────────────────────────
 
-export function LivingMemoryPage() {
+interface LivingMemoryPageProps {
+  /** The workspace already owns the authoritative project record. Reusing it
+   * keeps this known shell mounted while query-backed pane content hydrates. */
+  project?: ProjectRecord | null
+  refreshProject?: () => void
+  projectSettings?: UseProjectSettings
+}
+
+export function LivingMemoryPage({
+  project: workspaceProject,
+  refreshProject: workspaceRefreshProject,
+  projectSettings: workspaceProjectSettings,
+}: LivingMemoryPageProps = {}) {
   const { locale } = useI18n()
   const t = useT()
   const { id: projectId, section } = useParams<{ id: string; section?: string }>()
@@ -136,15 +149,29 @@ export function LivingMemoryPage() {
 
   const { state: livenessState, label: livenessLabel } = useLiveness(cells.length)
 
-  const { project, loading: projectLoading } = useProject(projectId ?? "")
+  const ownedProject = useProject(projectId ?? "", {
+    initialProject: workspaceProject,
+    enabled: workspaceProject == null,
+    // This page owns the editable settings instance immediately below.
+    includeSettings: false,
+  })
+  const project = workspaceProject ?? ownedProject.project
+  const projectLoading = workspaceProject == null && ownedProject.loading
+  const refreshProject = workspaceRefreshProject ?? ownedProject.refresh
 
   // Role-aware edit gate: mirrors the AQU-255 pattern — get roleLevel from
   // syncRole, pass to useProjectSettings which enforces MAINTAINER (600) floor.
   const roleLevel = project?.syncRole?.level ?? null
-  const { settings, canEdit, reasonCannotEdit, patch: patchSettings } = useProjectSettings(
-    projectId ?? null,
+  const ownedProjectSettings = useProjectSettings(
+    workspaceProjectSettings ? null : (projectId ?? null),
     roleLevel,
   )
+  const {
+    settings,
+    canEdit,
+    reasonCannotEdit,
+    patch: patchSettings,
+  } = workspaceProjectSettings ?? ownedProjectSettings
 
   const { session } = useFrontierSession()
 
@@ -343,7 +370,13 @@ export function LivingMemoryPage() {
                 <h2 className="text-xs font-semibold text-muted-foreground mb-3">
                   {t("nav.sidebarSection.rules")}
                 </h2>
-                <RulesSettingsSection projectId={projectId} />
+                <RulesSettingsSection
+                  projectId={projectId}
+                  project={project}
+                  refreshProject={refreshProject}
+                  patchSettings={patchSettings}
+                  roleLevel={roleLevel}
+                />
               </section>
             ) : null}
           </>

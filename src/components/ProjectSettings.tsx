@@ -294,13 +294,19 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const modalState = location.state as {
     backgroundLocation?: Location
     projectSettingsModalDepth?: number
+    projectSnapshot?: ProjectRecord
   } | null
   const backgroundLocation = modal ? modalState?.backgroundLocation : undefined
   const modalDepth = modal ? (modalState?.projectSettingsModalDepth ?? 1) : 0
   const nextModalState = backgroundLocation
     ? { backgroundLocation, projectSettingsModalDepth: modalDepth + 1 }
     : undefined
-  const { project, loading, refresh } = useProject(id!)
+  const { project, loading, refresh } = useProject(id!, {
+    initialProject: modal ? modalState?.projectSnapshot : undefined,
+    // This page owns the editable settings hook below. Asking useProject for
+    // its read-only overlay as well creates a second settings request.
+    includeSettings: false,
+  })
 
   // Workspace handoff (`?return=…`) — only accept same-origin relative paths.
   // The Editor breadcrumb is only for this handoff (settings opened from /editor).

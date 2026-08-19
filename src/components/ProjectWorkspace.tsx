@@ -495,7 +495,15 @@ export function ProjectWorkspace() {
           : orgHomePath(ALL_ORGS_PARAM),
     )
   }, [activeOrgId, isAllOrgs, navigate])
-  const { project: loadedProject, status, refresh, patchSettings, roleLevel: serverRoleLevel, settingsFetched } = useProject(projectId!)
+  const {
+    project: loadedProject,
+    status,
+    refresh,
+    patchSettings,
+    projectSettings,
+    roleLevel: serverRoleLevel,
+    settingsFetched,
+  } = useProject(projectId!)
   // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt,
   // aiSetupSkipped) live in IDB; merge them onto the server-fetched record on
   // load and after each local patch so rename suggestions don't loop on every
@@ -4876,9 +4884,21 @@ export function ProjectWorkspace() {
         projectId,
         returnTo: workspaceReturnPath(projectId, activeFileId),
       }),
-      { state: { backgroundLocation: location, projectSettingsModalDepth: 1 } },
+      {
+        state: {
+          backgroundLocation: location,
+          projectSettingsModalDepth: 1,
+          projectSnapshot: project,
+        },
+      },
     )
-  }, [projectId, activeFileId, location, navigate])
+  }, [projectId, activeFileId, location, navigate, project])
+
+  // Project Settings is a large route chunk. Warm it after the editor mounts
+  // so opening the modal never suspends behind the first module download.
+  useEffect(() => {
+    void import("./ProjectSettings")
+  }, [])
 
   const projectNavItems = useMemo(() => {
     const items = [
@@ -6006,6 +6026,7 @@ export function ProjectWorkspace() {
         switchLens(l)
         if (l === "audio") setDockTab("voices")
       }}
+      onAgentSelect={openAgentTab}
       timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
       checkOpen={checkOpen}
       checkRunning={checkRunning}
@@ -6510,14 +6531,18 @@ export function ProjectWorkspace() {
           // button; breadcrumb + history arrows + sidebar own navigation.
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<LoadingPanel label={t("workspace.loadingComments")} />}>
-              <CommentsPageContent />
+              <CommentsPageContent project={project} />
             </Suspense>
           </div>
         ) : centerSurface === "terminology" ? (
           // FRO-254: Terminology page inside the shell.
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<LoadingPanel label={t("terminology.loadingLabel")} />}>
-              <GlossaryEditorContent files={projectFiles} />
+              <GlossaryEditorContent
+                files={projectFiles}
+                project={project}
+                patchSettings={patchSettings}
+              />
             </Suspense>
           </div>
         ) : centerSurface === "memory" ? (
@@ -6525,7 +6550,11 @@ export function ProjectWorkspace() {
           // page reads :section from the URL itself.
           <div className="h-full overflow-y-auto">
             <Suspense fallback={<LoadingPanel label={t("workspace.loadingMemory")} />}>
-              <LivingMemoryPageContent />
+              <LivingMemoryPageContent
+                project={project}
+                refreshProject={refresh}
+                projectSettings={projectSettings}
+              />
             </Suspense>
           </div>
         ) : centerSurface === "agent" ? (
@@ -6737,7 +6766,6 @@ export function ProjectWorkspace() {
             // above the timeline — don't render it twice.
             chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
             chapterNavPortalTarget={editorHeaderNavTarget}
-            onAgentToggle={openAgentTab}
           />
               </div>
               </div>

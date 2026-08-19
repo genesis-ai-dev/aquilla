@@ -894,7 +894,6 @@ export const my: Catalog = {
   "editor.outbox.backlogTooltip": "ဆာဗာသို့ ပြောင်းလဲမှုများကို ထပ်တူပြု၍ မရပါ။ တည်းဖြတ်ချက်များ ဒေသတွင်း သိမ်းဆည်းထားဆဲ ဖြစ်သည်။ ပြန်စစ်ရန် နှိပ်ပါ။",
   "editor.outbox.queuedTooltip": {"forms":{"other":"ပြောင်းလဲမှု {count} ခု ဆာဗာထပ်တူပြုရန် တန်းစီနေသည်။ ပြန်စစ်ရန် နှိပ်ပါ။"},"countVar":"count"},
   "editor.outbox.syncedTooltip": "ပြောင်းလဲမှုအားလုံး ထပ်တူပြုပြီးပါပြီ။ ဆိုင်းငံ့ထားသော ပြောင်းလဲမှုများကို ပြန်စစ်ရန် နှိပ်ပါ။",
-  "comments.backToProject": "ပရောဂျက်သို့ ပြန်သွားရန်",
   "comments.sort.unresolvedFirst": "မဖြေရှင်းရသေးသည်များ ဦးစွာ",
   "comments.sort.recentActivity": "နောက်ဆုံးလှုပ်ရှားမှု ဦးစွာ",
   "comments.sort.newest": "အသစ်ဆုံး ဦးစွာ",

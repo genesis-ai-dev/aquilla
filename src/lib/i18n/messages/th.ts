@@ -893,7 +893,6 @@ export const th: Catalog = {
   "editor.outbox.backlogTooltip": "ไม่สามารถซิงค์การเปลี่ยนแปลงไปยังเซิร์ฟเวอร์ได้ การแก้ไขยังคงถูกบันทึกไว้ในเครื่อง คลิกเพื่อตรวจสอบ.",
   "editor.outbox.queuedTooltip": {"forms":{"other":"การเปลี่ยนแปลง {count} รายการอยู่ในคิวรอซิงค์กับเซิร์ฟเวอร์ คลิกเพื่อตรวจสอบ."},"countVar":"count"},
   "editor.outbox.syncedTooltip": "การเปลี่ยนแปลงทั้งหมดซิงค์แล้ว คลิกเพื่อตรวจสอบการเปลี่ยนแปลงที่ค้างอยู่.",
-  "comments.backToProject": "กลับไปที่โปรเจกต์",
   "comments.sort.unresolvedFirst": "ที่ยังไม่ปิดประเด็นก่อน",
   "comments.sort.recentActivity": "มีความเคลื่อนไหวล่าสุด",
   "comments.sort.newest": "ใหม่สุดก่อน",

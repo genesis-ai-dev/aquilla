@@ -93,6 +93,7 @@ describe("CommentsPage chrome", () => {
 
     expect(screen.getByRole("heading", { name: /Comments/i })).toBeInTheDocument()
     expect(screen.getByText(/No comments yet/i)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Back to project/i })).not.toBeInTheDocument()
   })
 
   it("expands Filters to show Sort combobox and collapses to hide it", () => {

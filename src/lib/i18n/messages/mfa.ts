@@ -891,7 +891,6 @@ export const mfa: Catalog = {
   "editor.outbox.backlogTooltip": "Tidak dapat menyegerakkan perubahan ke pelayan. Suntingan masih disimpan secara setempat. Klik untuk semak.",
   "editor.outbox.queuedTooltip": {"forms":{"other":"{count} perubahan menunggu segerak ke pelayan. Klik untuk semak."},"countVar":"count"},
   "editor.outbox.syncedTooltip": "Semua perubahan disegerak. Klik untuk semak perubahan tertunggak.",
-  "comments.backToProject": "Kembali ke projek",
   "comments.sort.unresolvedFirst": "Belum selesai dahulu",
   "comments.sort.recentActivity": "Aktiviti terkini dahulu",
   "comments.sort.newest": "Terbaharu dahulu",

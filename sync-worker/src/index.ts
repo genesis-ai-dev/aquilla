@@ -16,6 +16,10 @@ import { notifyProjectDo } from "./archive-broadcast"
 import { handleCorsPreflight, withCors } from "./cors"
 import { handleProjectArchiveRequest } from "./project-archive"
 import { handleMemberRemovedRequest, notifyProjectDoMemberRemoved } from "./member-removed"
+import {
+  handleMemberRoleChangedRequest,
+  notifyProjectDoMemberRoleChanged,
+} from "./member-role-changed"
 import { handleProjectSettingsChangedRequest } from "./project-settings-notify"
 import { handleContextualActivityRequest } from "./contextual-activity-notify"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
@@ -270,6 +274,14 @@ const worker = {
       notifyProjectDoMemberRemoved,
     )
     if (memberRemovedResponse) return memberRemovedResponse
+    // [Pen test 2026-08-17] sync a live connection's cached role after a
+    // direct project-member role change, without forcing a reconnect.
+    const memberRoleChangedResponse = await handleMemberRoleChangedRequest(
+      request,
+      env,
+      notifyProjectDoMemberRoleChanged,
+    )
+    if (memberRoleChangedResponse) return memberRoleChangedResponse
     const projectSettingsChangedResponse = await handleProjectSettingsChangedRequest(request, env)
     if (projectSettingsChangedResponse) return projectSettingsChangedResponse
     const contextualActivityResponse = await handleContextualActivityRequest(request, env)

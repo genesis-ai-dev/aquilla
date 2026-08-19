@@ -259,6 +259,43 @@ export class ProjectSync extends DurableObject<DOEnv> {
       return Response.json({ ok: true, ejected })
     }
 
+    // [Pen test 2026-08-17] role-change hook, companion to /__member-removed
+    // above. A live connection's role is captured once at /connect (see
+    // ConnectionState) and gates focus.claim/focus.renew — without this, a
+    // demotion (e.g. contributor -> viewer) doesn't take effect until the
+    // socket reconnects, letting an already-connected demoted user keep
+    // holding/renewing the edit lock. Updates the cached role in place;
+    // deliberately does NOT close the socket (an ordinary role change,
+    // including promotions, isn't itself a reason to force a reconnect).
+    if (request.method === "POST" && url.pathname === "/__member-role-changed") {
+      const auth = request.headers.get("Authorization") ?? ""
+      const expected = this.env.SYNC_SECRET_KEY
+        ? `Bearer ${this.env.SYNC_SECRET_KEY}`
+        : null
+      if (!expected || !secureCompare(auth, expected)) {
+        return new Response("unauthorized", { status: 401 })
+      }
+      let body: { project?: string; userId?: number; username?: string; role?: number }
+      try {
+        body = (await request.json()) as typeof body
+      } catch {
+        return new Response("bad request", { status: 400 })
+      }
+      if (typeof body.userId !== "number" || typeof body.role !== "number") {
+        return new Response("userId (number) and role (number) required", { status: 400 })
+      }
+      let updated = 0
+      for (const conn of this.connections.values()) {
+        const matches =
+          conn.numericUserId === body.userId ||
+          (body.username != null && conn.userId === body.username)
+        if (!matches) continue
+        conn.role = body.role
+        updated++
+      }
+      return Response.json({ ok: true, updated })
+    }
+
     if (url.pathname !== "/connect") {
       return new Response("not found", { status: 404 })
     }

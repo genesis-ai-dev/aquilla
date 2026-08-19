@@ -1,5 +1,5 @@
 import JSZip from "jszip"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import {
   parseIdml,
   renderIdmlUnitHtml,
@@ -8,10 +8,17 @@ import {
 } from "@aquilla/idml-roundtrip"
 import {
   IDML_COMPLETION_INSTRUCTION,
+  IDML_STRUCTURE_REPAIR_INSTRUCTION,
   IdmlCompletionError,
+  buildIdmlStructureRepairMessages,
   idmlCompletionPromptSource,
   idmlCompletionSystemAddendum,
   normalizeProtectedCompletion,
+  normalizeProtectedCompletionWithRepair,
+  parseIdmlSlotRepairReply,
+  stitchIdmlSlotTexts,
+  tryDeterministicIdmlSlotStitch,
+  unwrapIdmlCompletionOutput,
 } from "./completion"
 import {
   ProtectedIdmlHtmlError,
@@ -134,6 +141,122 @@ describe("IDML AI completion contract", () => {
     }
   })
 
+  it("unwraps Markdown fences before validating protected HTML", async () => {
+    const unit = await parsedUnit()
+    const cell = cellFor(unit)
+    const targetHtml = renderIdmlUnitHtml({
+      ...unit,
+      slots: unit.slots.map((slot, index) => ({
+        ...slot,
+        text: index === 0 ? "Bon" : "JOUR",
+      })),
+    })
+
+    expect(unwrapIdmlCompletionOutput(`\`\`\`html\n${targetHtml}\n\`\`\``)).toBe(targetHtml)
+    expect(normalizeProtectedCompletion(cell, `\`\`\`html\n${targetHtml}\n\`\`\``)).toEqual({
+      value: "Bon\nJOUR",
+      valueHtml: targetHtml,
+    })
+  })
+
+  it("stitches a single-slot plain draft into the source shell without a second model call", async () => {
+    const unit = await parsedSingleSlotUnit()
+    const cell = cellFor(unit)
+
+    const stitched = tryDeterministicIdmlSlotStitch(cell, "Traduction en une seule cellule.")
+    expect(stitched?.value).toBe("Traduction en une seule cellule.\n")
+    expect(stitched?.valueHtml).toContain('data-idml-slot="0"')
+    expect(stitched?.valueHtml).toContain("Traduction en une seule cellule.")
+
+    const repair = vi.fn(async () => {
+      throw new Error("repair must not run for single-slot plain text")
+    })
+    await expect(normalizeProtectedCompletionWithRepair(
+      cell,
+      "Traduction en une seule cellule.",
+      repair,
+    )).resolves.toMatchObject({ value: "Traduction en une seule cellule.\n" })
+    expect(repair).not.toHaveBeenCalled()
+  })
+
+  it("repairs a multi-slot broken draft via slot-JSON, then stitches into the source shell", async () => {
+    const unit = await parsedUnit()
+    const cell = cellFor(unit)
+    const repair = vi.fn(async (messages: readonly { role: string; content: string }[]) => {
+      expect(messages[0]?.content).toBe(IDML_STRUCTURE_REPAIR_INSTRUCTION)
+      expect(messages[1]?.content).toContain(unit.sourceHtml)
+      expect(messages[1]?.content).toContain("EDITABLE SLOTS")
+      expect(messages[1]?.content).toContain("plain broken draft")
+      return JSON.stringify({ slots: [{ i: 0, t: "Bon" }, { i: 1, t: "JOUR" }] })
+    })
+
+    const result = await normalizeProtectedCompletionWithRepair(
+      cell,
+      "plain broken draft",
+      repair,
+    )
+    expect(result.value).toBe("Bon\nJOUR")
+    expect(result.valueHtml).toContain('data-idml-slot="0"')
+    expect(result.valueHtml).toContain("Bon")
+    expect(result.valueHtml).toContain("JOUR")
+    expect(repair).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not call repair when the first draft already validates", async () => {
+    const unit = await parsedUnit()
+    const cell = cellFor(unit)
+    const targetHtml = renderIdmlUnitHtml({
+      ...unit,
+      slots: unit.slots.map((slot) => ({ ...slot, text: "ok" })),
+    })
+    const repair = vi.fn(async () => {
+      throw new Error("repair must not run")
+    })
+
+    await expect(normalizeProtectedCompletionWithRepair(cell, targetHtml, repair))
+      .resolves.toMatchObject({ valueHtml: targetHtml })
+    expect(repair).not.toHaveBeenCalled()
+  })
+
+  it("surfaces the original failure when the repair pass is still invalid", async () => {
+    const unit = await parsedUnit()
+    const cell = cellFor(unit)
+    const repair = vi.fn(async () => "still plain text")
+
+    await expect(normalizeProtectedCompletionWithRepair(
+      cell,
+      "plain broken draft",
+      repair,
+    )).rejects.toThrow(/repair pass also failed/i)
+    expect(repair).toHaveBeenCalledTimes(1)
+  })
+
+  it("parses slot-repair JSON and stitches it into the source shell", async () => {
+    const unit = await parsedUnit()
+    const cell = cellFor(unit)
+    const slots = parseIdmlSlotRepairReply(
+      '```json\n{"slots":[{"i":0,"t":"Bon"},{"i":1,"t":"JOUR"}]}\n```',
+      unit.metadata.editableSlotIndexes,
+    )
+    expect([...slots.entries()]).toEqual([[0, "Bon"], [1, "JOUR"]])
+    expect(stitchIdmlSlotTexts(cell, slots).value).toBe("Bon\nJOUR")
+  })
+
+  it("builds a repair prompt that includes source, slots, draft, and diagnostics", () => {
+    const messages = buildIdmlStructureRepairMessages(
+      '<p data-idml-version="2">src</p>',
+      "broken",
+      [{ code: "ANCHOR_INVALID", severity: "error", message: "IDML HTML is malformed" }],
+      new Map([[0, "Hello"]]),
+    )
+    expect(messages[1]?.content).toContain("SOURCE")
+    expect(messages[1]?.content).toContain('<p data-idml-version="2">src</p>')
+    expect(messages[1]?.content).toContain("EDITABLE SLOTS")
+    expect(messages[1]?.content).toContain("0: \"Hello\"")
+    expect(messages[1]?.content).toContain("broken")
+    expect(messages[1]?.content).toContain("ANCHOR_INVALID")
+  })
+
   it("leaves ordinary completion output byte-for-byte unchanged", () => {
     const cell = { id: "plain", originalHtml: "<p>source</p>", metadata: {} }
     expect(normalizeProtectedCompletion(cell, "ordinary result")).toEqual({
@@ -214,6 +337,21 @@ function cellFor(unit: IdmlTranslationUnit) {
 }
 
 async function parsedUnit(): Promise<IdmlTranslationUnit> {
+  return parseFixtureUnit([
+    '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>Hello</Content></CharacterStyleRange>',
+    "<Br/>",
+    '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Bold"><Content>WORLD</Content></CharacterStyleRange>',
+  ])
+}
+
+async function parsedSingleSlotUnit(): Promise<IdmlTranslationUnit> {
+  return parseFixtureUnit([
+    '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>Hello world</Content></CharacterStyleRange>',
+    "<Br/>",
+  ])
+}
+
+async function parseFixtureUnit(inner: readonly string[]): Promise<IdmlTranslationUnit> {
   const storyPath = "Stories/Story_u100.xml"
   const zip = new JSZip()
   zip.file("mimetype", IDML_MIME, { compression: "STORE", createFolders: false })
@@ -227,9 +365,7 @@ async function parsedUnit(): Promise<IdmlTranslationUnit> {
     [
       `<?xml version="1.0"?><idPkg:Story ${IDPKG}><Story Self="u100">`,
       '<ParagraphStyleRange Self="mixed" AppliedParagraphStyle="ParagraphStyle/Body">',
-      '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>Hello</Content></CharacterStyleRange>',
-      "<Br/>",
-      '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Bold"><Content>WORLD</Content></CharacterStyleRange>',
+      ...inner,
       "</ParagraphStyleRange></Story></idPkg:Story>",
     ].join(""),
     { compression: "DEFLATE", createFolders: false },
@@ -240,34 +376,5 @@ async function parsedUnit(): Promise<IdmlTranslationUnit> {
   }))
   const unit = parsed.units[0]
   if (!unit) throw new Error("Missing IDML completion fixture unit")
-  return unit
-}
-
-async function parsedSingleSlotUnit(): Promise<IdmlTranslationUnit> {
-  const storyPath = "Stories/Story_u363.xml"
-  const zip = new JSZip()
-  zip.file("mimetype", IDML_MIME, { compression: "STORE", createFolders: false })
-  zip.file(
-    "designmap.xml",
-    `<?xml version="1.0"?><Document ${IDPKG}><idPkg:Story src="${storyPath}"/></Document>`,
-    { compression: "DEFLATE", createFolders: false },
-  )
-  zip.file(
-    storyPath,
-    [
-      `<?xml version="1.0"?><idPkg:Story ${IDPKG}><Story Self="u363">`,
-      '<ParagraphStyleRange AppliedParagraphStyle="ParagraphStyle/Body">',
-      '<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Plain"><Content>Hello world</Content></CharacterStyleRange>',
-      "<Br/>",
-      "</ParagraphStyleRange></Story></idPkg:Story>",
-    ].join(""),
-    { compression: "DEFLATE", createFolders: false },
-  )
-  const parsed = await parseIdml(await zip.generateAsync({
-    type: "arraybuffer",
-    compression: "DEFLATE",
-  }))
-  const unit = parsed.units[0]
-  if (!unit) throw new Error("Missing one-slot IDML completion fixture unit")
   return unit
 }

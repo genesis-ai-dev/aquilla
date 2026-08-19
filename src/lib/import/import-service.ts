@@ -24,7 +24,9 @@ export interface ParsedImportResult {
   rawSourceFormat?: SourceArtifactFormat
   rawBytes?: ArrayBuffer
   bookCode?: string
-  corpusMarker?: "OT" | "NT"
+  /** Sidebar folder for the imported file — "OT"/"NT" for scripture, or a named
+   *  collection such as "Reach 4 Life" for a Biblica edition. */
+  corpusMarker?: string
   originalName?: string
   importRecipe?: DeclarativeImportRecipe
   importClassification?: Omit<AiImportClassification, "recipe"> & { recipe: DeclarativeImportRecipe }

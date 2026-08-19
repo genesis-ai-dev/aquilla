@@ -148,7 +148,9 @@ export async function denoiseMono48k(samples: Float32Array): Promise<DenoiseResu
       if (e.data.size > 0) chunks.push(e.data)
     }
 
-    const durationMs = (samples.length / TARGET_RATE) * 1000
+    // AQU-927: ms values land in BIGINT columns — round at the source. A raw
+    // float here (e.g. 2403.5) makes Postgres reject the whole event batch.
+    const durationMs = Math.round((samples.length / TARGET_RATE) * 1000)
     const blob = await new Promise<Blob>((resolve, reject) => {
       let flushTimer: ReturnType<typeof setTimeout> | null = null
       rec.onstop = () => {

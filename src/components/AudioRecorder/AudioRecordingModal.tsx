@@ -26,6 +26,7 @@ import { useCountdown } from "./useCountdown"
 import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
 import { TakesStrip, nextTakeLabel } from "./TakesStrip"
+import { RecordingVideoStage } from "./RecordingVideoStage"
 import { useRecordingAutoAdvance, setRecordingAutoAdvance } from "@/lib/store/recording-auto-advance-pref"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import { audioIdSeededWith, buildAudioId, uploadCellAudio, deleteCellAudio, fetchCellAudio, parseFrontierAudioUrl } from "@/lib/audio/upload"
@@ -44,6 +45,12 @@ interface Props {
   cells: CellData[]
   activeCellId: string | null
   username: string
+  // AQU-906: the file's linked core video, so the actor can watch the scene
+  // they're dubbing. Null when nothing is linked, or when the file is in
+  // audio-first timing — there the axis is the re-flowed programme, so cell
+  // times no longer address the video's clock (same reason the timeline hides
+  // it: TimelineEditor `coreMediaUrl && !audioFirst`).
+  videoUrl?: string | null
   onActiveCellChange: (cellId: string) => void
   onClose: () => void
 }
@@ -51,7 +58,7 @@ interface Props {
 type Phase = "idle" | "counting" | "recording" | "preview" | "uploading" | "saved" | "error"
 
 export function AudioRecordingModal({
-  open, project, cells, activeCellId, username,
+  open, project, cells, activeCellId, username, videoUrl = null,
   onActiveCellChange, onClose,
 }: Props) {
   const t = useT()
@@ -633,6 +640,18 @@ export function AudioRecordingModal({
 
         {/* Stage — changes with phase */}
         <div className="relative flex min-h-[200px] flex-col items-center justify-center gap-4 p-6">
+          {/* AQU-906: the scene monitor sits ABOVE the phase stage so the
+              frame is on screen before Start is pressed and stays put through
+              the take — the transport changes underneath it, the video
+              doesn't remount and re-buffer at the moment recording begins. */}
+          {videoUrl && (
+            <RecordingVideoStage
+              src={videoUrl}
+              startSec={activeCell.startTime ?? null}
+              endSec={activeCell.endTime ?? null}
+              recording={displayPhase === "recording"}
+            />
+          )}
           {displayPhase === "counting" && countdown.count !== null && (
             <div className="flex flex-col items-center gap-3">
               <div

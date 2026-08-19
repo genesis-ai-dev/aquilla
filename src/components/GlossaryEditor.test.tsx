@@ -23,14 +23,15 @@ const patchSettings = vi.fn().mockResolvedValue({ kind: "ok" })
 let mockProject: ProjectRecord
 let mockProjectLoading = false
 vi.mock("@/hooks/useProject", () => ({
-  useProject: () => ({
+  useProject: vi.fn(() => ({
     project: mockProject,
     loading: mockProjectLoading,
     patchSettings,
-  }),
+  })),
 }))
 
 import { GlossaryEditor } from "./GlossaryEditor"
+import { useProject } from "@/hooks/useProject"
 
 function concept(p: Partial<Concept>): Concept {
   return {
@@ -54,10 +55,10 @@ beforeEach(() => {
   } as unknown as ProjectRecord
 })
 
-function renderEditor() {
+function renderEditor(props: React.ComponentProps<typeof GlossaryEditor> = {}) {
   return render(
     <MemoryRouter>
-      <GlossaryEditor />
+      <GlossaryEditor {...props} />
     </MemoryRouter>,
   )
 }
@@ -78,6 +79,23 @@ describe("GlossaryEditor", () => {
     renderEditor()
     expect(screen.getByText("grace")).toBeInTheDocument()
     expect(screen.getByText("favor")).toBeInTheDocument()
+  })
+
+  it("renders the workspace-owned glossary immediately without a duplicate project resolve", () => {
+    mockProjectLoading = true
+    const workspaceProject = {
+      ...mockProject,
+      terminology: [concept({ sourceTerm: "workspace-term" })],
+    } as ProjectRecord
+
+    renderEditor({ project: workspaceProject, patchSettings })
+
+    expect(screen.getByText("workspace-term")).toBeInTheDocument()
+    expect(screen.queryByRole("status", { name: "Loading glossary" })).not.toBeInTheDocument()
+    expect(vi.mocked(useProject)).toHaveBeenLastCalledWith("p1", expect.objectContaining({
+      enabled: false,
+      includeSettings: false,
+    }))
   })
 
   it("hides archived concepts until 'Show archived' is toggled", () => {

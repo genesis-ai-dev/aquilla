@@ -43,6 +43,7 @@ import { knowledgeBase } from "../namespaces/knowledgeBase"
 import { settings } from "../namespaces/settings"
 import { agent } from "../namespaces/agent"
 import { workspace } from "../namespaces/workspace"
+import { segmentation } from "../namespaces/segmentation"
 import type { MessageValue } from "../plurals"
 
 export const en = {
@@ -70,6 +71,7 @@ export const en = {
   ...settings.keys,
   ...agent.keys,
   ...workspace.keys,
+  ...segmentation.keys,
 } as const
 
 export type MessageKey = keyof typeof en

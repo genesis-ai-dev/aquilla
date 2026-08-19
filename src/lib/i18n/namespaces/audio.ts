@@ -86,6 +86,12 @@ export const audio = defineNamespace({
     "audio.recordingModal.autoAdvanceEnableLabel": "Move to the next line after saving",
     "audio.recordingModal.muteBeepTooltip": "Mute countdown beep",
     "audio.recordingModal.unmuteBeepTooltip": "Enable countdown beep",
+    "audio.recordingModal.muteVideoTooltip": "Mute the scene video",
+    "audio.recordingModal.unmuteVideoTooltip": "Unmute the scene video",
+    "audio.recordingModal.videoMutedBadge": "Muted",
+    "audio.recordingModal.videoMutedWhileRecording":
+      "The scene plays muted while recording so it can't bleed into your take.",
+    "audio.recordingModal.videoScenePreview": "Scene for this line — plays while you record.",
     "audio.recordingModal.closeTooltip": "Close (Esc)",
     "audio.recordingModal.emptySource": "empty",
     "audio.recordingModal.readAloudLabel": "Read aloud",
@@ -127,6 +133,9 @@ export const audio = defineNamespace({
     "audio.takesStrip.renameTooltip": "Rename take",
     "audio.takesStrip.unknownLengthTooltip": "Length unknown — re-record or re-upload to fix",
     "audio.takesStrip.pendingSyncTooltip": "Saving — kept safe on this device until it syncs",
+    "audio.takesStrip.syncFailedTooltip":
+      "Couldn't save to the server — this take is still on this device. Retry to send it again.",
+    "audio.takesStrip.syncFailedRetry": "Not saved — retry",
     "audio.takesStrip.playTakeTooltip": "Play take",
     "audio.takesStrip.removeNoiseTooltip": "Remove noise (adds a cleaned take)",
     "audio.takesStrip.revertTooltip": "Revert to the original recording",
@@ -680,6 +689,32 @@ export const audio = defineNamespace({
           "Tooltip and accessible name for the same header button, shown when the " +
           "beep is currently off (pressing it turns the beep back on).",
       },
+      "audio.recordingModal.muteVideoTooltip": {
+        description:
+          "Tooltip and accessible name for the button that mutes the linked scene " +
+          "video shown inside the recording dialog, used while its sound is on.",
+      },
+      "audio.recordingModal.unmuteVideoTooltip": {
+        description:
+          "Tooltip and accessible name for the same button while the scene video is " +
+          "already muted (pressing it turns the video's sound back on).",
+      },
+      "audio.recordingModal.videoMutedBadge": {
+        description:
+          "Very short badge drawn over the top-right corner of the scene video while " +
+          "its sound is off. Keep it to one word if the language allows.",
+      },
+      "audio.recordingModal.videoMutedWhileRecording": {
+        description:
+          "Explains why the scene video's sound is forced off during a take: an " +
+          "audible video would be picked up by the microphone ('bleed into your " +
+          "take' is recording-studio idiom for exactly that).",
+      },
+      "audio.recordingModal.videoScenePreview": {
+        description:
+          "Caption under the scene video between takes, naming what the video is " +
+          "(the footage for the line being dubbed) and when it will play.",
+      },
       "audio.recordingModal.closeTooltip": {
         description:
           "Tooltip for the dialog's close button, including its keyboard shortcut " +
@@ -903,6 +938,19 @@ export const audio = defineNamespace({
           "Hover title on the cloud badge of a take that has been saved on this " +
           "device but not yet uploaded to the server. Reassurance: nothing is lost " +
           "while it waits.",
+      },
+      "audio.takesStrip.syncFailedTooltip": {
+        description:
+          "Hover title on the red badge of a take whose save to the server FAILED " +
+          "and will not be retried automatically. Distinct from the 'saving' badge: " +
+          "that one is still on its way, this one is stuck and needs the user to " +
+          "retry. Reassures that the recording itself is not lost.",
+      },
+      "audio.takesStrip.syncFailedRetry": {
+        description:
+          "Label on the small red button shown on a take that failed to save to the " +
+          "server; pressing it queues the save again. Very short — it sits inline on " +
+          "a compact take row.",
       },
       "audio.takesStrip.playTakeTooltip": {
         description:

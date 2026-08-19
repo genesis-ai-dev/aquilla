@@ -34,3 +34,24 @@ export async function decodeToMono48k(bytes: Uint8Array): Promise<Float32Array> 
     void ctx.close()
   }
 }
+
+/**
+ * Join mono PCM clips (all at the same rate) back-to-back — no silence, no
+ * timeline.
+ *
+ * Deliberately NOT what the character export does any more: there, gluing
+ * takes together destroyed the timing that made them useful. Here gapless IS
+ * the point — the caller is assembling a continuous voice sample for cloning,
+ * and silence between ranges would be material the model has to ignore.
+ */
+export function concatPcm(clips: Float32Array[]): Float32Array {
+  let total = 0
+  for (const c of clips) total += c.length
+  const out = new Float32Array(total)
+  let offset = 0
+  for (const c of clips) {
+    out.set(c, offset)
+    offset += c.length
+  }
+  return out
+}

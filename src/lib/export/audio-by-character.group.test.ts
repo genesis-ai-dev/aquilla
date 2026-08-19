@@ -40,8 +40,8 @@ describe("groupAudioByCharacter", () => {
 describe("previewAudioByCharacter", () => {
   it("reports per-character clip counts and (when known) total duration ms", () => {
     const cells = [
-      cell({ id: "c1", selectedAudioId: "a1", attachments: { a1: { url: "frontier-audio://a1.webm", type: "audio/webm", durationMs: 1000 } } }),
-      cell({ id: "c3", selectedAudioId: "a3", attachments: { a3: { url: "frontier-audio://a3.webm", type: "audio/webm", durationMs: 1500 } } }),
+      cell({ id: "c1", startTime: 1, endTime: 2, selectedAudioId: "a1", attachments: { a1: { url: "frontier-audio://a1.webm", type: "audio/webm", durationMs: 1000 } } }),
+      cell({ id: "c3", startTime: 5, endTime: 6.5, selectedAudioId: "a3", attachments: { a3: { url: "frontier-audio://a3.webm", type: "audio/webm", durationMs: 1500 } } }),
     ]
     const preview = previewAudioByCharacter(cells, SETTINGS)
     const mary = preview.find((p) => p.key === "v-mary")!
@@ -51,9 +51,9 @@ describe("previewAudioByCharacter", () => {
 
   it("returns null totalDurationMs when any clip's attachment lacks durationMs", () => {
     const cells = [
-      cell({ id: "c1", selectedAudioId: "a1", attachments: { a1: { url: "frontier-audio://a1.webm", type: "audio/webm", durationMs: 1000 } } }),
+      cell({ id: "c1", startTime: 1, endTime: 2, selectedAudioId: "a1", attachments: { a1: { url: "frontier-audio://a1.webm", type: "audio/webm", durationMs: 1000 } } }),
       // c3 attachment has no durationMs → total becomes unknown
-      cell({ id: "c3", selectedAudioId: "a3", attachments: { a3: { url: "frontier-audio://a3.webm", type: "audio/webm" } } }),
+      cell({ id: "c3", startTime: 5, endTime: 6, selectedAudioId: "a3", attachments: { a3: { url: "frontier-audio://a3.webm", type: "audio/webm" } } }),
     ]
     const preview = previewAudioByCharacter(cells, SETTINGS)
     const mary = preview.find((p) => p.key === "v-mary")!
@@ -71,8 +71,17 @@ describe("previewAudioByCharacter", () => {
 // into one default-voice group.
 
 describe("grouping by the resolved character name", () => {
-  const withAudio = (id: string) =>
-    cell({ id, selectedAudioId: `a-${id}`, attachments: { [`a-${id}`]: { url: `frontier-audio://a-${id}.webm`, type: "audio/webm" } } })
+  let at = 0
+  const withAudio = (id: string) => {
+    at += 10
+    return cell({
+      id,
+      startTime: at,
+      endTime: at + 2,
+      selectedAudioId: `a-${id}`,
+      attachments: { [`a-${id}`]: { url: `frontier-audio://a-${id}.webm`, type: "audio/webm" } },
+    })
+  }
 
   it("groups by NAME when a resolver supplies one, across different voices", () => {
     // Two cells the voice map disagrees about, one character. The name wins.
@@ -112,5 +121,68 @@ describe("grouping by the resolved character name", () => {
     const [p] = previewAudioByCharacter([withAudio("c1")], SETTINGS, () => "SIMON")
     expect(p.name).toBe("SIMON")
     expect(p.clipCount).toBe(1)
+  })
+})
+
+// ── Who is MISSING (the codex-editor lesson, 2026-08-18) ──────────────────
+//
+// The preview used to describe only what would be written, so a character with
+// no takes at all simply was not in the list — you found out by opening the zip
+// and noticing someone absent. codex-editor's export preview scans every
+// labelled line whether or not it has audio, precisely so an unrecorded
+// character is visible BEFORE the export.
+
+describe("the preview names characters with nothing recorded", () => {
+  const timed = (id: string, startTime: number, over: Partial<CellData> = {}) =>
+    cell({ id, startTime, endTime: startTime + 2, ...over })
+  const withAudio = (id: string, startTime: number) =>
+    timed(id, startTime, {
+      selectedAudioId: `a-${id}`,
+      attachments: { [`a-${id}`]: { url: `frontier-audio://a-${id}.webm`, type: "audio/webm", durationMs: 1000 } },
+    })
+
+  it("lists a character whose every line is still unrecorded", () => {
+    const rows = previewAudioByCharacter(
+      [withAudio("c1", 10), timed("c2", 20), timed("c3", 30)],
+      SETTINGS,
+      (c) => (c.id === "c1" ? "JESUS" : "THOMAS"),
+    )
+    const thomas = rows.find((r) => r.name === "THOMAS")!
+    expect(thomas.clipCount).toBe(0)
+    expect(thomas.missingCount).toBe(2)
+  })
+
+  it("counts a recorded line that cannot be placed separately from a missing one", () => {
+    // No start time: there IS a take, it just has nowhere to go.
+    const rows = previewAudioByCharacter(
+      [
+        cell({
+          id: "c1",
+          selectedAudioId: "a1",
+          attachments: { a1: { url: "frontier-audio://a1.webm", type: "audio/webm" } },
+        }),
+        timed("c2", 20),
+      ],
+      SETTINGS,
+      () => "JESUS",
+    )
+    expect(rows[0].untimedCount).toBe(1)
+    expect(rows[0].missingCount).toBe(1)
+    expect(rows[0].clipCount).toBe(0)
+  })
+
+  it("counts a take shared by several lines ONCE", () => {
+    // A combined "voice together" clip is attached to every cell it covers.
+    const shared = { url: "frontier-audio://combined.wav", type: "audio/wav", durationMs: 4000 }
+    const rows = previewAudioByCharacter(
+      [
+        timed("c1", 10, { selectedAudioId: "combined", attachments: { combined: shared } }),
+        timed("c2", 12, { selectedAudioId: "combined", attachments: { combined: shared } }),
+      ],
+      SETTINGS,
+      () => "CROWD",
+    )
+    expect(rows[0].clipCount).toBe(1)
+    expect(rows[0].totalDurationMs).toBe(4000)
   })
 })

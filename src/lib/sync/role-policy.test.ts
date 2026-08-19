@@ -22,7 +22,32 @@ describe("role-policy (client mirror)", () => {
     // 403 rather than a hole, but it defeats the guard — so pin both sides.
     expect(requiredRoleFor("file.timing.set")).toBe(ROLE.MAINTAINER)
     expect(requiredRoleFor("file.track.set")).toBe(ROLE.MAINTAINER)
-    expect(requiredRoleFor("file.video.set")).toBe(ROLE.CONTRIBUTOR)
+  })
+
+  // ── The setup/handoff line (AQU-646, Sam 2026-08-18) ────────────────────
+  //
+  // The client's own process settles the film, the cue pairings and the
+  // character sheets BEFORE handing the project to translators and dubbers.
+  // Those people are contributors, and none of these three is theirs to
+  // change: each one silently rewrites what everybody else is working against.
+  it("keeps project SETUP above the contributors who receive the handoff", () => {
+    expect(requiredRoleFor("file.video.set")).toBe(ROLE.PROJECT_LEAD)
+    expect(requiredRoleFor("cell.link.set")).toBe(ROLE.PROJECT_LEAD)
+    expect(requiredRoleFor("cast.assign")).toBe(ROLE.PROJECT_LEAD)
+  })
+
+  it("refuses all three for a contributor, and allows them for a lead", () => {
+    for (const kind of ["file.video.set", "cell.link.set", "cast.assign"]) {
+      expect(canPerform(kind, ROLE.CONTRIBUTOR)).toBe(false)
+      expect(canPerform(kind, ROLE.PROJECT_LEAD)).toBe(true)
+    }
+  })
+
+  it("knows about cast.assign at all", () => {
+    // It was absent from this mirror until 2026-08-18. `canPerform` fails open
+    // on an unknown kind, so the character-import button's own permission check
+    // returned true for every role and the server's 403 was the only guard.
+    expect(requiredRoleFor("cast.assign")).not.toBeNull()
   })
 
   describe("canPerform", () => {

@@ -66,13 +66,17 @@ describe('cast.assign — is non-chain-mutating', () => {
 })
 
 describe('cast.assign — role gate', () => {
-  it('requires at most CONTRIBUTOR (400)', () => {
-    // Contributor (400) must be able to emit cast.assign.
-    expect(REQUIRED_ROLE['cast.assign']).toBeLessThanOrEqual(400)
+  // AQU-646 (Sam, 2026-08-18): raised to PROJECT_LEAD (500). Importing a
+  // character sheet rewrites the speaker on hundreds of cells at once — that is
+  // project setup, done before the handoff, not translation work. The floor had
+  // been CONTRIBUTOR even though AQU-438's own note described the actor as "a
+  // PM or project lead".
+  it('requires PROJECT_LEAD (500)', () => {
+    expect(REQUIRED_ROLE['cast.assign']).toBe(500)
   })
 
-  it('is above VIEWER (100)', () => {
-    expect(REQUIRED_ROLE['cast.assign']).toBeGreaterThan(100)
+  it('is out of reach of a contributor', () => {
+    expect(REQUIRED_ROLE['cast.assign']).toBeGreaterThan(400)
   })
 })
 

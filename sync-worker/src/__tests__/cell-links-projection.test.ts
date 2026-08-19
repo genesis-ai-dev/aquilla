@@ -69,10 +69,12 @@ const link = (over: Partial<EventPayloads['cell.link.set']> = {}): EventPayloads
 })
 
 describe('cell.link.set', () => {
-  it('is contributor-gated and non-chain-mutating', () => {
-    // Pairing a line with the cue that performs it is ordinary dubbing work,
-    // and it never moves the cell's own text chain.
-    expect(REQUIRED_ROLE['cell.link.set']).toBe(400)
+  it('is lead-gated and non-chain-mutating', () => {
+    // AQU-646 (Sam, 2026-08-18): raised from 400 to 500. The pairings are
+    // settled during setup and handed off; a contributor re-cutting one
+    // silently moves which line a recording belongs to, for everyone. It still
+    // never moves the cell's own text chain.
+    expect(REQUIRED_ROLE['cell.link.set']).toBe(500)
     expect(isChainMutatingKind('cell.link.set')).toBe(false)
   })
 

@@ -273,13 +273,19 @@ describe("TimelineEditor", () => {
         onRetimeSubtitle={() => {}}
         onRequestLinkVideo={onRequestLinkVideo}
         canLinkVideo={false}
+        // A second, usable row keeps the menu on screen — without one it now
+        // hides entirely (see "the Sources menu disappears when nothing in it
+        // is yours" below). Permission is still per ROW, not per button.
+        onRequestImportCharacters={() => {}}
+        canImportCharacters
       />,
     )
     fireEvent.click(screen.getByTestId("tl-sources-menu"))
     const gated = screen.getByRole("menuitem", { name: /Film/ })
     expect(gated).toHaveTextContent("linked")
-    // Permission is per ROW now, rather than greying out a whole button.
     expect(gated).toHaveAttribute("data-disabled")
+    // …and the row they CAN use is not greyed out beside it.
+    expect(screen.getByRole("menuitem", { name: /Characters/ })).not.toHaveAttribute("data-disabled")
   })
 
   // ── AQU-646: playhead follows the audio queue; clicks navigate playback ──
@@ -1791,6 +1797,54 @@ describe("who may use the Check tools", () => {
         {...checkProps}
         canCheck={false}
         onRequestImportCharacters={() => {}}
+        canImportCharacters
+      />,
+    )
+    expect(screen.getByTestId("tl-sources-menu")).toBeInTheDocument()
+  })
+})
+
+// ── Sources is project setup (Sam, 2026-08-18) ───────────────────────────
+//
+// The film, the audio cues and the character sheets are all attached before
+// the file is handed to translators and dubbers, and all three are gated at
+// project lead. A button that opens onto three greyed-out rows reads as "you
+// are missing something" rather than "this is not yours to change".
+
+describe("the Sources menu disappears when nothing in it is yours", () => {
+  const sourceProps = {
+    cells: [
+      { id: "s1", fileId: "f1", original: "One", translated: "", startTime: 0, endTime: 2 },
+    ] as unknown as React.ComponentProps<typeof TimelineEditor>["cells"],
+    coreMediaUrl: null,
+    fileId: "f1",
+    onRetimeSubtitle: () => {},
+    editable: true,
+    onRequestLinkVideo: () => {},
+    onRequestImportAudioVtt: () => {},
+    onRequestImportCharacters: () => {},
+  } satisfies Partial<React.ComponentProps<typeof TimelineEditor>>
+
+  it("is gone entirely for someone who can attach none of it", () => {
+    render(
+      <TimelineEditor
+        {...sourceProps}
+        canLinkVideo={false}
+        canImportAudioVtt={false}
+        canImportCharacters={false}
+      />,
+    )
+    expect(screen.queryByTestId("tl-sources-menu")).not.toBeInTheDocument()
+  })
+
+  it("stays for someone who can attach even one of them", () => {
+    // A lead missing one specific permission keeps the menu — and the badges
+    // that say what is already attached.
+    render(
+      <TimelineEditor
+        {...sourceProps}
+        canLinkVideo={false}
+        canImportAudioVtt={false}
         canImportCharacters
       />,
     )

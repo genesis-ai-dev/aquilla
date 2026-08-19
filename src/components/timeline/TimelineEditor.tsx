@@ -1030,6 +1030,25 @@ export function TimelineEditor({
     charactersWriting,
   ])
 
+  /**
+   * Is there anything in Sources this person can actually do?
+   *
+   * All three entries — the film, the audio cues, the character sheets — are
+   * project SETUP, and as of 2026-08-18 all three are gated at project lead on
+   * the server. For the translators and dubbers who receive the file that
+   * leaves a button opening onto three greyed-out rows, which reads as "you're
+   * missing something" rather than "this isn't yours". Sam: "you could also
+   * totally just hide the sources drop-down button."
+   *
+   * Hidden only when NOTHING in it is available — a lead who happens to lack
+   * one specific permission still sees the menu, and the badges that say what
+   * is already attached.
+   */
+  const sourcesUsable = useMemo(
+    () => sourceMenuItems.some((item) => !item.disabled),
+    [sourceMenuItems],
+  )
+
   const links = cueLinks ?? EMPTY_CUE_LINK_INDEX
   // The amber "no subtitle behind this" mark exists to surface a HANDFUL of
   // genuine orphans (~10 per episode) among hundreds of paired cues. Two states
@@ -2138,7 +2157,7 @@ export function TimelineEditor({
 
               Built from `items`, not three hardcoded rows: stage 8's untimed
               pocket bin is the same category and will want a fourth. */}
-          {sourceMenuItems.length > 0 && (
+          {sourceMenuItems.length > 0 && sourcesUsable && (
             <OverflowMenu
               items={sourceMenuItems}
               triggerVariant="outline"

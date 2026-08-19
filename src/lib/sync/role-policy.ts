@@ -45,9 +45,10 @@ const REQUIRED_ROLE: Record<string, number> = {
   "cell.audio.remove": ROLE.CONTRIBUTOR,
   "cell.audio.rename": ROLE.CONTRIBUTOR,
   "cell.audio.trim": ROLE.CONTRIBUTOR,
-  // Stage 4: pairing a subtitle line with the cue that performs it is ordinary
-  // dubbing work, not structure.
-  "cell.link.set": ROLE.CONTRIBUTOR,
+  // AQU-646: project lead, not contributor. The pairings are settled during
+  // setup and handed off; a contributor re-cutting one silently moves which
+  // line a recording belongs to, for everyone.
+  "cell.link.set": ROLE.PROJECT_LEAD,
   "cell.audio.measure": ROLE.CONTRIBUTOR,
 
   "file.create": ROLE.PROJECT_LEAD,
@@ -69,7 +70,14 @@ const REQUIRED_ROLE: Record<string, number> = {
   // Timeline editor (mirrors server).
   "cell.retime": ROLE.CONTRIBUTOR,
   "cell.lane.retime": ROLE.CONTRIBUTOR,
-  "file.video.set": ROLE.CONTRIBUTOR,
+  // AQU-646: the linked film is what the whole team times, records and reviews
+  // against — project setup, not an edit.
+  "file.video.set": ROLE.PROJECT_LEAD,
+  // AQU-646: MISSING FROM THIS MIRROR until 2026-08-18, which is why the
+  // character-import button appeared for everyone — `canPerform` fails open on
+  // a kind it has never heard of, so the UI's own gate always said yes and the
+  // server's 403 was the only thing stopping anyone. Both are now project lead.
+  "cast.assign": ROLE.PROJECT_LEAD,
   // Structural — keeps the clearance the setting had in Project Settings.
   "file.timing.set": ROLE.MAINTAINER,
   // Track structure IS file structure: a rename or reorder relayouts the

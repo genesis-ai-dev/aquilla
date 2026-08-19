@@ -493,9 +493,10 @@ function makeEvent(
 }
 
 describe("conditional reads + ?since= delta", () => {
-  // ETag shape is "<fileId>:<rebuiltSeq>:<maxSeq>" (audit B5); these seeds
-  // never rebuilt, so rebuiltSeq is 0.
-  it("sets ETag \"<fileId>:<rebuiltSeq>:<maxSeq>\" on full reads and includes maxServerSeq in the body", async () => {
+  // ETag shape is "<fileId>:<epoch>:<rebuiltSeq>:<maxSeq>" (audit B5 +
+  // AQU-943); these seeds have no project_seq_counters row at all, so both
+  // epoch and rebuiltSeq are 0.
+  it("sets ETag \"<fileId>:<epoch>:<rebuiltSeq>:<maxSeq>\" on full reads and includes maxServerSeq in the body", async () => {
     const { db } = await makeTestDb({
       cells: [makeCell({ cell_id: "c1", anchor_cell_id: null, event_id: "e1" })],
       // Gaps are deliberate: server_seq is an ordering key, never a count.
@@ -511,7 +512,7 @@ describe("conditional reads + ?since= delta", () => {
     )
     const res = (await handleCellsReadRequest(req, envWith(db)))!
     expect(res.status).toBe(200)
-    expect(res.headers.get("ETag")).toBe('"file-x:0:7"')
+    expect(res.headers.get("ETag")).toBe('"file-x:0:0:7"')
     expect(res.headers.get("Cache-Control")).toBe("private, no-cache")
     const body = (await res.json()) as { maxServerSeq: number }
     expect(body.maxServerSeq).toBe(7)
@@ -524,11 +525,11 @@ describe("conditional reads + ?since= delta", () => {
     })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
     const req = new Request("https://w/api/v1/projects/proj-a/files/file-x/cells", {
-      headers: { Authorization: `Bearer ${token}`, "If-None-Match": '"file-x:0:5"' },
+      headers: { Authorization: `Bearer ${token}`, "If-None-Match": '"file-x:0:0:5"' },
     })
     const res = (await handleCellsReadRequest(req, envWith(db)))!
     expect(res.status).toBe(304)
-    expect(res.headers.get("ETag")).toBe('"file-x:0:5"')
+    expect(res.headers.get("ETag")).toBe('"file-x:0:0:5"')
     expect(await res.text()).toBe("")
   })
 
@@ -545,11 +546,11 @@ describe("conditional reads + ?since= delta", () => {
       .run()
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
     const req = new Request("https://w/api/v1/projects/proj-a/files/file-x/cells", {
-      headers: { Authorization: `Bearer ${token}`, "If-None-Match": '"file-x:0:5"' },
+      headers: { Authorization: `Bearer ${token}`, "If-None-Match": '"file-x:0:0:5"' },
     })
     const res = (await handleCellsReadRequest(req, envWith(db)))!
     expect(res.status).toBe(200)
-    expect(res.headers.get("ETag")).toBe('"file-x:0:6"')
+    expect(res.headers.get("ETag")).toBe('"file-x:0:0:6"')
   })
 
   it("?since= returns only changed rows; a changed cellId with no row signals deletion", async () => {
@@ -835,5 +836,217 @@ describe("rebuild visibility (audit B5)", () => {
     expect(body.resync).toBeUndefined()
     expect(body.delta).toBe(true)
     expect(body.maxServerSeq).toBe(1)
+  })
+})
+
+// ── Project incarnation (AQU-943) ───────────────────────────────────────────
+//
+// Deleting every row for a project — including its project_seq_counters row —
+// and re-migrating it recreates the project under the SAME deterministic
+// project/file ids, but the seq allocator restarts near 1. A browser that
+// viewed the OLD incarnation still holds `?since=` cursors from the old
+// (higher) seq range, so every delta reports "nothing newer than your cursor"
+// and the client renders its pre-wipe cache forever — including a scrambled
+// mid-ingest snapshot. Neither the ETag nor the `since < rebuilt_seq` gate
+// could see the wipe: neither embedded any notion of the project's
+// incarnation.
+//
+// project_seq_counters.project_epoch is that notion. Two independent gates use
+// it (see cells-read-route.ts): an explicit `?epoch=` mismatch, and a cursor
+// that sits above everything the project can currently advertise.
+
+describe("project incarnation (AQU-943)", () => {
+  /** The live incarnation: a counter row (epoch + last_seq) and one event. */
+  async function seedIncarnation(
+    db: AquillaDb,
+    opts: { epoch: number; serverSeq: number; value: string },
+  ): Promise<void> {
+    await db.prepare("DELETE FROM events WHERE project_id = ?").bind("proj-a").run()
+    await db.prepare("DELETE FROM cells WHERE project_id = ?").bind("proj-a").run()
+    await db.prepare("DELETE FROM project_seq_counters WHERE project_id = ?").bind("proj-a").run()
+    await db
+      .prepare(
+        "INSERT INTO project_seq_counters (project_id, last_seq, rebuilt_seq, project_epoch) VALUES (?, ?, 0, ?)",
+      )
+      .bind("proj-a", opts.serverSeq, opts.epoch)
+      .run()
+    await db
+      .prepare(
+        "INSERT INTO events (id, schema_version, project_id, file_id, cell_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      )
+      .bind(`ev-${opts.epoch}`, 1, "proj-a", "file-x", "c1", "target.cell.commit", "alice", "{}", 1, 1, opts.serverSeq)
+      .run()
+    await db
+      .prepare(
+        "INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, anchor_cell_id, event_id, last_editor, last_edit_at, validated, word_count) VALUES (?, ?, ?, 'target', '', ?, NULL, ?, 'alice', 1, 0, 1)",
+      )
+      .bind("proj-a", "file-x", "c1", opts.value, `ev-${opts.epoch}`)
+      .run()
+  }
+
+  function deltaReq(token: string, since: number, epoch?: number): Request {
+    const suffix = epoch === undefined ? "" : `&epoch=${epoch}`
+    return new Request(
+      `https://w/api/v1/projects/proj-a/files/file-x/cells?since=${since}${suffix}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+  }
+
+  it("a cursor minted against a previous incarnation is told to resync, even when the new seq range is HIGHER", async () => {
+    // The epoch is the only signal that survives here: the re-migration
+    // produced MORE events than the wiped one, so the old cursor still sits
+    // inside the new seq range and the delta would look perfectly valid while
+    // silently skipping every re-created cell below it.
+    const { db } = await makeTestDb({})
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+
+    await seedIncarnation(db, { epoch: 1_000, serverSeq: 50, value: "old-incarnation" })
+    const warm = (await handleCellsReadRequest(deltaReq(token, 50, 1_000), envWith(db)))!
+    const warmBody = (await warm.json()) as { delta?: boolean; projectEpoch?: number }
+    expect(warmBody.delta).toBe(true)
+    expect(warmBody.projectEpoch).toBe(1_000)
+
+    // Wipe + re-migrate: same ids, new counter row, new (larger) history.
+    await seedIncarnation(db, { epoch: 2_000, serverSeq: 900, value: "new-incarnation" })
+
+    const after = (await handleCellsReadRequest(deltaReq(token, 50, 1_000), envWith(db)))!
+    const afterBody = (await after.json()) as {
+      resync?: boolean
+      delta?: boolean
+      projectEpoch?: number
+    }
+    expect(afterBody.resync).toBe(true)
+    expect(afterBody.delta).toBeUndefined()
+    expect(afterBody.projectEpoch).toBe(2_000)
+  })
+
+  it("a cursor ABOVE the re-created project's whole history resyncs even without ?epoch=", async () => {
+    // The observed live failure (old max 129,108; re-migrated max 62,932) and
+    // the only rescue available to a client that predates the epoch: a cursor
+    // can only outrun the log if the allocator restarted.
+    const { db } = await makeTestDb({})
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+
+    await seedIncarnation(db, { epoch: 1_000, serverSeq: 129_108, value: "old-incarnation" })
+    await seedIncarnation(db, { epoch: 2_000, serverSeq: 62_932, value: "new-incarnation" })
+
+    const res = (await handleCellsReadRequest(deltaReq(token, 129_108), envWith(db)))!
+    const body = (await res.json()) as { resync?: boolean; delta?: boolean; maxServerSeq: number }
+    expect(body.resync).toBe(true)
+    expect(body.maxServerSeq).toBe(62_932)
+
+    // …and the resync converges: the full refetch shows the new incarnation's
+    // rows and hands back a cursor whose next delta is a normal empty one, not
+    // another resync (no loop).
+    const full = (await handleCellsReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/files/file-x/cells?side=target", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      envWith(db),
+    ))!
+    const fullBody = (await full.json()) as {
+      cells: Array<{ value: string }>
+      maxServerSeq: number
+      projectEpoch: number
+    }
+    expect(fullBody.cells.map((c) => c.value)).toEqual(["new-incarnation"])
+    expect(fullBody.projectEpoch).toBe(2_000)
+
+    const next = (await handleCellsReadRequest(
+      deltaReq(token, fullBody.maxServerSeq, fullBody.projectEpoch),
+      envWith(db),
+    ))!
+    const nextBody = (await next.json()) as {
+      delta?: boolean
+      resync?: boolean
+      changedCellIds?: string[]
+    }
+    expect(nextBody.resync).toBeUndefined()
+    expect(nextBody.delta).toBe(true)
+    expect(nextBody.changedCellIds).toEqual([])
+  })
+
+  it("the ETag misses across a re-creation whose MAX(server_seq) went BACKWARDS", async () => {
+    const { db } = await makeTestDb({})
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const fullReq = (etag?: string) =>
+      new Request("https://w/api/v1/projects/proj-a/files/file-x/cells", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...(etag ? { "If-None-Match": etag } : {}),
+        },
+      })
+
+    await seedIncarnation(db, { epoch: 1_000, serverSeq: 129_108, value: "old-incarnation" })
+    const first = (await handleCellsReadRequest(fullReq(), envWith(db)))!
+    const oldEtag = first.headers.get("ETag")!
+    expect((await handleCellsReadRequest(fullReq(oldEtag), envWith(db)))!.status).toBe(304)
+
+    await seedIncarnation(db, { epoch: 2_000, serverSeq: 62_932, value: "new-incarnation" })
+
+    const after = (await handleCellsReadRequest(fullReq(oldEtag), envWith(db)))!
+    expect(after.status).toBe(200)
+    expect(after.headers.get("ETag")).not.toBe(oldEtag)
+  })
+
+  it("a live project still deltas and 304s — a matching epoch costs no extra refetch", async () => {
+    const { db } = await makeTestDb({})
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    await seedIncarnation(db, { epoch: 1_000, serverSeq: 50, value: "live" })
+
+    const delta = (await handleCellsReadRequest(deltaReq(token, 50, 1_000), envWith(db)))!
+    const deltaBody = (await delta.json()) as {
+      delta?: boolean
+      resync?: boolean
+      changedCellIds?: string[]
+    }
+    expect(deltaBody.resync).toBeUndefined()
+    expect(deltaBody.delta).toBe(true)
+    expect(deltaBody.changedCellIds).toEqual([])
+
+    const full = (await handleCellsReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/files/file-x/cells", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      envWith(db),
+    ))!
+    const etag = full.headers.get("ETag")!
+    const conditional = (await handleCellsReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/files/file-x/cells", {
+        headers: { Authorization: `Bearer ${token}`, "If-None-Match": etag },
+      }),
+      envWith(db),
+    ))!
+    expect(conditional.status).toBe(304)
+  })
+
+  it("the interim operator remedy — bumping last_seq/rebuilt_seq past the old horizon — still forces the resync", async () => {
+    const { db } = await makeTestDb({})
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    await seedIncarnation(db, { epoch: 1_000, serverSeq: 62_932, value: "new-incarnation" })
+    await db
+      .prepare("UPDATE project_seq_counters SET last_seq = ?, rebuilt_seq = ? WHERE project_id = ?")
+      .bind(130_000, 130_000, "proj-a")
+      .run()
+
+    // The stale cursor is now BELOW rebuilt_seq, so the audit-B5 gate fires —
+    // the epoch gates must not have displaced it.
+    const res = (await handleCellsReadRequest(deltaReq(token, 129_108, 1_000), envWith(db)))!
+    const body = (await res.json()) as { resync?: boolean; maxServerSeq: number }
+    expect(body.resync).toBe(true)
+    expect(body.maxServerSeq).toBe(130_000)
+  })
+
+  it("rejects a non-numeric epoch instead of silently ignoring it", async () => {
+    const { db } = await makeTestDb({})
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const res = (await handleCellsReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/files/file-x/cells?since=1&epoch=abc", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      envWith(db),
+    ))!
+    expect(res.status).toBe(400)
+    expect(await res.text()).toContain("invalid epoch")
   })
 })

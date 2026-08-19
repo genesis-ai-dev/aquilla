@@ -203,9 +203,12 @@ function mapRow(row: CellRowRaw): CellRowOut {
  * (cycle) returns whatever chain prefix was reachable before the loop.
  *
  * Orphan cells (those whose anchor doesn't resolve to a known cell on this
- * side) are appended at the tail in event_id order — they'd otherwise drop
- * out entirely, which is the wrong default for a read API that should
- * surface everything in the projection.
+ * side) are appended at the tail: each orphan ROOT in event_id order with
+ * its own sub-chain walked behind it (AQU-931 — a dangling anchor must not
+ * scatter the cells that still chain together), then any cycle remnants
+ * flat in event_id order — they'd otherwise drop out entirely, which is
+ * the wrong default for a read API that should surface everything in the
+ * projection.
  */
 function walkAnchorChain(rows: CellRowRaw[]): CellRowRaw[] {
   if (rows.length === 0) return []
@@ -229,42 +232,70 @@ function walkAnchorChain(rows: CellRowRaw[]): CellRowRaw[] {
 
   const ordered: CellRowRaw[] = []
   const visited = new Set<string>()
+  const byEventId = (a: CellRowRaw, b: CellRowRaw): number =>
+    a.event_id < b.event_id ? -1 : a.event_id > b.event_id ? 1 : 0
 
-  // Depth-first descent from the head. Each cell's id becomes the anchor
-  // key for the next layer. We process siblings in ascending event_id
-  // order: the first sibling's whole sub-chain is emitted before moving to
-  // the next sibling. Iterative to avoid stack overflow on Bible-sized
-  // files (~30k cells per side).
+  // Depth-first descent. Each cell's id becomes the anchor key for the next
+  // layer. We process siblings in ascending event_id order: the first
+  // sibling's whole sub-chain is emitted before moving to the next sibling.
+  // Iterative to avoid stack overflow on Bible-sized files (~30k cells per
+  // side).
   //
   // The stack carries (anchorKey, indexIntoChildren) frames so we can
   // resume after recursing into a child. Visiting a child appends it to
   // `ordered` and pushes a new frame for its descendants.
   type Frame = { key: string; i: number }
-  const stack: Frame[] = [{ key: "", i: 0 }] // "" = null anchor (head)
-
-  while (stack.length > 0) {
-    const top = stack[stack.length - 1]
-    const children = byAnchor.get(top.key)
-    if (!children || top.i >= children.length) {
-      stack.pop()
-      continue
+  const descend = (rootKey: string): void => {
+    const stack: Frame[] = [{ key: rootKey, i: 0 }]
+    while (stack.length > 0) {
+      const top = stack[stack.length - 1]
+      const children = byAnchor.get(top.key)
+      if (!children || top.i >= children.length) {
+        stack.pop()
+        continue
+      }
+      const child = children[top.i]
+      top.i++
+      if (visited.has(child.cell_id)) continue
+      visited.add(child.cell_id)
+      ordered.push(child)
+      stack.push({ key: child.cell_id, i: 0 })
     }
-    const child = children[top.i]
-    top.i++
-    if (visited.has(child.cell_id)) continue
-    visited.add(child.cell_id)
-    ordered.push(child)
-    stack.push({ key: child.cell_id, i: 0 })
+  }
+  descend("") // "" = null anchor (head)
+
+  // Orphan ROOTS: cells whose anchor points to a non-existent cell on this
+  // side (a retracted heading/milestone — AQU-931). Flat-appending every
+  // unreachable row would scatter whole sub-chains in event_id (effectively
+  // random) order, because a dangling anchor strands not just the cell but
+  // everything chained behind it. Instead, promote each orphan root in
+  // event_id order and walk its descendants, so runs that still chain
+  // together stay contiguous behind their orphaned head.
+  if (visited.size < rows.length) {
+    const roots: CellRowRaw[] = []
+    for (const r of rows) {
+      if (visited.has(r.cell_id)) continue
+      if (r.anchor_cell_id !== null && !cellIds.has(r.anchor_cell_id)) roots.push(r)
+    }
+    roots.sort(byEventId)
+    for (const root of roots) {
+      if (visited.has(root.cell_id)) continue
+      visited.add(root.cell_id)
+      ordered.push(root)
+      descend(root.cell_id)
+    }
   }
 
-  // Append orphans (anchor points to a non-existent cell on this side, or
-  // a cycle isolated them from the head). Stable order by event_id.
+  // Cycle remnants: anchor resolves to a known cell yet the walk never
+  // reached them (a malformed projection). Stable flat order by event_id —
+  // they'd otherwise drop out entirely, which is the wrong default for a
+  // read API that should surface everything in the projection.
   if (visited.size < rows.length) {
     const orphans: CellRowRaw[] = []
     for (const r of rows) {
       if (!visited.has(r.cell_id)) orphans.push(r)
     }
-    orphans.sort((a, b) => (a.event_id < b.event_id ? -1 : a.event_id > b.event_id ? 1 : 0))
+    orphans.sort(byEventId)
     ordered.push(...orphans)
   }
 

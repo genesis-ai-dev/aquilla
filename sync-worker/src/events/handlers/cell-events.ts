@@ -28,7 +28,7 @@ import type { RealtimeMessage, ProjectionTable } from '../realtime'
 import type { EventKind } from '../types'
 import {
   buildEventProjectionStmts,
-  isChainMutatingKind,
+  isChainArbitrated,
   type PersistedEvent,
 } from '../event-projection'
 import { buildChainClaimStmt, eventQualifiedParentKey, type ChainSlot } from '../chain-claims'
@@ -95,13 +95,15 @@ export function handleCellEvent(
   let projectionTouches: readonly ProjectionTable[] = []
   let counterFile: DispatchResult['counterFile']
 
-  // Atomic AD-2 arbitration: chain-mutating events claim their chain slot in
+  // Atomic AD-2 arbitration: chain-arbitrated events claim their chain slot in
   // the same transaction, and the projection's cells write is gated on the
   // claim — so an in-flight sibling race resolves to exactly one winner.
+  // A parent-null cell delete is a tombstone, not a chain extension — it takes
+  // no claim and projects ungated, matching rebuild's replay rule (AQU-931).
   let chainGate: ChainSlot | undefined
   if (
     opts.updateProjection &&
-    isChainMutatingKind(event.kind) &&
+    isChainArbitrated(event.kind, event.parentId ?? null) &&
     event.fileId &&
     event.cellId
   ) {

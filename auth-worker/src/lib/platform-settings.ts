@@ -42,6 +42,14 @@ export interface PlatformSettings {
    *  to the agent model — the orchestrator can stay cheap while drafting
    *  quality comes from a stronger model). */
   agentDraftModel?: string
+  /** Autopilot FAST tier — summarize, the support check, passage detection.
+   *  These are the cheap-judgment nodes the tier split exists for, so this is
+   *  the single highest-leverage model setting on the platform. Unset means
+   *  the CONTEXTUAL_FAST_MODEL env var, then the product default. */
+  contextualFastModel?: string
+  /** Autopilot DEEP tier — the adversarial verifier stances. Unset means the
+   *  CONTEXTUAL_DEEP_MODEL env var, then the mid (drafting) model. */
+  contextualDeepModel?: string
   /** Allowlist of model IDs accepted by the AI guard (lib/ai-budget.ts). */
   allowedModels?: string[]
   /** Max AI requests per user per UTC day. */
@@ -87,6 +95,14 @@ function parseSettings(raw: string): PlatformSettings {
   if (typeof obj.defaultLlmModel === "string") out.defaultLlmModel = obj.defaultLlmModel
   if (typeof obj.agentModel === "string") out.agentModel = obj.agentModel
   if (typeof obj.agentDraftModel === "string") out.agentDraftModel = obj.agentDraftModel
+  // Empty strings are how the admin console CLEARS an optional tier; a stored
+  // "" would otherwise beat the env fallback and pin the tier to nothing.
+  if (typeof obj.contextualFastModel === "string" && obj.contextualFastModel) {
+    out.contextualFastModel = obj.contextualFastModel
+  }
+  if (typeof obj.contextualDeepModel === "string" && obj.contextualDeepModel) {
+    out.contextualDeepModel = obj.contextualDeepModel
+  }
   if (Array.isArray(obj.allowedModels)) {
     out.allowedModels = obj.allowedModels.filter((m): m is string => typeof m === "string")
   }
@@ -209,6 +225,13 @@ export async function savePlatformSettings(
   }
 
   const merged: PlatformSettings = { ...current.settings, ...patch }
+  // An empty string in the patch means CLEAR, not "store an empty value":
+  // optional keys (the contextual tiers) are unset by sending "", and leaving
+  // the empty string in the blob would keep a dead key in the row forever.
+  // Keys whose schema forbids "" are unaffected.
+  for (const [key, value] of Object.entries(merged)) {
+    if (value === "") delete merged[key as keyof PlatformSettings]
+  }
   const json = JSON.stringify(merged)
   const newVersion = current.version + 1
 

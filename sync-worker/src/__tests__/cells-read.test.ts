@@ -87,6 +87,48 @@ describe("GET /api/v1/projects/:projectId/files/:fileId/cells", () => {
     expect(body.cells.map((c) => c.cellId)).toEqual(["head", "first", "second"])
   })
 
+  it("keeps an orphaned sub-chain contiguous behind its orphan root (AQU-931)", async () => {
+    // c2's anchor points at a retracted cell ("gone"). The old flat-append
+    // would scatter c2/c3/c4 in event_id order (c3, c4, c2 here); the orphan
+    // root must instead be promoted with its descendants walked behind it.
+    const { db } = await makeTestDb({
+      cells: [
+        makeCell({ cell_id: "c1", anchor_cell_id: null, event_id: "e5" }),
+        makeCell({ cell_id: "c2", anchor_cell_id: "gone", event_id: "e9" }),
+        makeCell({ cell_id: "c3", anchor_cell_id: "c2", event_id: "e2" }),
+        makeCell({ cell_id: "c4", anchor_cell_id: "c3", event_id: "e3" }),
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const req = new Request(
+      "https://w/api/v1/projects/proj-a/files/file-x/cells?side=target",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+    const body = (await res.json()) as { cells: Array<{ cellId: string }> }
+    expect(body.cells.map((c) => c.cellId)).toEqual(["c1", "c2", "c3", "c4"])
+  })
+
+  it("orders multiple orphan roots by event_id, each with its own sub-chain (AQU-931)", async () => {
+    const { db } = await makeTestDb({
+      cells: [
+        makeCell({ cell_id: "b1", anchor_cell_id: "gone-b", event_id: "e7" }),
+        makeCell({ cell_id: "b2", anchor_cell_id: "b1", event_id: "e1" }),
+        makeCell({ cell_id: "a1", anchor_cell_id: "gone-a", event_id: "e4" }),
+        makeCell({ cell_id: "a2", anchor_cell_id: "a1", event_id: "e8" }),
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const req = new Request(
+      "https://w/api/v1/projects/proj-a/files/file-x/cells?side=target",
+      { headers: { Authorization: `Bearer ${token}` } },
+    )
+    const res = (await handleCellsReadRequest(req, envWith(db)))!
+    const body = (await res.json()) as { cells: Array<{ cellId: string }> }
+    // Roots by event_id: a1 (e4) before b1 (e7); each drags its chain along.
+    expect(body.cells.map((c) => c.cellId)).toEqual(["a1", "a2", "b1", "b2"])
+  })
+
   it("respects the side filter", async () => {
     const { db } = await makeTestDb({
       cells: [

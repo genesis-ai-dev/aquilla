@@ -49,7 +49,8 @@ export async function handleMigrateCellIdsRequest(
   const rows = await env.AQUILLA_PG.prepare(
     `SELECT cell_id,
             MAX(CASE WHEN side = 'source' THEN 1 ELSE 0 END) AS has_source,
-            MAX(CASE WHEN side = 'target' THEN 1 ELSE 0 END) AS has_target
+            MAX(CASE WHEN side = 'target' THEN 1 ELSE 0 END) AS has_target,
+            MAX(CASE WHEN side = 'source' AND target_lang = '' THEN anchor_cell_id END) AS source_anchor_cell_id
      FROM cells
      WHERE project_id = ? AND file_id = ? AND cell_id > ?
      GROUP BY cell_id
@@ -57,13 +58,24 @@ export async function handleMigrateCellIdsRequest(
      LIMIT ?`,
   )
     .bind(projectId, fileId, after, limit)
-    .all<{ cell_id: string; has_source: number | string; has_target: number | string }>()
+    .all<{
+      cell_id: string
+      has_source: number | string
+      has_target: number | string
+      source_anchor_cell_id: string | null
+    }>()
 
   const results = rows.results ?? []
+  // AQU-931: the source row's current anchor rides along so the CLI's
+  // reconciliation pass can diff it against the anchor today's mapping
+  // produces and emit `source.cell.reanchor` repairs. Null when the cell has
+  // no source row (or a genuinely null anchor — the chain head; the diff
+  // treats both as "no stored anchor", which is correct for a head cell).
   const cells = results.map((r) => ({
     cellId: r.cell_id,
     hasSource: Number(r.has_source) === 1,
     hasTarget: Number(r.has_target) === 1,
+    sourceAnchorCellId: r.source_anchor_cell_id ?? null,
   }))
   const lastCellId = results.length ? results[results.length - 1].cell_id : after
   const more = results.length === limit

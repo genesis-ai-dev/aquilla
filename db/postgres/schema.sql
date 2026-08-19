@@ -1196,6 +1196,37 @@ CREATE INDEX IF NOT EXISTS scene_briefs_lookup
 CREATE INDEX IF NOT EXISTS scene_briefs_run_provenance_time
   ON scene_briefs(project_id, (provenance ->> 'runId'), created_at DESC, id DESC);
 
+-- Per-file segmentation strategy (0079_file_segmentation.sql). Keyed by
+-- (project, file) with NO target_lang: segmentation is a property of the
+-- SOURCE, so every language lane reads the same boundaries. 'auto' derives
+-- from file structure (the default; an absent row means 'auto'), 'fixed' cuts
+-- every fixed_size cells, and 'explicit' stores the ordered span list verbatim
+-- — the shape an LLM re-segmentation pass writes, with optional title/gist/
+-- depth per entry so the same rows can drive a navigation outline.
+CREATE TABLE IF NOT EXISTS file_segmentation (
+  project_id   text NOT NULL,
+  file_id      text NOT NULL,
+  strategy     text NOT NULL DEFAULT 'auto'
+    CHECK (strategy IN ('auto', 'fixed', 'explicit')),
+  fixed_size   integer,
+  boundaries   jsonb,
+  note         text,
+  generated_by text,
+  model_id     text,
+  human_edited boolean NOT NULL DEFAULT false,
+  stale_since  timestamptz,
+  stale_reason text,
+  version      integer NOT NULL DEFAULT 1,
+  updated_by   text,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (project_id, file_id),
+  CHECK (strategy <> 'fixed' OR fixed_size IS NOT NULL),
+  CHECK (strategy <> 'explicit' OR boundaries IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS file_segmentation_project
+  ON file_segmentation(project_id);
+
 -- Contextual run engine (0071_contextual_runs.sql; pipeline design §8, slice D1).
 -- contextual_runs: one durable pipeline run; span_cursor {seeds, nextIndex}
 -- makes every tick resumable from Postgres. contextual_steering: the human

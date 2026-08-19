@@ -167,6 +167,7 @@ import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { ExpandableFileList } from "./ExpandableFileList"
 import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
 import { FileDetailsModal } from "./FileDetailsModal"
+import { FileSegmentationDialog } from "./FileSegmentationDialog"
 import { SidebarProjectSection } from "./SidebarProjectSection"
 import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { SuggestionBanner } from "./SuggestionBanner"
@@ -4493,6 +4494,7 @@ export function ProjectWorkspace() {
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
   // "File details" modal (sidebar file row ⋯ menu).
   const [detailsFileId, setDetailsFileId] = useState<string | null>(null)
+  const [segmentationFileId, setSegmentationFileId] = useState<string | null>(null)
   // Latest project for the suggestion-apply undo toast action (avoids stale closure).
   const projectForUndoRef = useRef(project)
   projectForUndoRef.current = project
@@ -6170,6 +6172,7 @@ export function ProjectWorkspace() {
                     setAssignTargetFileId(fileId)
                     setAssignModalOpen(true)
                   } : undefined}
+                  onSegmentation={setSegmentationFileId}
                   onDelete={currentRoleLevel >= ROLE.PROJECT_LEAD ? (fileId) => setPendingDeleteId(fileId) : undefined}
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
@@ -7220,6 +7223,18 @@ export function ProjectWorkspace() {
         />
       )}
       {/* "File details" modal — metadata for a sidebar file row. */}
+      <FileSegmentationDialog
+        projectId={projectId!}
+        fileId={segmentationFileId}
+        fileName={
+          segmentationFileId
+            ? project.files.find((f) => f.id === segmentationFileId)?.name ?? ""
+            : ""
+        }
+        open={segmentationFileId !== null}
+        onOpenChange={(v) => { if (!v) setSegmentationFileId(null) }}
+        canEdit={currentRoleLevel >= ROLE.PROJECT_LEAD}
+      />
       <FileDetailsModal
         open={detailsFileId !== null}
         onOpenChange={(v) => { if (!v) setDetailsFileId(null) }}

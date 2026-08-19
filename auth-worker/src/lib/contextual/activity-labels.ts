@@ -168,7 +168,11 @@ export function decorateActivityLabels<
 >(
   activity: LabelledActivity<TEvent, TBrief, TDraft>,
   index: CellDisplayIndex,
-): LabelledActivity<TEvent, TBrief, TDraft> {
+): LabelledActivity<
+  TEvent & { spanLabel: string | null },
+  TBrief & { spanLabel: string | null },
+  TDraft & { cellLabel?: string | null; spanLabel?: string | null }
+> {
   const sceneBriefs = activity.sceneBriefs.map((brief) => {
     const fromCells = index.range(brief.startCellId, brief.endCellId)
     const existing = humanPassageLabel(brief.spanLabel)

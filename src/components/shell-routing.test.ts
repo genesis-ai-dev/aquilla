@@ -17,6 +17,7 @@
  * (ProjectSettings), not as workspace overlay surfaces.
  */
 import { describe, it, expect } from "vitest"
+import { resolveSidebarAgentClick } from "./project-workspace-helpers"
 
 // ── Replicate the pure derivation logic from ProjectWorkspace ──────────────
 // Keep in sync with the `centerSurface` derivation in ProjectWorkspace.tsx.
@@ -149,13 +150,6 @@ describe("shouldShowAudioToolbar", () => {
     expect(shouldShowAudioToolbar("text", "editor")).toBe(false)
   })
 })
-
-// Keep in sync with `resolveSidebarAgentClick` in ProjectWorkspace.tsx.
-function resolveSidebarAgentClick(
-  workbenchActive: boolean,
-): "activate-editor-tab" | "open-dock" {
-  return workbenchActive ? "activate-editor-tab" : "open-dock"
-}
 
 describe("resolveSidebarAgentClick", () => {
   it("activates the editor Agent tab only while the workbench is the active surface", () => {

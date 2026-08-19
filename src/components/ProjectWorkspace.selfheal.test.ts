@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from "vitest"
-import { shouldSelfHealZeroFileLink } from "./ProjectWorkspace"
+import { shouldSelfHealZeroFileLink } from "./project-workspace-helpers"
 
 const BASE = {
   projectId: "proj-b",

@@ -10,7 +10,7 @@
  * rendering the full ProjectWorkspace isn't needed to prove the logic.
  */
 import { describe, it, expect } from "vitest"
-import { shouldApplyCheckResult } from "./ProjectWorkspace"
+import { shouldApplyCheckResult } from "./project-workspace-helpers"
 
 describe("shouldApplyCheckResult (mid-check file-switch guard)", () => {
   it("applies a result whose file is still the active file", () => {

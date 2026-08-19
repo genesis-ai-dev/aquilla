@@ -334,6 +334,8 @@ export const autopilot = defineNamespace({
       "Could not refresh detailed activity. Showing the last available run summary.",
     "autopilot.inspector.warning.olderDrafts":
       "Could not load older draft evidence. The draft records already shown are still current.",
+    "autopilot.inspector.warning.decisionsRefresh":
+      "Could not refresh decisions. Showing the last available list.",
     "autopilot.inspector.action.stopping": "Stopping Autopilot…",
     "autopilot.inspector.action.pausing": "Pausing Autopilot…",
     "autopilot.inspector.action.resuming": "Resuming Autopilot…",
@@ -527,6 +529,23 @@ export const autopilot = defineNamespace({
     "autopilot.proposal.discarded": "Discarded: {summary}",
     "autopilot.proposal.applyFailed": "Apply failed",
     "autopilot.proposal.applying": "Applying…",
+
+    // — Inspector: decisions (human-in-the-loop question channel) ————————
+    "autopilot.decisions.heading": "Needs your decision",
+    "autopilot.decisions.empty": "Nothing needs you right now.",
+    "autopilot.decisions.held": plural({
+      one: "{count} more question is held until these are settled.",
+      other: "{count} more questions are held until these are settled.",
+    }),
+    "autopilot.decisions.blastRadius": plural({
+      one: "Affects {count} later passage.",
+      other: "Affects {count} later passages.",
+    }),
+    "autopilot.decisions.answer": "Answer",
+    "autopilot.decisions.answerPlaceholder": "Your decision…",
+    "autopilot.decisions.dismiss": "Not needed",
+    "autopilot.decisions.assign": "Ask someone else",
+    "autopilot.decisions.actionFailed": "This decision couldn’t be saved. Retry.",
 
     // — Stable evidence/readiness enums (raw unknown values remain evidence) —
     "autopilot.evidence.status.proposed": "Proposed",
@@ -938,6 +957,14 @@ export const autopilot = defineNamespace({
       "autopilot.graph.decision.phase": withPlaceholders(
         "Last-decision fallback that only names the live passage.",
         { span: "Human-readable passage reference, or the generic 'this passage' fallback." },
+      ),
+      "autopilot.decisions.held": withPlaceholders(
+        "Note below the shown decision cards reporting how many further open decisions are withheld rather than lost.",
+        { count: "Number of additional open decisions not shown, beyond the ones displayed." },
+      ),
+      "autopilot.decisions.blastRadius": withPlaceholders(
+        "Decision-card detail giving how many later passages the answer will affect, so the question reads as worth answering rather than as generic review.",
+        { count: "Number of later passages this decision's answer affects." },
       ),
     },
   },

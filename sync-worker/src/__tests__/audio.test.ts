@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest"
 import { sign } from "hono/jwt"
-import { handleAudioRequest, audioObjectKey, MAX_AUDIO_BYTES } from "../audio"
+import { handleAudioRequest, audioObjectKey, isPathSafeId, MAX_AUDIO_BYTES } from "../audio"
 import { handleAdminRequest } from "../admin"
 import type { SyncTokenClaims } from "../auth"
 import { makeTestDb } from "./helpers/pg-test-db"
@@ -132,6 +132,25 @@ async function makeToken(
   }
   return sign(claims as unknown as Record<string, unknown>, secret, "HS256")
 }
+
+describe("isPathSafeId", () => {
+  it("accepts ordinary ids", () => {
+    expect(isPathSafeId("f1")).toBe(true)
+    expect(isPathSafeId("0198abc1-2345-7def-89ab-0123456789ab")).toBe(true)
+  })
+
+  it("rejects path separators, NUL, and bare dot-segments", () => {
+    // These are the ids `tts.ts`/`voice-convert.ts` reject before interpolating
+    // them into an R2 key (audioObjectKey) built from a template literal.
+    expect(isPathSafeId("")).toBe(false)
+    expect(isPathSafeId(".")).toBe(false)
+    expect(isPathSafeId("..")).toBe(false)
+    expect(isPathSafeId("a/b")).toBe(false)
+    expect(isPathSafeId("../other-project")).toBe(false)
+    expect(isPathSafeId("a\\b")).toBe(false)
+    expect(isPathSafeId("a\0b")).toBe(false)
+  })
+})
 
 describe("audio R2 endpoints", () => {
   it("returns null for unrelated paths", async () => {

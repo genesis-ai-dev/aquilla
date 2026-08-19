@@ -15,41 +15,22 @@ import { Spinner } from "@/components/ui/spinner"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { messageForStatus } from "@/lib/errors/user-error"
-import { AUTH_BASE } from "@/lib/frontier/auth"
+import {
+  approveChangeset,
+  ChangesetApiError,
+  fetchChangesetApproval,
+  rejectChangeset,
+  type ChangesetApproval,
+} from "@/lib/agent/changeset-api"
 import { t as standaloneT } from "@/lib/i18n/standalone"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatDateTime } from "@/lib/i18n/format"
-import {
-  ChangeList,
-  ImportPreviewView,
-  type ChangesetChanges,
-  type ChangesetImportPreview,
-} from "@/components/changesets/ChangeList"
+import { ChangeList, ImportPreviewView } from "@/components/changesets/ChangeList"
 
-interface ApprovalSummary {
-  warnings?: { message: string }[]
-  /** UpdateProjectSettings: per-key truncated previews of the settings being
-   *  written (an object, so it needs explicit rendering below — the flat
-   *  number/string fact loop skips it). */
-  settingsChanges?: Record<string, string>
-  [key: string]: unknown
-}
-
-interface ApprovalData {
-  changesetId: string
-  projectId: string
-  projectName: string | null
-  status: string
-  autonomyMode: string
-  summary: ApprovalSummary
-  /** Per-cell before/after detail (SetTranslation commands), capped server-side. */
-  changes?: ChangesetChanges
-  /** Sample cells for a PlanImport command. */
-  importPreview?: ChangesetImportPreview
-  digest: string
-  createdAt: string
-  expiresAt: string
-}
+/** Payload/base-URL/auth plumbing lives in the shared client
+ *  (src/lib/agent/changeset-api.ts) — this page and the in-chat
+ *  ChangesetCard consume the same route through the same helper. */
+type ApprovalData = ChangesetApproval
 
 type LoadState =
   | { phase: "loading" }
@@ -75,13 +56,18 @@ function humanizeKey(key: string): string {
 /**
  * AQU-820: the returned string is rendered verbatim, so it is always ours and
  * keyed — the server's `error.message` is untranslated and often a raw
- * diagnostic. The status alone distinguishes the three cases worth naming.
+ * diagnostic. The status alone distinguishes the three cases worth naming;
+ * anything that isn't an HTTP failure (network drop, timeout) reads as a
+ * connectivity problem.
  */
-async function parseErrorMessage(res: Response): Promise<string> {
-  if (res.status === 403) return standaloneT("error.changeset.notAuthorized")
-  if (res.status === 404) return standaloneT("error.changeset.notFound")
-  if (res.status === 409) return standaloneT("error.changeset.notApprovable")
-  return messageForStatus(res.status, "", "changeset").message
+function messageForError(err: unknown): string {
+  if (!(err instanceof ChangesetApiError)) {
+    return "Couldn't reach the server. Check your connection and try again."
+  }
+  if (err.status === 403) return standaloneT("error.changeset.notAuthorized")
+  if (err.status === 404) return standaloneT("error.changeset.notFound")
+  if (err.status === 409) return standaloneT("error.changeset.notApprovable")
+  return messageForStatus(err.status, "", "changeset").message
 }
 
 export function ApproveChangeset() {
@@ -97,17 +83,10 @@ export function ApproveChangeset() {
     if (!changesetId || !jwt) return
     setLoad({ phase: "loading" })
     try {
-      const res = await fetch(`${AUTH_BASE}/api/v2/changesets/${changesetId}/approval`, {
-        headers: { Authorization: `Bearer ${jwt}` },
-      })
-      if (!res.ok) {
-        setLoad({ phase: "error", message: await parseErrorMessage(res) })
-        return
-      }
-      const data = (await res.json()) as ApprovalData
+      const data = await fetchChangesetApproval(jwt, changesetId)
       setLoad({ phase: "loaded", data })
-    } catch {
-      setLoad({ phase: "error", message: "Couldn't reach the server. Check your connection and try again." })
+    } catch (err) {
+      setLoad({ phase: "error", message: messageForError(err) })
     }
   }, [changesetId, jwt])
 
@@ -121,18 +100,11 @@ export function ApproveChangeset() {
     if (!changesetId || !jwt || load.phase !== "loaded") return
     setAction({ phase: "working" })
     try {
-      const res = await fetch(`${AUTH_BASE}/api/v2/changesets/${changesetId}/approve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
-        body: JSON.stringify({ digest: load.data.digest }),
-      })
-      if (!res.ok) {
-        setAction({ phase: "error", message: await parseErrorMessage(res) })
-        return
-      }
+      // Digest ALWAYS comes from the GET payload — see the header comment.
+      await approveChangeset(jwt, changesetId, load.data.digest)
       setAction({ phase: "approved" })
-    } catch {
-      setAction({ phase: "error", message: "Couldn't reach the server. Check your connection and try again." })
+    } catch (err) {
+      setAction({ phase: "error", message: messageForError(err) })
     }
   }
 
@@ -140,17 +112,10 @@ export function ApproveChangeset() {
     if (!changesetId || !jwt) return
     setAction({ phase: "working" })
     try {
-      const res = await fetch(`${AUTH_BASE}/api/v2/changesets/${changesetId}/reject`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${jwt}` },
-      })
-      if (!res.ok) {
-        setAction({ phase: "error", message: await parseErrorMessage(res) })
-        return
-      }
+      await rejectChangeset(jwt, changesetId)
       setAction({ phase: "rejected" })
-    } catch {
-      setAction({ phase: "error", message: "Couldn't reach the server. Check your connection and try again." })
+    } catch (err) {
+      setAction({ phase: "error", message: messageForError(err) })
     }
   }
 

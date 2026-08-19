@@ -38,9 +38,9 @@ export interface ContextReadiness {
 
 /** Validated pairs below this and the performer is imitating almost nothing —
  *  the same threshold the risk router uses for example coverage. */
-const MIN_EXAMPLES = 8
+export const MIN_EXAMPLES = 8
 /** A brief with fewer answered fields than this is a stub, not a brief. */
-const MIN_BRIEF_FIELDS = 4
+export const MIN_BRIEF_FIELDS = 4
 
 export interface ReadinessInput {
   context: ProjectContext

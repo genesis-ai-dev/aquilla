@@ -7,6 +7,7 @@
 
 import type { ProjectDoServerMessage } from './project-do-handlers'
 import { parseContextualFrame, type ContextualFrame } from './contextual-frames'
+import { serviceBearerMatches } from './lib/service-auth'
 
 export interface ContextualActivityNotifyEnv {
   ProjectSync?: DurableObjectNamespace
@@ -51,8 +52,9 @@ export async function handleContextualActivityRequest(
   if (!match) return null
   if (request.method !== 'POST') return new Response('method not allowed', { status: 405 })
 
-  const expected = env.SYNC_SECRET_KEY ? `Bearer ${env.SYNC_SECRET_KEY}` : null
-  if (!expected || request.headers.get('Authorization') !== expected) {
+  // OPS-11: this gate used `!==` — a short-circuiting compare against the
+  // token-signing key — until 2026-08-17. Constant-time via the shared helper.
+  if (!serviceBearerMatches(request.headers.get('Authorization'), env)) {
     return new Response('unauthorized', { status: 401 })
   }
 

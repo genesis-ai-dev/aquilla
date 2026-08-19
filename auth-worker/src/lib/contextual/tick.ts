@@ -65,25 +65,42 @@ export interface ContextualModels {
 }
 
 interface ModelEnv {
+  /** Env fallbacks for the fast/deep tiers. The admin console's
+   *  platform_settings values win over these — see resolveContextualModels.
+   *  Kept because docs/COST-METERING.md drives offline costing runs through
+   *  .dev.vars, which has no admin console. */
   CONTEXTUAL_FAST_MODEL?: string
   CONTEXTUAL_DEEP_MODEL?: string
   AGENT_DRAFT_MODEL_DEFAULT?: string
   AGENT_MODEL_DEFAULT?: string
 }
 
-/** Tier → model map. mid follows the agent draft-model resolution
- *  (platform_settings.agentDraftModel → env → agent model); deep defaults to
- *  the draft (mid) model until a dedicated deep model is configured. */
+/**
+ * Tier → model map. Each tier resolves admin store → env var → default, the
+ * same precedence the chat and agent models use: the admin console is the
+ * primary control, and the env vars remain for surfaces that have no console
+ * (offline costing runs through .dev.vars — docs/COST-METERING.md).
+ *
+ * mid follows the agent draft-model resolution; deep falls back to mid, so a
+ * platform that configures only a fast model still behaves exactly as it did
+ * before. Leaving fast unset is the status quo — every tier on one frontier
+ * model — which is what makes the FAST setting the highest-leverage knob here.
+ */
 export function resolveContextualModels(
   env: ModelEnv,
-  settings: { agentModel?: string; agentDraftModel?: string },
+  settings: {
+    agentModel?: string
+    agentDraftModel?: string
+    contextualFastModel?: string
+    contextualDeepModel?: string
+  },
 ): ContextualModels {
   const agentModel = settings.agentModel || env.AGENT_MODEL_DEFAULT || DEFAULT_LLM_MODEL_ID
   const mid = settings.agentDraftModel || env.AGENT_DRAFT_MODEL_DEFAULT || agentModel
   return {
-    fast: env.CONTEXTUAL_FAST_MODEL || DEFAULT_LLM_MODEL_ID,
+    fast: settings.contextualFastModel || env.CONTEXTUAL_FAST_MODEL || DEFAULT_LLM_MODEL_ID,
     mid,
-    deep: env.CONTEXTUAL_DEEP_MODEL || mid,
+    deep: settings.contextualDeepModel || env.CONTEXTUAL_DEEP_MODEL || mid,
   }
 }
 

@@ -77,7 +77,7 @@ by `lintTerminology`. The decision is made once by a human and never re-asked.
 
 | # | Gap | Where | Fix |
 |---|---|---|---|
-| **G1** | **All three tiers resolve to one frontier model.** The tier architecture exists and is unwired. | `lib/contextual/tick.ts:76-87` | Set `CONTEXTUAL_FAST_MODEL` (and a distinct `CONTEXTUAL_DEEP_MODEL`) per environment. Config, not code. |
+| **G1** | **All three tiers resolve to one frontier model.** The tier architecture exists and is unwired. | `lib/contextual/tick.ts:76-87` | **Now settable in the admin console** (Settings → the model list's ⚡ Fast / 🔬 Deep toggles) — no deploy needed. Still unset by default: someone has to pick a model. |
 | **G2** | `summarize` — compress a construal to ≤1600 chars — runs at `fast` tier, i.e. on the frontier model. One call per span. Textbook small-model work. | `lib/contextual/summarize.ts` | Falls out of G1. |
 | **G3** | **Vacuous deep-tier calls.** `verify_ambiguity` is `tier: "deep"`, mandatory, and barrier-required. When the ambiguity register is *empty* it is asked to find violations of an empty list — there is nothing it can find. On a clean span that is a 25-weight call whose answer is structurally predetermined. | `lib/contextual/verify.ts:22-36`, `pipeline.ts` barrier | Route the empty-register case to `fast`, or answer it in code. Guarantee-affecting — needs a product call, so **not implemented here**. |
 | **G4** | `exampleCoverage` is not a support signal. `min(validated examples / 10, 1)` measures how many validated pairs the **file** has — it never looks at the draft. It was the router's only retrieval-quality input. | `pipeline.ts:238` | **Implemented** — see below. |
@@ -266,12 +266,46 @@ model, which inverts the entire argument for having built it.
 
 ---
 
+## Also landed: the tiers are admin-settable
+
+`CONTEXTUAL_FAST_MODEL` and `CONTEXTUAL_DEEP_MODEL` were env-only, so acting on
+G1 — the audit's top finding — needed a deploy per environment. Both now
+resolve **admin store → env var → default**, the same precedence the chat and
+agent models already used, and both are set from the platform admin console.
+
+They live on the existing managed model list rather than in new free-text
+fields, which is what makes them safe: a tier can only point at a model already
+in the allowlist, so the AI guard can never reject a model an admin configured.
+The route re-validates on the merged post-patch state, catching both "set a
+tier to an unlisted model" and "shrink the list out from under a set tier".
+
+Two behaviours distinguish these from the chat and agent models, because they
+are **optional** where those are required:
+
+- Adding the first model to the list claims chat and agent, and **does not**
+  claim the tiers. Claiming them implicitly would silently change what the
+  pipeline runs on.
+- Removing a model reassigns chat and agent to another list entry, but
+  **clears** a tier back to the fallback. Reassigning a tier an admin never
+  chose is a worse surprise than falling back to the documented default.
+
+The console seeds the toggles from the **stored** value, never from `effective`
+— `effective` reports what is in force including the fallback, so seeding from
+it would render an unset tier as pinned and turn the next save into a real
+change nobody asked for. Sending `""` clears a tier, and the store drops the key
+rather than persisting an empty string that would beat the env fallback.
+
+The env vars remain as a fallback: `docs/COST-METERING.md` drives offline
+costing runs through `.dev.vars`, which has no admin console.
+
+---
+
 ## Recommended order of work
 
-1. **G1 + G2** — set `CONTEXTUAL_FAST_MODEL` to a small model per environment.
-   Config-only, immediately measurable via the existing meter, and it turns the
-   entire tier architecture (including the new support check) from accounting
-   into money. Everything else is smaller.
+1. **G1 + G2** — mark a small model ⚡ Fast in the admin console. One click, no
+   deploy, immediately measurable via the existing meter, and it turns the
+   entire tier architecture (the support check and the segmentation pass
+   included) from accounting into money. Everything else is smaller.
 2. **G5** — reuse the FTS retrieval in the autopilot. Pure code, no model cost,
    improves both draft quality and the support signal's precision.
 3. **G8** — turn the meter on somewhere and start reading per-label cost. Nothing

@@ -53,7 +53,7 @@ import { measureTranslationEvidence, type TranslationEvidenceSnapshot } from "@/
 import {
   idmlCompletionPromptSource,
   idmlCompletionSystemAddendum,
-  normalizeProtectedCompletion,
+  normalizeProtectedCompletionWithRepair,
 } from "@/lib/idml/completion"
 
 // Cap per LLM call. Above this we split into independent review packages.
@@ -411,7 +411,21 @@ export function useCompletion(
       // AQU-211: auto-commit like the batch path. The cell lands unvalidated
       // and flows through the validation workflow — no inline accept/reject.
       const llmAuthor = modelName
-      const completed = normalizeProtectedCompletion(cell, finalText)
+      // IDML: reconstruct safe multi-slot damage locally; if anchors are still
+      // broken, run one repair pass that rebuilds the source shell with the
+      // draft's translated wording.
+      const completed = await normalizeProtectedCompletionWithRepair(
+        cell,
+        finalText,
+        async (messages) => complete({
+          settings: generationSettings,
+          session,
+          messages: [...messages],
+          stream: false,
+          signal,
+        }),
+      )
+      finalText = completed.valueHtml ?? completed.value
       if (opts?.commitGuard && !opts.commitGuard()) {
         setPreviews((p) => { const m = new Map(p); m.delete(cell.id); return m })
         setCompleting((p) => { const m = new Map(p); m.delete(cell.id); return m })
@@ -681,7 +695,17 @@ export function useCompletion(
           if (text !== undefined && text.trim()) {
             if (commitCompletedCell) {
               try {
-                const completed = normalizeProtectedCompletion(cell, text)
+                const completed = await normalizeProtectedCompletionWithRepair(
+                  cell,
+                  text,
+                  async (messages) => complete({
+                    settings: effectiveSettings,
+                    session,
+                    messages: [...messages],
+                    stream: false,
+                    signal: getBatchCompletionSignal(runId),
+                  }),
+                )
                 await commitCompletedCell(
                   cell,
                   completed.valueHtml ?? completed.value,
@@ -943,7 +967,17 @@ export function useCompletion(
         if (!idmlCompletionSystemAddendum([cell])) {
           setPreviews((p) => new Map(p).set(cellId, text))
         }
-        const completed = normalizeProtectedCompletion(cell, text)
+        const completed = await normalizeProtectedCompletionWithRepair(
+          cell,
+          text,
+          async (messages) => complete({
+            settings: effectiveSettings,
+            session,
+            messages: [...messages],
+            stream: false,
+            signal,
+          }),
+        )
         await commitCompletedCell?.(
           cell,
           completed.valueHtml ?? completed.value,
@@ -995,5 +1029,30 @@ export function useCompletion(
     }
   }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, commitCompletedCell, rules, getAllCells, briefSummary, draftContext, draftProvenance])
 
-  return { completeSingle, prepareSingleEvidence, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, isConfigured, isAvailable, completing, examples, errors, previews }
+  /**
+   * AQU-913: forget a cell's failure entirely — the visible message AND the
+   * per-cell `"error"` status that rides alongside it. Until this existed the
+   * only thing that cleared either was starting a new attempt on the same cell,
+   * so a stuck `completing: "error"` entry kept the cell looking failed
+   * downstream long after the message had served its purpose.
+   *
+   * Deliberately narrow: an in-flight attempt ("searching"/"generating") is
+   * left alone, so dismissing a stale error can never cancel a live draft.
+   */
+  const clearCellError = useCallback((cellId: string) => {
+    setErrors((p) => {
+      if (!p.has(cellId)) return p
+      const next = new Map(p)
+      next.delete(cellId)
+      return next
+    })
+    setCompleting((p) => {
+      if (p.get(cellId) !== "error") return p
+      const next = new Map(p)
+      next.delete(cellId)
+      return next
+    })
+  }, [])
+
+  return { completeSingle, prepareSingleEvidence, completeBatch, completeParagraph, cancelCompletion: cancelBatchCompletion, clearCellError, isConfigured, isAvailable, completing, examples, errors, previews }
 }

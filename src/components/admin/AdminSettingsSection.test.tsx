@@ -25,6 +25,10 @@ const RESPONSE: PlatformSettingsResponse = {
   effective: {
     defaultLlmModel: "anthropic/claude-sonnet-4.5",
     agentModel: "anthropic/claude-haiku-4-5",
+    // Nothing is STORED for the tiers, so `effective` reports the fallback —
+    // the same frontier model everything else runs on.
+    contextualFastModel: "anthropic/claude-sonnet-4.5",
+    contextualDeepModel: "anthropic/claude-sonnet-4.5",
     allowedModels: ["anthropic/claude-sonnet-4.5", "anthropic/claude-haiku-4-5"],
   },
 }
@@ -41,6 +45,38 @@ async function pickSelectOption(triggerLabel: string, optionName: RegExp) {
 }
 
 describe("AdminSettingsSection", () => {
+  it("hydrates the optional tiers from the STORED value, not the effective one", async () => {
+    // Seeding from `effective` would render an unset tier as pinned, and the
+    // next save would silently write a value the admin never chose.
+    mockGet.mockResolvedValue(RESPONSE)
+    mockUpdate.mockResolvedValue({ settings: {}, version: 4 })
+    render(<AdminSettingsSection jwt="jwt" />)
+    await screen.findAllByText("anthropic/claude-sonnet-4.5")
+
+    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalled())
+    expect(mockUpdate.mock.calls[0][1]).toMatchObject({
+      contextualFastModel: "",
+      contextualDeepModel: "",
+    })
+  })
+
+  it("sends a chosen fast tier and can clear it again", async () => {
+    mockGet.mockResolvedValue({
+      ...RESPONSE,
+      settings: { contextualFastModel: "anthropic/claude-haiku-4-5" },
+    })
+    mockUpdate.mockResolvedValue({ settings: {}, version: 4 })
+    render(<AdminSettingsSection jwt="jwt" />)
+    await screen.findAllByText("anthropic/claude-haiku-4-5")
+
+    fireEvent.click(screen.getByRole("button", { name: /save/i }))
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalled())
+    expect(mockUpdate.mock.calls[0][1]).toMatchObject({
+      contextualFastModel: "anthropic/claude-haiku-4-5",
+    })
+  })
+
   it("loads settings and lists the allowed models", async () => {
     mockGet.mockResolvedValue(RESPONSE)
     render(<AdminSettingsSection jwt="jwt" />)

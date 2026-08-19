@@ -18,7 +18,7 @@ not a micro-spec farm.
 | Projects | Open / delete / restore from trash | `e2e/specs/projects/project-trash.smoke.spec.ts` |
 | Projects | App shell still routes | `e2e/specs/projects/route-health.smoke.spec.ts` |
 | Projects | Project settings rename/save persists | `e2e/specs/projects/project-settings.smoke.spec.ts` |
-| Projects | Knowledge Base upload, extracted-text read, and delete persist through Postgres + R2 | `e2e/specs/projects/project-settings.smoke.spec.ts` |
+| Projects | Knowledge Base upload, extracted-text read, and delete persist through Postgres + R2 (via Living Memory → Knowledge, `/project/:id/memory/knowledge`) | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Setup checklist survives refresh | `e2e/specs/editor/setup-checklist-survives-refresh.smoke.spec.ts` |
 | Orgs | Add member to org, member sees it | `e2e/specs/orgs/members.smoke.spec.ts` |
 | Orgs | Account switcher sessions | `e2e/specs/orgs/account-switcher.smoke.spec.ts` |
@@ -86,7 +86,9 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 | Journey | Spec |
 | --- | --- |
 | IDML roundtrip / IME / protected slots | `e2e/specs/editor/idml-roundtrip.spec.ts` |
-| Biblica study notes import | `e2e/specs/editor/import-biblica-study-notes.spec.ts` |
+| Biblica study notes import (incl. division bookmarks + front/back matter volumes) | `e2e/specs/editor/import-biblica-study-notes.spec.ts` |
+| Treasure Hunt Bible import | `e2e/specs/editor/import-treasure-hunt-bible.spec.ts` |
+| Reach 4 Life import | `e2e/specs/editor/import-reach4life.spec.ts` |
 | Contextual run pill | `e2e/specs/contextual/run-pill.spec.ts` |
 | Project overview autopilot | `e2e/specs/projects/project-overview-autopilot.spec.ts` |
 | Org access lifecycle (multi-path revoke) | `e2e/specs/orgs/org-access-lifecycle.spec.ts` |
@@ -113,7 +115,7 @@ UI chrome that used to be one smoke file per click is covered under
 - Preferences toggles / theme (except persist-reload)
 - Rules page toggles / severity / regex mode (RTL on RulesPage + rule editor)
 - Comments page empty / filter / sort chrome (RTL + comments-page surface session)
-- Living-memory empty state
+- Living-memory empty states and section IA (index → brief/instructions/quality/knowledge/examples panes, collapsed prediction prompt, role gates — RTL in `LivingMemoryPage.component.test.tsx`; entry points and legacy settings redirects in `ProjectSettings.subMenuIA.test.tsx` + `shell-routing.test.ts`)
 - Back-translation generation, editing, stale/provenance, and statistical-pairs comparison (`BacktranslationPanel.test.tsx`); the cross-user edit lock remains in the smoke keep-list
 - Admin console tab clicks, formatting Ctrl+B alone, breadcrumb-only nav
 

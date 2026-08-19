@@ -791,4 +791,39 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "has already arrived at. Same English words, different grammatical role — " +
     "the same navigate-vs-heading split already documented for the language " +
     "switcher in namespaces/language.ts.",
+  "terminology.livingMemory.section.brief.title":
+    "Index-row title naming the translation brief — the skopos document, a " +
+    "translation-studies term of art that several languages render with a " +
+    "loanword or fixed phrase. autopilot.graph.node.summarize shows 'Brief' as " +
+    "the caption of the summarize STAGE in the autopilot pipeline graph — a " +
+    "process-step label, not the document, and free to translate as 'summary'.",
+  "terminology.livingMemory.section.brief.statusNone":
+    "Hint on the Living Memory index saying the brief document has not been " +
+    "begun — an authoring state of a document. autopilot.status.notStarted is a " +
+    "value of the run-status enum for a background PROCESS that has not run " +
+    "yet; document-authoring and process-lifecycle states often take different " +
+    "verbs or participles.",
+  "terminology.livingMemory.section.brief.statusDraft":
+    "Hint on the Living Memory index saying the brief document is partially " +
+    "filled in — a document maturity state ('a draft'). " +
+    "autopilot.inspector.review.draftTitle and autopilot.graph.node.draft label " +
+    "the autopilot DRAFTING step and its produced draft translations — the " +
+    "activity of machine-drafting text, a different sense languages split from " +
+    "'unfinished document'.",
+  "terminology.livingMemory.section.brief.statusComplete":
+    "Hint on the Living Memory index saying every brief field is filled in — " +
+    "'complete' as document completeness. autopilot.status.complete is the " +
+    "terminal value of the run-status enum — a PROCESS that finished; " +
+    "'filled-in' vs 'finished' are commonly different words outside English.",
+  "terminology.livingMemory.prompt.defaultBadge":
+    "Badge on the prediction-prompt block stating the prompt is the unmodified " +
+    "built-in one — 'default' as a setting state, paired with the sibling " +
+    "Custom badge. org.projectOverview.laneDefaultFallback names the unnamed " +
+    "target LANE shown when a project has no named lanes — a placeholder noun " +
+    "('the default one'), a different grammatical role.",
+  "terminology.livingMemory.section.examples.title":
+    "Index-row title for the validated-example-pairs section of Living Memory " +
+    "— a plain plural noun heading. agent.run.tool.examples is the display " +
+    "name of the agent's retrieve-examples TOOL call in the run log — an " +
+    "operation name that several languages render verbal ('fetch examples').",
 }

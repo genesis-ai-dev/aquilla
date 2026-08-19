@@ -151,6 +151,34 @@ export const terminology = defineNamespace({
     "terminology.livingMemory.recentExamplesDescription":
       "Human-validated source→target pairs the AI uses as in-context examples. These " +
       "are the translations your team has agreed on.",
+    // Settings-style IA (index → detail): section rows + pane chrome. Reused
+    // keys (no duplicates added): the instructions section title is
+    // instructionsTitle above, `knowledge` reuses knowledgeBase.title/
+    // .description, `examples` reuses recentExamplesDescription, the quality
+    // rule-count hint reuses rules.checkDrawer.scopeRules, and the prompt
+    // reset button reuses onboarding.checklist.aiInstructions.resetToDefault.
+    "terminology.livingMemory.section.brief.title": "Brief",
+    "terminology.livingMemory.section.brief.description":
+      "Audience, purpose, and scope of this translation",
+    "terminology.livingMemory.section.brief.statusNone": "Not started",
+    "terminology.livingMemory.section.brief.statusDraft": "Draft",
+    "terminology.livingMemory.section.brief.statusComplete": "Complete",
+    "terminology.livingMemory.section.instructions.description":
+      "How the AI should behave when drafting, and the default prediction prompt",
+    "terminology.livingMemory.section.instructions.entryCount": plural({
+      one: "{count} entry",
+      other: "{count} entries",
+    }),
+    "terminology.livingMemory.section.instructions.customPromptHint": "Custom prompt",
+    "terminology.livingMemory.section.quality.title": "Translation quality",
+    "terminology.livingMemory.section.quality.description":
+      "Standards, style rules, and checks that guard the translation",
+    "terminology.livingMemory.section.knowledge.hintOn": "On",
+    "terminology.livingMemory.section.knowledge.hintOff": "Off",
+    "terminology.livingMemory.section.examples.title": "Examples",
+    // Default-prediction-prompt block (instructions pane, collapsed by default).
+    "terminology.livingMemory.prompt.defaultBadge": "Default",
+    "terminology.livingMemory.prompt.customBadge": "Custom",
 
     // ── TerminologyTermDetail.tsx ────────────────────────────────────────────
     "terminology.termDetail.closeAria": "Close detail",
@@ -512,6 +540,47 @@ export const terminology = defineNamespace({
           "Prefix before the raw error message when Living Memory fails to load cells; " +
           "{message} is the underlying error's own text (not translated).",
         placeholders: { message: "The underlying fetch error's message, verbatim." },
+      },
+      "terminology.livingMemory.section.brief.statusNone": {
+        description:
+          "Right-aligned hint on the Living Memory index's Brief row when no translation " +
+          "brief has been authored yet. Sibling values: 'Draft', 'Complete'.",
+      },
+      "terminology.livingMemory.section.instructions.entryCount": {
+        description:
+          "Right-aligned hint on the Living Memory index's Instructions row: how many " +
+          "authored instruction entries exist; {count} is that count, already " +
+          "locale-formatted.",
+        placeholders: { count: "The instruction-entry count, already locale-formatted." },
+      },
+      "terminology.livingMemory.section.instructions.customPromptHint": {
+        description:
+          "Appended to the Instructions row hint when the project overrides the default " +
+          "AI prediction prompt (e.g. '2 entries · Custom prompt').",
+      },
+      "terminology.livingMemory.section.knowledge.hintOn": {
+        description:
+          "Right-aligned hint on the Living Memory index's Knowledge base row when the " +
+          "knowledge base is used in drafting. Paired with the 'Off' hint.",
+        maxLength: 12,
+      },
+      "terminology.livingMemory.section.knowledge.hintOff": {
+        description:
+          "Right-aligned hint on the Living Memory index's Knowledge base row when the " +
+          "knowledge base is not used in drafting. Paired with the 'On' hint.",
+        maxLength: 12,
+      },
+      "terminology.livingMemory.prompt.defaultBadge": {
+        description:
+          "Badge on the collapsed prediction-prompt row: the project uses the built-in " +
+          "default prompt (adjective, one word). Paired with the 'Custom' badge.",
+        maxLength: 16,
+      },
+      "terminology.livingMemory.prompt.customBadge": {
+        description:
+          "Badge on the collapsed prediction-prompt row: the project overrides the " +
+          "default prompt (adjective, one word). Paired with the 'Default' badge.",
+        maxLength: 16,
       },
       "terminology.common.occurrenceCount": {
         description:

@@ -37,6 +37,7 @@ import {
   type ContextualTransport,
   type ContextualTransportSnapshot,
 } from "./run-store"
+import { isOpaqueId } from "../../../shared/span-label"
 
 // ── Typed errors ────────────────────────────────────────────────────────────
 
@@ -177,7 +178,7 @@ interface DraftListRow {
   runId: string
   cellId: string
   text: string
-  provenance?: { spanId?: string } | null
+  provenance?: { spanId?: string; spanLabel?: string } | null
 }
 
 /**
@@ -203,13 +204,16 @@ export async function fetchContextualDrafts(
   if (res.status === 404 || res.status === 501) return []
   if (!res.ok) return throwFromResponse(res, "fetch contextual drafts failed")
   const { drafts } = (await res.json()) as { drafts?: DraftListRow[] }
-  return (drafts ?? []).map((d) => ({
-    draftId: d.id,
-    runId: d.runId,
-    cellId: d.cellId,
-    text: d.text,
-    ...(d.provenance?.spanId ? { spanLabel: d.provenance.spanId } : {}),
-  }))
+  return (drafts ?? []).map((d) => {
+    const spanLabel = typeof d.provenance?.spanLabel === "string" ? d.provenance.spanLabel : ""
+    return {
+      draftId: d.id,
+      runId: d.runId,
+      cellId: d.cellId,
+      text: d.text,
+      ...(spanLabel && !isOpaqueId(spanLabel) ? { spanLabel } : {}),
+    }
+  })
 }
 
 /**
@@ -352,6 +356,7 @@ export interface ContextualActivitySceneBrief {
   fileId?: string
   startCellId?: string
   endCellId?: string
+  spanLabel?: string | null
   status?: string
   construal?: string
   l1Summary?: string | null
@@ -375,6 +380,8 @@ export interface ContextualActivityDraft {
   runId?: string
   fileId?: string
   cellId?: string
+  cellLabel?: string | null
+  spanLabel?: string | null
   sceneBriefId?: string | null
   text?: string
   status?: string

@@ -11,7 +11,7 @@ import { ArchivedProjects } from "@/components/org/ArchivedProjects"
 import { ProjectOverview } from "@/components/org/ProjectOverview"
 import { AssignedToMe } from "@/components/org/AssignedToMe"
 import { SharedProjectsPage } from "@/components/org/SharedProjectsPage"
-import { resumeOrgPath, projectSettingsPath } from "@/lib/navigation/org-paths"
+import { resumeOrgPath, projectMemoryPath } from "@/lib/navigation/org-paths"
 import { JoinPage } from "@/components/JoinPage"
 import { AccessLinkPage } from "@/components/AccessLinkPage"
 import { JoinOrgPage } from "@/components/JoinOrgPage"
@@ -153,11 +153,11 @@ function RouteLoadingFallback() {
   return <LoadingOverlay />
 }
 
-/** Preserve bookmarks and e2e gotos to the old workspace overlay URLs. */
-function RedirectToProjectSettingsSection({ section }: { section: string }) {
+/** Preserve bookmarks and e2e gotos to retired paths that moved into Living Memory. */
+function RedirectToProjectMemory({ section }: { section?: string }) {
   const { id } = useParams<{ id: string }>()
   const { search } = useLocation()
-  return <Navigate to={`${projectSettingsPath(id!, section)}${search}`} replace />
+  return <Navigate to={`${projectMemoryPath(id!, section)}${search}`} replace />
 }
 
 function LazyRoute({ children, fallback = <RouteLoadingFallback /> }: { children: ReactNode; fallback?: ReactNode }) {
@@ -292,12 +292,14 @@ function AppRoutes() {
         <Route path="/project/:id/editor/file/:fileId" element={<ProjectWorkspace />} />
         <Route path="/project/:id/settings" element={<LazyRoute><ProjectSettings /></LazyRoute>} />
         <Route path="/project/:id/settings/:section" element={<LazyRoute><ProjectSettings /></LazyRoute>} />
-        <Route path="/project/:id/rules" element={<RedirectToProjectSettingsSection section="rules" />} />
+        {/* Rules now live on Living Memory's "Translation quality" pane. */}
+        <Route path="/project/:id/rules" element={<RedirectToProjectMemory section="quality" />} />
         <Route path="/project/:id/agent" element={<ProjectWorkspace />} />
         <Route path="/project/:id/voice" element={<ProjectWorkspace />} />
         <Route path="/project/:id/terminology" element={<ProjectWorkspace />} />
         <Route path="/project/:id/comments" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/memory" element={<RedirectToProjectSettingsSection section="memory" />} />
+        <Route path="/project/:id/memory" element={<ProjectWorkspace />} />
+        <Route path="/project/:id/memory/:section" element={<ProjectWorkspace />} />
 
         {/* Monday.com OAuth redirect URI. Stays top-level and un-scoped: the
             path is registered with Monday, so it cannot carry an org segment. */}

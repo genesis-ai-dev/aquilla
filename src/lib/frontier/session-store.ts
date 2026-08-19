@@ -84,12 +84,21 @@ async function readEnvelope(): Promise<Envelope> {
 // current environment host (aquilla.app, dev.aquilla.app, localhost).
 const HINT_COOKIE = "aq_hint"
 
+// [Pen test 2026-08-17] `Secure` prevents the cookie from ever being sent (or
+// set) over a plaintext connection. Conditional on protocol rather than
+// unconditional: an unconditional `Secure` attribute is silently dropped by
+// the browser on http:// origins, which would break the hint on local dev
+// (http://localhost) and any non-TLS preview host.
+function secureAttr(): string {
+  return typeof location !== "undefined" && location.protocol === "https:" ? "; Secure" : ""
+}
+
 function setAuthHint(): void {
-  document.cookie = `${HINT_COOKIE}=1; Path=/; Max-Age=31536000; SameSite=Lax`
+  document.cookie = `${HINT_COOKIE}=1; Path=/; Max-Age=31536000; SameSite=Lax${secureAttr()}`
 }
 
 export function clearAuthHint(): void {
-  document.cookie = `${HINT_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`
+  document.cookie = `${HINT_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${secureAttr()}`
 }
 
 /**

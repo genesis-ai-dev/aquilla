@@ -46,6 +46,7 @@ export const workspace = defineNamespace({
     "workspace.focusLock.editingNotice":
       "{user} is now editing this cell — your editor is read-only. Copy any unsaved text before moving away.",
     "workspace.loadingComments": "Loading comments",
+    "workspace.loadingMemory": "Loading Living Memory",
     // "Loading terminology" → terminology.loadingLabel (same panel, same surface)
 
     // -- ProjectWorkspace: "Recently deleted" trash dialog --
@@ -510,6 +511,13 @@ export const workspace = defineNamespace({
         description:
           "Loading-panel label shown while the full-page Comments surface inside " +
           "the workspace shell is being fetched.",
+      },
+      "workspace.loadingMemory": {
+        description:
+          "Loading-panel label shown while the full-page Living Memory surface " +
+          "inside the workspace shell is being fetched. 'Living Memory' is the " +
+          "product name of that surface — keep it aligned with " +
+          "terminology.livingMemory.title.",
       },
       "workspace.trash.empty": {
         description:

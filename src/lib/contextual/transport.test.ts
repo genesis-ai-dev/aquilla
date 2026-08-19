@@ -95,9 +95,28 @@ describe("fetchContextualDrafts", () => {
       runId: "older-owning-run",
       cellId: "cell-1",
       text: "Review me",
-      spanLabel: "span-1",
     }])
     expect(lastRequest().url).toContain("/contextual/drafts?fileId=file%201&status=proposed")
+  })
+
+  it("keeps a human passage label from draft provenance and ignores span ids", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      drafts: [{
+        id: "draft-1",
+        runId: "run-1",
+        cellId: "cell-1",
+        text: "Review me",
+        provenance: { spanId: "01920000-0000-7000-8000-000000000001", spanLabel: "LUK 1:1–1:8" },
+      }],
+    }))
+
+    await expect(fetchContextualDrafts(PROJECT_ID, FILE_ID)).resolves.toEqual([{
+      draftId: "draft-1",
+      runId: "run-1",
+      cellId: "cell-1",
+      text: "Review me",
+      spanLabel: "LUK 1:1–1:8",
+    }])
   })
 })
 

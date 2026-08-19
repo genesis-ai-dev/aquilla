@@ -3,7 +3,7 @@
 // eliminates the wait for a reconnect/focus refresh for active collaborators.
 
 import type { ProjectDoServerMessage } from './project-do-handlers'
-import { secureCompare } from './lib/secure-compare'
+import { serviceBearerMatches } from './lib/service-auth'
 
 export interface ProjectSettingsNotifyEnv {
   ProjectSync?: DurableObjectNamespace
@@ -47,8 +47,7 @@ export async function handleProjectSettingsChangedRequest(
   if (!match) return null
   if (request.method !== 'POST') return new Response('method not allowed', { status: 405 })
 
-  const expected = env.SYNC_SECRET_KEY ? `Bearer ${env.SYNC_SECRET_KEY}` : null
-  if (!expected || !secureCompare(request.headers.get('Authorization') ?? '', expected)) {
+  if (!serviceBearerMatches(request.headers.get('Authorization'), env)) {
     return new Response('unauthorized', { status: 401 })
   }
 

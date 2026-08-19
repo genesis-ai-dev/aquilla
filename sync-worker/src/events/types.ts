@@ -27,6 +27,11 @@ export type EventKind =
   | 'source.cell.reorder'
   // Versioned, metadata-only backfill. Does not advance the source text chain.
   | 'source.cell.metadata.patch'
+  // Anchor-only repair (migration reconciliation, AQU-931). Non-chain-mutating —
+  // moves ONLY cells.anchor_cell_id on the source row; never advances
+  // cells.event_id (the AD-9 staleness comparison depends on the source head
+  // moving only when content changes) and replays unconditionally on rebuild.
+  | 'source.cell.reanchor'
   // Target-side cell events (translator).
   | 'target.cell.create'
   | 'target.cell.commit'
@@ -183,6 +188,10 @@ export interface EventPayloads {
   }
   'source.cell.delete': Record<string, never>
   'source.cell.reorder': {
+    anchorCellId: string | null
+  }
+  'source.cell.reanchor': {
+    /** The cell this cell should follow; null re-heads it (anchor chain start). */
     anchorCellId: string | null
   }
   'source.cell.metadata.patch': {

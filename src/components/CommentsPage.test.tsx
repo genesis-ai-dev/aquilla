@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 import { CommentsPage } from "./CommentsPage"
@@ -104,7 +105,8 @@ describe("CommentsPage chrome", () => {
     expect(mockRefresh).toHaveBeenCalledTimes(1)
   })
 
-  it("opens the Filters menu to show Sort and Show resolved, then closes it", () => {
+  it("opens the Filters menu to show Sort and Show resolved, then closes it", async () => {
+    const user = userEvent.setup()
     renderPage()
 
     expect(screen.queryByRole("combobox", { name: /^Sort$/i })).not.toBeInTheDocument()
@@ -117,6 +119,13 @@ describe("CommentsPage chrome", () => {
     const sortTrigger = screen.getByRole("combobox", { name: /^Sort$/i })
     expect(sortTrigger).toBeInTheDocument()
     expect(sortTrigger.className).toMatch(/text-foreground/)
+    await user.click(screen.getByText("Sort"))
+    expect(sortTrigger).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(sortTrigger)
+    const sortMenu = document.querySelector("[data-slot=select-content]")
+    expect(sortMenu).toHaveAttribute("data-align-trigger", "false")
+    expect(sortMenu?.closest("[data-align]")).toHaveAttribute("data-align", "end")
+    expect(sortMenu?.closest("[data-side]")).toHaveAttribute("data-side", "top")
     expect(screen.getByText("Sort").className).toMatch(/text-muted-foreground/)
     expect(screen.getByText("Show resolved").className).toMatch(/text-muted-foreground/)
     expect(screen.getByRole("switch", { name: /Show resolved/i })).not.toBeChecked()

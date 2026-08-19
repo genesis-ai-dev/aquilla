@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useParams, useNavigate, Link } from "react-router-dom"
-import { MoreHorizontal, ChevronRight, Copy, Check, Download, Search, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings } from "lucide-react"
+import { MoreHorizontal, ChevronRight, Copy, Check, Download, Search, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
@@ -210,6 +210,35 @@ function StatusChip({ status }: { status: ProjectStatus }) {
 function DeadlineChip({ status }: { status: "overdue" | "soon" | "ok" | null }) {
   // On-track lives only next to the title — avoid duplicating it on the deadline.
   return <ProjectDeadlineStatuses deadline={status} testId="status-chip" />
+}
+
+/** Icon-only edit control for a header meta field (PM, deadline). */
+function MetaFieldEditButton({
+  label,
+  disabled,
+  testId,
+  onClick,
+}: {
+  label: string
+  disabled: boolean
+  testId?: string
+  onClick: () => void
+}) {
+  return (
+    <AppTooltip content={label}>
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="ghost"
+        disabled={disabled}
+        aria-label={label}
+        data-testid={testId}
+        onClick={onClick}
+      >
+        <Pencil />
+      </Button>
+    </AppTooltip>
+  )
 }
 
 // ── Stat tiles (big %) ────────────────────────────────────────────────────────
@@ -1122,30 +1151,19 @@ export function ProjectOverview() {
                         </span>
                       )}
                       {canManage && (
-                        <ButtonGroup>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={busy}
-                            data-testid="overview-pm-edit"
-                            onClick={() => {
-                              setPmSelection(pm ? String(pm.id) : "")
-                              setPmDialogOpen(true)
-                            }}
-                          >
-                            {pm ? t("org.projectOverview.change") : t("dialog.assign.submit")}
-                          </Button>
-                          {pm && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              disabled={busy}
-                              onClick={() => savePm(null)}
-                            >
-                              {t("common.clear")}
-                            </Button>
-                          )}
-                        </ButtonGroup>
+                        <MetaFieldEditButton
+                          label={
+                            pm
+                              ? t("org.projectOverview.changeProjectManagerDialogTitle")
+                              : t("org.projectOverview.assignProjectManagerDialogTitle")
+                          }
+                          disabled={busy}
+                          testId="overview-pm-edit"
+                          onClick={() => {
+                            setPmSelection(pm ? String(pm.id) : "")
+                            setPmDialogOpen(true)
+                          }}
+                        />
                       )}
                     </div>
                   </Field>
@@ -1163,29 +1181,19 @@ export function ProjectOverview() {
                         <span className="text-muted-foreground">{t("org.projectOverview.noDeadlineSet")}</span>
                       )}
                       {canManage && (
-                        <ButtonGroup>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled={busy}
-                            onClick={() => {
-                              setDeadlineDate(deadlineStringToDate(audio?.deadlineAt))
-                              setDeadlineDialogOpen(true)
-                            }}
-                          >
-                            {audio?.deadlineAt ? t("org.projectOverview.change") : t("org.projectOverview.setDeadline")}
-                          </Button>
-                          {audio?.deadlineAt && (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              disabled={busy}
-                              onClick={() => saveDeadline(null)}
-                            >
-                              {t("common.clear")}
-                            </Button>
-                          )}
-                        </ButtonGroup>
+                        <MetaFieldEditButton
+                          label={
+                            audio?.deadlineAt
+                              ? t("org.projectOverview.changeDeadlineDialogTitle")
+                              : t("org.projectOverview.setDeadlineDialogTitle")
+                          }
+                          disabled={busy}
+                          testId="overview-deadline-edit"
+                          onClick={() => {
+                            setDeadlineDate(deadlineStringToDate(audio?.deadlineAt))
+                            setDeadlineDialogOpen(true)
+                          }}
+                        />
                       )}
                     </div>
                   </Field>
@@ -1214,6 +1222,17 @@ export function ProjectOverview() {
                       </Field>
                     </FieldGroup>
                     <DialogFooter>
+                      {audio?.deadlineAt && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          disabled={busy}
+                          className="sm:me-auto"
+                          onClick={() => saveDeadline(null)}
+                        >
+                          {t("common.clear")}
+                        </Button>
+                      )}
                       <Button
                         type="button"
                         variant="outline"
@@ -1277,6 +1296,17 @@ export function ProjectOverview() {
                       </Field>
                     </FieldGroup>
                     <DialogFooter>
+                      {pm && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          disabled={busy}
+                          className="sm:me-auto"
+                          onClick={() => savePm(null)}
+                        >
+                          {t("common.clear")}
+                        </Button>
+                      )}
                       <Button
                         type="button"
                         variant="outline"

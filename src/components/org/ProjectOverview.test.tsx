@@ -819,6 +819,12 @@ describe("ProjectOverview PM assignment", () => {
     await waitFor(() => expect(fetchAccessibleProjects).toHaveBeenCalled())
     const callsBeforeSave = fetchAccessibleProjects.mock.calls.length
 
+    const meta = screen.getByTestId("overview-project-meta")
+    expect(within(meta).queryByRole("button", { name: "Change" })).not.toBeInTheDocument()
+    expect(within(meta).queryByRole("button", { name: "Clear" })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Change project manager" }))
+    expect(screen.getByRole("heading", { name: "Change project manager" })).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Clear" }))
 
     await waitFor(() => expect(setProjectPm).toHaveBeenCalledWith("jwt", "p1", null))
@@ -828,7 +834,7 @@ describe("ProjectOverview PM assignment", () => {
     )
   })
 
-  it("clears the deadline from the header Clear control", async () => {
+  it("clears the deadline from the edit-dialog Clear control", async () => {
     useProject.mockReturnValue({
       project: projectRecord({ level: 600 }),
       status: "ready",
@@ -852,6 +858,12 @@ describe("ProjectOverview PM assignment", () => {
     renderOverview()
 
     await screen.findByText("2026-07-01")
+    const meta = screen.getByTestId("overview-project-meta")
+    expect(within(meta).queryByRole("button", { name: "Change" })).not.toBeInTheDocument()
+    expect(within(meta).queryByRole("button", { name: "Clear" })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Change project deadline" }))
+    expect(screen.getByRole("heading", { name: "Change project deadline" })).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Clear" }))
     await waitFor(() => expect(setProjectDeadline).toHaveBeenCalledWith("jwt", "p1", null))
   })

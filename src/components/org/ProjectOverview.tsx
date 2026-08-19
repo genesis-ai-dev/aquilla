@@ -1615,32 +1615,6 @@ export function ProjectOverview() {
                       settings → exportMinRole set above that role), confirm
                       neither Copy CSV nor Download CSV control renders.
                     */}
-                    {orgSettings.canExport && sorted.length > 0 && (
-                      <div className="mb-3 flex items-center gap-2">
-                        <AppTooltip content={t("org.projectOverview.copyCsvTooltip")}>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => void handleCopyCsv()}
-                            data-testid="export-csv-copy"
-                          >
-                            {csvCopied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                            {csvCopied ? t("nav.version.copiedLabel") : t("org.projectOverview.copyCsv")}
-                          </Button>
-                        </AppTooltip>
-                        <AppTooltip content={t("org.projectOverview.downloadCsvTooltip")}>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={handleDownloadCsv}
-                            data-testid="export-csv-download"
-                          >
-                            <Download className="h-3.5 w-3.5" />
-                            {t("org.projectOverview.downloadCsv")}
-                          </Button>
-                        </AppTooltip>
-                      </div>
-                    )}
                     {/*
                       SWARM-TODO(AQU-499): verify live — open a Scripture
                       project overview, change the "Sort files by" dropdown
@@ -1652,8 +1626,8 @@ export function ProjectOverview() {
                       and confirm the same file's rollup is still expanded
                       after its row moves.
                     */}
-                    <div className="mb-3 flex flex-wrap items-center gap-2">
-                      <InputGroup className="h-9 max-w-56">
+                    <div className="mb-3 flex flex-wrap items-center gap-3">
+                      <InputGroup className="max-w-xs">
                         <InputGroupAddon>
                           <Search />
                         </InputGroupAddon>
@@ -1670,10 +1644,10 @@ export function ProjectOverview() {
                         value={fileSortMode}
                         onValueChange={(v) => setFileSortMode((v as FileSortMode) ?? "last-updated")}
                       >
-                        <SelectTrigger aria-label={t("org.projectOverview.sortFilesByAria")} className="w-44">
+                        <SelectTrigger aria-label={t("org.projectOverview.sortFilesByAria")} className="w-44!">
                           <SelectValue />
                         </SelectTrigger>
-                        <SelectContent>
+                        <SelectContent align="start" alignItemWithTrigger={false} className="w-(--anchor-width)">
                           <SelectGroup>
                             {fileSortItems.map((m) => (
                               <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
@@ -1681,6 +1655,32 @@ export function ProjectOverview() {
                           </SelectGroup>
                         </SelectContent>
                       </Select>
+                      {orgSettings.canExport && sorted.length > 0 && (
+                        <ButtonGroup className="ms-auto shadow-xs">
+                          <AppTooltip content={t("org.projectOverview.copyCsvTooltip")}>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => void handleCopyCsv()}
+                              data-testid="export-csv-copy"
+                            >
+                              {csvCopied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+                              {csvCopied ? t("nav.version.copiedLabel") : t("org.projectOverview.copyCsv")}
+                            </Button>
+                          </AppTooltip>
+                          <AppTooltip content={t("org.projectOverview.downloadCsvTooltip")}>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={handleDownloadCsv}
+                              data-testid="export-csv-download"
+                            >
+                              <Download data-icon="inline-start" />
+                              {t("org.projectOverview.downloadCsv")}
+                            </Button>
+                          </AppTooltip>
+                        </ButtonGroup>
+                      )}
                     </div>
                     {sorted.length === 0 ? (
                       <p className="text-sm text-muted-foreground">

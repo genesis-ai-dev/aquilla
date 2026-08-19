@@ -1607,8 +1607,9 @@ describe("ProjectOverview CSV export (AQU-500)", () => {
 
     renderOverview()
 
-    await screen.findByTestId("export-csv-copy")
-    expect(screen.getByTestId("export-csv-download")).toBeInTheDocument()
+    const copy = await screen.findByTestId("export-csv-copy")
+    const download = screen.getByTestId("export-csv-download")
+    expect(copy.closest("[data-slot='button-group']")).toBe(download.closest("[data-slot='button-group']"))
   })
 
   it("hides the export controls when the caller is below the org's export floor", async () => {

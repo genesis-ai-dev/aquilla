@@ -450,7 +450,7 @@ function DataTableRowActionsButton({
         // Rows are often clickable; this press belongs to the menu, not the row.
         onClick={(event) => event.stopPropagation()}
         className={cn(
-          "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+          "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
           // Snap hover/active paint (no muddy transparent→accent fade). Keep
           // transform so the shared Button active translate still works.
           "transition-transform",

@@ -7,6 +7,9 @@ import { cn } from "@/lib/utils"
 const restWhileFieldLabelHovered =
   "group-has-[[data-slot=field-label]:hover]/field:not-aria-expanded:hover:bg-transparent group-has-[[data-slot=field-label]:hover]/field:not-aria-expanded:dark:hover:bg-input/30"
 
+/** Rest hover — same wash as settings NavRow. */
+const restHover = "hover:bg-accent/40 hover:text-foreground dark:hover:bg-accent/40"
+
 /** Open/press fill — one muted→accent step, including while the pointer stays on the trigger. */
 const accentFill =
   "active:bg-accent aria-expanded:bg-accent aria-pressed:bg-accent data-popup-open:bg-accent hover:active:bg-accent hover:aria-expanded:bg-accent hover:aria-pressed:bg-accent hover:data-popup-open:bg-accent dark:hover:active:bg-accent dark:hover:aria-expanded:bg-accent dark:hover:aria-pressed:bg-accent dark:hover:data-popup-open:bg-accent"
@@ -23,7 +26,8 @@ const buttonVariants = cva(
         default:
           "bg-primary text-primary-foreground hover:bg-[color-mix(in_oklch,var(--primary),var(--foreground)_8%)] active:bg-[color-mix(in_oklch,var(--primary),var(--foreground)_10%)] hover:active:bg-[color-mix(in_oklch,var(--primary),var(--foreground)_10%)] aria-expanded:bg-[color-mix(in_oklch,var(--primary),var(--foreground)_10%)] hover:aria-expanded:bg-[color-mix(in_oklch,var(--primary),var(--foreground)_10%)] data-popup-open:bg-[color-mix(in_oklch,var(--primary),var(--foreground)_10%)] hover:data-popup-open:bg-[color-mix(in_oklch,var(--primary),var(--foreground)_10%)]",
         outline: [
-          "border-border bg-background hover:bg-muted hover:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
+          "border-border bg-background dark:border-input dark:bg-input/30",
+          restHover,
           "group-has-[[data-slot=field-label]:hover]/field:not-aria-expanded:hover:bg-background group-has-[[data-slot=field-label]:hover]/field:not-aria-expanded:dark:hover:bg-input/30",
           accentFill,
           outlineOpenBorder,
@@ -33,7 +37,7 @@ const buttonVariants = cva(
           "active:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_7%)] hover:active:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_7%)] aria-expanded:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_7%)] hover:aria-expanded:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_7%)] data-popup-open:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_7%)] hover:data-popup-open:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_7%)]",
         ].join(" "),
         ghost: [
-          "hover:bg-muted hover:text-foreground dark:hover:bg-input/50",
+          restHover,
           restWhileFieldLabelHovered,
           accentFill,
         ].join(" "),

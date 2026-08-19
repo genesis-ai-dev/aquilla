@@ -224,8 +224,8 @@ export function AccountSwitcher({
                 isHeader
                   ? "h-9 rounded-xl bg-card px-2 transition-shadow"
                   : compact
-                    ? "h-8 w-8 justify-center rounded-md p-0 hover:bg-accent"
-                    : "w-full rounded-md px-1.5 py-1.5 hover:bg-accent",
+                    ? "h-8 w-8 justify-center rounded-md p-0 hover:bg-accent/40"
+                    : "w-full rounded-md px-1.5 py-1.5 hover:bg-accent/40",
               )}
               aria-label={t("nav.account.menuLabel", { username: active.username })}
               data-account-switcher-surface={variant}

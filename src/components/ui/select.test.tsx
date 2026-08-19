@@ -55,4 +55,28 @@ describe("Select trigger chrome", () => {
       /group-has-\[\[data-slot=field-label\]:hover\]\/field:not-aria-expanded:hover:bg-transparent/,
     )
   })
+
+  it("uses the settings-row hover wash on the closed trigger", async () => {
+    const user = userEvent.setup()
+    render(
+      <Select defaultValue="newest">
+        <SelectTrigger aria-label="Sort">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            <SelectItem value="newest">Newest</SelectItem>
+          </SelectGroup>
+        </SelectContent>
+      </Select>,
+    )
+    const trigger = screen.getByRole("combobox", { name: "Sort" })
+    expect(trigger.className).toMatch(/hover:bg-accent\/40/)
+    expect(trigger.className).not.toMatch(/hover:bg-muted/)
+
+    await user.click(trigger)
+    expect(screen.getByRole("option", { name: "Newest" }).className).toMatch(
+      /focus:bg-accent\/40/,
+    )
+  })
 })

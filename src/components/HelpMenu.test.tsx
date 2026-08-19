@@ -46,6 +46,7 @@ describe("HelpMenu", () => {
       expect(screen.getByText("Take the tour")).toBeInTheDocument()
     })
     const tour = screen.getByRole("menuitem", { name: /take the tour/i })
+    expect(tour.className).toMatch(/focus:bg-accent\/40/)
     const homepage = screen.getByRole("menuitem", { name: /homepage/i })
     // Tour leads the menu so the expand affordance points at the primary action.
     expect(tour.compareDocumentPosition(homepage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()

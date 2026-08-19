@@ -1376,7 +1376,7 @@ export function ProjectOverview() {
                             render={
                               <button
                                 type="button"
-                                className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground data-popup-open:bg-muted data-popup-open:text-foreground"
+                                className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted-foreground hover:bg-accent/40 hover:text-foreground data-popup-open:bg-accent data-popup-open:text-foreground"
                               />
                             }
                           >

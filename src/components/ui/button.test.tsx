@@ -36,7 +36,12 @@ describe("Button press and open states", () => {
 
     rerender(<Button variant="ghost">Menu</Button>)
     const ghost = screen.getByRole("button", { name: "Menu" })
-    expect(ghost.className).toMatch(/hover:bg-muted/)
+    expect(ghost.className).toMatch(/hover:bg-accent\/40/)
     expect(ghost.className).toMatch(/active:bg-accent/)
+
+    rerender(<Button variant="outline">Filters</Button>)
+    const outline = screen.getByRole("button", { name: "Filters" })
+    expect(outline.className).toMatch(/hover:bg-accent\/40/)
+    expect(outline.className).toMatch(/active:bg-accent/)
   })
 })

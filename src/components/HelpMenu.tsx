@@ -64,7 +64,7 @@ export function HelpMenu({ compact = false, showTour = true }: HelpMenuProps) {
               aria-label={t("nav.help.menuLabel")}
               className={cn(
                 // Match OrgSidebar nav links: text-sm + px-2 py-1.5 + size-4 icon.
-                "flex items-center gap-2 rounded-md text-sm font-normal text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-popup-open:bg-accent data-popup-open:text-foreground",
+                "flex items-center gap-2 rounded-md text-sm font-normal text-muted-foreground hover:bg-accent hover:text-foreground data-popup-open:bg-accent data-popup-open:text-foreground",
                 compact ? "size-8 justify-center" : "w-full px-2 py-1.5",
               )}
             />

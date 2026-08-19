@@ -2425,7 +2425,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                   type="button"
                   aria-label={t("nav.dock.agentTab")}
                   onClick={onAgentToggle}
-                  className="absolute start-0 top-1/2 z-10 flex h-8 -translate-y-1/2 items-center justify-center gap-1.5 rounded-full border border-primary/40 bg-background px-2.5 text-primary shadow-md ring-4 ring-background transition-all hover:scale-105 hover:bg-primary/10 hover:text-primary ltr:-translate-x-1/2 rtl:translate-x-1/2"
+                  className="absolute start-0 top-1/2 z-10 flex h-8 -translate-y-1/2 items-center justify-center gap-1.5 rounded-full border border-primary/40 bg-background px-2.5 text-primary shadow-md ring-4 ring-background hover:bg-primary/10 hover:text-primary ltr:-translate-x-1/2 rtl:translate-x-1/2"
                 >
                   <Bot className="h-4 w-4" />
                   <span className="text-[11px] font-semibold">{t("nav.dock.agentTab")}</span>

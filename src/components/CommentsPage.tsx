@@ -634,9 +634,10 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
             render={
               <Button
                 type="button"
-                variant={menuOpen || activeFilterCount > 0 ? "secondary" : "outline"}
+                variant="outline"
                 size="icon"
                 aria-label={t("comments.filter.filtersButton")}
+                aria-pressed={activeFilterCount > 0}
               >
                 <Funnel />
               </Button>

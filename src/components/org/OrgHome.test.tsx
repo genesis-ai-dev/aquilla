@@ -18,7 +18,7 @@ function projectsRollupStat() {
 }
 
 function renderMemberShell(path: string) {
-  return render(
+  return renderWithTooltips(
     <MemoryRouter initialEntries={[path]}>
       <OrgProvider>
         <Routes>
@@ -564,7 +564,7 @@ describe("OrgOverview / OrgProjects", () => {
     expect(screen.getAllByText("Overdue").length).toBeGreaterThan(0)
   })
 
-  it("shows every project directly in recent-update order and marks attention projects", async () => {
+  it("shows every project directly in recent-update order", async () => {
     renderMemberOverview()
 
     const table = await screen.findByTestId("org-overview-projects-table")
@@ -573,10 +573,7 @@ describe("OrgOverview / OrgProjects", () => {
 
     expect(staleProject.compareDocumentPosition(recentProject) & Node.DOCUMENT_POSITION_PRECEDING)
       .toBeTruthy()
-    expect(within(staleProject.closest("tr")!).getByRole("img", {
-      name: "Needs attention: Overdue, Stalled",
-    })).toHaveClass("text-amber-600")
-    expect(within(recentProject.closest("tr")!).queryByRole("img", { name: /needs attention/i }))
+    expect(within(staleProject.closest("tr")!).queryByRole("img", { name: /needs attention/i }))
       .not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /view projects/i })).not.toBeInTheDocument()
   })

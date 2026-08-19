@@ -14,8 +14,21 @@ import {
   type PlanImportManifest,
   type PlanImportVariant,
 } from './import-manifest'
+import {
+  staticPatchSettingsFloor,
+  validatePatchSettingsCommand,
+  type PatchSettingsCommand,
+} from './commands-patch-settings'
+import {
+  emitEventsFloor,
+  validateEmitEventsCommand,
+  type EmitEventsCommand,
+} from './commands-emit-events'
 
 export type { PlanImportCell, PlanImportManifest, PlanImportVariant } from './import-manifest'
+export type { PatchSettingsCommand, PatchSettingsOp } from './commands-patch-settings'
+export type { EmitEventsCommand, EmitEventInput } from './commands-emit-events'
+export { cellKey, laneCellKey } from './cell-keys'
 
 /** Set (or update) a single cell's translation. Compiles to target.cell.commit. */
 export interface SetTranslationCommand {
@@ -94,6 +107,8 @@ export type Command =
   | CreateProjectCommand
   | UpdateProjectSettingsCommand
   | LinkMediaCommand
+  | PatchSettingsCommand
+  | EmitEventsCommand
 
 /** Hard cap on source cells per PlanImport changeset. Above this the plan is
  *  rejected with validation_failed — the manifest-in-R2 pattern for larger
@@ -415,6 +430,16 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       })
       return
     }
+    if (c.kind === 'PatchSettings') {
+      const cmd = validatePatchSettingsCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
+    if (c.kind === 'EmitEvents') {
+      const cmd = validateEmitEventsCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     if (c.kind === 'LinkMedia') {
       if (!isNonEmptyString(c.fileId)) {
         issues.push({ index, message: 'LinkMedia.fileId must be a non-empty string' })
@@ -443,7 +468,6 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
   return { ok: true, commands }
 }
 
-/** Stable key for de-duping / joining commands ↔ preconditions by target cell. */
 /**
  * Minimum project role a caller must hold to stage/commit a command — the SAME
  * floor the command's compiled event(s) hit at the /events perimeter, sourced
@@ -463,20 +487,21 @@ export function requiredRoleForCommand(c: Command): number {
   if (c.kind === 'CreateProject' || c.kind === 'UpdateProjectSettings') {
     return ROLE.MAINTAINER
   }
+  // PatchSettings also takes its own path (dynamic per-key floors, incl. the
+  // org termbase floor for `terminology`); this static value is the honest
+  // index-filtering floor per the command catalog.
+  if (c.kind === 'PatchSettings') {
+    return staticPatchSettingsFloor(c)
+  }
+  // EmitEvents: max REQUIRED_ROLE across the batch's event kinds — the same
+  // floors its compiled events hit at the /events perimeter (dynamic bumps,
+  // e.g. foreign unvalidate → maintainer, are enforced in its prepare path).
+  if (c.kind === 'EmitEvents') {
+    return emitEventsFloor(c)
+  }
   if (c.kind === 'LinkMedia') {
     // Compiles to cell.audio.attach + cell.audio.select (both CONTRIBUTOR).
     return Math.max(REQUIRED_ROLE['cell.audio.attach'], REQUIRED_ROLE['cell.audio.select'])
   }
   return REQUIRED_ROLE['target.cell.commit']
-}
-
-export function cellKey(fileId: string, cellId: string): string {
-  return `${fileId} ${cellId}`
-}
-
-/** Lane-qualified cellKey (AQU-538): the same cell in two target lanes is two
- *  distinct dedupe/join slots. Empty/absent lane is the default lane, so
- *  lane-less callers key identically to each other (back-compat). */
-export function laneCellKey(fileId: string, cellId: string, laneId?: string): string {
-  return `${cellKey(fileId, cellId)}\u0000${laneId ?? ''}`
 }

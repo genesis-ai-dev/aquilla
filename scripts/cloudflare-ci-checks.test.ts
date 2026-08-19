@@ -36,6 +36,17 @@ describe("Cloudflare parallel CI checks", () => {
     expect(commands).not.toContain("playwright install")
   })
 
+  it("runs the credential scan before anything that can fail ahead of it", () => {
+    // OPS-13. Steps within a lane run in sequence and a failure aborts the
+    // rest, so `scan:secrets` sitting last meant an unrelated lint failure
+    // silently took the credential scan off the board — which is what `dev`
+    // was doing when this test was added. Position, not presence, is the
+    // control here.
+    const lintLane = CHECK_LANES.find(({ name }) => name === "lint")
+    expect(lintLane).toBeDefined()
+    expect(lintLane?.steps[0]).toEqual(["pnpm", ["run", "scan:secrets"]])
+  })
+
   it("runs independent lanes concurrently within bounded memory phases", async () => {
     const started: string[] = []
     const releases = new Map<string, () => void>()

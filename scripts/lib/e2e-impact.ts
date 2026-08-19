@@ -35,6 +35,12 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/projects/project-settings.smoke.spec.ts"],
   },
   {
+    // Living Memory surface (AQU-932): the Knowledge Base journey rides the
+    // project-settings smoke spec's Living Memory leg.
+    source: /^src\/components\/(?:living-memory\/|LivingMemory)/i,
+    sentinels: ["e2e/specs/projects/project-settings.smoke.spec.ts"],
+  },
+  {
     source: /^(?:src\/(?:components|lib)\/(?:collab|sync|comments)|sync-worker\/)/i,
     sentinels: ["e2e/specs/collab/concurrent-edit.smoke.spec.ts"],
   },

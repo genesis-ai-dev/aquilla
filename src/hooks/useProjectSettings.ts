@@ -240,84 +240,100 @@ export function useProjectSettings(
     isOnlineRef.current = isOnline
   }, [isOnline])
 
+  // React StrictMode invokes the initial hydration effect twice, and settings
+  // can also be requested by more than one effect during a fast route change.
+  // Keep one request per mounted consumer in flight and let every caller await
+  // the same result instead of stacking identical GETs.
+  const refreshInFlightRef = useRef<Promise<ProjectSettingsResponse | null> | null>(null)
   const refresh = useCallback(async (): Promise<ProjectSettingsResponse | null> => {
     if (!projectId || !jwt) return null
     if (!isOnlineRef.current) return null
-    const out = await fetchProjectSettingsResult(jwt, projectId)
-    // Guard against post-unmount state updates. aliveRef is only set false on
-    // final unmount; explicit refresh() calls from still-mounted consumers
-    // should always land (aliveRef.current will be true for them).
-    if (!aliveRef.current) return null
-    if (!out.ok) {
-      // FAIL CLOSED: the GET failed (network / 401 / 5xx) — the settings state
-      // is UNKNOWN, not "empty". Do NOT mark hasFetched (consumers like the DCS
-      // source lockdown treat un-fetched as locked), and do NOT clobber a
-      // previously fetched server snapshot with null. The existing focus /
-      // online / settings-updated revalidation paths retry the GET.
-      return null
-    }
-    const got = out.value
-    writeServer(got)
-    setHasFetched(true)
-    if (got) {
-      posthog.capture("project settings hydrated", {
-        project_id: projectId,
-        within_ms: Math.round(performance.now() - mountAtRef.current),
-        has_server_row: got.version > 0,
-      })
-    }
-    if (got && got.version > 0) {
-      try {
-        await patchProject(projectId, (existing) => ({
-          ...existing,
-          ...(got.settings.sourceLanguage != null
-            ? { sourceLanguage: got.settings.sourceLanguage }
-            : {}),
-          ...(got.settings.targetLanguage != null
-            ? { targetLanguage: got.settings.targetLanguage }
-            : {}),
-          ...(got.settings.systemPrompt != null
-            ? {
-                completionSettings: {
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- spread of partial settings object; exact shape depends on runtime migration state
-                  ...(existing.completionSettings ?? ({} as any)),
-                  systemPrompt: got.settings.systemPrompt,
-                },
-              }
-            : {}),
-          ...(got.settings.rules != null ? { rules: got.settings.rules } : {}),
-          ...(got.settings.rulePenalties != null
-            ? { rulePenalties: got.settings.rulePenalties }
-            : {}),
-          ...(got.settings.algorithmicChecks != null
-            ? { algorithmicChecks: got.settings.algorithmicChecks }
-            : {}),
-          ...(got.settings.validationCount != null
-            ? { validationCount: got.settings.validationCount }
-            : {}),
-          ...(got.settings.validationCountAudio != null
-            ? { validationCountAudio: got.settings.validationCountAudio }
-            : {}),
-          ...(got.settings.terminology != null
-            ? { terminology: got.settings.terminology }
-            : {}),
-          ...(got.settings.livingMemoryEntries != null
-            ? { livingMemoryEntries: got.settings.livingMemoryEntries }
-            : {}),
-          ...(got.settings.translationBrief != null
-            ? { translationBrief: got.settings.translationBrief }
-            : {}),
-        }))
-      } catch (err) {
-        console.warn("[useProjectSettings] failed to mirror settings to IDB", err)
+    if (refreshInFlightRef.current) return refreshInFlightRef.current
+
+    const request = (async (): Promise<ProjectSettingsResponse | null> => {
+      const out = await fetchProjectSettingsResult(jwt, projectId)
+      // Guard against post-unmount state updates. aliveRef is only set false on
+      // final unmount; explicit refresh() calls from still-mounted consumers
+      // should always land (aliveRef.current will be true for them).
+      if (!aliveRef.current) return null
+      if (!out.ok) {
+        // FAIL CLOSED: the GET failed (network / 401 / 5xx) — the settings state
+        // is UNKNOWN, not "empty". Do NOT mark hasFetched (consumers like the DCS
+        // source lockdown treat un-fetched as locked), and do NOT clobber a
+        // previously fetched server snapshot with null. The existing focus /
+        // online / settings-updated revalidation paths retry the GET.
+        return null
       }
+      const got = out.value
+      writeServer(got)
+      setHasFetched(true)
+      if (got) {
+        posthog.capture("project settings hydrated", {
+          project_id: projectId,
+          within_ms: Math.round(performance.now() - mountAtRef.current),
+          has_server_row: got.version > 0,
+        })
+      }
+      if (got && got.version > 0) {
+        try {
+          await patchProject(projectId, (existing) => ({
+            ...existing,
+            ...(got.settings.sourceLanguage != null
+              ? { sourceLanguage: got.settings.sourceLanguage }
+              : {}),
+            ...(got.settings.targetLanguage != null
+              ? { targetLanguage: got.settings.targetLanguage }
+              : {}),
+            ...(got.settings.systemPrompt != null
+              ? {
+                  completionSettings: {
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- spread of partial settings object; exact shape depends on runtime migration state
+                    ...(existing.completionSettings ?? ({} as any)),
+                    systemPrompt: got.settings.systemPrompt,
+                  },
+                }
+              : {}),
+            ...(got.settings.rules != null ? { rules: got.settings.rules } : {}),
+            ...(got.settings.rulePenalties != null
+              ? { rulePenalties: got.settings.rulePenalties }
+              : {}),
+            ...(got.settings.algorithmicChecks != null
+              ? { algorithmicChecks: got.settings.algorithmicChecks }
+              : {}),
+            ...(got.settings.validationCount != null
+              ? { validationCount: got.settings.validationCount }
+              : {}),
+            ...(got.settings.validationCountAudio != null
+              ? { validationCountAudio: got.settings.validationCountAudio }
+              : {}),
+            ...(got.settings.terminology != null
+              ? { terminology: got.settings.terminology }
+              : {}),
+            ...(got.settings.livingMemoryEntries != null
+              ? { livingMemoryEntries: got.settings.livingMemoryEntries }
+              : {}),
+            ...(got.settings.translationBrief != null
+              ? { translationBrief: got.settings.translationBrief }
+              : {}),
+          }))
+        } catch (err) {
+          console.warn("[useProjectSettings] failed to mirror settings to IDB", err)
+        }
+      }
+      return got
+    })()
+    refreshInFlightRef.current = request
+    try {
+      return await request
+    } finally {
+      if (refreshInFlightRef.current === request) refreshInFlightRef.current = null
     }
-    return got
   }, [projectId, jwt])
 
-  // Hydrate local cache on projectId change, then kick off the server fetch.
-  // Sequencing local-before-remote is intentional: local state is shown
-  // immediately while the network round-trip is in flight.
+  // Hydrate local cache and server state in parallel on projectId change. The
+  // server snapshot overlays local values, so their completion order is safe;
+  // serializing these reads only made route-modals wait on IDB before the
+  // authoritative request could even start.
   //
   // IMPORTANT: we use a per-invocation `alive` local (not `aliveRef`) to guard
   // state updates. Under React StrictMode the effect runs twice:
@@ -336,28 +352,30 @@ export function useProjectSettings(
     // runs the cleanup on the first mount.
     aliveRef.current = true
 
+    void refresh()
     void getProject(projectId)
       .then((rec) => {
         if (!alive) return
         const nextLocal = localSettingsFrom(rec)
         setLocal((prev) => projectWideSettingsEqual(prev, nextLocal) ? prev : nextLocal)
-        // Kick off server fetch after local state is set.
-        void refresh()
       })
       .catch((err) => {
         if (!alive) return
         console.warn("[useProjectSettings] failed to read local IDB cache", err)
-        // Continue with empty local; refresh still fires so server values appear.
-        void refresh()
+        // Continue with empty local; the parallel refresh still supplies server values.
       })
     return () => {
       alive = false
     }
   }, [projectId, refresh])
 
-  // Re-fetch when transitioning offline -> online.
+  // Re-fetch only when transitioning offline -> online. Calling refresh on an
+  // initially-online mount duplicates the parallel initial request above.
+  const previousOnlineRef = useRef(isOnline)
   useEffect(() => {
-    if (isOnline && projectId && jwt) void refresh()
+    const wasOnline = previousOnlineRef.current
+    previousOnlineRef.current = isOnline
+    if (!wasOnline && isOnline && projectId && jwt) void refresh()
   }, [isOnline, projectId, jwt, refresh])
 
   // Project settings are written by identity, while the editor's live channel

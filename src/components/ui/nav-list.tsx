@@ -1,6 +1,6 @@
 import * as React from "react"
-import { Link } from "react-router-dom"
-import { ChevronRight } from "lucide-react"
+import { Link, type LinkProps } from "react-router-dom"
+import { ChevronLeft, ChevronRight } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -52,6 +52,7 @@ function NavRow({
   description,
   hint,
   className,
+  state,
 }: {
   to: string
   icon?: React.ComponentType<{ className?: string }>
@@ -59,10 +60,12 @@ function NavRow({
   description?: React.ReactNode
   hint?: React.ReactNode
   className?: string
+  state?: LinkProps["state"]
 }) {
   return (
     <Link
       to={to}
+      state={state}
       className={cn(
         "flex items-center gap-3 px-4 py-3.5 hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset",
         className,
@@ -89,4 +92,44 @@ function NavRow({
   )
 }
 
-export { NavList, NavRow }
+/**
+ * A small "back to the index" control for the top-left of a detail/submenu page.
+ * Pairs with the section card's own title below it, so a submenu page reads as
+ * "‹ Settings" then the section heading — self-sufficient navigation inside the
+ * main area without relying on the header breadcrumb.
+ *
+ * Prefer `to` for plain navigation. Use `onClick` when the caller needs to
+ * intercept (e.g. discard-unsaved confirmation) before leaving.
+ */
+function BackLink({
+  to,
+  onClick,
+  label,
+  className,
+}: {
+  to?: string
+  onClick?: () => void
+  label: React.ReactNode
+  className?: string
+}) {
+  const classes = cn(
+    "group -ms-1.5 inline-flex w-fit items-center gap-1 self-start rounded-md py-1 pe-1.5 ps-4 text-sm text-muted-foreground hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+    className,
+  )
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={classes}>
+        <ChevronLeft className="size-4" />
+        {label}
+      </button>
+    )
+  }
+  return (
+    <Link to={to!} className={classes}>
+      <ChevronLeft className="size-4" />
+      {label}
+    </Link>
+  )
+}
+
+export { NavList, NavRow, BackLink }

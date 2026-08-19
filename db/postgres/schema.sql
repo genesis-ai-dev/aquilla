@@ -386,10 +386,22 @@ CREATE TABLE events (
 -- MAX(events.server_seq) — the GET /cells delta/ETag watermark — does not
 -- move; any `?since=` cursor below rebuilt_seq is told to resync and the
 -- value is folded into the ETag. 0 = never rebuilt.
+--
+-- project_epoch (0079, AQU-943): the project's INCARNATION marker, stamped
+-- when this counter row is created. Wiping a project's rows and re-migrating
+-- it under the same deterministic ids restarts the allocator near 1, which
+-- inverts every warm client's `?since=` cursor — deltas answer "nothing newer"
+-- and the client renders its pre-wipe cache forever. The counter row is
+-- exactly what a wipe destroys, so its birth stamp distinguishes incarnations:
+-- it is folded into the cells-read ETag, and a client whose declared `?epoch=`
+-- doesn't match is told to resync (cells-read-route.ts). clock_timestamp() so
+-- a delete + re-create inside one transaction still changes it.
 CREATE TABLE IF NOT EXISTS project_seq_counters (
     project_id  TEXT PRIMARY KEY,
     last_seq    BIGINT NOT NULL,
-    rebuilt_seq BIGINT NOT NULL DEFAULT 0
+    rebuilt_seq BIGINT NOT NULL DEFAULT 0,
+    project_epoch BIGINT NOT NULL
+        DEFAULT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000000)::BIGINT
 );
 
 -- AD-2 first-child arbitration (audit RACE-2 / M1-1). One row per chain slot
@@ -884,7 +896,7 @@ CREATE TABLE IF NOT EXISTS changesets (
     credential_id      TEXT NOT NULL,
     autonomy_mode      TEXT NOT NULL CHECK (autonomy_mode IN ('ask', 'act')),
     status             TEXT NOT NULL DEFAULT 'staged'
-                         CHECK (status IN ('staged', 'committing', 'committed', 'discarded', 'stale', 'expired')),
+                         CHECK (status IN ('staged', 'committing', 'committed', 'discarded', 'stale', 'superseded', 'expired')),
     commands           JSONB NOT NULL,            -- normalized domain commands
     preconditions      JSONB NOT NULL,            -- per-cell head/source pins resolved at prepare
     summary            JSONB NOT NULL,            -- server-computed effect summary
@@ -893,7 +905,8 @@ CREATE TABLE IF NOT EXISTS changesets (
     confirmation_id    TEXT,                      -- consumed ask-mode approval (after commit)
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at         TIMESTAMPTZ NOT NULL,
-    committed_at       TIMESTAMPTZ
+    committed_at       TIMESTAMPTZ,
+    assigned_to_user_id TEXT                      -- routing only; never resolves (0079)
 );
 CREATE INDEX IF NOT EXISTS idx_changesets_project_status ON changesets(project_id, status);
 
@@ -1184,6 +1197,37 @@ CREATE INDEX IF NOT EXISTS scene_briefs_lookup
 CREATE INDEX IF NOT EXISTS scene_briefs_run_provenance_time
   ON scene_briefs(project_id, (provenance ->> 'runId'), created_at DESC, id DESC);
 
+-- Per-file segmentation strategy (0079_file_segmentation.sql). Keyed by
+-- (project, file) with NO target_lang: segmentation is a property of the
+-- SOURCE, so every language lane reads the same boundaries. 'auto' derives
+-- from file structure (the default; an absent row means 'auto'), 'fixed' cuts
+-- every fixed_size cells, and 'explicit' stores the ordered span list verbatim
+-- — the shape an LLM re-segmentation pass writes, with optional title/gist/
+-- depth per entry so the same rows can drive a navigation outline.
+CREATE TABLE IF NOT EXISTS file_segmentation (
+  project_id   text NOT NULL,
+  file_id      text NOT NULL,
+  strategy     text NOT NULL DEFAULT 'auto'
+    CHECK (strategy IN ('auto', 'fixed', 'explicit')),
+  fixed_size   integer,
+  boundaries   jsonb,
+  note         text,
+  generated_by text,
+  model_id     text,
+  human_edited boolean NOT NULL DEFAULT false,
+  stale_since  timestamptz,
+  stale_reason text,
+  version      integer NOT NULL DEFAULT 1,
+  updated_by   text,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (project_id, file_id),
+  CHECK (strategy <> 'fixed' OR fixed_size IS NOT NULL),
+  CHECK (strategy <> 'explicit' OR boundaries IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS file_segmentation_project
+  ON file_segmentation(project_id);
+
 -- Contextual run engine (0071_contextual_runs.sql; pipeline design §8, slice D1).
 -- contextual_runs: one durable pipeline run; span_cursor {seeds, nextIndex}
 -- makes every tick resumable from Postgres. contextual_steering: the human
@@ -1198,7 +1242,7 @@ CREATE TABLE IF NOT EXISTS contextual_runs (
   file_id text NOT NULL,
   target_lang text NOT NULL DEFAULT '', -- lane ('' = the file's single target language)
   status text NOT NULL DEFAULT 'running'
-    CHECK (status IN ('running','pausing','paused','parked','done','failed','terminated')),
+    CHECK (status IN ('running','pausing','paused','parked','waiting','done','failed','terminated')),
   initiated_by text,                    -- username
   role_snapshot jsonb,                  -- {userId, username, level} at start
   span_cursor jsonb,                    -- {seeds:[SpanSeed…], nextIndex:int}; NULL until the first tick derives seeds
@@ -1211,6 +1255,7 @@ CREATE TABLE IF NOT EXISTS contextual_runs (
   steering_cursor timestamptz,          -- last steering read; informational
   anchor_cell_id text,                  -- where the user was looking at start; rotates the first wave
   scope_group text,                     -- shared id across runs one project-wide start created
+  blocked_on_decision_id text,          -- set while status='waiting'; the open contextual_decisions row blocking this run
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()  -- doubles as the driver heartbeat/lease
 );
@@ -1218,7 +1263,7 @@ CREATE TABLE IF NOT EXISTS contextual_runs (
 -- pill's hydrate lookup and enforces createRun's refuse-double-active.
 CREATE UNIQUE INDEX IF NOT EXISTS contextual_runs_active
   ON contextual_runs(project_id, file_id, target_lang)
-  WHERE status IN ('running','pausing','paused','parked');
+  WHERE status IN ('running','pausing','paused','parked','waiting');
 -- Stranded-run sweeper: 'running' with a quiet heartbeat (dead driver) or
 -- 'parked' with spans still on the cursor (loop hit its wave cap).
 CREATE INDEX IF NOT EXISTS contextual_runs_driver
@@ -1369,6 +1414,54 @@ CREATE TABLE IF NOT EXISTS org_billing_events (
   payload_json    TEXT,
   created_at      TIMESTAMPTZ DEFAULT now()
 );
+
+-- Contextual decisions (0076_contextual_decisions.sql; seam design §4.3) — the
+-- agent → user channel. A decision is a question autopilot cannot answer
+-- alone. It closes exactly two ways (a human answers, or the agent researches
+-- it into a memory proposal); routing only ASSIGNS it and leaves it open. Two
+-- further terminal states are bookkeeping, and are deliberately distinct:
+-- `superseded` means the underlying gap got filled by other means (healthy),
+-- `expired` means nobody ever answered (unhealthy). Merging them would let
+-- the healthy case hide the warning the unhealthy one exists to give.
+CREATE TABLE IF NOT EXISTS contextual_decisions (
+  id text PRIMARY KEY,                  -- uuidv7
+  project_id text NOT NULL,
+  run_id text,                          -- NULL once the owning run ends
+  file_id text NOT NULL,
+  span_id text,
+  cell_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  -- WHY the agent cannot proceed, in the user's words. Never "review this".
+  reason text NOT NULL,
+  -- Which readiness item this gap belongs to; NULL for free-text ambiguities,
+  -- which the deterministic sweep can never close.
+  readiness_item text
+    CHECK (readiness_item IS NULL OR
+           readiness_item IN ('terminology','brief','examples','rules','languages')),
+  -- Set only for terminology decisions: the concept whose rendering is missing.
+  concept_id text,
+  -- How many later passages the answer affects. Drives surfacing rank (§4.6)
+  -- and belongs in the reason text too, because it is what makes a card
+  -- answerable.
+  blast_radius integer NOT NULL DEFAULT 0,
+  status text NOT NULL DEFAULT 'open'
+    CHECK (status IN ('open','researching','resolved','dismissed','superseded','expired')),
+  -- Routing is an ASSIGNMENT, not a resolution: an assigned decision is still
+  -- `open`, and anyone who joins later can answer it.
+  assigned_user_id integer,
+  assigned_invite_id text,
+  resolution jsonb,                     -- {kind:'answered'|'researched', …}
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  resolved_at timestamptz
+);
+-- Surfacing reads the open set per project, ranked by blast radius then age.
+CREATE INDEX IF NOT EXISTS contextual_decisions_open
+  ON contextual_decisions(project_id, blast_radius DESC, created_at ASC)
+  WHERE status IN ('open','researching');
+-- The supersession sweep and the run-unblock path both look up by run.
+CREATE INDEX IF NOT EXISTS contextual_decisions_run
+  ON contextual_decisions(run_id)
+  WHERE status IN ('open','researching');
 
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new

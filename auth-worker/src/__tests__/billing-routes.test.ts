@@ -215,12 +215,44 @@ describe("POST /api/v2/billing/webhook", () => {
 })
 
 describe("verifyStripeSignature", () => {
+  const secret = "whsec_test"
+  const payload = "{\"ok\":true}"
+  const sign = (t: number, key: string) =>
+    bytesToHex(hmac(sha256, utf8ToBytes(key), utf8ToBytes(`${t}.${payload}`)))
+
   it("accepts a matching HMAC and rejects a stale timestamp", () => {
-    const secret = "whsec_test"
-    const payload = "{\"ok\":true}"
     const t = Math.floor(Date.now() / 1000)
-    const v1 = bytesToHex(hmac(sha256, utf8ToBytes(secret), utf8ToBytes(`${t}.${payload}`)))
+    const v1 = sign(t, secret)
     expect(verifyStripeSignature({ payload, header: `t=${t},v1=${v1}`, secret })).toBe(true)
     expect(verifyStripeSignature({ payload, header: `t=${t - 400},v1=${v1}`, secret, nowSec: t })).toBe(false)
+  })
+
+  // OPS-12: Stripe signs with the old AND the new secret while a webhook
+  // secret is rolled, so the header carries two v1 entries and only one of
+  // them verifies under the secret this endpoint currently holds. Both
+  // orderings must pass, or rotating the secret drops every event for the
+  // length of the rollover.
+  it("accepts either signature when a secret rollover puts two v1 entries in the header", () => {
+    const t = Math.floor(Date.now() / 1000)
+    const mine = sign(t, secret)
+    const theirs = sign(t, "whsec_rotated")
+    expect(verifyStripeSignature({ payload, header: `t=${t},v1=${mine},v1=${theirs}`, secret })).toBe(true)
+    expect(verifyStripeSignature({ payload, header: `t=${t},v1=${theirs},v1=${mine}`, secret })).toBe(true)
+  })
+
+  it("still rejects when no candidate signature matches", () => {
+    const t = Math.floor(Date.now() / 1000)
+    const a = sign(t, "whsec_other_a")
+    const b = sign(t, "whsec_other_b")
+    expect(verifyStripeSignature({ payload, header: `t=${t},v1=${a},v1=${b}`, secret })).toBe(false)
+    expect(verifyStripeSignature({ payload, header: `t=${t}`, secret })).toBe(false)
+    expect(verifyStripeSignature({ payload, header: "", secret })).toBe(false)
+  })
+
+  it("does not accept a v0 signature in place of v1", () => {
+    // v0 covers a different payload; treating the scheme as interchangeable
+    // would accept a signature over content this endpoint never saw.
+    const t = Math.floor(Date.now() / 1000)
+    expect(verifyStripeSignature({ payload, header: `t=${t},v0=${sign(t, secret)}`, secret })).toBe(false)
   })
 })

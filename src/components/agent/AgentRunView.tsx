@@ -112,6 +112,10 @@ export interface AgentRunViewProps {
   /** Jump to the workbench's Memory tab from a memory/brief proposal notice.
    *  Omitted where there's no Memory tab to jump to (e.g. the dock panel). */
   onReviewMemory?: () => void
+  /** Post-commit flush + revalidate for the live ChangesetCard (AQU-926) —
+   *  same hook AgentDockView passes to ProposalCard. Omitted → the card
+   *  relies on the project DO's event.applied broadcast alone. */
+  onChangesetApplied?: (eventIds: string[], cellIds: string[]) => void | Promise<void>
 }
 
 export function AgentRunView({
@@ -120,6 +124,7 @@ export function AgentRunView({
   renderAquiferProposal,
   renderToolCard,
   onReviewMemory,
+  onChangesetApplied,
 }: AgentRunViewProps) {
   const { locale, t } = useI18n()
   return (
@@ -169,7 +174,7 @@ export function AgentRunView({
           case "code":
             return <CodeActivityBlock key={item.id} item={item} />
           case "changeset":
-            return <ChangesetCard key={item.id} item={item} />
+            return <ChangesetCard key={item.id} item={item} onApplied={onChangesetApplied} />
           case "memory-proposed":
             return <MemoryProposalNotice key={item.id} item={item} onReviewMemory={onReviewMemory} />
           case "brief-proposed":

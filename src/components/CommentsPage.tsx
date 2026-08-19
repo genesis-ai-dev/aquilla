@@ -32,6 +32,7 @@ import type { CommentRecord } from "@/lib/sync/comments-read-types"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useProject } from "@/hooks/useProject"
+import type { ProjectRecord } from "@/lib/parsers/types"
 import { renderCommentHtml } from "@/lib/comments/comment-helpers"
 import DOMPurify from "dompurify"
 import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
@@ -746,12 +747,23 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
 
 // ── Page ──────────────────────────────────────────────────────────────────
 
-export function CommentsPage() {
+interface CommentsPageProps {
+  /** Reuse the workspace's already-resolved project for file labels instead
+   * of starting a second project query when this pane opens. */
+  project?: ProjectRecord | null
+}
+
+export function CommentsPage({ project: workspaceProject }: CommentsPageProps = {}) {
   const t = useT()
   const { id: projectId } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { session } = useFrontierSession()
-  const { project } = useProject(projectId ?? "")
+  const ownedProject = useProject(projectId ?? "", {
+    initialProject: workspaceProject,
+    enabled: workspaceProject == null,
+    includeSettings: false,
+  })
+  const project = workspaceProject ?? ownedProject.project
   const [filter, setFilter] = useState<FilterState>(DEFAULT_FILTER)
 
   const getToken = useMemo(() => {

@@ -101,7 +101,7 @@ export function deriveNavTitleKey(pathname: string): NavTitle {
         return seg[3] === "file" ? key("common.file") : key("editor.navTitle.editor")
       case "settings":
         if (seg[3] === "rules") return key("editor.navTitle.checksAndRules")
-        if (seg[3] === "memory") return key("editor.navTitle.projectMemory")
+        if (seg[3] === "memory") return key("terminology.livingMemory.title")
         return key("editor.navTitle.projectSettings")
       case "rules":
         return key("editor.navTitle.checksAndRules")
@@ -114,7 +114,9 @@ export function deriveNavTitleKey(pathname: string): NavTitle {
       case "comments":
         return key("common.comments")
       case "memory":
-        return key("editor.navTitle.projectMemory")
+        // Same key as the Living Memory page/button — the feature keeps one
+        // co-referential name everywhere (no-duplicates guard).
+        return key("terminology.livingMemory.title")
       case "members":
         return key("editor.navTitle.projectMembers")
       default:

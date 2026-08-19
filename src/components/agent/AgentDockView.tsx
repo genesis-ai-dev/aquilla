@@ -262,6 +262,7 @@ export function AgentDockView({
                         ) : null
                       }}
                       onReviewMemory={onReviewMemory}
+                      onChangesetApplied={onApplied}
                     />
                   </MessageScrollerItem>
                 ))}

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { Link } from "react-router-dom"
 import {
   AlertTriangle,
   ChevronDown,
@@ -33,6 +34,7 @@ import {
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { LivingMemoryButton } from "@/components/LivingMemoryButton"
 import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { fmtShortCalendarDate } from "@/lib/format-date"
@@ -43,8 +45,10 @@ import {
   collapseListToRange,
   humanPassageLabel,
 } from "../../../shared/span-label"
+import { DecisionCard } from "@/components/contextual/DecisionCard"
 import {
   commandContextualRun,
+  fetchContextualDecisions,
   fetchContextualRunActivity,
   fetchContextualRuns,
   startFileContextualRun,
@@ -52,6 +56,7 @@ import {
   type ContextualActivityDraft,
   type ContextualActivityEvent,
   type ContextualActivitySceneBrief,
+  type ContextualDecisionView,
   type ContextualDraftCursor,
   type ContextualOverview,
   type ContextualRunActivity,
@@ -763,7 +768,11 @@ export function AutopilotActivityInspector({
   const [technicalOpen, setTechnicalOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [actionMessage, setActionMessage] = useState<InspectorNotice | null>(null)
+  const [decisions, setDecisions] = useState<ContextualDecisionView[]>([])
+  const [decisionsOpenCount, setDecisionsOpenCount] = useState(0)
+  const [decisionsWarning, setDecisionsWarning] = useState<MessageKey | null>(null)
   const seqRef = useRef(0)
+  const decisionsSeqRef = useRef(0)
   const activitySeqRef = useRef(0)
   const activityRef = useRef<ContextualRunActivity | null>(null)
   const activityRunRef = useRef<string | null>(null)
@@ -874,6 +883,25 @@ export function AutopilotActivityInspector({
     }
   }, [loadingOlderRuns, nextRunCursor, projectId])
 
+  const loadDecisions = useCallback(async () => {
+    const seq = ++decisionsSeqRef.current
+    try {
+      const page = await fetchContextualDecisions(projectId)
+      if (seq !== decisionsSeqRef.current) return
+      setDecisions(page.decisions)
+      setDecisionsOpenCount(page.openCount)
+      setDecisionsWarning(null)
+    } catch {
+      // The transport only degrades 404/501 to an empty page; anything else
+      // reaching here is a real failure. Silence would render exactly like
+      // "no open decisions" — the one false reassurance this region must
+      // never give — so surface it instead of swallowing it.
+      if (seq === decisionsSeqRef.current) {
+        setDecisionsWarning("autopilot.inspector.warning.decisionsRefresh")
+      }
+    }
+  }, [projectId])
+
   const loadActivity = useCallback(async (runId: string) => {
     const seq = ++activitySeqRef.current
     setLoadingActivity(true)
@@ -955,8 +983,12 @@ export function AutopilotActivityInspector({
     const openingRunId = focusRunId ?? preferredRun(fallbackRuns, initialSection)?.runId ?? null
     selectedRunRef.current = openingRunId
     setSelectedRunId(openingRunId)
+    setDecisions([])
+    setDecisionsOpenCount(0)
+    setDecisionsWarning(null)
     void loadRuns()
-  }, [fallbackRuns, focusRunId, initialSection, loadRuns, open])
+    void loadDecisions()
+  }, [fallbackRuns, focusRunId, initialSection, loadDecisions, loadRuns, open])
 
   useEffect(() => {
     if (!open || !selectedRun?.runId) return
@@ -1132,13 +1164,23 @@ export function AutopilotActivityInspector({
   const selectedRunError = selectedRun ? humanRunError(selectedRun, t) : null
   const runsWarningText = runsWarning ? t(runsWarning) : null
   const activityWarningText = activityWarning ? t(activityWarning) : null
+  const decisionsWarningText = decisionsWarning ? t(decisionsWarning) : null
   const actionMessageText = noticeText(actionMessage, t)
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-2xl!" data-testid="autopilot-activity-inspector">
         <SheetHeader className="pe-12">
-          <SheetTitle>{t("autopilot.inspector.title")}</SheetTitle>
+          <div className="flex items-center gap-1">
+            <SheetTitle>{t("autopilot.inspector.title")}</SheetTitle>
+            {/* Co-referential Living Memory entry point: what autopilot knows
+                lives there, so the surface reporting its work links to it. */}
+            <LivingMemoryButton
+              projectId={projectId}
+              iconOnly
+              onNavigate={() => onOpenChange(false)}
+            />
+          </div>
           <SheetDescription>
             {t("autopilot.inspector.description")}
           </SheetDescription>
@@ -1182,6 +1224,7 @@ export function AutopilotActivityInspector({
                     void Promise.all([
                       loadRuns(),
                       selectedRun?.runId ? loadActivity(selectedRun.runId) : Promise.resolve(),
+                      loadDecisions(),
                     ])
                   }}
                   disabled={loadingRuns || loadingActivity}
@@ -1264,6 +1307,45 @@ export function AutopilotActivityInspector({
               {runsTruncated && !nextRunCursor && (
                 <p className="text-xs text-muted-foreground">
                   {t("autopilot.inspector.recentRunsOnly")}
+                </p>
+              )}
+            </section>
+
+            <section aria-label={t("autopilot.decisions.heading")} className="flex flex-col gap-2">
+              <h3 className="text-sm font-medium">{t("autopilot.decisions.heading")}</h3>
+              {decisionsWarningText && (
+                <p role="status" className="flex items-start gap-2 text-sm text-destructive">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+                  {decisionsWarningText}
+                </p>
+              )}
+              {decisions.length > 0 ? (
+                <div className="flex flex-col gap-2">
+                  {decisions.map((decision) => (
+                    <DecisionCard
+                      key={decision.id}
+                      decision={decision}
+                      projectId={projectId}
+                      onResolved={() => void loadDecisions()}
+                    />
+                  ))}
+                </div>
+              ) : (
+                // A fetch failure must not read as "nothing needs you" — that
+                // is a false reassurance in the one region whose job is to
+                // say a person is needed. Only show the empty state when the
+                // fetch actually succeeded with zero decisions.
+                !decisionsWarningText && (
+                  <p className="text-sm text-muted-foreground">
+                    {t("autopilot.decisions.empty")}
+                  </p>
+                )
+              )}
+              {decisionsOpenCount > decisions.length && (
+                <p className="text-xs text-muted-foreground">
+                  {t("autopilot.decisions.held", {
+                    count: decisionsOpenCount - decisions.length,
+                  })}
                 </p>
               )}
             </section>
@@ -1477,15 +1559,19 @@ export function AutopilotActivityInspector({
                             <div className="flex shrink-0 items-center gap-2">
                               <Badge variant="outline">{readinessLevelLabel(item, t)}</Badge>
                               {item.href && item.level !== "ready" && (
-                                <a
+                                <Link
                                   aria-label={t("autopilot.inspector.context.setupNamed", {
                                     label: itemLabel,
                                   })}
-                                  href={`/project/${projectId}/${item.href}`}
+                                  to={`/project/${projectId}/${item.href}`}
                                   className="text-xs text-primary underline-offset-2 hover:underline"
+                                  // SPA navigation keeps this sheet mounted (the old
+                                  // raw <a> reloaded the page) — close it so the
+                                  // destination isn't hidden behind the overlay.
+                                  onClick={() => onOpenChange(false)}
                                 >
                                   {t("autopilot.inspector.context.setup")}
-                                </a>
+                                </Link>
                               )}
                             </div>
                           </div>

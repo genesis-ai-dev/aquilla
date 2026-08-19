@@ -49,6 +49,23 @@ export function audioObjectKey(
   return `${r2KeyPrefix(env)}projects/${projectId}/files/${fileId}/audio/${audioId}`
 }
 
+/**
+ * Rejects any id that could act as a path separator once interpolated into
+ * `audioObjectKey`'s template. The handlers in this file get `projectId`/
+ * `fileId` from `[^/]+` URL segments, which are inherently safe — but
+ * `tts.ts` and `voice-convert.ts` take these same ids from a JSON/form body
+ * and pass them straight through, so a caller could otherwise smuggle `/`
+ * (or `..`) into the resulting R2 key.
+ */
+export function isPathSafeId(id: string): boolean {
+  if (id.length === 0 || id === "." || id === "..") return false
+  for (let i = 0; i < id.length; i++) {
+    const c = id.charCodeAt(i)
+    if (c === 0x2f || c === 0x5c || c === 0) return false // "/" or "\" or NUL
+  }
+  return true
+}
+
 const AUDIO_PATH_RE = /^\/audio\/([^/]+)\/([^/]+)\/([^/]+)$/
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 

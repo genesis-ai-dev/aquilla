@@ -297,6 +297,26 @@ describe("POST /api/v1/voice/tts", () => {
     expect(res.status).toBe(400)
   })
 
+  it("400 when fileId contains a path separator", async () => {
+    // WHY: fileId is interpolated straight into the R2 key (audioObjectKey);
+    // a `/` here would let a caller aim the write outside this file's key
+    // namespace. The mint endpoint (auth-worker sync-token.ts) blocks this
+    // too, but this route must not rely on that alone.
+    const { db } = makeStubDb()
+    const fileId = "../other-file"
+    const token = await makeToken({ fileId })
+    const res = (await call(makeEnv(db), ttsReq({ projectId: "p1", fileId, text: "hi" }, token)))!
+    expect(res.status).toBe(400)
+  })
+
+  it("400 when projectId contains a path separator", async () => {
+    const { db } = makeStubDb()
+    const projectId = "p1/../p2"
+    const token = await makeToken({ projectId })
+    const res = (await call(makeEnv(db), ttsReq({ projectId, fileId: "f1", text: "hi" }, token)))!
+    expect(res.status).toBe(400)
+  })
+
   it("calls Modal with X-Auth-Token and sends text; writes WAV to R2; returns audioId + durationSeconds", async () => {
     // WHY: this is the core happy-path contract — the returned audioId must be
     // a valid R2 key (for cell attachment) and durationSeconds must reflect the

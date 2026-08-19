@@ -47,17 +47,6 @@ export function FileDetailsModal({
   const validatedPct = progress && progress.total > 0
     ? Math.round((progress.validated / progress.total) * 100) : null
 
-  // AQU-i18n: arrow glyph is wrapped so it visually mirrors under RTL instead
-  // of pointing away from the target language.
-  const languages =
-    file.sourceLanguage && file.targetLanguage ? (
-      <>
-        {file.sourceLanguage} <span className="inline-block rtl:-scale-x-100">→</span> {file.targetLanguage}
-      </>
-    ) : (
-      file.sourceLanguage || file.targetLanguage || null
-    )
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -78,7 +67,9 @@ export function FileDetailsModal({
                 ? t("fileDetails.orderingTimeline")
                 : t("fileDetails.orderingSequence")}
             </DetailRow>
-            {languages && <DetailRow label={t("fileDetails.languages")}>{languages}</DetailRow>}
+            {file.sourceLanguage && (
+              <DetailRow label={t("fileDetails.sourceLanguage")}>{file.sourceLanguage}</DetailRow>
+            )}
             <DetailRow label={t("fileDetails.imported")}>
               <DateTooltip value={file.createdAt} label={t("fileDetails.imported")} />
             </DetailRow>

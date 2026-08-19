@@ -1,18 +1,19 @@
 /**
  * ChangesetCard.tsx — in-conversation review surface for a staged agent
- * changeset (changeset.staged frame). Shows a sample of the actual per-cell
- * changes and lets the reviewer Approve/Reject right here — the full-page
- * `/approve/:changesetId` surface stays available (new tab) for auditing the
- * complete plan, but leaving the conversation is no longer required.
+ * changeset (changeset.staged frame).
  *
- * Approval calls the same auth-worker endpoints as the approval page, with the
- * digest taken from the GET payload — what's approved is provably what the
- * server staged, never something the frame carried.
+ * Two renderings, feature-detected on the frame (AQU-926,
+ * docs/COMMAND-REGISTRY.md §5):
+ * - Frames WITHOUT the additive `digest` field (older server builds, legacy
+ *   persisted PlanImport timelines) render the legacy card below EXACTLY as
+ *   before: sample changes, Approve/Reject (the agent commits afterwards),
+ *   mem-M5 status polling.
+ * - Frames WITH `digest` (fresh AQU-926 stagings) render LiveChangesetCard:
+ *   Approve & apply commits server-side from the card itself (approve →
+ *   sync-worker commit → receipt), with testimony gating.
  *
- * mem-M5 liveness: while the card is mounted and the changeset is still
- * pending, it polls `GET /api/v2/changesets/:id/approval` every ~5s so the
- * card reflects an approval/rejection made elsewhere without a page reload.
- * Polling stops once a terminal status lands or the card unmounts.
+ * Approval always posts the digest taken from the approval GET payload — what
+ * is approved is provably what the server staged, never what a frame carried.
  */
 
 import { useEffect, useState } from "react"
@@ -20,16 +21,25 @@ import { ExternalLink, FileDiff } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { AUTH_BASE } from "@/lib/frontier/auth"
 import type { ChangesetItem } from "@/lib/agent/run-state"
 import {
-  ChangeList,
-  ImportPreviewView,
-  type ChangesetChanges,
-  type ChangesetImportPreview,
-} from "@/components/changesets/ChangeList"
+  approveChangeset,
+  ChangesetApiError,
+  fetchChangesetApproval,
+  rejectChangeset,
+  type ChangesetApproval,
+} from "@/lib/agent/changeset-api"
+import {
+  changesetStatusBadgeClass,
+  changesetStatusLabel,
+  changesetStatusVariant,
+  isTerminalChangesetStatus,
+} from "@/lib/agent/changeset-review"
+import { ChangeList, ImportPreviewView } from "@/components/changesets/ChangeList"
+import { LiveChangesetCard } from "./LiveChangesetCard"
 
 const POLL_INTERVAL_MS = 5000
 
@@ -37,46 +47,33 @@ const POLL_INTERVAL_MS = 5000
  *  The "View full details" link carries the reviewer to the complete list. */
 const SAMPLE_CHANGES = 3
 
-/** Server statuses after which the changeset can no longer be acted on. */
-const TERMINAL_STATUSES = new Set(["committed", "discarded", "stale", "expired"])
-
-interface ApprovalPayload {
-  status: string
-  digest: string
-  changes?: ChangesetChanges
-  importPreview?: ChangesetImportPreview
-}
-
-function isTerminal(status: string): boolean {
-  return TERMINAL_STATUSES.has(status)
-}
-
-function statusLabel(status: string, approvedLocally: boolean): string {
-  switch (status) {
-    case "committed":
-      return "Committed"
-    case "discarded":
-      return "Discarded"
-    case "stale":
-      return "Stale"
-    case "expired":
-      return "Expired"
-    default:
-      return approvedLocally ? "Approved" : "Pending review"
+export function ChangesetCard({
+  item,
+  onApplied,
+}: {
+  item: ChangesetItem
+  /** Post-commit hook: flush outbox + revalidate the touched cells (same seam
+   *  ProposalCard uses). Only the live variant commits, so only it calls this. */
+  onApplied?: (eventIds: string[], cellIds: string[]) => void | Promise<void>
+}) {
+  // Feature-detect the live review flow on the additive digest field — a frame
+  // without it predates AQU-926 and must render exactly as before.
+  if (item.digest !== undefined) {
+    return <LiveChangesetCard item={item} onApplied={onApplied} />
   }
+  return <LegacyChangesetCard item={item} />
 }
 
-function statusVariant(status: string, approvedLocally: boolean): "default" | "secondary" | "outline" {
-  if (status === "committed" || approvedLocally) return "default"
-  if (isTerminal(status)) return "outline"
-  return "secondary"
-}
-
-export function ChangesetCard({ item }: { item: ChangesetItem }) {
+/**
+ * The pre-AQU-926 card, unchanged in behavior: the AGENT owns the commit, so
+ * a successful approve is remembered locally ("the agent can now commit") and
+ * mem-M5 polling keeps the status honest while the card is mounted.
+ */
+function LegacyChangesetCard({ item }: { item: ChangesetItem }) {
   const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
-  const [approval, setApproval] = useState<ApprovalPayload | null>(null)
+  const [approval, setApproval] = useState<ChangesetApproval | null>(null)
   const [status, setStatus] = useState("staged")
   // "Approved" isn't a server status (it stays `staged` until the agent
   // commits), so a successful approve is remembered locally.
@@ -85,16 +82,12 @@ export function ChangesetCard({ item }: { item: ChangesetItem }) {
   const [actionError, setActionError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!jwt || isTerminal(status)) return
+    if (!jwt || isTerminalChangesetStatus(status)) return
     let cancelled = false
 
     const poll = async () => {
       try {
-        const res = await fetch(`${AUTH_BASE}/api/v2/changesets/${item.changesetId}/approval`, {
-          headers: { Authorization: `Bearer ${jwt}` },
-        })
-        if (cancelled || !res.ok) return
-        const data = (await res.json()) as ApprovalPayload
+        const data = await fetchChangesetApproval(jwt, item.changesetId)
         if (cancelled) return
         setApproval(data)
         if (data.status) setStatus(data.status)
@@ -116,46 +109,46 @@ export function ChangesetCard({ item }: { item: ChangesetItem }) {
     setWorking(true)
     setActionError(null)
     try {
-      const res = await fetch(
-        `${AUTH_BASE}/api/v2/changesets/${item.changesetId}/${kind}`,
-        kind === "approve"
-          ? {
-              method: "POST",
-              headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
-              body: JSON.stringify({ digest: approval.digest }),
-            }
-          : { method: "POST", headers: { Authorization: `Bearer ${jwt}` } },
-      )
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null
-        setActionError(body?.error?.message ?? `Something went wrong (${res.status}).`)
-        return
+      if (kind === "approve") {
+        await approveChangeset(jwt, item.changesetId, approval.digest)
+        setApprovedLocally(true)
+      } else {
+        await rejectChangeset(jwt, item.changesetId)
+        setStatus("discarded")
       }
-      if (kind === "approve") setApprovedLocally(true)
-      else setStatus("discarded")
-    } catch {
-      setActionError("Couldn't reach the server. Check your connection and try again.")
+    } catch (err) {
+      setActionError(
+        err instanceof ChangesetApiError
+          ? err.message
+          : "Couldn't reach the server. Check your connection and try again.",
+      )
     } finally {
       setWorking(false)
     }
   }
 
-  const actionable = status === "staged" && !approvedLocally && jwt !== null && approval !== null
+  const staged = status === "staged"
+  const actionable = staged && !approvedLocally && jwt !== null && approval !== null
+  // "Approved" awaiting the agent's commit — shown while the server still says staged.
+  const approvedAwaitingCommit = approvedLocally && staged
 
   return (
     <div
       data-frame-type="changeset.staged"
-      data-changeset-status={approvedLocally && status === "staged" ? "approved" : status}
+      data-changeset-status={approvedAwaitingCommit ? "approved" : status}
       className="space-y-1.5 rounded-lg border border-sky-900/60 bg-sky-950/30 px-3 py-2"
     >
       <div className="flex flex-wrap items-center gap-1.5 text-xs">
         <FileDiff className="h-3.5 w-3.5 shrink-0 text-sky-500" />
         <span className="min-w-0 flex-1 truncate font-medium">{item.summary}</span>
         <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
-          {item.cellCount} {item.cellCount === 1 ? "cell" : "cells"}
+          {t("common.cellCount", { count: item.cellCount })}
         </Badge>
-        <Badge variant={statusVariant(status, approvedLocally)} className="px-1.5 py-0 text-[10px]">
-          {statusLabel(status, approvedLocally)}
+        <Badge
+          variant={changesetStatusVariant(status, approvedLocally)}
+          className={cn("px-1.5 py-0 text-[10px]", changesetStatusBadgeClass(status))}
+        >
+          {changesetStatusLabel(t, status, approvedLocally)}
         </Badge>
       </div>
 
@@ -171,7 +164,7 @@ export function ChangesetCard({ item }: { item: ChangesetItem }) {
         />
       )}
 
-      {approvedLocally && status === "staged" && (
+      {approvedAwaitingCommit && (
         <p className="text-[11px] text-muted-foreground">
           {t("agent.changeset.approvedNotice")}
         </p>

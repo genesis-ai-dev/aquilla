@@ -21,6 +21,14 @@ export interface AudioAttachmentOut {
    *  server. Never sent by the server; UI renders a "saving…" hint from it so
    *  a queued take is visibly safe rather than mysteriously present. */
   pendingSync?: true
+  /** AQU-924: set by the optimistic overlay when this clip's attach event was
+   *  QUARANTINED (403) or exhausted its retry budget. The clip's bytes are in
+   *  R2 and the event is still durable in the outbox, but the server has no
+   *  attachment for it and won't get one without user action. Never sent by the
+   *  server. The overlay deliberately keeps painting the take so it can be seen
+   *  and retried — dropping it was silent data loss (the take vanished on the
+   *  next read, and again on reload). Mutually exclusive with `pendingSync`. */
+  syncFailed?: true
 }
 
 export interface CellAudioEntry {

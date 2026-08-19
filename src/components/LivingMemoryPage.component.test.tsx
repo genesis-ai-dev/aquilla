@@ -183,6 +183,15 @@ beforeEach(() => {
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe("LivingMemoryPage — index", () => {
+  it("does not load the complete cell corpus before Examples is opened", () => {
+    renderPage()
+
+    expect(vi.mocked(useLivingMemory)).toHaveBeenLastCalledWith(expect.objectContaining({
+      enabled: false,
+      project: mockProjectBase,
+    }))
+  })
+
   it("renders from the workspace-owned project while the standalone query is unresolved", () => {
     mockProject({}, true)
     const workspaceProject = {
@@ -357,6 +366,15 @@ describe("LivingMemoryPage — role-gated edit affordances", () => {
 })
 
 describe("LivingMemoryPage — examples pane", () => {
+  it("starts the validated-cell query only for the Examples pane", () => {
+    renderPage("/project/proj-1/memory/examples")
+
+    expect(vi.mocked(useLivingMemory)).toHaveBeenLastCalledWith(expect.objectContaining({
+      enabled: true,
+      project: mockProjectBase,
+    }))
+  })
+
   it("keeps the Recent Examples section and role=status empty state", () => {
     renderPage("/project/proj-1/memory/examples")
     expect(

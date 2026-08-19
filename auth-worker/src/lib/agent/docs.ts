@@ -5,6 +5,8 @@
 // bound by sql-guard). Keep each cookbook under 200 lines; the model fetches
 // one with execute({docs:"topic"}) only when a task needs it.
 
+import { PROJECT_BOOTSTRAP, QA_SWEEP, FIRST_CYCLE } from "./docs-playbooks"
+
 const DRAFTING = `# Drafting cookbook — the canonical draft loop
 
 1. Find untranslated cells in the working file (empty target value):
@@ -325,6 +327,12 @@ const COOKBOOKS: Record<string, string> = {
   "files-and-refs": FILES_AND_REFS,
   aquifer: AQUIFER,
   brief: BRIEF,
+  // AQU-CMDREG-P1 §4: onboarding playbooks. L2 prose that sequences existing
+  // commands — deliberately NOT listed in the schema card or the docs tool
+  // description, so the always-resident prompt does not grow.
+  "playbooks/project-bootstrap": PROJECT_BOOTSTRAP,
+  "playbooks/qa-sweep": QA_SWEEP,
+  "playbooks/first-cycle": FIRST_CYCLE,
 }
 
 export const COOKBOOK_TOPICS = Object.keys(COOKBOOKS)

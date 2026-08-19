@@ -517,3 +517,25 @@ What's genuinely new (out of scope for this document, covered in
 living-memory/brief tables and review UI. None of it changes the external credential, command,
 changeset, or provenance model documented above — read `docs/AGENT-SANDBOX.md` for the sandbox
 architecture and come back here for what an external `PlanImport` changeset is once staged.
+
+## Status addendum (2026-08-17, AQU-926 — command registry P0)
+
+The command layer is now the **shared write spine for both agent surfaces** (see
+`docs/COMMAND-REGISTRY.md` for the binding contract and `docs/AGENT-CAPABILITY-AUDIT.md`
+§6–7 for the rationale and roadmap):
+
+- **Shared catalog** — `db/shared/command-catalog.ts`: kind/tier/floor metadata + on-demand
+  `paramsDoc`s. Drives the in-app agent's role-filtered prompt index (`describe_command` serves
+  the bodies) and `get_capabilities`' new `commands` index. `commandKinds` stays at the v1.1
+  five for compatibility; the `commands` index is the authoritative vocabulary.
+- **New commands** — `PatchSettings` (field-scoped settings write, per-key floors, sole
+  command, one op per key; `POLICY_SETTINGS_KEYS` are never agent-writable) and `EmitEvents`
+  (≤200 role-allowed events per sole-command changeset from `ALLOWED_EMIT_KINDS`: comments,
+  waives, validations (testimony-flagged), back-translation, repin, file rename/delete/restore,
+  assignments incl. reassign; head pins are server-resolved, whole-plan rejection on any bad
+  reference). `UpdateProjectSettings` is deprecated and now rejects policy-key changes.
+- **Session principal** — the in-app agent stages changesets through the same engine via
+  session sync-token routes (`/api/v1/changesets/:projectId[...]` on the sync host), with
+  `credential_id = 'session'`, forced ask mode, `channel: "app"` provenance, and the existing
+  `/api/v2/changesets/:id/approval|approve|reject` human gate; the SPA's live ChangesetCard
+  commits after approval (per-item confirmation for testimony kinds).

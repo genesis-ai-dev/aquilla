@@ -104,18 +104,18 @@ describe("CommentsPage chrome", () => {
     expect(mockRefresh).toHaveBeenCalledTimes(1)
   })
 
-  it("expands Filters to show Sort combobox and collapses to hide it", () => {
+  it("opens the Filters menu to show Sort and Show resolved, then closes it", () => {
     renderPage()
 
-    expect(screen.queryByRole("combobox")).not.toBeInTheDocument()
+    expect(screen.queryByRole("combobox", { name: /^Sort$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("switch", { name: /Show resolved/i })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: /^Filters$/i }))
-    const sortTrigger = screen.getByRole("combobox")
-    expect(sortTrigger).toBeInTheDocument()
-    expect(screen.getByText(/^Sort$/)).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: /^Sort$/i })).toBeInTheDocument()
+    expect(screen.getByRole("switch", { name: /Show resolved/i })).not.toBeChecked()
 
     fireEvent.click(screen.getByRole("button", { name: /^Filters$/i }))
-    expect(screen.queryByRole("combobox")).not.toBeInTheDocument()
+    expect(screen.queryByRole("combobox", { name: /^Sort$/i })).not.toBeInTheDocument()
   })
 
   it("filters threads by search, shows filter badge and clear-filters empty state", () => {

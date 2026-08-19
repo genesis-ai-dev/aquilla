@@ -9,12 +9,11 @@ import { useMemo, useState, useRef, useEffect } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import {
   MessageCircle, CheckCircle, ChevronDown, ChevronRight,
-  AlertCircle, Search, SlidersHorizontal, ArrowUpRight,
+  AlertCircle, Search, Funnel, ArrowUpRight,
   MoreHorizontal, Pencil, Trash2, RefreshCw,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
@@ -36,9 +35,11 @@ import { useProject } from "@/hooks/useProject"
 import { renderCommentHtml } from "@/lib/comments/comment-helpers"
 import DOMPurify from "dompurify"
 import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import {
   Popover,
   PopoverContent,
+  PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover"
 import {
@@ -60,6 +61,8 @@ import {
 import { useT, useI18n } from "@/lib/i18n/I18nProvider"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 import { DateTooltip } from "@/components/ui/date-tooltip"
+import { Separator } from "@/components/ui/separator"
+import { Switch } from "@/components/ui/switch"
 import {
   type FilterState,
   type SortOrder,
@@ -543,166 +546,166 @@ interface FilterControlsProps {
   authorOptions: { id: string; label: string }[]
 }
 
+function FilterSelectRow({
+  id,
+  label,
+  items,
+  value,
+  onValueChange,
+}: {
+  id: string
+  label: string
+  items: { value: string; label: string }[]
+  value: string
+  onValueChange: (value: string) => void
+}) {
+  return (
+    <Field orientation="horizontal" className="items-center justify-between gap-3">
+      <FieldLabel htmlFor={id} className="font-normal text-muted-foreground">
+        {label}
+      </FieldLabel>
+      <Select
+        items={items}
+        value={value}
+        onValueChange={(next) => onValueChange(next ?? "")}
+      >
+        <SelectTrigger id={id} size="sm" aria-label={label}>
+          <SelectValue className="truncate" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectGroup>
+            {items.map((item) => (
+              <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+    </Field>
+  )
+}
+
 function FilterControls({ filter, onChange, fileOptions, authorOptions }: FilterControlsProps) {
   const t = useT()
-  const [expanded, setExpanded] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
   const sortItemsList = sortItems(t)
   const allFilesLabel = t("comments.filter.allFiles")
   const anyoneLabel = t("comments.filter.anyone")
+  const showResolvedLabel = t("comments.filter.showResolved")
+  const activeFilterCount = countActiveFilters(filter)
+  const canReset = activeFilterCount > 0 || filter.sort !== DEFAULT_FILTER.sort
 
   return (
-    <div className="space-y-2">
-      {/* Search bar + expand toggle */}
-      <div className="flex items-center gap-2">
-        <InputGroup className="h-8 flex-1">
-          <InputGroupAddon>
-            <Search />
-          </InputGroupAddon>
-          <InputGroupInput
-            className="text-sm"
-            placeholder={t("comments.filter.searchPlaceholder")}
-            value={filter.search}
-            onChange={(e) => onChange({ ...filter, search: e.target.value })}
+    <div className="flex items-center gap-2">
+      <InputGroup className="h-8 flex-1">
+        <InputGroupAddon>
+          <Search />
+        </InputGroupAddon>
+        <InputGroupInput
+          className="text-sm"
+          placeholder={t("comments.filter.searchPlaceholder")}
+          value={filter.search}
+          onChange={(e) => onChange({ ...filter, search: e.target.value })}
+        />
+      </InputGroup>
+      <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+        <AppTooltip
+          content={t("comments.filter.filtersButton")}
+          side="bottom"
+          disabled={menuOpen}
+        >
+          <PopoverTrigger
+            render={
+              <Button
+                type="button"
+                variant={menuOpen || activeFilterCount > 0 ? "secondary" : "outline"}
+                size="icon"
+                aria-label={t("comments.filter.filtersButton")}
+              >
+                <Funnel />
+              </Button>
+            }
           />
-        </InputGroup>
-        <AppTooltip content={t("comments.filter.filtersButton")} side="bottom">
-          <Button
-            type="button"
-            variant={expanded ? "secondary" : "outline"}
-            size="icon"
-            aria-expanded={expanded}
-            aria-label={t("comments.filter.filtersButton")}
-            onClick={() => setExpanded((v) => !v)}
-          >
-            <SlidersHorizontal />
-          </Button>
         </AppTooltip>
-      </div>
-
-      {expanded && (
-        <div className="flex flex-wrap items-center gap-3 rounded-md border px-3 py-2 text-xs bg-muted/20">
-          {/* Sort picker */}
-          <label className="flex items-center gap-1.5">
-            <span className="text-muted-foreground whitespace-nowrap">{t("comments.filter.sortLabel")}</span>
-            <Select
+        <PopoverContent
+          align="end"
+          side="bottom"
+          sideOffset={4}
+          className="w-72"
+          data-testid="comments-filters-popover"
+        >
+          <PopoverTitle className="sr-only">{t("comments.filter.filtersButton")}</PopoverTitle>
+          <FieldGroup className="gap-3">
+            <FilterSelectRow
+              id="comments-filter-sort"
+              label={t("comments.filter.sortLabel")}
               items={sortItemsList}
               value={filter.sort}
-              onValueChange={(v) => onChange({ ...filter, sort: v as SortOrder })}
-            >
-              <SelectTrigger size="sm" className="text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {sortItemsList.map((it) => (
-                    <SelectItem key={it.value} value={it.value}>{it.label}</SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </label>
-
-          {/* Show resolved toggle */}
-          <label className="flex items-center gap-1.5 select-none">
-            <Checkbox
-              checked={filter.showResolved}
-              onCheckedChange={(checked) => onChange({ ...filter, showResolved: checked })}
-              className="size-3.5"
+              onValueChange={(value) => onChange({ ...filter, sort: value as SortOrder })}
             />
-            <span>{t("comments.filter.showResolved")}</span>
-          </label>
-
-          {/* File filter */}
-          {fileOptions.length > 0 && (
-            <label className="flex items-center gap-1.5">
-              <span className="text-muted-foreground whitespace-nowrap">{t("common.file")}</span>
-              <Select
+            <Field orientation="horizontal">
+              <FieldLabel htmlFor="comments-filter-show-resolved" className="font-normal">
+                {showResolvedLabel}
+              </FieldLabel>
+              <Switch
+                id="comments-filter-show-resolved"
+                checked={filter.showResolved}
+                onCheckedChange={(checked) => onChange({ ...filter, showResolved: checked })}
+                aria-label={showResolvedLabel}
+              />
+            </Field>
+            {fileOptions.length > 0 && (
+              <FilterSelectRow
+                id="comments-filter-file"
+                label={t("common.file")}
                 items={[
                   { value: "", label: allFilesLabel },
-                  ...fileOptions.map((f) => ({ value: f.id, label: f.name })),
+                  ...fileOptions.map((file) => ({ value: file.id, label: file.name })),
                 ]}
                 value={filter.fileId}
-                onValueChange={(v) => onChange({ ...filter, fileId: v ?? "" })}
-              >
-                <SelectTrigger size="sm" className="text-xs">
-                  <SelectValue className="truncate" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="">{allFilesLabel}</SelectItem>
-                    {fileOptions.map((f) => (
-                      <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </label>
-          )}
-
-          {/* Author filter */}
-          {authorOptions.length > 0 && (
-            <label className="flex items-center gap-1.5">
-              <span className="text-muted-foreground whitespace-nowrap">{t("comments.filter.authorLabel")}</span>
-              <Select
+                onValueChange={(value) => onChange({ ...filter, fileId: value })}
+              />
+            )}
+            {authorOptions.length > 0 && (
+              <FilterSelectRow
+                id="comments-filter-author"
+                label={t("comments.filter.authorLabel")}
                 items={[
                   { value: "", label: anyoneLabel },
-                  ...authorOptions.map((a) => ({ value: a.id, label: a.label })),
+                  ...authorOptions.map((author) => ({ value: author.id, label: author.label })),
                 ]}
                 value={filter.authorId}
-                onValueChange={(v) => onChange({ ...filter, authorId: v ?? "" })}
-              >
-                <SelectTrigger size="sm" className="text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="">{anyoneLabel}</SelectItem>
-                    {authorOptions.map((a) => (
-                      <SelectItem key={a.id} value={a.id}>{a.label}</SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </label>
-          )}
-
-          {/* Participant filter */}
-          {authorOptions.length > 0 && (
-            <label className="flex items-center gap-1.5">
-              <span className="text-muted-foreground whitespace-nowrap">{t("comments.filter.participantLabel")}</span>
-              <Select
+                onValueChange={(value) => onChange({ ...filter, authorId: value })}
+              />
+            )}
+            {authorOptions.length > 0 && (
+              <FilterSelectRow
+                id="comments-filter-participant"
+                label={t("comments.filter.participantLabel")}
                 items={[
                   { value: "", label: anyoneLabel },
-                  ...authorOptions.map((a) => ({ value: a.id, label: a.label })),
+                  ...authorOptions.map((author) => ({ value: author.id, label: author.label })),
                 ]}
                 value={filter.participant}
-                onValueChange={(v) => onChange({ ...filter, participant: v ?? "" })}
+                onValueChange={(value) => onChange({ ...filter, participant: value })}
+              />
+            )}
+          </FieldGroup>
+          {canReset && (
+            <>
+              <Separator />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="self-start text-muted-foreground"
+                onClick={() => onChange(DEFAULT_FILTER)}
               >
-                <SelectTrigger size="sm" className="text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="">{anyoneLabel}</SelectItem>
-                    {authorOptions.map((a) => (
-                      <SelectItem key={a.id} value={a.id}>{a.label}</SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </label>
+                {t("common.reset")}
+              </Button>
+            </>
           )}
-
-          {/* Reset */}
-          <Button
-            variant="ghost"
-            className="h-6 px-2 text-xs text-muted-foreground"
-            onClick={() => onChange(DEFAULT_FILTER)}
-          >
-            {t("common.reset")}
-          </Button>
-        </div>
-      )}
+        </PopoverContent>
+      </Popover>
     </div>
   )
 }

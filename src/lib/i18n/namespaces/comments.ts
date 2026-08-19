@@ -263,15 +263,15 @@ export const comments = defineNamespace({
       },
       "comments.filter.filtersButton": {
         description:
-          "Tooltip and accessible name of the icon-only button that expands/collapses " +
-          "the advanced filter row (sort, show-resolved, file, author, participant). " +
-          "Toggles state; the name does not change.",
+          "Tooltip and accessible name of the funnel icon button that opens the " +
+          "filter menu (sort, show-resolved, file, author, participant). The name " +
+          "does not change when the menu is open.",
       },
       "comments.filter.sortLabel": {
-        description: "Form label beside the sort-order picker in the filter row.",
+        description: "Form label beside the sort-order picker in the filter menu.",
       },
       "comments.filter.showResolved": {
-        description: "Checkbox label: include resolved threads in the visible list.",
+        description: "Switch label in the filter menu: include resolved threads in the visible list.",
       },
       "comments.filter.allFiles": {
         description: "Option in the file picker meaning no file filter is applied.",

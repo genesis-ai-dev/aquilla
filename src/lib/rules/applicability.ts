@@ -144,6 +144,12 @@ export interface CoordinateFile {
   fileId: string
   /** USFM book code when the file is a scripture book. */
   bookCode?: string
+  /**
+   * Explicit genre assignment (ProjectWideSettings.fileGenres, resolved through
+   * `resolveFileGenre`). Wins over the genre derived from the book code, and is
+   * the only genre a non-scripture document can have.
+   */
+  genre?: string
 }
 
 /**
@@ -174,11 +180,11 @@ export function cellCoordinates(
   }
 
   const book = file.bookCode?.trim().toUpperCase() || parsePassageRef(ref ?? "")?.book
-  if (book) {
-    coords.book = book
-    const genre = genreOf(book)
-    if (genre) coords.genre = genre
-  }
+  if (book) coords.book = book
+  // An assignment beats the derived scripture genre; without one a non-scripture
+  // file simply has no genre coordinate.
+  const genre = file.genre?.trim().toLowerCase() || (book ? genreOf(book) : undefined)
+  if (genre) coords.genre = genre
 
   return coords
 }

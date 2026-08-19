@@ -41,6 +41,7 @@ import { useRules } from "@/hooks/useRules"
 import { useStyleRules } from "@/hooks/useStyleRules"
 import { buildApplicabilityIndex, cellCoordinates, resolveEffectiveRules } from "@/lib/rules/applicability"
 import { buildLibraryLintResolver } from "@/lib/rules/effective-rules"
+import { resolveFileGenre } from "@/lib/rules/file-genre"
 import { bookGenre } from "@/lib/scripture/book-genres"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -2069,17 +2070,23 @@ export function ProjectWorkspace() {
     () => buildApplicabilityIndex(styleApplicability),
     [styleApplicability],
   )
+  const fileGenres = project?.fileGenres
   const styleInstructionsFor = useCallback((cell: CellData): string[] => {
     if (styleRules.length === 0) return []
     const file = projectFiles.find((f) => f.id === cell.fileId)
+    const genre = resolveFileGenre(cell.fileId, file?.bookCode, fileGenres)
     const coords = cellCoordinates(
       cell,
-      { fileId: cell.fileId, ...(file?.bookCode ? { bookCode: file.bookCode } : {}) },
+      {
+        fileId: cell.fileId,
+        ...(file?.bookCode ? { bookCode: file.bookCode } : {}),
+        ...(genre ? { genre } : {}),
+      },
       bookGenre,
     )
     return resolveEffectiveRules(styleRules, styleApplicabilityIndex, coords)
       .map((effective) => effective.rule.instruction)
-  }, [styleRules, styleApplicabilityIndex, projectFiles])
+  }, [styleRules, styleApplicabilityIndex, projectFiles, fileGenres])
 
   const bookCodeByFileId = useMemo(() => {
     const map = new Map<string, string>()
@@ -2097,14 +2104,19 @@ export function ProjectWorkspace() {
       applicability: styleApplicability,
       coordsFor: (cell) => {
         const bookCode = bookCodeByFileId.get(cell.fileId)
+        const genre = resolveFileGenre(cell.fileId, bookCode, fileGenres)
         return cellCoordinates(
           cell,
-          { fileId: cell.fileId, ...(bookCode ? { bookCode } : {}) },
+          {
+            fileId: cell.fileId,
+            ...(bookCode ? { bookCode } : {}),
+            ...(genre ? { genre } : {}),
+          },
           bookGenre,
         )
       },
     }),
-    [styleRules, styleApplicability, bookCodeByFileId],
+    [styleRules, styleApplicability, bookCodeByFileId, fileGenres],
   )
   const {
     comments: allProjectComments,

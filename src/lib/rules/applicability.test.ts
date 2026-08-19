@@ -113,6 +113,40 @@ describe("cellCoordinates", () => {
     expect(coords).toEqual(PSA_COORDS)
   })
 
+  it("lets an explicit genre assignment beat the one derived from the book", () => {
+    const coords = cellCoordinates(
+      { id: "cell-1", globalReferences: ["PSA 23:1"] },
+      { fileId: "file-psa", bookCode: "PSA", genre: "teaching" },
+      bookGenre,
+    )
+    expect(coords.genre).toBe("teaching")
+    // Reclassifying genre must not disturb the other coordinates.
+    expect(coords.book).toBe("PSA")
+    expect(coords.section).toBe("PSA 23")
+  })
+
+  it("gives a non-scripture file a genre only from an assignment", () => {
+    const unassigned = cellCoordinates({ id: "c" }, { fileId: "notes" }, bookGenre)
+    expect(unassigned.genre).toBeUndefined()
+
+    const assigned = cellCoordinates(
+      { id: "c" },
+      { fileId: "notes", genre: "Dialogue" },
+      bookGenre,
+    )
+    expect(assigned.genre).toBe("dialogue")
+    expect(assigned.book).toBeUndefined()
+  })
+
+  it("ignores a blank assignment rather than blanking the derived genre", () => {
+    const coords = cellCoordinates(
+      { id: "c", globalReferences: ["PSA 23:1"] },
+      { fileId: "f", bookCode: "PSA", genre: "   " },
+      bookGenre,
+    )
+    expect(coords.genre).toBe("poetry")
+  })
+
   it("slices section at the first colon, keeping ranges intact", () => {
     const coords = cellCoordinates(
       { id: "c", globalReferences: ["LUK 1:1-2"] },

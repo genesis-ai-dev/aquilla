@@ -122,6 +122,18 @@ export interface ProjectWideSettings {
   /** AQU-646 SUB-53: dubbing (the default, and the meaning of absent) or
    *  audio-first. See the AudioTimingMode doc comment in parsers/types.ts. */
   audioTimingMode?: AudioTimingMode
+  /**
+   * AQU-934: per-file genre assignment — fileId → genre id from the vocabulary
+   * in `src/lib/rules/file-genre.ts`. Human-set (a model may only suggest); an
+   * entry OVERRIDES the genre derived from a scripture book code and is the
+   * ONLY way a non-scripture document gets one, so genre-scoped style rules
+   * reach every cell of a classified document. Files with no entry keep
+   * deriving from their book code, so this map stays small — bounded by file
+   * count (tens of entries), not by content, which is why it belongs in the
+   * settings blob rather than its own table. Replacing this key replaces the
+   * whole map: writers must send the full merged object.
+   */
+  fileGenres?: Record<string, string>
 }
 
 /** Absent means dubbing — the behaviour every project had before SUB-53. */

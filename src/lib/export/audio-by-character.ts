@@ -5,7 +5,7 @@
 
 import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
-import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
+import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import { resolveCastVoice } from "@/lib/audio/voices"
 import { encodeWavPcm16 } from "@/lib/audio/wav-encode"
 import { parseFrontierAudioUrl } from "@/lib/audio/upload"
@@ -19,12 +19,17 @@ export interface CharacterClip {
 }
 
 export interface CharacterGroup {
-  voice: Voice
+  /** Stable identity for the group — the resolved character name when there is
+   *  one, else the voice id. */
+  key: string
+  /** What the character is CALLED. This is what names the file in the zip. */
+  name: string
+  color?: string
   clips: CharacterClip[]
 }
 
 export interface CharacterPreview {
-  voiceId: string
+  key: string
   name: string
   color?: string
   clipCount: number
@@ -38,12 +43,27 @@ function bestAudioId(cell: CellData): string | null {
   return cell.selectedAudioId ?? cell.selectedGeneratedVoiceAudioId ?? null
 }
 
+/**
+ * Who a clip belongs to, named the way the rest of the app names them.
+ *
+ * WHY THIS IS A PARAMETER. Grouping used to go straight to `resolveCastVoice`,
+ * which reads `castAssignments`. That is right when the AUDIO character sheet
+ * was imported — it writes assignments for cue ids — and silently wrong when
+ * only the SUBTITLE sheet was, because a cue then has no assignment of its own
+ * and every take collapses into one default-voice group. The caller passes a
+ * resolver that goes through the links (`lib/timeline/cue-character.ts`), which
+ * is exactly what the chip strip and the recorder already do, so the zip agrees
+ * with what was on screen.
+ */
+export type ResolveCharacterName = (cell: CellData) => string | null
+
 export function groupAudioByCharacter(
   cells: CellData[],
   settings: ProjectTtsSettings | undefined,
+  resolveName?: ResolveCharacterName,
 ): CharacterGroup[] {
   const order: string[] = []
-  const byVoice = new Map<string, CharacterGroup>()
+  const byKey = new Map<string, CharacterGroup>()
 
   for (const cell of cells) {
     const audioId = bestAudioId(cell)
@@ -51,22 +71,27 @@ export function groupAudioByCharacter(
     const attachment = cell.attachments?.[audioId]
     if (!attachment?.url) continue
     const voice = resolveCastVoice(settings, cell.id, cell.ttsSettings?.voiceId)
-    let group = byVoice.get(voice.id)
+    const named = resolveName?.(cell)?.trim() || null
+    // The NAME is the identity when we have one: two cells sharing a character
+    // belong together even if they resolved to different voices.
+    const key = named ?? voice.id
+    let group = byKey.get(key)
     if (!group) {
-      group = { voice, clips: [] }
-      byVoice.set(voice.id, group)
-      order.push(voice.id)
+      group = { key, name: named ?? voice.name, ...(voice.color ? { color: voice.color } : {}), clips: [] }
+      byKey.set(key, group)
+      order.push(key)
     }
     group.clips.push({ cellId: cell.id, audioId, url: attachment.url })
   }
-  return order.map((id) => byVoice.get(id)!)
+  return order.map((k) => byKey.get(k)!)
 }
 
 export function previewAudioByCharacter(
   cells: CellData[],
   settings: ProjectTtsSettings | undefined,
+  resolveName?: ResolveCharacterName,
 ): CharacterPreview[] {
-  return groupAudioByCharacter(cells, settings).map((g) => {
+  return groupAudioByCharacter(cells, settings, resolveName).map((g) => {
     let total: number | null = 0
     for (const clip of g.clips) {
       const dur = findCell(cells, clip.cellId)?.attachments?.[clip.audioId]?.durationMs
@@ -74,9 +99,9 @@ export function previewAudioByCharacter(
       else total += dur
     }
     return {
-      voiceId: g.voice.id,
-      name: g.voice.name,
-      color: g.voice.color,
+      key: g.key,
+      name: g.name,
+      color: g.color,
       clipCount: g.clips.length,
       totalDurationMs: total,
     }
@@ -120,10 +145,13 @@ export interface ExportAudioArgs {
    *  tests pass a fake. */
   decode: (bytes: Uint8Array) => Promise<Float32Array>
   onProgress?: (done: number, total: number) => void
+  resolveName?: ResolveCharacterName
 }
 
-export async function exportAudioByCharacter(args: ExportAudioArgs): Promise<{ blob: Blob; skipped: number }> {
-  const groups = groupAudioByCharacter(args.cells, args.settings)
+export async function exportAudioByCharacter(
+  args: ExportAudioArgs,
+): Promise<{ blob: Blob; skipped: number; clips: number; characters: number }> {
+  const groups = groupAudioByCharacter(args.cells, args.settings, args.resolveName)
   const zip = new JSZip()
   const usedNames = new Map<string, number>()
   const totalClips = groups.reduce((n, g) => n + g.clips.length, 0)
@@ -181,13 +209,18 @@ export async function exportAudioByCharacter(args: ExportAudioArgs): Promise<{ b
     if (pcm.length === 0) continue // character ended up with no decodable audio
     const wav = encodeWavPcm16(pcm, TARGET_RATE)
     // Disambiguate same-named cast members.
-    const base = `${characterKey(group.voice.name)}_${args.langCode}`
+    const base = `${characterKey(group.name)}_${args.langCode}`
     const seen = usedNames.get(base) ?? 0
     usedNames.set(base, seen + 1)
     const name = seen === 0 ? `${base}.wav` : `${base}_${seen + 1}.wav`
     zip.file(name, wav)
   }
 
+  // COUNTS OUT, so the caller can tell "nothing to export" from "everything
+  // failed to decode". An empty JSZip still generates a perfectly valid 22-byte
+  // archive, and handing that to someone as a download is the bug this whole
+  // round started from — episode 302's export looked like it worked.
+  const characters = Object.keys(zip.files).length
   const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" })
-  return { blob, skipped }
+  return { blob, skipped, clips: totalClips, characters }
 }

@@ -108,3 +108,78 @@ describe("exportAudioByCharacter", () => {
     expect(Object.keys(zip.files)).toHaveLength(0)
   })
 })
+
+// ── Counting what came out ───────────────────────────────────────────────
+//
+// An empty JSZip still generates a perfectly valid archive — 22 bytes — and
+// handing one to someone as a download reads as success. Episode 302's export
+// did exactly that, and the cause turned out to be upstream (it was fed the
+// subtitle rows, which carry no audio, instead of the cue cells where takes
+// live). The counts let the caller refuse instead of downloading nothing.
+
+describe("saying what actually came out", () => {
+  it("reports zero characters and zero clips when no cell has audio", async () => {
+    const result = await exportAudioByCharacter({
+      cells: [cell({ id: "c1" }), cell({ id: "c2" })],
+      settings: SETTINGS,
+      projectId: "p1",
+      langCode: "swh",
+      fetchBytes: async () => new Uint8Array([1, 2, 3, 4]),
+      decode: async () => new Float32Array([0.1]),
+    })
+    expect(result.clips).toBe(0)
+    expect(result.characters).toBe(0)
+    // …and the blob is still a real, and entirely empty, archive.
+    expect(Object.keys((await JSZip.loadAsync(result.blob)).files)).toEqual([])
+  })
+
+  it("distinguishes 'nothing to export' from 'everything failed to decode'", async () => {
+    const result = await exportAudioByCharacter({
+      cells: [
+        cell({ id: "c1", selectedAudioId: "a1", attachments: { a1: { url: "frontier-audio://a1.wav", type: "audio/wav" } } }),
+      ],
+      settings: SETTINGS,
+      projectId: "p1",
+      langCode: "swh",
+      fetchBytes: async () => { throw new Error("gone") },
+      decode: async () => new Float32Array([0.1]),
+    })
+    // There WAS something to export; it just could not be read.
+    expect(result.clips).toBe(1)
+    expect(result.characters).toBe(0)
+    expect(result.skipped).toBe(1)
+  })
+
+  it("counts the characters it actually wrote", async () => {
+    const result = await exportAudioByCharacter({
+      cells: [
+        cell({ id: "c1", selectedAudioId: "a1", attachments: { a1: { url: "frontier-audio://a1.wav", type: "audio/wav" } } }),
+        cell({ id: "c2", selectedAudioId: "a2", attachments: { a2: { url: "frontier-audio://a2.wav", type: "audio/wav" } } }),
+      ],
+      settings: SETTINGS,
+      projectId: "p1",
+      langCode: "swh",
+      fetchBytes: async () => new Uint8Array([1, 2, 3, 4]),
+      decode: async () => new Float32Array([0.1]),
+    })
+    expect(result.characters).toBe(2)
+    expect(result.clips).toBe(2)
+  })
+
+  it("names the files by the RESOLVED character, not the voice", async () => {
+    const result = await exportAudioByCharacter({
+      cells: [
+        cell({ id: "c1", selectedAudioId: "a1", attachments: { a1: { url: "frontier-audio://a1.wav", type: "audio/wav" } } }),
+      ],
+      settings: SETTINGS,
+      projectId: "p1",
+      langCode: "swh",
+      resolveName: () => "MARY MAGDALENE'S FATHER",
+      fetchBytes: async () => new Uint8Array([1, 2, 3, 4]),
+      decode: async () => new Float32Array([0.1]),
+    })
+    const names = Object.keys((await JSZip.loadAsync(result.blob)).files)
+    // …sanitized for the filesystem, but recognisably the character.
+    expect(names).toEqual(["MARY_MAGDALENE_S_FATHER_swh.wav"])
+  })
+})

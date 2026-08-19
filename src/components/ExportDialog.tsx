@@ -234,6 +234,18 @@ interface ExportDialogProps {
   canExport?: boolean
   /** Cells for the currently active file. */
   cells: CellData[]
+  /**
+   * The cells that actually CARRY RECORDINGS, when they are not the ones above.
+   *
+   * Since stage 4 takes live on the audio-cue sibling, not on the subtitle
+   * rows — so the per-character export was grouping ~650 rows that have no
+   * audio at all and writing a valid, empty, 22-byte zip. Absent ⇒ `cells`,
+   * which is every arrangement without an audio-cue track.
+   */
+  audioCells?: CellData[]
+  /** Name the character for a cell the way the timeline and recorder do — via
+   *  the links, so it works whichever character sheet was imported. */
+  resolveCharacterName?: (cell: CellData) => string | null
   projectId: string
   projectName: string
   /** The active file's id, used for USFM file-scope export. */
@@ -277,6 +289,8 @@ export function ExportDialog({
   onOpenChange,
   canExport = true,
   cells,
+  audioCells,
+  resolveCharacterName,
   projectId,
   projectName,
   activeFileId,
@@ -587,7 +601,8 @@ export function ExportDialog({
         // (projectId, fileId) — wrap it to match the fetchCellAudio signature.
         const getSyncToken = (_pid: string, fileId: string) => getToken(fileId)
         const result = await exportAudioByCharacter({
-          cells,
+          cells: audioCells ?? cells,
+          resolveName: resolveCharacterName,
           settings: ttsSettings,
           projectId,
           langCode: targetLanguage || "und",
@@ -596,6 +611,18 @@ export function ExportDialog({
           decode: decodeToMono48k,
           onProgress: (d, t) => setStatus({ kind: "busy", msg: `Decoding ${d}/${t}…` }),
         })
+        // REFUSE RATHER THAN DOWNLOAD NOTHING. A zip with no entries is still
+        // a valid archive, and handing one over reads as success.
+        if (result.characters === 0) {
+          setStatus({
+            kind: "error",
+            msg:
+              result.clips === 0
+                ? "No recordings found in this file, so there is nothing to export."
+                : `None of the ${result.clips} recordings could be read, so the export would be empty.`,
+          })
+          return
+        }
         const safe = buildExportStem(false) // AQU-437: user-chosen stem
         downloadBlob(result.blob, `${safe}_audio-by-character.zip`)
         const skippedNote = result.skipped > 0 ? ` (${result.skipped} clip${result.skipped === 1 ? "" : "s"} skipped)` : ""
@@ -1030,7 +1057,7 @@ export function ExportDialog({
 
         {/* Audio-by-character inline preview */}
         {format === "audio-by-character" && effectiveScope === "file" && (() => {
-          const preview = previewAudioByCharacter(cells, ttsSettings)
+          const preview = previewAudioByCharacter(audioCells ?? cells, ttsSettings, resolveCharacterName)
           return (
           <div className="flex flex-col gap-1 text-xs">
             <p className="font-medium text-muted-foreground text-[10px]">Preview</p>
@@ -1038,7 +1065,7 @@ export function ExportDialog({
               <p className="text-muted-foreground">No cells with audio found in this file.</p>
             ) : (
               preview.map((p) => (
-                <div key={p.voiceId} className="flex items-center gap-2">
+                <div key={p.key} className="flex items-center gap-2">
                   {p.color && (
                     <span
                       className="h-2 w-2 rounded-full shrink-0"

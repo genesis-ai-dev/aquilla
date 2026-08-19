@@ -8028,6 +8028,13 @@ export function ProjectWorkspace() {
                     // sits at the contributor floor `cast.assign` requires.
                     onRequestImportCharacters={() => setImportCharactersOpen(true)}
                     canImportCharacters={canPerform("cast.assign", project?.syncRole?.level ?? null)}
+                    // PROJECT_LEAD, not the contributor floor the underlying
+                    // events sit at: the checks are SETUP work, done before a
+                    // file reaches translators and dubbers, and they are the
+                    // contributors who should not be re-deciding it after. The
+                    // server floors are unchanged — this is workflow hygiene,
+                    // and the UI is the only path to these surfaces.
+                    canCheck={(project?.syncRole?.level ?? 0) >= ROLE.PROJECT_LEAD}
                     characterCount={characterCount}
                     audioCharacterCount={audioCharacterCount}
                     charactersWriting={characterWrite != null}
@@ -8623,6 +8630,18 @@ export function ProjectWorkspace() {
           onOpenChange={setExportOpen}
           canExport={canExportByOrgPolicy}
           cells={legacyCells}
+          // WHERE THE TAKES ACTUALLY ARE. Stage 4 moved recording onto the
+          // audio cues, so exporting the subtitle rows grouped 650 cells with
+          // no audio at all and wrote a valid, empty, 22-byte zip.
+          audioCells={audioCues ?? undefined}
+          // …and name each one the way every other surface does, so the zip
+          // agrees with the chip strip and the recorder whichever character
+          // sheet was imported.
+          resolveCharacterName={(cell: CellData) =>
+            formatCueCharacter(
+              resolveCueCharacter({ cell, links: cueLinks, textCells: legacyCells }).names,
+            )
+          }
           projectId={project.id}
           projectName={project.name ?? project.id}
           activeFileId={activeFileId ?? null}

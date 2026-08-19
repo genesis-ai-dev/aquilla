@@ -165,6 +165,18 @@ export interface TimelineEditorProps {
   /** Open the list of those disagreements. */
   onReviewCharacterDisagreements?(): void
   /**
+   * May this person use the CHECK tools at all?
+   *
+   * Reviewing pairings and settling character disagreements is setup work that
+   * happens BEFORE a file is handed to translators and dubbers — and they are
+   * exactly the contributors who should not be re-deciding it afterwards. The
+   * client's own producer sets the projects up, so she clears this; a
+   * contributor does not. (Sam, 2026-08-18.)
+   *
+   * Absent ⇒ allowed, so every existing caller and test is unaffected.
+   */
+  canCheck?: boolean
+  /**
    * Stage 4: the cells that CARRY TARGET AUDIO, when that is not this file's
    * own cells — the audio cues, merged with their attachments.
    *
@@ -502,6 +514,7 @@ export function TimelineEditor({
   charactersWriting = false,
   characterDisagreements = 0,
   onReviewCharacterDisagreements,
+  canCheck = true,
   targetCells,
   onLinkingModeChange,
   linkingModeRequest,
@@ -884,7 +897,7 @@ export function TimelineEditor({
   // can start on either row: from a heard line to find its subtitle, or from a
   // subtitle to find the lines that perform it.
   const [pickedLink, setPickedLink] = useState<{ id: string; side: "cue" | "text" } | null>(null)
-  const linkingAvailable = Boolean(onToggleCueLink && audioCues && editable)
+  const linkingAvailable = Boolean(onToggleCueLink && audioCues && editable && canCheck)
   // Leaving the mode must not strand a half-made pairing on screen.
   useEffect(() => {
     if (!linkingMode) setPickedLink(null)
@@ -934,7 +947,7 @@ export function TimelineEditor({
           }),
       })
     }
-    if (onReviewCharacterDisagreements) {
+    if (onReviewCharacterDisagreements && canCheck) {
       items.push({
         id: "check-characters",
         label: "Check characters",
@@ -951,7 +964,7 @@ export function TimelineEditor({
     return items
   }, [
     linkingAvailable, linkingMode, cueLinksPending, onLinkingModeChange,
-    onReviewCharacterDisagreements, characterDisagreements,
+    onReviewCharacterDisagreements, characterDisagreements, canCheck,
   ])
 
   const sourceMenuItems = useMemo<OverflowMenuItem[]>(() => {

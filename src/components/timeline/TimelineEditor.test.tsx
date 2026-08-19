@@ -1744,3 +1744,56 @@ describe("TimelineEditor — selecting an audio cue", () => {
     expect(onChipActivated).not.toHaveBeenCalled()
   })
 })
+
+// ── The checks are setup work, not contributor work ──────────────────────
+//
+// Reviewing pairings and settling character disagreements happens BEFORE a file
+// reaches translators and dubbers — and they are exactly the contributors who
+// should not be re-deciding it afterwards. The client's producer sets projects
+// up, so she clears the bar; a contributor does not. (Sam, 2026-08-18.)
+//
+// The IMPORT was already gated; these two surfaces were not — ProjectWorkspace
+// always passed the handler, so anyone could open the drawer and write
+// resolutions.
+
+describe("who may use the Check tools", () => {
+  const checkProps = {
+    cells: [
+      { id: "s1", fileId: "f1", original: "One", translated: "", startTime: 0, endTime: 2 },
+      { id: "s2", fileId: "f1", original: "Two", translated: "", startTime: 3, endTime: 5 },
+    ] as unknown as React.ComponentProps<typeof TimelineEditor>["cells"],
+    coreMediaUrl: null,
+    fileId: "f1",
+    onRetimeSubtitle: () => {},
+    audioCues: [
+      { id: "q1", fileId: "f2", original: "One", startTime: 0, endTime: 2 },
+    ] as unknown as React.ComponentProps<typeof TimelineEditor>["audioCues"],
+    onToggleCueLink: () => {},
+    onReviewCharacterDisagreements: () => {},
+    editable: true,
+  } satisfies Partial<React.ComponentProps<typeof TimelineEditor>>
+
+  it("offers both checks when the bar is cleared", () => {
+    render(<TimelineEditor {...checkProps} canCheck />)
+    fireEvent.click(screen.getByTestId("tl-check-menu"))
+    expect(screen.getByText("Check links")).toBeInTheDocument()
+    expect(screen.getByText("Check characters")).toBeInTheDocument()
+  })
+
+  it("hides the whole menu below it", () => {
+    render(<TimelineEditor {...checkProps} canCheck={false} />)
+    expect(screen.queryByTestId("tl-check-menu")).not.toBeInTheDocument()
+  })
+
+  it("leaves Sources alone — importing has its own floor", () => {
+    render(
+      <TimelineEditor
+        {...checkProps}
+        canCheck={false}
+        onRequestImportCharacters={() => {}}
+        canImportCharacters
+      />,
+    )
+    expect(screen.getByTestId("tl-sources-menu")).toBeInTheDocument()
+  })
+})

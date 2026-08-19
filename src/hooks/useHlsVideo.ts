@@ -22,10 +22,16 @@
 // cannot run, or fails fatally past its own recovery, Safari's native HLS is
 // still a working player and the pane drops back to it.
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type Hls from "hls.js"
 import { capIndexForHeight, isHlsSource, MAX_LEVEL_HEIGHT } from "@/lib/video/hls-levels"
+import {
+  DEFAULT_FILM_AUDIO_LANG,
+  pickAudioTrack,
+  selectableAudioTracks,
+  type FilmAudioTrack,
+} from "@/lib/video/film-audio-tracks"
 
 /** THE ROLLBACK VALVE. Flip to false and every film goes back to whatever the
  *  browser does with the address on its own — which is the behaviour that
@@ -71,6 +77,51 @@ export function streamingPlayerAvailable(): boolean {
   }
 }
 
+/**
+ * Safari's own audio track list, which is NOT in the standard DOM types.
+ *
+ * It is the reason the language picker needs no disabled state: where the
+ * streaming player is not driving — the fallback the stall ladder reaches for,
+ * and any browser without Media Source Extensions — the one engine that plays
+ * these playlists natively is also the one that exposes this. Chromium has no
+ * `audioTracks` and no native HLS either, so it never needs it.
+ */
+interface NativeAudioTrack {
+  id: string
+  label: string
+  language: string
+  enabled: boolean
+}
+interface NativeAudioTrackList {
+  readonly length: number
+  [index: number]: NativeAudioTrack
+  addEventListener(type: string, listener: () => void): void
+  removeEventListener(type: string, listener: () => void): void
+}
+
+function nativeAudioTracks(video: HTMLVideoElement | null): NativeAudioTrackList | null {
+  const list = (video as unknown as { audioTracks?: NativeAudioTrackList } | null)?.audioTracks
+  return list && typeof list.length === "number" ? list : null
+}
+
+function readNativeTracks(list: NativeAudioTrackList): FilmAudioTrack[] {
+  const out: FilmAudioTrack[] = []
+  for (let i = 0; i < list.length; i += 1) {
+    const t = list[i]
+    if (!t) continue
+    out.push({ id: t.id || String(i), name: t.label || t.language || `Track ${i + 1}`, lang: t.language || null })
+  }
+  return out
+}
+
+/** Same renditions, same order? Track lists are re-read whenever the player
+ *  says anything about audio, and a fresh array each time would re-run the
+ *  effect that applies the choice — which is itself what provoked the event. */
+function sameTracks(a: readonly FilmAudioTrack[], b: readonly FilmAudioTrack[]): boolean {
+  if (a.length !== b.length) return false
+  return a.every((t, i) => t.id === b[i]?.id && t.lang === b[i]?.lang && t.name === b[i]?.name)
+}
+
 export interface HlsSnapshot {
   pipeline: VideoPipeline
   /** Null until the manifest has been parsed. */
@@ -78,6 +129,9 @@ export interface HlsSnapshot {
   autoLevelCapping: number | null
   levels: { height: number | null; codec: string | null; bitrate: number | null }[]
   fatalRecoveries: number
+  /** What the film is speaking, and what was on offer. */
+  audioLang: string | null
+  audioTrackCount: number
 }
 
 export interface UseHlsVideoOptions {
@@ -91,6 +145,13 @@ export interface UseHlsVideoOptions {
   enabled?: boolean
   /** Test seam. Production omits it and the library is imported for real. */
   loader?: HlsLoader
+  /**
+   * What the film should speak. null means nobody has said, which resolves to
+   * English — NOT to whatever the player would have picked. These masters carry
+   * 65 dubs and flag none of them as the default, so a player left to choose
+   * takes the top of an alphabetical list and the film comes up in Amharic.
+   */
+  audioLanguage?: string | null
 }
 
 export interface HlsVideoHandle {
@@ -107,6 +168,12 @@ export interface HlsVideoHandle {
   /** Give up on the streaming player for this source and let the browser try.
    *  A genuinely different decoder, which is the point. */
   fallbackToNative: () => void
+  /** The languages this film is dubbed into, narration tracks excluded, in the
+   *  manifest's own order. Empty until the film has opened — and empty forever
+   *  on a plain file, which has one soundtrack and nothing to choose. */
+  audioTracks: FilmAudioTrack[]
+  /** The one currently sounding, resolved through the fallbacks. */
+  activeAudioLang: string | null
   snapshot: () => HlsSnapshot
 }
 
@@ -116,7 +183,13 @@ export interface HlsVideoHandle {
 export function useHlsVideo(
   videoRef: React.RefObject<HTMLVideoElement | null>,
   src: string | null | undefined,
-  { maxHeight = MAX_LEVEL_HEIGHT, attachKey = 0, enabled = true, loader = importHls }: UseHlsVideoOptions = {},
+  {
+    maxHeight = MAX_LEVEL_HEIGHT,
+    attachKey = 0,
+    enabled = true,
+    loader = importHls,
+    audioLanguage = null,
+  }: UseHlsVideoOptions = {},
 ): HlsVideoHandle {
   // Set when the library will not run, or has failed past its own recovery.
   // Keyed to the source, so a different film gets a fresh chance rather than
@@ -135,6 +208,16 @@ export function useHlsVideo(
   const hlsRef = useRef<Hls | null>(null)
   const fatalRef = useRef(0)
   const capRef = useRef<number | null>(null)
+  /** What the film is dubbed into, as the driving player reports it. */
+  const [audioTracks, setAudioTracks] = useState<FilmAudioTrack[]>([])
+  /** Read once at construction so the FIRST segments fetched are already the
+   *  right language — correcting it afterwards works, but you hear the wrong
+   *  one first. Deliberately a ref: changing the language must not tear the
+   *  player down and rebuild it. */
+  const audioLanguageRef = useRef(audioLanguage)
+  useEffect(() => {
+    audioLanguageRef.current = audioLanguage
+  }, [audioLanguage])
 
   useEffect(() => {
     if (pipeline !== "hls" || !src) return
@@ -170,6 +253,10 @@ export function useHlsVideo(
         // H.264, standard range. HEVC is the rendition family Safari was most
         // likely wedging on, and nothing here needs HDR.
         videoPreference: { videoCodec: "avc1", allowedVideoRanges: ["SDR" as const] },
+        // English unless this film has been set otherwise. Without it the
+        // library picks for itself, and with no DEFAULT in the manifest that
+        // means the first rendition alphabetically.
+        audioPreference: { lang: audioLanguageRef.current ?? DEFAULT_FILM_AUDIO_LANG },
         // An hour-long episode scrubbed through all afternoon will hold every
         // segment it has ever played unless told not to.
         backBufferLength: 30,
@@ -197,6 +284,25 @@ export function useHlsVideo(
         hls.autoLevelCapping = cap
       })
 
+      const publishTracks = () => {
+        const hls = hlsRef.current
+        if (!hls) return
+        const next = selectableAudioTracks(
+          (hls.audioTracks ?? []).map((a) => ({
+            id: a.id,
+            name: a.name,
+            lang: a.lang ?? null,
+            characteristics: a.characteristics ?? null,
+            default: a.default,
+            autoselect: a.autoselect,
+          })),
+        )
+        setAudioTracks((prev) => (sameTracks(prev, next) ? prev : next))
+      }
+      instance.on(Ctor.Events.AUDIO_TRACKS_UPDATED, publishTracks)
+      instance.on(Ctor.Events.AUDIO_TRACK_SWITCHED, publishTracks)
+      instance.on(Ctor.Events.MANIFEST_PARSED, publishTracks)
+
       instance.on(Ctor.Events.ERROR, (_event, data) => {
         if (!data.fatal) return
         const hls = hlsRef.current
@@ -219,6 +325,7 @@ export function useHlsVideo(
 
     return () => {
       cancelled = true
+      setAudioTracks([])
       const open = instance ?? hlsRef.current
       if (open) {
         // Detaches the element too, so the next player starts against a clean
@@ -231,6 +338,71 @@ export function useHlsVideo(
     // `attachKey` is the caller saying it replaced the element; without it a
     // rebuilt element would keep the old, detached player.
   }, [pipeline, src, attachKey, maxHeight, loader, videoRef])
+
+  /**
+   * The same list, where the browser is the player. Safari populates its own
+   * `audioTracks` for native HLS, which is what lets the picker keep working
+   * after the stall ladder has handed the film back to it.
+   */
+  useEffect(() => {
+    if (pipeline !== "native") return
+    const video = videoRef.current
+    if (!video) return
+    const read = () => {
+      const list = nativeAudioTracks(video)
+      const next = list ? selectableAudioTracks(readNativeTracks(list)) : []
+      setAudioTracks((prev) => (sameTracks(prev, next) ? prev : next))
+    }
+    read()
+    const list = nativeAudioTracks(video)
+    video.addEventListener("loadedmetadata", read)
+    list?.addEventListener("addtrack", read)
+    list?.addEventListener("change", read)
+    return () => {
+      video.removeEventListener("loadedmetadata", read)
+      list?.removeEventListener("addtrack", read)
+      list?.removeEventListener("change", read)
+      setAudioTracks([])
+    }
+  }, [pipeline, src, attachKey, videoRef])
+
+  /**
+   * Make the film speak the chosen language, on whichever player is driving.
+   *
+   * Declarative rather than a command: the caller says what it wants and this
+   * keeps it true, so a language chosen before the film opened is applied the
+   * moment the list arrives, and a fallback to the browser's own player
+   * re-applies it rather than silently reverting — which is the bug the picker
+   * exists to end, and would be a poor way to reintroduce it.
+   */
+  const activeTrack = useMemo(
+    // Derived, not stored: what is sounding is a function of what the film
+    // offers and what was asked for, and holding a copy in state would let the
+    // two drift the moment either changed.
+    () => pickAudioTrack(audioTracks, audioLanguage),
+    [audioTracks, audioLanguage],
+  )
+  const activeAudioLang = activeTrack?.lang ?? null
+
+  useEffect(() => {
+    const wanted = activeTrack
+    if (!wanted) return
+    if (pipeline === "hls") {
+      const hls = hlsRef.current
+      if (!hls) return
+      const id = Number(wanted.id)
+      if (Number.isFinite(id) && hls.audioTrack !== id) hls.audioTrack = id
+      return
+    }
+    const list = nativeAudioTracks(videoRef.current)
+    if (!list) return
+    for (let i = 0; i < list.length; i += 1) {
+      const track = list[i]
+      if (!track) continue
+      const on = (track.id || String(i)) === String(wanted.id)
+      if (track.enabled !== on) track.enabled = on
+    }
+  }, [activeTrack, pipeline, videoRef])
 
   const restartLoad = useCallback(() => {
     try {
@@ -264,8 +436,18 @@ export function useHlsVideo(
         bitrate: l.bitrate ?? null,
       })),
       fatalRecoveries: fatalRef.current,
+      audioLang: activeAudioLang,
+      audioTrackCount: audioTracks.length,
     }
-  }, [pipeline])
+  }, [pipeline, activeAudioLang, audioTracks.length])
 
-  return { pipeline, restartLoad, recoverMedia, fallbackToNative, snapshot }
+  return {
+    pipeline,
+    restartLoad,
+    recoverMedia,
+    fallbackToNative,
+    audioTracks,
+    activeAudioLang,
+    snapshot,
+  }
 }

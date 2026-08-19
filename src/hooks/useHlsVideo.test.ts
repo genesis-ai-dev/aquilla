@@ -23,6 +23,19 @@ const LEVELS = [
   { height: 2160, bitrate: 92507195, videoCodec: "avc1.4D4033" },
 ]
 
+/**
+ * Episode 101's audio renditions, in the manifest's own order: sixty-five dubs,
+ * alphabetical, Amharic first, and only English flagged — with AUTOSELECT, not
+ * DEFAULT. Trimmed to the entries the rules turn on. The description track is
+ * included deliberately; it is the one that must never be offered.
+ */
+const AUDIO_TRACKS = [
+  { id: 0, name: "Amharic", lang: "am-ET" },
+  { id: 16, name: "English", lang: "en", autoselect: true },
+  { id: 17, name: "English Audio Descriptions", lang: "en_ad" },
+  { id: 50, name: "Spanish (Latin America)", lang: "es-419" },
+]
+
 type Handler = (event: string, data: unknown) => void
 
 /** A stand-in for the library: records what it was asked to do and lets a test
@@ -31,12 +44,19 @@ function makeFakeHls(o: { supported?: boolean } = {}) {
   const instances: FakeHls[] = []
 
   class FakeHls {
-    static Events = { MANIFEST_PARSED: "hlsManifestParsed", ERROR: "hlsError" } as const
+    static Events = {
+      MANIFEST_PARSED: "hlsManifestParsed",
+      ERROR: "hlsError",
+      AUDIO_TRACKS_UPDATED: "hlsAudioTracksUpdated",
+      AUDIO_TRACK_SWITCHED: "hlsAudioTrackSwitched",
+    } as const
     static ErrorTypes = { NETWORK_ERROR: "networkError", MEDIA_ERROR: "mediaError", OTHER_ERROR: "otherError" } as const
     static isSupported = () => o.supported ?? true
 
     config: Record<string, unknown>
     levels = LEVELS
+    audioTracks = AUDIO_TRACKS
+    audioTrack = -1
     currentLevel = 4
     autoLevelCapping = -1
     subtitleDisplay = true
@@ -281,5 +301,112 @@ describe("the snapshot the console seam reads", () => {
     expect(snap.autoLevelCapping).toBe(2)
     expect(snap.levels).toHaveLength(LEVELS.length)
     expect(snap.levels[5]).toEqual({ height: 2160, codec: "avc1.4D4033", bitrate: 92507195 })
+  })
+})
+
+// ── What the film speaks (Sam, 2026-08-18) ────────────────────────────────
+//
+// "It seems though that the video's language randomly changed." It did, and
+// this is why: the masters flag no default track, so a player left to choose
+// takes the top of an alphabetical list.
+
+describe("the language the film speaks", () => {
+  it("asks for English before it fetches anything", () => {
+    // Correcting it after the manifest lands works, but you hear the wrong
+    // language first — so the preference goes in at construction.
+    const { ref } = elementRef()
+    const { loader, instances } = makeFakeHls()
+    renderHook(() => useHlsVideo(ref, HLS_SRC, { loader }))
+    return waitFor(() => {
+      expect(instances).toHaveLength(1)
+      expect(instances[0]!.config.audioPreference).toEqual({ lang: "en" })
+    })
+  })
+
+  it("asks for the film's chosen language instead, when there is one", async () => {
+    const { ref } = elementRef()
+    const { loader, instances } = makeFakeHls()
+    renderHook(() => useHlsVideo(ref, HLS_SRC, { loader, audioLanguage: "es-419" }))
+    await waitFor(() => expect(instances).toHaveLength(1))
+    expect(instances[0]!.config.audioPreference).toEqual({ lang: "es-419" })
+  })
+
+  it("offers every language except the narration track for blind viewers", async () => {
+    const { ref } = elementRef()
+    const { loader, instances } = makeFakeHls()
+    const { result } = renderHook(() => useHlsVideo(ref, HLS_SRC, { loader }))
+    await waitFor(() => expect(instances).toHaveLength(1))
+    instances[0]!.emit("hlsAudioTracksUpdated")
+    await waitFor(() => expect(result.current.audioTracks.length).toBeGreaterThan(0))
+    const names = result.current.audioTracks.map((t) => t.name)
+    expect(names).toEqual(["Amharic", "English", "Spanish (Latin America)"])
+  })
+
+  it("switches the player to English rather than the top of the list", async () => {
+    const { ref } = elementRef()
+    const { loader, instances } = makeFakeHls()
+    renderHook(() => useHlsVideo(ref, HLS_SRC, { loader }))
+    await waitFor(() => expect(instances).toHaveLength(1))
+    instances[0]!.emit("hlsAudioTracksUpdated")
+    await waitFor(() => expect(instances[0]!.audioTrack).toBe(16))
+  })
+
+  it("follows a change of language without rebuilding the player", async () => {
+    // Choosing a language mid-film must not tear the picture down and start it
+    // again from the beginning.
+    const { ref } = elementRef()
+    const { loader, instances } = makeFakeHls()
+    const { rerender } = renderHook(
+      ({ lang }: { lang: string | null }) => useHlsVideo(ref, HLS_SRC, { loader, audioLanguage: lang }),
+      { initialProps: { lang: null as string | null } },
+    )
+    await waitFor(() => expect(instances).toHaveLength(1))
+    instances[0]!.emit("hlsAudioTracksUpdated")
+    await waitFor(() => expect(instances[0]!.audioTrack).toBe(16))
+    rerender({ lang: "es-419" })
+    await waitFor(() => expect(instances[0]!.audioTrack).toBe(50))
+    expect(instances).toHaveLength(1)
+    expect(instances[0]!.destroyed).toBe(false)
+  })
+
+  it("reports what is sounding", async () => {
+    const { ref } = elementRef()
+    const { loader, instances } = makeFakeHls()
+    const { result } = renderHook(() => useHlsVideo(ref, HLS_SRC, { loader, audioLanguage: "es-419" }))
+    await waitFor(() => expect(instances).toHaveLength(1))
+    instances[0]!.emit("hlsAudioTracksUpdated")
+    await waitFor(() => expect(result.current.activeAudioLang).toBe("es-419"))
+    expect(result.current.snapshot().audioLang).toBe("es-419")
+  })
+
+  it("falls back to English for a film that lacks the chosen language", async () => {
+    const { ref } = elementRef()
+    const { loader, instances } = makeFakeHls()
+    const { result } = renderHook(() => useHlsVideo(ref, HLS_SRC, { loader, audioLanguage: "cy-GB" }))
+    await waitFor(() => expect(instances).toHaveLength(1))
+    instances[0]!.emit("hlsAudioTracksUpdated")
+    await waitFor(() => expect(result.current.activeAudioLang).toBe("en"))
+  })
+
+  it("keeps the choice when the browser takes the film back", async () => {
+    // The stall ladder's last rung hands the address to the browser's own
+    // player. Reverting the language there would be the original bug again.
+    const { video, ref } = elementRef()
+    const tracks = [
+      { id: "1", label: "Amharic", language: "am-ET", enabled: true },
+      { id: "2", label: "English", language: "en", enabled: false },
+    ]
+    Object.defineProperty(video, "audioTracks", {
+      configurable: true,
+      value: Object.assign(tracks, {
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }),
+    })
+    const { loader } = makeFakeHls({ supported: false })
+    const { result } = renderHook(() => useHlsVideo(ref, HLS_SRC, { loader }))
+    await waitFor(() => expect(result.current.pipeline).toBe("native"))
+    await waitFor(() => expect(tracks[1]!.enabled).toBe(true))
+    expect(tracks[0]!.enabled).toBe(false)
   })
 })

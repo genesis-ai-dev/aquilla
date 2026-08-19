@@ -28,6 +28,7 @@ import { AlertTriangle, Headphones, VolumeX } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { useHlsVideo } from "@/hooks/useHlsVideo"
+import { readFilmAudioLanguage } from "@/lib/video/film-audio-tracks"
 import { AppTooltip } from "@/components/ui/tooltip"
 import {
   setRecordingFilmAudible,
@@ -120,7 +121,12 @@ export function RecordingVideoSurface({
    * It does NOT breach this file's invariant: the hook touches the element and
    * nothing else. No controller, no clock, nothing published.
    */
-  const stream = useHlsVideo(videoRef, src)
+  // FOLLOWS the language chosen on the main picture, and offers no control of
+  // its own (Sam, 2026-08-18: "the recording model should follow that"). The
+  // preference is keyed by the film's address, and this is the same film — so
+  // the two agree without either knowing about the other. A team working from
+  // Spanish must not hear English the moment they hit record.
+  const stream = useHlsVideo(videoRef, src, { audioLanguage: readFilmAudioLanguage(src) })
   const pipeline = stream.pipeline
   /** A source that will not load leaves NOTHING behind — see the render. */
   const [failed, setFailed] = useState(false)

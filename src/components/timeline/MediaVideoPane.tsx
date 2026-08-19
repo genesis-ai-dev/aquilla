@@ -41,6 +41,8 @@ import {
 } from "@/lib/timeline/video-clock"
 import { clearVideoControllerIf, setVideoController, type VideoController } from "@/lib/timeline/video-controller"
 import { useHlsVideo } from "@/hooks/useHlsVideo"
+import { readFilmAudioLanguage, writeFilmAudioLanguage } from "@/lib/video/film-audio-tracks"
+import { VideoAudioPicker } from "./VideoAudioPicker"
 import { videoSyncAction } from "./video-sync"
 import {
   forgetStallSample,
@@ -165,8 +167,30 @@ export function MediaVideoPane({
    * survive. An ordinary file or a recording goes on being handled by the
    * browser, and `pipeline` says which is driving.
    */
-  const stream = useHlsVideo(videoRef, src, { attachKey: loadAttempt })
+  /**
+   * What the film speaks. These masters carry sixty-five dubs of the same
+   * episode and flag none of them as the default, so a player left to itself
+   * picks the top of an alphabetical list — which is how Sam's film came up in
+   * Amharic the moment the streaming player replaced Safari's own. The choice
+   * is remembered per film, in this browser, and English until someone says
+   * otherwise.
+   */
+  const [audioLanguage, setAudioLanguage] = useState<string | null>(() => readFilmAudioLanguage(src))
+  useEffect(() => {
+    setAudioLanguage(readFilmAudioLanguage(src))
+  }, [src])
+  const stream = useHlsVideo(videoRef, src, { attachKey: loadAttempt, audioLanguage })
   const pipeline = stream.pipeline
+  const chooseAudioLanguage = useCallback(
+    (lang: string) => {
+      writeFilmAudioLanguage(src, lang)
+      setAudioLanguage(lang)
+    },
+    [src],
+  )
+  /** Held open while the language menu is: the corner controls fade with the
+   *  pointer, and a list that vanishes as you reach for it is unusable. */
+  const [audioMenuOpen, setAudioMenuOpen] = useState(false)
   /** The caption toggle rides faded on the picture; this shows it briefly when
    *  playback starts so the control is discoverable without hovering. */
   const [modeRevealed, setModeRevealed] = useState(false)
@@ -1058,6 +1082,25 @@ export function MediaVideoPane({
            the line in the black below it. Anchored to the FIELD, so it
            lands in the bar when there is one. */}
       {hasCaption && placement === "bar" && <VideoPaneCaption {...captionProps} />}
+      {/* Bottom right (Sam, 2026-08-18). On the FIELD rather than the picture,
+          like the two caption controls above and for the same reason: it keeps
+          its corner when the picture is letterboxed down to a small box. */}
+      <div
+        data-testid="video-audio-overlay"
+        className={cn(
+          "absolute bottom-2 right-2 z-30 transition-opacity duration-300",
+          modeRevealed || audioMenuOpen
+            ? "opacity-100"
+            : "pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100",
+        )}
+      >
+        <VideoAudioPicker
+          tracks={stream.audioTracks}
+          activeLang={stream.activeAudioLang}
+          onChange={chooseAudioLanguage}
+          onOpenChange={setAudioMenuOpen}
+        />
+      </div>
       {/* NO MUTE BUTTON ON THE PICTURE. It was here for a few hours on
           2026-08-14 and came straight back off (Sam): the playback bar already
           carries one, and the Source-audio row in the timeline gutter carries

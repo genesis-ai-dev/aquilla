@@ -201,6 +201,9 @@ describe("AppShell main-content error containment", () => {
     const version = screen.getByRole("button", { name: "Copy build info" })
     expect(version.parentElement).not.toHaveClass("flex-1")
     expect(version.closest('[data-slot="app-shell-sidebar-footer"]')).toBe(footer)
+    const help = screen.getByRole("button", { name: /help & community/i })
+    expect(footer).toContainElement(help)
+    expect(help.nextElementSibling).toBe(trigger)
     // The picker must list endonyms, not English names — a Burmese speaker
     // looking for their language will not scan for the word "Burmese".
     await userEvent.click(trigger)
@@ -228,6 +231,13 @@ describe("AppShell main-content error containment", () => {
     const footer = language.closest('[data-slot="app-shell-sidebar-footer"]')
     expect(footer).toHaveClass("justify-between")
     expect(version.closest('[data-slot="app-shell-sidebar-footer"]')).toBe(footer)
+    const help = screen.getByRole("button", { name: /help & community/i })
+    expect(footer).toContainElement(help)
+    expect(help).toHaveClass("size-8")
+
+    await userEvent.click(help)
+    expect(await screen.findByRole("menuitem", { name: /homepage/i })).toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: /take the tour/i })).not.toBeInTheDocument()
   })
 })
 

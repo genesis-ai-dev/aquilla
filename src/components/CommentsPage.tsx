@@ -545,6 +545,8 @@ interface FilterControlsProps {
   onChange: (next: FilterState) => void
   fileOptions: { id: string; name: string }[]
   authorOptions: { id: string; label: string }[]
+  isRefreshing: boolean
+  onRefresh: () => void
 }
 
 const filterLabelClass = "font-normal text-muted-foreground"
@@ -611,7 +613,14 @@ function FilterSelectRow({
   )
 }
 
-function FilterControls({ filter, onChange, fileOptions, authorOptions }: FilterControlsProps) {
+function FilterControls({
+  filter,
+  onChange,
+  fileOptions,
+  authorOptions,
+  isRefreshing,
+  onRefresh,
+}: FilterControlsProps) {
   const t = useT()
   const [menuOpen, setMenuOpen] = useState(false)
   const sortItemsList = sortItems(t)
@@ -741,6 +750,18 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
           )}
         </PopoverContent>
       </Popover>
+      <AppTooltip content={t("common.refresh")} side="bottom" align="end">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          onClick={onRefresh}
+          disabled={isRefreshing}
+          aria-label={t("common.refresh")}
+        >
+          {isRefreshing ? <Spinner /> : <RefreshCw />}
+        </Button>
+      </AppTooltip>
     </div>
   )
 }
@@ -877,19 +898,6 @@ export function CommentsPage({ project: workspaceProject }: CommentsPageProps = 
               : t("comments.filterCount.one", { count: activeFilterCount })}
           </Badge>
         )}
-        <div className="flex-1" />
-        <AppTooltip content={t("common.refresh")} side="bottom">
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            onClick={refresh}
-            disabled={isLoading}
-            aria-label={t("common.refresh")}
-          >
-            {isLoading ? <Spinner /> : <RefreshCw />}
-          </Button>
-        </AppTooltip>
       </div>
 
       <FilterControls
@@ -897,6 +905,8 @@ export function CommentsPage({ project: workspaceProject }: CommentsPageProps = 
         onChange={setFilter}
         fileOptions={fileOptions}
         authorOptions={authorOptions}
+        isRefreshing={isLoading}
+        onRefresh={refresh}
       />
 
       {isError && (

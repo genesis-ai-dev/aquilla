@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { screen, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
+import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { CommentsPage } from "./CommentsPage"
 
 const mockComments = vi.fn<() => CommentRecord[]>(() => [])
@@ -74,7 +75,7 @@ function makeComment(overrides: Partial<CommentRecord> = {}): CommentRecord {
 }
 
 function renderPage(props: React.ComponentProps<typeof CommentsPage> = {}) {
-  return render(
+  return renderWithTooltips(
     <MemoryRouter initialEntries={["/project/proj-1/comments"]}>
       <Routes>
         <Route path="/project/:id/comments" element={<CommentsPage {...props} />} />
@@ -94,8 +95,9 @@ describe("CommentsPage chrome", () => {
 
     expect(screen.getByRole("heading", { name: /Comments/i })).toBeInTheDocument()
     expect(screen.getByText(/No comments yet/i)).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /^Refresh$/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /^Filters$/i })).toBeInTheDocument()
+    const filters = screen.getByRole("button", { name: /^Filters$/i })
+    const refresh = screen.getByRole("button", { name: /^Refresh$/i })
+    expect(filters.compareDocumentPosition(refresh) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(screen.queryByRole("button", { name: /Back to project/i })).not.toBeInTheDocument()
   })
 
@@ -103,6 +105,18 @@ describe("CommentsPage chrome", () => {
     renderPage()
     fireEvent.click(screen.getByRole("button", { name: /^Refresh$/i }))
     expect(mockRefresh).toHaveBeenCalledTimes(1)
+  })
+
+  it("centers the filters tooltip and right-aligns the refresh tooltip", async () => {
+    renderPage()
+    const user = userEvent.setup()
+
+    await expectTooltip(screen.getByRole("button", { name: /^Filters$/i }), /^Filters$/i)
+    expect(screen.getByRole("tooltip").closest("[data-align]")).toHaveAttribute("data-align", "center")
+
+    await user.unhover(screen.getByRole("button", { name: /^Filters$/i }))
+    await expectTooltip(screen.getByRole("button", { name: /^Refresh$/i }), /^Refresh$/i)
+    expect(screen.getByRole("tooltip").closest("[data-align]")).toHaveAttribute("data-align", "end")
   })
 
   it("uses the workspace-owned project without starting another project resolve", async () => {

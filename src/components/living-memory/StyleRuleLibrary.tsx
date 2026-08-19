@@ -11,6 +11,7 @@
  * explains the lock once via `RoleLockTooltip`.
  */
 
+import { Sparkles } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -37,6 +38,9 @@ interface StyleRuleLibraryProps {
   labels: StyleRuleLabels
   onToggleEnabled: (rule: StyleRule, enabled: boolean) => void
   onOpenApplicability: (rule: StyleRule) => void
+  /** Opens AI refinement of the rule's targets. Absent = the run has no source
+   *  of segments (or no model), so the action is not offered at all. */
+  onRefine?: (rule: StyleRule) => void
 }
 
 export function StyleRuleLibrary({
@@ -45,6 +49,7 @@ export function StyleRuleLibrary({
   labels,
   onToggleEnabled,
   onOpenApplicability,
+  onRefine,
 }: StyleRuleLibraryProps) {
   const t = useT()
 
@@ -97,6 +102,17 @@ export function StyleRuleLibrary({
                   >
                     {t("terminology.livingMemory.styleRules.library.applicability")}
                   </Button>
+                  {onRefine ? (
+                    <Button
+                      variant="ghost"
+                      className="h-7 gap-1 px-2 text-xs"
+                      disabled={!canManage}
+                      onClick={() => onRefine(rule)}
+                    >
+                      <Sparkles className="h-3 w-3" aria-hidden="true" />
+                      {t("terminology.livingMemory.styleRules.refine.button")}
+                    </Button>
+                  ) : null}
                 </div>
               </CardContent>
             </Card>

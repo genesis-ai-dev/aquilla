@@ -324,7 +324,13 @@ export function AppShell({
           switcher rides in both layouts: ProjectWorkspace (the `leftDock` case)
           is the screen a translator spends the whole day on, so making them
           leave it to change UI language would defeat the point. */}
-      <div className={cn("flex shrink-0 items-center gap-2", leftDock && "justify-end px-2 pb-2")}>
+      <div
+        data-slot="app-shell-sidebar-footer"
+        className={cn(
+          "flex shrink-0 items-center gap-2 px-2 pb-2",
+          leftDock && "justify-end",
+        )}
+      >
         {!leftDock && (
           <div className="min-w-0 flex-1">
             <VersionTag />

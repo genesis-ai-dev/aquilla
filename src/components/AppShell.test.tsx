@@ -196,6 +196,7 @@ describe("AppShell main-content error containment", () => {
     // the two apart.
     const trigger = await screen.findByRole("button", { name: "Quick language switch" })
     expect(trigger).toBeInTheDocument()
+    expect(trigger.closest('[data-slot="app-shell-sidebar-footer"]')).toHaveClass("px-2", "pb-2")
     // The picker must list endonyms, not English names — a Burmese speaker
     // looking for their language will not scan for the word "Burmese".
     await userEvent.click(trigger)

@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dialog"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { useProject } from "@/hooks/useProject"
+import type { UseProjectSettings } from "@/hooks/useProjectSettings"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { Concept, TermRendering } from "@/lib/terminology/types"
@@ -48,11 +49,16 @@ import { TerminologyTermDetail } from "@/components/TerminologyTermDetail"
 import { TerminologyViolationsInbox } from "@/components/TerminologyViolationsInbox"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { ProjectRecord } from "@/lib/parsers/types"
 
 interface GlossaryEditorProps {
   /** Workspace-authoritative files include optimistic imports before the
    * project settings record has caught up. */
   files?: Array<{ id: string; name: string; type: string }>
+  /** Workspace-owned project data. Supplying it avoids resolving the same
+   * project again when this surface replaces the editor center pane. */
+  project?: ProjectRecord | null
+  patchSettings?: UseProjectSettings["patch"]
 }
 
 function conceptsEqual(a: Concept[], b: Concept[]): boolean {
@@ -74,11 +80,22 @@ function downloadBlob(content: string, filename: string, mime: string) {
   URL.revokeObjectURL(url)
 }
 
-export function GlossaryEditor({ files: workspaceFiles }: GlossaryEditorProps = {}) {
+export function GlossaryEditor({
+  files: workspaceFiles,
+  project: workspaceProject,
+  patchSettings: workspacePatchSettings,
+}: GlossaryEditorProps = {}) {
   const t = useT()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { project, loading, patchSettings } = useProject(id!)
+  const ownedProject = useProject(id!, {
+    initialProject: workspaceProject,
+    enabled: workspaceProject == null,
+    includeSettings: workspacePatchSettings == null,
+  })
+  const project = workspaceProject ?? ownedProject.project
+  const loading = workspaceProject == null && ownedProject.loading
+  const patchSettings = workspacePatchSettings ?? ownedProject.patchSettings
   const { session: frontierSession } = useFrontierSession()
   const importInputRef = useRef<HTMLInputElement>(null)
 

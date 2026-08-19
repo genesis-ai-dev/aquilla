@@ -320,22 +320,16 @@ export function AppShell({
         </div>
       )}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{dockContent}</div>
-      {/* Sidebar footer. The version tag is org-chrome only, but the language
-          switcher rides in both layouts: ProjectWorkspace (the `leftDock` case)
-          is the screen a translator spends the whole day on, so making them
-          leave it to change UI language would defeat the point. */}
+      {/* Keep build and locale controls in one footer row in both sidebar
+          layouts. Rendering the version inside LeftDock placed localization
+          on a separate row below it in the project workspace. */}
       <div
         data-slot="app-shell-sidebar-footer"
-        className={cn(
-          "flex shrink-0 items-center gap-2 px-2 pb-2",
-          leftDock && "justify-end",
-        )}
+        className="flex shrink-0 items-center justify-between gap-2 px-2 pb-2"
       >
-        {!leftDock && (
-          <div className="min-w-0 flex-1">
-            <VersionTag />
-          </div>
-        )}
+        <div className="min-w-0">
+          <VersionTag />
+        </div>
         {i18n && (
           <LanguageSwitcher
             className="h-6 shrink-0 rounded-md border border-border/50 bg-transparent px-1 text-xs"

@@ -196,14 +196,18 @@ describe("AppShell main-content error containment", () => {
     // the two apart.
     const trigger = await screen.findByRole("button", { name: "Quick language switch" })
     expect(trigger).toBeInTheDocument()
-    expect(trigger.closest('[data-slot="app-shell-sidebar-footer"]')).toHaveClass("px-2", "pb-2")
+    const footer = trigger.closest('[data-slot="app-shell-sidebar-footer"]')
+    expect(footer).toHaveClass("justify-between", "px-2", "pb-2")
+    const version = screen.getByRole("button", { name: "Copy build info" })
+    expect(version.parentElement).not.toHaveClass("flex-1")
+    expect(version.closest('[data-slot="app-shell-sidebar-footer"]')).toBe(footer)
     // The picker must list endonyms, not English names — a Burmese speaker
     // looking for their language will not scan for the word "Burmese".
     await userEvent.click(trigger)
     expect(await screen.findByRole("menuitemradio", { name: /မြန်မာ/ })).toBeInTheDocument()
   })
 
-  it("keeps the language control reachable in the leftDock (project workspace) layout", async () => {
+  it("keeps version and language controls on one row in the project workspace", async () => {
     render(
       <MemoryRouter>
         <I18nProvider>
@@ -219,9 +223,11 @@ describe("AppShell main-content error containment", () => {
     // ProjectWorkspace is the only caller that passes leftDock, and it is the
     // screen a translator works in all day. If the switcher only rendered in the
     // org-chrome layout, changing UI language would mean leaving your work.
-    expect(
-      await screen.findByRole("button", { name: "Quick language switch" }),
-    ).toBeInTheDocument()
+    const language = await screen.findByRole("button", { name: "Quick language switch" })
+    const version = screen.getByRole("button", { name: "Copy build info" })
+    const footer = language.closest('[data-slot="app-shell-sidebar-footer"]')
+    expect(footer).toHaveClass("justify-between")
+    expect(version.closest('[data-slot="app-shell-sidebar-footer"]')).toBe(footer)
   })
 })
 

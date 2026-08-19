@@ -392,6 +392,11 @@ export function LivingMemoryPage({
                 roleLevel={entriesReady ? roleLevel : null}
                 completionSettings={completionSettings}
                 session={session ?? null}
+                files={project?.files ?? []}
+                fileGenres={settings.fileGenres}
+                canEditSettings={entriesReady && canEdit}
+                reasonCannotEditSettings={entriesReady ? reasonCannotEdit : "role"}
+                patchFileGenres={patchSettings}
               />
             ) : null}
           </>

@@ -282,6 +282,44 @@ export const terminology = defineNamespace({
       "Set up an AI model for this project before extracting rules.",
     "terminology.livingMemory.styleRules.extract.failed": "Extraction stopped: {message}",
 
+    // ── Document genres (quality pane, AQU-934 phase 3b) ────────────────────
+    // Reused keys (no duplicates added): styleRules.assignedBy.human labels a
+    // genre a person set (same "how did this value get here" vocabulary as the
+    // applicability rows), common.save confirms suggestions, common.discard
+    // drops them, and common.reset clears one assignment back to derived.
+    "terminology.livingMemory.genres.title": "Document genres",
+    "terminology.livingMemory.genres.description":
+      "A document's genre decides which genre-scoped style rules reach its passages. " +
+      "Scripture books start from their book code; assign a genre to override that, or " +
+      "to give any other document one.",
+    "terminology.livingMemory.genres.empty": "No documents in this project yet.",
+    "terminology.livingMemory.genres.derived": "From the book",
+    "terminology.livingMemory.genres.unclassified": "Unclassified",
+    "terminology.livingMemory.genres.pickerAria": "Genre for {file}",
+    "terminology.livingMemory.genres.resetAria": "Clear the genre assigned to {file}",
+    "terminology.livingMemory.genres.suggestButton": "Suggest genres",
+    "terminology.livingMemory.genres.suggesting": "Classifying documents…",
+    "terminology.livingMemory.genres.suggestHeading": "Suggested genres",
+    "terminology.livingMemory.genres.suggestHint":
+      "Nothing is saved until you confirm these.",
+    "terminology.livingMemory.genres.suggestNone":
+      "No genres suggested. Assign them by hand instead.",
+    "terminology.livingMemory.genres.suggestNeedsModel":
+      "Set up an AI model for this project before suggesting genres.",
+    "terminology.livingMemory.genres.suggestFailed": "Couldn't suggest genres: {message}",
+    "terminology.livingMemory.genres.name.law": "Law",
+    "terminology.livingMemory.genres.name.history": "Historical narrative",
+    "terminology.livingMemory.genres.name.wisdom": "Wisdom",
+    "terminology.livingMemory.genres.name.poetry": "Poetry",
+    "terminology.livingMemory.genres.name.prophecy": "Prophecy",
+    "terminology.livingMemory.genres.name.gospel": "Gospel",
+    "terminology.livingMemory.genres.name.epistle": "Epistle",
+    "terminology.livingMemory.genres.name.apocalyptic": "Apocalyptic",
+    "terminology.livingMemory.genres.name.narrative": "Narrative",
+    "terminology.livingMemory.genres.name.teaching": "Teaching",
+    "terminology.livingMemory.genres.name.dialogue": "Dialogue",
+    "terminology.livingMemory.genres.name.reference": "Reference",
+
     // ── TerminologyTermDetail.tsx ────────────────────────────────────────────
     "terminology.termDetail.closeAria": "Close detail",
     "terminology.termDetail.verdictNa": "n/a",
@@ -799,6 +837,36 @@ export const terminology = defineNamespace({
         description:
           "Inline alert in the extraction dialog when the run stops on an error; " +
           "{message} is the underlying error's own text (not translated).",
+        placeholders: { message: "The underlying error's message, verbatim." },
+      },
+      "terminology.livingMemory.genres.pickerAria": {
+        description:
+          "Accessible name for one document's genre dropdown in the Document genres " +
+          "list; {file} is that document's own file name, verbatim.",
+        placeholders: { file: "The document's own file name, verbatim (not translated)." },
+      },
+      "terminology.livingMemory.genres.resetAria": {
+        description:
+          "Accessible name for the button that removes a document's assigned genre so " +
+          "it derives from its book code again; {file} is the document's own file name.",
+        placeholders: { file: "The document's own file name, verbatim (not translated)." },
+      },
+      "terminology.livingMemory.genres.derived": {
+        description:
+          "Badge on a document whose genre was derived from its scripture book code " +
+          "rather than assigned by a person. Sits next to the genre name.",
+        maxLength: 20,
+      },
+      "terminology.livingMemory.genres.unclassified": {
+        description:
+          "Badge on a document with no genre at all — no assignment and no scripture " +
+          "book code to derive one from. Sits where the genre name would be.",
+        maxLength: 20,
+      },
+      "terminology.livingMemory.genres.suggestFailed": {
+        description:
+          "Inline alert under the Document genres heading when the classification run " +
+          "fails; {message} is the underlying error's own text (not translated).",
         placeholders: { message: "The underlying error's message, verbatim." },
       },
       "terminology.common.occurrenceCount": {

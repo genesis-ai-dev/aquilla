@@ -5,7 +5,8 @@
  * Composes the review queue, the approved-rule library, the per-rule
  * applicability editor and the knowledge-base extraction dialog over a single
  * `useStyleRules` instance, so one refetch after a mutation refreshes all of
- * them.
+ * them, plus the document-genre block (phase 3b) — genre assignment is what
+ * makes a genre-scoped rule reach a document, so it belongs beside the library.
  *
  * Role floors (live-resolved from the project's syncRole, like the rest of the
  * page): proposing/extracting needs CONTRIBUTOR (400); reviewing, editing,
@@ -37,7 +38,9 @@ import type {
   StyleRuleCategory,
   StyleRuleScope,
 } from "@/lib/rules/style-rule-types"
+import { suggestFileGenres } from "@/lib/rules/file-genre"
 import { RoleLockTooltip } from "./AuthoredEntriesSection"
+import { DocumentGenres, type GenreFile } from "./DocumentGenres"
 import { ExtractRulesDialog } from "./ExtractRulesDialog"
 import { RuleApplicabilityDialog } from "./RuleApplicabilityDialog"
 import { StyleRuleCandidates } from "./StyleRuleCandidates"
@@ -83,6 +86,19 @@ interface QualityStyleRulesProps {
   roleLevel: number | null
   completionSettings?: CompletionSettings
   session: FrontierSession | null
+  /**
+   * Document-genre block (phase 3b). Its inputs come from the page-level
+   * `useProjectSettings` instance — this section must not open a second one
+   * (see LivingMemoryPage's header) — so the block renders only once `files`
+   * is wired through. Genre assignment is what makes a genre-scoped rule
+   * reach a document, hence its home beside the library.
+   */
+  files?: readonly GenreFile[]
+  fileGenres?: Record<string, string>
+  canEditSettings?: boolean
+  reasonCannotEditSettings?: "offline" | "role" | null
+  /** The PAGE's useProjectSettings patch (optimistic overlay lives there). */
+  patchFileGenres?: (partial: { fileGenres: Record<string, string> }) => Promise<unknown>
 }
 
 export function QualityStyleRules({
@@ -90,6 +106,11 @@ export function QualityStyleRules({
   roleLevel,
   completionSettings,
   session,
+  files,
+  fileGenres,
+  canEditSettings = false,
+  reasonCannotEditSettings = "role",
+  patchFileGenres,
 }: QualityStyleRulesProps) {
   const t = useT()
   const { locale } = useI18n()
@@ -149,6 +170,22 @@ export function QualityStyleRules({
 
   const canPropose = roleLevel != null && roleLevel >= ROLE.CONTRIBUTOR
   const canReview = roleLevel != null && roleLevel >= ROLE.PROJECT_LEAD
+
+  // One completion call over the batch the genre block hands us; undefined
+  // (no model configured) hides the suggest action rather than failing on click.
+  const suggestGenres = useMemo(() => {
+    if (!completionSettings) return undefined
+    return (batch: readonly GenreFile[]) =>
+      suggestFileGenres({
+        files: batch.map((file) => ({
+          fileId: file.id,
+          name: file.name,
+          sample: file.sample ?? "",
+        })),
+        settings: completionSettings,
+        session,
+      })
+  }, [completionSettings, session])
 
   const candidates = rules.filter((rule) => rule.status === "proposed")
   const library = rules.filter((rule) => rule.status === "approved")
@@ -228,6 +265,17 @@ export function QualityStyleRules({
             onOpenApplicability={setApplicabilityRule}
           />
         </div>
+
+        {files && patchFileGenres ? (
+          <DocumentGenres
+            files={files}
+            assignments={fileGenres}
+            canEdit={canEditSettings}
+            reasonCannotEdit={reasonCannotEditSettings}
+            onSave={(next) => patchFileGenres({ fileGenres: next })}
+            onSuggest={suggestGenres}
+          />
+        ) : null}
       </div>
 
       <RuleApplicabilityDialog

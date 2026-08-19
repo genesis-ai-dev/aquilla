@@ -20,6 +20,7 @@
 import { DurableObject } from "cloudflare:workers"
 import { shouldBeReadOnly, verifyTokenForProject } from "./auth"
 import { isDeployedEnvironment } from "./environment-guard"
+import { secureCompare } from "./lib/secure-compare"
 import {
   applyDisconnect,
   applyFocusClaim,

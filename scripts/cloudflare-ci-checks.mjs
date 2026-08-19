@@ -12,12 +12,23 @@ const ROOT_LANE = { name: "root", steps: [["pnpm", ["test"]]] }
 // adding a new one. Previously wired into `pnpm test` only — grep found zero
 // i18n references anywhere in CI before this, so a context regression could
 // merge unnoticed until someone ran `pnpm test` locally.
+//
+// OPS-13 (docs/OPSEC-REVIEW-2026-08-17.md): the credential scan runs FIRST in
+// this lane, and that order is load-bearing rather than cosmetic. A lane's
+// steps run in sequence and a failing step aborts the rest of it, so while
+// `scan:secrets` sat last, any red in `pnpm lint` meant the scan did not run at
+// all — not "ran and was overridden", simply never executed. That is exactly
+// what was happening on `dev` at the time this was written (484 eslint errors
+// from the i18n gate), which turned "rides an already-required check" into
+// "rides a check that was already failing". Cheapest step first also fails the
+// build in seconds when a credential is committed, instead of after the lint
+// pass.
 const LINT_LANE = {
   name: "lint",
   steps: [
+    ["pnpm", ["run", "scan:secrets"]],
     ["pnpm", ["lint"]],
     ["pnpm", ["run", "i18n:check"]],
-    ["pnpm", ["run", "scan:secrets"]],
   ],
 }
 const IDENTITY_LANE = { name: "identity", steps: [["pnpm", ["run", "build:workers-build:identity"]]] }

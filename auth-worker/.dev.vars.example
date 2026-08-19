@@ -91,3 +91,56 @@ MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 # STRIPE_PUBLISHABLE_KEY="pk_test_..."
 # STRIPE_PRICE_FIELD="price_..."
 # STRIPE_PRICE_ADDON="price_..."
+
+# Admin panel access. Comma-separated emails; elevation adds a re-auth step.
+# ADMIN_EMAILS=""
+# ADMIN_REQUIRE_ELEVATION="false"
+# ELEVATION_TTL_MINUTES="10"
+# ELEVATION_SESSION_HOURS="12"
+
+# AI usage/cost guardrails for the chat + agent proxies. Leave unset to disable.
+# AI_ALLOWED_MODELS=""
+# AI_BUDGET_ENFORCE="false"
+# AI_GLOBAL_DAILY_REQUEST_LIMIT=""
+# AI_USER_DAILY_REQUEST_LIMIT=""
+# AGENT_RUN_COST_CAP_CENTS=""
+# COST_METER=""
+
+# Credit-system caps for chat and the translation agent. Leave unset to disable enforcement.
+# CREDIT_ENFORCE="false"
+# CREDIT_MARKUP=""
+# CREDIT_DAILY_CAP=""
+# CREDIT_WEEKLY_CAP=""
+# CREDIT_AGENT_MARKUP=""
+# CREDIT_AGENT_DAILY_CAP=""
+# CREDIT_AGENT_WEEKLY_CAP=""
+
+# Bible Aquifer proxy (/api/v1/aquifer).
+# AQUIFER_BASE_URL="https://api.aquifer.bible"
+# AQUIFER_USER_AGENT="aquilla-dev"
+
+# Public API base used in generated links (e.g. invite emails). Falls back to
+# request origin when unset.
+# BASE_URL_API="http://127.0.0.1:8788"
+
+# Support/help-menu contact links surfaced to the client.
+# CONTACT_EMAIL=""
+# DISCORD_INVITE_URL=""
+# EMAIL_REPLY_TO=""
+
+# Model overrides for contextual (translation-assist) features and the
+# knowledge-base indexer.
+# CONTEXTUAL_DEEP_MODEL="openai/gpt-5.6-luna"
+# CONTEXTUAL_MAX_CONCURRENCY=""
+# CONTEXTUAL_MAX_INFLIGHT=""
+# KB_INDEX_MODEL=""
+
+# OpenRouter proxy base override (defaults to https://openrouter.ai/api/v1).
+# OPENROUTER_BASE_URL=""
+
+# PostHog server-side analytics (optional — omit to disable).
+# POSTHOG_KEY=""
+# POSTHOG_HOST="https://us.i.posthog.com"
+
+# R2 object key prefix override for agent artifacts (routes/agent-artifacts.ts).
+# R2_KEY_PREFIX=""

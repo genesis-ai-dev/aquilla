@@ -561,6 +561,31 @@ export function buildEventProjectionStmts(
       return ['cells']
     }
 
+    case 'source.cell.reanchor': {
+      const p = event.payload as EventPayloads['source.cell.reanchor']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      // Anchor-ONLY repair (AQU-931): re-point the source row's anchor without
+      // advancing the chain head. `event_id` moves only when content changes —
+      // the AD-9 staleness comparison (target pin vs source head) depends on
+      // that — and validation, counters, and FTS are untouched. Non-chain-
+      // mutating by design: rebuild replays it unconditionally in seq order
+      // (a chain-mutating event with a null parent would lose first-child
+      // arbitration to the genesis create and the repair would evaporate on
+      // every rebuild).
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cells SET anchor_cell_id = ?
+             WHERE project_id = ? AND file_id = ? AND cell_id = ?
+               AND side = 'source' AND target_lang = ''`,
+          )
+          .bind(p.anchorCellId ?? null, event.projectId, event.fileId, event.cellId),
+      )
+      return ['cells']
+    }
+
     case 'source.cell.commit':
     case 'target.cell.commit': {
       const p = event.payload as EventPayloads['source.cell.commit'] | EventPayloads['target.cell.commit']
@@ -2094,6 +2119,26 @@ export function isChainMutatingKind(kind: string): boolean {
 }
 
 /**
+ * AQU-931: whether an event COMPETES for its AD-2 chain slot. Chain-mutating
+ * kinds arbitrate first-child-of-parent — EXCEPT a parent-null cell delete.
+ * That shape is the trusted tombstone (the AQU-747 mapper retraction and the
+ * AQU-910 deletion-by-absence pass both mint deletes with parentId null): it
+ * extends no chain, and arbitrating it at the genesis slot makes it LOSE to
+ * the cell's own `source.cell.create` on replay — so a projection rebuild
+ * silently resurrected every retracted cell. All three arbitration sites
+ * (the live claim in handlers/cell-events.ts, rebuild.ts's in-memory
+ * childKey, and isWinningChild's sibling filter) must use this predicate —
+ * or replay diverges from live.
+ */
+export function isChainArbitrated(kind: string, parentId: string | null | undefined): boolean {
+  if (!CHAIN_MUTATING_KINDS.has(kind)) return false
+  if (parentId == null && (kind === 'source.cell.delete' || kind === 'target.cell.delete')) {
+    return false
+  }
+  return true
+}
+
+/**
  * AD-2 first-child-of-parent guard. Returns true if this event is the
  * winning child for its `(project_id, file_id, cell_id, parent_id)` — that
  * is, no other CHAIN-MUTATING event with the same key has been accepted
@@ -2119,6 +2164,9 @@ export async function isWinningChild(
     // File-level events have no chain — always "winning".
     return true
   }
+  // A non-arbitrated event (parent-null delete tombstone) never competes —
+  // and never blocks a competitor (see the sibling loop below). AQU-931.
+  if (!isChainArbitrated(candidate.kind, candidate.parentId)) return true
 
   // Build the SQL with a NULL-aware parent_id predicate. We also filter
   // to chain-mutating kinds so a sibling validation event doesn't block a
@@ -2157,6 +2205,9 @@ export async function isWinningChild(
     candidate.payload,
   )
   for (const row of results ?? []) {
+    // Non-arbitrated siblings (parent-null delete tombstones) hold no slot —
+    // they must not beat a later genesis create to it (AQU-931).
+    if (parentIsNull && !isChainArbitrated(row.kind, null)) continue
     let rowPayload: unknown = null
     try {
       rowPayload = JSON.parse(row.payload)

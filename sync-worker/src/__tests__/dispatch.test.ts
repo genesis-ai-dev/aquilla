@@ -19,6 +19,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'source.cell.delete': {},
     'source.cell.reorder': { anchorCellId: null },
     'source.cell.metadata.patch': { version: 1, metadata: {} },
+    'source.cell.reanchor': { anchorCellId: null },
     'target.cell.create': { cellId: 'cell-1', value: 'x' },
     'target.cell.commit': { value: 'x' },
     'target.cell.delete': {},

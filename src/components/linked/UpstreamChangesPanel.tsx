@@ -48,7 +48,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { DiffText } from "./DiffText"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
-import { formatDateTime } from "@/lib/i18n/format"
+import { fmtShortCalendarDate } from "@/lib/format-date"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import {
   useUpstreamChangesReview,
   type ReviewItem,
@@ -281,9 +282,11 @@ export function UpstreamChangesPanel({
             >
               <CollapsibleTrigger className="flex w-full items-center justify-between rounded border px-3 py-2 text-start text-sm font-medium hover:bg-muted/40">
                 <span>
-                  {t("importExport.linked.syncBatchHeading", {
-                    date: formatDateTime(group.serverTs, locale),
-                  })}
+                  <DateTooltip value={group.serverTs} label={t("org.orgProjectsDataTable.updatedColumn")}>
+                    {t("importExport.linked.syncBatchHeading", {
+                      date: fmtShortCalendarDate(group.serverTs, undefined, locale),
+                    })}
+                  </DateTooltip>
                 </span>
                 <Badge variant="outline">{t("common.cellCount", { count: group.cellCount })}</Badge>
               </CollapsibleTrigger>

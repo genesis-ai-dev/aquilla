@@ -15,7 +15,7 @@
 import React, { useMemo, useState } from "react"
 import { useParams, useNavigate, useLocation } from "react-router-dom"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
-import { formatDate, formatCount } from "@/lib/i18n/format"
+import { formatCount } from "@/lib/i18n/format"
 import { BookOpen, Users, AlertTriangle, Plus, Pencil, Trash2, Lock, Brain } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -23,6 +23,7 @@ import { Badge } from "@/components/ui/badge"
 import { EmptyState } from "@/components/ui/empty"
 import { Skeleton } from "@/components/ui/skeleton"
 import { LoadingTemplate } from "@/components/ui/loading-overlay"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
@@ -326,7 +327,6 @@ function AuthoredEntriesSection({
   onUpdate,
   onDelete,
 }: AuthoredEntriesSectionProps) {
-  const { locale } = useI18n()
   const t = useT()
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -427,7 +427,7 @@ function AuthoredEntriesSection({
                   </div>
                 )}
                 <p className="text-[10px] text-muted-foreground/60 mt-1.5">
-                  {entry.author} · {formatDate(entry.createdAt, locale, {})}
+                  {entry.author} · <DateTooltip value={entry.createdAt} label={t("common.date.created")} />
                 </p>
               </CardContent>
             </Card>

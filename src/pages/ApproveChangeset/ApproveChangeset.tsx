@@ -18,7 +18,8 @@ import { messageForStatus } from "@/lib/errors/user-error"
 import { AUTH_BASE } from "@/lib/frontier/auth"
 import { t as standaloneT } from "@/lib/i18n/standalone"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
-import { formatDateTime } from "@/lib/i18n/format"
+import { fmtShortCalendarDate } from "@/lib/format-date"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import {
   ChangeList,
   ImportPreviewView,
@@ -333,7 +334,13 @@ function ApprovalSummaryView({
 
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>{t("agent.changeset.digestLabel")} <span className="font-mono">{data.digest.slice(0, 16)}…</span></span>
-        <span>{t("common.expiresOn", { date: formatDateTime(data.expiresAt, locale) })}</span>
+        <span>
+          <DateTooltip value={data.expiresAt} label={t("common.date.expires")}>
+            {t("common.expiresOn", {
+              date: fmtShortCalendarDate(data.expiresAt, undefined, locale),
+            })}
+          </DateTooltip>
+        </span>
       </div>
 
       {actionError && (

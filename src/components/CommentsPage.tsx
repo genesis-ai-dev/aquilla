@@ -57,9 +57,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useT, useI18n } from "@/lib/i18n/I18nProvider"
-import { formatDateTime } from "@/lib/i18n/format"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 import { translate } from "@/lib/i18n/translate"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -177,19 +177,6 @@ export function headerBadgeCount(
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
-
-function formatTs(ms: number, locale: string): string {
-  try {
-    return formatDateTime(ms, locale, {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    })
-  } catch {
-    return String(ms)
-  }
-}
 
 /**
  * Resolve a fileId to a display name, or return a tombstone if not found.
@@ -353,7 +340,7 @@ interface CommentBubbleProps {
 }
 
 function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBubbleProps) {
-  const { t, locale } = useI18n()
+  const { t } = useI18n()
   const isDeleted = comment.deletedAt !== null
   const isOwn = !!currentUsername && comment.authorId === currentUsername
   const canMutate = isOwn && !isDeleted
@@ -366,7 +353,7 @@ function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBu
           size="xs"
           nameClassName="text-xs font-medium text-foreground"
         />
-        <span>{formatTs(comment.createdAt, locale)}</span>
+        <DateTooltip value={comment.createdAt} label={t("common.date.posted")} />
         {comment.updatedAt !== comment.createdAt && (
           <span className="italic">{t("comments.bubble.edited")}</span>
         )}

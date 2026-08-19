@@ -34,6 +34,8 @@ import {
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { DateTooltip } from "@/components/ui/date-tooltip"
+import { fmtShortCalendarDate } from "@/lib/format-date"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { draftReviewHref } from "@/components/project-workspace-lane-deeplink"
 import { AutopilotProcessGraph } from "@/components/contextual/AutopilotProcessGraph"
@@ -138,18 +140,18 @@ function StatusBadge({ run }: { run: ContextualRunRecord }) {
   )
 }
 
-function formatTimestamp(
-  value: string | null | undefined,
-  locale: string,
-  t: TFunction,
-): string {
-  if (!value) return t("autopilot.time.notRecorded")
+function Timestamp({
+  value,
+  label,
+}: {
+  value: string | null | undefined
+  label: string
+}) {
+  const { t } = useI18n()
+  if (!value) return <>{t("autopilot.time.notRecorded")}</>
   const date = new Date(value)
-  if (Number.isNaN(date.valueOf())) return t("autopilot.time.notRecorded")
-  return new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date)
+  if (Number.isNaN(date.valueOf())) return <>{t("autopilot.time.notRecorded")}</>
+  return <DateTooltip value={value} label={label} />
 }
 
 function phaseLabel(value: string | null | undefined, t: TFunction): string | null {
@@ -554,7 +556,7 @@ function eventSummary(event: ContextualActivityEvent, t: TFunction): string {
 }
 
 function EventTimeline({ events }: { events: ContextualActivityEvent[] }) {
-  const { locale, t } = useI18n()
+  const { t } = useI18n()
   if (events.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -578,8 +580,8 @@ function EventTimeline({ events }: { events: ContextualActivityEvent[] }) {
               {(event.phase || event.status) && (
                 <Badge variant="secondary">{eventStatusLabel(event, t)}</Badge>
               )}
-              <time className="text-xs text-muted-foreground" dateTime={event.createdAt}>
-                {formatTimestamp(event.createdAt, locale, t)}
+              <time className="text-xs text-muted-foreground" dateTime={event.createdAt ?? undefined}>
+                <Timestamp value={event.createdAt} label={t("common.date.posted")} />
               </time>
             </div>
             <p className="mt-1 text-sm">{eventSummary(event, t)}</p>
@@ -1325,9 +1327,17 @@ export function AutopilotActivityInspector({
                     )}
                   </CardContent>
                   <CardFooter className="justify-between gap-3 text-xs text-muted-foreground">
-                    <span>{t("autopilot.inspector.run.updatedAt", {
-                      time: formatTimestamp(selectedRun.updatedAt, locale, t),
-                    })}</span>
+                    <span>
+                      {selectedRun.updatedAt ? (
+                        <DateTooltip value={selectedRun.updatedAt} label={t("autopilot.inspector.details.lastUpdate")}>
+                          {t("autopilot.inspector.run.updatedAt", {
+                            time: fmtShortCalendarDate(selectedRun.updatedAt, undefined, locale),
+                          })}
+                        </DateTooltip>
+                      ) : t("autopilot.inspector.run.updatedAt", {
+                        time: t("autopilot.time.notRecorded"),
+                      })}
+                    </span>
                     <span className="flex flex-wrap gap-x-2">
                       <span>
                         {t("autopilot.inspector.run.calls", { count: selectedRun.callsSpent })}
@@ -1344,8 +1354,8 @@ export function AutopilotActivityInspector({
 
                 <Disclosure title={t("autopilot.inspector.details.title")} open={detailsOpen} onOpenChange={setDetailsOpen}>
                   <dl className="grid grid-cols-2 gap-3 text-sm">
-                    <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.started")}</dt><dd>{formatTimestamp(selectedRun.createdAt, locale, t)}</dd></div>
-                    <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.lastUpdate")}</dt><dd>{formatTimestamp(selectedRun.updatedAt, locale, t)}</dd></div>
+                    <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.started")}</dt><dd><Timestamp value={selectedRun.createdAt} label={t("autopilot.inspector.details.started")} /></dd></div>
+                    <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.lastUpdate")}</dt><dd><Timestamp value={selectedRun.updatedAt} label={t("autopilot.inspector.details.lastUpdate")} /></dd></div>
                     <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.modelCalls")}</dt><dd className="tabular-nums">{selectedRun.callsSpent}</dd></div>
                     <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.unitsUsed")}</dt><dd className="tabular-nums">{selectedRun.unitsSpent}</dd></div>
                     <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.startedBy")}</dt><dd>{selectedRun.initiatedBy ?? t("autopilot.time.notRecorded")}</dd></div>

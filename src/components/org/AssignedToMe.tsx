@@ -156,6 +156,7 @@ export function AssignedToMe() {
           <DateTooltip
             value={row.original.deadline}
             label={t("org.assignedToMe.dueColumnLabel")}
+            variant="deadline"
             className="text-muted-foreground"
           />
         ),

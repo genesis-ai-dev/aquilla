@@ -14,7 +14,7 @@ import type { MondayBoardLink, MondayBoardStructure } from "@/lib/monday/api"
 import type { MondayMapping } from "@/lib/monday/types"
 import { MondayMappingEditor, MondayMappingTable } from "./MondayMappingEditor"
 import { useI18n } from "@/lib/i18n/I18nProvider"
-import { formatDateTime } from "@/lib/i18n/format"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 
 export function MondayLinkedView({
   link,
@@ -51,7 +51,7 @@ export function MondayLinkedView({
   onUnlink: () => void
   warnings: string[]
 }) {
-  const { locale, t } = useI18n()
+  const { t } = useI18n()
   return (
     <div className="space-y-4">
       {link.structureStale && (
@@ -82,9 +82,7 @@ export function MondayLinkedView({
               granularity: link.config.itemGranularity === "file" ? "file" : "project",
             })}
             {link.lastPushedAt
-              ? ` Last push ${formatDateTime(link.lastPushedAt, locale)} — ${
-                  link.lastPushStatus === "ok" ? "ok" : "failed"
-                }.`
+              ? <> Last push <DateTooltip value={link.lastPushedAt} label={t("common.date.pushed")} /> — {link.lastPushStatus === "ok" ? "ok" : "failed"}.</>
               : " Not pushed yet."}
           </p>
           {link.lastPushStatus === "error" && link.lastPushError && (

@@ -37,6 +37,13 @@ export interface CellsCacheEntry {
   /** MAX(server_seq) over the file's events at snapshot time — the `?since=`
    *  cursor. Absent on entries written before M2-1 → full-stream fallback. */
   maxServerSeq?: number
+  /** AQU-943: the project incarnation `maxServerSeq` was minted against,
+   *  echoed as `?epoch=` so the server can tell a cursor from a WIPED-AND-
+   *  RE-CREATED project (whose allocator restarted, inverting the cursor)
+   *  from a live one. Absent on entries written before AQU-943 — those
+   *  cursors are unverifiable, so callers take the full-stream fallback once
+   *  rather than trusting a delta against an unknown incarnation. */
+  projectEpoch?: number
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null
@@ -104,6 +111,7 @@ export async function writeCellsCache(
   fileId: string,
   rows: CellRow[],
   maxServerSeq?: number,
+  projectEpoch?: number,
 ): Promise<void> {
   try {
     const db = await openDb()
@@ -117,6 +125,7 @@ export async function writeCellsCache(
       maxLastEditAt,
       cachedAt: Date.now(),
       ...(maxServerSeq !== undefined ? { maxServerSeq } : {}),
+      ...(projectEpoch !== undefined && projectEpoch !== null ? { projectEpoch } : {}),
     }
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE, "readwrite")

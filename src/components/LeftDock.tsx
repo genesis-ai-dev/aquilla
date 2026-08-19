@@ -27,8 +27,6 @@ import {
   PanelLeftOpen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { HelpMenu } from "@/components/HelpMenu"
-import { VersionTag } from "@/components/VersionBadge"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -272,23 +270,16 @@ export function LeftDock({
         )}
       </div>
 
-      {/* Help + account live at the dock root so they're present in every tab
-          and even when collapsed (compact icon / avatar on the 40px rail). */}
+      {/* Account stays at the dock root so it is present in every tab and even
+          when collapsed. Help now shares AppShell's utility row with locale. */}
       <div
         className={cn(
           "shrink-0 border-t pt-2",
           isOpen ? "flex flex-col gap-1 px-2 pb-1" : "flex flex-col items-center gap-1 pb-1",
         )}
       >
-        <HelpMenu compact={!isOpen} showTour={false} />
         <div data-tour="account-switcher">
           <AccountSwitcher variant="sidebar" compact={!isOpen} />
-        </div>
-      </div>
-
-      <div className="flex shrink-0 items-center">
-        <div className="min-w-0 flex-1">
-          <VersionTag />
         </div>
       </div>
     </div>

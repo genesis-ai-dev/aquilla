@@ -5,6 +5,7 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuCheckboxItem,
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
@@ -13,12 +14,14 @@ import {
 
 export interface OverflowMenuItem {
   id: string
-  type?: "item" | "separator"
+  type?: "item" | "checkbox" | "separator"
   label?: string
   icon?: ComponentType<{ className?: string }>
   /** Optional trailing badge (e.g. check-file finding count). */
   badge?: ReactNode
   onClick?: () => void
+  checked?: boolean
+  onCheckedChange?: (checked: boolean) => void
   disabled?: boolean
   destructive?: boolean
 }
@@ -47,6 +50,17 @@ function OverflowMenuPanel({ items }: { items: OverflowMenuItem[] }) {
         {items.map((item) =>
           item.type === "separator" ? (
             <DropdownMenuSeparator key={item.id} />
+          ) : item.type === "checkbox" ? (
+            <DropdownMenuCheckboxItem
+              key={item.id}
+              checked={item.checked}
+              disabled={item.disabled}
+              onCheckedChange={(checked) => item.onCheckedChange?.(checked)}
+            >
+              {item.icon && <item.icon className="h-4 w-4" />}
+              <span className="flex-1">{item.label}</span>
+              {item.badge}
+            </DropdownMenuCheckboxItem>
           ) : (
             <DropdownMenuItem
               key={item.id}

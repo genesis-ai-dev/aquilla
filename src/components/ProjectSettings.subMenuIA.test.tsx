@@ -18,23 +18,20 @@
 //   4. No section was dropped: every previously-available control is still
 //      reachable through some sub-menu (spot-checks one control per group).
 //   5. The Settings breadcrumb returns to the index.
+//   6. Living Memory extraction: the `memory`, `rules`, and `system-prompt`
+//      sections are gone from settings, and their legacy URLs redirect
+//      (page AND route-modal) to the standalone /project/:id/memory surface —
+//      memory → /memory, rules → /memory/quality, system-prompt →
+//      /memory/instructions — preserving the query string.
+//   7. The AI pane keeps a cross-link NavRow to Living Memory (instructions)
+//      with the old Custom/Default system-prompt hint semantics.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, cleanup } from "@testing-library/react"
-import { MemoryRouter, Route, Routes, Link } from "react-router-dom"
-import { ProjectSettings } from "./ProjectSettings"
+import { MemoryRouter, Route, Routes, Link, useLocation } from "react-router-dom"
+import { ProjectSettings, ProjectSettingsDialog } from "./ProjectSettings"
 
 
-vi.mock("./ProjectSettings/RulesSection", () => ({
-  RulesSettingsSection: () => <div data-testid="settings-rules-section">Built-in checks</div>,
-}))
-vi.mock("./LivingMemoryPage", () => ({
-  LivingMemoryPage: () => (
-    <div data-testid="settings-memory-section">
-      <section aria-label="Instructions" />
-    </div>
-  ),
-}))
 vi.mock("@/components/org/OrgSidebar", () => ({
   OrgSidebar: () => <div data-testid="org-sidebar">sidebar</div>,
 }))
@@ -217,6 +214,14 @@ vi.mock("@/hooks/useUserSearch", () => ({
   }),
 }))
 
+// Catch-all landing recorder: the moved-section redirects leave the settings
+// routes entirely, so any non-settings destination falls through to this probe
+// and exposes exactly where (path + search) the redirect landed.
+function LandingProbe() {
+  const location = useLocation()
+  return <div data-testid="landing-path">{`${location.pathname}${location.search}`}</div>
+}
+
 function renderAt(path: string) {
   cleanup()
   return render(
@@ -224,6 +229,37 @@ function renderAt(path: string) {
       <Routes>
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
         <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
+        <Route path="*" element={<LandingProbe />} />
+      </Routes>
+    </MemoryRouter>,
+  )
+}
+
+function renderModalAt(path: string) {
+  cleanup()
+  const backgroundLocation = {
+    pathname: `/projects/${PROJECT_ID}`,
+    search: "",
+    hash: "",
+    state: null,
+    key: "project-overview",
+  }
+  return render(
+    <MemoryRouter
+      initialIndex={1}
+      initialEntries={[
+        backgroundLocation,
+        {
+          pathname: path,
+          state: { backgroundLocation, projectSettingsModalDepth: 1 },
+        },
+      ]}
+    >
+      <Routes>
+        <Route path="/projects/:id" element={<div data-testid="project-overview-background" />} />
+        <Route path="/project/:id/settings" element={<ProjectSettingsDialog />} />
+        <Route path="/project/:id/settings/:section" element={<ProjectSettingsDialog />} />
+        <Route path="*" element={<LandingProbe />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -235,6 +271,32 @@ beforeEach(() => {
 })
 
 describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
+  it("renders the shared settings UI in a route-backed modal and closes to its origin", () => {
+    renderModalAt(`/project/${PROJECT_ID}/settings`)
+
+    const dialog = screen.getByTestId("project-settings-dialog")
+    expect(dialog).toHaveClass("max-w-[min(42rem,calc(100%-2rem))]")
+    fireEvent.click(screen.getByText("General"))
+    fireEvent.change(screen.getByLabelText(/project title/i), {
+      target: { value: "Unsaved modal title" },
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: /close/i }))
+    expect(screen.getByRole("heading", { name: "Discard changes?" })).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }))
+    expect(screen.getByTestId("project-overview-background")).toBeTruthy()
+  })
+
+  it("only expands the modal beyond the content width for wide settings panes", () => {
+    renderModalAt(`/project/${PROJECT_ID}/settings`)
+
+    fireEvent.click(screen.getByText("Members"))
+
+    expect(screen.getByTestId("project-settings-dialog")).toHaveClass(
+      "max-w-[min(72rem,calc(100%-2rem))]",
+    )
+  })
+
   it("index (no ?section=) shows labeled sub-menus, not the full control set", () => {
     renderAt(`/project/${PROJECT_ID}/settings`)
 
@@ -243,8 +305,12 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.getByText("Members")).toBeTruthy()
     expect(screen.getByText("AI & completion")).toBeTruthy()
     expect(screen.getByText("Validation & health")).toBeTruthy()
-    expect(screen.getByText("Rules")).toBeTruthy()
-    expect(screen.getByText("Living Memory")).toBeTruthy()
+    // ...minus the sections that moved to the standalone Living Memory
+    // surface (/project/:id/memory) — they must NOT be index rows anymore.
+    // The Quality hub still renders with Validation & health alone.
+    expect(screen.queryByText("Rules")).toBeNull()
+    expect(screen.queryByText("Living Memory")).toBeNull()
+
     // Index hints show the current value, capitalized — not the raw enum
     // ("reviewer", "lazy") dumped before opening the pane.
     expect(screen.getByText("Reviewer")).toBeTruthy()
@@ -353,17 +419,15 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.getByText("Git Sync")).toBeTruthy()
 
     renderAt(`/project/${PROJECT_ID}/settings/ai`)
-    // System prompt is nested — AI pane shows a chevron row, not the textarea.
-    expect(screen.getByRole("link", { name: /system prompt/i })).toBeTruthy()
+    // The system prompt moved to Living Memory (memory/instructions) — the AI
+    // pane cross-links there instead of nesting a settings pane, and no
+    // system-prompt textarea exists anywhere in settings anymore.
+    expect(screen.getByRole("link", { name: /living memory/i })).toBeTruthy()
     expect(screen.queryByLabelText(/^system prompt$/i)).toBeNull()
     expect(screen.getByLabelText(/examples retrieved/i)).toBeTruthy()
     expect(screen.getByLabelText(/preceding committed-target cells/i)).toBeTruthy()
     expect(screen.getByText(/^voice$/i)).toBeTruthy()
     expect(screen.getByRole("button", { name: /open terminology library/i })).toBeTruthy()
-
-    renderAt(`/project/${PROJECT_ID}/settings/system-prompt`)
-    expect(screen.getByLabelText(/^system prompt$/i)).toBeTruthy()
-    expect(screen.queryByLabelText(/examples retrieved/i)).toBeNull()
 
     renderAt(`/project/${PROJECT_ID}/settings/validation`)
     expect(screen.getByLabelText(/required validators \(text\)/i)).toBeTruthy()
@@ -387,13 +451,51 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     // PostEditMetricsSection renders its own heading regardless of loading state.
     expect(screen.getByText(/approved ai review effort/i)).toBeTruthy()
 
-    renderAt(`/project/${PROJECT_ID}/settings/rules`)
-    expect(screen.getByTestId("settings-rules-section")).toBeTruthy()
-    expect(screen.queryByLabelText(/project title/i)).toBeNull()
+    // rules / memory / system-prompt are NOT panes anymore — their legacy URLs
+    // redirect to the Living Memory surface (covered by the redirect tests).
+  })
 
+  // Living Memory extraction: legacy section URLs must keep working — deep
+  // links exist in the wild (the server-sent `settings/memory` readiness href,
+  // RuleDrawer's `settings/rules?ruleId=…`) — by redirecting to the standalone
+  // /project/:id/memory surface with the query string preserved.
+  it("redirects the legacy settings/memory URL to the memory surface", () => {
     renderAt(`/project/${PROJECT_ID}/settings/memory`)
-    expect(screen.getByTestId("settings-memory-section")).toBeTruthy()
-    expect(screen.queryByLabelText(/project title/i)).toBeNull()
+    expect(screen.getByTestId("landing-path").textContent).toBe(
+      `/project/${PROJECT_ID}/memory`,
+    )
+  })
+
+  it("redirects the legacy settings/rules URL to memory/quality, preserving search", () => {
+    renderAt(`/project/${PROJECT_ID}/settings/rules?q=x`)
+    expect(screen.getByTestId("landing-path").textContent).toBe(
+      `/project/${PROJECT_ID}/memory/quality?q=x`,
+    )
+  })
+
+  it("redirects the legacy settings/system-prompt URL to memory/instructions, from the route-modal too", () => {
+    renderAt(`/project/${PROJECT_ID}/settings/system-prompt`)
+    expect(screen.getByTestId("landing-path").textContent).toBe(
+      `/project/${PROJECT_ID}/memory/instructions`,
+    )
+
+    // The modal presentation redirects identically (no dialog shell renders).
+    renderModalAt(`/project/${PROJECT_ID}/settings/system-prompt`)
+    expect(screen.getByTestId("landing-path").textContent).toBe(
+      `/project/${PROJECT_ID}/memory/instructions`,
+    )
+    expect(screen.queryByTestId("project-settings-dialog")).toBeNull()
+  })
+
+  // Entry point kept alive: the AI pane cross-links to Living Memory where
+  // the system prompt now lives, reusing the old Custom/Default hint. It is a
+  // plain navigation (no modal state) since it leaves settings entirely.
+  it("the AI pane shows a Living Memory cross-link with a Default hint by default", () => {
+    renderAt(`/project/${PROJECT_ID}/settings/ai`)
+
+    const link = screen.getByRole("link", { name: /living memory/i })
+    expect(link).toHaveAttribute("href", `/project/${PROJECT_ID}/memory/instructions`)
+    expect(link).toHaveTextContent("Default")
   })
 
   // The hidden termbase-sharing section (SHOW_TERMBASE_SHARING_IN_SETTINGS

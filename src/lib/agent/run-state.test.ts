@@ -176,6 +176,34 @@ describe("reduceRunFrame — AQU-AGENT additions", () => {
       summary: "Import glossary.csv",
       cellCount: 40,
     })
+    // Legacy frame (no AQU-926 fields) must yield a legacy item — the card
+    // feature-detects on `digest`, so it must not be materialized as a key.
+    expect(run.items[0]).not.toHaveProperty("digest")
+    expect(run.items[0]).not.toHaveProperty("tier")
+    expect(run.items[0]).not.toHaveProperty("kinds")
+  })
+
+  it("threads the AQU-926 digest/tier/kinds frame fields through to the item", () => {
+    const run = fold([
+      {
+        type: "changeset.staged",
+        runId: "r1",
+        changesetId: "cs-2",
+        approvalUrl: "https://app.example/approve/cs-2",
+        summary: "Set 3 translations",
+        cellCount: 3,
+        digest: "sha256:abc",
+        tier: "prepared",
+        kinds: ["SetTranslation"],
+      },
+    ])
+    expect(run.items[0]).toMatchObject({
+      kind: "changeset",
+      changesetId: "cs-2",
+      digest: "sha256:abc",
+      tier: "prepared",
+      kinds: ["SetTranslation"],
+    })
   })
 
   it("records memory.proposed and brief.proposed as inline notices, pending by default", () => {

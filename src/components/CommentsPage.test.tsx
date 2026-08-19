@@ -27,7 +27,7 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 }))
 
 vi.mock("@/hooks/useProject", () => ({
-  useProject: () => ({
+  useProject: vi.fn(() => ({
     project: {
       id: "proj-1",
       name: "Test Project",
@@ -35,7 +35,7 @@ vi.mock("@/hooks/useProject", () => ({
     },
     loading: false,
     status: "ready",
-  }),
+  })),
 }))
 
 vi.mock("@/hooks/useUserSearch", () => ({
@@ -72,11 +72,11 @@ function makeComment(overrides: Partial<CommentRecord> = {}): CommentRecord {
   }
 }
 
-function renderPage() {
+function renderPage(props: React.ComponentProps<typeof CommentsPage> = {}) {
   return render(
     <MemoryRouter initialEntries={["/project/proj-1/comments"]}>
       <Routes>
-        <Route path="/project/:id/comments" element={<CommentsPage />} />
+        <Route path="/project/:id/comments" element={<CommentsPage {...props} />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -93,6 +93,22 @@ describe("CommentsPage chrome", () => {
 
     expect(screen.getByRole("heading", { name: /Comments/i })).toBeInTheDocument()
     expect(screen.getByText(/No comments yet/i)).toBeInTheDocument()
+  })
+
+  it("uses the workspace-owned project without starting another project resolve", async () => {
+    const { useProject } = await import("@/hooks/useProject")
+    renderPage({
+      project: {
+        id: "proj-1",
+        name: "Workspace project",
+        files: [{ id: "file-1", name: "Workspace GEN" }],
+      } as never,
+    })
+
+    expect(vi.mocked(useProject)).toHaveBeenLastCalledWith("proj-1", expect.objectContaining({
+      enabled: false,
+      includeSettings: false,
+    }))
   })
 
   it("expands Filters to show Sort combobox and collapses to hide it", () => {

@@ -1,5 +1,5 @@
-// Segmented "Text | Audio" lens switch in the chapter navigation row (beside
-// Check file). Both lenses read the SAME cell list. For non-time-ordered files the toggle is local
+// Icon-only Text / Audio-or-Media / Agent switch in the chapter navigation row.
+// The editor lenses read the SAME cell list. For non-time-ordered files the toggle is local
 // state over one mounted editor, so scroll/selection carry over directly; for
 // time-ordered (media) files the editors swap and the workspace TRACES the
 // current cell across the switch instead (AQU-646 — media→text scrolls+flashes
@@ -7,8 +7,9 @@
 // translation; Audio mode reveals the cast library, transport, per-line
 // speaker chips and generate controls (the old standalone Voice Studio).
 
-import { Mic2, Pencil, AudioWaveform } from "lucide-react"
+import { Mic2, Pencil, AudioWaveform, Bot } from "lucide-react"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { audioLensLabelKey } from "@/lib/editor/audio-lens-label"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -17,13 +18,21 @@ export type EditorLens = "text" | "audio"
 interface Props {
   lens: EditorLens
   onChange: (lens: EditorLens) => void
+  /** Open the full Agent workbench. Agent is a destination rather than a
+   * persisted editor lens, so selecting it delegates navigation to the shell. */
+  onAgentSelect?: () => void
   /** Timeline-segment-model: when true the active file is time-ordered, so the
    *  second lens selects the MEDIA layer (separate media segments) rather than
    *  audio-attachments on the same text cells. Relabels "Audio" → "Media". */
   timeOrdered?: boolean
 }
 
-export function EditorModeToggle({ lens, onChange, timeOrdered = false }: Props) {
+export function EditorModeToggle({
+  lens,
+  onChange,
+  onAgentSelect,
+  timeOrdered = false,
+}: Props) {
   const t = useT()
   // AQU-353: the canonical lens label is shared with every other entry point
   // that toggles this lens (e.g. the sidebar "More" item) via audioLensLabelKey,
@@ -36,18 +45,33 @@ export function EditorModeToggle({ lens, onChange, timeOrdered = false }: Props)
   return (
     <Tabs
       value={lens}
-      onValueChange={(value) => onChange(value as EditorLens)}
+      onValueChange={(value) => {
+        if (value === "agent") {
+          onAgentSelect?.()
+          return
+        }
+        onChange(value as EditorLens)
+      }}
       className="gap-0"
     >
       <TabsList>
-        <TabsTrigger value="text" aria-label={t("editor.lens.text")}>
-          <Pencil />
-          <span className="hidden lg:inline">{t("editor.lens.text")}</span>
-        </TabsTrigger>
-        <TabsTrigger value="audio" aria-label={secondLabel}>
-          <SecondIcon />
-          <span className="hidden lg:inline">{secondLabel}</span>
-        </TabsTrigger>
+        <AppTooltip content={t("editor.lens.text")} side="bottom" delay={150}>
+          <TabsTrigger value="text" aria-label={t("editor.lens.text")}>
+            <Pencil />
+          </TabsTrigger>
+        </AppTooltip>
+        <AppTooltip content={secondLabel} side="bottom" delay={150}>
+          <TabsTrigger value="audio" aria-label={secondLabel}>
+            <SecondIcon />
+          </TabsTrigger>
+        </AppTooltip>
+        {onAgentSelect ? (
+          <AppTooltip content={t("nav.dock.agentTab")} side="bottom" delay={150}>
+            <TabsTrigger value="agent" aria-label={t("nav.dock.agentTab")}>
+              <Bot />
+            </TabsTrigger>
+          </AppTooltip>
+        ) : null}
       </TabsList>
     </Tabs>
   )

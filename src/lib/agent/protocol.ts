@@ -73,7 +73,10 @@ export type AgentFrame =
   // builds) are unaffected by these new variants.
   | { type: 'tool.code.start'; runId: string; language: 'js' | 'python'; codePreview: string } // first 400 chars
   | { type: 'tool.code.output'; runId: string; stdout: string; stderr: string; truncated: boolean; durationMs: number }
-  | { type: 'changeset.staged'; runId: string; changesetId: string; approvalUrl: string; summary: string; cellCount: number }
+  // AQU-926 (docs/COMMAND-REGISTRY.md §4): digest/tier/kinds are ADDITIVE and
+  // optional — older server builds omit them and the card renders the legacy
+  // way; their presence upgrades ChangesetCard to the live review flow.
+  | { type: 'changeset.staged'; runId: string; changesetId: string; approvalUrl: string; summary: string; cellCount: number; digest?: string; tier?: string; kinds?: string[] }
   | { type: 'memory.proposed'; runId: string; memoryId: string; path: string; preview: string }
   | { type: 'brief.proposed'; runId: string; proposalId: string; preview: string }
   | { type: 'budget'; runId: string; spentCredits: number; capCredits: number }

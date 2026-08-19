@@ -38,9 +38,9 @@ export interface ContextReadiness {
 
 /** Validated pairs below this and the performer is imitating almost nothing —
  *  the same threshold the risk router uses for example coverage. */
-const MIN_EXAMPLES = 8
+export const MIN_EXAMPLES = 8
 /** A brief with fewer answered fields than this is a stub, not a brief. */
-const MIN_BRIEF_FIELDS = 4
+export const MIN_BRIEF_FIELDS = 4
 
 export interface ReadinessInput {
   context: ProjectContext
@@ -85,8 +85,9 @@ export function computeContextReadiness(input: ReadinessInput): ContextReadiness
       answered === 0 && !hasL1
         ? "No brief. Autopilot has to guess your audience, register, and how literal to be — the decisions that shape every sentence."
         : `${answered} of the brief's questions answered${hasL1 ? ", summarised for every passage" : ""}. Audience, register, and literalness ride in each draft prompt.`,
-        // The brief builder lives on Living Memory in project settings.
-        href: "settings/memory",
+        // The brief builder is Living Memory's "brief" pane
+        // (/project/:id/memory/brief) — deep-link straight to it.
+        href: "memory/brief",
   })
 
   // ── Examples of your team's own work ──

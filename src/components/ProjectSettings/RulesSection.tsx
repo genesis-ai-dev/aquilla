@@ -18,11 +18,36 @@ import type { RuleInfraction } from "@/lib/parsers/types"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { RulesSurface } from "@/components/RulesSurface"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { ProjectRecord } from "@/lib/parsers/types"
+import type { UseProjectSettings } from "@/hooks/useProjectSettings"
 
-export function RulesSettingsSection({ projectId }: { projectId: string }) {
+interface RulesSettingsSectionProps {
+  projectId: string
+  project?: ProjectRecord | null
+  refreshProject?: () => void
+  patchSettings?: UseProjectSettings["patch"]
+  roleLevel?: number | null
+}
+
+export function RulesSettingsSection({
+  projectId,
+  project: parentProject,
+  refreshProject,
+  patchSettings: parentPatchSettings,
+  roleLevel: parentRoleLevel,
+}: RulesSettingsSectionProps) {
   const t = useT()
   const [editingRuleId, setEditingRuleId] = useState<string | "new" | null>(null)
-  const { project, loading, refresh, patchSettings, roleLevel } = useProject(projectId)
+  const ownedProject = useProject(projectId, {
+    initialProject: parentProject,
+    enabled: parentProject == null,
+    includeSettings: parentPatchSettings == null,
+  })
+  const project = parentProject ?? ownedProject.project
+  const loading = parentProject == null && ownedProject.loading
+  const refresh = refreshProject ?? ownedProject.refresh
+  const patchSettings = parentPatchSettings ?? ownedProject.patchSettings
+  const roleLevel = parentRoleLevel ?? ownedProject.roleLevel
   const { session } = useFrontierSession()
   const orgCtx = useActiveOrgOptional()
 

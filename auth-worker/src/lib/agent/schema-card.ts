@@ -7,6 +7,8 @@
 // a REVIEWER's prompt simply does not contain target.cell.commit. The server
 // re-validates role on every staged event regardless (emit-stage.ts).
 
+import { catalogIndexLines } from "../../../../db/shared/command-catalog"
+
 // ── Role table ──────────────────────────────────────────────────────────────
 // Mirrored as data from sync-worker/src/events/role-policy.ts (REQUIRED_ROLE).
 // That file is the source of truth — if it changes, change this table too.
@@ -149,6 +151,21 @@ Results come back as pipe tables: ∅ = NULL; UUIDs are aliased (#c1 cells, #e1 
 :project = this project's id (REQUIRED in every sql query)
 :user = the requesting user's numeric id`
 
+/** AQU-926 (COMMAND-REGISTRY §4): role-filtered changeset-command index,
+ *  appended to the tools contract. One line per command — the paramsDocs stay
+ *  OUT of the prompt (describe_command fetches them on demand, L2). Roles
+ *  below every command floor get no block at all (same absent-not-rejected
+ *  property as the event card). */
+function commandIndexBlock(roleLevel: number): string {
+  const lines = catalogIndexLines(roleLevel)
+  if (lines.length === 0) return ""
+  return `
+
+## Changeset commands (filtered to your role)
+Stage these with propose_command({commands:[{kind, …}]}) — call describe_command({kind}) for exact params first; the staged changeset waits for the user to review and apply it in-app.
+${lines.join("\n")}`
+}
+
 // Appended to the contract only when project_settings.bibleResourcesEnabled is
 // on. Off → the model is never told the branch exists (and the server rejects
 // it anyway). See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
@@ -165,7 +182,7 @@ const SAFETY = `## Safety & stance
 - Prefer ACTING over asking: staging IS the confirmation mechanism — the user reviews every proposal before anything is written, so do not ask "shall I?" or "which one?" when you can derive the answer (languages from settings or existing target text; "next" from the focused cell; scope from the open file) and stage it. Ask at most ONE question, only when the request is truly underdetermined.
 - WHICH FILE is the one exception to that: never guess it. A request phrased relative to the user's view ("the next five verses", "this chapter", "keep going") means the file they have open — scope it to :file. If no file is focused and the request names none, ASK which file and stage nothing; picking a plausible file is a correctness bug, because the user approves the proposal believing it lands in the file they are looking at.
 - If a proposal comes back stale or rejected, surface that to the user rather than silently retrying.
-- Reads (read/examples/search/docs) are cheap and unbudgeted; draft/propose/sql are budgeted — plan writes before you make them.
+- Reads (read/examples/search/docs/describe_command) are cheap and unbudgeted; draft/propose/propose_command/sql are budgeted — plan writes before you make them.
 - Keep sql tight: select only needed columns, LIMIT generously, prefer counts/aggregates for overview questions.`
 
 export interface AgentPromptContext {
@@ -295,7 +312,7 @@ ${kinds.map((k) => `- ${EVENT_LINES[k]}`).join("\n")}${
 
   return `You are the Aquilla translation agent for project :project, acting on behalf of user "${ctx.username}" (role: ${roleName}). You help translate, check, and manage a translation project whose entire state lives in an append-only event log and SQL projections.${languagePair} You act ONLY through your tools; every write is an event, staged for the user's approval.${translatorProfileBlock(ctx)}${briefBlock(ctx)}
 
-${TOOLS_CONTRACT}
+${TOOLS_CONTRACT}${commandIndexBlock(ctx.roleLevel)}
 ${ctx.bibleResourcesEnabled ? `\n${AQUIFER_CONTRACT}\n` : ""}
 ${focus.length ? focus.join("\n") + "\n" : ""}
 ${situation}${SCHEMA_CARD}

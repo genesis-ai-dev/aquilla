@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 import { BrandContext } from "@/branding/use-brand"
 import { useI18nOptional } from "@/lib/i18n/I18nProvider"
 import { LanguageSwitcher } from "@/lib/i18n/LanguageSwitcher"
+import { HelpMenu } from "./HelpMenu"
 import { VersionTag } from "./VersionBadge"
 import { BetaBadge } from "./BetaBadge"
 import { NavHistoryControls } from "./NavHistoryControls"
@@ -320,22 +321,25 @@ export function AppShell({
         </div>
       )}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{dockContent}</div>
-      {/* Sidebar footer. The version tag is org-chrome only, but the language
-          switcher rides in both layouts: ProjectWorkspace (the `leftDock` case)
-          is the screen a translator spends the whole day on, so making them
-          leave it to change UI language would defeat the point. */}
-      <div className={cn("flex shrink-0 items-center gap-2", leftDock && "justify-end px-2 pb-2")}>
-        {!leftDock && (
-          <div className="min-w-0 flex-1">
-            <VersionTag />
-          </div>
-        )}
-        {i18n && (
-          <LanguageSwitcher
-            className="h-6 shrink-0 rounded-md border border-border/50 bg-transparent px-1 text-xs"
-            ariaLabel={i18n.t("language.switcher.chrome")}
-          />
-        )}
+      {/* Keep build and shared utilities in one footer row in both sidebar
+          layouts. Help stays compact beside localization; the org-only Tour
+          remains hidden in the project editor. */}
+      <div
+        data-slot="app-shell-sidebar-footer"
+        className="flex shrink-0 items-center justify-between gap-2 px-2 pb-2"
+      >
+        <div className="min-w-0">
+          <VersionTag />
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <HelpMenu compact showTour={!useDockResize} />
+          {i18n && (
+            <LanguageSwitcher
+              className="h-6 shrink-0 rounded-md border border-border/50 bg-transparent px-1 text-xs"
+              ariaLabel={i18n.t("language.switcher.chrome")}
+            />
+          )}
+        </div>
       </div>
     </aside>
   )

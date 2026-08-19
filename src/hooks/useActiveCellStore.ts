@@ -245,6 +245,12 @@ export class CellStore {
   private derivedVersion = 0
   private writeSeq = 0
   private maxServerSeq: number | null = null
+  /** AQU-943: the project incarnation `maxServerSeq` was minted against. A
+   *  wipe + re-migration under the same deterministic ids restarts the seq
+   *  allocator, which inverts the cursor and makes every delta answer
+   *  "nothing newer". Echoed as `?epoch=` so the server can spot that; null ⇒
+   *  the cursor is unverifiable and the delta path is skipped. */
+  private projectEpoch: number | null = null
   private navIndex: CellNavigationEntry[] = []
   private fileProgressSnapshot: FileProgressResponse | null = null
   private sectionLabelById = new Map<string, string>()
@@ -318,6 +324,7 @@ export class CellStore {
     this.freshnessFloors = new Map()
     this.cellVersionById = new Map()
     this.maxServerSeq = null
+    this.projectEpoch = null
     this.writeSeq = 0
     this.footnoteCache = new Map()
     this.rebuildDerivedIndexes()
@@ -356,6 +363,10 @@ export class CellStore {
   getProjectId = (): string | null => this.ctx.projectId
   getCellCount = (): number => this.order.length
   getMaxServerSeq = (): number | null => this.maxServerSeq
+  getProjectEpoch = (): number | null => this.projectEpoch
+  setProjectEpoch(epoch: number | null): void {
+    this.projectEpoch = epoch
+  }
   setMaxServerSeq(seq: number | null): void {
     this.maxServerSeq = seq
     if (this.fileProgressSnapshot) {
@@ -1369,10 +1380,12 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       if (generationRef.current !== gen) return
       if (cached && cached.rows.length > 0) {
         store.replaceRows(cached.rows, { full: true, maxServerSeq: cached.maxServerSeq ?? null })
+        store.setProjectEpoch(cached.projectEpoch ?? null)
         setIsLoading(false)
         usedCache = true
       } else {
         store.setMaxServerSeq(null)
+        store.setProjectEpoch(null)
         setIsLoading(true)
       }
     }
@@ -1401,22 +1414,31 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       tokenAttemptsRef.current = 0
 
       const since = store.getMaxServerSeq()
-      if (since !== null) {
+      // AQU-943: a cursor whose incarnation is unknown (cache entry written
+      // before the epoch existed) cannot be validated against a wipe + re-
+      // create, so it is not trusted — one full stream re-mints both.
+      const epoch = store.getProjectEpoch()
+      if (since !== null && epoch !== null) {
         const deltaStartSeq = store.getWriteSeq()
-        const result = await fetchCellsDelta(pid, fid, since, token)
+        const result = await fetchCellsDelta(pid, fid, since, token, undefined, epoch)
         if (generationRef.current !== gen) return
         if (result.kind === "delta") {
           let nextWatermark = result.maxServerSeq
+          // The server answered with a delta rather than a resync, so it
+          // confirmed the cursor's incarnation; pre-AQU-943 servers report
+          // none — hold the epoch we already had.
+          const nextEpoch = result.projectEpoch ?? epoch
+          store.setProjectEpoch(nextEpoch)
           if (result.changedCellIds.length > 0) {
             store.clearConfirmedShadows(result.cells, deltaStartSeq)
             const merged = mergeCellsDelta(store.toRows(), result.changedCellIds, result.cells)
             const { rows: kept, discardedCellIds } = store.mergeProtectedRows(merged, deltaStartSeq)
             store.replaceRows(kept, { changedCellIds: result.changedCellIds, maxServerSeq: discardedCellIds.size > 0 ? since : nextWatermark })
             if (discardedCellIds.size > 0) nextWatermark = since
-            void writeCellsCache(pid, fid, store.toRows(), nextWatermark)
+            void writeCellsCache(pid, fid, store.toRows(), nextWatermark, nextEpoch ?? undefined)
           } else if (result.maxServerSeq !== since) {
             store.setMaxServerSeq(result.maxServerSeq)
-            void writeCellsCache(pid, fid, store.toRows(), result.maxServerSeq)
+            void writeCellsCache(pid, fid, store.toRows(), result.maxServerSeq, nextEpoch ?? undefined)
           }
           setIsLoading(false)
           return
@@ -1442,16 +1464,20 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
 
       const startSeq = store.getWriteSeq()
       let streamMaxSeq: number | null = null
+      // AQU-943: incarnation of `streamMaxSeq`, taken from the same first page
+      // so cursor and epoch always describe the same snapshot.
+      let streamEpoch: number | null = null
       let streamTorn = false
       let cursorSeen = false
       const trackStreamMeta = () => {
         let sideFirst: number | null = null
         let sideSeen = false
-        return (meta: { maxServerSeq?: number | null }) => {
+        return (meta: { maxServerSeq?: number | null; projectEpoch?: number | null }) => {
           const value = typeof meta.maxServerSeq === "number" ? meta.maxServerSeq : null
           if (!cursorSeen) {
             cursorSeen = true
             streamMaxSeq = value
+            streamEpoch = typeof meta.projectEpoch === "number" ? meta.projectEpoch : null
           }
           if (!sideSeen) {
             sideSeen = true
@@ -1478,8 +1504,10 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       }
 
       const watermark = streamTorn || discardedProtected ? null : streamMaxSeq
+      const watermarkEpoch = watermark === null ? null : streamEpoch
       store.setMaxServerSeq(watermark)
-      void writeCellsCache(pid, fid, store.toRows(), watermark ?? undefined)
+      store.setProjectEpoch(watermarkEpoch)
+      void writeCellsCache(pid, fid, store.toRows(), watermark ?? undefined, watermarkEpoch ?? undefined)
       setIsLoading(false)
     } catch (err) {
       if (generationRef.current !== gen) return
@@ -1598,7 +1626,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     const pid = projectRef.current
     const fid = fileRef.current
     if (!pid || !fid) return
-    void writeCellsCache(pid, fid, store.toRows(), maxServerSeq ?? store.getMaxServerSeq() ?? undefined)
+    void writeCellsCache(
+      pid,
+      fid,
+      store.toRows(),
+      maxServerSeq ?? store.getMaxServerSeq() ?? undefined,
+      store.getProjectEpoch() ?? undefined,
+    )
   }, [store])
 
   const revalidateCellRef = useRef<(cellId: string) => void>(() => {})

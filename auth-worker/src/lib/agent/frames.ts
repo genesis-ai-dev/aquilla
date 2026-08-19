@@ -5,6 +5,8 @@
 // are normative — copy the shapes, do not rename. agent.ts widens its own
 // AgentFrame union with `HarnessFrame` and emits these server-side.
 
+import type { CommandTier } from "../../../../db/shared/command-catalog"
+
 /** The sandbox `run_code` tool started executing. codePreview = first 400 chars. */
 export interface ToolCodeStartFrame {
   type: "tool.code.start"
@@ -23,9 +25,11 @@ export interface ToolCodeOutputFrame {
   durationMs: number
 }
 
-/** Backward-compatible frame for previously staged PlanImport changesets. The
- * current product importer runs through the dedicated Import dialog, but old
- * persisted agent timelines may still contain this frame. */
+/** A changeset was staged for human review. Historically emitted for
+ * PlanImport (old persisted timelines still contain bare frames); AQU-926's
+ * propose_command re-emits it for every registered-command staging, adding
+ * the optional fields below. Optional-only extension — the SPA mirror
+ * (src/lib/agent/protocol.ts) must keep rendering field-less frames. */
 export interface ChangesetStagedFrame {
   type: "changeset.staged"
   runId: string
@@ -33,6 +37,12 @@ export interface ChangesetStagedFrame {
   approvalUrl: string
   summary: string
   cellCount: number
+  /** Plan digest the approve step re-presents (commands + preconditions). */
+  digest?: string
+  /** Max risk tier across the staged commands, from the shared catalog. */
+  tier?: CommandTier
+  /** Distinct command kinds staged, first-seen order. */
+  kinds?: string[]
 }
 
 /** A memory proposal was created (status `proposed`). `preview` is a short

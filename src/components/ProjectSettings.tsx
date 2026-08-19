@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react"
-import { useParams, useNavigate, useSearchParams } from "react-router-dom"
+import { Navigate, useLocation, useParams, useNavigate, useSearchParams, type Location } from "react-router-dom"
 import {
   isProjectEditorPath,
+  projectMemoryPath,
   projectSettingsPath,
   safeReturnPath,
   withSettingsReturn,
@@ -9,7 +10,7 @@ import {
 import {
   Check, CheckCircle, XCircle, ChevronDown, Save, Sparkles,
   SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines, Plug, FlaskConical,
-  Users, SpellCheck, BrainCircuit,
+  Users,
 } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { Button } from "@/components/ui/button"
@@ -36,9 +37,9 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
-import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -85,8 +86,7 @@ import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
 import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSection"
 import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
 import { MembersSection } from "./ProjectSettings/MembersSection"
-import { RulesSettingsSection } from "./ProjectSettings/RulesSection"
-import { LivingMemoryPage } from "./LivingMemoryPage"
+import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
 import { readCursor } from "@/lib/dcs/cursor"
 import { UpstreamChangesPanel } from "./linked/UpstreamChangesPanel"
@@ -96,7 +96,7 @@ import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useActiveOrgOptional } from "@/context/OrgContext"
 import { ApiKeyField } from "./ApiKeyField"
 import { SettingsNav, type SettingsSection } from "./ProjectSettings/SettingsNav"
-import { NavList, NavRow } from "@/components/ui/nav-list"
+import { BackLink, NavList, NavRow } from "@/components/ui/nav-list"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
@@ -208,7 +208,6 @@ interface Baseline {
   model: string
   maxTokens: number
   temperature: number
-  systemPrompt: string
   llmHealthPenalty: number
   top_k: number
   contextSize: ContextSize
@@ -252,7 +251,6 @@ function buildBaseline(project: ProjectRecord): Baseline {
     // default snapshots (512/4096) are upgraded to the current default.
     maxTokens: normalizeCompletionMaxTokens(project.completionSettings?.maxTokens),
     temperature: project.completionSettings?.temperature ?? 0.3,
-    systemPrompt: project.completionSettings?.systemPrompt || DEFAULT_SYSTEM_PROMPT,
     llmHealthPenalty: project.completionSettings?.llmHealthPenalty ?? 0.1,
     top_k: project.completionSettings?.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT,
     contextSize: project.completionSettings?.contextSize ?? "medium",
@@ -287,12 +285,32 @@ function decayEqual(a: DecaySettings | undefined, b: DecaySettings | undefined):
   return JSON.stringify(a) === JSON.stringify(b)
 }
 
-export function ProjectSettings() {
+interface ProjectSettingsProps {
+  modal?: boolean
+}
+
+export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const t = useT()
   const { id, section: sectionParam } = useParams<{ id: string; section?: string }>()
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams] = useSearchParams()
-  const { project, loading, refresh } = useProject(id!)
+  const modalState = location.state as {
+    backgroundLocation?: Location
+    projectSettingsModalDepth?: number
+    projectSnapshot?: ProjectRecord
+  } | null
+  const backgroundLocation = modal ? modalState?.backgroundLocation : undefined
+  const modalDepth = modal ? (modalState?.projectSettingsModalDepth ?? 1) : 0
+  const nextModalState = backgroundLocation
+    ? { backgroundLocation, projectSettingsModalDepth: modalDepth + 1 }
+    : undefined
+  const { project, loading, refresh } = useProject(id!, {
+    initialProject: modal ? modalState?.projectSnapshot : undefined,
+    // This page owns the editable settings hook below. Asking useProject for
+    // its read-only overlay as well creates a second settings request.
+    includeSettings: false,
+  })
 
   // Workspace handoff (`?return=…`) — only accept same-origin relative paths.
   // The Editor breadcrumb is only for this handoff (settings opened from /editor).
@@ -404,7 +422,6 @@ export function ProjectSettings() {
   const [model, setModel] = useState("")
   const [maxTokens, setMaxTokens] = useState(DEFAULT_COMPLETION_MAX_TOKENS)
   const [temperature, setTemperature] = useState(0.3)
-  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT)
   const [llmHealthPenalty, setLlmHealthPenalty] = useState(0.1)
   const [topK, setTopK] = useState(DEFAULT_APPROVED_EXAMPLE_COUNT)
   const [contextSize, setContextSize] = useState<ContextSize>("medium")
@@ -464,7 +481,6 @@ export function ProjectSettings() {
     setModel(b.model)
     setMaxTokens(b.maxTokens)
     setTemperature(b.temperature)
-    setSystemPrompt(b.systemPrompt)
     setLlmHealthPenalty(b.llmHealthPenalty)
     setTopK(b.top_k)
     setContextSize(b.contextSize)
@@ -563,7 +579,6 @@ export function ProjectSettings() {
       model !== baseline.model ||
       maxTokens !== baseline.maxTokens ||
       temperature !== baseline.temperature ||
-      systemPrompt !== baseline.systemPrompt ||
       llmHealthPenalty !== baseline.llmHealthPenalty ||
       topK !== baseline.top_k ||
       contextSize !== baseline.contextSize ||
@@ -589,7 +604,7 @@ export function ProjectSettings() {
     )
   }, [
     baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
-    model, maxTokens, temperature, systemPrompt, llmHealthPenalty,
+    model, maxTokens, temperature, llmHealthPenalty,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
@@ -610,6 +625,8 @@ export function ProjectSettings() {
   }, [isDirty])
 
   const [discardOpen, setDiscardOpen] = useState(false)
+  const [closeAfterDiscard, setCloseAfterDiscard] = useState(false)
+  const [pendingHistoryDelta, setPendingHistoryDelta] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   // Distinct from `saveError`: a shared-settings save blocked by the active
@@ -625,7 +642,7 @@ export function ProjectSettings() {
   }, [session?.username, canEditShared])
   // AQU-408: success message reflects the actual delta saved (a brief
   // enumeration of which fields changed), not a generic "Saved". Auto-dismisses
-  // after a few seconds. The page itself stays open on save — only an
+  // after a few seconds. The modal/page itself stays open on save — only an
   // explicit "Save and close" leaves it.
   const [savedMessage, setSavedMessage] = useState<string | null>(null)
   const savedMessageTimerRef = useRef<number | null>(null)
@@ -646,6 +663,25 @@ export function ProjectSettings() {
     } else {
       navigate(target)
     }
+  }, [isDirty, navigate])
+
+  const closeSettings = useCallback(() => {
+    if (isDirty) {
+      setCloseAfterDiscard(true)
+      setDiscardOpen(true)
+      return
+    }
+    if (modal) navigate(-modalDepth)
+    else navigate(editorPath)
+  }, [editorPath, isDirty, modal, modalDepth, navigate])
+
+  const requestHistoryNavigation = useCallback((delta: number) => {
+    if (isDirty) {
+      setPendingHistoryDelta(delta)
+      setDiscardOpen(true)
+      return
+    }
+    navigate(delta)
   }, [isDirty, navigate])
 
   const preset = CUSTOM_PRESETS.find((p) => p.id === presetId) ?? CUSTOM_PRESETS[0]
@@ -778,7 +814,6 @@ export function ProjectSettings() {
       const sharedUpdates: ProjectWideSettings = {}
       if (sourceLanguage !== baseline.sourceLanguage) { sharedUpdates.sourceLanguage = sourceLanguage; changedFieldLabels.push("source language") }
       if (targetLanguage !== baseline.targetLanguage) { sharedUpdates.targetLanguage = targetLanguage; changedFieldLabels.push("target language") }
-      if (systemPrompt !== baseline.systemPrompt) { sharedUpdates.systemPrompt = systemPrompt; changedFieldLabels.push("AI instructions") }
       if (validationCount !== baseline.validationCount) { sharedUpdates.validationCount = validationCount; changedFieldLabels.push("validation count") }
       if (validationCountAudio !== baseline.validationCountAudio) {
         sharedUpdates.validationCountAudio = validationCountAudio
@@ -846,7 +881,6 @@ export function ProjectSettings() {
         model,
         maxTokens,
         temperature,
-        systemPrompt,
         llmHealthPenalty,
         top_k: topK,
         contextSize,
@@ -877,7 +911,7 @@ export function ProjectSettings() {
 
       // AQU-408 acceptance criterion: the success message reflects the actual
       // delta saved (a brief enumeration of which fields changed), and the
-      // page stays open afterward — callers decide separately whether
+      // page/modal stays open afterward — callers decide separately whether
       // to also navigate away (see handleSaveAndClose).
       const message =
         changedFieldLabels.length === 0
@@ -897,7 +931,7 @@ export function ProjectSettings() {
     }
   }, [
     id, baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
-    model, maxTokens, temperature, systemPrompt, llmHealthPenalty,
+    model, maxTokens, temperature, llmHealthPenalty,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
@@ -911,19 +945,35 @@ export function ProjectSettings() {
     // `saveError` from the render closure is stale (set inside handleSave
     // during this same tick); rely on the returned boolean instead.
     if (!ok) return
-    navigate(editorPath)
-  }, [handleSave, navigate, editorPath])
+    if (modal) navigate(-modalDepth)
+    else navigate(editorPath)
+  }, [handleSave, navigate, editorPath, modal, modalDepth])
 
   const handleDiscardConfirm = useCallback(() => {
     if (baseline) applyBaseline(baseline)
     setDiscardOpen(false)
+    if (closeAfterDiscard) {
+      setCloseAfterDiscard(false)
+      setPendingNav(null)
+      if (modal) navigate(-modalDepth)
+      else navigate(editorPath)
+      return
+    }
+    if (pendingHistoryDelta != null) {
+      setPendingHistoryDelta(null)
+      setPendingNav(null)
+      navigate(pendingHistoryDelta)
+      return
+    }
     const target = pendingNav ?? editorPath
     setPendingNav(null)
     navigate(target)
-  }, [baseline, applyBaseline, pendingNav, navigate, editorPath])
+  }, [baseline, applyBaseline, closeAfterDiscard, pendingHistoryDelta, pendingNav, navigate, editorPath, modal, modalDepth])
 
   const handleDiscardCancel = useCallback(() => {
     setDiscardOpen(false)
+    setCloseAfterDiscard(false)
+    setPendingHistoryDelta(null)
     setPendingNav(null)
   }, [])
 
@@ -954,13 +1004,10 @@ export function ProjectSettings() {
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot"] },
-    { id: "section-system-prompt", label: "System prompt", keywords: ["system prompt", "ai instructions", "prompt", "product", "tone", "style", "domain", "guidance"] },
     { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
     { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
     { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "kokoro", "mms", "transcription", "model", "download", "offline", "local ai"] },
-    { id: "section-rules", label: "Rules", keywords: ["rules", "checks", "lqa", "autofix", "forbidden", "pattern", "org rules"] },
-    { id: "section-memory", label: "Living Memory", keywords: ["living memory", "memory", "brief", "instructions", "standards", "examples", "validated"] },
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-decay", label: "Retrieval support", keywords: ["decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
@@ -1048,39 +1095,13 @@ export function ProjectSettings() {
       description: "Instructions, draft context, provider, voice, terminology",
       icon: Sparkles,
       hub: "AI & media",
-      // System prompt is a nested detail page (linked with a chevron from this
-      // pane); it is not listed again on the settings index.
+      // The system prompt (and the rest of Living Memory) lives on the
+      // standalone /project/:id/memory surface; this pane keeps a cross-link
+      // NavRow to memory/instructions instead of a nested settings page.
       sectionIds: [
         "section-ai-instructions", "section-draft-context", "section-advanced-llm",
         "section-voice", "section-local-models", "section-terminology", "section-termbase-sharing",
       ],
-    },
-    {
-      id: "system-prompt",
-      label: "System prompt",
-      description: "How translations should read for this project — used on every AI completion",
-      icon: Sparkles,
-      hub: "AI & media",
-      /** Nested under AI & completion — only deep-linked / opened from that pane. */
-      hideFromIndex: true,
-      parentId: "ai",
-      sectionIds: ["section-system-prompt"],
-    },
-    {
-      id: "rules",
-      label: "Rules",
-      description: "Translation checks, custom rules, and org-wide rules",
-      icon: SpellCheck,
-      hub: "Quality",
-      sectionIds: ["section-rules"],
-    },
-    {
-      id: "memory",
-      label: "Living Memory",
-      description: "Instructions, standards, and validated examples the AI draws on",
-      icon: BrainCircuit,
-      hub: "Quality",
-      sectionIds: ["section-memory"],
     },
     {
       id: "validation",
@@ -1130,9 +1151,28 @@ export function ProjectSettings() {
   const visibleGroups = SETTINGS_GROUPS
     .map((g) => ({ ...g, sectionIds: g.sectionIds.filter((id) => visibleSectionIdSet.has(id)) }))
     .filter((g) => g.sectionIds.length > 0)
-  // Index lists only hub-level entries; nested panes (e.g. system-prompt) are
-  // opened from a parent pane NavRow.
+  // Index lists only hub-level entries; a `hideFromIndex` pane stays
+  // deep-linkable but is opened from a parent pane NavRow.
   const indexGroups = visibleGroups.filter((g) => !g.hideFromIndex)
+
+  // Living Memory extraction: `memory`, `rules`, and `system-prompt` moved out
+  // of settings onto the standalone /project/:id/memory surface. Old section
+  // ids redirect (replace) instead of falling back to the index so deep links
+  // keep working — the server-sent `settings/memory` readiness href, and
+  // RuleDrawer's `settings/rules?ruleId=…` — with query params carried along.
+  // Returning here, before either shell renders, covers both the routed page
+  // and the route-modal dialog.
+  const movedSectionRedirects: Record<string, string> = id
+    ? {
+        memory: projectMemoryPath(id),
+        rules: projectMemoryPath(id, "quality"),
+        "system-prompt": projectMemoryPath(id, "instructions"),
+      }
+    : {}
+  const movedSectionTarget = sectionParam ? movedSectionRedirects[sectionParam] : undefined
+  if (movedSectionTarget) {
+    return <Navigate to={`${movedSectionTarget}${location.search}`} replace />
+  }
 
   // Navigation between the index and a pane uses `/settings/:section` —
   // deep-linkable and back-button friendly.
@@ -1166,9 +1206,6 @@ export function ProjectSettings() {
       "section-bible-resources",
       "section-user",
       "section-members",
-      "section-rules",
-      "section-memory",
-      "section-system-prompt",
       "section-ai-instructions",
       "section-draft-context",
       "section-advanced-llm",
@@ -1191,7 +1228,7 @@ export function ProjectSettings() {
       if (!group || claimedGroups.has(group.id)) continue
       claimedGroups.add(group.id)
       // Nested panes that are hidden from the index still show their own title
-      // (e.g. "System prompt") rather than the parent hub name in search.
+      // rather than the parent hub name in search.
       headers.set(sectionId, group.label)
     }
     return headers
@@ -1216,13 +1253,14 @@ export function ProjectSettings() {
   // Table panes (Members roster) need the wider content well; form panes stay
   // intentional/narrow. Search flattens across groups → keep default width.
   const pageSize = activeGroup?.wide && !lowerQuery ? "wide" : "default"
+  const modalWidthClass = pageSize === "wide"
+    ? "max-w-[min(72rem,calc(100%-2rem))] sm:max-w-[min(72rem,calc(100%-2rem))]"
+    : "max-w-[min(42rem,calc(100%-2rem))] sm:max-w-[min(42rem,calc(100%-2rem))]"
 
   // Hints for index NavRows — short current-value summaries (org / Preferences pattern).
   const groupHints: Record<string, string> = {
     general: name.trim() || "Untitled",
     members: "Roles & invites",
-    rules: "Checks",
-    memory: "Brief & examples",
     "source-sync": hasSourceLink ? "Linked" : hasGitOrigin ? "Git" : "None",
     ai: provider === "frontier" ? "Frontier" : "Custom",
     validation: resolveRoleName(t, validationRoleFloor),
@@ -1312,22 +1350,51 @@ export function ProjectSettings() {
   )
 
   if (loading) {
+    const loadingContent = (
+      <Page size={pageSize}>
+        <LoadingPanel label={t("projectSettings.loadingLabel")} />
+      </Page>
+    )
+    if (modal) {
+      return (
+        <Dialog open onOpenChange={(open) => { if (!open) closeSettings() }}>
+          <DialogContent
+            className={`h-[min(90dvh,56rem)] gap-0 p-0 ${modalWidthClass}`}
+            data-testid="project-settings-dialog"
+          >
+            <DialogHeader className="sr-only">
+              <DialogTitle>{pageTitle}</DialogTitle>
+              <DialogDescription>{pageDescription}</DialogDescription>
+            </DialogHeader>
+            <DialogBody className="m-0 p-0">{loadingContent}</DialogBody>
+          </DialogContent>
+        </Dialog>
+      )
+    }
     return (
       <AppShell
         sidebar={<OrgSidebar />}
         header={breadcrumb}
         statusBar={null}
-        main={
-          <Page size={pageSize}>
-            <LoadingPanel label={t("projectSettings.loadingLabel")} />
-          </Page>
-        }
+        main={loadingContent}
       />
     )
   }
 
+  // Living Memory cross-link hint (Custom vs Default): the prompt itself is
+  // edited on memory/instructions now, so read the saved value straight off
+  // the project record — the same source the removed form baseline used.
+  const savedSystemPrompt = project?.completionSettings?.systemPrompt || DEFAULT_SYSTEM_PROMPT
+
   const settingsContent = (
     <Page size={pageSize}>
+          {modal && onSettingsPane ? (
+            <BackLink
+              className="mb-6"
+              label={breadcrumbParent?.label ?? "Project settings"}
+              onClick={() => requestHistoryNavigation(-1)}
+            />
+          ) : null}
           <div className="flex flex-col gap-12">
             <PageHeader
               title={pageTitle}
@@ -1353,6 +1420,7 @@ export function ProjectSettings() {
                         <NavRow
                           key={g.id}
                           to={settingsHref(g.id)}
+                          state={nextModalState}
                           icon={g.icon}
                           title={g.label}
                           hint={groupHints[g.id] ?? g.description}
@@ -1592,67 +1660,22 @@ export function ProjectSettings() {
           <MembersSection projectId={id} />
         )}
 
-        {searchGroupLabel("section-rules")}
-        {id && sectionsToRender.some((s) => s.id === "section-rules") && (
-          <div id="section-rules">
-            <RulesSettingsSection projectId={id} />
-          </div>
-        )}
-
-        {searchGroupLabel("section-memory")}
-        {sectionsToRender.some((s) => s.id === "section-memory") && (
-          <div id="section-memory">
-            <LivingMemoryPage embedded />
-          </div>
-        )}
-
-        {searchGroupLabel("section-system-prompt")}
-        {sectionsToRender.some((s) => s.id === "section-system-prompt") && (
-          <div id="section-system-prompt">
-            <SettingsGroup>
-              <SettingsRow
-                label={<label htmlFor="sp">{t("projectSettings.systemPrompt.label")}</label>}
-                description={withStyledTerms(
-                  t("projectSettings.ai.instructionsHelp", {
-                    sourceVar: "{sourceLanguage}",
-                    targetVar: "{targetLanguage}",
-                  }),
-                  [
-                    { text: "{sourceLanguage}", as: "code" },
-                    { text: "{targetLanguage}", as: "code" },
-                  ],
-                )}
-                block
-              >
-                <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
-                  <Textarea
-                    id="sp"
-                    value={systemPrompt}
-                    onChange={(e) => setSystemPrompt(e.target.value)}
-                    rows={24}
-                    disabled={!canEditShared}
-                    className="min-h-[28rem] bg-background font-mono text-sm leading-relaxed"
-                    placeholder={DEFAULT_SYSTEM_PROMPT}
-                    aria-label={t("projectSettings.systemPrompt.label")}
-                  />
-                </DisabledFieldTooltip>
-              </SettingsRow>
-            </SettingsGroup>
-          </div>
-        )}
-
         {searchGroupLabel("section-ai-instructions")}
         {sectionsToRender.some((s) => s.id === "section-ai-instructions") && (
           <div id="section-ai-instructions" className="flex flex-col gap-12">
-            {/* Nested detail: system prompt lives on its own page; open via chevron row. */}
+            {/* Cross-link: the system prompt is edited on the Living Memory
+                surface (memory/instructions). A real navigation out of
+                settings — deliberately no modal `state` (unlike sibling
+                NavRows), so the route-modal doesn't try to stack it. */}
             {!lowerQuery && id ? (
               <NavList>
                 <NavRow
-                  to={settingsHref("system-prompt")}
-                  title={t("projectSettings.systemPrompt.label")}
+                  to={projectMemoryPath(id, "instructions")}
+                  icon={LIVING_MEMORY_ICON}
+                  title={t("terminology.livingMemory.title")}
                   description={t("projectSettings.systemPrompt.navDescription")}
                   hint={
-                    systemPrompt.trim() && systemPrompt !== DEFAULT_SYSTEM_PROMPT
+                    savedSystemPrompt.trim() && savedSystemPrompt !== DEFAULT_SYSTEM_PROMPT
                       ? "Custom"
                       : "Default"
                   }
@@ -2311,7 +2334,20 @@ export function ProjectSettings() {
     </Page>
   )
 
-  const shell = (
+  const shell = modal ? (
+    <Dialog open onOpenChange={(open) => { if (!open) closeSettings() }}>
+      <DialogContent
+        className={`h-[min(90dvh,56rem)] gap-0 p-0 ${modalWidthClass}`}
+        data-testid="project-settings-dialog"
+      >
+        <DialogHeader className="sr-only">
+          <DialogTitle>{pageTitle}</DialogTitle>
+          <DialogDescription>{pageDescription}</DialogDescription>
+        </DialogHeader>
+        <DialogBody className="m-0 p-0">{settingsContent}</DialogBody>
+      </DialogContent>
+    </Dialog>
+  ) : (
     <AppShell
       sidebar={<OrgSidebar />}
       header={breadcrumb}
@@ -2342,4 +2378,10 @@ export function ProjectSettings() {
 
     </>
   )
+}
+
+/** Route-modal presentation used by in-app project-settings entry points.
+ * Direct settings URLs retain the full-page fallback. */
+export function ProjectSettingsDialog() {
+  return <ProjectSettings modal />
 }

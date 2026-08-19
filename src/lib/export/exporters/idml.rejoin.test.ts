@@ -18,8 +18,15 @@ import {
 import type { CellData } from "@/hooks/useCells"
 import {
   BIBLICA_STORY_PATH,
+  FRONT_BACK_MATTER,
   SAMPLE_NOTES,
+  biblicaFrontBackMatterStory,
   makeBiblicaIdml,
+  note,
+  noteWithTrailingVerseMarker,
+  paragraph,
+  run,
+  verseMarkerOnlyNote,
 } from "@/lib/biblica/__fixtures__/biblica-idml"
 import { buildBulkCellsWithSpeakers } from "@/lib/import"
 import { extractBiblicaStudyNoteStrings } from "@/lib/parsers/biblica"
@@ -35,10 +42,13 @@ const directExecutor: IdmlExportExecutor = {
  * Import the fixture exactly as the app does when the importer's sentence
  * splitting is switched on. Splitting is opt-in — the default imports whole
  * paragraphs — and it is the only path that produces the sub-paragraph cells
- * this rejoin contract exists for.
+ * this rejoin contract exists for. Pass `paragraphs` to import a custom story
+ * (verse-marker flush fixtures) instead of the sample notes package.
  */
-async function importBiblicaCells(): Promise<{ bytes: ArrayBuffer; cells: CellData[] }> {
-  const bytes = await makeBiblicaIdml()
+async function importBiblicaCells(
+  paragraphs?: readonly string[],
+): Promise<{ bytes: ArrayBuffer; cells: CellData[] }> {
+  const bytes = await makeBiblicaIdml(paragraphs)
   const parsed = await parseIdml(bytes.slice(0))
   const { strings } = await extractBiblicaStudyNoteStrings(
     bytes.slice(0),
@@ -169,6 +179,57 @@ describe("IDML export of a note block that was imported as several cells", () =>
     await expect(exportIdml(bytes, partial, directExecutor)).rejects.toThrow(
       /1 of them are missing from this export/,
     )
+  })
+
+  it("writes a translated note back around the verse marker it was cut from", async () => {
+    const noteText = "Jesus sends his followers out."
+    const { bytes, cells } = await importBiblicaCells([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "MRK")),
+      note("p-title", "The Gospel of Mark", "intro%3aimt1"),
+      noteWithTrailingVerseMarker("p-n", noteText, "20"),
+      verseMarkerOnlyNote("p-ie", "28", "20"),
+    ])
+
+    // The markers own no cell, so only the two notes were imported.
+    expect(cells.map((cell) => cell.original)).toEqual(["The Gospel of Mark", noteText])
+    for (const cell of cells) translate(cell)
+
+    const result = await exportIdml(bytes, cells, directExecutor)
+    const story = await storyOf(result.blob)
+
+    expect(story).toContain(`<Content>${noteText.toUpperCase()}</Content>`)
+    // Both delimiter runs come back exactly as the publisher set them: IDML
+    // needs them to close Matthew's last verse.
+    expect(story).toContain(`<Content>28:</Content>`)
+    expect(story.match(/<Content>20<\/Content>/g)).toHaveLength(2)
+    expect(result.report).toMatchObject({ missing: 0, rejected: 0 })
+  })
+
+  it("writes a translated front/back matter volume back into its layout paragraphs", async () => {
+    const { bytes, cells } = await importBiblicaCells(biblicaFrontBackMatterStory)
+
+    expect(cells.map((cell) => cell.original)).toEqual([
+      FRONT_BACK_MATTER.title,
+      FRONT_BACK_MATTER.firstLetter,
+      FRONT_BACK_MATTER.firstEntry,
+      FRONT_BACK_MATTER.firstBody.join(""),
+      FRONT_BACK_MATTER.secondLetter,
+      FRONT_BACK_MATTER.secondEntry,
+    ])
+    for (const cell of cells) translate(cell)
+
+    const result = await exportIdml(bytes, cells, directExecutor)
+    const story = await storyOf(result.blob)
+
+    expect(story).toContain(`<Content>${FRONT_BACK_MATTER.title.toUpperCase()}</Content>`)
+    expect(story).toContain(`<Content>${FRONT_BACK_MATTER.firstEntry.toUpperCase()}</Content>`)
+    // The apostrophe is an ordinary possessive here, so its run is written back
+    // with the words around it rather than held at the publisher's text.
+    expect(story).toContain(`<Content>${FRONT_BACK_MATTER.firstBody[0].toUpperCase()}</Content>`)
+    expect(story).toContain(`<Content>${FRONT_BACK_MATTER.firstBody[2].toUpperCase()}</Content>`)
+    // The running head owns no cell, so InDesign's own text survives untouched.
+    expect(story).toContain(`<Content>${FRONT_BACK_MATTER.runningHead}</Content>`)
+    expect(result.report).toMatchObject({ missing: 0, rejected: 0 })
   })
 
   it("refuses to export a sentence whose ranges no longer fit its paragraph", async () => {

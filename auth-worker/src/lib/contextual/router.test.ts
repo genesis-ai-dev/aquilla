@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { classifyRisk } from "./router"
+import { classifyRisk, SUPPORT_RATIO_LOW_THRESHOLD } from "./router"
 import type { AmbiguityEntry, LintFlag, SpanDraft } from "./types"
 
 const draft: SpanDraft = {
@@ -45,6 +45,48 @@ describe("classifyRisk", () => {
     expect(classifyRisk(draft, [], [], 1.0, { rounds: 4, exit: "fixpoint" }).level).toBe("high")
     expect(classifyRisk(draft, [], [], 1.0, { rounds: 2, exit: "budget" }).level).toBe("high")
     expect(classifyRisk(draft, [], [], 1.0, { rounds: 3, exit: "fixpoint" }).level).toBe("low")
+  })
+
+  it("ignores the support check when it abstained (a thin corpus routes nothing high)", () => {
+    const risk = classifyRisk(draft, [], [], 1.0, undefined, {
+      applicable: false,
+      ratio: 0,
+      riskyCellIds: ["c1"],
+    })
+    expect(risk.level).toBe("low")
+    expect(risk.sourceFindingIds).toEqual([])
+  })
+
+  it("a CONFIRMED unsupported cell routes high and is named as a finding", () => {
+    const risk = classifyRisk(draft, [], [], 1.0, undefined, {
+      applicable: true,
+      ratio: 0.9,
+      riskyCellIds: ["c1"],
+    })
+    expect(risk.level).toBe("high")
+    expect(risk.verifiers).toEqual(["force", "ambiguity", "naturalness"])
+    expect(risk.sourceFindingIds).toEqual(["support:c1"])
+    expect(risk.reasons.join(" ")).toContain("unattested")
+  })
+
+  it("a code flag the fast model cleared does NOT route high", () => {
+    const risk = classifyRisk(draft, [], [], 1.0, undefined, {
+      applicable: true,
+      ratio: 0.95,
+      riskyCellIds: [],
+    })
+    expect(risk.level).toBe("low")
+    expect(risk.reasons[0]).toContain("span support 0.95")
+  })
+
+  it("a span-wide support collapse routes high even with no single cell confirmed", () => {
+    const risk = classifyRisk(draft, [], [], 1.0, undefined, {
+      applicable: true,
+      ratio: SUPPORT_RATIO_LOW_THRESHOLD - 0.01,
+      riskyCellIds: [],
+    })
+    expect(risk.level).toBe("high")
+    expect(risk.reasons.join(" ")).toContain("drifted off its retrieval")
   })
 
   it("reasons are always populated (inspectable routing, both directions)", () => {

@@ -17,12 +17,33 @@ const fetchAllMock = vi.fn<(projectId: string, fileId: string, jwt: string, side
 const fetchByIdsMock = vi.fn<(projectId: string, fileId: string, cellIds: string[], jwt: string) => Promise<CellRow[]>>()
 // Seam for the M2-1 conditional refetch (?since= delta). Only consulted when
 // the hook holds a watermark (cache hit with maxServerSeq, or streamMeta).
-const fetchDeltaMock = vi.fn<(projectId: string, fileId: string, since: number, jwt: string) => Promise<unknown>>()
+const fetchDeltaMock =
+  vi.fn<
+    (
+      projectId: string,
+      fileId: string,
+      since: number,
+      jwt: string,
+      lane?: string,
+      projectEpoch?: number | null,
+    ) => Promise<unknown>
+  >()
+// AQU-943: the project incarnation every fixture's cursor was minted against.
+// The hook only takes the delta path when it holds BOTH a cursor and the epoch
+// that cursor belongs to, so warm fixtures must carry one — a cursor with no
+// epoch cannot be validated against a wipe + re-create and full-streams once.
+const TEST_EPOCH = 4242
 // Watermark the streamFileCells mock reports via onMeta. `maxServerSeq` is
 // the single-value case (every page agrees); `perPage` overrides it with one
 // value per page index so B2 tests can stage a mid-stream watermark bump
 // (the torn-snapshot tell). undefined = pre-M2-1 server → keeps full-streaming.
-const streamMeta: { maxServerSeq?: number; perPage?: Array<number | undefined> } = {}
+const streamMeta: {
+  maxServerSeq?: number
+  perPage?: Array<number | undefined>
+  /** AQU-943 incarnation reported alongside the watermark. Omit for
+   *  TEST_EPOCH; null models a pre-AQU-943 server that reports none. */
+  projectEpoch?: number | null
+} = {}
 // Optional override: a queue of pages to deliver one-at-a-time. When non-empty,
 // the streamFileCells mock pulls from here instead of calling fetchAllMock.
 const pagesMock: { queue: CellRow[][]; pendingResolvers: Array<() => void> } = {
@@ -46,7 +67,7 @@ vi.mock("@/lib/sync/cells-read", () => ({
     jwt: string,
     onPage: OnPage,
     side?: "source" | "target",
-    onMeta?: (meta: { maxServerSeq?: number | null }) => void,
+    onMeta?: (meta: { maxServerSeq?: number | null; projectEpoch?: number | null }) => void,
   ) => {
     // onMeta fires once per page (matching the real streamFileCells): with
     // `perPage` staged, page i reports perPage[i]; otherwise every page
@@ -56,6 +77,7 @@ vi.mock("@/lib/sync/cells-read", () => ({
       const per = streamMeta.perPage
       onMeta({
         maxServerSeq: per ? per[Math.min(pageIndex, per.length - 1)] : streamMeta.maxServerSeq,
+        projectEpoch: streamMeta.projectEpoch === undefined ? TEST_EPOCH : streamMeta.projectEpoch,
       })
     }
     if (pagesMock.queue.length > 0) {
@@ -99,11 +121,17 @@ vi.mock("@/lib/sync/cells-read", () => ({
 // (projectId, fileId) fixture. `cacheEntry` lets the M2-1 tests stage a warm
 // cache hit. mergeCellsDelta stays REAL (importOriginal) so the conditional
 // refetch tests exercise the actual lib merge, not a stand-in.
-const cacheEntry: { value: { rows: CellRow[]; maxServerSeq?: number } | null } = { value: null }
+const cacheEntry: {
+  value: { rows: CellRow[]; maxServerSeq?: number; projectEpoch?: number } | null
+} = { value: null }
 // Every writeCellsCache call is captured so B1/B2 tests can assert what
 // watermark (if any) would have been PERSISTED to IDB — the persisted cursor
 // is what makes a bad watermark sticky across reloads.
-const cacheWrites: Array<{ rows: CellRow[]; maxServerSeq: number | undefined }> = []
+const cacheWrites: Array<{
+  rows: CellRow[]
+  maxServerSeq: number | undefined
+  projectEpoch: number | undefined
+}> = []
 vi.mock("@/lib/sync/cells-cache", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sync/cells-cache")>()
   return {
@@ -117,8 +145,9 @@ vi.mock("@/lib/sync/cells-cache", async (importOriginal) => {
       _fileId: string,
       rows: CellRow[],
       maxServerSeq?: number,
+      projectEpoch?: number,
     ) => {
-      cacheWrites.push({ rows, maxServerSeq })
+      cacheWrites.push({ rows, maxServerSeq, projectEpoch })
     },
     resetCellsCacheConnectionForTests: async () => {},
   }
@@ -190,6 +219,7 @@ beforeEach(() => {
   cacheWrites.length = 0
   delete streamMeta.maxServerSeq
   delete streamMeta.perPage
+  delete streamMeta.projectEpoch
   vtt.calls = 0
   peekOutboxBatchCallCount = 0
 })
@@ -961,6 +991,7 @@ describe("useCells conditional refetch (M2-1)", () => {
         makeRow({ cellId: "c1", side: "target", value: "cached-tgt" }),
       ],
       maxServerSeq: 10,
+      projectEpoch: TEST_EPOCH,
     }
     // Nothing changed since the snapshot.
     fetchDeltaMock.mockResolvedValueOnce({
@@ -970,7 +1001,7 @@ describe("useCells conditional refetch (M2-1)", () => {
       useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
     )
     await waitFor(() => expect(fetchDeltaMock).toHaveBeenCalledTimes(1))
-    expect(fetchDeltaMock).toHaveBeenCalledWith("proj-a", "file-x", 10, "fake-jwt")
+    expect(fetchDeltaMock).toHaveBeenCalledWith("proj-a", "file-x", 10, "fake-jwt", undefined, TEST_EPOCH)
     await waitFor(() => expect(result.current.isLoading).toBe(false))
     expect(result.current.cells).toHaveLength(1)
     expect(result.current.cells[0].original).toBe("cached-src")
@@ -988,6 +1019,7 @@ describe("useCells conditional refetch (M2-1)", () => {
         makeRow({ cellId: "b", side: "target", value: "B-tgt", anchorCellId: "a" }),
       ],
       maxServerSeq: 5,
+      projectEpoch: TEST_EPOCH,
     }
     // b's target was edited; c was deleted outright.
     fetchDeltaMock.mockResolvedValueOnce({
@@ -1034,7 +1066,7 @@ describe("useCells conditional refetch (M2-1)", () => {
     })
     act(() => { window.dispatchEvent(new Event("focus")) })
     await waitFor(() => expect(result.current.cells[0].translated).toBe("peer-edit"))
-    expect(fetchDeltaMock).toHaveBeenCalledWith("proj-a", "file-x", 3, "fake-jwt")
+    expect(fetchDeltaMock).toHaveBeenCalledWith("proj-a", "file-x", 3, "fake-jwt", undefined, TEST_EPOCH)
     // No additional full stream ran for the focus revalidate.
     expect(fetchAllMock.mock.calls.length).toBe(fullStreamCalls)
 
@@ -1044,13 +1076,14 @@ describe("useCells conditional refetch (M2-1)", () => {
     })
     act(() => { result.current.revalidate() })
     await waitFor(() => expect(fetchDeltaMock).toHaveBeenCalledTimes(2))
-    expect(fetchDeltaMock).toHaveBeenLastCalledWith("proj-a", "file-x", 4, "fake-jwt")
+    expect(fetchDeltaMock).toHaveBeenLastCalledWith("proj-a", "file-x", 4, "fake-jwt", undefined, TEST_EPOCH)
   })
 
   it("falls back to the full stream when the server answers resync", async () => {
     cacheEntry.value = {
       rows: [makeRow({ cellId: "c1", side: "source", value: "stale" })],
       maxServerSeq: 2,
+      projectEpoch: TEST_EPOCH,
     }
     fetchDeltaMock.mockResolvedValueOnce({ kind: "resync" })
     fetchAllMock.mockResolvedValueOnce([
@@ -1073,6 +1106,7 @@ describe("useCells conditional refetch (M2-1)", () => {
         makeRow({ cellId: "c1", side: "target", value: "cached-tgt" }),
       ],
       maxServerSeq: 7,
+      projectEpoch: TEST_EPOCH,
     }
     fetchDeltaMock.mockRejectedValueOnce(new DOMException("timed out", "TimeoutError"))
     const { result } = renderHook(() =>
@@ -1100,6 +1134,7 @@ describe("useCells conditional refetch (M2-1)", () => {
         makeRow({ cellId: "c1", side: "target", value: "old" }),
       ],
       maxServerSeq: 1,
+      projectEpoch: TEST_EPOCH,
     }
     // Stall the delta until the local edit lands.
     let resolveDelta: (v: unknown) => void = () => {}
@@ -1140,6 +1175,7 @@ describe("useCells conditional refetch (M2-1)", () => {
         makeRow({ cellId: "c1", side: "target", value: "old" }),
       ],
       maxServerSeq: 1,
+      projectEpoch: TEST_EPOCH,
     }
     // Stall the first delta until the local edit lands.
     let resolveDelta: (v: unknown) => void = () => {}
@@ -1198,7 +1234,7 @@ describe("useCells conditional refetch (M2-1)", () => {
     })
     act(() => { result.current.revalidate() })
     await waitFor(() => expect(fetchDeltaMock).toHaveBeenCalledTimes(2))
-    expect(fetchDeltaMock).toHaveBeenLastCalledWith("p", "f", 1, "fake-jwt")
+    expect(fetchDeltaMock).toHaveBeenLastCalledWith("p", "f", 1, "fake-jwt", undefined, TEST_EPOCH)
     await waitFor(() => expect(result.current.cells[0].translated).toBe("peer-E2-final"))
   })
 
@@ -1305,7 +1341,71 @@ describe("useCells conditional refetch (M2-1)", () => {
     })
     act(() => { result.current.revalidate() })
     await waitFor(() => expect(fetchDeltaMock).toHaveBeenCalledTimes(1))
-    expect(fetchDeltaMock).toHaveBeenCalledWith("p", "f", 7, "fake-jwt")
+    expect(fetchDeltaMock).toHaveBeenCalledWith("p", "f", 7, "fake-jwt", undefined, TEST_EPOCH)
+  })
+
+  // ── Project incarnation (AQU-943) ─────────────────────────────────────────
+  //
+  // A project wiped and re-migrated under the same deterministic ids restarts
+  // the seq allocator, so a cursor from the old incarnation outruns the whole
+  // new history and every delta answers "nothing newer" — the client renders
+  // its pre-wipe rows forever. The cursor alone cannot express which
+  // incarnation it belongs to, so the client stores the server's `projectEpoch`
+  // beside it and echoes it back; a cursor with no epoch is not trusted at all.
+
+  it("AQU-943: a cached cursor with NO incarnation is not trusted — the client full-streams instead of deltaing", async () => {
+    // Exactly the pre-AQU-943 IDB entry a browser carries across the upgrade,
+    // and the one that could have been minted against a wiped incarnation.
+    cacheEntry.value = {
+      rows: [makeRow({ cellId: "c1", side: "source", value: "pre-wipe" })],
+      maxServerSeq: 129_108,
+    }
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "re-migrated" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells[0]?.original).toBe("re-migrated"))
+    expect(fetchDeltaMock).not.toHaveBeenCalled()
+  })
+
+  it("AQU-943: the incarnation is persisted with the cursor so the next delta can declare it", async () => {
+    streamMeta.maxServerSeq = 62_932
+    streamMeta.projectEpoch = 2_000
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "re-migrated" }),
+    ])
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    expect(cacheWrites.at(-1)?.maxServerSeq).toBe(62_932)
+    expect(cacheWrites.at(-1)?.projectEpoch).toBe(2_000)
+
+    fetchDeltaMock.mockResolvedValueOnce({
+      kind: "delta", changedCellIds: [], cells: [], maxServerSeq: 62_932, projectEpoch: 2_000,
+    })
+    act(() => { result.current.revalidate() })
+    await waitFor(() => expect(fetchDeltaMock).toHaveBeenCalledTimes(1))
+    expect(fetchDeltaMock).toHaveBeenCalledWith(
+      "proj-a", "file-x", 62_932, "fake-jwt", undefined, 2_000,
+    )
+  })
+
+  it("AQU-943: a torn stream stores neither cursor nor incarnation — they only travel as a pair", async () => {
+    streamMeta.perPage = [7, 9]
+    streamMeta.projectEpoch = 2_000
+    pagesMock.queue = [
+      [makeRow({ cellId: "a", side: "source", value: "A" })],
+      [makeRow({ cellId: "b", side: "source", value: "B" })],
+    ]
+    const { result } = renderHook(() =>
+      useCells({ projectId: "p", fileId: "f", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(2))
+    expect(cacheWrites.at(-1)?.maxServerSeq).toBeUndefined()
+    expect(cacheWrites.at(-1)?.projectEpoch).toBeUndefined()
   })
 })
 

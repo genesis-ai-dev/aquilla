@@ -144,6 +144,78 @@ async function startRun(targetLang = "") {
   return created.run
 }
 
+// ── Prose files: paragraph marks, not chapter refs ─────────────────────────
+//
+// docx/markdown/epub carry no canonical refs, so segmentation used to fall
+// straight through to fixed 10-cell chunks — `deriveSpanSeeds` was called with
+// no options, leaving its paragraph branch unreachable even though the
+// importer had recorded every paragraph start in `cells.metadata`. These pin
+// that the tick now reads them.
+
+const PROSE_PROJECT = "proj-tick-prose"
+const PROSE_FILE = "file-prose"
+
+async function seedProseCell(
+  cellId: string,
+  seq: number,
+  source: string,
+  paragraphStart: boolean,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, sequence_index, metadata, event_id, last_edit_at)
+       VALUES (?, ?, ?, 'source', ?, ?, ?, ?, 0)`,
+    )
+    .bind(
+      PROSE_PROJECT,
+      PROSE_FILE,
+      cellId,
+      source,
+      seq,
+      paragraphStart ? JSON.stringify({ paragraphStart: true }) : null,
+      `ev-src-${cellId}`,
+    )
+    .run()
+}
+
+/** 15 sentences in three 5-sentence paragraphs. */
+async function seedProseFile(): Promise<void> {
+  for (let i = 1; i <= 15; i++) {
+    await seedProseCell(`s${i}`, i, `Sentence number ${i}.`, i === 1 || i === 6 || i === 11)
+  }
+}
+
+async function startProseRun() {
+  const created = await createRun(db, {
+    projectId: PROSE_PROJECT,
+    fileId: PROSE_FILE,
+    targetLang: "",
+    initiatedBy: "tester",
+    roleSnapshot: { userId: 1, username: "tester", level: 400 },
+  })
+  if (created.status !== "ok") throw new Error("prose run not created")
+  return created.run
+}
+
+describe("runOneTick — prose segmentation", () => {
+  it("derives paragraph-aligned spans from cells.metadata.paragraphStart", async () => {
+    await seedProseFile()
+    const run = await startProseRun()
+    await runOneTick({ db, runId: run.id, llm: llm() })
+
+    const after = await getRun(db, run.id)
+    const seeds = after?.spanCursor?.seeds ?? []
+    expect(seeds.length).toBeGreaterThan(0)
+    expect(seeds.every((seed) => seed.seedSource === "paragraph")).toBe(true)
+    // Paragraphs 1+2 coalesce to 10 cells; paragraph 3 would overflow the
+    // 12-cell cap, so it becomes its own span — on a real paragraph edge.
+    expect(seeds.map((seed) => [seed.startCellId, seed.endCellId])).toEqual([
+      ["s1", "s10"],
+      ["s11", "s15"],
+    ])
+  })
+})
+
 describe("runOneTick", () => {
   it("stages a French run into the French review queue without leaking into the default lane", async () => {
     await seedFile()

@@ -20,6 +20,10 @@ const PROJECT_ROUTES = [
   `/project/${SEEDED_PROJECT_ID}/terminology`,
   `/project/${SEEDED_PROJECT_ID}/comments`,
   `/project/${SEEDED_PROJECT_ID}/memory`,
+  // AQU-932: Living Memory section panes (settings/{rules,memory} above now
+  // exercise the legacy redirects into this surface).
+  `/project/${SEEDED_PROJECT_ID}/memory/instructions`,
+  `/project/${SEEDED_PROJECT_ID}/memory/quality`,
   `/project/${SEEDED_PROJECT_ID}/voice`,
 ]
 

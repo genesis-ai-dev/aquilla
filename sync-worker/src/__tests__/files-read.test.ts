@@ -256,3 +256,71 @@ describe("GET /api/v1/projects/:projectId/files", () => {
     expect(res.status).toBe(404)
   })
 })
+
+// ── The timing correction, forwarded (AQU-646, 2026-08-19) ───────────────
+//
+// An audio VTT arrives at a different frame rate from the subtitles it belongs
+// to, and the import measures the drift and stretches the cues to match. That
+// measurement happens once and was, until now, written into the file's meta and
+// never read again. The project report signs an episode's timing off with it,
+// so the read route has to forward it — recomputing is not an option, and a
+// second opinion that disagreed with the correction actually applied would be
+// worse than silence.
+
+describe("the audio-cue timebase a file was imported with", () => {
+  const metaWith = (timebase: unknown) =>
+    JSON.stringify({ orderedBy: "time", aquillaImport: { audioVtt: { timebase } } })
+
+  async function readFiles(meta: string | null) {
+    const { db } = await makeTestDb({
+      files: [
+        {
+          id: "file-cues",
+          project_id: "proj-a",
+          name: "Episode · audio cues",
+          file_type: "vtt",
+          cell_count: 548,
+          ...(meta === null ? {} : { meta }),
+        },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
+    const res = (await handleFilesReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/files", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      envWith(db),
+    ))!
+    const body = (await res.json()) as {
+      files: Array<{ audioVttTimebase: { fromFps?: string; toFps?: string; scale: number } | null }>
+    }
+    return body.files[0]!.audioVttTimebase
+  }
+
+  it("comes back with both rates when the import could name them", async () => {
+    expect(await readFiles(metaWith({ fromFps: "24", toFps: "23.976", scale: 1.001 }))).toEqual({
+      fromFps: "24",
+      toFps: "23.976",
+      scale: 1.001,
+    })
+  })
+
+  it("comes back with the scale alone when it could not", async () => {
+    // A drift measured from the words is exact even when neither frame rate is
+    // knowable — 24-against-23.976 and 30-against-29.97 are the same ratio — so
+    // the labels are optional and the scale never is.
+    expect(await readFiles(metaWith({ scale: 1.001 }))).toEqual({ scale: 1.001 })
+  })
+
+  it("is null for a file that was never measured", async () => {
+    expect(await readFiles(JSON.stringify({ orderedBy: "time" }))).toBeNull()
+    expect(await readFiles(null)).toBeNull()
+  })
+
+  it("is null rather than a lie when the stored record is malformed", async () => {
+    expect(await readFiles(metaWith({ fromFps: "24" }))).toBeNull()
+    expect(await readFiles(metaWith("nonsense"))).toBeNull()
+    expect(await readFiles(metaWith({ scale: "1.001" }))).toBeNull()
+  })
+})
+

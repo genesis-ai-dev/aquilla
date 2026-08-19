@@ -32,6 +32,7 @@ export interface CloudFileSummary {
   targetTextDirection?: "ltr" | "rtl" | null
   /** Timeline editor: core video URL for the preview; absent/null ⇒ no video. */
   coreMediaUrl?: string | null
+  audioVttTimebase?: { fromFps?: string; toFps?: string; scale: number } | null
   /** The file's audio timing mode; absent ⇒ the project default applies. */
   timingMode?: "dubbing" | "audioFirst" | null
   /** Per-track deltas keyed by track id; absent ⇒ the file draws the three
@@ -317,6 +318,7 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
       ...(f.sourceTextDirection === "ltr" || f.sourceTextDirection === "rtl" ? { sourceTextDirection: f.sourceTextDirection } : {}),
       ...(f.targetTextDirection === "ltr" || f.targetTextDirection === "rtl" ? { targetTextDirection: f.targetTextDirection } : {}),
       ...(f.coreMediaUrl ? { coreMediaUrl: f.coreMediaUrl } : {}),
+      ...(f.audioVttTimebase ? { audioVttTimebase: f.audioVttTimebase } : {}),
       ...(f.timingMode === "dubbing" || f.timingMode === "audioFirst" ? { timingMode: f.timingMode } : {}),
       // Shape-checked despite the declared type — this is raw JSON off the
       // wire. Entries pass through unread: mergeTrackOverrides is the only

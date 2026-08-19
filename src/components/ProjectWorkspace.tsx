@@ -1943,6 +1943,39 @@ export function ProjectWorkspace() {
       ),
     [audioCueSiblings],
   )
+  /**
+   * Every file the project report walks, each already paired with its hidden
+   * audio-cue sibling and that sibling's recorded timing correction.
+   *
+   * Built HERE rather than in the dialog because this is where the sibling
+   * relationship is known: the dialog is handed a flat id/name/type list and
+   * has no way to tell an episode from the cue file anchored to it. Siblings
+   * are followed, never listed — a report row for "Episode 1 · audio cues"
+   * beside "Episode 1" would double every count in it.
+   */
+  const reportFiles = useMemo(() => {
+    const all = hydratedProject?.files ?? []
+    const siblingFor = new Map<string, FileReference>()
+    for (const f of all) {
+      if (!isAudioCueFile(f) || !f.anchorFileId) continue
+      // Same newest-wins rule as `audioCueSibling` above: ids are UUIDv7, so
+      // the greatest is the most recently minted.
+      const held = siblingFor.get(f.anchorFileId)
+      if (!held || f.id > held.id) siblingFor.set(f.anchorFileId, f)
+    }
+    return all
+      .filter((f) => !isAudioCueFile(f))
+      .map((f) => {
+        const sibling = siblingFor.get(f.id)
+        return {
+          id: f.id,
+          name: f.name,
+          ...(sibling ? { siblingId: sibling.id } : {}),
+          ...(sibling?.audioVttTimebase ? { timebase: sibling.audioVttTimebase } : {}),
+        }
+      })
+  }, [hydratedProject?.files])
+
   const { audioCues, refresh: refreshAudioCues } = useAudioCueCells({
     projectId: project?.id ?? null,
     siblingFileId: audioCueSibling?.id ?? null,
@@ -8630,10 +8663,26 @@ export function ProjectWorkspace() {
           onOpenChange={setExportOpen}
           canExport={canExportByOrgPolicy}
           cells={legacyCells}
-          // WHERE THE TAKES ACTUALLY ARE. Stage 4 moved recording onto the
-          // audio cues, so exporting the subtitle rows grouped 650 cells with
-          // no audio at all and wrote a valid, empty, 22-byte zip.
-          audioCells={audioCues ?? undefined}
+          // WHERE THE TAKES ACTUALLY ARE, and — the part the first fix got
+          // wrong — in the VIEW THAT CARRIES THEM.
+          //
+          // Stage 4 moved recording onto the audio cues, so exporting the
+          // subtitle rows grouped 650 cells with no audio at all and wrote a
+          // valid, empty, 22-byte zip. The fix for that pointed the export at
+          // `audioCues`, which is the RAW read of the sibling: attachments and
+          // `selectedAudioId` arrive only through `mergeCellsWithAudio`, so
+          // every cell still looked take-less and the export went on finding
+          // nothing (Sam, 2026-08-18: "I get 'No recordings found in this
+          // file' despite there definitely being target audio").
+          //
+          // `audioCueCells` is that same sibling, merged. The fallback is the
+          // active file's OWN merged cells rather than `legacyCells`, because a
+          // file with no cue sibling at all — an audio-first import, say —
+          // carries its takes directly and would otherwise be unexportable.
+          audioCells={audioCueCells ?? audioMergedCells}
+          reportFiles={reportFiles}
+          cueLinks={cueLinks}
+          characterResolutions={tts.settings?.characterResolutions}
           // …and name each one the way every other surface does, so the zip
           // agrees with the chip strip and the recorder whichever character
           // sheet was imported.

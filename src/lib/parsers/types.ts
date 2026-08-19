@@ -620,6 +620,15 @@ export interface FileReference {
    */
   timingMode?: AudioTimingMode | null
   /**
+   * What the audio-VTT import did about drift, for an audio-cue sibling:
+   * `scale` 1.001 means the cues were stretched to match the reference, and the
+   * fps labels are present only when both rates could actually be named. Read
+   * from `meta.aquillaImport.audioVtt.timebase`; absent on every other file.
+   * The project report turns this into "corrected" / "aligned" / "not
+   * measurable" so an episode's timing can be signed off rather than assumed.
+   */
+  audioVttTimebase?: { fromFps?: string; toFps?: string; scale: number } | null
+  /**
    * Persisted per-track DELTAS keyed by track id — renames, reorders, groups,
    * and the entries that bring user-added tracks into existence. Stored in
    * files.meta JSON (set via the `file.track.set` event). Absent ⇒ the pure

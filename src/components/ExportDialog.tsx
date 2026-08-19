@@ -21,7 +21,7 @@
 // all camera angles.
 
 import { useState, useEffect, useMemo, useRef } from "react"
-import { Download, AlertTriangle, CheckCircle2 } from "lucide-react"
+import { Download, AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react"
 import {
   Dialog,
   DialogContent,
@@ -51,12 +51,15 @@ import { exportSrt } from "@/lib/export/exporters/srt"
 import { exportPlainTextDump } from "@/lib/export/exporters/plain-text-dump"
 import { buildProjectZip } from "@/lib/export/project-zip-export"
 import type { TextExportFormat } from "@/lib/export/project-zip-export"
+import { toast } from "sonner"
+
 import { previewAudioByCharacter } from "@/lib/export/audio-by-character"
 import { exportMetadataCsv } from "@/lib/export/exporters/metadata-csv"
 import { injectSdbhXml } from "@/lib/parsers/sdbh"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import type { CellData } from "@/hooks/useCells"
-import type { ProjectTtsSettings } from "@/lib/parsers/types"
+import type { CueLinkIndex } from "@/lib/sync/cell-links-read"
+import type { CharacterResolution, ProjectTtsSettings } from "@/lib/parsers/types"
 import posthog from "@/lib/posthog"
 import {
   CURRENT_IDML_FORMAT_COPY,
@@ -65,7 +68,7 @@ import {
 } from "@/lib/idml/release-gate"
 import { idmlTelemetryProperties } from "@/lib/idml/telemetry"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
+export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
 
 interface FormatOption {
@@ -180,7 +183,28 @@ const BASE_FORMAT_OPTIONS: FormatOption[] = [
     id: "audio-by-character",
     label: "Audio by character",
     ext: ".zip",
-    description: "One WAV per cast member — each character's clips concatenated, best-available audio (recording → generated). Concatenated order = document order. Trim-honoring deferred; clips export full-length.",
+    description: "One WAV per character, with every take at its own place on the timeline and silence in between. All files start at 0:00, so they drop onto a DAW already aligned with each other and with the film.",
+    lossy: false,
+  },
+  {
+    id: "character-sheets",
+    label: "Character sheets (corrected)",
+    ext: ".xlsx",
+    description: "Both character spreadsheets back — subtitle and audio — with every resolved disagreement applied and a column saying what changed. Lines still in dispute are left as they are and marked unresolved. Rebuilt from what the app holds, so the audio sheet's own line numbers are renumbered and the Group camera state comes back as Mixed.",
+    lossy: false,
+  },
+  {
+    id: "project-report",
+    label: "Project report",
+    ext: ".html",
+    description: "One document for the whole project: open disagreements, what is recorded and what is not, cues with no subtitle behind them, the timing correction each episode was imported with, and characters spelled more than one way.",
+    lossy: false,
+  },
+  {
+    id: "audio-by-line",
+    label: "Audio by line",
+    ext: ".zip",
+    description: "One file per recording, numbered in playing order and named by character. Each WAV carries a broadcast timestamp a DAW can place from, and a manifest.csv lists every file with its timecode. For reviewing and re-recording individual lines.",
     lossy: false,
   },
   // Advanced-only option — not shown in the main format list.
@@ -242,6 +266,9 @@ interface ExportDialogProps {
    * audio at all and writing a valid, empty, 22-byte zip. Absent ⇒ `cells`,
    * which is every arrangement without an audio-cue track.
    */
+  /** The cells that carry the recordings — the audio-cue sibling where there
+   *  is one. MUST be the attachment-merged view: a raw cell read has no
+   *  `selectedAudioId` and no attachments, so it looks take-less. */
   audioCells?: CellData[]
   /** Name the character for a cell the way the timeline and recorder do — via
    *  the links, so it works whichever character sheet was imported. */
@@ -261,6 +288,21 @@ interface ExportDialogProps {
   activeFileType?: string | null
   /** All project files — used only for project-scope USFM zip. */
   projectFiles: { id: string; name: string; type: string }[]
+  /**
+   * The subtitle files the project report walks, each paired with its hidden
+   * audio-cue sibling and what that sibling's import recorded about drift.
+   *
+   * A separate prop rather than a richer `projectFiles`: that one is a plain
+   * id/name/type list used by half the dialog and by a dozen tests, and this is
+   * the only export that needs to know siblings exist.
+   */
+  reportFiles?: { id: string; name: string; siblingId?: string | null; timebase?: { fromFps?: string; toFps?: string; scale: number } | null }[]
+  /** The pairing graph between this file's lines and its audio cues. The
+   *  corrected sheets need it to know which two rows are the same line. */
+  cueLinks?: CueLinkIndex
+  /** What has been settled in the character check drawer. The corrected sheets
+   *  apply these and leave everything still in dispute alone. */
+  characterResolutions?: Record<string, CharacterResolution>
   sourceLanguage?: string
   targetLanguage?: string
   /** Storage lane for the active target. Distinct from its display language. */
@@ -297,6 +339,9 @@ export function ExportDialog({
   activeFileName,
   activeFileType = null,
   projectFiles,
+  reportFiles,
+  characterResolutions,
+  cueLinks,
   sourceLanguage = "und",
   targetLanguage = "und",
   targetLang = "",
@@ -344,6 +389,17 @@ export function ExportDialog({
   const [customBaseName, setCustomBaseName] = useState<string>(defaultBaseName)
   const [appendTimestamp, setAppendTimestamp] = useState(false)
   const [appendLangTag, setAppendLangTag] = useState(false)
+  // Two shapes of subtitle file codex-editor offers as separate formats
+  // (2026-08-18). Both default off: the file this produces untouched is the
+  // one it has always produced.
+  /** The live export toast, so the catch-all below can turn a spinner that
+   *  will never finish into the error it actually was. */
+  const exportToastRef = useRef<string | number | null>(null)
+  const [vttCueSplitting, setVttCueSplitting] = useState(false)
+  const [vttExcludeLabels, setVttExcludeLabels] = useState(false)
+  /** Source above target in every cue — a review artifact, played against the
+   *  picture to check the translation line by line. */
+  const [vttIncludeSource, setVttIncludeSource] = useState(false)
 
   // Keep the base name in sync when the active file changes (e.g. dialog reopened on a new file).
   useEffect(() => {
@@ -360,15 +416,112 @@ export function ExportDialog({
   }, [activeFileId, nativeFormatId])
 
   // audio-by-character, vtt, docx, pptx, and plain-text-dump only support file scope.
-  const fileOnlyFormats = ["audio-by-character", "vtt", "docx", "pptx", "idml", "plain-text-dump"] as const
+  /**
+   * Which array to export audio from.
+   *
+   * Taking the cue sibling when it merely EXISTS was not enough, twice over.
+   * It reads as an empty array while it is still loading — a real state the
+   * hook documents — and a nullish check happily exports that as "nothing to
+   * export". And a file with no sibling at all carries its takes on its own
+   * cells. So: take the one that demonstrably HAS a recording, and only fall
+   * back when neither does.
+   */
+  const audioSourceCells = useMemo(() => {
+    const hasTake = (list: CellData[] | undefined) =>
+      list?.some((c) => {
+        const id = c.selectedAudioId ?? c.selectedGeneratedVoiceAudioId
+        return id != null && Boolean(c.attachments?.[id]?.url)
+      }) === true
+    if (hasTake(audioCells)) return audioCells!
+    if (hasTake(cells)) return cells
+    return audioCells ?? cells
+  }, [audioCells, cells])
+
+  /**
+   * Is this a DUBBING file?
+   *
+   * Keyed on the import type alone (Sam, 2026-08-19), and deliberately not on
+   * anything cleverer like "does it have a linked film or an audio-cue
+   * sibling". Every VTT and SRT in this client's world is an episode being
+   * dubbed, and a rule someone can state in one sentence beats an inference
+   * that is right more often but explicable less often.
+   *
+   * What it changes: the featured area stops asking "what IS this file?" and
+   * starts asking "what is this file FOR?". A dubbing project's deliverables
+   * are its audio and its subtitles — not a TSV — so those get the top of the
+   * dialog and everything else keeps its place in the fold.
+   */
+  const isDubbingFile = activeFileType === "vtt" || activeFileType === "srt"
+
+  /** Who is in this file and what is recorded. Computed once: the Audio card
+   *  reads the totals to decide whether it can export at all, and the preview
+   *  list under it reads the same rows. */
+  const audioPreview = useMemo(
+    () => previewAudioByCharacter(audioSourceCells, ttsSettings, resolveCharacterName),
+    [audioSourceCells, ttsSettings, resolveCharacterName],
+  )
+  const recordedLines = useMemo(
+    () => audioPreview.reduce((n, c) => n + c.clipCount, 0),
+    [audioPreview],
+  )
+
+  /** Which of the two audio deliverables the Audio card will produce. They are
+   *  two forms of one thing — a mix track and a review folder — so they share a
+   *  card and a button rather than competing as two entries in a list. */
+  const [audioMode, setAudioMode] = useState<"audio-by-character" | "audio-by-line">("audio-by-character")
+
+  const fileOnlyFormats = ["audio-by-character", "audio-by-line", "character-sheets", "vtt", "docx", "pptx", "idml", "plain-text-dump"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
   // SDBH XML reinjection spans every lexicon file — inherently project scope.
-  const isProjectOnlyFormat = format === "sdbh-xml"
+  // The report describes a PROJECT: name consistency only means anything across
+  // episodes, since MARY in one and MARY MAGDALENE in the next is invisible
+  // inside either file.
+  const isProjectOnlyFormat = format === "sdbh-xml" || format === "project-report"
   const effectiveScope: ExportScope = isProjectOnlyFormat ? "project" : isFileOnlyFormat ? "file" : scope
 
   // SDBH XML export needs the original MARBLE edition as the skeleton.
   const [sdbhSkeleton, setSdbhSkeleton] = useState<File | null>(null)
   const hasSdbhFiles = projectFiles.some((f) => f.type === "sdbh")
+
+  /**
+   * What the fold offers, in what order.
+   *
+   * For a dubbing file the two audio exports and the subtitle round-trip are
+   * FEATURED above, so they come out of this list — offering them twice invites
+   * the two copies to drift, and the fold is meant to read as "everything
+   * else". What is left is reordered so the things this workflow reaches for
+   * come first: the other subtitle format, the corrected character sheets, the
+   * metadata sheet, then the project report. Every other project is untouched
+   * and keeps the original order.
+   */
+  const foldFormats = useMemo(() => {
+    const visible = formatOptions.filter((f) => {
+      if (f.id === "usfm") return activeFileType === "usfm"
+      if (f.id === "docx") return activeFileType === "docx" // AQU-233: only for docx imports
+      if (f.id === "pptx") return activeFileType === "pptx" // AQU-152a: only for pptx imports
+      if (f.id === "idml") return activeFileType === "idml" // only for idml imports
+      if (f.id === "sdbh-xml") return hasSdbhFiles // SDBH round-trip: only for lexicon projects
+      if (f.id === "plain-text-dump") return false // shown in Advanced section only
+      return true
+    })
+    if (!isDubbingFile) return visible
+    const featured = new Set<string>(["audio-by-character", "audio-by-line", nativeFormatId ?? ""])
+    const rest = visible.filter((f) => !featured.has(f.id))
+    // The sibling subtitle format leads: a file imported as VTT features VTT
+    // and offers SRT here, and the other way round.
+    const first: string[] = [
+      activeFileType === "srt" ? "vtt" : "srt",
+      "character-sheets",
+      "metadata-csv",
+      "project-report",
+    ]
+    const rank = (id: string) => {
+      const at = first.indexOf(id)
+      return at === -1 ? first.length : at
+    }
+    return [...rest].sort((a, b) => rank(a.id) - rank(b.id))
+  }, [activeFileType, formatOptions, hasSdbhFiles, isDubbingFile, nativeFormatId])
+
 
   // A selected format can also vanish without a file switch (sdbh-xml is
   // offered per-project, not per-file) — fall back to the always-visible tsv.
@@ -435,7 +588,7 @@ export function ExportDialog({
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
   // project scope so we don't fan-out N fetches on dialog open.
-  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "vtt" && format !== "docx" && format !== "pptx" && format !== "plain-text-dump")
+  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "audio-by-line" && format !== "vtt" && format !== "docx" && format !== "pptx" && format !== "plain-text-dump")
 
   const { files: projectFileCells, isLoading: projectCellsLoading, error: projectCellsError } =
     useProjectCells({
@@ -593,27 +746,104 @@ export function ExportDialog({
           : ` (${result.report.translated} paragraph${result.report.translated === 1 ? "" : "s"} translated)`
         setStatus({ kind: "ok", msg: `Downloaded ${baseName}.idml${note}` })
       } else if (fmt === "audio-by-character") {
+        // A TOAST, not just the dialog's own line (Sam, 2026-08-18). This is
+        // the one export that takes real time — every take is fetched, decoded
+        // and laid onto a track — and the dialog's status is only visible while
+        // the dialog is. The toast means you can close it and get on with
+        // something else, and still be told when the zip is ready.
+        exportToastRef.current = toast.loading("Preparing the character export…")
         setStatus({ kind: "busy", msg: "Decoding audio…" })
         const { exportAudioByCharacter } = await import("@/lib/export/audio-by-character")
         const { decodeToMono48k } = await import("@/lib/audio/decode-mono")
+        let lastPct = -1
         const { fetchCellAudio } = await import("@/lib/audio/upload")
         // getToken is (fileId) => Promise<string|null>; SyncTokenForFile expects
         // (projectId, fileId) — wrap it to match the fetchCellAudio signature.
         const getSyncToken = (_pid: string, fileId: string) => getToken(fileId)
         const result = await exportAudioByCharacter({
-          cells: audioCells ?? cells,
+          cells: audioSourceCells,
           resolveName: resolveCharacterName,
           settings: ttsSettings,
           projectId,
           langCode: targetLanguage || "und",
+          // codex-editor's scheme: a dubber ends up with tracks from several
+          // episodes in one folder, and `swh_JESUS.wav` twice over is no help.
+          fileBase: defaultBaseName,
           fetchBytes: ({ projectId: pid, fileId, audioId, ext }) =>
             fetchCellAudio({ projectId: pid, fileId, audioId, ext, getSyncToken }),
           decode: decodeToMono48k,
-          onProgress: (d, t) => setStatus({ kind: "busy", msg: `Decoding ${d}/${t}…` }),
+          onProgress: (d, t) => {
+            setStatus({ kind: "busy", msg: `Decoding ${d}/${t}…` })
+            // Throttled to whole percentage points: an episode has hundreds of
+            // takes, and re-rendering the toast for each one buys nothing a
+            // person can read.
+            const pct = t > 0 ? Math.floor((d / t) * 100) : 0
+            if (pct === lastPct && d < t) return
+            lastPct = pct
+            toast.loading(
+              d < t
+                ? `Decoding recordings — ${pct}%`
+                : // Everything is decoded; what is left is rendering the last
+                  // character's track and compressing, which on a long episode
+                  // is where the remaining wait actually goes.
+                  "Building the archive…",
+              { id: exportToastRef.current ?? undefined },
+            )
+          },
         })
         // REFUSE RATHER THAN DOWNLOAD NOTHING. A zip with no entries is still
         // a valid archive, and handing one over reads as success.
         if (result.characters === 0) {
+          const msg =
+            result.clips === 0
+              ? "No recordings found in this file, so there is nothing to export."
+              : `None of the ${result.clips} recordings could be read, so the export would be empty.`
+          setStatus({ kind: "error", msg })
+          toast.error(msg, { id: exportToastRef.current ?? undefined })
+          exportToastRef.current = null
+          return
+        }
+        const safe = buildExportStem(false) // AQU-437: user-chosen stem
+        downloadBlob(result.blob, `${safe}_audio-by-character.zip`)
+        // Say what did NOT make it, in words. An unplaceable take is not a
+        // failure to read the audio — it is a line with no time on it, and the
+        // fix is in the file rather than in the export.
+        const notes: string[] = []
+        if (result.skipped > 0) {
+          notes.push(`${result.skipped} recording${result.skipped === 1 ? "" : "s"} could not be read`)
+        }
+        if (result.untimed > 0) {
+          notes.push(
+            `${result.untimed} recording${result.untimed === 1 ? " has" : "s have"} no timing, so ${result.untimed === 1 ? "it was" : "they were"} left out`,
+          )
+        }
+        const doneMsg = notes.length
+          ? `Exported audio by character — ${notes.join("; ")}.`
+          : `Exported ${result.characters} character track${result.characters === 1 ? "" : "s"}.`
+        setStatus({ kind: "ok", msg: doneMsg })
+        toast.success(doneMsg, { id: exportToastRef.current ?? undefined })
+        exportToastRef.current = null
+      } else if (fmt === "audio-by-line") {
+        // The other shape (Sam, 2026-08-18: "a separate track for each
+        // recording? With timing data?"). No decoding — the stored bytes are
+        // copied straight across, so this is lossless and fast where the
+        // character export has to resample everything onto one timeline.
+        setStatus({ kind: "busy", msg: "Collecting recordings…" })
+        const { exportAudioPerLine } = await import("@/lib/export/audio-per-line")
+        const { fetchCellAudio } = await import("@/lib/audio/upload")
+        const getSyncToken = (_pid: string, fileId: string) => getToken(fileId)
+        const result = await exportAudioPerLine({
+          cells: audioSourceCells,
+          resolveName: resolveCharacterName,
+          settings: ttsSettings,
+          projectId,
+          langCode: targetLanguage || "und",
+          fileBase: defaultBaseName,
+          fetchBytes: ({ projectId: pid, fileId, audioId, ext }) =>
+            fetchCellAudio({ projectId: pid, fileId, audioId, ext, getSyncToken }),
+          onProgress: (d, t) => setStatus({ kind: "busy", msg: `Collecting ${d}/${t}…` }),
+        })
+        if (result.files === 0) {
           setStatus({
             kind: "error",
             msg:
@@ -623,10 +853,90 @@ export function ExportDialog({
           })
           return
         }
-        const safe = buildExportStem(false) // AQU-437: user-chosen stem
-        downloadBlob(result.blob, `${safe}_audio-by-character.zip`)
-        const skippedNote = result.skipped > 0 ? ` (${result.skipped} clip${result.skipped === 1 ? "" : "s"} skipped)` : ""
-        setStatus({ kind: "ok", msg: `Exported audio by character${skippedNote}` })
+        const safeLine = buildExportStem(false)
+        downloadBlob(result.blob, `${safeLine}_audio-by-line.zip`)
+        const lineNotes: string[] = []
+        if (result.skipped > 0) {
+          lineNotes.push(`${result.skipped} recording${result.skipped === 1 ? "" : "s"} could not be read`)
+        }
+        if (result.untimed > 0) {
+          lineNotes.push(
+            `${result.untimed} ${result.untimed === 1 ? "has" : "have"} no timing, so ${result.untimed === 1 ? "it carries" : "they carry"} no timestamp`,
+          )
+        }
+        setStatus({
+          kind: "ok",
+          msg: lineNotes.length
+            ? `Exported ${result.files} recordings — ${lineNotes.join("; ")}.`
+            : `Exported ${result.files} recordings`,
+        })
+      } else if (fmt === "character-sheets") {
+        // HER OWN FILES, BACK, CORRECTED. She resolves the disagreements here
+        // and her team keeps working from the spreadsheets that still contain
+        // every error she fixed; this is the only export that closes that loop.
+        if (!cueLinks || (audioCells?.length ?? 0) === 0) {
+          setStatus({
+            kind: "error",
+            msg: "This file has no audio cues imported, so there is only one character sheet and nothing to reconcile.",
+          })
+          return
+        }
+        setStatus({ kind: "busy", msg: "Building the sheets…" })
+        const { buildCharacterSheets } = await import("@/lib/export/character-sheets")
+        const sheetBlob = await buildCharacterSheets({
+          textCells: cells,
+          cueCells: audioCells ?? [],
+          links: cueLinks,
+          settings: ttsSettings,
+          ...(characterResolutions ? { resolutions: characterResolutions } : {}),
+        })
+        const sheetName = buildExportStem(false)
+        downloadBlob(sheetBlob, `${sheetName}_character-sheets.xlsx`)
+        setStatus({ kind: "ok", msg: `Downloaded ${sheetName}_character-sheets.xlsx` })
+      } else if (fmt === "project-report") {
+        // The only export that reads the WHOLE project: every episode's cues,
+        // recordings and links, four reads apiece. Sequential on purpose — a
+        // fifteen-file project should not open sixty connections at once.
+        const files = reportFiles ?? []
+        if (files.length === 0) {
+          setStatus({ kind: "error", msg: "No subtitle files in this project to report on." })
+          return
+        }
+        setStatus({ kind: "busy", msg: "Reading the project…" })
+        const { runProjectReport } = await import("@/lib/export/project-report-run")
+        const { renderProjectReport } = await import("@/lib/export/project-report")
+        const { fetchAllFileCells } = await import("@/lib/sync/cells-read")
+        const { fetchFileAudioAttachments } = await import("@/lib/sync/cell-audio-read")
+        const { fetchFileCellLinks } = await import("@/lib/sync/cell-links-read")
+        const run = await runProjectReport({
+          projectId,
+          projectName,
+          files,
+          settings: ttsSettings,
+          ...(characterResolutions ? { resolutions: characterResolutions } : {}),
+          getToken,
+          fetchCells: (pid, fileId, jwt) => fetchAllFileCells(pid, fileId, jwt),
+          fetchAudio: (pid, fileId, jwt) => fetchFileAudioAttachments(pid, fileId, jwt),
+          fetchLinks: (pid, fileId, jwt) => fetchFileCellLinks(pid, fileId, jwt),
+          onProgress: (d, t, name) =>
+            setStatus({ kind: "busy", msg: `Reading ${name} (${d}/${t})…` }),
+        })
+        if (run.data.files.length === 0) {
+          setStatus({
+            kind: "error",
+            msg: `None of the ${files.length} files could be read: ${run.unreadable[0]?.reason ?? "unknown reason"}.`,
+          })
+          return
+        }
+        const html = renderProjectReport(run.data)
+        const reportName = buildExportStem(true)
+        downloadBlob(new Blob([html], { type: "text/html;charset=utf-8" }), `${reportName}.html`)
+        setStatus({
+          kind: "ok",
+          msg: run.unreadable.length
+            ? `Reported ${run.data.files.length} files — ${run.unreadable.length} could not be read.`
+            : `Reported ${run.data.files.length} ${run.data.files.length === 1 ? "file" : "files"}`,
+        })
       } else if (fmt === "sdbh-xml") {
         // SDBH round-trip: reinject every translated lexicon cell into the
         // user-supplied MARBLE XML skeleton, keyed by LEXID-derived cell ids.
@@ -721,7 +1031,11 @@ export function ExportDialog({
             blob = exportTmxStructured(filteredCells, sourceLanguage, targetLanguage)
             break
           case "vtt":
-            blob = exportVtt(filteredCells, ttsSettings)
+            blob = exportVtt(filteredCells, ttsSettings, {
+              cueSplitting: vttCueSplitting,
+              excludeLabels: vttExcludeLabels,
+              includeSource: vttIncludeSource,
+            })
             break
           case "srt":
             blob = exportSrt(filteredCells)
@@ -757,7 +1071,15 @@ export function ExportDialog({
           durationMs: performance.now() - idmlTelemetryStartedAt,
         }))
       }
-      setStatus({ kind: "error", msg: (e as Error).message || "Export failed." })
+      const msg = (e as Error).message || "Export failed."
+      setStatus({ kind: "error", msg })
+      // Never leave a spinning toast behind: this catch covers the whole run,
+      // including the long audio export, and an orphaned loading toast sits
+      // there claiming work is still happening.
+      if (exportToastRef.current != null) {
+        toast.error(msg, { id: exportToastRef.current })
+        exportToastRef.current = null
+      }
     }
   }
 
@@ -778,6 +1100,142 @@ export function ExportDialog({
   // wondering whether anything happened. We keep the dialog open rather than
   // auto-closing so lossy/fidelity warnings stay visible.
   const isDone = status.kind === "ok" || status.kind === "ok-lossy"
+
+  /**
+   * The three shapes a subtitle file can take. Rendered in two places — on the
+   * featured card for a dubbing file, in the fold for anything else that is
+   * merely converting to VTT — so they are written once here rather than
+   * duplicated and left to drift.
+   */
+  const renderVttOptions = () => (
+          <div className="flex flex-col gap-1.5">
+            <p className="font-medium text-muted-foreground text-[10px]">Subtitle file</p>
+            <label className="flex items-start gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+              <Checkbox
+                className="mt-0.5"
+                checked={vttCueSplitting}
+                onCheckedChange={(c) => setVttCueSplitting(c === true)}
+              />
+              <span>
+                Split overlapping cues
+                <span className="block text-[10px] text-muted-foreground">
+                  Where two characters speak at once, both lines share one cue instead of
+                  overlapping — the shape some subtitle tools require.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+              <Checkbox
+                className="mt-0.5"
+                checked={vttIncludeSource}
+                onCheckedChange={(c) => setVttIncludeSource(c === true)}
+              />
+              <span>
+                Include the source text
+                <span className="block text-[10px] text-muted-foreground">
+                  Each cue carries the original line above the translation — for playing against
+                  the film and checking the two line by line.
+                </span>
+              </span>
+            </label>
+            <label className="flex items-start gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+              <Checkbox
+                className="mt-0.5"
+                checked={vttExcludeLabels}
+                onCheckedChange={(c) => setVttExcludeLabels(c === true)}
+              />
+              <span>
+                Leave out character names
+                <span className="block text-[10px] text-muted-foreground">
+                  For a tool that would show the speaker tags as literal text.
+                </span>
+              </span>
+            </label>
+          </div>
+  )
+
+  /**
+   * Who is recorded and who is not. Lives beside whichever control is about to
+   * export audio: inside the Audio card for a dubbing file, under the format
+   * list everywhere else.
+   */
+  const renderCharacterPreview = () => {
+          const preview = audioPreview
+          // WHO IS MISSING, not just who is included (codex-editor's lesson,
+          // 2026-08-18). The list used to describe only what would be written,
+          // so a character with nothing recorded simply was not in it — you
+          // found out by opening the zip and noticing an absence.
+          const recorded = preview.filter((p) => p.clipCount > 0)
+          const unrecorded = preview.filter((p) => p.clipCount === 0)
+          const untimedTotal = preview.reduce((n, p) => n + p.untimedCount, 0)
+          return (
+          <div className="flex flex-col gap-1 text-xs">
+            <p className="font-medium text-muted-foreground text-[10px]">Preview</p>
+            {preview.length === 0 ? (
+              <p className="text-muted-foreground">No characters found in this file.</p>
+            ) : (
+              <>
+                {/* Only the characters that will actually produce a file. An
+                    episode has dozens of one-line parts nobody has recorded
+                    yet, and listing them all buried the ones that matter
+                    (Sam, 2026-08-18: "the preview is a little bit messy"). */}
+                {recorded.map((p) => (
+                  <div key={p.key} className="flex items-center gap-2">
+                    {p.color && (
+                      <span
+                        className="h-2 w-2 rounded-full shrink-0"
+                        style={{ backgroundColor: p.color }}
+                        aria-hidden="true"
+                      />
+                    )}
+                    <span className="font-medium">{p.name}</span>
+                    <span className="text-muted-foreground">
+                      {p.clipCount} {p.clipCount === 1 ? "line" : "lines"}
+                      {p.totalDurationMs != null && (
+                        <> · {Math.floor(p.totalDurationMs / 60000)}:{String(Math.floor((p.totalDurationMs % 60000) / 1000)).padStart(2, "0")}</>
+                      )}
+                      {p.missingCount > 0 && <> · {p.missingCount} still to record</>}
+                      {p.untimedCount > 0 && <> · {p.untimedCount} untimed</>}
+                    </span>
+                  </div>
+                ))}
+                {recorded.length === 0 && (
+                  <p className="text-muted-foreground">
+                    Nothing is recorded yet, so there is nothing to export.
+                  </p>
+                )}
+                {/* The rest, folded away — still countable at a glance, still
+                    openable when you want to know WHO is outstanding. */}
+                {unrecorded.length > 0 && (
+                  <details className="group/unrec" data-testid="export-unrecorded">
+                    <summary className="cursor-pointer list-none text-muted-foreground hover:text-foreground transition-colors">
+                      <span className="inline-flex items-center gap-1">
+                        <ChevronRight className="h-3 w-3 transition-transform group-open/unrec:rotate-90" aria-hidden="true" />
+                        {unrecorded.length} {unrecorded.length === 1 ? "character" : "characters"} with
+                        nothing recorded yet
+                      </span>
+                    </summary>
+                    <div className="flex flex-wrap gap-x-2 gap-y-0.5 pl-4 pt-1 text-muted-foreground">
+                      {unrecorded.map((p) => (
+                        <span key={p.key}>
+                          {p.name}
+                          <span className="text-[10px]"> ({p.missingCount})</span>
+                        </span>
+                      ))}
+                    </div>
+                  </details>
+                )}
+                {untimedTotal > 0 && (
+                  <p className="text-muted-foreground">
+                    {untimedTotal} {untimedTotal === 1 ? "recording has" : "recordings have"} no timing
+                    and cannot be placed.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+          )
+  }
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -842,8 +1300,104 @@ export function ExportDialog({
             </span>
           </div>
         )}
+        {/* ── What this file is FOR (dubbing files, Sam 2026-08-19) ────────
+             Two cards, in the order the work happens: the audio somebody
+             records, then the subtitles they record against. The old featured
+             area asked only "what format was this imported as?", which gave a
+             dubbing episode the same top billing for VTT that a Bible project
+             gives USFM — while the exports this workflow actually delivers sat
+             in the fold beside TMX. */}
+        {/* Deliberately NOT gated on `effectiveScope`: that follows whatever
+             format is selected down in the fold, and these two cards are about
+             the FILE, not about the fold's current selection. Picking a
+             project-scoped TSV below must not make the episode's own
+             deliverables disappear from the top of the dialog. */}
+        {isDubbingFile && (
+          <div className="flex flex-col gap-2.5">
+            <div
+              data-testid="export-audio-card"
+              className="flex flex-col gap-2.5 rounded-xl border border-border/60 bg-accent/30 px-3 py-3"
+            >
+              <div className="flex items-baseline justify-between gap-2">
+                <p className="text-sm font-medium">Audio</p>
+                <span className="text-xs text-muted-foreground font-mono">.zip</span>
+              </div>
+              <RadioGroup
+                value={audioMode}
+                onValueChange={(v) => setAudioMode(v as typeof audioMode)}
+                className="flex flex-col gap-0.5"
+                aria-label="Audio export shape"
+              >
+                {([
+                  {
+                    id: "audio-by-character" as const,
+                    label: "By character",
+                    hint: "One track per character, every take at its own place on the timeline. All the tracks start at 0:00, so they drop onto a DAW already lined up with each other and with the film. For mixing.",
+                  },
+                  {
+                    id: "audio-by-line" as const,
+                    label: "By line",
+                    hint: "One file per recording, numbered in playing order, each carrying a timestamp a DAW can place it from — plus a manifest listing them all. For reviewing and re-recording individual lines.",
+                  },
+                ]).map((mode) => (
+                  <label
+                    key={mode.id}
+                    className={
+                      "flex items-start gap-2.5 rounded-lg px-2 py-1.5 transition-colors " +
+                      (audioMode === mode.id ? "bg-background/70" : "hover:bg-accent/40")
+                    }
+                  >
+                    <RadioGroupItem value={mode.id} className="mt-0.5 shrink-0" aria-label={mode.label} />
+                    <span className="flex flex-col gap-0.5 min-w-0">
+                      <span className="text-sm font-medium leading-tight">{mode.label}</span>
+                      <span className="text-xs text-muted-foreground leading-relaxed">{mode.hint}</span>
+                    </span>
+                  </label>
+                ))}
+              </RadioGroup>
+              {/* The preview belongs WITH the button that acts on it. */}
+              {renderCharacterPreview()}
+              <Button
+                size="lg"
+                className="w-full justify-center"
+                onClick={() => handleExport(audioMode)}
+                // Nothing recorded means nothing to write. Better to say so on a
+                // dead button than to hand someone a refusal after they press it.
+                disabled={!activeFileId || isBusy || recordedLines === 0}
+                aria-busy={isBusy}
+              >
+                {isBusy ? <Spinner aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
+                Export audio
+              </Button>
+            </div>
+
+            {nativeOption && (
+              <div
+                data-testid="export-subtitle-card"
+                className="flex flex-col gap-2.5 rounded-xl border border-border/60 bg-accent/30 px-3 py-3"
+              >
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="text-sm font-medium">Subtitles</p>
+                  <span className="text-xs text-muted-foreground font-mono">{nativeOption.ext}</span>
+                </div>
+                {nativeOption.id === "vtt" && renderVttOptions()}
+                <Button
+                  size="lg"
+                  className="w-full justify-center"
+                  onClick={() => handleExport(nativeOption.id)}
+                  disabled={!activeFileId || isBusy}
+                  aria-busy={isBusy}
+                >
+                  {isBusy ? <Spinner aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
+                  Download {buildExportStem(false)}{nativeOption.ext}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Primary action: download the file back in its own format. */}
-        {nativeOption && (
+        {!isDubbingFile && nativeOption && (
           <div className="flex flex-col gap-2 rounded-xl border border-border/60 bg-accent/30 px-3 py-3">
             <Button
               size="lg"
@@ -897,15 +1451,7 @@ export function ExportDialog({
             className="flex flex-col gap-0.5"
             aria-label="Export format"
           >
-            {formatOptions.filter((f) => {
-              if (f.id === "usfm") return activeFileType === "usfm"
-              if (f.id === "docx") return activeFileType === "docx" // AQU-233: only for docx imports
-              if (f.id === "pptx") return activeFileType === "pptx" // AQU-152a: only for pptx imports
-              if (f.id === "idml") return activeFileType === "idml" // only for idml imports
-              if (f.id === "sdbh-xml") return hasSdbhFiles // SDBH round-trip: only for lexicon projects
-              if (f.id === "plain-text-dump") return false // shown in Advanced section only
-              return true
-            }).map((f) => (
+            {foldFormats.map((f) => (
               <label
                 key={f.id}
                 className={
@@ -1055,37 +1601,12 @@ export function ExportDialog({
           </div>
         </fieldset>
 
-        {/* Audio-by-character inline preview */}
-        {format === "audio-by-character" && effectiveScope === "file" && (() => {
-          const preview = previewAudioByCharacter(audioCells ?? cells, ttsSettings, resolveCharacterName)
-          return (
-          <div className="flex flex-col gap-1 text-xs">
-            <p className="font-medium text-muted-foreground text-[10px]">Preview</p>
-            {preview.length === 0 ? (
-              <p className="text-muted-foreground">No cells with audio found in this file.</p>
-            ) : (
-              preview.map((p) => (
-                <div key={p.key} className="flex items-center gap-2">
-                  {p.color && (
-                    <span
-                      className="h-2 w-2 rounded-full shrink-0"
-                      style={{ backgroundColor: p.color }}
-                      aria-hidden="true"
-                    />
-                  )}
-                  <span className="font-medium">{p.name}</span>
-                  <span className="text-muted-foreground">
-                    {p.clipCount} {p.clipCount === 1 ? "clip" : "clips"}
-                    {p.totalDurationMs != null && (
-                      <> · {Math.floor(p.totalDurationMs / 60000)}:{String(Math.floor((p.totalDurationMs % 60000) / 1000)).padStart(2, "0")}</>
-                    )}
-                  </span>
-                </div>
-              ))
-            )}
-          </div>
-          )
-        })()}
+        {/* Subtitle shape options — on the card for a dubbing file. */}
+        {!isDubbingFile && format === "vtt" && renderVttOptions()}
+
+        {/* Who is recorded — on the card for a dubbing file. */}
+        {!isDubbingFile && (format === "audio-by-character" || format === "audio-by-line")
+          && effectiveScope === "file" && renderCharacterPreview()}
 
         {/* Lossy warning banner */}
         {isLossy && (

@@ -63,6 +63,18 @@ interface FileSummary {
   /** The file's audio timing mode (file.timing.set), read from meta. Null ⇒
    *  the project-level default applies. */
   timingMode: 'dubbing' | 'audioFirst' | null
+  /**
+   * What the audio-VTT import did about drift, read from
+   * `meta.aquillaImport.audioVtt.timebase`. Null on every file that is not an
+   * audio-cue sibling, and on siblings imported before this was recorded.
+   *
+   * Forwarded rather than recomputed: the measurement happened once, against
+   * the reference file, at import — there is nothing here that could measure it
+   * again, and a second opinion that disagreed with the correction actually
+   * applied would be worse than silence. The project report reads this to say
+   * whether an episode's cues were corrected, aligned, or never measurable.
+   */
+  audioVttTimebase: { fromFps?: string; toFps?: string; scale: number } | null
   /** Per-track deltas keyed by track id (file.track.set), read from meta —
    *  NEVER the full track list, which the client derives. Null ⇒ the file
    *  draws the three defaults. Patch fields stay widened (`kind: string`)
@@ -79,6 +91,21 @@ interface FileSummary {
   deletedAt: number | null
 }
 
+/** Shape-check the recorded correction. `scale` is the only field that must be
+ *  there — a drift measured from the words is exact even when neither frame
+ *  rate could be named (24-against-23.976 and 30-against-29.97 are the same
+ *  ratio), so the labels are optional by design. */
+function normalizeTimebase(raw: unknown): FileSummary['audioVttTimebase'] {
+  if (!raw || typeof raw !== 'object') return null
+  const t = raw as { fromFps?: unknown; toFps?: unknown; scale?: unknown }
+  if (typeof t.scale !== 'number' || !Number.isFinite(t.scale)) return null
+  return {
+    ...(typeof t.fromFps === 'string' ? { fromFps: t.fromFps } : {}),
+    ...(typeof t.toFps === 'string' ? { toFps: t.toFps } : {}),
+    scale: t.scale,
+  }
+}
+
 function mapRow(row: FileRowRaw): FileSummary {
   let meta: {
     source_language?: string
@@ -93,6 +120,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     coreMediaUrl?: string
     timingMode?: string
     trackOverrides?: unknown
+    aquillaImport?: { audioVtt?: { timebase?: unknown } }
   } = {}
   try {
     meta = row.meta ? JSON.parse(row.meta) : {}
@@ -115,6 +143,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     orderedBy: meta.orderedBy ?? null,
     coreMediaUrl: meta.coreMediaUrl ?? null,
     timingMode: meta.timingMode === 'dubbing' || meta.timingMode === 'audioFirst' ? meta.timingMode : null,
+    audioVttTimebase: normalizeTimebase(meta.aquillaImport?.audioVtt?.timebase),
     trackOverrides: normalizeTrackOverrides(meta.trackOverrides),
     cellCount: row.cell_count,
     approvedCount: row.approved_count,

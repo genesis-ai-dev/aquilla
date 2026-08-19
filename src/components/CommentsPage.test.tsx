@@ -111,11 +111,38 @@ describe("CommentsPage chrome", () => {
     expect(screen.queryByRole("switch", { name: /Show resolved/i })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: /^Filters$/i }))
-    expect(screen.getByRole("combobox", { name: /^Sort$/i })).toBeInTheDocument()
+    const filters = screen.getByRole("button", { name: /^Filters$/i })
+    expect(filters).toHaveAttribute("data-variant", "outline")
+    expect(filters).toHaveAttribute("aria-expanded", "true")
+    const sortTrigger = screen.getByRole("combobox", { name: /^Sort$/i })
+    expect(sortTrigger).toBeInTheDocument()
+    expect(sortTrigger.className).toMatch(/text-foreground/)
+    expect(screen.getByText("Sort").className).toMatch(/text-muted-foreground/)
+    expect(screen.getByText("Show resolved").className).toMatch(/text-muted-foreground/)
     expect(screen.getByRole("switch", { name: /Show resolved/i })).not.toBeChecked()
+
+    fireEvent.click(screen.getByRole("switch", { name: /Show resolved/i }))
+    const reset = screen.getByRole("button", { name: /^Reset$/i })
+    expect(reset.className).toMatch(/text-foreground/)
+    expect(reset.className).not.toMatch(/text-muted-foreground/)
+    expect(reset.parentElement).toHaveClass("justify-end")
+    expect(screen.getByTestId("comments-filters-popover").className).toMatch(/\bp-0\b/)
+    expect(screen.getByRole("separator")).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: /^Filters$/i }))
     expect(screen.queryByRole("combobox", { name: /^Sort$/i })).not.toBeInTheDocument()
+  })
+
+  it("keeps File, Author, and Participant trigger text as selected values", () => {
+    mockComments.mockReturnValue([makeComment()])
+    renderPage()
+    fireEvent.click(screen.getByRole("button", { name: /^Filters$/i }))
+
+    for (const name of [/^Sort$/i, /^File$/i, /^Author$/i, /^Participant$/i]) {
+      const trigger = screen.getByRole("combobox", { name })
+      expect(trigger).not.toHaveAttribute("data-placeholder")
+      expect(trigger.className).toMatch(/text-foreground/)
+    }
   })
 
   it("filters threads by search, shows filter badge and clear-filters empty state", () => {

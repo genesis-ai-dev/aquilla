@@ -546,6 +546,19 @@ interface FilterControlsProps {
   authorOptions: { id: string; label: string }[]
 }
 
+const filterLabelClass = "font-normal text-muted-foreground"
+
+/** Base UI treats "" as no value (`data-placeholder`), which mutes the trigger. */
+const ALL_SELECT_VALUE = "__all__"
+
+function toSelectValue(value: string) {
+  return value === "" ? ALL_SELECT_VALUE : value
+}
+
+function fromSelectValue(value: string | null) {
+  return value == null || value === ALL_SELECT_VALUE ? "" : value
+}
+
 function FilterSelectRow({
   id,
   label,
@@ -559,22 +572,26 @@ function FilterSelectRow({
   value: string
   onValueChange: (value: string) => void
 }) {
+  const selectItems = items.map((item) => ({
+    ...item,
+    value: toSelectValue(item.value),
+  }))
   return (
     <Field orientation="horizontal" className="items-center justify-between gap-3">
-      <FieldLabel htmlFor={id} className="font-normal text-muted-foreground">
+      <FieldLabel htmlFor={id} className={filterLabelClass}>
         {label}
       </FieldLabel>
       <Select
-        items={items}
-        value={value}
-        onValueChange={(next) => onValueChange(next ?? "")}
+        items={selectItems}
+        value={toSelectValue(value)}
+        onValueChange={(next) => onValueChange(fromSelectValue(next))}
       >
         <SelectTrigger id={id} size="sm" aria-label={label}>
           <SelectValue className="truncate" />
         </SelectTrigger>
         <SelectContent>
           <SelectGroup>
-            {items.map((item) => (
+            {selectItems.map((item) => (
               <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
             ))}
           </SelectGroup>
@@ -630,11 +647,11 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
           align="end"
           side="bottom"
           sideOffset={4}
-          className="w-72"
+          className="w-72 gap-0 p-0"
           data-testid="comments-filters-popover"
         >
           <PopoverTitle className="sr-only">{t("comments.filter.filtersButton")}</PopoverTitle>
-          <FieldGroup className="gap-3">
+          <FieldGroup className="gap-3 p-2.5">
             <FilterSelectRow
               id="comments-filter-sort"
               label={t("comments.filter.sortLabel")}
@@ -643,7 +660,7 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
               onValueChange={(value) => onChange({ ...filter, sort: value as SortOrder })}
             />
             <Field orientation="horizontal">
-              <FieldLabel htmlFor="comments-filter-show-resolved" className="font-normal">
+              <FieldLabel htmlFor="comments-filter-show-resolved" className={filterLabelClass}>
                 {showResolvedLabel}
               </FieldLabel>
               <Switch
@@ -693,15 +710,17 @@ function FilterControls({ filter, onChange, fileOptions, authorOptions }: Filter
           {canReset && (
             <>
               <Separator />
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="self-start text-muted-foreground"
-                onClick={() => onChange(DEFAULT_FILTER)}
-              >
-                {t("common.reset")}
-              </Button>
+              <div className="flex justify-end p-2.5">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-foreground"
+                  onClick={() => onChange(DEFAULT_FILTER)}
+                >
+                  {t("common.reset")}
+                </Button>
+              </div>
             </>
           )}
         </PopoverContent>

@@ -181,6 +181,52 @@ work is a route plus UI rather than a route plus UI plus a core change.
 
 ---
 
+## Also landed: a per-file segmentation surface
+
+`file_segmentation` (migration 0079) stores one row per file, keyed by
+`(project, file)` with **no `target_lang`** — segmentation is a property of the
+source, so every language lane reads the same boundaries. Before it, the
+segmentation was derived per RUN into `contextual_runs.span_cursor`: two lanes
+of the same file recomputed it independently, it was discarded when the run
+ended, and nothing outside the run could see or correct it.
+
+Three strategies, resolved by `resolveSpanSeeds` in `tick.ts`, most-specific
+first:
+
+- **`explicit`** — an ordered boundary list, stored verbatim. This is the shape
+  a re-segmentation pass writes; each entry may carry `title`/`gist`/`depth`, so
+  the same rows can later drive a navigation outline.
+- **`fixed`** — cut every N cells. The blunt human override.
+- **`auto`** — derive from file structure (the default; an absent row is `auto`).
+
+Every stored strategy degrades to `auto` rather than failing — an unreadable
+row, a boundary list whose endpoints no longer resolve, a file that changed
+shape underneath a saved segmentation. A run with imperfect boundaries still
+translates the file; a run with no boundaries translates nothing.
+
+The validation in `db/shared/file-segmentation.ts` is the load-bearing part,
+and it is **code, not judgment**. A boundary list is checked against the file's
+real ordered cell ids for unknown endpoints, gaps, overlaps, ordering, and full
+coverage before it is ever stored. Each of those rules exists because breaking
+it loses work *silently*: cells that belong to no span are never drafted by any
+run and are never reported as skipped, because nothing knows they were meant to
+be covered. When a model starts proposing boundaries, that check is the only
+thing standing between a plausible-looking list and a quietly half-translated
+book.
+
+`GET /contextual/segmentation` returns the **effective** segmentation, resolved
+through the same `resolveSpanSeeds` the run itself calls. A preview computed by
+a second, parallel implementation would drift from the real boundaries, and it
+would drift silently — so the dialog renders what the server resolved and
+computes nothing itself.
+
+The UI is the file row's ⋯ → **Segmentation…**, read-only below Project Lead
+(the dialog says why rather than hiding how the file is divided). The AI option
+is rendered and disabled: the pass behind it does not exist, but its note box
+is live and saved, because that note is the instruction the pass will read.
+
+---
+
 ## Recommended order of work
 
 1. **G1 + G2** — set `CONTEXTUAL_FAST_MODEL` to a small model per environment.

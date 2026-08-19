@@ -83,6 +83,42 @@ export function coalesceRuns(runs: CellPair[][], max: number = CHUNK_MAX): CellP
   return out
 }
 
+/**
+ * Build seeds from an explicit, already-validated boundary list.
+ *
+ * The list is stored against the file's ordered source cells
+ * (db/shared/file-segmentation.ts validates contiguity and coverage on write),
+ * but a run reads it later — cells can be added, tombstoned, or reordered in
+ * between. So endpoints are resolved against the pairs THIS run actually has,
+ * and any boundary that no longer resolves is dropped rather than trusted.
+ * Returns null when nothing usable survives, so the caller falls back to
+ * derived structure instead of running a file with no spans.
+ */
+export function seedsFromBoundaries(
+  fileId: string,
+  pairs: CellPair[],
+  boundaries: { startCellId: string; endCellId: string }[],
+): SpanSeed[] | null {
+  const index = new Map(pairs.map((p, i) => [p.cellId, i]))
+  const seeds: SpanSeed[] = []
+  let covered = 0
+  for (const boundary of boundaries) {
+    const start = index.get(boundary.startCellId)
+    const end = index.get(boundary.endCellId)
+    if (start === undefined || end === undefined || end < start) continue
+    const run = pairs.slice(start, end + 1)
+    if (run.length === 0) continue
+    covered += run.length
+    // An oversized stored span still has to fit the draft node's reply cap.
+    for (const piece of subdivide(run)) seeds.push(toSeed(fileId, piece, "explicit"))
+  }
+  // A list that resolves to less than half the file is not a segmentation of
+  // this file any more — treat it as absent rather than silently drafting a
+  // fraction of the work.
+  if (seeds.length === 0 || covered * 2 < pairs.length) return null
+  return seeds
+}
+
 /** Cut into fixed-size pieces of exactly `size` (the last one may be short). */
 function fixedChunks(pairs: CellPair[], size: number): CellPair[][] {
   const out: CellPair[][] = []

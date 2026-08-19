@@ -6,6 +6,8 @@
 //   POST /:projectId/contextual/runs/:runId/pause|resume|terminate
 //   POST /:projectId/contextual/steering                  direction / refresh_span / note
 //   GET  /:projectId/contextual/drafts?fileId=            staged drafts (VIEWER)
+//   GET  /:projectId/contextual/segmentation?fileId=      strategy + preview (VIEWER)
+//   PUT  /:projectId/contextual/segmentation?fileId=      set the strategy (PROJECT_LEAD)
 //   POST /:projectId/contextual/drafts/:draftId/review    {action: applied|rejected}
 //
 // v1 execution (documented deviation): no Workflows binding — POST /runs kicks
@@ -29,6 +31,18 @@ import { wordCapBody, wordGuard } from "../lib/billing/words"
 import { makeCostMeter } from "../lib/cost-meter"
 import { notifySyncWorkerOfContextualActivity } from "../services/sync-worker-notify"
 import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
+import {
+  getFileSegmentation,
+  setFileSegmentation,
+  validateSegmentationInput,
+  MAX_BOUNDARIES,
+  MAX_NOTE_CHARS,
+  MAX_SEGMENT_SIZE,
+  MIN_SEGMENT_SIZE,
+  type SegmentationInput,
+} from "../../../db/shared/file-segmentation"
+import { selectCellPairs } from "../lib/agent/tools/select-cells"
+import { resolveSpanSeeds, spanLabel } from "../lib/contextual/tick"
 import {
   createRun,
   getRun,
@@ -1212,6 +1226,125 @@ contextual.post(
       },
     })
     return c.json({ draft: result.draft })
+  },
+)
+
+
+// ── Segmentation ────────────────────────────────────────────────────────────
+//
+// One row per file, no target_lang: segmentation is a property of the SOURCE,
+// so every language lane of a file reads the same boundaries.
+//
+// The GET returns the EFFECTIVE segmentation, not just the stored setting —
+// resolved through the same `resolveSpanSeeds` the run itself calls, so the
+// preview a translator approves is the segmentation the autopilot will use.
+// A preview computed by a second, parallel implementation would drift, and it
+// would drift silently.
+
+/** Preview spans returned inline. A long book segments into a few hundred;
+ *  the count is always exact, the list is a sample. */
+const SEGMENTATION_PREVIEW_LIMIT = 60
+
+const segmentationBoundarySchema = z.object({
+  startCellId: z.string().min(1),
+  endCellId: z.string().min(1),
+  title: z.string().optional(),
+  gist: z.string().optional(),
+  depth: z.number().optional(),
+})
+
+const segmentationSchema = z
+  .object({
+    strategy: z.enum(["auto", "fixed", "explicit"]),
+    fixedSize: z.number().optional(),
+    boundaries: z.array(segmentationBoundarySchema).max(MAX_BOUNDARIES).optional(),
+    note: z.string().max(MAX_NOTE_CHARS).optional(),
+  })
+  .strict()
+
+contextual.get("/:projectId/contextual/segmentation", authMiddleware, async (c) => {
+  const projectId = c.req.param("projectId") ?? ""
+  const gate = await requireRole(c, projectId, ROLE.VIEWER)
+  if (!gate.ok) return gate.res
+  const fileId = c.req.query("fileId")
+  if (!fileId) {
+    const { body, status } = errorJson("validation_failed", "fileId is required", 400)
+    return c.json(body, status)
+  }
+
+  const db = c.env.AQUILLA_PG
+  const [segmentation, pairs] = await Promise.all([
+    getFileSegmentation(db, projectId, fileId),
+    selectCellPairs(db, projectId, { fileId }),
+  ])
+  const seeds = await resolveSpanSeeds(db, projectId, fileId, pairs)
+  const order = new Map(pairs.map((p, i) => [p.cellId, i]))
+  const spans = seeds.map((seed) => {
+    const start = order.get(seed.startCellId)
+    const end = order.get(seed.endCellId)
+    return {
+      startCellId: seed.startCellId,
+      endCellId: seed.endCellId,
+      seedSource: seed.seedSource,
+      cellCount: start === undefined || end === undefined ? 0 : end - start + 1,
+      label: spanLabel(seed, pairs),
+    }
+  })
+
+  return c.json({
+    segmentation,
+    limits: { minSize: MIN_SEGMENT_SIZE, maxSize: MAX_SEGMENT_SIZE, maxBoundaries: MAX_BOUNDARIES },
+    effective: {
+      // Which branch actually produced these spans — 'explicit' means the
+      // stored list was used, anything else means it was derived.
+      seedSource: spans[0]?.seedSource ?? "chunk",
+      spanCount: spans.length,
+      cellCount: pairs.length,
+      spans: spans.slice(0, SEGMENTATION_PREVIEW_LIMIT),
+      truncated: spans.length > SEGMENTATION_PREVIEW_LIMIT,
+    },
+  })
+})
+
+// PUT — changing how a file is cut up changes what every future run drafts, so
+// it sits at the same floor as the project's other structural settings.
+contextual.put(
+  "/:projectId/contextual/segmentation",
+  authMiddleware,
+  zValidator("json", segmentationSchema),
+  async (c) => {
+    const projectId = c.req.param("projectId") ?? ""
+    const gate = await requireRole(c, projectId, ROLE.PROJECT_LEAD)
+    if (!gate.ok) return gate.res
+    const fileId = c.req.query("fileId")
+    if (!fileId) {
+      const { body, status } = errorJson("validation_failed", "fileId is required", 400)
+      return c.json(body, status)
+    }
+
+    const db = c.env.AQUILLA_PG
+    const input = c.req.valid("json") as SegmentationInput
+    // Explicit boundaries are checked against the file's real ordered cells;
+    // 'auto'/'fixed' do not need them, so only pay for the read when they do.
+    const orderedCellIds =
+      input.strategy === "explicit"
+        ? (await selectCellPairs(db, projectId, { fileId })).map((p) => p.cellId)
+        : []
+    const checked = validateSegmentationInput(input, orderedCellIds)
+    if (!checked.ok) {
+      const { body, status } = errorJson("validation_failed", checked.error, 400)
+      return c.json(body, status)
+    }
+
+    const user = c.get("user")
+    const segmentation = await setFileSegmentation(
+      db,
+      projectId,
+      fileId,
+      { ...checked.value, humanEdited: true },
+      user.username ?? null,
+    )
+    return c.json({ segmentation })
   },
 )
 

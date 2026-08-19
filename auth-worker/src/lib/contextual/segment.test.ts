@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { coalesceRuns, deriveSpanSeeds, MAX_FIXED_SIZE, MIN_FIXED_SIZE } from "./segment"
+import { coalesceRuns, deriveSpanSeeds, seedsFromBoundaries, MAX_FIXED_SIZE, MIN_FIXED_SIZE } from "./segment"
 import { pair } from "./test-helpers"
 
 /** Span sizes in cell counts, in order — the property every branch must hold. */
@@ -197,5 +197,48 @@ describe("coalesceRuns", () => {
   it("drops empty runs and handles an empty input", () => {
     expect(coalesceRuns([], 12)).toEqual([])
     expect(coalesceRuns([[], run(3, "a"), []], 12).map((r) => r.length)).toEqual([3])
+  })
+})
+
+describe("seedsFromBoundaries", () => {
+  const pairs = Array.from({ length: 10 }, (_, i) => pair(`c${i + 1}`))
+  const span = (startCellId: string, endCellId: string) => ({ startCellId, endCellId })
+
+  it("turns a stored list into seeds marked 'explicit'", () => {
+    const seeds = seedsFromBoundaries("f1", pairs, [span("c1", "c4"), span("c5", "c10")])
+    expect(seeds?.map((s) => [s.startCellId, s.endCellId])).toEqual([
+      ["c1", "c4"],
+      ["c5", "c10"],
+    ])
+    expect(seeds?.every((s) => s.seedSource === "explicit")).toBe(true)
+  })
+
+  it("subdivides a stored span too long for the draft node's reply cap", () => {
+    const long = Array.from({ length: 40 }, (_, i) => pair(`d${i + 1}`))
+    const seeds = seedsFromBoundaries("f1", long, [span("d1", "d40")])
+    expect(seeds!.length).toBeGreaterThan(1)
+    for (const seed of seeds!) {
+      const size =
+        long.findIndex((p) => p.cellId === seed.endCellId) -
+        long.findIndex((p) => p.cellId === seed.startCellId) +
+        1
+      expect(size).toBeLessThanOrEqual(12)
+    }
+  })
+
+  it("drops a span whose endpoints the file no longer has", () => {
+    const seeds = seedsFromBoundaries("f1", pairs, [span("c1", "c8"), span("gone", "alsogone")])
+    expect(seeds?.map((s) => s.startCellId)).toEqual(["c1"])
+  })
+
+  it("abstains entirely when the stored list no longer covers half the file", () => {
+    // The file grew (or the list was written against a different file): only
+    // two of ten cells resolve. Drafting a fifth of the file and calling it
+    // the segmentation would lose the rest without ever reporting it.
+    expect(seedsFromBoundaries("f1", pairs, [span("c1", "c2")])).toBeNull()
+  })
+
+  it("abstains on an empty list", () => {
+    expect(seedsFromBoundaries("f1", pairs, [])).toBeNull()
   })
 })

@@ -42,11 +42,12 @@ import {
   markStale,
   getSceneBrief,
 } from "../../../../db/shared/scene-briefs"
+import { getFileSegmentation } from "../../../../db/shared/file-segmentation"
 import { selectCellPairs, type CellPair } from "../agent/tools/select-cells"
 import { type LintRule } from "../agent/lint"
 import { loadProjectContext, type ProjectContext } from "./project-context"
 import { openRouterExtras } from "../llm-vendor"
-import { deriveSpanSeeds } from "./segment"
+import { deriveSpanSeeds, seedsFromBoundaries } from "./segment"
 import { lintSpanDraft } from "./lint-node"
 import { runSpan, EXAMPLES_TARGET } from "./pipeline"
 import type { ExamplePair } from "./draft"
@@ -525,7 +526,7 @@ export function orderSeedsFromAnchor(
 
 // ── Span label ("LUK 1:1–1:8") — display only, never authoritative ──────────
 
-function spanLabel(seed: StoredSpanSeed, pairs: CellPair[]): string {
+export function spanLabel(seed: Pick<StoredSpanSeed, "startCellId" | "endCellId">, pairs: CellPair[]): string {
   const startIdx = pairs.findIndex((pair) => pair.cellId === seed.startCellId)
   const endIdx = pairs.findIndex((pair) => pair.cellId === seed.endCellId)
   return formatSpanRange(
@@ -606,6 +607,53 @@ async function loadParagraphStarts(
     console.error("[contextual] failed to read paragraph starts (falling back):", err)
     return []
   }
+}
+
+/**
+ * Settle this run's span boundaries.
+ *
+ * Precedence, most-specific first:
+ *   1. an EXPLICIT stored boundary list — a person or a re-segmentation pass
+ *      said where the spans go, and that outranks anything derived;
+ *   2. a FIXED size a person chose for this file;
+ *   3. structure derived from the file itself (canonical refs → paragraph
+ *      marks → fixed chunks).
+ *
+ * Every stored strategy degrades to (3) rather than failing: a boundary list
+ * whose endpoints no longer resolve, an unreadable row, a file that changed
+ * shape underneath a saved segmentation. A run with imperfect boundaries still
+ * translates the file; a run with no boundaries translates nothing.
+ */
+export async function resolveSpanSeeds(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  pairs: CellPair[],
+): Promise<SpanSeed[]> {
+  let stored: Awaited<ReturnType<typeof getFileSegmentation>> = null
+  try {
+    stored = await getFileSegmentation(db, projectId, fileId)
+  } catch (err) {
+    console.error("[contextual] failed to read stored segmentation (deriving instead):", err)
+  }
+
+  if (stored?.strategy === "explicit" && stored.boundaries && stored.boundaries.length > 0) {
+    const seeds = seedsFromBoundaries(fileId, pairs, stored.boundaries)
+    if (seeds) return seeds
+    console.error(
+      `[contextual] stored boundaries for ${fileId} no longer match the file — deriving instead`,
+    )
+  }
+  if (stored?.strategy === "fixed" && stored.fixedSize) {
+    return deriveSpanSeeds(fileId, pairs, { fixedSize: stored.fixedSize })
+  }
+
+  const paragraphStartCellIds = await loadParagraphStarts(db, projectId, fileId)
+  return deriveSpanSeeds(
+    fileId,
+    pairs,
+    paragraphStartCellIds.length > 0 ? { paragraphStartCellIds } : undefined,
+  )
 }
 
 function validatedExamples(pairs: CellPair[]): ExamplePair[] {
@@ -1057,16 +1105,11 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
   ])
   let cursor = run.spanCursor
   if (!cursor) {
-    // First wave: derive the segmentation, then rotate it so work starts where
-    // the user was last looking (run.anchorCellId, set at start). Paragraph
-    // starts are read once here, not per wave — the cursor is derived once.
-    const paragraphStartCellIds = await loadParagraphStarts(db, run.projectId, run.fileId)
+    // First wave: settle the segmentation, then rotate it so work starts where
+    // the user was last looking (run.anchorCellId, set at start). Read once
+    // here, not per wave — the cursor is derived once and then pinned.
     const seeds = orderSeedsFromAnchor(
-      deriveSpanSeeds(
-        run.fileId,
-        pairs,
-        paragraphStartCellIds.length > 0 ? { paragraphStartCellIds } : undefined,
-      ),
+      await resolveSpanSeeds(db, run.projectId, run.fileId, pairs),
       run.anchorCellId,
       pairs,
     )

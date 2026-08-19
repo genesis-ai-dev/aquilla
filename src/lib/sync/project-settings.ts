@@ -48,7 +48,7 @@ export interface ProjectWideSettings {
   /** Synced voice profiles (voice library, cast, default voice, engine). The
    *  Gemini apiKey is deliberately omitted — it stays device-local. */
   ttsSettings?: Omit<ProjectTtsSettings, "apiKey">
-  /** Project terminology / glossary concepts. Synced to D1 via the same
+  /** Project terminology / glossary concepts. Synced to Postgres via the same
    *  top-level key mechanism as `rules`. Absent → no terminology enforcement. */
   terminology?: Concept[]
   /** Authored living-memory guidance entries (instructions + standards). */

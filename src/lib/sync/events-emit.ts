@@ -59,7 +59,7 @@ export interface BuildEventInput<K extends OutboxEventKind> {
  * but we don't enforce it client-side — there are valid transient states
  * (the very first target.cell.commit on a cell whose target row hasn't been
  * projected locally yet, the importer's chained commits within a single
- * transaction before any have round-tripped to D1, etc.). The server's
+ * transaction before any have round-tripped to Postgres, etc.). The server's
  * parent-chain guard is authoritative; a wrong client-side parentId
  * surfaces as a stale-sibling broadcast and the outbox dead-letters.
  */

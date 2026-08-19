@@ -27,9 +27,13 @@ export const segmentation = defineNamespace({
       "Read the whole file and mark where each passage begins and ends, with a short title for each one.",
     "segmentation.aiNoteLabel": "Anything the AI should know (optional)",
     "segmentation.aiNotePlaceholder": "e.g. keep each parable in one passage",
-    "segmentation.aiComingSoon": "Not available yet.",
     "segmentation.previewSpanCells": "{count} segments",
     "segmentation.previewTruncated": "and {count} more",
+    "segmentation.aiRunning": "Reading the file…",
+    "segmentation.aiDone": "Found {count} passages.",
+    "segmentation.aiPartial": "Some of the file could not be read: {notes}",
+    "segmentation.aiSlowHint":
+      "This reads the whole file and can take a minute on a long one.",
     "segmentation.unavailable":
       "Segmentation settings are not available on this server yet.",
     "segmentation.loadFailed": "Could not load this file's segmentation.",
@@ -149,10 +153,32 @@ export const segmentation = defineNamespace({
           "kind of short story in Scripture; substitute a natural example if the " +
           "literal word does not fit.",
       },
-      "segmentation.aiComingSoon": {
+      "segmentation.aiRunning": {
         description:
-          "Short badge beside the AI option marking it as not yet released. Terse.",
-        maxLength: 24,
+          "Status shown on the confirm button and beside the AI option while the model " +
+          "is reading the file. Verb, progressive.",
+        maxLength: 28,
+      },
+      "segmentation.aiDone": {
+        description:
+          "Confirmation after the model finished, naming how many passages it found. " +
+          "Plural-sensitive.",
+        placeholders: { count: "How many passages the model found." },
+      },
+      "segmentation.aiPartial": {
+        description:
+          "Shown when the model finished but could not read part of the file — the " +
+          "passages are still saved and still cover everything, but some boundaries " +
+          "were not chosen by the model. The notes are English diagnostics from the " +
+          "server and are not translated.",
+        placeholders: {
+          notes: "Server diagnostics naming which parts were not read; English, untranslated.",
+        },
+      },
+      "segmentation.aiSlowHint": {
+        description:
+          "Sentence under the AI option warning that it is slow, so the user is not " +
+          "surprised by the wait.",
       },
       "segmentation.previewSpanCells": {
         description:

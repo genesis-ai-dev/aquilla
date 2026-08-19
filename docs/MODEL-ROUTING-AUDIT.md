@@ -221,9 +221,48 @@ would drift silently — so the dialog renders what the server resolved and
 computes nothing itself.
 
 The UI is the file row's ⋯ → **Segmentation…**, read-only below Project Lead
-(the dialog says why rather than hiding how the file is divided). The AI option
-is rendered and disabled: the pass behind it does not exist, but its note box
-is live and saved, because that note is the instruction the pass will read.
+(the dialog says why rather than hiding how the file is divided).
+
+---
+
+## Also landed: fast-tier passage detection (the LLM re-segmentation pass)
+
+`segment-model.ts` is the 90/9/1 split applied to segmentation itself, and it
+is the first surface in the repo that exists specifically to be served by a
+cheap model. It sits behind the Segmentation dialog's third option and
+`POST /contextual/segmentation/generate`.
+
+The division of labour is the whole design:
+
+- **The model proposes break points and names each passage.** That is the only
+  part needing judgment — where one scene stops being the same scene.
+- **Code turns break points into the segmentation.** `buildBoundaries` builds
+  segment *k* as the run between break *k* and break *k+1*, with the last
+  reaching the end of the file, so contiguity and full coverage are
+  **structural** — not something a model can get wrong.
+
+That asymmetry is deliberate and worth preserving. Asking a model for
+start/end pairs and validating them means a model that emits a gap loses those
+cells from every future run silently. Asking only "where does a new passage
+begin" makes the worst case a mediocre boundary rather than missing work. The
+stored result still goes through `validateSegmentationInput` before it lands —
+a generator writing straight to the table would be the one path into that row
+that skips the check every other path takes.
+
+Windowing: 120 cells per call, and each window advances to the model's **last**
+proposed break rather than to the window edge, so a passage straddling a
+boundary is decided by a call that can see all of it. A window that proposes
+nothing still advances (or the loop could not terminate) and says so in
+`notes`; the run cap is 40 windows, and a file longer than that keeps its tail
+as one passage with a note rather than losing it. Every degradation is
+reported — the dialog renders `notes` as a warning next to the passage count.
+
+Cost: one fast-tier call per ~120 cells, once per file, amortized across every
+span, every language lane, and every future run over that file — against a
+closure loop that spends up to six **mid**-tier calls per span rediscovering
+the same boundaries. This is the clearest single case in the audit for wiring
+`CONTEXTUAL_FAST_MODEL` (G1): until it is set, this pass runs on the frontier
+model, which inverts the entire argument for having built it.
 
 ---
 

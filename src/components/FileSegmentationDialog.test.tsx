@@ -18,11 +18,13 @@ import type { SegmentationSnapshot } from "@/lib/contextual/segmentation-api"
 
 const fetchSegmentation = vi.fn()
 const saveSegmentation = vi.fn()
+const generateSegmentation = vi.fn()
 
 vi.mock("@/lib/contextual/segmentation-api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/contextual/segmentation-api")>()),
   fetchSegmentation: (...args: unknown[]) => fetchSegmentation(...args),
   saveSegmentation: (...args: unknown[]) => saveSegmentation(...args),
+  generateSegmentation: (...args: unknown[]) => generateSegmentation(...args),
 }))
 
 function snapshot(over: Partial<SegmentationSnapshot> = {}): SegmentationSnapshot {
@@ -63,6 +65,10 @@ function renderDialog(over: Partial<Parameters<typeof FileSegmentationDialog>[0]
 beforeEach(() => {
   fetchSegmentation.mockReset().mockResolvedValue(snapshot())
   saveSegmentation.mockReset().mockResolvedValue({})
+  generateSegmentation.mockReset().mockResolvedValue({
+    segmentation: {},
+    generated: { passageCount: 4, calls: 1, notes: [] },
+  })
 })
 
 describe("FileSegmentationDialog", () => {
@@ -134,12 +140,55 @@ describe("FileSegmentationDialog", () => {
     expect(saveSegmentation).not.toHaveBeenCalled()
   })
 
-  it("offers the AI option but cannot select it — the pass behind it does not exist yet", async () => {
+  it("runs the model pass, reports what it found, and stays open to show it", async () => {
+    const onOpenChange = vi.fn()
+    renderDialog({ onOpenChange })
+    await waitFor(() => expect(screen.getByText(/Divide this file/i)).toBeTruthy())
+
+    await userEvent.click(screen.getByRole("radio", { name: /Let AI find the passages/i }))
+    await userEvent.type(screen.getByLabelText(/Anything the AI should know/i), "keep parables whole")
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() =>
+      expect(generateSegmentation).toHaveBeenCalledWith("p1", "f1", "keep parables whole"),
+    )
+    await waitFor(() => expect(screen.getByText(/Found 4 passages/)).toBeTruthy())
+    // The model just decided every boundary in the file — closing on a spinner
+    // would give the translator no chance to look at what it did.
+    expect(onOpenChange).not.toHaveBeenCalledWith(false)
+    // And the preview is repainted from the server, not from local state.
+    expect(fetchSegmentation).toHaveBeenCalledTimes(2)
+    expect(saveSegmentation).not.toHaveBeenCalled()
+  })
+
+  it("warns when the pass could not read part of the file", async () => {
+    generateSegmentation.mockResolvedValue({
+      segmentation: {},
+      generated: { passageCount: 3, calls: 40, notes: ["stopped after 40 windows"] },
+    })
     renderDialog()
+    await waitFor(() => expect(screen.getByText(/Divide this file/i)).toBeTruthy())
+    await userEvent.click(screen.getByRole("radio", { name: /Let AI find the passages/i }))
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(screen.getByText(/could not be read/i)).toBeTruthy())
+    expect(screen.getByText(/stopped after 40 windows/)).toBeTruthy()
+  })
+
+  it("surfaces a failed pass without changing the shown segmentation", async () => {
+    generateSegmentation.mockRejectedValue(new Error("Could not find passages in this file."))
+    renderDialog()
+    await waitFor(() => expect(screen.getByText(/Divide this file/i)).toBeTruthy())
+    await userEvent.click(screen.getByRole("radio", { name: /Let AI find the passages/i }))
+    await userEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(screen.getByText(/Could not find passages/)).toBeTruthy())
+    expect(screen.getByText(/2 passages across 14 segments/)).toBeTruthy()
+  })
+
+  it("cannot run the pass below Project Lead", async () => {
+    renderDialog({ canEdit: false })
     await waitFor(() => expect(screen.getByText(/Let AI find the passages/i)).toBeTruthy())
     const ai = screen.getByRole("radio", { name: /Let AI find the passages/i })
     expect(ai.hasAttribute("disabled") || ai.getAttribute("aria-disabled") === "true").toBe(true)
-    expect(screen.getByText(/Not available yet/i)).toBeTruthy()
   })
 
   it("reads but cannot save below Project Lead", async () => {

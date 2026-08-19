@@ -4,10 +4,10 @@ import { useI18n } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
 import {
   fetchSegmentation,
+  generateSegmentation,
   saveSegmentation,
   type SegmentationSnapshot,
 } from "@/lib/contextual/segmentation-api"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -24,12 +24,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 
-/** The choices the dialog offers. "ai" is a UI-only option today: it maps to
- *  no stored strategy until the re-segmentation pass exists, so picking it
- *  cannot be saved. It is present because the shape of the decision is what
- *  makes the other two legible — "automatically, by count, or let it read the
- *  file" — and hiding the third option makes the menu look like a settings
- *  toggle rather than a segmentation choice. */
+/** The three ways a file can be divided. "ai" does not map to a stored
+ *  strategy directly: it runs the model pass, which WRITES an explicit
+ *  boundary list — so choosing it is an action, not a setting, and the dialog
+ *  reports what it found rather than closing silently. */
 type Choice = "auto" | "fixed" | "ai"
 
 interface Props {
@@ -60,6 +58,7 @@ export function FileSegmentationDialog({
   const [loadError, setLoadError] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [generated, setGenerated] = useState<{ passageCount: number; notes: string[] } | null>(null)
   const [choice, setChoice] = useState<Choice>("auto")
   const [size, setSize] = useState("10")
   const [note, setNote] = useState("")
@@ -74,6 +73,7 @@ export function FileSegmentationDialog({
     setLoading(true)
     setLoadError(null)
     setSaveError(null)
+    setGenerated(null)
     fetchSegmentation(projectId, fileId)
       .then((next) => {
         if (cancelled) return
@@ -95,18 +95,34 @@ export function FileSegmentationDialog({
   const parsedSize = Number.parseInt(size, 10)
   const sizeValid =
     Number.isFinite(parsedSize) && parsedSize >= limits.minSize && parsedSize <= limits.maxSize
-  // "ai" has nowhere to be stored yet, so it can never be the saved choice.
   const canSubmit =
-    canEdit && !saving && snapshot?.available === true && choice !== "ai" &&
-    (choice === "auto" || sizeValid)
+    canEdit && !saving && snapshot?.available === true && (choice !== "fixed" || sizeValid)
 
+  /**
+   * "ai" runs the pass and REPORTS; the other two save and close.
+   *
+   * The AI branch deliberately stays open on success: the model just decided
+   * where every passage in the file begins, and closing on a spinner would
+   * give a translator no chance to see what it did. Reloading the snapshot
+   * repaints the preview with the passages it actually stored.
+   */
   async function submit(): Promise<void> {
     if (!fileId || !canSubmit) return
     setSaving(true)
     setSaveError(null)
+    setGenerated(null)
     try {
+      if (choice === "ai") {
+        const result = await generateSegmentation(projectId, fileId, note)
+        setGenerated({
+          passageCount: result.generated.passageCount,
+          notes: result.generated.notes,
+        })
+        setSnapshot(await fetchSegmentation(projectId, fileId))
+        return
+      }
       await saveSegmentation(projectId, fileId, {
-        strategy: choice === "fixed" ? "fixed" : "auto",
+        strategy: choice,
         ...(choice === "fixed" ? { fixedSize: parsedSize } : {}),
         ...(note.trim() ? { note: note.trim() } : {}),
       })
@@ -263,22 +279,19 @@ export function FileSegmentationDialog({
                     )}
                   </div>
 
-                  {/* Present but not yet wired: the re-segmentation pass does
-                      not exist, so this option describes the shape of the
-                      choice without pretending it can be made. The note is
-                      still editable and still saved — it is the instruction
-                      the pass will read when it lands. */}
-                  <div className="space-y-2 opacity-70">
+                  <div className="space-y-2">
                     <label className="flex items-start gap-2 text-sm">
-                      <RadioGroupItem value="ai" className="mt-1" disabled />
+                      <RadioGroupItem value="ai" className="mt-1" disabled={!canEdit} />
                       <span className="min-w-0 flex-1">
                         <span className="flex items-center gap-2 font-medium">
                           <Sparkles className="h-3.5 w-3.5" aria-hidden />
                           {t("segmentation.aiLabel")}
-                          <Badge variant="secondary">{t("segmentation.aiComingSoon")}</Badge>
                         </span>
                         <span className="block text-xs text-muted-foreground">
                           {t("segmentation.aiHelp")}
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {t("segmentation.aiSlowHint")}
                         </span>
                       </span>
                     </label>
@@ -302,6 +315,18 @@ export function FileSegmentationDialog({
               {!canEdit && (
                 <p className="text-xs text-muted-foreground">{t("segmentation.readOnly")}</p>
               )}
+              {generated && (
+                <div className="space-y-1">
+                  <p className="text-sm">
+                    {t("segmentation.aiDone", { count: num(generated.passageCount) })}
+                  </p>
+                  {generated.notes.length > 0 && (
+                    <p className="text-xs text-amber-600 dark:text-amber-500">
+                      {t("segmentation.aiPartial", { notes: generated.notes.join("; ") })}
+                    </p>
+                  )}
+                </div>
+              )}
               {saveError && <p className="text-sm text-destructive">{saveError}</p>}
             </>
           )}
@@ -311,7 +336,11 @@ export function FileSegmentationDialog({
             {t("common.cancel")}
           </Button>
           <Button onClick={() => { void submit() }} disabled={!canSubmit}>
-            {saving ? t("common.saving") : t("common.save")}
+            {saving
+              ? choice === "ai"
+                ? t("segmentation.aiRunning")
+                : t("common.saving")
+              : t("common.save")}
           </Button>
         </DialogFooter>
       </DialogContent>

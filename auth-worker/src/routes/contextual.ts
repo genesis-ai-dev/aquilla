@@ -8,6 +8,7 @@
 //   GET  /:projectId/contextual/drafts?fileId=            staged drafts (VIEWER)
 //   GET  /:projectId/contextual/segmentation?fileId=      strategy + preview (VIEWER)
 //   PUT  /:projectId/contextual/segmentation?fileId=      set the strategy (PROJECT_LEAD)
+//   POST /:projectId/contextual/segmentation/generate     AI re-segmentation (PROJECT_LEAD)
 //   POST /:projectId/contextual/drafts/:draftId/review    {action: applied|rejected}
 //
 // v1 execution (documented deviation): no Workflows binding — POST /runs kicks
@@ -42,7 +43,7 @@ import {
   type SegmentationInput,
 } from "../../../db/shared/file-segmentation"
 import { selectCellPairs } from "../lib/agent/tools/select-cells"
-import { resolveSpanSeeds, spanLabel } from "../lib/contextual/tick"
+import { segmentWithModel } from "../lib/contextual/segment-model"
 import {
   createRun,
   getRun,
@@ -86,6 +87,8 @@ import {
   makeLlmCall,
   resolveContextualModels,
   resolveOpenRouterUrl,
+  resolveSpanSeeds,
+  spanLabel,
   runStateFrame,
   persistContextualProgressFrame,
   MAX_WAVE_CONCURRENCY,
@@ -130,6 +133,7 @@ type ErrorCode =
   | "run_exists"
   | "credit_cap_exceeded"
   | "not_configured"
+  | "segmentation_failed"
 
 function errorJson(code: ErrorCode, message: string, status: ContentfulStatusCode, details?: unknown) {
   return {
@@ -1345,6 +1349,161 @@ contextual.put(
       user.username ?? null,
     )
     return c.json({ segmentation })
+  },
+)
+
+// POST /:projectId/contextual/segmentation/generate — have a fast-tier model
+// find the passages, store them as an explicit boundary list.
+//
+// PROJECT_LEAD, and guarded like every other paid surface here: model
+// allowlist, org credit cap, word cap — all BEFORE any tokens are spent.
+//
+// The pass proposes break points; `buildBoundaries` turns them into the
+// segmentation, so contiguity and coverage are structural. The result still
+// goes through `validateSegmentationInput` before it is stored: a generator
+// writing straight to the table would be the one path into this row that skips
+// the check every other path takes.
+contextual.post(
+  "/:projectId/contextual/segmentation/generate",
+  authMiddleware,
+  zValidator("json", z.object({ note: z.string().max(MAX_NOTE_CHARS).optional() }).strict()),
+  async (c) => {
+    const projectId = c.req.param("projectId") ?? ""
+    const gate = await requireRole(c, projectId, ROLE.PROJECT_LEAD)
+    if (!gate.ok) return gate.res
+    const fileId = c.req.query("fileId")
+    if (!fileId) {
+      const { body, status } = errorJson("validation_failed", "fileId is required", 400)
+      return c.json(body, status)
+    }
+    if (!c.env.OPENROUTER_API_KEY) {
+      const { body, status } = errorJson("not_configured", "OPENROUTER_API_KEY is not configured", 500)
+      return c.json(body, status)
+    }
+
+    const db = c.env.AQUILLA_PG
+    const user = c.get("user")
+    const { note } = c.req.valid("json")
+
+    const settings = await getPlatformSettingsCached(c.env)
+    const models = resolveContextualModels(c.env, settings)
+    // The FAST tier is the whole point of this surface — guard the model it
+    // will actually call, not the one the drafting pipeline uses.
+    const guard = await runAiGuard(models.fast, user.id, db, c.env)
+    if (!guard.ok) return c.json(guard.body, guard.status)
+
+    let orgId = 0
+    try {
+      const projectRow = await db
+        .prepare("SELECT org_id FROM projects WHERE id = ?")
+        .bind(projectId)
+        .first<{ org_id: number | null }>()
+      orgId = projectRow?.org_id ?? 0
+    } catch {
+      /* best-effort — degrade to org 0 */
+    }
+    const credit = await creditGuard(db, c.env, orgId, "agent")
+    if (!credit.ok) {
+      const { body: err, status } = errorJson(
+        "credit_cap_exceeded",
+        "Agent credit cap reached. Contact your org admin.",
+        429,
+        { reason: credit.reason },
+      )
+      return c.json(err, status)
+    }
+    const words = await wordGuard(db, orgId)
+    if (!words.ok) return c.json(wordCapBody(words.reason), 429)
+
+    const pairs = await selectCellPairs(db, projectId, { fileId })
+    if (pairs.length === 0) {
+      const { body, status } = errorJson("validation_failed", "this file has no source cells", 400)
+      return c.json(body, status)
+    }
+
+    const meter = makeCostMeter(c.env, db)
+    const llm = makeLlmCall({
+      url: resolveOpenRouterUrl(c.env),
+      apiKey: c.env.OPENROUTER_API_KEY,
+      models,
+      signal: c.req.raw.signal,
+      onUsage: (usage) => {
+        meter.add({
+          surface: "autopilot",
+          runId: `segment:${fileId}`,
+          projectId,
+          kind: "llm",
+          label: usage.label,
+          tier: usage.tier,
+          model: usage.model,
+          promptTokens: usage.promptTokens,
+          completionTokens: usage.completionTokens,
+          costCents: usage.costCents,
+          latencyMs: usage.latencyMs,
+          ok: usage.ok,
+        })
+      },
+    })
+
+    let result: Awaited<ReturnType<typeof segmentWithModel>>
+    try {
+      result = await segmentWithModel({
+        pairs,
+        llm,
+        ...(note ? { note } : {}),
+      })
+    } catch (err) {
+      console.error(`[contextual] segmentation pass failed for ${fileId}:`, err)
+      const { body, status } = errorJson(
+        "segmentation_failed",
+        "The segmentation model could not be reached. Nothing was changed.",
+        502,
+      )
+      return c.json(body, status)
+    } finally {
+      await meter.flush()
+    }
+
+    if (result.boundaries.length === 0) {
+      const { body, status } = errorJson(
+        "segmentation_failed",
+        "The segmentation model returned nothing usable. Nothing was changed.",
+        502,
+      )
+      return c.json(body, status)
+    }
+
+    const checked = validateSegmentationInput(
+      {
+        strategy: "explicit",
+        boundaries: result.boundaries,
+        generatedBy: "model",
+        modelId: models.fast,
+        ...(note ? { note } : {}),
+      },
+      pairs.map((p) => p.cellId),
+    )
+    if (!checked.ok) {
+      // Structurally this should not happen — buildBoundaries constructs the
+      // segments — so a failure here means a real defect, not bad model
+      // output. Refuse rather than store something the run cannot trust.
+      console.error(`[contextual] generated boundaries failed validation for ${fileId}: ${checked.error}`)
+      const { body, status } = errorJson(
+        "segmentation_failed",
+        "The generated passages did not cover the file. Nothing was changed.",
+        500,
+      )
+      return c.json(body, status)
+    }
+
+    // humanEdited stays false: a person ASKED for this, but did not author the
+    // boundaries. The pin is what stops a later automated pass overwriting a
+    // person's own division, and this is not one.
+    const segmentation = await setFileSegmentation(db, projectId, fileId, checked.value, user.username ?? null)
+    return c.json({
+      segmentation,
+      generated: { passageCount: result.boundaries.length, calls: result.calls, notes: result.notes },
+    })
   },
 )
 

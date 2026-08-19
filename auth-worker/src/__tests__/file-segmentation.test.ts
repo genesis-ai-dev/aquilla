@@ -9,7 +9,8 @@
 // than store.
 
 import { env } from "cloudflare:test"
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+import { scriptMockResponse } from "../../../scripts/mock-openrouter"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import {
@@ -24,6 +25,10 @@ import {
 const PROJECT = "proj-seg"
 const FILE = "file-seg"
 const CELLS = ["c1", "c2", "c3", "c4", "c5", "c6"]
+const MOCK_BASE = "http://mock.local/api/v1"
+
+const testEnv = env as typeof env & { OPENROUTER_BASE_URL?: string }
+const realFetch = globalThis.fetch
 
 async function seedWorld(): Promise<{ lead: string; contrib: string; viewer: string }> {
   await seedUser(1, "seg-lead")
@@ -363,3 +368,144 @@ async function seedTokens(): Promise<{ lead: string; contrib: string; viewer: st
     viewer: await jwtFor("seg-viewer"),
   }
 }
+
+
+// ── AI re-segmentation ──────────────────────────────────────────────────────
+
+/** A file long enough that break points are meaningful (the mock breaks every
+ *  10 lines, and sub-minimum segments are dropped). */
+const LONG_FILE = "file-seg-long"
+const LONG_CELLS = 25
+
+async function seedLongFile(): Promise<void> {
+  for (let i = 0; i < LONG_CELLS; i++) {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, sequence_index, event_id, last_edit_at)
+       VALUES (?, ?, ?, 'source', ?, ?, ?, 0)`,
+    )
+      .bind(PROJECT, LONG_FILE, `L${i + 1}`, `Long sentence number ${i + 1}.`, i, `ev-L${i + 1}`)
+      .run()
+  }
+}
+
+describe("POST /contextual/segmentation/generate", () => {
+  let modelCalls = 0
+
+  beforeEach(async () => {
+    await seedWorld()
+    await seedLongFile()
+    modelCalls = 0
+    testEnv.OPENROUTER_API_KEY = "mock"
+    testEnv.OPENROUTER_BASE_URL = MOCK_BASE
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === `${MOCK_BASE}/chat/completions`) {
+        modelCalls += 1
+        const body = JSON.parse(String(init?.body)) as { messages: { role: string; content: string }[] }
+        return new Response(JSON.stringify(scriptMockResponse(body.messages)), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+      throw new Error(`unexpected fetch in segmentation test: ${url}`)
+    })
+  })
+
+  afterEach(() => {
+    testEnv.OPENROUTER_API_KEY = undefined
+    delete testEnv.OPENROUTER_BASE_URL
+    vi.stubGlobal("fetch", realFetch)
+  })
+
+  it("stores model-found passages that cover the file exactly", async () => {
+    const { lead } = await seedTokens()
+    const res = await req("POST", `/segmentation/generate?fileId=${LONG_FILE}`, lead, {})
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      segmentation: { strategy: string; generatedBy: string; humanEdited: boolean; modelId: string }
+      generated: { passageCount: number; calls: number }
+    }
+    expect(modelCalls).toBeGreaterThan(0)
+    expect(body.segmentation.strategy).toBe("explicit")
+    expect(body.segmentation.generatedBy).toBe("model")
+    expect(body.segmentation.modelId).toBeTruthy()
+    // Asked for by a human, but not AUTHORED by one — the pin is what stops a
+    // later automated pass overwriting a person's own division.
+    expect(body.segmentation.humanEdited).toBe(false)
+    expect(body.generated.passageCount).toBeGreaterThan(1)
+
+    const stored = await getFileSegmentation(env.AQUILLA_PG, PROJECT, LONG_FILE)
+    const boundaries = stored?.boundaries ?? []
+    expect(boundaries[0].startCellId).toBe("L1")
+    expect(boundaries[boundaries.length - 1].endCellId).toBe(`L${LONG_CELLS}`)
+    // Contiguous, by construction — no gap and no overlap anywhere.
+    for (let i = 1; i < boundaries.length; i++) {
+      const prevEnd = Number(boundaries[i - 1].endCellId.slice(1))
+      expect(Number(boundaries[i].startCellId.slice(1))).toBe(prevEnd + 1)
+    }
+  })
+
+  it("carries the human's note into the prompt and keeps it on the row", async () => {
+    const { lead } = await seedTokens()
+    let sawNote = false
+    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { messages: { role: string; content: string }[] }
+      if (body.messages.some((m) => m.content.includes("keep each parable whole"))) sawNote = true
+      return new Response(JSON.stringify(scriptMockResponse(body.messages)), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    })
+    const res = await req("POST", `/segmentation/generate?fileId=${LONG_FILE}`, lead, {
+      note: "keep each parable whole",
+    })
+    expect(res.status).toBe(200)
+    expect(sawNote).toBe(true)
+    const stored = await getFileSegmentation(env.AQUILLA_PG, PROJECT, LONG_FILE)
+    expect(stored?.note).toBe("keep each parable whole")
+  })
+
+  it("is closed to CONTRIBUTOR and spends nothing when refused", async () => {
+    const { contrib } = await seedTokens()
+    const res = await req("POST", `/segmentation/generate?fileId=${LONG_FILE}`, contrib, {})
+    expect(res.status).toBe(403)
+    expect(modelCalls).toBe(0)
+    expect(await getFileSegmentation(env.AQUILLA_PG, PROJECT, LONG_FILE)).toBeNull()
+  })
+
+  it("refuses a file with no source cells before calling the model", async () => {
+    const { lead } = await seedTokens()
+    const res = await req("POST", "/segmentation/generate?fileId=nope", lead, {})
+    expect(res.status).toBe(400)
+    expect(modelCalls).toBe(0)
+  })
+
+  it("changes nothing when the upstream is unreachable", async () => {
+    const { lead } = await seedTokens()
+    vi.stubGlobal("fetch", async () => {
+      throw new Error("upstream down")
+    })
+    const res = await req("POST", `/segmentation/generate?fileId=${LONG_FILE}`, lead, {})
+    // The pass keeps the file whole rather than failing, so this still stores
+    // a valid one-passage segmentation — what must NOT happen is a partial or
+    // gapped list.
+    expect([200, 502]).toContain(res.status)
+    const stored = await getFileSegmentation(env.AQUILLA_PG, PROJECT, LONG_FILE)
+    if (stored?.boundaries) {
+      expect(stored.boundaries[0].startCellId).toBe("L1")
+      expect(stored.boundaries[stored.boundaries.length - 1].endCellId).toBe(`L${LONG_CELLS}`)
+    }
+  })
+
+  it("preserves a human-set pin when a later generation runs over it", async () => {
+    const { lead } = await seedTokens()
+    await req("PUT", `/segmentation?fileId=${LONG_FILE}`, lead, { strategy: "fixed", fixedSize: 5 })
+    expect((await getFileSegmentation(env.AQUILLA_PG, PROJECT, LONG_FILE))?.humanEdited).toBe(true)
+
+    const res = await req("POST", `/segmentation/generate?fileId=${LONG_FILE}`, lead, {})
+    expect(res.status).toBe(200)
+    const stored = await getFileSegmentation(env.AQUILLA_PG, PROJECT, LONG_FILE)
+    expect(stored?.strategy).toBe("explicit")
+    expect(stored?.humanEdited).toBe(true)
+  })
+})

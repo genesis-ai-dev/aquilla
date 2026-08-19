@@ -70,12 +70,26 @@ export interface SegmentationSnapshot {
   available: boolean
 }
 
+export interface GeneratedSegmentation {
+  segmentation: FileSegmentation
+  generated: {
+    passageCount: number
+    /** Model calls the pass actually made. */
+    calls: number
+    /** Non-fatal notes: a window that returned nothing, a truncated tail. */
+    notes: string[]
+  }
+}
+
 export interface SegmentationUpdate {
   strategy: SegmentationStrategy
   fixedSize?: number
   boundaries?: SegmentBoundary[]
   note?: string
 }
+
+/** Ceiling for the generation request: MAX_WINDOWS model calls end to end. */
+const GENERATE_TIMEOUT_MS = 180_000
 
 const UNAVAILABLE: SegmentationSnapshot = {
   segmentation: null,
@@ -141,4 +155,33 @@ export async function saveSegmentation(
   if (!res.ok) return throwFromResponse(res, "Could not save this file's segmentation.")
   const body = (await res.json()) as { segmentation: FileSegmentation }
   return body.segmentation
+}
+
+/**
+ * Have a fast-tier model find the passages and store them.
+ *
+ * Slow by design — one call per ~120 segments — so callers must show progress
+ * rather than assume this returns promptly. Nothing is written unless the pass
+ * produced a boundary list that covers the whole file.
+ */
+export async function generateSegmentation(
+  projectId: string,
+  fileId: string,
+  note?: string,
+): Promise<GeneratedSegmentation> {
+  const jwt = await requireJwt()
+  const res = await fetchWithTimeout(
+    `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}` +
+      `/contextual/segmentation/generate?fileId=${encodeURIComponent(fileId)}`,
+    {
+      method: "POST",
+      headers: authHeaders(jwt),
+      body: JSON.stringify(note?.trim() ? { note: note.trim() } : {}),
+    },
+    // The pass reads the whole file through a model; the default transport
+    // timeout is sized for ordinary reads and would abort a long book.
+    GENERATE_TIMEOUT_MS,
+  )
+  if (!res.ok) return throwFromResponse(res, "Could not find passages in this file.")
+  return (await res.json()) as GeneratedSegmentation
 }

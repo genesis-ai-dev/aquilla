@@ -1198,6 +1198,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // Table panes (Members roster) need the wider content well; form panes stay
   // intentional/narrow. Search flattens across groups → keep default width.
   const pageSize = activeGroup?.wide && !lowerQuery ? "wide" : "default"
+  const modalWidthClass = pageSize === "wide"
+    ? "max-w-[min(72rem,calc(100%-2rem))] sm:max-w-[min(72rem,calc(100%-2rem))]"
+    : "max-w-[min(42rem,calc(100%-2rem))] sm:max-w-[min(42rem,calc(100%-2rem))]"
 
   // Hints for index NavRows — short current-value summaries (org / Preferences pattern).
   const groupHints: Record<string, string> = {
@@ -1303,7 +1306,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       return (
         <Dialog open onOpenChange={(open) => { if (!open) closeSettings() }}>
           <DialogContent
-            className="h-[min(90dvh,56rem)] max-w-[min(72rem,calc(100%-2rem))] gap-0 p-0 sm:max-w-[min(72rem,calc(100%-2rem))]"
+            className={`h-[min(90dvh,56rem)] gap-0 p-0 ${modalWidthClass}`}
             data-testid="project-settings-dialog"
           >
             <DialogHeader className="sr-only">
@@ -2290,7 +2293,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const shell = modal ? (
     <Dialog open onOpenChange={(open) => { if (!open) closeSettings() }}>
       <DialogContent
-        className="h-[min(90dvh,56rem)] max-w-[min(72rem,calc(100%-2rem))] gap-0 p-0 sm:max-w-[min(72rem,calc(100%-2rem))]"
+        className={`h-[min(90dvh,56rem)] gap-0 p-0 ${modalWidthClass}`}
         data-testid="project-settings-dialog"
       >
         <DialogHeader className="sr-only">

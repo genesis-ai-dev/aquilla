@@ -21,6 +21,7 @@ import { ExternalLink, FileDiff } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { ChangesetItem } from "@/lib/agent/run-state"
@@ -32,6 +33,7 @@ import {
   type ChangesetApproval,
 } from "@/lib/agent/changeset-api"
 import {
+  changesetStatusBadgeClass,
   changesetStatusLabel,
   changesetStatusVariant,
   isTerminalChangesetStatus,
@@ -142,8 +144,11 @@ function LegacyChangesetCard({ item }: { item: ChangesetItem }) {
         <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
           {t("common.cellCount", { count: item.cellCount })}
         </Badge>
-        <Badge variant={changesetStatusVariant(status, approvedLocally)} className="px-1.5 py-0 text-[10px]">
-          {changesetStatusLabel(status, approvedLocally)}
+        <Badge
+          variant={changesetStatusVariant(status, approvedLocally)}
+          className={cn("px-1.5 py-0 text-[10px]", changesetStatusBadgeClass(status))}
+        >
+          {changesetStatusLabel(t, status, approvedLocally)}
         </Badge>
       </div>
 

@@ -6,10 +6,11 @@
  * - auth-worker `/api/v2/changesets/:id/{approval,approve,reject}` — the
  *   human-approval surface (session Bearer JWT). Shapes mirror
  *   auth-worker/src/routes/changeset-approvals.ts.
- * - sync-worker `/api/v1/changesets/:projectId/:changesetId/{commit,discard}`
- *   — the session commit surface (short-lived sync token, minted with the
- *   established `__project__` sentinel — same convention as useComments /
- *   outbox-flush / archive.triggerLinkSync). Response mirrors the external
+ * - sync-worker `/api/v1/changesets/:projectId` (list) and
+ *   `/api/v1/changesets/:projectId/:changesetId/{commit,discard}` — the
+ *   session surface (short-lived sync token, minted with the established
+ *   `__project__` sentinel — same convention as useComments / outbox-flush /
+ *   archive.triggerLinkSync). Responses mirror the external
  *   `changesetToResponse` (sync-worker/src/external/store.ts).
  *
  * Mirrors src/lib/agent/memory-api.ts conventions: AUTH_BASE +
@@ -30,6 +31,33 @@ import type {
 } from "@/components/changesets/ChangeList"
 
 // ── Types (approval GET — changeset-approvals.ts response construction) ─────
+
+/** The changeset status vocabulary, mirroring sync-worker
+ *  `CHANGESET_STATUSES` (src/external/store.ts) plus AQU-CMDREG-P1's
+ *  `superseded` (docs/COMMAND-REGISTRY-P1.md §1).
+ *
+ *  `superseded` is the HEALTHY end-state: the plan's outcome already exists
+ *  because a person did the work by hand. It is never folded into `stale`
+ *  (preconditions drifted some other way) or `expired` (nobody acted) — those
+ *  count problems, this one doesn't. */
+export const CHANGESET_STATUSES = [
+  "staged",
+  "committing",
+  "committed",
+  "discarded",
+  "stale",
+  "superseded",
+  "expired",
+] as const
+
+export type ChangesetStatusName = (typeof CHANGESET_STATUSES)[number]
+
+/** Server statuses are cast, not parsed, so display helpers still take a plain
+ *  `string` — an older/newer worker naming a status we don't know must render
+ *  as unknown-but-pending, never crash a review card. */
+export function isChangesetStatusName(value: string): value is ChangesetStatusName {
+  return (CHANGESET_STATUSES as readonly string[]).includes(value)
+}
 
 /** One summary entry per staged event kind (COMMAND-REGISTRY §2 EmitEvents).
  *  `testimony: true` marks kinds that need per-item human confirmation. */
@@ -54,8 +82,12 @@ export interface ChangesetApproval {
   changesetId: string
   projectId: string
   projectName: string | null
-  status: string
+  status: ChangesetStatusName
   autonomyMode: string
+  /** Who the changeset is ROUTED to (COMMAND-REGISTRY-P1 §2.2). Absent on
+   *  older servers, `null` when unassigned. Routing never resolves anything:
+   *  an assigned changeset is still `staged` and still needs a human. */
+  assignedToUserId?: string | null
   summary: ChangesetApprovalSummary
   /** Per-cell before/after detail (SetTranslation commands), capped server-side. */
   changes?: ChangesetChanges
@@ -76,7 +108,7 @@ export interface ChangesetApproveResult {
 /** POST /:id/reject response. */
 export interface ChangesetRejectResult {
   changesetId: string
-  status: string
+  status: ChangesetStatusName
 }
 
 /** Execution receipt recorded on commit (sync-worker external types —
@@ -101,7 +133,7 @@ export interface ChangesetStatus {
   createdByUserId: string
   credentialId: string
   autonomyMode: string
-  status: string
+  status: ChangesetStatusName
   commands: unknown
   preconditions: unknown
   summary: ChangesetApprovalSummary
@@ -277,4 +309,57 @@ export async function discardChangeset(
   return unwrapChangeset(
     (await res.json()) as ChangesetStatus | { changeset: ChangesetStatus },
   )
+}
+
+// ── Pending inbox (sync-worker list route, COMMAND-REGISTRY-P1 §3.3) ────────
+
+/** How many staged changesets the server surfaces by default; the rest come
+ *  back as `heldCount`, never as rows. Mirrored here so a list surface can say
+ *  what it is showing without re-deriving the cap. */
+export const SURFACED_CAP = 3
+
+/** One row of the list route — `changesetToResponse` plus the approval URL the
+ *  route appends (sync-worker/src/external/session-routes.ts handleList). */
+export interface ChangesetListItem extends ChangesetStatus {
+  approvalUrl: string
+}
+
+/** GET /api/v1/changesets/:projectId response. `heldCount` is the number of
+ *  staged changesets ranked BELOW the surfaced ones — still `staged`, held
+ *  rather than closed, so a later supersession sweep can still close them.
+ *  `surfacedCap` is the server's cap for this view, echoed so a list can say
+ *  what it is showing without assuming the constant below. */
+export interface ChangesetListPage {
+  changesets: ChangesetListItem[]
+  heldCount: number
+  surfacedCap: number
+}
+
+/** List a project's changesets. The server ranks them by blast radius and, in
+ *  the default view, surfaces only `SURFACED_CAP` of them; `limit` pages
+ *  further down that ranking. `heldCount` always reports the staged rows the
+ *  returned page still leaves out. */
+export async function listProjectChangesets(
+  jwt: string,
+  projectId: string,
+  opts: { status?: ChangesetStatusName; limit?: number } = {},
+): Promise<ChangesetListPage> {
+  const token = await mintProjectSyncToken(jwt, projectId)
+  const query = new URLSearchParams()
+  if (opts.status) query.set("status", opts.status)
+  if (opts.limit !== undefined) query.set("limit", String(opts.limit))
+  const qs = query.toString()
+  const res = await fetchWithTimeout(
+    `${syncWorkerHttpOrigin()}/api/v1/changesets/${encodeURIComponent(projectId)}${qs ? `?${qs}` : ""}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!res.ok) return parseErrorAndThrow(res, "list changesets failed")
+  const body = (await res.json()) as Partial<ChangesetListPage>
+  return {
+    changesets: body.changesets ?? [],
+    // Both absent on a pre-P1 worker: it caps nothing and holds nothing back,
+    // so the honest client-side reading is "everything is surfaced".
+    heldCount: typeof body.heldCount === "number" ? body.heldCount : 0,
+    surfacedCap: typeof body.surfacedCap === "number" ? body.surfacedCap : SURFACED_CAP,
+  }
 }

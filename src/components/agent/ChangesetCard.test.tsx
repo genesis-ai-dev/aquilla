@@ -13,19 +13,46 @@
  * load → diffs, Approve & apply (approve then sync-worker commit, in order),
  * execution receipt + onApplied revalidation seam, per-item testimony gating,
  * reject, and the stale/expired drift surface with Refresh. Fixtures mirror
- * auth-worker/src/routes/changeset-approvals.ts (approval lines 270-281,
- * approve 361-365, reject 402) and sync-worker/src/external/store.ts
- * changesetToResponse (98-116) + types.ts ChangesetReceipt (113-121).
+ * auth-worker/src/routes/changeset-approvals.ts (approval lines 143-156,
+ * approve 234-238, reject 273) and sync-worker/src/external/store.ts
+ * changesetToResponse (166-184) + types.ts ChangesetReceipt (140-148).
+ *
+ * AQU-CMDREG-P1 (docs/COMMAND-REGISTRY-P1.md §1/§2.2/§3.3/§5): the
+ * `superseded` outcome, the `assignedToUserId` routing line (approval literal
+ * line 152), and the held-count line a capped pending list ends with
+ * (sync-worker session-routes.ts handleList 142-151).
  */
 
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ChangesetItem } from "@/lib/agent/run-state"
 import { ChangesetCard } from "./ChangesetCard"
-import { testimonyEntriesFor } from "@/lib/agent/changeset-review"
+import { ChangesetHeldNotice } from "./ChangesetHeldNotice"
+import {
+  changesetStatusBadgeClass,
+  changesetStatusLabel,
+  changesetStatusVariant,
+  isTerminalChangesetStatus,
+  testimonyEntriesFor,
+} from "@/lib/agent/changeset-review"
+import { t as standaloneT } from "@/lib/i18n/standalone"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: vi.fn(() => ({ session: { jwt: "test-jwt", username: "alice" }, loading: false })),
+}))
+
+/** Roster the card resolves an assignee's name against. Mutable so one test
+ *  can name the person and the rest can leave it empty (the card then falls
+ *  back to the raw user id, exactly as it does when org policy hides the
+ *  roster). Read lazily inside the hook, so no TDZ against the hoisted mock. */
+let rosterMembers: { userId: number; username: string }[] = []
+vi.mock("@/hooks/useProjectMembers", () => ({
+  useProjectMembers: vi.fn(() => ({
+    members: rosterMembers,
+    isLoading: false,
+    error: null,
+    rosterHidden: false,
+  })),
 }))
 
 function item(overrides: Partial<ChangesetItem> = {}): ChangesetItem {
@@ -206,6 +233,25 @@ describe("ChangesetCard", () => {
     }
   })
 
+  it("treats a superseded legacy frame as terminal: labelled, unactionable, and it stops polling", async () => {
+    // Adding `superseded` to the terminal set is the one behaviour change the
+    // legacy card sees (P1 §1) — before it, this status polled forever.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const fetchMock = mockApproval("superseded")
+      vi.stubGlobal("fetch", fetchMock)
+      render(<ChangesetCard item={item()} />)
+
+      await waitFor(() => expect(screen.getByText("Already done")).toBeInTheDocument())
+      expect(screen.queryByRole("button", { name: /Approve/ })).not.toBeInTheDocument()
+      const callsAtTerminal = fetchMock.mock.calls.length
+      await vi.advanceTimersByTimeAsync(15000)
+      expect(fetchMock.mock.calls.length).toBe(callsAtTerminal)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("never shows the live-flow Approve & apply for a legacy frame (regression)", async () => {
     render(<ChangesetCard item={item()} />)
     await screen.findByRole("button", { name: /^Approve$/ })
@@ -234,8 +280,9 @@ function liveItem(overrides: Partial<ChangesetItem> = {}): ChangesetItem {
   }
 }
 
-/** Mirrors auth-worker changeset-approvals.ts GET response (lines 270-281),
- *  with per-cell rows shaped by buildChangeDetails (lines 195-213). */
+/** Mirrors auth-worker changeset-approvals.ts GET response (lines 143-156),
+ *  with per-cell rows shaped by buildChangeDetails. `assignedToUserId` is the
+ *  P1 §2.2 field (literal line 152) — always sent, null when unassigned. */
 function liveApproval(overrides: Record<string, unknown> = {}) {
   return {
     changesetId: "cs-9",
@@ -243,6 +290,7 @@ function liveApproval(overrides: Record<string, unknown> = {}) {
     projectName: "Blackfoot",
     status: "staged",
     autonomyMode: "ask",
+    assignedToUserId: null,
     summary: { translationsAdded: 1, translationsModified: 1, warnings: [] },
     changes: {
       total: 2,
@@ -576,5 +624,134 @@ describe("testimonyEntriesFor", () => {
       approvalWith([{ kind: "target.cell.commit", count: 4 }]),
     )
     expect(entries).toEqual([])
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// AQU-CMDREG-P1 — supersession, routing, and the held count (§1/§2.2/§3.3/§5).
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("changeset status helpers (P1 §1)", () => {
+  it("gives superseded its own label — never stale's", () => {
+    expect(changesetStatusLabel(standaloneT, "superseded", false)).toBe("Already done")
+    expect(changesetStatusLabel(standaloneT, "stale", false)).toBe("Stale")
+    expect(changesetStatusLabel(standaloneT, "superseded", false)).not.toBe(
+      changesetStatusLabel(standaloneT, "stale", false),
+    )
+  })
+
+  it("styles superseded as a healthy outcome, not as the stale problem", () => {
+    // stale/expired are the unhealthy terminals: bare outline chips.
+    expect(changesetStatusVariant("stale", false)).toBe("outline")
+    expect(changesetStatusVariant("expired", false)).toBe("outline")
+    // superseded joins committed in the healthy group…
+    expect(changesetStatusVariant("superseded", false)).toBe("default")
+    // …and carries its own tone class, so it doesn't read as work this card did.
+    expect(changesetStatusBadgeClass("superseded")).toContain("emerald")
+    expect(changesetStatusBadgeClass("stale")).toBe("")
+    expect(changesetStatusBadgeClass("committed")).toBe("")
+  })
+
+  it("treats superseded as terminal — nothing left to act on", () => {
+    expect(isTerminalChangesetStatus("superseded")).toBe(true)
+    expect(isTerminalChangesetStatus("staged")).toBe(false)
+  })
+})
+
+describe("ChangesetCard — superseded (P1 §1/§5)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it("renders the Already done chip with the healthy tone and explains why", async () => {
+    vi.stubGlobal("fetch", routedFetch({ approval: () => json(liveApproval({ status: "superseded" })) }))
+    const { container } = render(<ChangesetCard item={liveItem()} />)
+
+    const chip = await screen.findByText("Already done")
+    expect(chip.className).toContain("emerald")
+    expect(screen.queryByText("Stale")).not.toBeInTheDocument()
+    expect(container.querySelector('[data-changeset-status="superseded"]')).not.toBeNull()
+    expect(
+      screen.getByText(/already made this change by hand/i),
+    ).toBeInTheDocument()
+  })
+
+  it("offers no Approve action for a superseded changeset", async () => {
+    vi.stubGlobal("fetch", routedFetch({ approval: () => json(liveApproval({ status: "superseded" })) }))
+    render(<ChangesetCard item={liveItem()} />)
+
+    await screen.findByText("Already done")
+    expect(screen.queryByRole("button", { name: /Approve/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Reject/ })).not.toBeInTheDocument()
+    // Terminal: not a drift the reviewer can refresh their way out of.
+    expect(screen.queryByRole("button", { name: /Refresh/ })).not.toBeInTheDocument()
+  })
+
+  it("keeps the stale chip untinted, so the two outcomes never look alike", async () => {
+    vi.stubGlobal("fetch", routedFetch({ approval: () => json(liveApproval({ status: "stale" })) }))
+    render(<ChangesetCard item={liveItem()} />)
+
+    const chip = await screen.findByText("Stale")
+    expect(chip.className).not.toContain("emerald")
+    expect(screen.queryByText("Already done")).not.toBeInTheDocument()
+  })
+})
+
+describe("ChangesetCard — assignment (P1 §2.2)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    rosterMembers = []
+  })
+
+  it("names the assignee and says routing decides nothing", async () => {
+    rosterMembers = [{ userId: 77, username: "priya" }]
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({ approval: () => json(liveApproval({ assignedToUserId: "77" })) }),
+    )
+    render(<ChangesetCard item={liveItem()} />)
+
+    expect(await screen.findByText("Routed to priya")).toBeInTheDocument()
+    expect(screen.getByText(/approves nothing/i)).toBeInTheDocument()
+    // Assignment never changes status — it is still awaiting a person.
+    expect(screen.getByText("Pending review")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Approve & apply/ })).toBeInTheDocument()
+  })
+
+  it("falls back to the user id when the roster can't name them", async () => {
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({ approval: () => json(liveApproval({ assignedToUserId: "77" })) }),
+    )
+    render(<ChangesetCard item={liveItem()} />)
+    expect(await screen.findByText("Routed to 77")).toBeInTheDocument()
+  })
+
+  it("renders no routing line when the changeset is unassigned", async () => {
+    vi.stubGlobal("fetch", routedFetch({}))
+    render(<ChangesetCard item={liveItem()} />)
+
+    await screen.findByRole("button", { name: /Approve & apply/ })
+    expect(screen.queryByText(/Routed to/)).not.toBeInTheDocument()
+  })
+})
+
+describe("ChangesetHeldNotice (P1 §3.3)", () => {
+  it("reports the held remainder as one line, not as rows", () => {
+    const { container } = render(<ChangesetHeldNotice heldCount={2} />)
+    expect(screen.getByText("2 more held")).toBeInTheDocument()
+    // Held, not closed — the line has to say so, or it reads as discarded.
+    expect(screen.getByText(/still staged/i)).toBeInTheDocument()
+    expect(container.querySelector('[data-held-count="2"]')).not.toBeNull()
+  })
+
+  it("says '1 more held' for a single held changeset", () => {
+    render(<ChangesetHeldNotice heldCount={1} />)
+    expect(screen.getByText("1 more held")).toBeInTheDocument()
+  })
+
+  it("renders nothing when the list is showing everything", () => {
+    const { container } = render(<ChangesetHeldNotice heldCount={0} />)
+    expect(container).toBeEmptyDOMElement()
   })
 })

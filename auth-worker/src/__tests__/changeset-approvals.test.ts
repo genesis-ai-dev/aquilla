@@ -26,6 +26,24 @@ async function seedProject(id: string, name: string, createdBy: number): Promise
     .run()
 }
 
+async function grant(projectId: string, userId: number, roleLevel: number): Promise<void> {
+  await env.AQUILLA_PG.prepare(
+    "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES (?, ?, ?, ?)",
+  )
+    .bind(projectId, userId, roleLevel, userId)
+    .run()
+}
+
+/** A one-cell translation plan: floor CONTRIBUTOR (400) via requiredRoleForCommand. */
+const SET_TRANSLATION_PLAN = [
+  { kind: "SetTranslation", fileId: "file-1", cellId: "c-a", value: "New draft" },
+]
+
+/** A structural plan: floor PROJECT_LEAD (500). */
+const PLAN_IMPORT_PLAN = [
+  { kind: "PlanImport", fileName: "genesis.usfm", fileType: "usfm", cells: [{ content: "v1" }] },
+]
+
 /** api_credentials.id is a real UUID column — mint one and return it. */
 async function seedCredential(userId: number): Promise<string> {
   const id = crypto.randomUUID()
@@ -307,7 +325,7 @@ describe("GET /api/v2/changesets/:id/approval", () => {
     expect(body.error.code).toBe("not_found")
   })
 
-  it("403s for a user who doesn't own the changeset's credential", async () => {
+  it("403s a caller with no role on the changeset's project", async () => {
     await seedUser(1, "alice")
     await seedUser(2, "mallory")
     await seedProject("proj-1", "Blackfoot", 1)
@@ -366,7 +384,7 @@ describe("POST /api/v2/changesets/:id/approve", () => {
     })
   })
 
-  it("403s when the caller isn't the changeset's owning user", async () => {
+  it("403s a caller with no role on the changeset's project", async () => {
     await seedUser(1, "alice")
     await seedUser(2, "mallory")
     await seedProject("proj-1", "Blackfoot", 1)
@@ -554,5 +572,318 @@ describe("POST /api/v2/changesets/:id/reject", () => {
     expect(res.status).toBe(409)
     const body = (await res.json()) as { error: { code: string } }
     expect(body.error.code).toBe("validation_failed")
+  })
+})
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-CMDREG-P1 §2.1 — approval is AUTHORITY, not identity.
+//
+// The gate is the caller's LIVE project role vs the floor recomputed from the
+// changeset's stored commands. The creator is neither privileged nor excluded:
+// a colleague who holds the floor may approve, and a creator whose role has
+// since dropped may not. An agent still cannot approve anything — every route
+// here needs a browser session.
+// ──────────────────────────────────────────────────────────────────────────
+
+describe("changeset approval authority (role floor, not creator identity)", () => {
+  /** alice (1) creates the project (creator ⇒ 700) and stages the plan;
+   *  bob (2), carol (3) and dave (4) get explicit grants; mallory (9) none. */
+  async function seedCast(commands: unknown[]): Promise<string> {
+    await seedUser(1, "alice")
+    await seedUser(2, "bob")
+    await seedUser(3, "carol")
+    await seedUser(4, "dave")
+    await seedUser(9, "mallory")
+    await seedProject("proj-1", "Blackfoot", 1)
+    await grant("proj-1", 2, 400) // contributor
+    await grant("proj-1", 3, 300) // reviewer
+    await grant("proj-1", 4, 500) // project lead
+    const credId = await seedCredential(1)
+    await seedChangeset({
+      id: "cs-1",
+      projectId: "proj-1",
+      createdByUserId: 1,
+      credentialId: credId,
+      commands,
+    })
+    return credId
+  }
+
+  it("lets a non-creator who holds the floor view the approval", async () => {
+    await seedCast(SET_TRANSLATION_PLAN)
+
+    const res = await app.request(
+      "/api/v2/changesets/cs-1/approval",
+      { method: "GET", headers: authHeader(await jwtFor("bob")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { changesetId: string; assignedToUserId: string | null }
+    expect(body.changesetId).toBe("cs-1")
+    expect(body.assignedToUserId).toBeNull()
+  })
+
+  it("lets a non-creator who holds the floor approve — stamping the approving human", async () => {
+    const credId = await seedCast(SET_TRANSLATION_PLAN)
+
+    const res = await app.request(
+      "/api/v2/changesets/cs-1/approve",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("bob")),
+        body: JSON.stringify({ digest: DEFAULT_DIGEST }),
+      },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { confirmationId: string; expiresAt: string }
+    expect(body.confirmationId).toBeTruthy()
+
+    // The confirmation records the human who approved (bob), on the
+    // changeset's own credential — unchanged minting behaviour.
+    const row = await env.AQUILLA_PG.prepare(
+      "SELECT user_id, credential_id, digest, consumed_at FROM changeset_confirmations WHERE id = ?",
+    )
+      .bind(body.confirmationId)
+      .first<{ user_id: string; credential_id: string; digest: string; consumed_at: string | null }>()
+    expect(row).toMatchObject({
+      user_id: "2",
+      credential_id: credId,
+      digest: DEFAULT_DIGEST,
+      consumed_at: null,
+    })
+  })
+
+  it("still requires the digest from a non-creator approver", async () => {
+    await seedCast(SET_TRANSLATION_PLAN)
+
+    const res = await app.request(
+      "/api/v2/changesets/cs-1/approve",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("bob")),
+        body: JSON.stringify({ digest: "sha256:wrong" }),
+      },
+      env,
+    )
+    expect(res.status).toBe(409)
+    const body = (await res.json()) as { error: { code: string; details?: { code: string } } }
+    expect(body.error.code).toBe("validation_failed")
+    expect(body.error.details?.code).toBe("digest_mismatch")
+
+    const count = await env.AQUILLA_PG.prepare(
+      "SELECT COUNT(*)::int AS n FROM changeset_confirmations WHERE changeset_id = ?",
+    )
+      .bind("cs-1")
+      .first<{ n: number }>()
+    expect(count?.n).toBe(0)
+  })
+
+  it("lets a non-creator who holds the floor reject", async () => {
+    await seedCast(SET_TRANSLATION_PLAN)
+
+    const res = await app.request(
+      "/api/v2/changesets/cs-1/reject",
+      { method: "POST", headers: authHeader(await jwtFor("bob")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const row = await env.AQUILLA_PG.prepare("SELECT status FROM changesets WHERE id = ?")
+      .bind("cs-1")
+      .first<{ status: string }>()
+    expect(row?.status).toBe("discarded")
+  })
+
+  it("403s a member below the floor on view, approve and reject", async () => {
+    await seedCast(SET_TRANSLATION_PLAN) // floor 400; carol is 300
+
+    const jwt = await jwtFor("carol")
+    const view = await app.request(
+      "/api/v2/changesets/cs-1/approval",
+      { method: "GET", headers: authHeader(jwt) },
+      env,
+    )
+    expect(view.status).toBe(403)
+    const viewBody = (await view.json()) as { error: { code: string; details?: { requiredRole: number } } }
+    expect(viewBody.error.code).toBe("permission_denied")
+    expect(viewBody.error.details?.requiredRole).toBe(400)
+
+    const approve = await app.request(
+      "/api/v2/changesets/cs-1/approve",
+      { method: "POST", headers: authHeader(jwt), body: JSON.stringify({ digest: DEFAULT_DIGEST }) },
+      env,
+    )
+    expect(approve.status).toBe(403)
+
+    const reject = await app.request(
+      "/api/v2/changesets/cs-1/reject",
+      { method: "POST", headers: authHeader(jwt) },
+      env,
+    )
+    expect(reject.status).toBe(403)
+
+    const row = await env.AQUILLA_PG.prepare("SELECT status FROM changesets WHERE id = ?")
+      .bind("cs-1")
+      .first<{ status: string }>()
+    expect(row?.status).toBe("staged")
+  })
+
+  it("raises the floor for a structural plan — PlanImport needs PROJECT_LEAD", async () => {
+    await seedCast(PLAN_IMPORT_PLAN)
+
+    const contributor = await app.request(
+      "/api/v2/changesets/cs-1/approval",
+      { method: "GET", headers: authHeader(await jwtFor("bob")) },
+      env,
+    )
+    expect(contributor.status).toBe(403)
+    const denied = (await contributor.json()) as { error: { details?: { requiredRole: number } } }
+    expect(denied.error.details?.requiredRole).toBe(500)
+
+    const lead = await app.request(
+      "/api/v2/changesets/cs-1/approval",
+      { method: "GET", headers: authHeader(await jwtFor("dave")) },
+      env,
+    )
+    expect(lead.status).toBe(200)
+  })
+
+  it("403s the CREATOR once their live role drops below the floor", async () => {
+    // dave (4) owns the project; bob (2) staged the plan and is only a
+    // REVIEWER now — the whole reason the check is live rather than stored.
+    await seedUser(2, "bob")
+    await seedUser(4, "dave")
+    await seedProject("proj-1", "Blackfoot", 4)
+    await grant("proj-1", 2, 300)
+    const credId = await seedCredential(2)
+    await seedChangeset({
+      id: "cs-1",
+      projectId: "proj-1",
+      createdByUserId: 2,
+      credentialId: credId,
+      commands: SET_TRANSLATION_PLAN,
+    })
+
+    const res = await app.request(
+      "/api/v2/changesets/cs-1/approve",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("bob")),
+        body: JSON.stringify({ digest: DEFAULT_DIGEST }),
+      },
+      env,
+    )
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { error: { code: string } }
+    expect(body.error.code).toBe("permission_denied")
+  })
+
+  it("403s an OWNER of a different project (cross-tenant regression)", async () => {
+    await seedCast(SET_TRANSLATION_PLAN)
+    // mallory owns proj-2 outright; that buys her nothing on proj-1's plan.
+    await seedProject("proj-2", "Other", 9)
+
+    const res = await app.request(
+      "/api/v2/changesets/cs-1/approval",
+      { method: "GET", headers: authHeader(await jwtFor("mallory")) },
+      env,
+    )
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { error: { code: string } }
+    expect(body.error.code).toBe("permission_denied")
+  })
+
+  it("404s an absent changeset without leaking whether one exists elsewhere", async () => {
+    await seedCast(SET_TRANSLATION_PLAN)
+
+    const res = await app.request(
+      "/api/v2/changesets/cs-nope/approval",
+      { method: "GET", headers: authHeader(await jwtFor("bob")) },
+      env,
+    )
+    expect(res.status).toBe(404)
+    const body = (await res.json()) as { error: { code: string } }
+    expect(body.error.code).toBe("not_found")
+  })
+
+  it("keeps the creator rule for a project-creation plan (the project does not exist yet)", async () => {
+    // A CreateProject changeset is filed under a project id that has no row
+    // until commit, so no project role can resolve against it — a floor check
+    // alone would deny everyone, including the person who staged it.
+    await seedUser(1, "alice")
+    await seedUser(9, "mallory")
+    const credId = await seedCredential(1)
+    await seedChangeset({
+      id: "cs-new",
+      projectId: "proj-not-yet",
+      createdByUserId: 1,
+      credentialId: credId,
+      commands: [{ kind: "CreateProject", name: "Fresh", projectId: "proj-not-yet" }],
+    })
+
+    const creator = await app.request(
+      "/api/v2/changesets/cs-new/approval",
+      { method: "GET", headers: authHeader(await jwtFor("alice")) },
+      env,
+    )
+    expect(creator.status).toBe(200)
+    const body = (await creator.json()) as { projectId: string; projectName: string | null }
+    expect(body).toMatchObject({ projectId: "proj-not-yet", projectName: null })
+
+    const stranger = await app.request(
+      "/api/v2/changesets/cs-new/approval",
+      { method: "GET", headers: authHeader(await jwtFor("mallory")) },
+      env,
+    )
+    expect(stranger.status).toBe(403)
+    const denied = (await stranger.json()) as { error: { code: string; message: string } }
+    expect(denied.error.code).toBe("permission_denied")
+    expect(denied.error.message).toMatch(/project-creation plan/i)
+  })
+
+  it("lets the creator of a project-creation plan approve and mint the confirmation", async () => {
+    await seedUser(1, "alice")
+    const credId = await seedCredential(1)
+    await seedChangeset({
+      id: "cs-new",
+      projectId: "proj-not-yet",
+      createdByUserId: 1,
+      credentialId: credId,
+      commands: [{ kind: "CreateProject", name: "Fresh", projectId: "proj-not-yet" }],
+    })
+
+    const res = await app.request(
+      "/api/v2/changesets/cs-new/approve",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("alice")),
+        body: JSON.stringify({ digest: DEFAULT_DIGEST }),
+      },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { confirmationId: string }
+    expect(body.confirmationId).toBeTruthy()
+  })
+
+  it("fails CLOSED when the stored commands are unreadable — owner only", async () => {
+    await seedCast([{ kind: "NotACommandKind" }])
+    await grant("proj-1", 9, 600) // mallory: maintainer, still below OWNER
+
+    const maintainer = await app.request(
+      "/api/v2/changesets/cs-1/approval",
+      { method: "GET", headers: authHeader(await jwtFor("mallory")) },
+      env,
+    )
+    expect(maintainer.status).toBe(403)
+    const denied = (await maintainer.json()) as { error: { details?: { requiredRole: number } } }
+    expect(denied.error.details?.requiredRole).toBe(700)
+
+    const owner = await app.request(
+      "/api/v2/changesets/cs-1/approval",
+      { method: "GET", headers: authHeader(await jwtFor("alice")) },
+      env,
+    )
+    expect(owner.status).toBe(200)
   })
 })

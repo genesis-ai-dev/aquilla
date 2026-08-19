@@ -90,6 +90,16 @@ export async function markChangesetStale(db: AquillaDb, changesetId: string): Pr
     .run()
 }
 
+/** Mark a changeset superseded (P1 §3.2) — the drift that stopped this commit
+ *  is the plan's own end-state, already applied by hand. Same guard as
+ *  markChangesetStale so a concurrent committer's terminal write always wins. */
+export async function markChangesetSuperseded(db: AquillaDb, changesetId: string): Promise<void> {
+  await db
+    .prepare(`UPDATE changesets SET status = 'superseded' WHERE id = ? AND status IN ('staged','committing')`)
+    .bind(changesetId)
+    .run()
+}
+
 /**
  * Shared staged→committing gate sequence for receipt-only commits. There are no
  * per-cell preconditions, so no drift re-check — the CreateProject id-collision

@@ -173,8 +173,20 @@ export interface StoredChangeset {
   autonomyMode: 'ask' | 'act'
   /** `committing` is the mid-commit state (W1-B, §4): set when apply starts,
    *  flipped to `committed` at the end. A changeset found in `committing` is a
-   *  crash-retry — commit re-enters it, re-posts the stored ids, and finishes. */
-  status: 'staged' | 'committing' | 'committed' | 'discarded' | 'stale' | 'expired'
+   *  crash-retry — commit re-enters it, re-posts the stored ids, and finishes.
+   *  `superseded` (P1 §1) is a HEALTHY terminal outcome: the plan's end-state
+   *  already existed because a human did the work. It is never `stale`
+   *  (preconditions drifted some other way) and never `expired` (nobody
+   *  acted) — merging it into either would inflate an unhealthy count with a
+   *  healthy case. */
+  status:
+    | 'staged'
+    | 'committing'
+    | 'committed'
+    | 'discarded'
+    | 'stale'
+    | 'superseded'
+    | 'expired'
   commands: Command[]
   preconditions: CellPrecondition[]
   summary: ChangesetSummary

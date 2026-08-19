@@ -31,7 +31,10 @@ import {
   writeCommittedReceipt,
   type EventsWriteResponse,
 } from './commit-gates'
+import { changesetAuthorityDenied } from './authority'
 import { resolveCellStates } from './preconditions'
+import { isPlanSatisfied } from './supersede'
+import { resolveSupersedeState } from './supersede-state'
 import { compilePlanImport } from './import-manifest'
 import { loadChangeset } from './store'
 import { assertCredentialScope, mintInternalSyncToken } from './token-bridge'
@@ -72,10 +75,11 @@ function bearer(request: Request): string | null {
 
 /** Who is committing, under which ownership rule, on which channel (AQU-926).
  *  'credential' = PAT rule (the credential that staged the changeset);
- *  'creator' = session rule (the human who created it, via sync token). */
+ *  'project-floor' = session rule (P1 §2.3: any human whose LIVE project role
+ *  meets the plan's required floor, not only its creator). */
 export interface CommitCaller {
   cred: ApiCredentialContext
-  ownership: 'credential' | 'creator'
+  ownership: 'credential' | 'project-floor'
   channel: ProvenanceChannel
 }
 
@@ -123,17 +127,20 @@ export async function commitChangesetCore(
   const cs = await loadChangeset(db, projectId, id)
   if (!cs) return errorResponse('not_found', `changeset ${id} not found`)
 
-  // Ownership: a PAT changeset is committed by the credential that staged it;
-  // a session commit requires the changeset's creating USER (the session
-  // holder) — which also lets a user drive their own PAT-staged changeset
-  // from the app (same human authority; confirmations still key on the
-  // changeset's own credential_id).
+  // Ownership: a PAT changeset is committed by the credential that staged it
+  // (frozen external rule). A session commit is gated on the plan's required
+  // role floor (P1 §2.3) — delegated approval, so a lead can clear a
+  // teammate's inbox, and a user can still drive their own PAT-staged
+  // changeset from the app. Confirmations still key on the changeset's own
+  // credential_id, so widening WHO approves never widens WHETHER approval is
+  // required.
   if (caller.ownership === 'credential') {
     if (cred.credentialId !== cs.credentialId) {
       return errorResponse('permission_denied', 'credential did not create this changeset')
     }
-  } else if (String(cs.createdByUserId) !== String(cred.userId)) {
-    return errorResponse('permission_denied', 'only the changeset creator may commit it')
+  } else {
+    const denied = await changesetAuthorityDenied(db, cs, cred)
+    if (denied) return denied
   }
 
   // ── Status gate ──────────────────────────────────────────────────────────
@@ -148,7 +155,18 @@ export async function commitChangesetCore(
     return errorResponse('validation_failed', 'changeset has expired')
   }
   if (cs.status === 'stale') {
-    return errorResponse('plan_stale', 'changeset is stale — prepare a new plan')
+    return errorResponse('plan_stale', 'changeset is stale — prepare a new plan', { status: 'stale' })
+  }
+  // P1 §3.2: superseded is terminal like stale, and shares the FROZEN wire code
+  // (plan_stale). Only the stored status and the details discriminator differ,
+  // so a client can tell "already done by hand" from "the plan no longer
+  // describes reality" without a new error code.
+  if (cs.status === 'superseded') {
+    return errorResponse(
+      'plan_stale',
+      'changeset was superseded — its intended end-state already exists',
+      { status: 'superseded' },
+    )
   }
   // status is 'staged' (first attempt) or 'committing' (crash-retry, W1-B §4)
   // from here.
@@ -227,11 +245,28 @@ export async function commitChangesetCore(
       }
     }
     if (drift.length > 0) {
+      // P1 §3.2: drift is not automatically decay. Ask the deterministic
+      // predicate whether the plan's end-state ALREADY holds — a human who did
+      // the work by hand leaves a HEALTHY outcome (superseded), not a stale
+      // plan. The predicate is biased to false, so anything it cannot check
+      // cleanly still lands as stale. The wire code stays plan_stale in both
+      // cases (the external error contract is frozen); the stored status and
+      // the details discriminator are what differ.
+      const live = await resolveSupersedeState(db, projectId, cs.commands, cred.username)
+      const superseded = isPlanSatisfied(cs.commands, live)
       await db
-        .prepare(`UPDATE changesets SET status = 'stale' WHERE id = ? AND status IN ('staged','committing')`)
-        .bind(id)
+        .prepare(
+          `UPDATE changesets SET status = ? WHERE id = ? AND status IN ('staged','committing')`,
+        )
+        .bind(superseded ? 'superseded' : 'stale', id)
         .run()
-      return errorResponse('plan_stale', 'project state changed since prepare', { drift })
+      return errorResponse(
+        'plan_stale',
+        superseded
+          ? 'plan already satisfied — its end-state exists in live state'
+          : 'project state changed since prepare',
+        { drift, status: superseded ? 'superseded' : 'stale' },
+      )
     }
 
     // races-F1 (burn-without-apply): flip to 'committing' FIRST — this guarded

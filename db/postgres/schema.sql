@@ -884,7 +884,7 @@ CREATE TABLE IF NOT EXISTS changesets (
     credential_id      TEXT NOT NULL,
     autonomy_mode      TEXT NOT NULL CHECK (autonomy_mode IN ('ask', 'act')),
     status             TEXT NOT NULL DEFAULT 'staged'
-                         CHECK (status IN ('staged', 'committing', 'committed', 'discarded', 'stale', 'expired')),
+                         CHECK (status IN ('staged', 'committing', 'committed', 'discarded', 'stale', 'superseded', 'expired')),
     commands           JSONB NOT NULL,            -- normalized domain commands
     preconditions      JSONB NOT NULL,            -- per-cell head/source pins resolved at prepare
     summary            JSONB NOT NULL,            -- server-computed effect summary
@@ -893,7 +893,8 @@ CREATE TABLE IF NOT EXISTS changesets (
     confirmation_id    TEXT,                      -- consumed ask-mode approval (after commit)
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at         TIMESTAMPTZ NOT NULL,
-    committed_at       TIMESTAMPTZ
+    committed_at       TIMESTAMPTZ,
+    assigned_to_user_id TEXT                      -- routing only; never resolves (0079)
 );
 CREATE INDEX IF NOT EXISTS idx_changesets_project_status ON changesets(project_id, status);
 

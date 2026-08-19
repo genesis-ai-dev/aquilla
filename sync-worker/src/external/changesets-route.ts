@@ -96,6 +96,9 @@ export async function discardChangesetCore(
   if (cs.status === 'committing') {
     return errorResponse('validation_failed', 'cannot discard a changeset that is currently committing')
   }
+  // `superseded` (P1 §1) is deliberately absent: it is a terminal, HEALTHY
+  // outcome, and flipping it to `discarded` would erase the fact that the work
+  // exists — the count it feeds is not one to launder.
   if (cs.status === 'staged' || cs.status === 'stale' || cs.status === 'expired') {
     await db.prepare(`UPDATE changesets SET status = 'discarded' WHERE id = ?`).bind(cs.id).run()
   }

@@ -6,7 +6,15 @@
 // deprecated UpdateProjectSettings whole-blob command now enforces.
 
 import { errorResponse, toErrorResponse } from './errors'
-import { receiptOnlyGates, writeCommittedReceipt, markChangesetStale } from './commit-gates'
+import { deepEqualJson } from './canonical'
+import {
+  receiptOnlyGates,
+  writeCommittedReceipt,
+  markChangesetStale,
+  markChangesetSuperseded,
+} from './commit-gates'
+import { isPlanSatisfied } from './supersede'
+import { resolveSupersedeState } from './supersede-state'
 import { stageAndRespond } from './stage'
 import { assertCredentialScope } from './token-bridge'
 import type {
@@ -127,27 +135,6 @@ export function validatePatchSettingsCommand(
  *  `terminology` is resolved at prepare/commit. */
 export function staticPatchSettingsFloor(cmd: PatchSettingsCommand): number {
   return cmd.ops.every((op) => op.key === 'terminology') ? ROLE.PROJECT_LEAD : ROLE.MAINTAINER
-}
-
-/** Structural deep-equality over JSON values (objects by key set, arrays by
- *  order). `undefined` equals only `undefined` — a policy key absent from a
- *  whole-blob replace but present in the live blob is a CHANGE (deletion). */
-export function deepEqualJson(a: unknown, b: unknown): boolean {
-  if (a === b) return true
-  if (Array.isArray(a) || Array.isArray(b)) {
-    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
-    return a.every((v, i) => deepEqualJson(v, b[i]))
-  }
-  if (a !== null && b !== null && typeof a === 'object' && typeof b === 'object') {
-    const ka = Object.keys(a as Record<string, unknown>)
-    const kb = Object.keys(b as Record<string, unknown>)
-    if (ka.length !== kb.length) return false
-    return ka.every((k) =>
-      Object.prototype.hasOwnProperty.call(b, k) &&
-      deepEqualJson((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]),
-    )
-  }
-  return false
 }
 
 /** Policy keys whose STORED value would change if `candidate` replaced the
@@ -351,11 +338,25 @@ export async function commitPatchSettings(
     if (!wasStaged && bumpedByThisUser) {
       return finishPatchSettingsReceipt(db, cred, cs, projectId, result.current.version, confirmationId, channel)
     }
-    await markChangesetStale(db, cs.id)
-    return errorResponse('plan_stale', 'settings version changed since prepare', {
-      expected: expectedVersion,
-      current: result.current.version,
-    })
+    // P1 §3.2: a version bump by SOMEONE ELSE is only stale if the patch still
+    // has work to do. When every op's key already holds the proposed value, the
+    // human beat the agent to it — that is `superseded`, a healthy outcome. The
+    // live blob comes from the conflict result, so no extra read.
+    const live = await resolveSupersedeState(db, projectId, cs.commands, cred.username, result.current.settings)
+    const superseded = isPlanSatisfied(cs.commands, live)
+    if (superseded) await markChangesetSuperseded(db, cs.id)
+    else await markChangesetStale(db, cs.id)
+    return errorResponse(
+      'plan_stale',
+      superseded
+        ? 'plan already satisfied — the proposed settings values are already live'
+        : 'settings version changed since prepare',
+      {
+        expected: expectedVersion,
+        current: result.current.version,
+        status: superseded ? 'superseded' : 'stale',
+      },
+    )
   }
   if (result.status === 'error') {
     return errorResponse('job_failed', result.message)

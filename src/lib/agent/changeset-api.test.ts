@@ -7,24 +7,39 @@
  *
  * Fixtures mirror the real producers (AGENTS.md #12):
  * - approval GET / approve / reject: auth-worker/src/routes/
- *   changeset-approvals.ts — response literals at lines 270-281 (approval),
- *   361-365 (approve), 402 (reject); error envelope at errorJson(), digest
- *   mismatch details at lines 323-330.
+ *   changeset-approvals.ts — response literals at lines 143-156 (approval),
+ *   234-238 (approve), 273 (reject); error envelope at errorJson() (line 46),
+ *   digest mismatch details at lines 196-201.
  * - commit/discard: sync-worker/src/external/store.ts changesetToResponse
- *   (lines 98-116) with a ChangesetReceipt per
- *   sync-worker/src/external/types.ts (lines 113-121).
+ *   (lines 166-184) with a ChangesetReceipt per
+ *   sync-worker/src/external/types.ts (lines 140-148).
+ *
+ * AQU-CMDREG-P1 additions (docs/COMMAND-REGISTRY-P1.md):
+ * - `assignedToUserId` on the approval payload: changeset-approvals.ts
+ *   response literal line 152 (`assignedToUserId: cs.assigned_to_user_id`),
+ *   row column at line 64 — always present, `null` when unassigned.
+ * - list + `heldCount`/`surfacedCap`: sync-worker/src/external/session-routes.ts
+ *   handleList lines 142-151, rows from the same changesetToResponse plus the
+ *   route's `approvalUrl`.
+ * - `superseded` status: sync-worker/src/external/store.ts CHANGESET_STATUSES
+ *   (lines 99-101).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   approveChangeset,
+  CHANGESET_STATUSES,
   ChangesetApiError,
   commitChangeset,
   DigestMismatchError,
   discardChangeset,
   fetchChangesetApproval,
+  isChangesetStatusName,
+  listProjectChangesets,
   rejectChangeset,
+  SURFACED_CAP,
   type ChangesetApproval,
+  type ChangesetListItem,
   type ChangesetStatus,
 } from "./changeset-api"
 
@@ -52,6 +67,7 @@ const APPROVAL: ChangesetApproval = {
   projectName: "Blackfoot",
   status: "staged",
   autonomyMode: "ask",
+  assignedToUserId: null,
   summary: { translationsAdded: 2, warnings: [] },
   changes: {
     total: 2,
@@ -266,5 +282,124 @@ describe("discardChangeset", () => {
     const [discardUrl] = fetchMock.mock.calls[1] as [string]
     expect(discardUrl).toContain(`/api/v1/changesets/${PROJECT_ID}/${CHANGESET_ID}/discard`)
     expect(result.status).toBe("discarded")
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// AQU-CMDREG-P1 — supersession, routing, and the capped pending inbox.
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("changeset status vocabulary (P1 §1)", () => {
+  it("admits superseded alongside the shipped statuses", () => {
+    // Mirrors sync-worker/src/external/store.ts CHANGESET_STATUSES (99-101) —
+    // the list every status filter validates against.
+    expect([...CHANGESET_STATUSES]).toEqual([
+      "staged",
+      "committing",
+      "committed",
+      "discarded",
+      "stale",
+      "superseded",
+      "expired",
+    ])
+    expect(isChangesetStatusName("superseded")).toBe(true)
+    expect(isChangesetStatusName("supercede")).toBe(false)
+  })
+
+  it("carries a superseded approval through without collapsing it into stale", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ...APPROVAL, status: "superseded" }))
+    const result = await fetchChangesetApproval(JWT, CHANGESET_ID)
+    expect(result.status).toBe("superseded")
+  })
+})
+
+describe("fetchChangesetApproval — assignment (P1 §2.2)", () => {
+  it("returns the assignee when the changeset is routed, still staged", async () => {
+    // Assignment never changes status: changeset-approvals.ts line 151-152.
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ ...APPROVAL, assignedToUserId: "77", status: "staged" }),
+    )
+    const result = await fetchChangesetApproval(JWT, CHANGESET_ID)
+    expect(result.assignedToUserId).toBe("77")
+    expect(result.status).toBe("staged")
+  })
+
+  it("returns null for an unassigned changeset", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(APPROVAL))
+    const result = await fetchChangesetApproval(JWT, CHANGESET_ID)
+    expect(result.assignedToUserId).toBeNull()
+  })
+})
+
+describe("listProjectChangesets (P1 §3.3)", () => {
+  /** One list row: changesetToResponse (store.ts 166-184) plus the
+   *  approvalUrl handleList appends (session-routes.ts 143-146). */
+  function listRow(id: string, status: ChangesetStatus["status"] = "staged"): ChangesetListItem {
+    return {
+      ...COMMITTED,
+      id,
+      status,
+      receipt: status === "committed" ? COMMITTED.receipt : null,
+      committedAt: status === "committed" ? COMMITTED.committedAt : null,
+      approvalUrl: `https://app.example/approve/${id}`,
+    }
+  }
+
+  /** Mirrors handleList's response literal (session-routes.ts 142-151). */
+  const PAGE = {
+    changesets: [listRow("cs-a"), listRow("cs-b"), listRow("cs-c")],
+    heldCount: 2,
+    surfacedCap: 3,
+  }
+
+  it("mints a __project__ sync token, then GETs the list with it", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(SYNC_TOKEN)).mockResolvedValueOnce(jsonResponse(PAGE))
+
+    const page = await listProjectChangesets(JWT, PROJECT_ID)
+
+    const [mintUrl, mintInit] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(mintUrl).toContain("/api/v2/sync-token")
+    expect(JSON.parse(String(mintInit.body))).toEqual({ projectId: PROJECT_ID, fileId: "__project__" })
+
+    const [listUrl, listInit] = fetchMock.mock.calls[1] as [string, RequestInit]
+    expect(listUrl).toContain(`/api/v1/changesets/${PROJECT_ID}`)
+    expect((listInit.headers as Record<string, string>).Authorization).toBe(`Bearer ${SYNC_TOKEN.token}`)
+
+    // The held remainder arrives as a COUNT, never as extra rows.
+    expect(page.changesets).toHaveLength(3)
+    expect(page.changesets.length).toBeLessThanOrEqual(page.surfacedCap)
+    expect(page.heldCount).toBe(2)
+  })
+
+  it("passes status and limit through as query params", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(SYNC_TOKEN))
+      .mockResolvedValueOnce(jsonResponse({ ...PAGE, heldCount: 0 }))
+    await listProjectChangesets(JWT, PROJECT_ID, { status: "superseded", limit: 25 })
+    const [listUrl] = fetchMock.mock.calls[1] as [string]
+    expect(listUrl).toContain("status=superseded")
+    expect(listUrl).toContain("limit=25")
+  })
+
+  it("reads a pre-P1 worker (no heldCount/surfacedCap) as nothing held", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(SYNC_TOKEN))
+      .mockResolvedValueOnce(jsonResponse({ changesets: [listRow("cs-a")] }))
+    const page = await listProjectChangesets(JWT, PROJECT_ID)
+    expect(page.heldCount).toBe(0)
+    expect(page.surfacedCap).toBe(SURFACED_CAP)
+  })
+
+  it("surfaces the shared error envelope on a rejected status filter", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(SYNC_TOKEN))
+      .mockResolvedValueOnce(
+        errorResponse(409, "validation_failed", 'unknown status filter "nope"', {
+          statuses: CHANGESET_STATUSES,
+        }),
+      )
+    const err = await listProjectChangesets(JWT, PROJECT_ID).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ChangesetApiError)
+    expect((err as ChangesetApiError).code).toBe("validation_failed")
   })
 })

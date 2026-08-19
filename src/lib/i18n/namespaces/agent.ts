@@ -128,6 +128,26 @@ export const agent = defineNamespace({
       other: "{count} were stale and skipped.",
     }),
 
+    // ── AQU-CMDREG-P1 review surface (docs/COMMAND-REGISTRY-P1.md §5).
+    //    `superseded` is the one HEALTHY terminal status — the plan's outcome
+    //    already exists because a person did the work by hand. It must never
+    //    read like `stale` ("the plan no longer describes reality", a
+    //    problem); a locale that blurs the two turns a good outcome into a
+    //    warning. Routing likewise resolves nothing: an assigned changeset is
+    //    still waiting on a human. ────────────────────────────────────────
+    "agent.changeset.statusSuperseded": "Already done",
+    "agent.changeset.supersededNotice":
+      "Someone already made this change by hand, so there is nothing left to apply.",
+    "agent.changeset.routedTo": "Routed to {user}",
+    "agent.changeset.routedToNotice":
+      "Routing only names who should look at it — it approves nothing. This changeset is still waiting on a person.",
+    "agent.changeset.heldCount": plural({
+      one: "{count} more held",
+      other: "{count} more held",
+    }),
+    "agent.changeset.heldNotice":
+      "Held changesets are still staged — they surface here once the ones above are dealt with.",
+
     // ── Staged proposal rows (ProposalCard's KIND_META + destination badge) ──
     "agent.proposal.kind.edit": "Edit",
     "agent.proposal.kind.newSourceRow": "New source row",
@@ -498,6 +518,31 @@ export const agent = defineNamespace({
           "applied because the underlying cells changed after staging (stale pins). " +
           "Follows the 'Applied N changes.' sentence, so it refers back to changes.",
         placeholders: { count: "Number of staged changes skipped as stale; also selects the plural form." },
+      },
+      "agent.changeset.statusSuperseded": {
+        description:
+          "Status chip on a changeset the server closed as 'superseded': the plan's " +
+          "intended result already existed, because a person made the change by hand " +
+          "first. This is a GOOD outcome, not a failure — keep it clearly distinct " +
+          "from the neighbouring 'Stale' chip, which means the plan no longer matches " +
+          "reality and something is wrong. Short enough to sit in a row of badges.",
+        maxLength: 20,
+      },
+      "agent.changeset.routedTo": {
+        description:
+          "Line on a staged changeset naming the person it has been routed to for " +
+          "review. Routing is an expectation, not a decision: the changeset is still " +
+          "waiting for a human to approve or reject it.",
+        placeholders: { user: "Display name of the assigned reviewer, or their user id when no name is known." },
+      },
+      "agent.changeset.heldCount": {
+        description:
+          "Count of further staged changesets the pending list is holding back rather " +
+          "than listing: the list shows the highest-impact few and reports the rest as " +
+          "a single line. Held changesets are still pending, not closed. English uses " +
+          "the same wording for both plural forms; translate for whatever forms the " +
+          "target language needs.",
+        placeholders: { count: "How many additional staged changesets are held; also selects the plural form." },
       },
       "agent.proposal.landsInFile": {
         description:

@@ -28,6 +28,7 @@ import {
 export type { PlanImportCell, PlanImportManifest, PlanImportVariant } from './import-manifest'
 export type { PatchSettingsCommand, PatchSettingsOp } from './commands-patch-settings'
 export type { EmitEventsCommand, EmitEventInput } from './commands-emit-events'
+export { cellKey, laneCellKey } from './cell-keys'
 
 /** Set (or update) a single cell's translation. Compiles to target.cell.commit. */
 export interface SetTranslationCommand {
@@ -467,7 +468,6 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
   return { ok: true, commands }
 }
 
-/** Stable key for de-duping / joining commands ↔ preconditions by target cell. */
 /**
  * Minimum project role a caller must hold to stage/commit a command — the SAME
  * floor the command's compiled event(s) hit at the /events perimeter, sourced
@@ -504,15 +504,4 @@ export function requiredRoleForCommand(c: Command): number {
     return Math.max(REQUIRED_ROLE['cell.audio.attach'], REQUIRED_ROLE['cell.audio.select'])
   }
   return REQUIRED_ROLE['target.cell.commit']
-}
-
-export function cellKey(fileId: string, cellId: string): string {
-  return `${fileId} ${cellId}`
-}
-
-/** Lane-qualified cellKey (AQU-538): the same cell in two target lanes is two
- *  distinct dedupe/join slots. Empty/absent lane is the default lane, so
- *  lane-less callers key identically to each other (back-compat). */
-export function laneCellKey(fileId: string, cellId: string, laneId?: string): string {
-  return `${cellKey(fileId, cellId)}\u0000${laneId ?? ''}`
 }

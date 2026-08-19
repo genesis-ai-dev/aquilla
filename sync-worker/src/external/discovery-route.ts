@@ -119,7 +119,7 @@ function apiMap(): Record<string, unknown> {
         scope_denied: '403 — credential’s org/project scope does not cover this resource.',
         validation_failed: '400 — malformed request; fix per message, do not retry unchanged.',
         not_found: '404 — no such resource (or not visible to you).',
-        plan_stale: '409 — state drifted since prepare; re-prepare a fresh changeset.',
+        plan_stale: '409 — state drifted since prepare; re-prepare a fresh changeset. details.status distinguishes "stale" (the plan no longer describes reality) from "superseded" (its end-state already exists — a human did the work; nothing to re-prepare).',
         conflict: '409 — CreateProject id claimed by someone else; pick another id and re-prepare.',
         confirmation_required: '428 — ask-mode commit needs a human approval at the approvalUrl first.',
         rate_limited: '429 — too many requests from this credential in the trailing 15 minutes (currently enforced on /search; back off and retry later).',

@@ -1,10 +1,15 @@
 // Tests for the session-token changeset routes (AQU-926, command registry §3):
 // the in-app surface over the SAME changeset engine the external Agent API
 // uses, authenticated with the browser's sync token. Asserts the §3 contract:
-// forced ask-mode, the 'session' credential sentinel, creator-only access, the
-// 'app' provenance channel, list semantics, and ask-mode confirmation
-// consumption (confirmations minted with credential_id='session', as
-// auth-worker's approve route stamps them).
+// forced ask-mode, the 'session' credential sentinel, the 'app' provenance
+// channel, list semantics, and ask-mode confirmation consumption
+// (confirmations minted with credential_id='session', as auth-worker's approve
+// route stamps them).
+//
+// P1 §2.3 replaced the creator-identity gate with a capability gate: a
+// changeset is readable/actionable by anyone whose LIVE project role meets the
+// plan's required floor. P1 §3.3 added the ranked, capped inbox. Both are
+// asserted below.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
@@ -18,6 +23,7 @@ vi.mock('partyserver', () => ({
 import { handleSessionChangesetsRequest } from '../external/session-routes'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
+import { SURFACED_CAP } from '../external/store'
 
 const SECRET = 'test-secret'
 const PROJECT = 'proj-a'
@@ -37,20 +43,28 @@ async function seedProject(): Promise<TestDb> {
     users: [
       { id: 1, username: 'alice', email: 'a@x.com', password_hash: 'h' },
       { id: 2, username: 'bob', email: 'b@x.com', password_hash: 'h' },
+      { id: 3, username: 'carol', email: 'c@x.com', password_hash: 'h' },
     ],
     projects: [{ id: PROJECT, name: 'P', created_by: 99, org_id: null }],
     project_members: [
       { project_id: PROJECT, user_id: 1, role_level: 400 }, // alice: contributor
       { project_id: PROJECT, user_id: 2, role_level: 400 }, // bob: contributor
+      { project_id: PROJECT, user_id: 3, role_level: 100 }, // carol: viewer
     ],
-    cells: [
-      {
-        project_id: PROJECT, file_id: FILE, cell_id: 'cell-1', side: 'source',
-        value: 'source one', event_id: 'src-evt-1', last_edit_at: 1,
-      },
-    ],
+    files: [{ id: FILE, project_id: PROJECT, name: 'F', event_id: 'f-evt-1' }],
+    cells: [1, 2, 3, 4].map((n) => ({
+      project_id: PROJECT, file_id: FILE, cell_id: `cell-${n}`, side: 'source',
+      value: `source ${n}`, event_id: `src-evt-${n}`, last_edit_at: 1,
+    })),
   })
   return tdb
+}
+
+/** N SetTranslation commands over N distinct cells — blast radius N. */
+function translationPlan(cellCount: number) {
+  return Array.from({ length: cellCount }, (_, i) => ({
+    kind: 'SetTranslation', fileId: FILE, cellId: `cell-${i + 1}`, value: `v${i + 1}`,
+  }))
 }
 
 const BASE = `https://w/api/v1/changesets/${PROJECT}`
@@ -137,9 +151,6 @@ describe('session changesets — prepare', () => {
 
   it('enforces the same command floors as the PAT surface (EmitEvents file.delete needs 500)', async () => {
     const env = makeEnv(tdb.db)
-    await tdb.pg.query(
-      `INSERT INTO files (id, project_id, name, event_id) VALUES ('file-x', $1, 'F', 'f-evt-1')`, [PROJECT],
-    )
     const token = await sessionToken(1, 'alice', 400) // contributor
     const { res, body } = await call(env, req(token, '', 'POST', {
       commands: [{ kind: 'EmitEvents', events: [{ kind: 'file.delete', fileId: FILE }] }],
@@ -149,8 +160,8 @@ describe('session changesets — prepare', () => {
   })
 })
 
-describe('session changesets — creator-only access', () => {
-  it('a non-creator cannot read, commit, or discard the changeset', async () => {
+describe('session changesets — delegated authority (P1 §2.3)', () => {
+  it('a non-creator AT the floor may read, list, commit, and discard', async () => {
     const env = makeEnv(tdb.db)
     const alice = await sessionToken(1, 'alice', 400)
     const bob = await sessionToken(2, 'bob', 400)
@@ -160,19 +171,93 @@ describe('session changesets — creator-only access', () => {
     }))
     const id = prep.changeset.id as string
 
+    // Bob did not create it, but SetTranslation's floor is CONTRIBUTOR and he
+    // holds it — the plan is his to approve.
+    const { res: read } = await call(env, req(bob, `/${id}`, 'GET'))
+    expect(read.status).toBe(200)
+    const { body: listed } = await call(env, req(bob, '', 'GET'))
+    expect(listed.changesets.map((c: { id: string }) => c.id)).toContain(id)
+
+    // Commit still requires the unconsumed ask-mode confirmation — delegation
+    // widens WHO approves, never WHETHER a human approval is required.
+    const { res: unapproved, body: unapprovedBody } = await call(env, req(bob, `/${id}/commit`, 'POST'))
+    expect(unapproved.status).toBe(428)
+    expect(unapprovedBody.error.code).toBe('confirmation_required')
+
+    await insertConfirmation(tdb.db, { id: 'conf-bob', changesetId: id, digest: prep.digest })
+    const { res: committed, body: committedBody } = await call(env, req(bob, `/${id}/commit`, 'POST'))
+    expect(committed.status).toBe(200)
+    expect(committedBody.changeset.status).toBe('committed')
+
+    // Discard obeys the same rule on a second, still-staged plan.
+    const { body: other } = await call(env, req(alice, '', 'POST', {
+      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-2', value: 'adios' }],
+    }))
+    const { res: discarded, body: discardedBody } = await call(env, req(bob, `/${other.changeset.id}/discard`, 'POST'))
+    expect(discarded.status).toBe(200)
+    expect(discardedBody.changeset.status).toBe('discarded')
+  })
+
+  it('a member BELOW the floor is denied, and never sees the plan in the list', async () => {
+    const env = makeEnv(tdb.db)
+    const alice = await sessionToken(1, 'alice', 400)
+    const carol = await sessionToken(3, 'carol', 100) // viewer
+
+    const { body: prep } = await call(env, req(alice, '', 'POST', {
+      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola' }],
+    }))
+    const id = prep.changeset.id as string
+
     for (const attempt of [
-      req(bob, `/${id}`, 'GET'),
-      req(bob, `/${id}/commit`, 'POST'),
-      req(bob, `/${id}/discard`, 'POST'),
+      req(carol, `/${id}`, 'GET'),
+      req(carol, `/${id}/commit`, 'POST'),
+      req(carol, `/${id}/discard`, 'POST'),
     ]) {
       const { res, body } = await call(env, attempt)
       expect(res.status).toBe(403)
       expect(body.error.code).toBe('permission_denied')
     }
+    const { body: listed } = await call(env, req(carol, '', 'GET'))
+    expect(listed.changesets).toHaveLength(0)
+  })
 
-    // The creator still reads it fine.
-    const { res: mine } = await call(env, req(alice, `/${id}`, 'GET'))
-    expect(mine.status).toBe(200)
+  it('a higher floor keeps a lower-role member out even when they are a member', async () => {
+    const env = makeEnv(tdb.db)
+    // Promote alice so she can stage a PROJECT_LEAD-floor plan (file.delete).
+    await tdb.pg.query(
+      `UPDATE project_members SET role_level = 500 WHERE project_id = $1 AND user_id = 1`, [PROJECT],
+    )
+    const alice = await sessionToken(1, 'alice', 500)
+    const bob = await sessionToken(2, 'bob', 400)
+
+    const { body: prep } = await call(env, req(alice, '', 'POST', {
+      commands: [{ kind: 'EmitEvents', events: [{ kind: 'file.delete', fileId: FILE }] }],
+    }))
+    const id = prep.changeset.id as string
+
+    const { res, body } = await call(env, req(bob, `/${id}`, 'GET'))
+    expect(res.status).toBe(403)
+    expect(body.error.code).toBe('permission_denied')
+    expect(body.error.details.requiredRole).toBe(500)
+
+    const { body: listed } = await call(env, req(bob, '', 'GET'))
+    expect(listed.changesets).toHaveLength(0)
+  })
+
+  it('a non-member is denied outright', async () => {
+    const env = makeEnv(tdb.db)
+    const alice = await sessionToken(1, 'alice', 400)
+    const { body: prep } = await call(env, req(alice, '', 'POST', {
+      commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hola' }],
+    }))
+    // A valid project-scoped token whose user has no path to the project at
+    // all — no membership row, and not its creator (user 99 is, per the seed).
+    const stranger = await makeTestToken(SECRET, {
+      projectId: PROJECT, fileId: '', userId: 7, username: 'mallory', role: 600,
+    })
+    const { res, body } = await call(env, req(stranger, `/${prep.changeset.id}`, 'GET'))
+    expect(res.status).toBe(403)
+    expect(body.error.code).toBe('permission_denied')
   })
 })
 
@@ -219,7 +304,7 @@ describe('session changesets — commit', () => {
 })
 
 describe('session changesets — list + discard', () => {
-  it("lists only the caller's changesets, newest-first, with status filter and cap validation", async () => {
+  it('lists the project inbox a caller holds the floor for, with status filter and limit validation', async () => {
     const env = makeEnv(tdb.db)
     const alice = await sessionToken(1, 'alice', 400)
     const bob = await sessionToken(2, 'bob', 400)
@@ -240,18 +325,20 @@ describe('session changesets — list + discard', () => {
       commands: [{ kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'three' }],
     }))
 
+    // P1 §2.3: the inbox is the PROJECT's, filtered by floor — bob's plan is
+    // alice's to approve too. All three carry blast radius 1, so the ranking
+    // falls through to created_at DESC (id DESC on a tie).
     const { res, body } = await call(env, req(alice, '', 'GET'))
     expect(res.status).toBe(200)
     const ids = body.changesets.map((c: { id: string }) => c.id)
-    expect(ids).toHaveLength(2)
-    expect(ids).not.toContain(idBob)
-    // Newest-first: same created_at second is tie-broken by id DESC.
-    expect(ids).toEqual([idB, idA])
+    expect(ids).toHaveLength(3)
+    expect(ids).toContain(idBob)
+    expect(body.heldCount).toBe(0)
 
     // Discard one, then filter by status.
     await call(env, req(alice, `/${idA}/discard`, 'POST'))
     const { body: staged } = await call(env, req(alice, '?status=staged', 'GET'))
-    expect(staged.changesets.map((c: { id: string }) => c.id)).toEqual([idB])
+    expect(staged.changesets.map((c: { id: string }) => c.id).sort()).toEqual([idB, idBob].sort())
     const { body: discarded } = await call(env, req(alice, '?status=discarded', 'GET'))
     expect(discarded.changesets.map((c: { id: string }) => c.id)).toEqual([idA])
 
@@ -264,6 +351,32 @@ describe('session changesets — list + discard', () => {
 
     const { body: limited } = await call(env, req(alice, '?limit=1', 'GET'))
     expect(limited.changesets).toHaveLength(1)
+  })
+
+  it('ranks the inbox by blast radius, caps it at SURFACED_CAP, and holds the rest as a count', async () => {
+    const env = makeEnv(tdb.db)
+    const alice = await sessionToken(1, 'alice', 400)
+
+    // Four plans of blast radius 1..4 (one SetTranslation per distinct cell).
+    const ids: Record<number, string> = {}
+    for (const size of [1, 2, 3, 4]) {
+      const { body } = await call(env, req(alice, '', 'POST', { commands: translationPlan(size) }))
+      expect(body.summary.translationsAdded).toBe(size)
+      ids[size] = body.changeset.id as string
+    }
+
+    const { body } = await call(env, req(alice, '', 'GET'))
+    expect(body.surfacedCap).toBe(SURFACED_CAP)
+    expect(body.changesets.map((c: { id: string }) => c.id)).toEqual([ids[4], ids[3], ids[2]])
+    // Held, not closed — the smallest plan is still staged, just not surfaced.
+    expect(body.heldCount).toBe(1)
+    const { body: held } = await call(env, req(alice, `/${ids[1]}`, 'GET'))
+    expect(held.changeset.status).toBe('staged')
+
+    // An explicit limit pages the full ranked list; the default cap is gone.
+    const { body: paged } = await call(env, req(alice, '?limit=10', 'GET'))
+    expect(paged.changesets.map((c: { id: string }) => c.id)).toEqual([ids[4], ids[3], ids[2], ids[1]])
+    expect(paged.heldCount).toBe(0)
   })
 
   it('discard flips a staged changeset to discarded and refuses a committed one', async () => {

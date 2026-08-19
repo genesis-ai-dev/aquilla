@@ -4,7 +4,7 @@
 // sync token instead of a PAT:
 //
 //   POST /api/v1/changesets/:projectId                    → prepare
-//   GET  /api/v1/changesets/:projectId?status=&limit=     → list (creator's, newest-first)
+//   GET  /api/v1/changesets/:projectId?status=&limit=     → the project inbox (ranked, capped)
 //   GET  /api/v1/changesets/:projectId/:changesetId       → status
 //   POST /api/v1/changesets/:projectId/:changesetId/commit  → commit
 //   POST /api/v1/changesets/:projectId/:changesetId/discard → discard
@@ -13,11 +13,14 @@
 // 'session' (precedent: agent-artifacts' SESSION_UPLOAD_SENTINEL) and mode
 // 'ask' — the shared prepare core's effective-autonomy formula therefore
 // FORCES ask on every session changeset, and the null org/project scopes make
-// assertCredentialScope a pure project-existence check. Only the changeset's
-// CREATOR (created_by_user_id === the token's user) may read or act on it.
+// assertCredentialScope a pure project-existence check.
+//
+// Authority (P1 §2.3): a changeset is readable/actionable by anyone whose LIVE
+// project role meets its required floor — not only its creator (authority.ts).
 // Confirmations are minted by auth-worker's approve route (which stamps the
 // changeset's own credential_id — 'session' here), so ask-mode consumption in
-// the shared commit core works unchanged.
+// the shared commit core works unchanged: widening WHO may approve never
+// widens WHETHER a human approval is required.
 
 import { errorResponse, externalError } from './errors'
 import { prepareChangesetCore } from './prepare'
@@ -25,14 +28,17 @@ import { approvalUrlFor } from './stage'
 import { commitChangesetCore } from './commit'
 import { discardChangesetCore } from './changesets-route'
 import {
+  blastRadius,
   CHANGESET_STATUSES,
   changesetToResponse,
-  listChangesetsForCreator,
+  listChangesetsForProject,
   loadChangeset,
+  LIST_CHANGESETS_MAX,
+  SURFACED_CAP,
 } from './store'
-import type { ExternalEnv } from './types'
+import { changesetAuthorityDenied, visibleAtRole } from './authority'
+import type { ExternalEnv, StoredChangeset } from './types'
 import { verifyTokenForProject, type SyncTokenClaims } from '../auth'
-import { ROLE } from '../events/role-policy'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 
@@ -80,10 +86,20 @@ async function sessionAuth(
   return { cred: sessionPrincipal(auth.claims) }
 }
 
-/** Creator-only rule (§3): created_by_user_id must equal the token's user. */
-function creatorDenied(csCreatedByUserId: string, cred: ApiCredentialContext): Response | null {
-  if (String(csCreatedByUserId) === cred.userId) return null
-  return errorResponse('permission_denied', 'only the changeset creator may access it')
+/** Inbox order (P1 §3.3): staged rows first, ranked by blast radius (the total
+ *  effect count the server computed at prepare) descending, tie-broken by
+ *  created_at descending. Everything else keeps the newest-first order the SQL
+ *  already returned, after the staged block — history never displaces work. */
+function rankForInbox(rows: readonly StoredChangeset[]): StoredChangeset[] {
+  const staged = rows.filter((cs) => cs.status === 'staged')
+  const rest = rows.filter((cs) => cs.status !== 'staged')
+  staged.sort((a, b) => {
+    const byRadius = blastRadius(b.summary) - blastRadius(a.summary)
+    if (byRadius !== 0) return byRadius
+    if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1
+    return a.id < b.id ? 1 : -1
+  })
+  return [...staged, ...rest]
 }
 
 async function handleList(
@@ -106,13 +122,32 @@ async function handleList(
     if (!Number.isFinite(limit) || limit < 1) {
       return errorResponse('validation_failed', 'limit must be a positive integer')
     }
+    limit = Math.min(LIST_CHANGESETS_MAX, Math.floor(limit))
   }
-  const rows = await listChangesetsForCreator(db, projectId, cred.userId, { status, limit })
+
+  // One live role read serves the whole page — the per-row rule is the
+  // changeset's own floor (authority.ts), which reads only stored commands.
+  const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
+  if (!role) return errorResponse('permission_denied', 'no project membership')
+
+  const rows = (await listChangesetsForProject(db, projectId, { status })).filter((cs) =>
+    visibleAtRole(cs, role.level, cred.userId),
+  )
+  const ranked = rankForInbox(rows)
+  // Default view surfaces SURFACED_CAP staged plans; the remainder is reported
+  // as a count, never as rows. An explicit `limit` pages the full ranked list.
+  const surfaced = limit === undefined ? ranked.slice(0, SURFACED_CAP) : ranked.slice(0, limit)
+  const stagedTotal = rows.filter((cs) => cs.status === 'staged').length
+  const stagedSurfaced = surfaced.filter((cs) => cs.status === 'staged').length
   return Response.json({
-    changesets: rows.map((cs) => ({
+    changesets: surfaced.map((cs) => ({
       ...changesetToResponse(cs),
       approvalUrl: approvalUrlFor(env, cs.id),
     })),
+    // Held, not closed: these rows stay `staged` so a later supersession sweep
+    // can still resolve them.
+    heldCount: stagedTotal - stagedSurfaced,
+    surfacedCap: SURFACED_CAP,
   })
 }
 
@@ -125,14 +160,11 @@ async function handleGet(
 ): Promise<Response> {
   const cs = await loadChangeset(db, projectId, changesetId)
   if (!cs) return errorResponse('not_found', `changeset ${changesetId} not found`)
-  const denied = creatorDenied(cs.createdByUserId, cred)
+  // Live-role authority (P1 §2.3, PAT-surface parity): the floor is resolved
+  // fresh, so a member removed after the token was minted can no longer read
+  // the plan within the token's lifetime.
+  const denied = await changesetAuthorityDenied(db, cs, cred)
   if (denied) return denied
-  // Live-role re-check (PAT-surface parity): a member removed after the token
-  // was minted can no longer read the plan within the token's lifetime.
-  const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
-  if (!role || role.level < ROLE.VIEWER) {
-    return errorResponse('permission_denied', 'no project membership')
-  }
   return Response.json({ changeset: changesetToResponse(cs), approvalUrl: approvalUrlFor(env, cs.id) })
 }
 
@@ -144,12 +176,8 @@ async function handleDiscard(
 ): Promise<Response> {
   const cs = await loadChangeset(db, projectId, changesetId)
   if (!cs) return errorResponse('not_found', `changeset ${changesetId} not found`)
-  const denied = creatorDenied(cs.createdByUserId, cred)
+  const denied = await changesetAuthorityDenied(db, cs, cred)
   if (denied) return denied
-  const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
-  if (!role) {
-    return errorResponse('permission_denied', 'no project membership')
-  }
   return discardChangesetCore(db, projectId, cs)
 }
 
@@ -197,7 +225,7 @@ export async function handleSessionChangesetsRequest(
       env,
       projectId,
       changesetId,
-      { cred, ownership: 'creator', channel: 'app' },
+      { cred, ownership: 'project-floor', channel: 'app' },
       ctx,
     )
     // The shared core replies with the PAT-surface `{ receipt }` shape (frozen

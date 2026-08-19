@@ -16,14 +16,16 @@
  */
 
 import { useEffect, useMemo, useState } from "react"
-import { AlertCircle, Check, ExternalLink, FileDiff, RefreshCw } from "lucide-react"
+import { AlertCircle, Check, CheckCheck, ExternalLink, FileDiff, RefreshCw, UserRound } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Spinner } from "@/components/ui/spinner"
+import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { formatDateTime } from "@/lib/i18n/format"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useProjectMembers } from "@/hooks/useProjectMembers"
 import type { ChangesetItem } from "@/lib/agent/run-state"
 import {
   approveChangeset,
@@ -35,6 +37,7 @@ import {
   type ChangesetCommitReceipt,
 } from "@/lib/agent/changeset-api"
 import {
+  changesetStatusBadgeClass,
   changesetStatusLabel,
   changesetStatusVariant,
   isTerminalChangesetStatus,
@@ -107,6 +110,18 @@ export function LiveChangesetCard({
   const testimony = useMemo(() => testimonyEntriesFor(item, approval), [item, approval])
   const allConfirmed = testimony.every((entry) => confirmed.has(entry.key))
 
+  // Routing (COMMAND-REGISTRY-P1 §2.2): the payload names an assignee by id,
+  // so the roster supplies the human name. A null projectId makes the hook
+  // inert, so an UNassigned card costs no request; when the roster is
+  // unavailable (org policy hides it, or it hasn't landed yet) the id is a
+  // truthful fallback.
+  const assignedToUserId = approval?.assignedToUserId ?? null
+  const { members } = useProjectMembers(assignedToUserId && approval ? approval.projectId : null)
+  const assignee = useMemo(() => {
+    if (!assignedToUserId) return null
+    return members.find((m) => String(m.userId) === assignedToUserId)?.username ?? assignedToUserId
+  }, [assignedToUserId, members])
+
   const refresh = () => {
     setActionError(null)
     setOfferRefresh(false)
@@ -178,6 +193,9 @@ export function LiveChangesetCard({
   // 'committing' server-side) — let the reviewer re-check.
   const showStateRefresh =
     approval !== null && !committing && !isTerminalChangesetStatus(status) && status !== "staged"
+  // Superseded is a GOOD terminal outcome (P1 §1) — the work already exists —
+  // so it earns an explanation rather than the error treatment `stale` gets.
+  const showSupersededNotice = status === "superseded"
 
   return (
     <div
@@ -197,10 +215,32 @@ export function LiveChangesetCard({
             {kind}
           </Badge>
         ))}
-        <Badge variant={changesetStatusVariant(displayStatus, false)} className="px-1.5 py-0 text-[10px]">
-          {changesetStatusLabel(displayStatus, false)}
+        <Badge
+          variant={changesetStatusVariant(displayStatus, false)}
+          className={cn("px-1.5 py-0 text-[10px]", changesetStatusBadgeClass(displayStatus))}
+        >
+          {changesetStatusLabel(t, displayStatus, false)}
         </Badge>
       </div>
+
+      {assignee !== null && (
+        <p className="flex items-start gap-1 text-[11px] text-muted-foreground">
+          <UserRound className="mt-px h-3 w-3 shrink-0" />
+          <span>
+            <span className="font-medium text-foreground">
+              {t("agent.changeset.routedTo", { user: assignee })}
+            </span>{" "}
+            {t("agent.changeset.routedToNotice")}
+          </span>
+        </p>
+      )}
+
+      {showSupersededNotice && (
+        <p className="flex items-start gap-1 text-[11px] text-emerald-700 dark:text-emerald-400">
+          <CheckCheck className="mt-px h-3 w-3 shrink-0" />
+          {t("agent.changeset.supersededNotice")}
+        </p>
+      )}
 
       {loading && (
         <div className="flex items-center gap-1.5 py-0.5 text-[11px] text-muted-foreground">

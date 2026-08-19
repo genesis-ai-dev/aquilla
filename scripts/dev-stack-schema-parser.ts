@@ -44,9 +44,11 @@ const TABLE_CONSTRAINT_KEYWORDS = new Set([
 
 /**
  * Parse schema.sql into table blocks + column definitions + index statements.
- * Relies on the file's regular shape (also assumed by scripts/neon-migrate.ts,
- * which gates prod deploys on the same parse): blocks open with
- * `CREATE TABLE name (`, one column per line, and close with `);`. Index
+ * Relies on the file's regular shape (scripts/neon-migrate.ts gates prod
+ * deploys on a comma-splitting parse of the same file): blocks open with
+ * `CREATE TABLE name (` and close with `);`. Entries are comma-separated; a
+ * column or constraint may wrap onto continuation lines (e.g. a DEFAULT
+ * expression), which are folded into the entry that opened them. Index
  * statements may span lines and are accumulated through their semicolon.
  */
 export function parsePgSchema(sql: string): {
@@ -59,6 +61,12 @@ export function parsePgSchema(sql: string): {
   let block: string[] = []
   let tableDepth = 0
   let pendingIndex: string[] | null = null
+  // Entry tracking: a top-level line starts a new column/constraint only when
+  // the previous entry was closed by a trailing comma; otherwise it continues
+  // the open entry. openColumn is that entry when it is a column (null for
+  // constraints), so continuation lines extend its ALTER-able definition.
+  let expectNewEntry = true
+  let openColumn: { name: string; def: string } | null = null
   const recordIndex = (lines: string[]): void => {
     const statement = lines.join(" ").replace(/\s+/g, " ").trim()
     const index = statement.match(
@@ -94,6 +102,8 @@ export function parsePgSchema(sql: string): {
         current = { createSql: "", columns: [] }
         block = [`CREATE TABLE IF NOT EXISTS ${table[1]} (`]
         tableDepth = 1
+        expectNewEntry = true
+        openColumn = null
         tables.set(table[1].toLowerCase(), current)
         continue
       }
@@ -114,16 +124,31 @@ export function parsePgSchema(sql: string): {
       current = null
       continue
     }
-    // Only top-level entries are columns. Lines nested inside multiline
-    // CHECK/CONSTRAINT clauses and balanced FK continuation lines must never
-    // become additive ALTER statements.
+    if (!trimmed) continue
+    const startsEntry = expectNewEntry
+    // Only a trailing comma at top level closes an entry; commas inside
+    // multiline CHECK/FK parens must not.
+    expectNewEntry = tableDepth === 1 && trimmed.endsWith(",")
+    // Only top-level lines are entries or their continuations. Lines nested
+    // inside multiline CHECK/CONSTRAINT parens must never become additive
+    // ALTER statements.
     if (depthBeforeLine !== 1) continue
+    if (!startsEntry) {
+      // Continuation of a wrapped entry (e.g. a DEFAULT expression on its own
+      // line) — fold it into the open column's definition, never a new column.
+      if (openColumn) openColumn.def += ` ${trimmed.replace(/,\s*$/, "")}`
+      continue
+    }
     const first = trimmed.split(/[\s(,]/)[0]
-    if (!first || TABLE_CONSTRAINT_KEYWORDS.has(first.toUpperCase())) continue
-    current.columns.push({
+    if (!first || TABLE_CONSTRAINT_KEYWORDS.has(first.toUpperCase())) {
+      openColumn = null
+      continue
+    }
+    openColumn = {
       name: first.toLowerCase(),
       def: trimmed.replace(/,\s*$/, ""),
-    })
+    }
+    current.columns.push(openColumn)
   }
   return { tables, indexesByTable }
 }

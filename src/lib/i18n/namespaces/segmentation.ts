@@ -45,7 +45,8 @@ export const segmentation = defineNamespace({
     _context: {
       description:
         "The Segmentation dialog, opened from a file row's overflow (⋯) menu in the " +
-        "workspace sidebar. It shows how a file is currently divided into passages " +
+        "workspace sidebar or the editor File options ⋯ beside Import. It shows how a " +
+        "file is currently divided into passages " +
         "(with a preview list), and lets a project lead choose a different division: " +
         "automatic, a fixed count, or AI-detected. IMPORTANT VOCABULARY: a 'segment' " +
         "is the app's smallest unit of translatable text (one verse, one subtitle " +
@@ -58,9 +59,9 @@ export const segmentation = defineNamespace({
     keys: {
       "segmentation.menuItem": {
         description:
-          "Menu item in the file row's overflow menu that opens this dialog. Noun, " +
-          "not an action verb; the trailing ellipsis marks that a dialog follows and " +
-          "should be kept.",
+          "Menu item in the file row's overflow menu and the editor File options ⋯ " +
+          "that opens this dialog. Noun, not an action verb; the trailing ellipsis " +
+          "marks that a dialog follows and should be kept.",
         maxLength: 24,
       },
       "segmentation.title": { description: "Dialog title. Noun.", maxLength: 24 },

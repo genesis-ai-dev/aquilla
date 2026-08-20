@@ -16,7 +16,7 @@
 // audio-coordinator still guarantees only one source plays at a time.
 
 import { useCallback, useEffect, useMemo, useRef } from "react"
-import { Pause, Play, UserPlus, Volume2, VolumeX } from "lucide-react"
+import { CopyPlus, Pause, Play, Volume2, VolumeX } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -139,20 +139,22 @@ function VolumeButton({ volume, onChange }: { volume: number; onChange: (v: numb
   const t = useT()
   return (
     <Popover>
-      <PopoverTrigger
-        render={
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label={t("common.volume")}
-            className="shrink-0"
-          >
-            {volume === 0 ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
-          </Button>
-        }
-      />
-      <PopoverContent align="end" side="top" className="w-44 p-2.5">
+      <AppTooltip content={t("common.volume")}>
+        <PopoverTrigger
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("common.volume")}
+              className="shrink-0"
+            >
+              {volume === 0 ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+            </Button>
+          }
+        />
+      </AppTooltip>
+      <PopoverContent align="end" side="bottom" className="w-44 p-2.5">
         <div className="flex items-center gap-2">
           <VolumeX className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <Slider
@@ -424,7 +426,10 @@ export function CellVoicePanel({
           card to reveal crop / volume / clone. */}
       {hasTake && (
         <>
-          <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/voice:opacity-100">
+          <div
+            data-slot="voice-overlay-chip"
+            className="absolute right-1.5 top-1.5 z-10 flex items-center gap-0.5 rounded-md bg-[color-mix(in_oklch,var(--muted),black_12%)] p-0.5 opacity-0 transition-opacity focus-within:opacity-100 has-aria-expanded:opacity-100 group-hover/voice:opacity-100"
+          >
             {/* Round 5: no crop on the shared source clip — its window is the
                 section's timing; retime the section in the timeline. */}
             {!isSourceClip && (
@@ -432,7 +437,7 @@ export function CellVoicePanel({
             )}
             <VolumeButton volume={volume} onChange={changeVolume} />
             <HeaderIconButton title={t("editor.voice.clone")} onClick={onMakeCharacter}>
-              <UserPlus className="h-3.5 w-3.5" />
+              <CopyPlus className="h-3.5 w-3.5" />
             </HeaderIconButton>
           </div>
           <div className="relative mb-2 h-12">
@@ -445,7 +450,7 @@ export function CellVoicePanel({
                   variant="default"
                   onClick={onPrimary}
                   aria-label={primaryTitle}
-                  className="shadow-md ring-4 ring-background"
+                  className="shadow-md"
                 >
                   {audioLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-[1px]" />}
                 </Button>

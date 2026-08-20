@@ -122,7 +122,8 @@ import {
 import { emitCastAssign, emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
-import { buildCastAdditions } from "@/lib/import/cast-from-speakers"
+import { resolveTimingLocked } from "@/lib/sync/project-settings"
+import { buildCastAdditions, buildCastRemovals } from "@/lib/import/cast-from-speakers"
 import { ImportCharactersDialog } from "./timeline/ImportCharactersDialog"
 import { CharacterCheckDrawer, type ResolveChoice } from "./timeline/CharacterCheckDrawer"
 import type { CueReconcilePlan } from "@/lib/import/cue-reconcile"
@@ -1845,8 +1846,7 @@ export function ProjectWorkspace() {
       ).length
       if (atRisk > 0) {
         const ok = window.confirm(
-          `Diarizing re-segments this file and will DISCARD the transcription/translation on ${atRisk} section${atRisk === 1 ? "" : "s"}. ` +
-            `Diarize first, then transcribe and translate. Continue anyway?`,
+          t("workspace.diarize.discardWarning", { count: atRisk }),
         )
         if (!ok) {
           setDiarizePhase(null)
@@ -1973,6 +1973,41 @@ export function ProjectWorkspace() {
     revalidateCells()
   }, [project?.id, activeFileId, currentUsername, getTokenForFile, getTokenForProjectFile, revalidateCells])
 
+  /**
+   * AQU-646: is this project's timeline locked against dragging?
+   *
+   * ABSENT MEANS LOCKED, which matters most in the moment before the project's
+   * settings have arrived: erring toward frozen means the handles never flash
+   * up and then vanish, and nobody gets a drag in during the gap.
+   *
+   * The server enforces this independently (sync-worker timing-authority.ts).
+   * This copy exists for the same reason the role mirror does — so an event
+   * that is certain to 403 never enters the durable outbox — and to take the
+   * handles away, which is where the "very active decision" Sam asked for
+   * actually lives.
+   */
+  const timingLocked = resolveTimingLocked(project ?? undefined)
+  /** …and who can lift it. Maintainer, deliberately above project lead: Sam,
+   *  "I think they could mess that up as well unintentionally." */
+  const canUnlockTiming = (project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
+
+  /**
+   * AQU-646 (Sam, 2026-08-20): setting up a project's SOURCES is maintainer
+   * work — the audio cues and the character sheets, though not the film.
+   *
+   * Deliberately a UI gate rather than a raised floor in role-policy. The
+   * events underneath are shared: `cast.assign` also backs the character-check
+   * resolve drawer and the CSV label panel, and the person who most needs the
+   * drawer is the client contact resolving her own sheets' disagreements —
+   * raising the event's floor would lock her out of the one screen built for
+   * her. Same shape as bulk repin, which role-policy.ts already documents as
+   * "gated higher in the review-panel UI itself, not here".
+   *
+   * The lock above is the separate mechanism, and the one with teeth: this
+   * decides who is OFFERED an import, that decides who may move a timing.
+   */
+  const canManageSources = (project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
+
   // Timeline editor, round 6 (SUB-36): retiming exists only on the SUBTITLE
   // row. A TEXT cell's own timing IS its subtitle timing → cell.retime as
   // before; a MEDIA cell keeps its frozen source split and gets an
@@ -1981,6 +2016,15 @@ export function ProjectWorkspace() {
     async (cellId: string, startSec: number, endSec: number) => {
       if (!project?.id || !activeFileId) return
       const cell = getActiveCells().find((c) => c.id === cellId)
+      // AQU-646: never enqueue a retime the server is certain to refuse — the
+      // outbox is durable, so a guaranteed 403 would sit in it and wedge the
+      // queue. The handles are already hidden when locked; this catches the
+      // paths that reach the handler another way (keyboard nudge, a drag that
+      // began before the lock arrived).
+      if (timingLocked && !canUnlockTiming && cell && !isUserAddedLine(cell)) {
+        toast.add({ type: "warning", title: "The timings are locked for this project." })
+        return
+      }
       const startMs = Math.round(startSec * 1000)
       const endMs = Math.round(endSec * 1000)
       if (cell?.medium === "media") {
@@ -2008,7 +2052,7 @@ export function ProjectWorkspace() {
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
     },
-    [project?.id, activeFileId, currentUsername, getActiveCells, applyOptimisticCellTiming, getTokenForProjectFile, revalidateCells],
+    [project?.id, activeFileId, currentUsername, getActiveCells, applyOptimisticCellTiming, getTokenForProjectFile, revalidateCells, timingLocked, canUnlockTiming],
   )
 
   // Round 7: trim a dub chip (edge drag) — re-attach the take with the new
@@ -2865,6 +2909,147 @@ export function ProjectWorkspace() {
   )
 
   /**
+   * Take a character sheet back off a file. (AQU-646, 2026-08-20)
+   *
+   * REMOVE MEANS CLEAR — Sam settled that explicitly, for every source. This is
+   * NOT an undo of the import: corrections made by hand since it go with
+   * everything else. The alternative needs a record of which cells a given
+   * import wrote, which nothing keeps, so the surgical-sounding version would
+   * really be an unpredictable one. The confirmation says plainly which it is.
+   *
+   * All three fields go together, because all three came off the same sheet. A
+   * line that keeps its camera angle after losing its speaker is a state no
+   * import could have produced, and a corrected sheet exported from it would
+   * print angles for lines nobody speaks.
+   *
+   * No new event kind was needed: `cast.assign` already clears each of the
+   * three on null, in three separate arms of the projection.
+   *
+   * Shares the write lock with the imports and the two resolve paths, for the
+   * reason documented on `characterWriteBusy` — all five snapshot the same
+   * records and save the whole object, so whichever landed last would otherwise
+   * overwrite the others' work.
+   */
+  const runCharacterClear = useCallback(
+    async (args: {
+      fileId: string
+      cells: readonly CellData[]
+      /** Plural, for the toasts: "subtitle lines" / "heard lines". */
+      noun: string
+      after: () => void
+    }) => {
+      if (!project?.id) return
+      if (characterWriteBusy.current) return
+      if (!navigator.onLine) {
+        toast.add({ type: "error", title: "Characters can't be cleared while offline." })
+        return
+      }
+      // EVERY cell the sheet could have touched, not only the named ones. The
+      // drawer's resolve path writes a camera angle on its own, so a line can
+      // carry an angle with no name — and a clear that steps over those is not
+      // a clear. Reading `castByCellId` here would miss exactly them.
+      const dirty = args.cells.filter(
+        (c) =>
+          (typeof c.metadata?.cast_name === "string" && c.metadata.cast_name !== "") ||
+          (typeof c.metadata?.line_number === "string" && c.metadata.line_number !== "") ||
+          c.cameraState !== undefined,
+      )
+      // Can only happen if the counts and the cells have drifted apart, but a
+      // confirmed destructive click that produces NO feedback at all is the
+      // worst shape this could fail in — it reads as a broken button.
+      if (dirty.length === 0) {
+        toast.add({ type: "info", title: `There were no characters on the ${args.noun} to clear.` })
+        return
+      }
+
+      const toastId = toast.add({ type: "loading", title: `Clearing ${dirty.length} ${args.noun}\u2026`, timeout: 0 })
+      characterWriteBusy.current = true
+      frozenAgreement.current = characterAgreement
+      setCharacterWrite({ done: 0, total: dirty.length, phase: "writing" })
+      let done = 0
+      try {
+        for (const cell of dirty) {
+          await emitCastAssign({
+            projectId: project.id,
+            fileId: args.fileId,
+            cellId: cell.id,
+            castName: null,
+            cameraState: null,
+            lineNumber: null,
+            author: currentUsername,
+          })
+          reportCharacterWrite(++done, dirty.length)
+        }
+        setCharacterWrite({ done: dirty.length, total: dirty.length, phase: "syncing" })
+        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      } catch (e) {
+        toast.update(toastId, { type: "error", title: e instanceof Error ? `Couldn't clear the characters: ${e.message}` : "Couldn't clear the characters." })
+        characterWriteBusy.current = false
+        setCharacterWrite(null)
+        return
+      }
+
+      // The half that is easy to forget, because nothing on screen points at
+      // it: `characterIdentity` resolves a cell's character from
+      // `castAssignments` independently of `cast_name`, so leaving those behind
+      // would keep both audio exports grouping these lines under a name the
+      // file no longer carries. The cast LIST is deliberately untouched — see
+      // `buildCastRemovals`.
+      try {
+        await tts.saveTts(buildCastRemovals(dirty.map((c) => c.id), tts.settings))
+      } catch (e) {
+        console.warn("[characters] pruning the cast assignments failed", e)
+        toast.add({ type: "warning", title: "Characters cleared, but the cast assignments could not be updated." })
+      }
+
+      characterWriteBusy.current = false
+      setCharacterWrite(null)
+      args.after()
+      toast.update(toastId, { type: "success", title: `Cleared the characters on ${dirty.length} ${args.noun}.` })
+    },
+    [
+      project?.id,
+      currentUsername,
+      getTokenForProjectFile,
+      characterAgreement,
+      reportCharacterWrite,
+      tts,
+    ],
+  )
+
+  /** The sheet keyed to the SUBTITLE rows. The heard lines read their character
+   *  off these through the links, so clearing this side empties them too unless
+   *  they carry names of their own — which is what the confirmation warns. */
+  const handleClearCharacters = useCallback(async () => {
+    if (!activeFileId) return
+    await runCharacterClear({
+      fileId: activeFileId,
+      cells: readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews()),
+      noun: "subtitle lines",
+      after: () => {
+        revalidateCells()
+      },
+    })
+  }, [activeFileId, cellStore, cellStoreVersion, runCharacterClear, revalidateCells])
+
+  /** The sheet keyed to the HEARD lines. Clearing this side degrades gently:
+   *  `resolveCueCharacter` prefers a cue's own name and falls back to the
+   *  linked subtitles, so the cues go back to reading the other sheet. */
+  const handleClearAudioCharacters = useCallback(async () => {
+    const cueFileId = audioCueSibling?.id
+    if (!cueFileId) return
+    await runCharacterClear({
+      fileId: cueFileId,
+      cells: audioCues ?? [],
+      noun: "heard lines",
+      after: () => {
+        refreshAudioCues()
+        revalidateCells()
+      },
+    })
+  }, [audioCueSibling?.id, audioCues, runCharacterClear, refreshAudioCues, revalidateCells])
+
+  /**
    * Write the picked cues as this file's audio-cue sibling.
    *
    * IMPORT FIRST, DELETE SECOND. The upload is atomic (bulkUploadSource stages
@@ -3699,7 +3884,7 @@ export function ProjectWorkspace() {
         const normalized = normalizeProtectedCompletion(cell, entry.valueHtml ?? entry.value)
         promoted = { value: normalized.value, valueHtml: normalized.valueHtml }
       } catch (error) {
-        alert(error instanceof Error ? error.message : "This IDML history entry cannot be restored safely.")
+        alert(error instanceof Error ? error.message : t("workspace.idml.historyRestoreBlocked"))
         return
       }
     }
@@ -6424,7 +6609,7 @@ export function ProjectWorkspace() {
         }
       }
     } catch (error) {
-      alert(error instanceof Error ? error.message : "Protected IDML replacement was blocked.")
+      alert(error instanceof Error ? error.message : t("workspace.idml.replacementBlocked"))
       return
     }
     const touched: string[] = []
@@ -8214,17 +8399,44 @@ export function ProjectWorkspace() {
       if (!isMediaFileType(ref.type)) continue
       const seed = consumeMediaImportSeed(ref.id)
       if (!seed || !project?.id) continue
+      // Sam, 2026-08-18: an imported MP3 takes about a minute to come back with
+      // any text, and until it does the file looks empty and broken. The toast
+      // is CREATED LAZILY, on the first progress call — a consent denial or a
+      // file with nothing to transcribe never reports, so neither of those
+      // leaves a spinner hanging over a run that is not happening.
+      let toastId: string | null = null
+      let lastTotal = 0
+      const plural = (n: number) => (n === 1 ? "" : "s")
       void autoTranscribeImportedMedia({
         seed,
         projectId: project.id,
         session: frontierSession ?? null,
         sourceLanguage: project.sourceLanguage,
         targetLanguage: project.targetLanguage,
+        onProgress: (done, total) => {
+          lastTotal = total
+          // The zeroth call lands BEFORE the Whisper model is fetched, which on
+          // a cold run is most of the minute — so the first thing on screen
+          // says what is happening rather than counting from nothing.
+          const title =
+            done === 0
+              ? `Transcribing ${total} section${plural(total)} of "${ref.name}"\u2026`
+              : `Transcribing \u2014 ${done} of ${total} done\u2026`
+          if (toastId === null) toastId = toast.add({ type: "loading", title, timeout: 0 })
+          else toast.update(toastId, { type: "loading", title })
+        },
+        onFailed: (message) => {
+          if (toastId !== null) toast.update(toastId, { type: "error", title: `Couldn't transcribe "${ref.name}": ${message}` })
+        },
         onDone: async () => {
           // Transcripts ride outbox-queued cell.audio.attach emits — flush so
           // they land, then pull the projection with the new source text.
           await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
           revalidateCells()
+          // Only if something was actually reported — see the lazy toast above.
+          if (toastId !== null) {
+            toast.update(toastId, { type: "success", title: `Transcribed ${lastTotal} section${plural(lastTotal)} of "${ref.name}".` })
+          }
         },
       })
     }
@@ -8358,6 +8570,7 @@ export function ProjectWorkspace() {
             }
             filesPanel={
               <div className="flex h-full flex-col overflow-y-auto overflow-x-hidden">
+                {/* i18n-exempt "audio" is a lens token, not copy */}
                 {lens !== "audio" && (
                   <SuggestionBanner
                     suggestions={bannerSuggestions}
@@ -8561,6 +8774,7 @@ export function ProjectWorkspace() {
         }
         beforeMain={
           <>
+            {/* i18n-exempt "editor" is a centre-surface token, not copy */}
             {project && activeFileId && centerSurface === "editor" && (
               <>
                 <SelectionBar
@@ -8634,9 +8848,7 @@ export function ProjectWorkspace() {
             {showStaleSiblingBanner && (
               <div className="flex items-center justify-between gap-2 bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-300">
                 <span>
-                  {outboxStaleSiblingCount === 1
-                    ? "1 change was rejected because it conflicted with a newer edit from another session."
-                    : `${outboxStaleSiblingCount} changes were rejected because they conflicted with newer edits from another session.`}
+                  {t("workspace.outbox.staleRejected", { count: outboxStaleSiblingCount })}
                 </span>
                 <div className="ms-2 flex items-center gap-1">
                   <button
@@ -8910,6 +9122,12 @@ export function ProjectWorkspace() {
                     editable={!isReadOnly}
                     fileId={activeFile.id}
                     onRetimeSubtitle={handleRetimeSubtitle}
+                    // AQU-646: a maintainer sees the handles too only once the
+                    // project is unlocked. The ceremony Sam asked for ("a very
+                    // active decision") lives here rather than in the server
+                    // rule, which lets maintainers through so an import's
+                    // retimes are not caught by the lock.
+                    timingLocked={timingLocked}
                     onRetimeTarget={handleRetimeTarget}
                     onTrimTarget={handleTrimTarget}
                     onTogglePlay={handleTimelineTogglePlay}
@@ -8929,11 +9147,11 @@ export function ProjectWorkspace() {
                     // so it sits behind the SAME source.* floor as the add-line
                     // button above and for the same reason.
                     onRequestImportAudioVtt={() => setImportAudioVttOpen(true)}
-                    canImportAudioVtt={canPerform("source.cell.create", project?.syncRole?.level ?? null)}
+                    canImportAudioVtt={canManageSources}
                     // Writes cell metadata rather than creating cells, so it
                     // sits at the contributor floor `cast.assign` requires.
                     onRequestImportCharacters={() => setImportCharactersOpen(true)}
-                    canImportCharacters={canPerform("cast.assign", project?.syncRole?.level ?? null)}
+                    canImportCharacters={canManageSources}
                     // PROJECT_LEAD, not the contributor floor the underlying
                     // events sit at: the checks are SETUP work, done before a
                     // file reaches translators and dubbers, and they are the
@@ -9144,6 +9362,7 @@ export function ProjectWorkspace() {
               </ResizablePanelGroup>
               </EditorActionsProvider>
             </div>
+            {/* i18n-exempt "tray" is a footnote view-mode token, not copy */}
             {footnoteViewMode === "tray" && (
               <FootnotesTray
                 entries={visibleFootnotes}
@@ -9522,12 +9741,12 @@ export function ProjectWorkspace() {
           // on screen. Always passed, not just in the cue arrangement, so the
           // two can never drift apart again.
           //
-          // NOT gated on timing mode, where AQU-906's `videoUrl` prop was:
-          // there the film was withheld in audio-first, because the programme
-          // is re-flowed and cell times no longer address the video's clock.
-          // This pane resolves the film from the FILE and does not consult the
-          // mode — flagged rather than changed, since the two arrangements
-          // disagree about whether an audio-first file can have a picture.
+          // NOT gated on timing mode, unlike dev's AQU-906 `videoUrl` prop,
+          // which withheld the film in audio-first because the programme is
+          // re-flowed and cell times no longer address the video's clock.
+          // SETTLED 2026-08-20 (Sam: "we stick with ours. Because it's
+          // better"): this pane resolves the film from the FILE and never
+          // consults the mode, so an audio-first file keeps its picture.
           filmFileId={activeFileId}
           onActiveCellChange={(cellId) => {
             setRecordingCellId(cellId)
@@ -9813,7 +10032,7 @@ export function ProjectWorkspace() {
         // most of this dialog sits on, so the button is gated on its own kind
         // rather than on the import's.
         onRemove={
-          audioCueSibling && canPerform("file.delete", project?.syncRole?.level ?? null)
+          audioCueSibling && canManageSources
             ? () => {
                 setImportAudioVttOpen(false)
                 void handleRemoveAudioCues()
@@ -9854,6 +10073,24 @@ export function ProjectWorkspace() {
             setImportCharactersOpen(false)
             void handleImportAudioCharacters(plan)
           }}
+          onClearSubtitles={
+            // Same floor as the import that put them there. Absent when there
+            // is no clearance, which is how the dialog decides not to offer it.
+            canManageSources
+              ? () => {
+                  setImportCharactersOpen(false)
+                  void handleClearCharacters()
+                }
+              : undefined
+          }
+          onClearAudio={
+            audioCueSibling && canManageSources
+              ? () => {
+                  setImportCharactersOpen(false)
+                  void handleClearAudioCharacters()
+                }
+              : undefined
+          }
         />
       )}
       <LinkVideoTimingDialog

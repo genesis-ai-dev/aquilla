@@ -192,6 +192,9 @@ describe("removing the cues", () => {
     // "Kept but unreachable" is the honest wording — file.delete is a SOFT
     // delete, and "lost" would ask for more nerve than the act requires.
     expect(panel).toHaveTextContent(/audio itself is kept/)
+    // ...and the soft delete is only honest if the confirmation says where the
+    // track goes. Without this, "kept but unreachable" reads as permanent.
+    expect(panel).toHaveTextContent(/Recently deleted, so a project lead can put it back/)
   })
 
   it("says nothing about recordings when there are none", () => {

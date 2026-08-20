@@ -1893,3 +1893,94 @@ describe("the heading over the text column", () => {
     expect(screen.getByTestId("tl-dialogue-header")).not.toHaveTextContent("Subtitles")
   })
 })
+
+// ── The project timing lock (AQU-646, Sam 2026-08-20) ────────────────────
+//
+// "When a subtitle VTT gets imported and nothing else has been added yet, I can
+// technically go into the timeline and the chips have handlebars and I can
+// totally mess up the timings."
+//
+// He was right, and the reason was precise: the guard that freezes imported
+// rows was `subtitleFileWithFootage ? isUserAddedLine : undefined`, and
+// `subtitleFileWithFootage` requires a LINKED FILM. With no film it was
+// `undefined` and every imported row was draggable. So the first test here is
+// his exact arrangement — a subtitle file, nothing else, no film.
+
+describe("the project timing lock", () => {
+  const imported = () =>
+    cell({ id: "s1", original: "Imported line", medium: "text", startTime: 0, endTime: 8 })
+  const added = () =>
+    cell({
+      id: "s2",
+      original: "Added line",
+      medium: "text",
+      startTime: 12,
+      endTime: 20,
+      metadata: { aquillaOrigin: { version: 1, kind: "user-insert" } },
+    })
+
+  /** The resize grips — the "handlebars" Sam saw. They carry no testid of
+   *  their own, so they are found the way the card renders them. */
+  const grips = (id: string) =>
+    screen.getByTestId(`tl-card-${id}`).querySelectorAll(".cursor-ew-resize")
+
+  it("leaves the handles on an imported row when the project is unlocked", () => {
+    // The control. Without this the next test would pass against a card that
+    // never had grips for some unrelated reason (too narrow, too short).
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={[imported()]} onRetimeSubtitle={() => {}}
+        timingLocked={false}
+      />,
+    )
+    expect(grips("s1").length).toBeGreaterThan(0)
+  })
+
+  it("takes them away when it is locked — with no film linked, Sam's case", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={[imported()]} onRetimeSubtitle={() => {}}
+        timingLocked
+      />,
+    )
+    expect(grips("s1")).toHaveLength(0)
+  })
+
+  it("still lets someone move a line they added themselves", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={[imported(), added()]} onRetimeSubtitle={() => {}}
+        timingLocked
+      />,
+    )
+    expect(grips("s1")).toHaveLength(0)
+    expect(grips("s2").length).toBeGreaterThan(0)
+  })
+
+  it("says so, and keeps saying so, while the project is unlocked", () => {
+    // Sam: "the app should remind you when you're unlocked." A toast would go
+    // away; the risk is a project left unlocked for a week without anyone
+    // noticing, so the reminder is part of the toolbar.
+    const { unmount } = render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={[imported()]} onRetimeSubtitle={() => {}}
+        timingLocked={false}
+      />,
+    )
+    expect(screen.getByTestId("tl-timing-unlocked")).toBeInTheDocument()
+    unmount()
+
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={[imported()]} onRetimeSubtitle={() => {}}
+        timingLocked
+      />,
+    )
+    expect(screen.queryByTestId("tl-timing-unlocked")).not.toBeInTheDocument()
+  })
+})

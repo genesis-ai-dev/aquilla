@@ -37,6 +37,8 @@ import {
   type TimebaseVerdict,
 } from "@/lib/import/timebase"
 import { decodeImportText, MAX_UNKNOWN_TEXT_BYTES } from "@/lib/import/ai-recipe"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import { fmtClock } from "./format"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 
@@ -99,6 +101,7 @@ export function ImportAudioVttDialog({
   takeCount = 0,
   onCancel,
 }: Props) {
+  const t = useT()
   const [picked, setPicked] = useState<{ parsed: ParsedAudioVtt; fileName: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
   /** Default ON: a detected mismatch is a defect in the file, and the whole
@@ -239,17 +242,17 @@ export function ImportAudioVttDialog({
     setPicked(null)
     setError(null)
     if (file.size === 0) {
-      setError("That file is empty.")
+      setError(t("editor.timeline.importFileEmpty"))
       return
     }
     if (file.size > MAX_UNKNOWN_TEXT_BYTES) {
-      setError(`"${file.name}" is larger than the 10 MB limit for text imports.`)
+      setError(t("editor.timeline.importTooLargeText", { fileName: file.name }))
       return
     }
     try {
       const parsed = parseAudioVtt(decodeImportText(await file.arrayBuffer(), file.name))
       if (parsed.cues.length === 0) {
-        setError("This doesn't look like an audio VTT — no timed cues found.")
+        setError(t("editor.timeline.audioVttNoCues"))
         return
       }
       setPicked({ parsed, fileName: file.name })
@@ -265,15 +268,13 @@ export function ImportAudioVttDialog({
       <DialogContent data-testid="import-audio-vtt-dialog">
         <DialogHeader>
           <DialogTitle>
-            {replacing ? "Replace the audio VTT" : "Import an audio VTT"}
+            {replacing
+              ? t("editor.timeline.audioVttTitleReplace")
+              : t("editor.timeline.audioVttTitleNew")}
           </DialogTitle>
           <DialogDescription>
-            The cues become a read-only Source audio track on this file's
-            timeline — the transcript of what is said in the film, on the film's
-            own timings. The dialogue table below is untouched: no rows are
-            added to "{textFileName}", and nothing here is translated or
-            exported.
-            {replacing && " The audio track this file has now will be replaced."}
+            {t("editor.timeline.audioVttDescription", { fileName: textFileName })}
+            {replacing && <> {t("editor.timeline.audioVttDescriptionReplacing")}</>}
           </DialogDescription>
         </DialogHeader>
 
@@ -281,23 +282,28 @@ export function ImportAudioVttDialog({
           <div className="flex flex-col gap-1 text-sm">
             <p className="font-medium">{picked.fileName}</p>
             <p className="text-muted-foreground">
-              {report.totalCues} cues, {cueSpan(picked.parsed)}
+              {t("editor.timeline.audioVttCueSummary", {
+                count: report.totalCues,
+                span: cueSpan(picked.parsed),
+              })}
             </p>
             {report.repairedShortForm > 0 && (
               <p className="text-xs text-muted-foreground">
-                {report.repairedShortForm} short-form timestamps read as
-                minutes and seconds.
+                {t("editor.timeline.audioVttRepairedShortForm", {
+                  count: report.repairedShortForm,
+                })}
               </p>
             )}
             {report.strippedTagCues > 0 && (
               <p className="text-xs text-muted-foreground">
-                Formatting removed from {report.strippedTagCues} cues.
+                {t("editor.timeline.audioVttStrippedTags", {
+                  count: report.strippedTagCues,
+                })}
               </p>
             )}
             {report.droppedCues > 0 && (
               <p className="text-xs text-muted-foreground">
-                {report.droppedCues} lines carried no usable text and were
-                skipped.
+                {t("editor.timeline.audioVttDroppedCues", { count: report.droppedCues })}
               </p>
             )}
           </div>
@@ -305,7 +311,7 @@ export function ImportAudioVttDialog({
           <div className="flex flex-col items-center gap-2 rounded-lg border-2 border-dashed border-muted p-6 text-center">
             <label>
               <span className="inline-flex cursor-pointer items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent">
-                Choose audio VTT
+                {t("editor.timeline.audioVttChoose")}
               </span>
               <input
                 type="file"
@@ -322,7 +328,7 @@ export function ImportAudioVttDialog({
               />
             </label>
             <p className="text-xs text-muted-foreground">
-              The episode's audio VTT — usually the one marked AUDIO_ONLY.
+              {t("editor.timeline.audioVttPickHint")}
             </p>
           </div>
         )}
@@ -338,6 +344,7 @@ export function ImportAudioVttDialog({
             The drift is stated in seconds, not in frame rates: the rates are
             the evidence, but "three seconds late by the end" is the thing
             anyone can check against the picture. */}
+        {/* i18n-exempt "correct" is a TimebaseVerdict tag, not copy */}
         {picked && verdict?.kind === "correct" && (
           <div
             data-testid="import-audio-vtt-timebase"
@@ -345,52 +352,77 @@ export function ImportAudioVttDialog({
           >
             <p>
               {verdict.namedRatio ? (
-                <>
-                  These cues are timed at{" "}
-                  <span className="font-medium">{verdict.cue.label} frames per second</span>, but
-                  "{textFileName}" is at{" "}
-                  <span className="font-medium">{verdict.reference.label}</span>.
-                </>
+                <RichMessage
+                  k="editor.timeline.audioVttTimebaseNamed"
+                  values={{
+                    rate: (
+                      <span className="font-medium">
+                        {t("editor.timeline.audioVttFramesPerSecond", {
+                          rate: verdict.cue.label,
+                        })}
+                      </span>
+                    ),
+                    fileName: textFileName,
+                    other: <span className="font-medium">{verdict.reference.label}</span>,
+                  }}
+                />
               ) : verdict.ambiguousRates ? (
-                <>
-                  These cues run{" "}
-                  <span className="font-medium">
-                    {Math.abs((verdict.scale - 1) * 100).toFixed(1)}%{" "}
-                    {verdict.scale > 1 ? "fast" : "slow"}
-                  </span>{" "}
-                  against "{textFileName}" — the usual frame-rate mistake. Several pairs
-                  of rates produce exactly this, so which one it is cannot be told from
-                  the files; the correction is the same either way.
-                </>
+                <RichMessage
+                  k="editor.timeline.audioVttTimebaseAmbiguous"
+                  values={{
+                    rate: (
+                      <span className="font-medium">
+                        {t(
+                          verdict.scale > 1
+                            ? "editor.timeline.audioVttPercentFast"
+                            : "editor.timeline.audioVttPercentSlow",
+                          { percent: Math.abs((verdict.scale - 1) * 100).toFixed(1) },
+                        )}
+                      </span>
+                    ),
+                    fileName: textFileName,
+                  }}
+                />
               ) : (
-                <>
-                  These cues run at a different speed from "{textFileName}" — by a
-                  ratio that matches no frame-rate mistake we recognise, so it may be a
-                  different cut of the episode rather than a timing error.
-                </>
+                t("editor.timeline.audioVttTimebaseUnrecognised", { fileName: textFileName })
               )}{" "}
-              Left alone they run about{" "}
-              <span className="font-medium">
-                {Math.abs(verdict.driftAtEndSec).toFixed(1)} seconds{" "}
-                {verdict.driftAtEndSec > 0 ? "early" : "late"}
-              </span>{" "}
-              by the end of the file. The error starts at nothing and grows, so the opening
-              minutes look right even when the rest has drifted.
+              <RichMessage
+                k="editor.timeline.audioVttDriftTail"
+                values={{
+                  drift: (
+                    <span className="font-medium">
+                      {t(
+                        verdict.driftAtEndSec > 0
+                          ? "editor.timeline.audioVttSecondsEarly"
+                          : "editor.timeline.audioVttSecondsLate",
+                        { seconds: Math.abs(verdict.driftAtEndSec).toFixed(1) },
+                      )}
+                    </span>
+                  ),
+                }}
+              />
             </p>
             {verdict.measured && (
               <p className="text-muted-foreground">
-                Measured on {verdict.measured.anchors} lines worded the same in both files.
-                {verdict.disputed &&
-                  " The files' own timing grids suggest something different — worth a look at the numbers below before accepting."}
+                {t("editor.timeline.audioVttMeasured", { count: verdict.measured.anchors })}
+                {verdict.disputed && <> {t("editor.timeline.audioVttDisputed")}</>}
               </p>
             )}
             {coverage && coverage.raw != null && (
               <p data-testid="import-audio-vtt-coverage">
-                Lined up,{" "}
-                <span className="font-medium">
-                  {Math.round(coverage.applied * 100)}% of the heard lines find a subtitle
-                </span>
-                ; left as delivered, {Math.round(coverage.raw * 100)}%.
+                <RichMessage
+                  k="editor.timeline.audioVttCoverageCompare"
+                  values={{
+                    found: (
+                      <span className="font-medium">
+                        {t("editor.timeline.audioVttCoverageFound", {
+                          percent: Math.round(coverage.applied * 100),
+                        })}
+                      </span>
+                    ),
+                    rawPercent: Math.round(coverage.raw * 100),
+                  }}
+                />
               </p>
             )}
             <label className="flex items-center gap-2">
@@ -399,47 +431,66 @@ export function ImportAudioVttDialog({
                 checked={correctTimebase}
                 onCheckedChange={(checked) => setCorrectTimebase(checked)}
               />
-              Line them up with "{textFileName}" on import
+              {t("editor.timeline.audioVttTimebaseApply", { fileName: textFileName })}
             </label>
           </div>
         )}
 
+        {/* i18n-exempt "aligned" is a TimebaseVerdict tag, not copy */}
         {picked && verdict?.kind === "aligned" && (
           <div
             data-testid="import-audio-vtt-timebase-aligned"
             className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground"
           >
-            These cues and "{textFileName}" keep the same time — no correction needed.
+            {t("editor.timeline.audioVttTimebaseAligned", { fileName: textFileName })}
             {coverage && (
               <>
                 {" "}
                 <span className="font-medium text-foreground">
-                  {Math.round(coverage.applied * 100)}% of the heard lines find a subtitle.
+                  {t("editor.timeline.audioVttCoverageFoundSentence", {
+                    percent: Math.round(coverage.applied * 100),
+                  })}
                 </span>
               </>
             )}
           </div>
         )}
 
+        {/* i18n-exempt "unmeasurable" is a TimebaseVerdict tag, not copy */}
         {picked && verdict?.kind === "unmeasurable" && (
           <div
             data-testid="import-audio-vtt-timebase-unknown"
             className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs"
           >
             <p>
-              <span className="font-medium">
-                Couldn't check these cues against "{textFileName}"
-              </span>{" "}
-              — {verdict.reason}. They will be imported exactly as delivered. If the
-              pairings look wrong afterwards, this is the first thing to check.
+              <RichMessage
+                k="editor.timeline.audioVttUnmeasurable"
+                values={{
+                  lead: (
+                    <span className="font-medium">
+                      {t("editor.timeline.audioVttUnmeasurableLead", {
+                        fileName: textFileName,
+                      })}
+                    </span>
+                  ),
+                  reason: verdict.reason,
+                }}
+              />
             </p>
             {coverage && (
               <p data-testid="import-audio-vtt-coverage">
-                As delivered,{" "}
-                <span className="font-medium">
-                  {Math.round(coverage.applied * 100)}% of the heard lines find a subtitle
-                </span>
-                .
+                <RichMessage
+                  k="editor.timeline.audioVttCoverageAsDelivered"
+                  values={{
+                    found: (
+                      <span className="font-medium">
+                        {t("editor.timeline.audioVttCoverageFound", {
+                          percent: Math.round(coverage.applied * 100),
+                        })}
+                      </span>
+                    ),
+                  }}
+                />
               </p>
             )}
           </div>
@@ -455,28 +506,47 @@ export function ImportAudioVttDialog({
             className="flex flex-col gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3 text-xs"
           >
             {planIsNoop ? (
-              <p>
-                These are the {plan.total} cues this file already has, on the same timings —
-                there is nothing to update.
-              </p>
+              <p>{t("editor.timeline.audioVttReconcileNoop", { count: plan.total })}</p>
             ) : (
               <>
                 <p>
-                  <span className="font-medium">{plan.kept} of {plan.total} cues</span> are the
-                  ones already here and keep everything attached to them
+                  <RichMessage
+                    k="editor.timeline.audioVttReconcileKept"
+                    values={{
+                      kept: (
+                        <span className="font-medium">
+                          {t("editor.timeline.audioVttKeptOfTotal", {
+                            kept: plan.kept,
+                            total: plan.total,
+                          })}
+                        </span>
+                      ),
+                    }}
+                  />
                   {plan.keptTakes > 0 && (
                     <>
                       {" "}
-                      — including{" "}
-                      <span className="font-medium">
-                        {plan.keptTakes} recording{plan.keptTakes === 1 ? "" : "s"}
-                      </span>
+                      <RichMessage
+                        k="editor.timeline.audioVttKeptIncluding"
+                        values={{
+                          takes: (
+                            <span className="font-medium">
+                              {t("editor.timeline.audioVttRecordingCount", {
+                                count: plan.keptTakes,
+                              })}
+                            </span>
+                          ),
+                        }}
+                      />
                     </>
                   )}
                   {plan.retimes.length > 0 && (
                     <>
-                      . {plan.retimes.length} shift by up to {plan.maxShiftSec.toFixed(1)}{" "}
-                      seconds
+                      {". "}
+                      {t("editor.timeline.audioVttRetimeShift", {
+                        count: plan.retimes.length,
+                        seconds: plan.maxShiftSec.toFixed(1),
+                      })}
                     </>
                   )}
                   .
@@ -484,27 +554,26 @@ export function ImportAudioVttDialog({
                 {(plan.creates.length > 0 || plan.deletes.length > 0) && (
                   <p>
                     {plan.creates.length > 0 && (
-                      <>
-                        {plan.creates.length} new cue{plan.creates.length === 1 ? "" : "s"} will
-                        be added.{" "}
-                      </>
+                      <>{t("editor.timeline.audioVttCreates", { count: plan.creates.length })} </>
                     )}
-                    {plan.deletes.length > 0 && (
-                      <>
-                        {plan.deletes.length} cue{plan.deletes.length === 1 ? "" : "s"} are gone
-                        from this file and will be removed.
-                      </>
-                    )}
+                    {plan.deletes.length > 0 &&
+                      t("editor.timeline.audioVttDeletes", { count: plan.deletes.length })}
                   </p>
                 )}
                 {plan.orphanedTakes > 0 && (
                   <p data-testid="import-audio-vtt-orphan-warning" className="text-red-600 dark:text-red-400">
-                    <span className="font-medium">
-                      {plan.orphanedTakes} recording{plan.orphanedTakes === 1 ? "" : "s"} sit
-                      {plan.orphanedTakes === 1 ? "s" : ""} on a cue that is going away
-                    </span>{" "}
-                    and will no longer be reachable. The audio itself is kept, but nothing in
-                    the app would show it.
+                    <RichMessage
+                      k="editor.timeline.audioVttOrphanWarning"
+                      values={{
+                        lead: (
+                          <span className="font-medium">
+                            {t("editor.timeline.audioVttOrphanLead", {
+                              count: plan.orphanedTakes,
+                            })}
+                          </span>
+                        ),
+                      }}
+                    />
                   </p>
                 )}
               </>
@@ -533,20 +602,26 @@ export function ImportAudioVttDialog({
             className="flex flex-col gap-2 rounded-md border border-red-500/40 bg-red-500/5 p-3 text-xs"
           >
             <p>
-              Take the Source audio track off "{textFileName}"? The{" "}
-              {existingCues?.length ?? 0} cues and every subtitle pairing go with it.
+              {t("editor.timeline.audioVttRemoveLead", {
+                fileName: textFileName,
+                count: existingCues?.length ?? 0,
+              })}
               {takeCount > 0 && (
                 <>
                   {" "}
-                  <span className="font-medium">
-                    {takeCount} recording{takeCount === 1 ? "" : "s"} sit{takeCount === 1 ? "s" : ""} on
-                    those cues
-                  </span>{" "}
-                  and would no longer be reachable — the audio itself is kept, but nothing in the
-                  app would show it.
+                  <RichMessage
+                    k="editor.timeline.audioVttRemoveTakes"
+                    values={{
+                      lead: (
+                        <span className="font-medium">
+                          {t("editor.timeline.audioVttRemoveTakesLead", { count: takeCount })}
+                        </span>
+                      ),
+                    }}
+                  />
                 </>
               )}{" "}
-              You can import an audio VTT again afterwards.
+              {t("editor.timeline.audioVttRemoveRestore")}
             </p>
             <div className="flex gap-2">
               <Button
@@ -555,7 +630,7 @@ export function ImportAudioVttDialog({
                 data-testid="import-audio-vtt-remove-go"
                 onClick={onRemove}
               >
-                Remove the cues
+                {t("editor.timeline.audioVttRemoveGo")}
               </Button>
               <Button
                 size="sm"
@@ -563,7 +638,7 @@ export function ImportAudioVttDialog({
                 data-testid="import-audio-vtt-remove-cancel"
                 onClick={() => setConfirmingRemove(false)}
               >
-                Keep them
+                {t("editor.timeline.keepThem")}
               </Button>
             </div>
           </div>
@@ -579,7 +654,7 @@ export function ImportAudioVttDialog({
               onClick={() => setConfirmingRemove(true)}
               className="mr-auto text-red-600 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400 dark:hover:text-red-400"
             >
-              Remove audio cues
+              {t("editor.timeline.audioVttRemove")}
             </Button>
           )}
           <Button
@@ -587,7 +662,7 @@ export function ImportAudioVttDialog({
             data-testid="import-audio-vtt-cancel"
             onClick={onCancel}
           >
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             data-testid="import-audio-vtt-confirm"
@@ -609,12 +684,14 @@ export function ImportAudioVttDialog({
             }}
           >
             {!picked
-              ? "Import cues"
+              ? t("editor.timeline.audioVttImport")
               : plan
                 ? planIsNoop
-                  ? "Nothing to update"
-                  : `Update ${plan.total} cues`
-                : `Import ${picked.parsed.cues.length} cues`}
+                  ? t("editor.timeline.audioVttNothingToUpdate")
+                  : t("editor.timeline.audioVttUpdateCues", { count: plan.total })
+                : t("editor.timeline.audioVttImportCues", {
+                    count: picked.parsed.cues.length,
+                  })}
           </Button>
         </DialogFooter>
       </DialogContent>

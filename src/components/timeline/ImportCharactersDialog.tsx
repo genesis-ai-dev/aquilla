@@ -40,6 +40,8 @@ import {
   type AlignableCue,
   type AudioCharacterPlan,
 } from "@/lib/import/audio-character-sheet"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
 /**
  * Which of the client's two character spreadsheets this is.
@@ -66,6 +68,11 @@ interface Props {
   existingAudioCount?: number
   onConfirm(plan: CharacterAssignmentPlan): void
   onConfirmAudio?(plan: AudioCharacterPlan): void
+  /** Take a sheet back off, per side. Absent => not offered, either because
+   *  there is nothing there or because this user is not a project lead — the
+   *  same convention the audio-VTT dialog uses for its own removal. */
+  onClearSubtitles?(): void
+  onClearAudio?(): void
   onCancel(): void
 }
 
@@ -86,17 +93,46 @@ export function ImportCharactersDialog({
   existingAudioCount = 0,
   onConfirm,
   onConfirmAudio,
+  onClearSubtitles,
+  onClearAudio,
   onCancel,
 }: Props) {
+  const t = useT()
   const [picked, setPicked] = useState<Picked | null>(null)
   const [error, setError] = useState<string | null>(null)
+  /** Clearing asks twice, in place. It empties hundreds of lines and takes hand
+   *  corrections with them, so it does not get to be one click beside Cancel.
+   *  Holds WHICH side is being confirmed, since the two are independent. */
+  const [clearing, setClearing] = useState<CharacterSheetKind | null>(null)
 
   useEffect(() => {
     if (open) {
       setPicked(null)
       setError(null)
+      setClearing(null)
     }
   }, [open])
+
+  const anyImported = existingCount > 0 || existingAudioCount > 0
+  /** "637 subtitle lines and 548 heard lines" — only the sides that have one,
+   *  because claiming a side that was never imported reads as a bug. The
+   *  conjunction is its own catalog string rather than a hardcoded " and ", so
+   *  a translator owns both the word and the order the two counts appear in. */
+  const importedParts = [
+    existingCount > 0
+      ? t("editor.timeline.charactersSubtitleLines", { count: existingCount })
+      : null,
+    existingAudioCount > 0
+      ? t("editor.timeline.charactersHeardLines", { count: existingAudioCount })
+      : null,
+  ].filter((part): part is string => part !== null)
+  const importedSummary =
+    importedParts.length === 2
+      ? t("editor.timeline.charactersBothSides", {
+          subtitle: importedParts[0],
+          audio: importedParts[1],
+        })
+      : (importedParts[0] ?? "")
 
   const sheet = picked?.sheets[picked.sheetIndex]
   const columns = sheet ? guessCharacterColumns(sheet.rows[0] ?? []) : null
@@ -134,16 +170,16 @@ export function ImportCharactersDialog({
   const handleFile = async (file: File, kind: CharacterSheetKind) => {
     setPicked(null)
     setError(null)
-    if (file.size === 0) return setError("That file is empty.")
+    if (file.size === 0) return setError(t("editor.timeline.importFileEmpty"))
     if (file.size > MAX_UNKNOWN_TEXT_BYTES) {
-      return setError(`"${file.name}" is larger than the 10 MB limit for imports.`)
+      return setError(t("editor.timeline.importTooLargeSheet", { fileName: file.name }))
     }
     try {
       const sheets = /\.csv$/i.test(file.name)
         ? [parseCsvToSheet(decodeImportText(await file.arrayBuffer(), file.name), file.name)]
         : await parseXlsxToSheets(await file.arrayBuffer())
       if (sheets.length === 0 || (sheets[0].rows.length ?? 0) < 2) {
-        return setError("That spreadsheet has no rows.")
+        return setError(t("editor.timeline.charactersNoRows"))
       }
       setPicked({ fileName: file.name, sheets, sheetIndex: 0, kind })
     } catch (cause) {
@@ -155,13 +191,19 @@ export function ImportCharactersDialog({
     <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel() }}>
       <DialogContent data-testid="import-characters-dialog">
         <DialogHeader>
+          {/* Titled for what this is a home for, not only for what it was
+              built to do first. It gained two ways to take a sheet back off,
+              and "Replace the characters" would be a door labelled with half
+              of what is behind it. */}
           <DialogTitle>
-            {existingCount > 0 ? "Replace the characters" : "Import characters"}
+            {anyImported
+              ? t("editor.timeline.charactersTitle")
+              : t("editor.timeline.charactersImportTitle")}
           </DialogTitle>
           <DialogDescription>
-            A spreadsheet with one row per line of "{textFileName}", saying who speaks it and
-            whether the camera is on them. Rows are matched to lines by their timestamps.
-            {existingCount > 0 && ` ${existingCount} lines already have a character.`}
+            {anyImported
+              ? t("editor.timeline.charactersImportedSummary", { summary: importedSummary })
+              : t("editor.timeline.charactersImportHint", { fileName: textFileName })}
           </DialogDescription>
         </DialogHeader>
 
@@ -171,7 +213,7 @@ export function ImportCharactersDialog({
 
             {picked.sheets.length > 1 && (
               <label className="flex items-center gap-2 text-xs">
-                Sheet
+                {t("editor.timeline.charactersSheet")}
                 <select
                   data-testid="import-characters-sheet"
                   className="rounded-md border border-input bg-background px-2 py-1"
@@ -187,22 +229,34 @@ export function ImportCharactersDialog({
 
             {!columns ? (
               <p data-testid="import-characters-nocolumn" className="text-xs text-red-600 dark:text-red-400">
-                No character column found in this sheet. Expected a column named something like
-                "Character Label", "Cast" or "Speaker".
+                {t("editor.timeline.charactersNoColumn")}
               </p>
             ) : wrongKind ? (
               <div
                 data-testid="import-characters-wrongkind"
                 className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs"
               >
+                {/* One key per direction rather than a frame with three holes
+                    in it: which sheet this is, which one it is not, and which
+                    side its rows landed on all move together, and a language
+                    that reorders the clause needs the whole sentence. */}
                 <p>
-                  This looks like the{" "}
-                  <span className="font-medium">
-                    {picked!.kind === "audio" ? "subtitle" : "audio"} character sheet
-                  </span>
-                  , not the {picked!.kind === "audio" ? "audio" : "subtitle"} one — its rows line
-                  up with the {picked!.kind === "audio" ? "subtitles" : "heard lines"} instead.
-                  Use the other button and it will import fine.
+                  <RichMessage
+                    k={
+                      picked!.kind === "audio"
+                        ? "editor.timeline.charactersWrongKindAudio"
+                        : "editor.timeline.charactersWrongKindSubtitle"
+                    }
+                    values={{
+                      sheet: (
+                        <span className="font-medium">
+                          {picked!.kind === "audio"
+                            ? t("editor.timeline.charactersSubtitleSheet")
+                            : t("editor.timeline.charactersAudioSheet")}
+                        </span>
+                      ),
+                    }}
+                  />
                 </p>
               </div>
             ) : mismatched ? (
@@ -211,12 +265,25 @@ export function ImportCharactersDialog({
                 className="rounded-md border border-red-500/40 bg-red-500/5 p-3 text-xs"
               >
                 <p>
-                  <span className="font-medium">
-                    {active!.unmatchedRows.length} of this sheet's rows match no{" "}
-                    {picked!.kind === "audio" ? "heard line" : "line"} in "{textFileName}"
-                  </span>{" "}
-                  — starting at row {active!.unmatchedRows[0]}. That normally means the spreadsheet
-                  belongs to a different episode. Nothing has been changed.
+                  <RichMessage
+                    k="editor.timeline.charactersMismatch"
+                    values={{
+                      lead: (
+                        <span className="font-medium">
+                          {t(
+                            picked!.kind === "audio"
+                              ? "editor.timeline.charactersMismatchLeadAudio"
+                              : "editor.timeline.charactersMismatchLeadSubtitle",
+                            {
+                              count: active!.unmatchedRows.length,
+                              fileName: textFileName,
+                            },
+                          )}
+                        </span>
+                      ),
+                      row: active!.unmatchedRows[0],
+                    }}
+                  />
                 </p>
               </div>
             ) : (
@@ -225,24 +292,38 @@ export function ImportCharactersDialog({
                 className="rounded-md border border-emerald-500/40 bg-emerald-500/5 p-3 text-xs"
               >
                 <p>
-                  <span className="font-medium">
-                    {active!.assignments.length}{" "}
-                    {picked!.kind === "audio" ? "heard lines" : "lines"} get a character
-                  </span>
-                  , {(plan ?? audioPlan)!.distinctCharacters} people in all. Camera state comes
-                  across with them.
+                  <RichMessage
+                    k="editor.timeline.charactersAssignedSummary"
+                    values={{
+                      lead: (
+                        <span className="font-medium">
+                          {t(
+                            picked!.kind === "audio"
+                              ? "editor.timeline.charactersAssignedLeadAudio"
+                              : "editor.timeline.charactersAssignedLeadSubtitle",
+                            { count: active!.assignments.length },
+                          )}
+                        </span>
+                      ),
+                      people: (plan ?? audioPlan)!.distinctCharacters,
+                    }}
+                  />
                 </p>
                 {(plan ?? audioPlan)!.blankRows > 0 && (
                   <p className="mt-1 text-muted-foreground">
-                    {(plan ?? audioPlan)!.blankRows} rows have no character and are skipped —
-                    screen text and the like.
+                    {t("editor.timeline.charactersBlankRows", {
+                      count: (plan ?? audioPlan)!.blankRows,
+                    })}
                   </p>
                 )}
                 {(plan?.cellsWithoutRow ?? audioPlan?.cuesWithoutRow ?? 0) > 0 && (
                   <p className="mt-1 text-muted-foreground">
-                    {plan?.cellsWithoutRow ?? audioPlan?.cuesWithoutRow}{" "}
-                    {picked!.kind === "audio" ? "heard lines are" : "lines are"} not in the sheet
-                    and keep whatever they have.
+                    {t(
+                      picked!.kind === "audio"
+                        ? "editor.timeline.charactersWithoutRowAudio"
+                        : "editor.timeline.charactersWithoutRowSubtitle",
+                      { count: plan?.cellsWithoutRow ?? audioPlan?.cuesWithoutRow ?? 0 },
+                    )}
                   </p>
                 )}
                 {(plan ?? audioPlan)!.filledByPosition > 0 && (
@@ -250,8 +331,9 @@ export function ImportCharactersDialog({
                     data-testid="import-characters-drift"
                     className="mt-1 text-muted-foreground"
                   >
-                    {(plan ?? audioPlan)!.filledByPosition} rows do not quite match their line;
-                    the lines either side pin them, so they are matched by position.
+                    {t("editor.timeline.charactersFilledByPosition", {
+                      count: (plan ?? audioPlan)!.filledByPosition,
+                    })}
                   </p>
                 )}
                 {(plan ?? audioPlan)!.cameraDisagreements > 0 && (
@@ -259,8 +341,9 @@ export function ImportCharactersDialog({
                     data-testid="import-characters-camera-warning"
                     className="mt-1 text-amber-600 dark:text-amber-400"
                   >
-                    In {(plan ?? audioPlan)!.cameraDisagreements} rows the Camera column and the
-                    angle written into the name disagree. The column wins.
+                    {t("editor.timeline.charactersCameraDisagreements", {
+                      count: (plan ?? audioPlan)!.cameraDisagreements,
+                    })}
                   </p>
                 )}
               </div>
@@ -278,7 +361,7 @@ export function ImportCharactersDialog({
             <div className="flex flex-wrap items-center justify-center gap-2">
               <label>
                 <span className="inline-flex cursor-pointer items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent">
-                  Subtitle characters
+                  {t("editor.timeline.charactersPickSubtitle")}
                 </span>
                 <input
                   type="file"
@@ -297,7 +380,7 @@ export function ImportCharactersDialog({
               {audioCues && audioCues.length > 0 && (
                 <label>
                   <span className="inline-flex cursor-pointer items-center rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium transition-colors hover:bg-accent">
-                    Audio characters
+                    {t("editor.timeline.charactersPickAudio")}
                   </span>
                   <input
                     type="file"
@@ -314,16 +397,12 @@ export function ImportCharactersDialog({
               )}
             </div>
             <p className="text-xs text-muted-foreground">
-              One row per line of "{textFileName}", or per heard line of its audio track.
-              .xlsx or .csv.
-              {existingCount > 0 || existingAudioCount > 0 ? (
+              {t("editor.timeline.charactersPickHint", { fileName: textFileName })}
+              {anyImported ? (
                 <>
                   {" "}
                   <span className="text-foreground">
-                    {existingCount > 0 && `${existingCount} subtitle lines`}
-                    {existingCount > 0 && existingAudioCount > 0 && " and "}
-                    {existingAudioCount > 0 && `${existingAudioCount} heard lines`} already have a
-                    character.
+                    {t("editor.timeline.charactersAlreadyHave", { summary: importedSummary })}
                   </span>
                 </>
               ) : null}
@@ -337,9 +416,116 @@ export function ImportCharactersDialog({
           </p>
         )}
 
+        {/* PRONOUNCED THROUGH SPECIFICS, not through volume (Sam: "very
+            pronounced and very clear and very simple so that people actually
+            read it"). Every sentence is a count or a named consequence; there
+            is nothing here to skim past. It says outright that hand
+            corrections go too, because "remove" means CLEAR — this is not an
+            undo of the import, and promising one we cannot deliver would be
+            worse than the blunt truth. */}
+        {/* i18n-exempt "subtitle" is a CharacterSheetKind tag, not copy */}
+        {clearing === "subtitle" && onClearSubtitles && (
+          <div
+            data-testid="import-characters-clear-subtitle-confirm"
+            className="flex flex-col gap-2 rounded-md border border-red-500/40 bg-red-500/5 p-3 text-xs"
+          >
+            <p className="font-medium">{t("editor.timeline.charactersClearSubtitleTitle")}</p>
+            <p>
+              {t("editor.timeline.charactersClearSubtitleBody", { count: existingCount })}
+              {/* The links only carry names ONE WAY — a cue reads off the
+                  subtitles, never the reverse — so emptying this side empties
+                  the heard lines with it unless they have names of their own. */}
+              {existingAudioCount === 0 && (audioCues?.length ?? 0) > 0 && (
+                <> {t("editor.timeline.charactersClearSubtitleAlsoAudio")}</>
+              )}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="destructive"
+                data-testid="import-characters-clear-subtitle-go"
+                onClick={onClearSubtitles}
+              >
+                {t("editor.timeline.charactersClearGo")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                data-testid="import-characters-clear-cancel"
+                onClick={() => setClearing(null)}
+              >
+                {t("editor.timeline.keepThem")}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* i18n-exempt "audio" is a CharacterSheetKind tag, not copy */}
+        {clearing === "audio" && onClearAudio && (
+          <div
+            data-testid="import-characters-clear-audio-confirm"
+            className="flex flex-col gap-2 rounded-md border border-red-500/40 bg-red-500/5 p-3 text-xs"
+          >
+            <p className="font-medium">{t("editor.timeline.charactersClearAudioTitle")}</p>
+            <p>
+              {t("editor.timeline.charactersClearAudioBody", { count: existingAudioCount })}{" "}
+              {existingCount > 0
+                ? t("editor.timeline.charactersClearAudioToSubtitles")
+                : t("editor.timeline.charactersClearAudioNone")}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="destructive"
+                data-testid="import-characters-clear-audio-go"
+                onClick={onClearAudio}
+              >
+                {t("editor.timeline.charactersClearGo")}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                data-testid="import-characters-clear-cancel"
+                onClick={() => setClearing(null)}
+              >
+                {t("editor.timeline.keepThem")}
+              </Button>
+            </div>
+          </div>
+        )}
+
         <DialogFooter>
+          {/* Pushed away from the confirming pair so neither can be hit for the
+              other, and hidden while a confirmation is up so the question on
+              screen is the only one being asked. */}
+          {!clearing && (onClearSubtitles || onClearAudio) && (
+            <div className="mr-auto flex gap-1">
+              {onClearSubtitles && existingCount > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  data-testid="import-characters-clear-subtitle"
+                  onClick={() => setClearing("subtitle")}
+                  className="text-red-600 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400 dark:hover:text-red-400"
+                >
+                  {t("editor.timeline.charactersClearSubtitles")}
+                </Button>
+              )}
+              {onClearAudio && existingAudioCount > 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  data-testid="import-characters-clear-audio"
+                  onClick={() => setClearing("audio")}
+                  className="text-red-600 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400 dark:hover:text-red-400"
+                >
+                  {t("editor.timeline.charactersClearHeardLines")}
+                </Button>
+              )}
+            </div>
+          )}
           <Button variant="outline" data-testid="import-characters-cancel" onClick={onCancel}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             data-testid="import-characters-confirm"
@@ -351,8 +537,8 @@ export function ImportCharactersDialog({
             }}
           >
             {active && !mismatched && !wrongKind && active.assignments.length > 0
-              ? `Assign ${active.assignments.length} characters`
-              : "Assign characters"}
+              ? t("editor.timeline.charactersAssignCount", { count: active.assignments.length })
+              : t("editor.timeline.charactersAssign")}
           </Button>
         </DialogFooter>
       </DialogContent>

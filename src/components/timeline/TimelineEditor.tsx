@@ -31,6 +31,7 @@ import {
   Plus,
   Users,
   Volume2,
+  LockOpen,
   VolumeX,
   X,
 } from "lucide-react"
@@ -108,6 +109,17 @@ export interface TimelineEditorProps {
    *  text cells' own timing IS their subtitle timing (the workspace routes).
    *  (Renamed from `onRetime` when the source row was frozen.) */
   onRetimeSubtitle(cellId: string, startSec: number, endSec: number): void
+  /**
+   * AQU-646: the project's timing lock. When on, every imported row and cue is
+   * frozen for everyone — including project leads, which Sam asked for
+   * explicitly. Lines someone added here are exempt: they carry no imported
+   * timing to corrupt.
+   *
+   * Absent reads as LOCKED at the call site, not here, so a project whose
+   * settings have not arrived does not flash the handles up and then take
+   * them away.
+   */
+  timingLocked?: boolean
   /** Round 6/7: move a section's dub chip — its clip-zero anchor (file sec). */
   onRetimeTarget?(cellId: string, anchorSec: number): void
   /** Round 7: trim a dub chip — complete trim state (undefined clears). */
@@ -428,6 +440,7 @@ function LaneLabel({
   trailing?: ReactNode
   reorder?: LaneLabelReorder
 }) {
+  const t = useT()
   const lifted = reorder?.liftPx != null
   // The same ruler the chips beside this label degrade against. Stage 3 wired
   // it for them and left the gutter rendering at full size into a clip, which
@@ -453,7 +466,7 @@ function LaneLabel({
       // below the tracks is not one of them.
       data-tl-track-row={reorder ? "" : undefined}
       role={reorder ? "listitem" : undefined}
-      aria-roledescription={reorder ? "sortable track" : undefined}
+      aria-roledescription={reorder ? t("editor.timeline.sortableTrackRole") : undefined}
       tabIndex={reorder ? 0 : undefined}
       onPointerDown={reorder?.onPointerDown}
       onKeyDown={reorder?.onKeyDown}
@@ -552,6 +565,7 @@ export function TimelineEditor({
   fileId,
   onRetimeSubtitle,
   onRetimeTarget,
+  timingLocked = false,
   onTrimTarget,
   onTogglePlay,
   onRequestLinkVideo,
@@ -1015,7 +1029,7 @@ export function TimelineEditor({
         label: linkingMode ? "Stop linking" : "Check links",
         icon: Link2,
         badge: cueLinksPending ? (
-          <span className="text-[11px] text-muted-foreground">pairing…</span>
+          <span className="text-[11px] text-muted-foreground">{t("editor.timeline.badgePairing")}</span>
         ) : undefined,
         onClick: () =>
           setLinkingMode((on) => {
@@ -1054,7 +1068,7 @@ export function TimelineEditor({
         disabled: !canLinkVideo,
         badge: (
           <span className="text-[11px] text-muted-foreground">
-            {coreMediaUrl ? "linked" : "not linked"}
+            {coreMediaUrl ? t("editor.timeline.badgeLinked") : t("editor.timeline.badgeNotLinked")}
           </span>
         ),
         onClick: onRequestLinkVideo,
@@ -1068,7 +1082,9 @@ export function TimelineEditor({
         disabled: !canImportAudioVtt,
         badge: (
           <span className="text-[11px] text-muted-foreground">
-            {hasAudioCueTrack ? `${audioCues?.length ?? 0} imported` : "not imported"}
+            {hasAudioCueTrack
+              ? t("editor.timeline.badgeImportedCount", { count: audioCues?.length ?? 0 })
+              : t("editor.timeline.badgeNotImported")}
           </span>
         ),
         onClick: onRequestImportAudioVtt,
@@ -1082,12 +1098,12 @@ export function TimelineEditor({
         disabled: !canImportCharacters,
         badge: charactersWriting ? (
           <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-            <Spinner className="h-3 w-3" /> saving…
+            <Spinner className="h-3 w-3" /> {t("editor.timeline.badgeSaving")}
           </span>
         ) : (
           <span className="text-[11px] text-muted-foreground">
             {characterCount === 0 && audioCharacterCount === 0
-              ? "not imported"
+              ? t("editor.timeline.badgeNotImported")
               : [
                   characterCount > 0 ? `${characterCount} subtitle` : null,
                   audioCharacterCount > 0 ? `${audioCharacterCount} heard` : null,
@@ -1955,7 +1971,13 @@ export function TimelineEditor({
             // and cannot collide with it anyway, since that mirror exists
             // only when there ARE dialogue cells and this predicate needs
             // there to be none.
-            canRetimeCell={subtitleFileWithFootage ? isUserAddedLine : undefined}
+            // AQU-646 (2026-08-20): `subtitleFileWithFootage` required a LINKED
+            // FILM, so on a freshly imported VTT with nothing else in the
+            // project this predicate was `undefined` and every imported row
+            // was draggable — exactly what Sam hit ("the chips have
+            // handlebars and I can totally mess up the timings"). The lock
+            // freezes them whether or not a film is linked.
+            canRetimeCell={timingLocked || subtitleFileWithFootage ? isUserAddedLine : undefined}
             // ...and the line it may move within is the space its neighbours
             // leave it. Only here: SUB-36's media-subtitle card is meant to
             // sit wherever it likes, so this must never be on by default.
@@ -2244,6 +2266,22 @@ export function TimelineEditor({
               ariaLabel={t("editor.timeline.sourcesMenuAria")}
             />
           )}
+          {/* AQU-646: the reminder, for as long as the project is unlocked.
+              Sam: "the app should remind you when you're unlocked." A toast
+              would be exactly wrong here — it goes away, and the whole risk is
+              somebody leaving a project unlocked for a week without noticing.
+              This sits in the toolbar and does not leave until the lock is back
+              on, which is also why it is deliberately plain rather than an
+              alarm: it is a state, not an error. */}
+          {!timingLocked && (
+            <span
+              data-testid="tl-timing-unlocked"
+              className="flex shrink-0 items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-700 dark:text-amber-400"
+            >
+              <LockOpen className="h-3 w-3" />
+              {t("editor.timeline.timingsUnlocked")}
+            </span>
+          )}
           {/* Stage 4: linking mode. An explicit toggle, off by default, because
               while it is off clicking must stay exactly what it always was —
               seek, select, drag, trim. Only offered once there are cues to pair
@@ -2285,13 +2323,12 @@ export function TimelineEditor({
               data-testid="tl-linking-notice"
               className="text-xs text-red-600 dark:text-red-400"
             >
-              The pairings couldn't be loaded — what's shown may be incomplete.
+              {t("editor.timeline.pairingsFailed")}
             </span>
           )}
           {linkingAvailable && linkingMode && !cueLinksFailed && neverPaired && (
             <span data-testid="tl-linking-notice" className="text-xs text-muted-foreground">
-              These cues have never been paired with the subtitles — re-import the audio VTT
-              and tick "work out the subtitle pairings".
+              {t("editor.timeline.neverPaired")}
             </span>
           )}
           <div className="inline-flex items-center rounded-md border border-border">
@@ -2325,8 +2362,8 @@ export function TimelineEditor({
           <div className="inline-flex items-center rounded-md border border-border">
             <button
               type="button"
-              aria-label="Shorter rows"
-              title="Shorter rows — fit more tracks on screen (⌘ + scroll)"
+              aria-label={t("editor.timeline.rowsShorterAria")}
+              title={t("editor.timeline.rowsShorterTooltip")}
               onClick={() => applyRowHeight(rowH / 1.3)}
               className="px-1.5 py-1 text-foreground/70 hover:bg-muted"
             >
@@ -2337,8 +2374,8 @@ export function TimelineEditor({
             </span>
             <button
               type="button"
-              aria-label="Taller rows"
-              title="Taller rows (⌘ + scroll)"
+              aria-label={t("editor.timeline.rowsTallerAria")}
+              title={t("editor.timeline.rowsTallerTooltip")}
               onClick={() => applyRowHeight(rowH * 1.3)}
               className="px-1.5 py-1 text-foreground/70 hover:bg-muted"
             >
@@ -2449,7 +2486,7 @@ export function TimelineEditor({
             <div
               ref={gutterInnerRef}
               role={onReorderTrack ? "list" : undefined}
-              aria-label={onReorderTrack ? "Timeline tracks — drag a name, or press Alt with the arrow keys, to reorder" : undefined}
+              aria-label={onReorderTrack ? t("editor.timeline.gutterReorderAria") : undefined}
             >
               {/* The gutter is the track list, exactly as the lanes beside it are —
                   one row here per row there, in the same order, off the same
@@ -2516,8 +2553,8 @@ export function TimelineEditor({
                   actually untimed — an always-on empty row read as a mystery. */}
               {untimed.length > 0 && (
                 <div className="flex h-12 flex-col justify-center px-3">
-                  <span className="text-xs font-semibold text-foreground">Untimed</span>
-                  <span className="text-[10px] text-muted-foreground">no timecode yet</span>
+                  <span className="text-xs font-semibold text-foreground">{t("editor.timeline.laneUntimed")}</span>
+                  <span className="text-[10px] text-muted-foreground">{t("editor.timeline.laneUntimedSub")}</span>
                 </div>
               )}
             </div>

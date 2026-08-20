@@ -165,8 +165,11 @@ describe("wording", () => {
         onConfirm={vi.fn()} onCancel={() => {}}
       />,
     )
-    expect(screen.getByText("Replace the characters")).toBeInTheDocument()
-    expect(screen.getByText(/637 lines already have a character/)).toBeInTheDocument()
+    // Retitled when the dialog gained two ways to take a sheet back OFF:
+    // "Replace the characters" was a door labelled with half of what is
+    // behind it. The state now leads the description instead.
+    expect(screen.getByText("Characters")).toBeInTheDocument()
+    expect(screen.getByText(/637 subtitle lines carry a character/)).toBeInTheDocument()
   })
 
   it("says Import when none do", () => {
@@ -287,5 +290,130 @@ describe("the audio character sheet", () => {
     expect(screen.getByTestId("import-characters-mismatch")).toHaveTextContent("heard line")
     fireEvent.click(screen.getByTestId("import-characters-confirm"))
     expect(onConfirmAudio).not.toHaveBeenCalled()
+  })
+})
+
+
+// ── Taking a sheet back off (AQU-646, Sam 2026-08-20) ────────────────────
+//
+// "There isn't a way to unimport imported sources files… there should be."
+// Remove means CLEAR, and the two sheets clear independently, so this is two
+// removals in one dialog rather than one that guesses which was meant.
+
+describe("clearing a sheet", () => {
+  const both = {
+    open: true,
+    textFileName: "ep101.vtt",
+    cells,
+    onConfirm: vi.fn(),
+    onCancel: () => {},
+  } as const
+
+  it("offers a side only when that side has something on it", () => {
+    render(
+      <ImportCharactersDialog
+        {...both} existingCount={637} existingAudioCount={0}
+        onClearSubtitles={vi.fn()} onClearAudio={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId("import-characters-clear-subtitle")).toBeInTheDocument()
+    expect(screen.queryByTestId("import-characters-clear-audio")).not.toBeInTheDocument()
+  })
+
+  it("offers neither without the clearance to do it", () => {
+    // The absent-handler convention: no project lead, no removal, and the
+    // dialog never renders a button that would only fail.
+    render(<ImportCharactersDialog {...both} existingCount={637} existingAudioCount={548} />)
+    expect(screen.queryByTestId("import-characters-clear-subtitle")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("import-characters-clear-audio")).not.toBeInTheDocument()
+  })
+
+  it("asks twice — the first click confirms rather than clears", () => {
+    const onClearSubtitles = vi.fn()
+    render(
+      <ImportCharactersDialog {...both} existingCount={637} onClearSubtitles={onClearSubtitles} />,
+    )
+    fireEvent.click(screen.getByTestId("import-characters-clear-subtitle"))
+    expect(onClearSubtitles).not.toHaveBeenCalled()
+    expect(screen.getByTestId("import-characters-clear-subtitle-confirm")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("import-characters-clear-subtitle-go"))
+    expect(onClearSubtitles).toHaveBeenCalledTimes(1)
+  })
+
+  it("says how many lines and that hand corrections go too", () => {
+    render(
+      <ImportCharactersDialog {...both} existingCount={637} onClearSubtitles={vi.fn()} />,
+    )
+    fireEvent.click(screen.getByTestId("import-characters-clear-subtitle"))
+    const box = screen.getByTestId("import-characters-clear-subtitle-confirm")
+    expect(box).toHaveTextContent(/637 lines lose their character name, camera angle and line number/)
+    expect(box).toHaveTextContent(/Corrections made since the import go too/)
+  })
+
+  it("warns that the heard lines go blank only when they have no names of their own", () => {
+    // The links carry names ONE WAY. With cues present but unnamed, clearing
+    // the subtitles empties them too — the consequence a reader cannot infer.
+    const { unmount } = render(
+      <ImportCharactersDialog
+        {...both} existingCount={637} existingAudioCount={0} audioCues={audioCues}
+        onClearSubtitles={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("import-characters-clear-subtitle"))
+    expect(screen.getByTestId("import-characters-clear-subtitle-confirm")).toHaveTextContent(
+      /heard lines read their characters from these, so they go blank as well/,
+    )
+    unmount()
+
+    // Cues with their OWN sheet keep their names, so the warning would be a lie.
+    render(
+      <ImportCharactersDialog
+        {...both} existingCount={637} existingAudioCount={548} audioCues={audioCues}
+        onClearSubtitles={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("import-characters-clear-subtitle"))
+    expect(screen.getByTestId("import-characters-clear-subtitle-confirm")).not.toHaveTextContent(
+      /go blank as well/,
+    )
+  })
+
+  it("tells the heard side where its characters will come from instead", () => {
+    const { unmount } = render(
+      <ImportCharactersDialog
+        {...both} existingCount={637} existingAudioCount={548} audioCues={audioCues}
+        onClearAudio={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("import-characters-clear-audio"))
+    expect(screen.getByTestId("import-characters-clear-audio-confirm")).toHaveTextContent(
+      /go back to reading their characters from the subtitles/,
+    )
+    unmount()
+
+    render(
+      <ImportCharactersDialog
+        {...both} existingCount={0} existingAudioCount={548} audioCues={audioCues}
+        onClearAudio={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("import-characters-clear-audio"))
+    expect(screen.getByTestId("import-characters-clear-audio-confirm")).toHaveTextContent(
+      /show no character at all/,
+    )
+  })
+
+  it("backs out without clearing", () => {
+    const onClearAudio = vi.fn()
+    render(
+      <ImportCharactersDialog
+        {...both} existingCount={0} existingAudioCount={548} audioCues={audioCues}
+        onClearAudio={onClearAudio}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("import-characters-clear-audio"))
+    fireEvent.click(screen.getByTestId("import-characters-clear-cancel"))
+    expect(onClearAudio).not.toHaveBeenCalled()
+    expect(screen.getByTestId("import-characters-clear-audio")).toBeInTheDocument()
   })
 })

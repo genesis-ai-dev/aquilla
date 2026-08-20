@@ -73,6 +73,7 @@ export {
   type CaptionPlacement,
   type SubtitleMode,
 } from "./video-pane-prefs"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 /** `HAVE_FUTURE_DATA` — enough decoded to start and keep going for a moment.
  *  The same bar the play queue's cue gate uses for its audio elements. */
@@ -145,6 +146,7 @@ export function MediaVideoPane({
   sourceTextDirection = "ltr",
   targetTextDirection = "ltr",
 }: MediaVideoPaneProps) {
+  const t = useT()
   const videoRef = useRef<HTMLVideoElement>(null)
   const cellIdSet = useMemo(() => new Set(cells.map((c) => c.id)), [cells])
   const queue = useQueueForFile(cellIdSet)
@@ -941,7 +943,7 @@ export function MediaVideoPane({
           src={pipeline === "hls" ? undefined : src}
           data-testid="video-pane-media"
           data-video-pipeline={pipeline}
-          aria-label="Linked video"
+          aria-label={t("editor.timeline.videoPaneLinked")}
           className="h-full w-full object-contain"
           playsInline
           preload="metadata"
@@ -1050,6 +1052,7 @@ export function MediaVideoPane({
         {/* Anchored to the PICTURE, not the black field: the exported video
              has no bars, so this is where the line really lives — and it can
              never drift into a bar as the pane is resized. */}
+        {/* i18n-exempt "picture" is a CaptionPlacement token, not copy */}
         {hasCaption && placement === "picture" && <VideoPaneCaption {...captionProps} />}
         {needsGesture && (
           <button
@@ -1074,13 +1077,14 @@ export function MediaVideoPane({
             }}
             className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 text-xs font-medium text-white"
           >
-            Click to start the picture
+            {t("editor.timeline.videoPaneStart")}
           </button>
         )}
       </div>
       {/* The other choice: keep the image itself completely clear and put
            the line in the black below it. Anchored to the FIELD, so it
            lands in the bar when there is one. */}
+      {/* i18n-exempt "bar" is a CaptionPlacement token, not copy */}
       {hasCaption && placement === "bar" && <VideoPaneCaption {...captionProps} />}
       {/* Bottom right (Sam, 2026-08-18). On the FIELD rather than the picture,
           like the two caption controls above and for the same reason: it keeps

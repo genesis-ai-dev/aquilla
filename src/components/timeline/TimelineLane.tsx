@@ -22,6 +22,7 @@ import { TimelineCard } from "./TimelineCard"
 import { CueLinkOverlay, type LaneLinkOverlay } from "./CueLinkOverlay"
 import type { TimelineLayout } from "@/lib/timeline/layout"
 import type { CellData } from "@/hooks/useCells"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface TimelineLaneProps {
   /** Already lane-filtered + time-sorted (from deriveLanes). */
@@ -89,6 +90,7 @@ export function TimelineLane({
   onRemove,
   linkOverlay,
 }: TimelineLaneProps) {
+  const t = useT()
   // Which add-line slot the pointer is on. State rather than CSS `:hover` —
   // see TimelineSlotButton's header for the six-lit-at-once bug that forced it.
   const { hotKey, slotHoverProps } = useHotSlot(viewStartSec, pxPerSec)
@@ -193,7 +195,7 @@ export function TimelineLane({
             return (
               <TimelineSlotButton
                 testId={`tl-add-line-${span.startSec}-button`}
-                label="Add a line here"
+                label={t("editor.timeline.addLineHere")}
                 hot={hotKey === String(span.startSec)}
                 sizePx={buttonPx}
                 onClick={() => addLine?.(span.startSec, span.endSec)}

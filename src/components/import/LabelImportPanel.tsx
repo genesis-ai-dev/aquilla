@@ -365,11 +365,13 @@ export function LabelImportPanel({
         <Button variant="ghost" onClick={onCancel}>
           {t("common.cancel")}
         </Button>
+        {/* i18n-exempt "idle" is an import-phase tag, not copy */}
         {preview && preview.length > 0 && phase === "idle" && (
           <Button onClick={handleImport} disabled={fileCells === null}>
             {t("importExport.labels.importLabelCount", { count: preview.length })}
           </Button>
         )}
+        {/* i18n-exempt "importing" is an import-phase tag, not copy */}
         {phase === "importing" && (
           <Button disabled>
             {t("importExport.action.importing")}

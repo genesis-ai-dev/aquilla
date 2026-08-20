@@ -203,6 +203,7 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
           >
             <Upload className="me-1 h-3.5 w-3.5" /> {t("audio.clone.uploadButton")}
           </Button>
+          {/* i18n-exempt "uploading" is a clone-status tag, not copy */}
           {status.kind === "uploading" && (
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
               <Spinner className="size-3.5" /> {t("common.uploading")}
@@ -211,6 +212,7 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
         </div>
       )}
 
+      {/* i18n-exempt "error" is a clone-status tag, not copy */}
       {status.kind === "error" && (
         <p className="mt-2 rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
           {status.message}

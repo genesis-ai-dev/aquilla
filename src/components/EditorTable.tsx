@@ -2751,6 +2751,7 @@ function RowStructureCorner({
   // Both directions available (only ever the first row, and only while the
   // file still opens on a silence) — the button has to ask which. One
   // direction available: just do it. A one-item menu is a click for nothing.
+  const t = useT()
   const needsMenu = Boolean(insertAbove && insertBelow)
   const square =
     "flex h-6 w-6 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
@@ -2767,8 +2768,8 @@ function RowStructureCorner({
       {onRemove && (
         <button
           type="button"
-          title="Remove this line"
-          aria-label="Remove this line"
+          title={t("editor.row.removeLine")}
+          aria-label={t("editor.row.removeLine")}
           data-testid={removeTestId ?? `${testId}-remove`}
           className={square}
           onClick={(e) => {
@@ -2786,8 +2787,8 @@ function RowStructureCorner({
               render={
                 <button
                   type="button"
-                  title="Add a line"
-                  aria-label="Add a line"
+                  title={t("editor.row.addLine")}
+                  aria-label={t("editor.row.addLine")}
                   data-testid={`${testId}-add`}
                   className={square}
                   onClick={(e) => e.stopPropagation()}
@@ -2802,22 +2803,22 @@ function RowStructureCorner({
                 onClick={() => onAddLine(insertAbove!.startSec, insertAbove!.endSec)}
               >
                 <ArrowUp className="mr-2 h-3.5 w-3.5" />
-                Insert above
+                {t("editor.row.insertAbove")}
               </DropdownMenuItem>
               <DropdownMenuItem
                 data-testid="row-insert-below"
                 onClick={() => onAddLine(insertBelow!.startSec, insertBelow!.endSec)}
               >
                 <ArrowDown className="mr-2 h-3.5 w-3.5" />
-                Insert below
+                {t("editor.row.insertBelow")}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         ) : (
           <button
             type="button"
-            title={insertAbove ? "Add a line above" : "Add a line below"}
-            aria-label={insertAbove ? "Add a line above" : "Add a line below"}
+            title={insertAbove ? t("editor.row.addLineAbove") : t("editor.row.addLineBelow")}
+            aria-label={insertAbove ? t("editor.row.addLineAbove") : t("editor.row.addLineBelow")}
             data-testid={`${testId}-add`}
             className={square}
             onClick={(e) => {
@@ -6308,11 +6309,12 @@ function EditorRow({
               className="sr-only"
             >
               {isLoading && !completionPreview
-                ? (loadingPhase === "searching"
-                    ? `${cellRef}: Looking up similar examples…`
-                    : `${cellRef}: Generating translation…`)
+                ? // i18n-exempt "searching" is a loading-phase tag, not copy
+                  (loadingPhase === "searching"
+                    ? t("editor.row.draftSearching", { cellRef })
+                    : t("editor.row.draftGenerating", { cellRef }))
                 : isLoading && completionPreview
-                  ? `${cellRef}: Translation preview available`
+                  ? t("editor.row.draftPreviewReady", { cellRef })
                   : null}
             </div>
             {/* FRO-274: write-failure banner — shown when an outbox enqueue
@@ -6612,8 +6614,8 @@ function EditorRow({
                       <p className="font-medium text-foreground">{t("agentWorkspace.assuranceValidated")}</p>
                       <p>
                         {cellInfractions.length > 0
-                          ? "Validation is authoritative, but automatic checks still found an issue."
-                          : "Human review is complete. Automatic evidence remains available as context."}
+                          ? t("editor.assurance.validatedWithInfractions")
+                          : t("editor.assurance.validatedClean")}
                       </p>
                     </>
                   ) : healthRibbonPoint.stage === "automatic" ? (
@@ -6629,8 +6631,8 @@ function EditorRow({
                         </p>
                         <p>
                           {cellNeedsAttention
-                            ? "Lower local support — review terminology and context closely."
-                            : "Better local support — human review is still required."}
+                            ? t("editor.assurance.lowerSupport")
+                            : t("editor.assurance.betterSupport")}
                         </p>
                       </>
                     )

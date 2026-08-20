@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 /** Accepts what a <video src> can actually fetch, and nothing else. */
 export function isLinkableVideoUrl(value: string): boolean {
@@ -43,6 +44,7 @@ interface Props {
 }
 
 export function LinkVideoUrlDialog({ open, currentUrl, onSave, onCancel }: Props) {
+  const t = useT()
   const [value, setValue] = useState(currentUrl ?? "")
   const [touched, setTouched] = useState(false)
 
@@ -60,15 +62,13 @@ export function LinkVideoUrlDialog({ open, currentUrl, onSave, onCancel }: Props
     <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel() }}>
       <DialogContent data-testid="link-video-url-dialog">
         <DialogHeader>
-          <DialogTitle>{currentUrl ? "Change the linked video" : "Link a video"}</DialogTitle>
+          <DialogTitle>{currentUrl ? t("editor.timeline.linkVideoTitleChange") : t("editor.timeline.linkVideoTitleNew")}</DialogTitle>
           <DialogDescription>
-            Paste the address of the video this file was dubbed from. It plays
-            beside the text, muted and in step with the audio — the recording you
-            hear is always the one on the timeline.
+            {t("editor.timeline.linkVideoDescription")}
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-2">
-          <Label htmlFor="link-video-url">Video address</Label>
+          <Label htmlFor="link-video-url">{t("editor.timeline.linkVideoAddressLabel")}</Label>
           <Input
             id="link-video-url"
             data-testid="link-video-url-input"
@@ -80,7 +80,7 @@ export function LinkVideoUrlDialog({ open, currentUrl, onSave, onCancel }: Props
           />
           {invalid && (
             <p data-testid="link-video-url-error" className="text-xs text-red-600 dark:text-red-400">
-              That doesn't look like a web address. It should start with http:// or https://.
+              {t("editor.timeline.linkVideoInvalid")}
             </p>
           )}
         </div>
@@ -91,17 +91,17 @@ export function LinkVideoUrlDialog({ open, currentUrl, onSave, onCancel }: Props
               data-testid="link-video-clear"
               onClick={() => onSave(null)}
             >
-              Clear video
+              {t("editor.timeline.linkVideoClear")}
             </Button>
           ) : <span />}
           <div className="flex gap-2">
-            <Button variant="outline" onClick={onCancel}>Cancel</Button>
+            <Button variant="outline" onClick={onCancel}>{t("common.cancel")}</Button>
             <Button
               data-testid="link-video-save"
               disabled={!canSave}
               onClick={() => onSave(value.trim())}
             >
-              Save
+              {t("common.save")}
             </Button>
           </div>
         </DialogFooter>

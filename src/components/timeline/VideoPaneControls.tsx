@@ -16,6 +16,7 @@
 
 import { SegmentTabs } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { CaptionPlacement, SubtitleMode } from "./video-pane-prefs"
 
 /** Shared look for the two controls that ride on the picture: dark, translucent
@@ -43,6 +44,7 @@ export function VideoPaneControls({
   onModeChange,
   onPlacementChange,
 }: VideoPaneControlsProps) {
+  const t = useT()
   return (
     <div
       data-testid="video-pane-controls"
@@ -58,7 +60,7 @@ export function VideoPaneControls({
           <SegmentTabs<CaptionPlacement>
             value={placement}
             onValueChange={onPlacementChange}
-            aria-label="Subtitle position"
+            aria-label={t("editor.timeline.subtitlePosition")}
             options={[
               { label: "On video", value: "picture" },
               { label: "In bar", value: "bar" },
@@ -75,7 +77,7 @@ export function VideoPaneControls({
         <SegmentTabs<SubtitleMode>
           value={mode}
           onValueChange={onModeChange}
-          aria-label="Subtitle text"
+          aria-label={t("editor.timeline.subtitleText")}
           options={[
             { label: "Target", value: "target" },
             { label: "Source", value: "source" },

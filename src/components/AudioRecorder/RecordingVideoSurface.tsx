@@ -28,6 +28,7 @@ import { AlertTriangle, Headphones, VolumeX } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { useHlsVideo } from "@/hooks/useHlsVideo"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { readFilmAudioLanguage } from "@/lib/video/film-audio-tracks"
 import { AppTooltip } from "@/components/ui/tooltip"
 import {
@@ -109,6 +110,7 @@ export function RecordingVideoSurface({
   armNonce,
   leadIn,
 }: RecordingVideoSurfaceProps) {
+  const t = useT()
   const videoRef = useRef<HTMLVideoElement>(null)
   const audible = useRecordingFilmAudible()
   /**
@@ -302,7 +304,7 @@ export function RecordingVideoSurface({
           // a second source for the same picture.
           src={pipeline === "hls" ? undefined : src}
           data-testid="rec-video"
-          aria-label="Film for the line being recorded"
+          aria-label={t("audio.recordingModal.filmAriaLabel")}
           className="h-full w-full object-contain"
           // NO `controls`, and this is not a style choice. A scrub bar invites
           // exactly what the main pane's `suspended` watchdog exists to
@@ -327,8 +329,8 @@ export function RecordingVideoSurface({
         <AppTooltip
           content={
             audible
-              ? "The film is playing out loud. Unless you are on headphones it is going into your take — click to mute it."
-              : "The film is muted. Unmuting is for headphones only — the mic records with echo cancellation off, so on speakers the film goes into your take."
+              ? t("audio.recordingModal.filmAudibleTooltip")
+              : t("audio.recordingModal.filmMutedTooltip")
           }
         >
           <Button
@@ -337,7 +339,11 @@ export function RecordingVideoSurface({
             size="icon-sm"
             data-testid="rec-film-audible"
             aria-pressed={audible}
-            aria-label={audible ? "Mute the film" : "Unmute the film (headphones only)"}
+            aria-label={
+              audible
+                ? t("audio.recordingModal.filmMuteAriaLabel")
+                : t("audio.recordingModal.filmUnmuteAriaLabel")
+            }
             // Allowed in BOTH directions at ALL times, mid-take included.
             // Blocking mute would trap someone who can hear bleed starting;
             // blocking unmute would disable the feature at the exact moment it
@@ -374,9 +380,7 @@ export function RecordingVideoSurface({
           className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-start gap-1.5 bg-gradient-to-t from-black/80 to-transparent py-2 pl-3 pr-12 text-[11px] leading-snug text-amber-400"
         >
           <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden />
-          <span>
-            The film is not muted. Use headphones — on speakers it will be recorded into your take.
-          </span>
+          <span>{t("audio.recordingModal.filmAudibleWarning")}</span>
         </p>
       )}
     </div>

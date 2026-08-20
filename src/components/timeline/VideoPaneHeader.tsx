@@ -16,11 +16,14 @@
 // row's height is kept in lockstep with MediaTextHeader's (see the note in
 // ProjectWorkspace around the media-video/media-table panels).
 
+import { useT } from "@/lib/i18n/I18nProvider"
+
 export interface VideoPaneHeaderProps {
   src: string
 }
 
 export function VideoPaneHeader({ src }: VideoPaneHeaderProps) {
+  const t = useT()
   let basename = src
   try {
     basename = decodeURIComponent(new URL(src).pathname.split("/").pop() || src)
@@ -32,7 +35,7 @@ export function VideoPaneHeader({ src }: VideoPaneHeaderProps) {
       data-testid="video-pane-header"
       className="flex shrink-0 items-center gap-2 border-t border-border bg-muted/20 px-4 py-1.5"
     >
-      <span className="text-xs font-medium text-muted-foreground">Video</span>
+      <span className="text-xs font-medium text-muted-foreground">{t("editor.timeline.videoPaneTitle")}</span>
       <span className="inline-flex min-w-0 items-center rounded-md border border-border bg-background px-2 py-0.5 text-[11px] text-foreground/80">
         <span className="truncate font-mono">{basename}</span>
       </span>

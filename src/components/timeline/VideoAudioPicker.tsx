@@ -30,6 +30,7 @@ import {
   CommandList,
 } from "@/components/ui/command"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { FilmAudioTrack } from "@/lib/video/film-audio-tracks"
 
 export interface VideoAudioPickerProps {
@@ -44,6 +45,7 @@ export interface VideoAudioPickerProps {
 }
 
 export function VideoAudioPicker({ tracks, activeLang, onChange, onOpenChange }: VideoAudioPickerProps) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const setOpenState = (next: boolean) => {
     setOpen(next)
@@ -80,10 +82,10 @@ export function VideoAudioPicker({ tracks, activeLang, onChange, onOpenChange }:
         data-testid="video-audio-picker-menu"
       >
         <Command>
-          <CommandInput placeholder="Search languages…" aria-label="Search languages" />
+          <CommandInput placeholder={t("editor.timeline.audioTrackSearchPlaceholder")} aria-label={t("editor.timeline.audioTrackSearchAria")} />
           <CommandList>
-            <CommandEmpty>No language by that name.</CommandEmpty>
-            <CommandGroup heading="Film audio">
+            <CommandEmpty>{t("editor.timeline.audioTrackNoMatch")}</CommandEmpty>
+            <CommandGroup heading={t("editor.timeline.audioTrackFilmAudio")}>
               {tracks.map((track) => {
                 const lang = track.lang ?? ""
                 const isActive = track === active

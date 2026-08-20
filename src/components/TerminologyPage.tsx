@@ -294,7 +294,7 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
     <Dialog open={open} onOpenChange={(next) => { if (!next) handleClose() }}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{initial ? "Edit concept" : "Add concept"}</DialogTitle>
+          <DialogTitle>{initial ? t("terminology.page.editConceptTitle") : t("terminology.page.addConceptButton")}</DialogTitle>
         </DialogHeader>
 
         <FieldGroup className="space-y-4 py-1">
@@ -375,7 +375,7 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
 
         <DialogFooter showCloseButton>
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? "Saving…" : initial ? "Save changes" : "Add concept"}
+            {saving ? t("common.saving") : initial ? t("common.saveChanges") : t("terminology.page.addConceptButton")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -498,6 +498,7 @@ function TermbaseImportDialog({
                   {t("terminology.importDialog.csvColumnsHint")}
                 </p>
               )}
+              {/* i18n-exempt "tbx" is an import-format token, not copy */}
               {tab === "tbx" && (
                 <p className="mt-2 text-xs text-muted-foreground">
                   {t("terminology.importDialog.tbxDialectsHint")}
@@ -1398,8 +1399,8 @@ export function TerminologyPage() {
         title={t("terminology.page.deleteConceptDialogTitle")}
         description={
           pendingDeleteConcept
-            ? `Delete "${pendingDeleteConcept.sourceTerm}"? This removes the concept and all its renderings for everyone in the project and cannot be undone.`
-            : "Delete this concept? This removes it for everyone in the project and cannot be undone."
+            ? t("terminology.page.deleteNamedConcept", { term: pendingDeleteConcept.sourceTerm })
+            : t("terminology.page.deleteConcept")
         }
         confirmLabel="Delete concept"
         checkboxLabel="I understand this deletes the concept and all its renderings for everyone in the project."

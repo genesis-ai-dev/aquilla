@@ -1082,17 +1082,17 @@ export function AudioRecordingModal({
               armNonce={armNonce}
               leadIn={leadIn}
             />
-            <AppTooltip content="Hide the film and use the narrow recorder">
+            <AppTooltip content={t("audio.recordingModal.collapseFilmTooltip")}>
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 data-testid="rec-collapse-video"
                 onClick={() => setRecordingVideoCollapsed(true)}
-                aria-label="Hide the film"
+                aria-label={t("audio.recordingModal.collapseFilmAriaLabel")}
                 className="absolute top-3 right-3 z-10 h-7 gap-1.5 rounded-md bg-black/65 px-2.5 text-[11px] text-white/80 backdrop-blur-sm hover:bg-black/80 hover:text-white"
               >
-                <Minimize2 className="h-3.5 w-3.5" /> Collapse video
+                <Minimize2 className="h-3.5 w-3.5" /> {t("audio.recordingModal.collapseFilmButton")}
               </Button>
             </AppTooltip>
           </div>
@@ -1108,32 +1108,32 @@ export function AudioRecordingModal({
           <div className="shrink-0 border-b px-4 py-3">
             <div className="flex items-center gap-2">
               <span className="min-w-0 flex-1 truncate text-sm font-semibold">
-                {activeCell.cellLabel ?? `Cell ${activeIndex + 1}`}
+                {activeCell.cellLabel ?? t("audio.recordingModal.cellFallback", { index: activeIndex + 1 })}
               </span>
               {/* Only when a film EXISTS but is collapsed — a line without one
                   never offers to show a picture it does not have. */}
               {filmUrl && videoCollapsed && (
-                <AppTooltip content="Show the film for this line beside the recorder">
+                <AppTooltip content={t("audio.recordingModal.expandFilmTooltip")}>
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     data-testid="rec-expand-video"
                     onClick={() => setRecordingVideoCollapsed(false)}
-                    aria-label="Show the film"
+                    aria-label={t("audio.recordingModal.expandFilmAriaLabel")}
                     className="h-7 shrink-0 gap-1.5 px-2 text-[11px] text-muted-foreground/70"
                   >
-                    <Maximize2 className="h-3.5 w-3.5" /> Video
+                    <Maximize2 className="h-3.5 w-3.5" /> {t("editor.timeline.videoPaneTitle")}
                   </Button>
                 </AppTooltip>
               )}
-              <AppTooltip content="Close (Esc)">
+              <AppTooltip content={t("audio.recordingModal.closeTooltip")}>
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon-sm"
                   onClick={onClose}
-                  aria-label="Close"
+                  aria-label={t("common.close")}
                   className="shrink-0 text-muted-foreground/60"
                 >
                   <X />
@@ -1144,7 +1144,7 @@ export function AudioRecordingModal({
                 edges: together they read as one navigation control, and they
                 stay put when the counter's width changes between lines. */}
             <div className="mt-1.5 flex items-center gap-0.5">
-              <AppTooltip content="Previous line (⌥←)">
+              <AppTooltip content={t("audio.recordingModal.prevLineTooltip")}>
                 <Button
                   type="button"
                   variant="ghost"
@@ -1152,7 +1152,7 @@ export function AudioRecordingModal({
                   data-testid="rec-prev"
                   disabled={!canNav || activeIndex <= 0}
                   onClick={() => gotoIndex(activeIndex - 1)}
-                  aria-label="Previous line"
+                  aria-label={t("audio.playbackBar.previousLine")}
                   className="h-6 w-6 shrink-0 text-muted-foreground/70"
                 >
                   <ChevronLeft className="h-3.5 w-3.5" />
@@ -1171,15 +1171,28 @@ export function AudioRecordingModal({
                 )}
                 title={
                   targetSec != null && targetSec < MIN_USEFUL_REGION_SEC
-                    ? "This section is very short — you can still record, but there is barely room for anything."
+                    ? t("audio.recordingModal.veryShortWindowTitle")
                     : undefined
                 }
               >
-                {activeIndex + 1} / {cells.length}
-                {targetSec != null && ` · window ${targetSec.toFixed(2)}s`}
-                {targetSec != null && targetSec < MIN_USEFUL_REGION_SEC && " · very short"}
+                {targetSec == null
+                  ? t("audio.recordingModal.lineCounter", {
+                      index: activeIndex + 1,
+                      total: cells.length,
+                    })
+                  : targetSec < MIN_USEFUL_REGION_SEC
+                    ? t("audio.recordingModal.lineCounterVeryShort", {
+                        index: activeIndex + 1,
+                        total: cells.length,
+                        seconds: targetSec.toFixed(2),
+                      })
+                    : t("audio.recordingModal.lineCounterWindow", {
+                        index: activeIndex + 1,
+                        total: cells.length,
+                        seconds: targetSec.toFixed(2),
+                      })}
               </span>
-              <AppTooltip content="Next line (⌥→)">
+              <AppTooltip content={t("audio.recordingModal.nextLineTooltip")}>
                 <Button
                   type="button"
                   variant="ghost"
@@ -1187,7 +1200,7 @@ export function AudioRecordingModal({
                   data-testid="rec-next"
                   disabled={!canNav || activeIndex >= cells.length - 1}
                   onClick={() => gotoIndex(activeIndex + 1)}
-                  aria-label="Next line"
+                  aria-label={t("audio.playbackBar.nextLine")}
                   className="h-6 w-6 shrink-0 text-muted-foreground/70"
                 >
                   <ChevronRight className="h-3.5 w-3.5" />
@@ -1219,10 +1232,10 @@ export function AudioRecordingModal({
           >
           <div className="shrink-0 px-4 pt-3">
             <div className="text-[10px] font-medium tracking-wide text-muted-foreground/60 uppercase">
-              Source
+              {t("editor.column.source")}
             </div>
             <p className="mt-0.5 line-clamp-2 text-xs leading-snug text-muted-foreground">
-              {activeCell.original || <span className="text-muted-foreground/60 italic">empty</span>}
+              {activeCell.original || <span className="text-muted-foreground/60 italic">{t("audio.recordingModal.emptySource")}</span>}
             </p>
             {/* Who is speaking, and whether the camera is on them — the two
                 things a performer settles BEFORE the first word, so they sit
@@ -1235,7 +1248,7 @@ export function AudioRecordingModal({
                 nothing at all. */}
             <div className="mt-3 flex items-baseline gap-2">
               <div className="text-[10px] font-medium tracking-wide text-muted-foreground/60 uppercase">
-                Read aloud
+                {t("audio.recordingModal.readAloudLabel")}
               </div>
               {readAloudCast && (
                 <div
@@ -1280,7 +1293,7 @@ export function AudioRecordingModal({
                 }}
               >
                 {readAloudText || (
-                  <span className="text-base text-muted-foreground/60 italic">not translated</span>
+                  <span className="text-base text-muted-foreground/60 italic">{t("audio.recordingModal.notTranslated")}</span>
                 )}
               </p>
             </div>
@@ -1293,7 +1306,7 @@ export function AudioRecordingModal({
                 data-testid="rec-cue-reference"
                 className="mt-1.5 line-clamp-2 text-[11px] leading-snug text-muted-foreground/70"
               >
-                <span className="font-medium">This cue: </span>
+                <span className="font-medium">{t("audio.recordingModal.cueReferenceLabel")} </span>
                 {readAloudReference}
               </p>
             )}
@@ -1326,6 +1339,7 @@ export function AudioRecordingModal({
                 between takes closes and reopens that context per take: churn
                 the OS answers with an input-gain recovery ramp through the
                 next take's head. One mount, one context, whole session. */}
+            {/* i18n-exempt "counting"/"recording" are RecorderPhase union tags, not copy */}
             {(displayPhase === "counting" || displayPhase === "recording" || recorder.stream != null) && (
               <div
                 className={cn(
@@ -1340,7 +1354,7 @@ export function AudioRecordingModal({
                       className="text-2xl font-semibold tabular-nums text-foreground/80"
                       style={{ animation: "pop 700ms ease-out" }}
                     >
-                      {countdown.count === 0 ? "GO" : countdown.count}
+                      {countdown.count === 0 ? t("audio.recordingModal.countingGo") : countdown.count}
                     </div>
                   </div>
                 ) : (
@@ -1349,7 +1363,7 @@ export function AudioRecordingModal({
                     <span className="text-xs font-semibold text-red-500">REC</span>
                     <span className="font-mono text-lg tabular-nums">{formatClock(elapsedMs)}</span>
                     <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground">
-                      max {minutesOf(formatLimits.hardStopMs)}m
+                      {t("audio.recordingModal.maxDuration", { minutes: minutesOf(formatLimits.hardStopMs) })}
                     </span>
                   </div>
                 )}
@@ -1367,6 +1381,7 @@ export function AudioRecordingModal({
                       within a frame of GO, so without this the word GO is
                       gone before it lands — and the silent fourth beat needs
                       its visual (the audible one would print into the take). */}
+                  {/* i18n-exempt "recording" is a RecorderPhase union tag, not copy */}
                   {displayPhase === "recording" && elapsedMs < 700 && (
                     <div
                       className="pointer-events-none absolute inset-0 flex items-center justify-center text-3xl font-semibold text-foreground/70"
@@ -1377,26 +1392,32 @@ export function AudioRecordingModal({
                     </div>
                   )}
                 </div>
+                {/* i18n-exempt "recording" is a RecorderPhase union tag, not copy */}
                 {displayPhase === "recording" && targetSec != null && <DurationBar elapsedMs={elapsedMs} targetSec={targetSec} />}
+                {/* i18n-exempt "recording" is a RecorderPhase union tag, not copy */}
                 {displayPhase === "recording" && targetOverrun && (
-                  <p className="text-xs font-medium text-red-500">Past the window — this will overrun the cue.</p>
+                  <p className="text-xs font-medium text-red-500">{t("audio.recordingModal.overrunNotice")}</p>
                 )}
+                {/* i18n-exempt "recording" is a RecorderPhase union tag, not copy */}
                 {displayPhase === "recording" && isNearLimit && (
                   <p className="text-xs font-medium text-amber-500">
                     {/* Derived from the ACTIVE format's limits: WAV is ~3× the
                         bytes of a compressed take, so its window is much
                         shorter, and both are computed from the upload cap. */}
-                    Recording is {minutesOf(formatLimits.warnMs)} minutes — it stops automatically at{" "}
-                    {minutesOf(formatLimits.hardStopMs)}.
+                    {t("audio.recordingModal.nearLimitNotice", {
+                      warnMinutes: minutesOf(formatLimits.warnMs),
+                      hardStopMinutes: minutesOf(formatLimits.hardStopMs),
+                    })}
                   </p>
                 )}
               </div>
             )}
 
+            {/* i18n-exempt "preview" is a RecorderPhase union tag, not copy */}
             {displayPhase === "preview" && previewUrl && (
               <div className="space-y-2">
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" /> Captured — review, then keep or retake.
+                  <Check className="h-3.5 w-3.5 shrink-0 text-emerald-500" /> {t("audio.recordingModal.capturedNotice")}
                 </div>
                 <audio ref={previewAudioRef} src={previewUrl} controls className="h-9 w-full" preload="auto" />
                 {targetSec != null && <DurationBar elapsedMs={elapsedMs} targetSec={targetSec} />}
@@ -1407,16 +1428,17 @@ export function AudioRecordingModal({
                 )}
                 {online && errorMessage != null && errorMessage !== OFFLINE_MESSAGE && (
                   <p data-testid="rec-save-error" className="text-xs font-medium text-destructive">
-                    Saving failed — the take is safe, try Save again. ({errorMessage})
+                    {t("audio.recordingModal.saveFailedNotice", { error: errorMessage })}
                   </p>
                 )}
               </div>
             )}
 
+            {/* i18n-exempt "uploading" is a RecorderPhase union tag, not copy */}
             {displayPhase === "uploading" && (
               <div className="flex h-[76px] flex-col items-center justify-center gap-2 text-muted-foreground">
                 <Spinner className="size-6" />
-                <p className="text-xs">Uploading…</p>
+                <p className="text-xs">{t("common.uploading")}</p>
               </div>
             )}
 
@@ -1426,16 +1448,18 @@ export function AudioRecordingModal({
                 is the thing you are meant to be looking at. A take that has just
                 been kept lands HERE, not in a state of its own: the note below
                 marks it and everything else stays exactly where it was. */}
+            {/* i18n-exempt "idle"/"error" are RecorderPhase union tags, not copy */}
             {(displayPhase === "idle" || displayPhase === "error") && (
               <div className="space-y-2">
                 {targetSec != null ? (
                   <DurationBar elapsedMs={0} targetSec={targetSec} />
                 ) : (
-                  <p className="text-xs text-muted-foreground">This line has no timed window.</p>
+                  <p className="text-xs text-muted-foreground">{t("audio.recordingModal.noTimedWindow")}</p>
                 )}
+                {/* i18n-exempt "error" is a RecorderPhase union tag, not copy */}
                 {displayPhase === "error" && (
                   <p data-testid="rec-error-message" className="text-xs font-medium text-destructive">
-                    {errorMessage ?? "Something went wrong."}
+                    {errorMessage ?? t("audio.recordingModal.genericError")}
                   </p>
                 )}
                 {savedNote != null && (
@@ -1453,6 +1477,7 @@ export function AudioRecordingModal({
                 the button never moves between phases. Preview is the single
                 exception the design asks for: discarding and keeping are a
                 genuine fork, so they sit side by side at equal weight. */}
+            {/* i18n-exempt "preview"/"recording"/"counting" are RecorderPhase union tags, not copy */}
             {displayPhase === "preview" ? (
               <div className="flex gap-2">
                 <Button
@@ -1461,9 +1486,9 @@ export function AudioRecordingModal({
                   onClick={retake}
                   className="h-[52px] flex-1 text-sm font-semibold"
                 >
-                  <RefreshCw className="mr-1.5 h-4 w-4" /> Retake
+                  <RefreshCw className="mr-1.5 h-4 w-4" /> {t("audio.recordingModal.retakeButton")}
                 </Button>
-                <AppTooltip content={online ? "Save (Space or Enter)" : OFFLINE_MESSAGE}>
+                <AppTooltip content={online ? t("audio.recordingModal.saveTooltip") : OFFLINE_MESSAGE}>
                   <span className="inline-flex flex-1">
                     <Button
                       data-testid="rec-save"
@@ -1471,7 +1496,7 @@ export function AudioRecordingModal({
                       onClick={save}
                       className="h-[52px] w-full text-sm font-semibold"
                     >
-                      <Check className="mr-1.5 h-4 w-4" /> Save
+                      <Check className="mr-1.5 h-4 w-4" /> {t("common.save")}
                     </Button>
                   </span>
                 </AppTooltip>
@@ -1483,7 +1508,7 @@ export function AudioRecordingModal({
                 onClick={stopRecording}
                 className="h-[52px] w-full text-sm font-semibold"
               >
-                <Square className="mr-2 h-4 w-4" /> Stop <span className="ml-1.5 opacity-60">· SPACE</span>
+                <Square className="mr-2 h-4 w-4" /> {t("common.stop")} <span className="ml-1.5 opacity-60">· SPACE</span>
               </Button>
             ) : displayPhase === "counting" ? (
               <Button
@@ -1491,10 +1516,10 @@ export function AudioRecordingModal({
                 onClick={() => { countdown.cancel(); setLeadIn(null); setPhase("idle") }}
                 className="h-[52px] w-full text-sm font-semibold"
               >
-                Cancel <span className="ml-1.5 opacity-60">· ESC</span>
+                {t("common.cancel")} <span className="ml-1.5 opacity-60">· ESC</span>
               </Button>
             ) : (
-              <AppTooltip content={online ? "Start recording (Space)" : OFFLINE_MESSAGE}>
+              <AppTooltip content={online ? t("audio.recordingModal.startTooltip") : OFFLINE_MESSAGE}>
                 <span className="inline-flex w-full">
                   <Button
                     data-testid="rec-start"
@@ -1502,7 +1527,7 @@ export function AudioRecordingModal({
                     onClick={startFlow}
                     className="h-[52px] w-full text-sm font-semibold"
                   >
-                    <Mic className="mr-2 h-4 w-4" /> Record <span className="ml-1.5 opacity-60">· SPACE</span>
+                    <Mic className="mr-2 h-4 w-4" /> {t("editor.audio.recordShort")} <span className="ml-1.5 opacity-60">· SPACE</span>
                   </Button>
                 </span>
               </AppTooltip>
@@ -1513,6 +1538,7 @@ export function AudioRecordingModal({
                 the room; kept in ERROR, which is exactly where a blocked
                 microphone lands and where "let me upload instead" earns its
                 place. */}
+            {/* i18n-exempt "idle"/"error" are RecorderPhase union tags, not copy */}
             {(displayPhase === "idle" || displayPhase === "error") && (
               <div className="flex gap-2">
                 <AppTooltip
@@ -1520,10 +1546,10 @@ export function AudioRecordingModal({
                     !online
                       ? OFFLINE_MESSAGE
                       : !activeCell?.translated?.trim()
-                        ? "Translate this line first to generate voice"
+                        ? t("audio.recordingModal.ttsNeedsTranslation")
                         : ttsDone
-                          ? "Voice generated — it plays on the Target track"
-                          : "Generate this line's voice with the project's engine"
+                          ? t("audio.recordingModal.ttsDoneTooltip")
+                          : t("audio.recordingModal.ttsTooltip")
                   }
                 >
                   <span className="inline-flex min-w-0 flex-1">
@@ -1542,7 +1568,7 @@ export function AudioRecordingModal({
                       ) : (
                         <Sparkles className="mr-1.5 h-3.5 w-3.5" />
                       )}
-                      <span className="truncate">Generate</span>
+                      <span className="truncate">{t("audio.recordingModal.generateButton")}</span>
                     </Button>
                   </span>
                 </AppTooltip>
@@ -1552,14 +1578,14 @@ export function AudioRecordingModal({
                   accept={ACCEPT}
                   className="sr-only"
                   onChange={onUploadInputChange}
-                  aria-label="Upload audio file"
+                  aria-label={t("editor.audio.upload")}
                   // Diverges from the cell rail's copy of this input ON PURPOSE:
                   // inside a focus trap an invisible tab stop is a real
                   // annoyance, and the visible button beside it already carries
                   // the accessible name and the click.
                   tabIndex={-1}
                 />
-                <AppTooltip content={online ? "Attach an audio file as a take" : OFFLINE_MESSAGE}>
+                <AppTooltip content={online ? t("audio.recordingModal.uploadTooltip") : OFFLINE_MESSAGE}>
                   <span className="inline-flex min-w-0 flex-1">
                     <Button
                       variant="outline"
@@ -1570,7 +1596,7 @@ export function AudioRecordingModal({
                       className="h-9 w-full bg-muted/30 text-xs font-normal text-muted-foreground"
                     >
                       <Upload className="mr-1.5 h-3.5 w-3.5 shrink-0" />
-                      <span className="truncate">Upload</span>
+                      <span className="truncate">{t("audio.recordingModal.uploadButton")}</span>
                     </Button>
                   </span>
                 </AppTooltip>
@@ -1618,12 +1644,12 @@ export function AudioRecordingModal({
                   onClick={() => setTakesOpen((v) => !v)}
                   className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground"
                 >
-                  Takes <span className="font-mono tabular-nums">{recordingTakes.length}</span>
+                  {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums">{recordingTakes.length}</span>
                   <ChevronUp className={cn("h-3.5 w-3.5 transition-transform", takesOpen && "rotate-180")} />
                 </Button>
               ) : (
                 <span data-testid="rec-takes-count" className="shrink-0 px-1 text-xs font-medium">
-                  Takes <span className="font-mono tabular-nums text-muted-foreground">{recordingTakes.length}</span>
+                  {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums text-muted-foreground">{recordingTakes.length}</span>
                 </span>
               )}
 
@@ -1633,10 +1659,10 @@ export function AudioRecordingModal({
               <AppTooltip
                 content={
                   takeInHand
-                    ? "This take is already captured — the format applies to the next one."
+                    ? t("audio.recordingModal.formatLockedTooltip")
                     : recordingFormat === "wav"
-                      ? "Recording at full WAV quality — about three times the file size. Click to record compressed instead."
-                      : "Recording compressed — much smaller files, slightly less detail. Click to record at full WAV quality."
+                      ? t("audio.recordingModal.formatWavTooltip")
+                      : t("audio.recordingModal.formatCompressedTooltip")
                 }
               >
                 <span className="ml-auto inline-flex shrink-0">
@@ -1648,8 +1674,8 @@ export function AudioRecordingModal({
                     aria-pressed={recordingFormat === "wav"}
                     aria-label={
                       recordingFormat === "wav"
-                        ? "Recording format: WAV — click to record compressed"
-                        : "Recording format: compressed — click to record in WAV"
+                        ? t("audio.recordingModal.formatWavAriaLabel")
+                        : t("audio.recordingModal.formatCompressedAriaLabel")
                     }
                     disabled={takeInHand}
                     onClick={() => setRecordingFormatPref(recordingFormat === "wav" ? "webm" : "wav")}
@@ -1671,7 +1697,7 @@ export function AudioRecordingModal({
                       variant="ghost"
                       size="icon-sm"
                       data-testid="rec-settings"
-                      aria-label="Recorder settings"
+                      aria-label={t("audio.recordingModal.settingsAriaLabel")}
                       className="h-7 w-7 shrink-0 text-muted-foreground/70"
                     >
                       <Settings2 className="h-3.5 w-3.5" />
@@ -1690,9 +1716,11 @@ export function AudioRecordingModal({
                       className={cn("mt-0.5 h-4 w-4 shrink-0", autoAdvance ? "text-foreground" : "text-muted-foreground/50")}
                     />
                     <span className="min-w-0">
-                      <span className="block text-xs font-medium">Move on after saving</span>
+                      <span className="block text-xs font-medium">{t("audio.recordingModal.autoAdvanceTitle")}</span>
                       <span className="block text-[11px] leading-snug text-muted-foreground">
-                        {autoAdvance ? "Jumps to the next line" : "Stays on this line"}
+                        {autoAdvance
+                          ? t("audio.recordingModal.autoAdvanceOnDescription")
+                          : t("audio.recordingModal.autoAdvanceOffDescription")}
                       </span>
                     </span>
                   </button>
@@ -1709,9 +1737,11 @@ export function AudioRecordingModal({
                       <VolumeX className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/50" />
                     )}
                     <span className="min-w-0">
-                      <span className="block text-xs font-medium">Countdown beep</span>
+                      <span className="block text-xs font-medium">{t("audio.recordingModal.beepTitle")}</span>
                       <span className="block text-[11px] leading-snug text-muted-foreground">
-                        {beepEnabled ? "3-2-1 tones before recording" : "Silent countdown"}
+                        {beepEnabled
+                          ? t("audio.recordingModal.beepOnDescription")
+                          : t("audio.recordingModal.beepOffDescription")}
                       </span>
                     </span>
                   </button>
@@ -1743,13 +1773,14 @@ export function AudioRecordingModal({
                 />
               ) : (
                 <p className="px-4 py-6 text-center text-xs text-muted-foreground/60">
-                  No takes yet — record one and it lands here.
+                  {t("audio.recordingModal.noTakesYet")}
                 </p>
               )}
             </div>
           )}
         </div>
 
+        {/* i18n-exempt CSS keyframes for the countdown "pop", not user-visible copy */}
         <style>{`
           @keyframes pop {
             0% { transform: scale(0.6); opacity: 0; }

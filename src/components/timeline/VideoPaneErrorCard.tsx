@@ -7,6 +7,7 @@ import { Film } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { VideoPaneHeader } from "./VideoPaneHeader"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface VideoPaneErrorCardProps {
   src: string
@@ -15,6 +16,7 @@ export interface VideoPaneErrorCardProps {
 }
 
 export function VideoPaneErrorCard({ src, onRetry, onChangeVideo }: VideoPaneErrorCardProps) {
+  const t = useT()
   return (
     <div
       data-testid="tl-video-pane"
@@ -25,7 +27,7 @@ export function VideoPaneErrorCard({ src, onRetry, onChangeVideo }: VideoPaneErr
       <div className="m-2 flex min-h-0 flex-col items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 p-3">
         <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
           <Film className="h-3.5 w-3.5 shrink-0" />
-          This video could not be loaded
+          {t("editor.timeline.videoPaneErrorTitle")}
         </div>
         <p className="break-all text-[11px] leading-snug text-muted-foreground">{src}</p>
         <div className="flex flex-wrap gap-2">
@@ -40,11 +42,14 @@ export function VideoPaneErrorCard({ src, onRetry, onChangeVideo }: VideoPaneErr
             data-testid="video-pane-retry"
             onClick={onRetry}
           >
-            Try again
+            {/* `common.retry` rather than a twin of it — the catalog already
+                carries this word, and rewording English to dodge the duplicate
+                scan is the mistake it made once and reverted. */}
+            {t("common.retry")}
           </Button>
           {onChangeVideo && (
             <Button size="sm" variant="outline" className="h-7 text-xs" onClick={onChangeVideo}>
-              Change video
+              {t("editor.timeline.changeVideo")}
             </Button>
           )}
         </div>

@@ -521,8 +521,8 @@ function TargetAudioChip({
               : leftGlyph === "syncFailed"
                 ? t("audio.takesStrip.syncFailedTooltip")
                 : leftGlyph === "loading"
-                  ? "Loading this clip's audio…"
-                  : "Saving — kept safe on this device until it syncs"
+                  ? t("editor.timeline.takeLoading")
+                  : t("editor.timeline.takeSaving")
           }
           data-testid={`tl-target-${cell.id}-${leftGlyph}`}
           className="absolute left-1.5 top-1 z-10 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-background/85 shadow-sm ring-1 ring-border"
@@ -750,7 +750,7 @@ export function TargetAudioLane({
               return (
               <TimelineSlotButton
                 testId={`tl-target-add-${span.startSec}-record`}
-                label="Record over this stretch"
+                label={t("editor.timeline.recordOverStretch")}
                 hot={hotKey === `add-${span.startSec}`}
                 sizePx={buttonPx}
                 onClick={() => onAddLineAndRecord(span.startSec, span.endSec)}

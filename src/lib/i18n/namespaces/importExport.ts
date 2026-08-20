@@ -546,6 +546,48 @@ export const importExport = defineNamespace({
     "importExport.dialog.appendLangTag": "Append language tag",
     "importExport.dialog.noCellsWithAudio": "No cells with audio found in this file.",
     "importExport.dialog.clipCount": plural({ one: "{count} clip", other: "{count} clips" }),
+
+    // — Export dialog: subtitle-shape checkboxes (rendered on the dubbing
+    //   file's own card, and in the fold for anything converting to VTT) —
+    "importExport.dialog.subtitleFileHeading": "Subtitle file",
+    "importExport.dialog.vttSplitCues": "Split overlapping cues",
+    "importExport.dialog.vttSplitCuesHint":
+      "Where two characters speak at once, both lines share one cue instead of overlapping — the " +
+      "shape some subtitle tools require.",
+    "importExport.dialog.vttIncludeSource": "Include the source text",
+    "importExport.dialog.vttIncludeSourceHint":
+      "Each cue carries the original line above the translation — for playing against the film " +
+      "and checking the two line by line.",
+    "importExport.dialog.vttExcludeLabels": "Leave out character names",
+    "importExport.dialog.vttExcludeLabelsHint":
+      "For a tool that would show the speaker tags as literal text.",
+
+    // — Export dialog: who is recorded and who is not (audio export preview) —
+    "importExport.dialog.characterPreviewHeading": "Preview",
+    "importExport.dialog.noCharactersInFile": "No characters found in this file.",
+    "importExport.dialog.characterLineCount": plural({
+      one: "{count} line",
+      other: "{count} lines",
+    }),
+    "importExport.dialog.stillToRecordCount": "{count} still to record",
+    "importExport.dialog.untimedClipCount": "{count} untimed",
+    "importExport.dialog.nothingRecordedYet": "Nothing is recorded yet, so there is nothing to export.",
+    "importExport.dialog.unrecordedCharacterCount": plural({
+      one: "{count} character with nothing recorded yet",
+      other: "{count} characters with nothing recorded yet",
+    }),
+    "importExport.dialog.untimedRecordingsNote": plural({
+      one: "{count} recording has no timing and cannot be placed.",
+      other: "{count} recordings have no timing and cannot be placed.",
+    }),
+
+    // — Export dialog: the per-section cards a dubbing file gets —
+    "importExport.dialog.audioSectionTitle": "Audio",
+    "importExport.dialog.audioShapeGroupAriaLabel": "Audio export shape",
+    "importExport.dialog.exportAudio": "Export audio",
+    "importExport.dialog.srtExportSectionTitle": "SRT export",
+    "importExport.dialog.vttExportSectionTitle": "VTT export",
+    "importExport.dialog.subtitleTargetGroupAriaLabel": "Which subtitles to export",
     "importExport.dialog.lossyWarningAriaLabel": "Lossy format warning",
     "importExport.dialog.lossyWarningText":
       "This format is lossy — inline markup, paragraph structure, and some metadata will not " +
@@ -1300,6 +1342,39 @@ export const importExport = defineNamespace({
       "importExport.dialog.clipCount": {
         description: "Clip count in the audio-by-character export preview, per cast member.",
         placeholders: { count: "Number of audio clips for this cast member." },
+      },
+      "importExport.dialog.characterLineCount": {
+        description:
+          "How many lines one character has recorded, shown next to that character's name in the list of who is recorded on the Export dialog.",
+        placeholders: { count: "Number of recorded lines for this character." },
+      },
+      "importExport.dialog.stillToRecordCount": {
+        description:
+          "Trailing clause on a character's row in the Export dialog's list of who is recorded, after a bullet separator: how many of that character's lines still have no recording. Reads in place as ' · 4 still to record'.",
+        placeholders: { count: "Number of this character's lines that have no recording yet." },
+      },
+      "importExport.dialog.untimedClipCount": {
+        description:
+          "Trailing clause on a character's row in the Export dialog's list of who is recorded, after a bullet separator: how many of that character's recordings carry no timing. Reads in place as ' · 2 untimed'.",
+        placeholders: { count: "Number of this character's recordings that carry no timing." },
+      },
+      "importExport.dialog.unrecordedCharacterCount": {
+        description:
+          "Clickable summary line on the Export dialog that opens the folded-away list of characters nobody has recorded a single line for yet.",
+        placeholders: { count: "Number of characters with no recordings at all." },
+      },
+      "importExport.dialog.untimedRecordingsNote": {
+        description:
+          "Warning under the Export dialog's list of who is recorded: recordings with no timing cannot be positioned in the exported audio and will be left out.",
+        placeholders: { count: "Total number of recordings across all characters that carry no timing." },
+      },
+      "importExport.dialog.audioShapeGroupAriaLabel": {
+        description:
+          "Accessible name for the radio group choosing the shape of an audio export — one track per character, or one file per recorded line.",
+      },
+      "importExport.dialog.subtitleTargetGroupAriaLabel": {
+        description:
+          "Accessible name for the radio group choosing which subtitles to export: the translated lines, or the lines heard in the recorded audio.",
       },
       "importExport.dialog.lossyWarningAriaLabel": {
         description: "Accessible name for the lossy-format warning banner on the Export dialog.",

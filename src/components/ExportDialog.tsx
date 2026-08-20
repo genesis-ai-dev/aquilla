@@ -1341,7 +1341,7 @@ export function ExportDialog({
    */
   const renderVttOptions = (opts?: { showSource?: boolean }) => (
           <div className="flex flex-col gap-1.5">
-            <p className="font-medium text-muted-foreground text-[10px]">Subtitle file</p>
+            <p className="font-medium text-muted-foreground text-[10px]">{t("importExport.dialog.subtitleFileHeading")}</p>
             <label className="flex items-start gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
               <Checkbox
                 className="mt-0.5"
@@ -1349,10 +1349,9 @@ export function ExportDialog({
                 onCheckedChange={(c) => setVttCueSplitting(c === true)}
               />
               <span>
-                Split overlapping cues
+                {t("importExport.dialog.vttSplitCues")}
                 <span className="block text-[10px] text-muted-foreground">
-                  Where two characters speak at once, both lines share one cue instead of
-                  overlapping — the shape some subtitle tools require.
+                  {t("importExport.dialog.vttSplitCuesHint")}
                 </span>
               </span>
             </label>
@@ -1368,10 +1367,9 @@ export function ExportDialog({
                   onCheckedChange={(c) => setVttIncludeSource(c === true)}
                 />
                 <span>
-                  Include the source text
+                  {t("importExport.dialog.vttIncludeSource")}
                   <span className="block text-[10px] text-muted-foreground">
-                    Each cue carries the original line above the translation — for playing against
-                    the film and checking the two line by line.
+                    {t("importExport.dialog.vttIncludeSourceHint")}
                   </span>
                 </span>
               </label>
@@ -1383,9 +1381,9 @@ export function ExportDialog({
                 onCheckedChange={(c) => setVttExcludeLabels(c === true)}
               />
               <span>
-                Leave out character names
+                {t("importExport.dialog.vttExcludeLabels")}
                 <span className="block text-[10px] text-muted-foreground">
-                  For a tool that would show the speaker tags as literal text.
+                  {t("importExport.dialog.vttExcludeLabelsHint")}
                 </span>
               </span>
             </label>
@@ -1408,9 +1406,9 @@ export function ExportDialog({
           const untimedTotal = preview.reduce((n, p) => n + p.untimedCount, 0)
           return (
           <div className="flex flex-col gap-1 text-xs">
-            <p className="font-medium text-muted-foreground text-[10px]">Preview</p>
+            <p className="font-medium text-muted-foreground text-[10px]">{t("importExport.dialog.characterPreviewHeading")}</p>
             {preview.length === 0 ? (
-              <p className="text-muted-foreground">No characters found in this file.</p>
+              <p className="text-muted-foreground">{t("importExport.dialog.noCharactersInFile")}</p>
             ) : (
               <>
                 {/* Only the characters that will actually produce a file. An
@@ -1428,18 +1426,18 @@ export function ExportDialog({
                     )}
                     <span className="font-medium">{p.name}</span>
                     <span className="text-muted-foreground">
-                      {p.clipCount} {p.clipCount === 1 ? "line" : "lines"}
+                      {t("importExport.dialog.characterLineCount", { count: p.clipCount })}
                       {p.totalDurationMs != null && (
                         <> · {Math.floor(p.totalDurationMs / 60000)}:{String(Math.floor((p.totalDurationMs % 60000) / 1000)).padStart(2, "0")}</>
                       )}
-                      {p.missingCount > 0 && <> · {p.missingCount} still to record</>}
-                      {p.untimedCount > 0 && <> · {p.untimedCount} untimed</>}
+                      {p.missingCount > 0 && <> · {t("importExport.dialog.stillToRecordCount", { count: p.missingCount })}</>}
+                      {p.untimedCount > 0 && <> · {t("importExport.dialog.untimedClipCount", { count: p.untimedCount })}</>}
                     </span>
                   </div>
                 ))}
                 {recorded.length === 0 && (
                   <p className="text-muted-foreground">
-                    Nothing is recorded yet, so there is nothing to export.
+                    {t("importExport.dialog.nothingRecordedYet")}
                   </p>
                 )}
                 {/* The rest, folded away — still countable at a glance, still
@@ -1449,8 +1447,7 @@ export function ExportDialog({
                     <summary className="cursor-pointer list-none text-muted-foreground hover:text-foreground transition-colors">
                       <span className="inline-flex items-center gap-1">
                         <ChevronRight className="h-3 w-3 transition-transform group-open/unrec:rotate-90" aria-hidden="true" />
-                        {unrecorded.length} {unrecorded.length === 1 ? "character" : "characters"} with
-                        nothing recorded yet
+                        {t("importExport.dialog.unrecordedCharacterCount", { count: unrecorded.length })}
                       </span>
                     </summary>
                     <div className="flex flex-wrap gap-x-2 gap-y-0.5 pl-4 pt-1 text-muted-foreground">
@@ -1465,8 +1462,7 @@ export function ExportDialog({
                 )}
                 {untimedTotal > 0 && (
                   <p className="text-muted-foreground">
-                    {untimedTotal} {untimedTotal === 1 ? "recording has" : "recordings have"} no timing
-                    and cannot be placed.
+                    {t("importExport.dialog.untimedRecordingsNote", { count: untimedTotal })}
                   </p>
                 )}
               </>
@@ -1573,7 +1569,7 @@ export function ExportDialog({
                 >
                   ›
                 </span>
-                <span className="text-sm font-medium">Audio</span>
+                <span className="text-sm font-medium">{t("importExport.dialog.audioSectionTitle")}</span>
                 <span className="ml-auto font-mono text-xs text-muted-foreground">.zip</span>
               </summary>
               <div className="mt-2.5 flex flex-col gap-2.5">
@@ -1581,7 +1577,7 @@ export function ExportDialog({
                 value={audioMode}
                 onValueChange={(v) => setAudioMode(v as typeof audioMode)}
                 className="flex flex-col gap-0.5"
-                aria-label="Audio export shape"
+                aria-label={t("importExport.dialog.audioShapeGroupAriaLabel")}
               >
                 {([
                   {
@@ -1622,7 +1618,7 @@ export function ExportDialog({
                 aria-busy={isBusy}
               >
                 {isBusy ? <Spinner aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
-                Export audio
+                {t("importExport.dialog.exportAudio")}
               </Button>
               </div>
             </details>
@@ -1648,7 +1644,9 @@ export function ExportDialog({
                     ›
                   </span>
                   <span className="text-sm font-medium">
-                    {nativeOption.id === "srt" ? "SRT export" : "VTT export"}
+                    {nativeOption.id === "srt"
+                      ? t("importExport.dialog.srtExportSectionTitle")
+                      : t("importExport.dialog.vttExportSectionTitle")}
                   </span>
                   <span className="ml-auto font-mono text-xs text-muted-foreground">
                     {nativeOption.ext}
@@ -1664,7 +1662,7 @@ export function ExportDialog({
                       value={effectiveSubtitleTarget}
                       onValueChange={(v) => setSubtitleTarget(v as SubtitleTarget)}
                       className="flex flex-col gap-0.5"
-                      aria-label="Which subtitles to export"
+                      aria-label={t("importExport.dialog.subtitleTargetGroupAriaLabel")}
                     >
                       {([
                         {
@@ -1716,9 +1714,9 @@ export function ExportDialog({
                     aria-busy={isBusy}
                   >
                     {isBusy ? <Spinner aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
-                    Download {buildExportStem(false)}
-                    {effectiveSubtitleTarget === "audio" ? "_audio" : ""}
-                    {nativeOption.ext}
+                    {t("importExport.dialog.downloadFile", {
+                      fileName: `${buildExportStem(false)}${effectiveSubtitleTarget === "audio" ? "_audio" : ""}${nativeOption.ext}`,
+                    })}
                   </Button>
                 </div>
               </details>
@@ -1879,6 +1877,7 @@ export function ExportDialog({
           )}
 
           {/* Project-scope notices */}
+          {/* i18n-exempt "project" is an ExportScope tag, not copy */}
           {effectiveScope === "project" && format !== "usfm" && projectCellsLoading && (
             <div className="flex items-center gap-1.5 mt-1">
               <Skeleton className="h-2 w-2 rounded-full shrink-0" />
@@ -1939,6 +1938,7 @@ export function ExportDialog({
               aria-label={t("importExport.dialog.filenameAriaLabel")}
               className="h-7 text-sm font-mono"
             />
+            {/* i18n-exempt "project" is an ExportScope tag, not copy */}
             {effectiveScope === "project" && (
               <p className="text-[10px] text-muted-foreground -mt-0.5">
                 {t("importExport.dialog.projectScopeUsesProjectName")}
@@ -1968,6 +1968,7 @@ export function ExportDialog({
 
         {/* Who is recorded — on the card for a dubbing file. */}
         {!isDubbingFile && (format === "audio-by-character" || format === "audio-by-line")
+          // i18n-exempt "file" is an ExportScope tag, not copy
           && effectiveScope === "file" && renderCharacterPreview()}
 
         {/* Lossy warning banner */}
@@ -2086,6 +2087,7 @@ export function ExportDialog({
         </details>
 
         {/* Status feedback */}
+        {/* i18n-exempt "idle" is an export-status kind tag, not copy */}
         {status.kind !== "idle" && (
           <div
             role="status"
@@ -2099,17 +2101,21 @@ export function ExportDialog({
                   : "bg-muted/60 text-muted-foreground")
             }
           >
+            {/* i18n-exempt "busy" is an export-status kind tag, not copy */}
             {status.kind === "busy" && (
               <Spinner className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
             )}
+            {/* i18n-exempt "ok" is an export-status kind tag, not copy */}
             {(status.kind === "ok" || status.kind === "ok-lossy") && (
               <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             )}
+            {/* i18n-exempt "error" is an export-status kind tag, not copy */}
             {status.kind === "error" && (
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             )}
             <span className="flex flex-col gap-1">
               <span>{status.msg}</span>
+              {/* i18n-exempt "error" is an export-status kind tag, not copy */}
               {status.kind === "error" && idmlRecovery && (
                 <span className="flex flex-wrap items-center gap-2 pt-1">
                   <Button
@@ -2150,6 +2156,7 @@ export function ExportDialog({
         )}
 
         {/* Inline-style fidelity report: formatting the export could not keep. */}
+        {/* i18n-exempt "ok" is an export-status kind tag, not copy */}
         {fidelityWarnings.length > 0 && (status.kind === "ok" || status.kind === "ok-lossy") && (
           <div
             role="note"

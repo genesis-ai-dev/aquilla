@@ -28,6 +28,7 @@ import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
 import { fmtClock } from "./format"
 import { formatVttTime } from "@/lib/video/vtt-generator"
 import type { CellData } from "@/hooks/useCells"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const MIN_DUR_SEC = 0.2
 
@@ -142,6 +143,7 @@ export function TimelineCard({
   onSeek,
   onRemove,
 }: TimelineCardProps) {
+  const t = useT()
   // Round 6: a subtitle card on a media cell shows its INDEPENDENT span.
   const laneSpan = span ?? (variant === "subtitle" ? subtitleSpanSec(cell) : null)
   const startSec = laneSpan?.start ?? cell.startTime ?? 0
@@ -379,8 +381,8 @@ export function TimelineCard({
         // select and seek on the way out.
         <button
           type="button"
-          title="Remove this line"
-          aria-label="Remove this line"
+          title={t("editor.timeline.removeThisLine")}
+          aria-label={t("editor.timeline.removeThisLine")}
           data-testid={`tl-card-${cell.id}-remove`}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {

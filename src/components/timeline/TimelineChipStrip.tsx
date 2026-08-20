@@ -162,6 +162,8 @@ export function TimelineTimingRow({ cell, chipStats, audioMissing }: TimelineChi
             </span>
           </Pill>
         )}
+        {/* i18n-exempt "dubbing" is a ChipStats union tag, not copy */}
+        {/* i18n-exempt "dubbing" is a ChipStats union tag, not copy */}
         {chipStats?.kind === "dubbing" && (
           <Pill>
             <span data-testid="tl-detail-dub-range" className="font-mono tabular-nums">
@@ -171,6 +173,7 @@ export function TimelineTimingRow({ cell, chipStats, audioMissing }: TimelineChi
             </span>
           </Pill>
         )}
+        {/* i18n-exempt "dubbing" is a ChipStats union tag, not copy */}
         {chipStats?.kind === "dubbing" &&
           chipStats.durationDiffSec != null &&
           (() => {
@@ -206,6 +209,7 @@ export function TimelineTimingRow({ cell, chipStats, audioMissing }: TimelineChi
         {/* Overlap: one side → one plain pill (today's shape); BOTH sides →
             two labeled pills, because a single summed number would say
             nothing about where the collision is (Sam 2026-08-08). */}
+        {/* i18n-exempt "dubbing" is a ChipStats union tag, not copy */}
         {chipStats?.kind === "dubbing" &&
           chipStats.headOverlapSec != null &&
           chipStats.tailOverlapSec != null && (
@@ -230,6 +234,7 @@ export function TimelineTimingRow({ cell, chipStats, audioMissing }: TimelineChi
               </Pill>
             </>
           )}
+        {/* i18n-exempt "dubbing" is a ChipStats union tag, not copy */}
         {chipStats?.kind === "dubbing" &&
           (chipStats.headOverlapSec == null) !== (chipStats.tailOverlapSec == null) && (
             <Pill>
@@ -301,6 +306,7 @@ export function MediaTextHeader({
   /** Ditto for the camera, merged to "mixed" when the linked lines disagree. */
   cameraState?: CameraState | null
 }) {
+  const t = useT()
   const isDialogue = (cell?.medium ?? "media") === "media"
   const ownCastName =
     cell?.metadata && typeof cell.metadata.cast_name === "string"
@@ -326,16 +332,16 @@ export function MediaTextHeader({
           back to the section's own name when nothing is selected so the header
           doesn't blink in and out. */}
       <span className="shrink-0 text-xs font-medium text-muted-foreground">
-        {headingLabel ?? (isDialogue ? "Dialogue" : "Subtitle")}
+        {headingLabel ?? (isDialogue ? t("editor.timeline.chipHeadingDialogue") : t("editor.timeline.chipHeadingSubtitle"))}
       </span>
       {castName && (
         <Pill>
-          Speaker <b className="font-semibold text-foreground">{castName}</b>
+          {t("editor.timeline.chipSpeaker")} <b className="font-semibold text-foreground">{castName}</b>
         </Pill>
       )}
       {cameraState && (
         <Pill>
-          Camera <b className="font-semibold text-foreground">{cameraState}</b>
+          {t("editor.timeline.chipCamera")} <b className="font-semibold text-foreground">{cameraState}</b>
         </Pill>
       )}
       <StripNavSlot />

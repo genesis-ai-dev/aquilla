@@ -26,6 +26,7 @@ import { Check, ChevronRight, Link2, RefreshCw, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 import { fmtClock } from "./format"
 import type { CueLinkReview, ReviewCandidate, ReviewPair } from "@/lib/timeline/cue-link-review"
@@ -81,6 +82,7 @@ function CandidateRow({
 }: {
   row: ReviewCandidate
 } & Pick<Props, "textById" | "cueById" | "onNavigate" | "onPair" | "onReject">) {
+  const t = useT()
   const cue = cueById.get(row.cueCellId)
   const text = textById.get(row.textCellId)
   return (
@@ -102,12 +104,12 @@ function CandidateRow({
       <div className="flex w-full flex-col gap-1 text-left">
         <div className="flex items-baseline gap-2">
           <TimeLabel cue={cue} />
-          <span className="text-muted-foreground">heard</span>
+          <span className="text-muted-foreground">{t("editor.timeline.cueLinkHeard")}</span>
           <span className="min-w-0 flex-1 truncate">{clip(cue?.original)}</span>
         </div>
         <div className="flex items-baseline gap-2">
           <TimeLabel cue={text} />
-          <span className="text-muted-foreground">line</span>
+          <span className="text-muted-foreground">{t("editor.timeline.cueLinkLine")}</span>
           <span className="min-w-0 flex-1 truncate">{clip(text?.original)}</span>
         </div>
       </div>
@@ -119,7 +121,7 @@ function CandidateRow({
           data-testid={`cue-link-pair-${row.cueCellId}`}
           onClick={() => onPair(row.textCellId, row.cueCellId)}
         >
-          <Check className="mr-1 h-3 w-3" /> Pair
+          <Check className="mr-1 h-3 w-3" /> {t("editor.timeline.cueLinkPair")}
         </Button>
         <Button
           size="sm"
@@ -127,7 +129,7 @@ function CandidateRow({
           data-testid={`cue-link-reject-${row.cueCellId}`}
           onClick={() => onReject(row.textCellId, row.cueCellId)}
         >
-          Not a pair
+          {t("editor.timeline.cueLinkNotAPair")}
         </Button>
         <span className="ml-auto font-mono text-[10px] text-muted-foreground">
           {Math.round(row.similarity * 100)}% · {row.gapSec.toFixed(1)}s
@@ -144,6 +146,7 @@ function PairRow({
   onNavigate,
   onReject,
 }: { pair: ReviewPair } & Pick<Props, "textById" | "cueById" | "onNavigate" | "onReject">) {
+  const t = useT()
   const cue = cueById.get(pair.cueCellId)
   const text = textById.get(pair.textCellId)
   return (
@@ -171,7 +174,7 @@ function PairRow({
           onReject(pair.textCellId, pair.cueCellId)
         }}
       >
-        Not a pair
+        {t("editor.timeline.cueLinkNotAPair")}
       </button>
     </div>
   )
@@ -249,6 +252,7 @@ export function CueLinkDrawer({
   onReject,
   onRepairAll,
 }: Props) {
+  const t = useT()
   const [confirmingRepair, setConfirmingRepair] = useState(false)
   const rowProps = { textById, cueById, onNavigate, onPair, onReject }
 
@@ -263,19 +267,27 @@ export function CueLinkDrawer({
     >
       <header className="flex items-center gap-2 border-b border-border px-3 py-2">
         <Link2 className="h-4 w-4 text-violet-600 dark:text-violet-400" />
-        <span className="text-sm font-medium">Pairings</span>
+        <span className="text-sm font-medium">{t("editor.timeline.cueLinkTitle")}</span>
         {pending ? (
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Spinner className="h-3 w-3" /> working…
+            <Spinner className="h-3 w-3" /> {t("editor.timeline.cueLinkWorking")}
           </span>
         ) : (
           review && (
             <span data-testid="cue-link-actionable" className="text-xs text-muted-foreground">
-              {review.actionable === 0 ? "nothing to review" : `${review.actionable} to review`}
+              {review.actionable === 0
+                ? t("editor.timeline.cueLinkNothingToReview")
+                : t("editor.timeline.cueLinkToReview", { count: review.actionable })}
             </span>
           )
         )}
-        <Button size="sm" variant="ghost" className="ml-auto" aria-label="Close" onClick={onClose}>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="ml-auto"
+          aria-label={t("common.close")}
+          onClick={onClose}
+        >
           <X className="h-4 w-4" />
         </Button>
       </header>
@@ -290,7 +302,7 @@ export function CueLinkDrawer({
         data-testid="cue-link-mode-note"
         className="border-b border-border bg-violet-50 px-3 py-1.5 text-[11px] text-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
       >
-        Linking is on — click a heard line, then the subtitle it performs.
+        {t("editor.timeline.cueLinkModeNote")}
       </p>
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3">
@@ -299,10 +311,7 @@ export function CueLinkDrawer({
             had already imported, which is a button wearing an import dialog. */}
         {confirmingRepair ? (
           <div className="rounded-md border border-red-500/40 bg-red-500/5 p-2 text-xs">
-            <p>
-              Work out every pairing again from scratch? This discards any pairing you fixed by
-              hand.
-            </p>
+            <p>{t("editor.timeline.cueLinkRepairConfirm")}</p>
             <div className="mt-2 flex gap-2">
               <Button
                 size="sm"
@@ -313,10 +322,10 @@ export function CueLinkDrawer({
                   onRepairAll()
                 }}
               >
-                Re-pair everything
+                {t("editor.timeline.cueLinkRepairAll")}
               </Button>
               <Button size="sm" variant="outline" onClick={() => setConfirmingRepair(false)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
             </div>
           </div>
@@ -329,7 +338,7 @@ export function CueLinkDrawer({
             disabled={pending}
             onClick={() => setConfirmingRepair(true)}
           >
-            <RefreshCw className="mr-1 h-3 w-3" /> Re-pair everything
+            <RefreshCw className="mr-1 h-3 w-3" /> {t("editor.timeline.cueLinkRepairAll")}
           </Button>
         )}
 
@@ -337,8 +346,8 @@ export function CueLinkDrawer({
           <>
             {review.confident.length > 0 && (
               <Section
-                title="Almost certainly the same line"
-                hint="Identical wording, moments apart, in a gap the pairings left open."
+                title={t("editor.timeline.cueLinkConfidentTitle")}
+                hint={t("editor.timeline.cueLinkConfidentHint")}
               >
                 {review.confident.map((row) => (
                   <CandidateRow key={row.cueCellId} row={row} {...rowProps} />
@@ -348,8 +357,8 @@ export function CueLinkDrawer({
 
             {review.crossScriptCandidates.length > 0 && (
               <Section
-                title="Different writing systems"
-                hint="The timings line up, but nothing could compare the words — so this was not paired for you."
+                title={t("editor.timeline.cueLinkCrossScriptCandidatesTitle")}
+                hint={t("editor.timeline.cueLinkCrossScriptCandidatesHint")}
               >
                 {review.crossScriptCandidates.map((row) => (
                   <CandidateRow key={row.cueCellId} row={row} {...rowProps} />
@@ -359,8 +368,8 @@ export function CueLinkDrawer({
 
             {review.weakCandidates.length > 0 && (
               <Section
-                title="Overlapping, words barely agree"
-                hint="Enough shared wording to notice, not enough to pair on its own."
+                title={t("editor.timeline.cueLinkWeakTitle")}
+                hint={t("editor.timeline.cueLinkWeakHint")}
               >
                 {review.weakCandidates.map((row) => (
                   <CandidateRow key={row.cueCellId} row={row} {...rowProps} />
@@ -370,8 +379,8 @@ export function CueLinkDrawer({
 
             {review.uncertain.length > 0 && (
               <Section
-                title="The only candidate nearby"
-                hint="Nothing else is unpaired between them, but the words don't agree."
+                title={t("editor.timeline.cueLinkUncertainTitle")}
+                hint={t("editor.timeline.cueLinkUncertainHint")}
               >
                 {review.uncertain.map((row) => (
                   <CandidateRow key={row.cueCellId} row={row} {...rowProps} />
@@ -381,8 +390,8 @@ export function CueLinkDrawer({
 
             {review.crossScript.length > 0 && (
               <Section
-                title="Paired on timing alone"
-                hint="Different writing systems, so nothing compared the words."
+                title={t("editor.timeline.cueLinkCrossScriptTitle")}
+                hint={t("editor.timeline.cueLinkCrossScriptHint")}
               >
                 {review.crossScript.map((p) => (
                   <PairRow key={p.cueCellId} pair={p} {...rowProps} />
@@ -391,7 +400,10 @@ export function CueLinkDrawer({
             )}
 
             {review.lowConfidence.length > 0 && (
-              <Section title="Paired, but barely" hint="Weak wording agreement. Probably fine.">
+              <Section
+                title={t("editor.timeline.cueLinkLowConfidenceTitle")}
+                hint={t("editor.timeline.cueLinkLowConfidenceHint")}
+              >
                 {review.lowConfidence.map((p) => (
                   <PairRow key={p.cueCellId} pair={p} {...rowProps} />
                 ))}
@@ -401,14 +413,14 @@ export function CueLinkDrawer({
             <div className="mt-auto border-t border-border pt-2">
               <CollapsedGroup
                 testId="cue-link-orphan-cues"
-                label={(n) => `${n} heard line${n === 1 ? "" : "s"} with no subtitle nearby`}
+                label={(n) => t("editor.timeline.cueLinkOrphanCues", { count: n })}
                 ids={review.unpairedCues}
                 byId={cueById}
                 onNavigate={(id) => onNavigate(id)}
               />
               <CollapsedGroup
                 testId="cue-link-orphan-text"
-                label={(n) => `${n} line${n === 1 ? "" : "s"} with no speech nearby`}
+                label={(n) => t("editor.timeline.cueLinkOrphanText", { count: n })}
                 ids={review.unpairedText}
                 byId={textById}
                 // A SUBTITLE, not a cue — it has a row of its own to scroll to,

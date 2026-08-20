@@ -21,6 +21,7 @@
 import { secToPx, chipRadiusPx } from "@/lib/timeline/scale"
 import { TL_CHIP_BOX_CLASS } from "@/lib/timeline/row-metrics"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface LinkOverlayItem {
   id: string
@@ -56,6 +57,7 @@ export function CueLinkOverlay({
   unlinkedIds,
   onPick,
 }: Props) {
+  const t = useT()
   return (
     <>
       {items.map((item) => {
@@ -73,10 +75,10 @@ export function CueLinkOverlay({
             tabIndex={0}
             title={
               picked
-                ? "Pairing from this one — click a line on the other row"
+                ? t("editor.timeline.pairingFromThis")
                 : linked
-                  ? "Paired · click to unpair"
-                  : "Click to pair with the selected chip"
+                  ? t("editor.timeline.pairedClickToUnpair")
+                  : t("editor.timeline.clickToPair")
             }
             onClick={(e) => {
               // The chip underneath still has its own click handlers; letting

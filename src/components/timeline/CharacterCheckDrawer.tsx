@@ -35,6 +35,7 @@ import { Check, ChevronRight, Users, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 
 import { Button } from "@/components/ui/button"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 import type {
   CharacterAgreement,
@@ -223,6 +224,7 @@ function OpenRowCard({
   onResolve: Props["onResolve"]
   inert?: boolean
 }) {
+  const t = useT()
   const pick = (axis: Axis, side: Side) => {
     const pair =
       axis === "name"
@@ -277,12 +279,16 @@ function OpenRowCard({
       {/* Half-decided rows say so, or they look untouched. */}
       {row.settled?.name && !row.name && (
         <p className="mt-1 text-[10px] text-muted-foreground">
-          Speaker settled — {row.settled.name.rejected} was set aside.
+          {t("editor.timeline.characterCheckSpeakerSettled", {
+            rejected: row.settled.name.rejected,
+          })}
         </p>
       )}
       {row.settled?.camera && !row.camera && (
         <p className="mt-1 text-[10px] text-muted-foreground">
-          Camera settled — {cameraWord(row.settled.camera.rejected)} was set aside.
+          {t("editor.timeline.characterCheckCameraSettled", {
+            rejected: cameraWord(row.settled.camera.rejected),
+          })}
         </p>
       )}
     </RowShell>
@@ -377,6 +383,7 @@ export function CharacterCheckDrawer({
   onStrictCameraChange,
   pending,
 }: Props) {
+  const t = useT()
   const [showResolved, setShowResolved] = useState(false)
   /** Which bulk decision is awaiting its "are you sure". */
   const [confirmingBulk, setConfirmingBulk] = useState<Side | null>(null)
@@ -410,7 +417,7 @@ export function CharacterCheckDrawer({
     >
       <header className="flex items-center gap-2 border-b border-border px-3 py-2">
         <Users className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-        <span className="text-sm font-medium">Characters</span>
+        <span className="text-sm font-medium">{t("editor.timeline.charactersTitle")}</span>
         {pending ? (
           // DETERMINATE on purpose: 150 writes is long enough that a bare
           // spinner reads as hung.
@@ -420,15 +427,26 @@ export function CharacterCheckDrawer({
           >
             <Spinner className="h-3 w-3" />
             {pending.phase === "syncing"
-              ? "Syncing…"
-              : `Saving… ${pending.done} of ${pending.total}`}
+              ? t("editor.timeline.characterCheckSyncing")
+              : t("editor.timeline.characterCheckSaving", {
+                  done: pending.done,
+                  total: pending.total,
+                })}
           </span>
         ) : (
           <span data-testid="character-check-count" className="text-xs text-muted-foreground">
-            {open.length === 0 ? "nothing to check" : `${open.length} to check`}
+            {open.length === 0
+              ? t("editor.timeline.characterCheckNothingToCheck")
+              : t("editor.timeline.characterCheckToCheck", { count: open.length })}
           </span>
         )}
-        <Button size="sm" variant="ghost" className="ml-auto" aria-label="Close" onClick={onClose}>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="ml-auto"
+          aria-label={t("common.close")}
+          onClick={onClose}
+        >
           <X className="h-4 w-4" />
         </Button>
       </header>
@@ -442,8 +460,11 @@ export function CharacterCheckDrawer({
           data-testid="character-check-columns"
           className="grid grid-cols-2 gap-1.5 border-b border-border bg-muted/30 px-3 py-1 text-[10px] font-medium tracking-wide text-muted-foreground uppercase"
         >
-          <span>Subtitle</span>
-          <span>Audio</span>
+          {/* Reused rather than re-keyed: the catalog already carries both of
+              these bare words, and minting twins would give a translator two
+              things to keep in step for no gain. */}
+          <span>{t("editor.timeline.chipHeadingSubtitle")}</span>
+          <span>{t("nav.lens.audio")}</span>
         </div>
       )}
 
@@ -459,16 +480,14 @@ export function CharacterCheckDrawer({
           // An explanation, not a disabled menu item — a greyed-out control
           // says nothing about why.
           <p data-testid="character-check-one-sheet" className="text-xs text-muted-foreground">
-            Both character sheets have to be imported before there is anything to check. Each is
-            keyed to one side of the script — one row per subtitle line, one per heard line — and
-            comparing them is what turns up a wrong pairing or a wrong sheet.
+            {t("editor.timeline.characterCheckOneSheet")}
           </p>
         ) : (
           <>
             {nameRows.length > 0 && (
               <Section
-                title={`Who says it · ${nameRows.length}`}
-                hint="The sheets name different people. Either the pairing is wrong or one sheet is."
+                title={t("editor.timeline.characterCheckNamesTitle", { count: nameRows.length })}
+                hint={t("editor.timeline.characterCheckNamesHint")}
               >
                 <div data-testid="character-check-names" className="flex flex-col gap-1.5">
                   {nameRows.map((r) => (
@@ -491,8 +510,8 @@ export function CharacterCheckDrawer({
                 hidden. The zero state says so in a line. */}
             {(
               <Section
-                title={`Camera · ${cameraRows.length}`}
-                hint="Same person; the sheets disagree about whether the camera is on them."
+                title={t("editor.timeline.characterCheckCameraTitle", { count: cameraRows.length })}
+                hint={t("editor.timeline.characterCheckCameraHint")}
               >
                 {/* ASKING TO SEE MORE. `mixed` and `group` both mean "several,
                     or not one answer", so neither contradicts anything by
@@ -511,14 +530,14 @@ export function CharacterCheckDrawer({
                   className="flex flex-col gap-1 rounded-md border border-border bg-muted/30 p-2"
                 >
                   <p className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
-                    Also flag
+                    {t("editor.timeline.characterCheckAlsoFlag")}
                   </p>
                   {(
                     [
-                      ["mixed", "Mixed against on or off"],
-                      ["group", "Group against on or off"],
+                      ["mixed", "editor.timeline.characterCheckFlagMixed"],
+                      ["group", "editor.timeline.characterCheckFlagGroup"],
                     ] as const
-                  ).map(([key, label]) => (
+                  ).map(([key, labelKey]) => (
                     <label
                       key={key}
                       className="flex items-center gap-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
@@ -531,7 +550,7 @@ export function CharacterCheckDrawer({
                           onStrictCameraChange({ ...strictCamera, [key]: c === true })
                         }
                       />
-                      <span>{label}</span>
+                      <span>{t(labelKey)}</span>
                     </label>
                   ))}
                 </div>
@@ -541,7 +560,7 @@ export function CharacterCheckDrawer({
                     data-testid="character-check-cameras-clear"
                     className="text-[11px] text-muted-foreground"
                   >
-                    Nothing here disagrees about the camera.
+                    {t("editor.timeline.characterCheckCamerasClear")}
                   </p>
                 )}
 
@@ -559,9 +578,10 @@ export function CharacterCheckDrawer({
                       className="rounded-md border border-amber-500/40 bg-amber-500/5 p-2 text-xs"
                     >
                       <p>
-                        Use the {confirmingBulk} sheet's camera answer for all{" "}
-                        {allCameraRows.length} lines? Each lands in Resolved and can still be
-                        flipped one by one.
+                        {t("editor.timeline.characterCheckBulkConfirm", {
+                          side: confirmingBulk,
+                          count: allCameraRows.length,
+                        })}
                       </p>
                       <div className="mt-2 flex gap-2">
                         <Button
@@ -574,16 +594,18 @@ export function CharacterCheckDrawer({
                             resolveAllCameras(side)
                           }}
                         >
-                          Use {confirmingBulk}
+                          {t("editor.timeline.characterCheckBulkGo", { side: confirmingBulk })}
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => setConfirmingBulk(null)}>
-                          Cancel
+                          {t("common.cancel")}
                         </Button>
                       </div>
                     </div>
                   ) : (
                     <div className="grid grid-cols-[auto_1fr_1fr] items-center gap-1.5 text-[11px]">
-                      <span className="text-muted-foreground">All {allCameraRows.length}:</span>
+                      <span className="text-muted-foreground">
+                        {t("editor.timeline.characterCheckBulkAll", { count: allCameraRows.length })}
+                      </span>
                       {(["subtitle", "audio"] as const).map((side) => (
                         <Button
                           key={side}
@@ -594,7 +616,9 @@ export function CharacterCheckDrawer({
                           disabled={Boolean(pending)}
                           onClick={() => setConfirmingBulk(side)}
                         >
-                          {side === "subtitle" ? "Subtitle" : "Audio"}
+                          {side === "subtitle"
+                            ? t("editor.timeline.chipHeadingSubtitle")
+                            : t("nav.lens.audio")}
                         </Button>
                       ))}
                     </div>
@@ -615,7 +639,7 @@ export function CharacterCheckDrawer({
 
             {open.length === 0 && (
               <p data-testid="character-check-clear" className="text-xs text-muted-foreground">
-                The two sheets agree everywhere they both have something to say.
+                {t("editor.timeline.characterCheckAllAgree")}
               </p>
             )}
 
@@ -624,8 +648,7 @@ export function CharacterCheckDrawer({
                 display is already correct. */}
             {agreement != null && agreement.sharedRows > 0 && (
               <p data-testid="character-check-shared" className="text-[11px] text-muted-foreground">
-                {agreement.sharedRows} pairings sit on a subtitle row that covers several heard
-                lines, so one name cannot describe them all. Nothing to fix.
+                {t("editor.timeline.characterCheckShared", { count: agreement.sharedRows })}
               </p>
             )}
 
@@ -638,7 +661,7 @@ export function CharacterCheckDrawer({
                   onClick={() => setShowResolved((v) => !v)}
                 >
                   <Check className="h-3.5 w-3.5" />
-                  Resolved · {resolved.length}
+                  {t("editor.timeline.characterCheckResolvedToggle", { count: resolved.length })}
                   <ChevronRight
                     className={cn("h-3 w-3 transition-transform", showResolved && "rotate-90")}
                   />
@@ -667,8 +690,7 @@ export function CharacterCheckDrawer({
                     className="mt-2 rounded-md border border-red-500/40 bg-red-500/5 p-2 text-xs"
                   >
                     <p>
-                      Un-resolve all {resolved.length}? Every disagreement returns to the list
-                      with both answers restored. Nothing is deleted from the sheets.
+                      {t("editor.timeline.characterCheckResetConfirm", { count: resolved.length })}
                     </p>
                     <div className="mt-2 flex gap-2">
                       <Button
@@ -681,10 +703,10 @@ export function CharacterCheckDrawer({
                           onResetAll()
                         }}
                       >
-                        Un-resolve everything
+                        {t("editor.timeline.characterCheckResetAll")}
                       </Button>
                       <Button size="sm" variant="outline" onClick={() => setConfirmingReset(false)}>
-                        Cancel
+                        {t("common.cancel")}
                       </Button>
                     </div>
                   </div>
@@ -697,7 +719,7 @@ export function CharacterCheckDrawer({
                     disabled={Boolean(pending)}
                     onClick={() => setConfirmingReset(true)}
                   >
-                    Un-resolve everything
+                    {t("editor.timeline.characterCheckResetAll")}
                   </Button>
                 )}
               </section>

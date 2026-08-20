@@ -406,6 +406,11 @@ export const terminology = defineNamespace({
     // ── TerminologyPage.tsx: main page chrome ────────────────────────────────
     "terminology.loadingLabel": "Loading terminology",
     "terminology.page.addConceptButton": "Add concept",
+    "terminology.page.editConceptTitle": "Edit concept",
+    "terminology.page.deleteConcept":
+      "Delete this concept? This removes it for everyone in the project and cannot be undone.",
+    "terminology.page.deleteNamedConcept":
+      'Delete "{term}"? This removes the concept and all its renderings for everyone in the project and cannot be undone.',
     "terminology.page.mergeDuplicatesButton": "Merge duplicates",
     "terminology.page.reviewQueueHeading": "Review queue",
     "terminology.page.candidateTermsHeading": "Candidate terms",
@@ -936,6 +941,16 @@ export const terminology = defineNamespace({
           "is still loading. Rendered from two places for the same surface — the " +
           "Terminology page itself and the workspace shell's Suspense fallback — " +
           "so it is worded without naming either container.",
+      },
+      "terminology.page.deleteNamedConcept": {
+        description:
+          "Body of the confirmation asked before deleting a terminology concept, " +
+          "when the concept has a source term to name. Full sentence, ends with a " +
+          "period. States the blast radius (everyone in the project) and that it " +
+          "cannot be undone — do not soften either. The term is quoted.",
+        placeholders: {
+          term: "The concept's source term, shown in quotes so it is clear which one is going.",
+        },
       },
       "terminology.page.addConceptButton": {
         description: "Header button opening the add-concept dialog.",

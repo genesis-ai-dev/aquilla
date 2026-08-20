@@ -200,7 +200,7 @@ export function ProjectCard({
                       data-testid="toggle-lifecycle-button"
                     >
                       <PauseCircle className="h-4 w-4" />
-                      {isInactive ? "Mark as Active" : "Mark as Inactive"}
+                      {isInactive ? t("org.projectOverview.markAsActive") : t("org.projectOverview.markAsInactive")}
                     </button>
                   )}
                   {canTrash && onTrash && (
@@ -251,7 +251,7 @@ export function ProjectCard({
           <div className="mt-3 flex items-center justify-between gap-2">
             <span className="text-xs text-muted-foreground">
               {t("comments.file.deletedBadge")}
-              {project.deletedBy ? ` by ${project.deletedBy}` : ""}
+              {project.deletedBy ? t("workspace.projectCard.deletedBy", { name: project.deletedBy }) : ""}
               {project.deletedAt ? ` · ${formatDate(project.deletedAt, locale)}` : ""}
             </span>
             {onRestore && (

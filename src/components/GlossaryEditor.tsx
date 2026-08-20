@@ -455,6 +455,7 @@ export function GlossaryEditor({
             ? t("terminology.editor.backToGlossary")
             : t("terminology.violations.title")}
         </Button>
+        {/* i18n-exempt "glossary" is a view token, not copy */}
         {canManage && view === "glossary" && (
           <Button size="sm" onClick={() => setAddOpen(true)} aria-label={t("terminology.editor.addTerm")}>
             <Plus data-icon="inline-start" />

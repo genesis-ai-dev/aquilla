@@ -32,6 +32,7 @@ import { fmtClock } from "./format"
 import { CueLinkOverlay, type LaneLinkOverlay } from "./CueLinkOverlay"
 import { MIN_CARD_TEXT_PX, TimelineCard } from "./TimelineCard"
 import type { CellData } from "@/hooks/useCells"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { SourceRegionMap } from "@/lib/timeline/source-regions"
 
 // Silences shorter than MIN_ADDABLE_SPAN_SEC draw no chip. A real VTT carries
@@ -83,6 +84,7 @@ function SourceRegionLaneImpl({
   onSeekSec,
   linkOverlay,
 }: SourceRegionLaneProps) {
+  const t = useT()
   const spanOf = (c: CellData): { start: number; end: number } => {
     const start = c.startTime ?? 0
     return { start, end: c.endTime ?? start }
@@ -112,7 +114,7 @@ function SourceRegionLaneImpl({
           // "No speech", not "no subtitle": these gaps come from a transcript of
           // the soundtrack, so a gap says nobody was talking — a subtitle may
           // well exist over it, and often does.
-          title={`No speech here · ${(g.endSec - g.startSec).toFixed(1)}s`}
+          title={t("editor.timeline.noSpeechHere", { seconds: (g.endSec - g.startSec).toFixed(1) })}
           onClick={() => onSeekSec(g.startSec)}
           // TimelineCard's geometry and radius, dashed and unfilled — the
           // established "slot with nothing in it yet" treatment (the untimed

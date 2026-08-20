@@ -73,6 +73,24 @@ export function isBiblicaNoteSectionStyle(paragraphStyle: string): boolean {
   return hasStyleToken(paragraphStyle, "intro")
 }
 
+/**
+ * Headings printed inside the scripture flow (`head:*`).
+ *
+ * Unlike the verses around them, these are not swapped in from a Bible
+ * translation — they are set in the study Bible's own layout and have to be
+ * translated here. The Psalter is where they carry the most text: chapter
+ * labels ("Psalm 1", `head:cl`), superscriptions ("A psalm of David",
+ * `head:d_h`), speaker lines (`head:sp`), the acrostic letters of Psalm 119
+ * (`head:qa`) and the five-book headings ("Book I", `head:ms`, with its range
+ * "Psalms 1—41", `head:mr_h`).
+ *
+ * Auto-generated running heads live in `meta:rh`, not here, so nothing the
+ * layout repeats is picked up.
+ */
+export function isBiblicaScriptureHeadingStyle(paragraphStyle: string): boolean {
+  return hasStyleToken(paragraphStyle, "head")
+}
+
 /** The paragraph whose text is the 2–4 character book abbreviation. */
 export function isBiblicaBookMarkerStyle(paragraphStyle: string): boolean {
   return hasStyleToken(paragraphStyle, "meta", "bk")

@@ -178,14 +178,17 @@ export async function handleMigrateIngestRequest(
   }
 
   // Pipelined batch (postgres.js) collapses the per-statement Hyperdrive↔Neon
-  // round-trips that dominated audio ingest (~140ms × thousands of stmts). Order
-  // + atomicity are identical to batch(); we just stop waiting between sends.
-  // Falls back to serial batch() on executors without it (PGlite tests). Larger
-  // limit when pipelined — round-trips no longer scale with batch size, so fewer
-  // commits is a pure win.
+  // round-trips that dominated ingest (2 RTTs × thousands of stmts ≈ 21 stmts/s
+  // — see batchPipelined in db/shim/postgres.ts for the mechanics). Order +
+  // atomicity are identical to batch(). Falls back to serial batch() on
+  // executors without it (PGlite tests). Larger limit when pipelined: each
+  // batch re-pays a ~2-RTT prepare per distinct statement shape (the prepared-
+  // statement cache is per connection, and a batch can land on any pooled
+  // connection), so fewer, bigger transactions amortize the warm-up; at
+  // pipelined speed a 1000-stmt transaction still commits in ~1s.
   const pipelined = typeof db.batchPipelined === "function"
   const runBatch = pipelined ? db.batchPipelined!.bind(db) : db.batch.bind(db)
-  const limit = pipelined ? 250 : BATCH_LIMIT
+  const limit = pipelined ? 1000 : BATCH_LIMIT
   try {
     for (let i = 0; i < stmts.length; i += limit) {
       await runBatch(stmts.slice(i, i + limit))

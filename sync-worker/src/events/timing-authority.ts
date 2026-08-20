@@ -41,14 +41,20 @@ export async function resolveTimingLocked(
   db: AquillaDb,
   projectId: string,
 ): Promise<boolean> {
-  const row = await db
-    .prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
-    .bind(projectId)
-    .first<{ settings: string | null }>()
-
-  if (!row?.settings) return true
-
+  // THE QUERY IS INSIDE THE TRY, not just the parse. This runs on the event
+  // perimeter: an exception here does not degrade to a 403, it escapes
+  // `authorize` and 500s the whole batch — and a 500 on the event route can
+  // wedge the durable outbox with a poisoned event, which is the exact failure
+  // the role mirror exists to prevent. An unreachable settings row must read as
+  // LOCKED (nothing moves) rather than as an outage.
   try {
+    const row = await db
+      .prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
+      .bind(projectId)
+      .first<{ settings: string | null }>()
+
+    if (!row?.settings) return true
+
     const parsed = JSON.parse(row.settings) as { timingLocked?: unknown }
     return parsed?.timingLocked !== false
   } catch {
@@ -76,17 +82,19 @@ export async function isUserInsertedCell(
   fileId: string,
   cellId: string,
 ): Promise<boolean> {
-  const row = await db
-    .prepare(
-      `SELECT metadata FROM cells
-       WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
-    )
-    .bind(projectId, fileId, cellId)
-    .first<{ metadata: unknown }>()
-
-  if (!row?.metadata) return false
-
+  // Same discipline as above: the read is inside the try. A failure here must
+  // withhold the exemption rather than escape into a 500.
   try {
+    const row = await db
+      .prepare(
+        `SELECT metadata FROM cells
+         WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+      )
+      .bind(projectId, fileId, cellId)
+      .first<{ metadata: unknown }>()
+
+    if (!row?.metadata) return false
+
     // jsonb comes back parsed on one driver and as text on another; both shapes
     // reach here, so normalize rather than assuming either.
     const meta = (typeof row.metadata === 'string'

@@ -60,6 +60,19 @@ describe("resolveTimingLocked", () => {
   it("locks when the blob will not parse", async () => {
     expect(await resolveTimingLocked(makeDb({ settings: "{not json" }), "p1")).toBe(true)
   })
+
+  it("locks when the DATABASE itself fails, rather than escaping as a 500", async () => {
+    // This runs on the event perimeter. An exception here does not degrade to a
+    // 403 — it escapes `authorize` and 500s the batch, and a 500 on the event
+    // route can wedge the durable outbox with a poisoned event.
+    const broken = {
+      prepare() {
+        return { bind() { return { async first() { throw new Error("no binding") } } } }
+      },
+    } as unknown as AquillaDb
+    expect(await resolveTimingLocked(broken, "p1")).toBe(true)
+    expect(await isUserInsertedCell(broken, "p1", "f1", "c1")).toBe(false)
+  })
 })
 
 describe("isUserInsertedCell", () => {

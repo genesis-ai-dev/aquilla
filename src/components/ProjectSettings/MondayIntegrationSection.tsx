@@ -9,12 +9,20 @@
 // MAINTAINER (600) to mutate; any member sees a read-only status summary.
 // Board list / structure fetches require ORG maintainer server-side — when
 // they 403 we degrade gracefully (raw column ids instead of titles).
+//
+// SWARM-TODO(AQU-832, i18n): this file plus MondayLinkedView.tsx and
+// MondayMappingEditor.tsx (~50 unkeyed strings total) are deliberately left
+// unkeyed by the WS-14 project-settings/creation/sharing i18n wave — the
+// audit scoped the Monday.com integration trio to a later wave rather than
+// this pass. Key with a `projectSettings.monday.*` (or dedicated `monday`)
+// namespace when that wave starts; see docs/swarm/TRACES.md.
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { Link } from "react-router-dom"
+import { Sparkles } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import {
   Dialog,
   DialogContent,
@@ -52,6 +60,8 @@ import {
 import type { MondayMapping } from "@/lib/monday/types"
 import { MondayMappingTable } from "./MondayMappingEditor"
 import { MondayLinkedView } from "./MondayLinkedView"
+import { MondaySetupWizard } from "./MondaySetupWizard"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const MAINTAINER = 600
 
@@ -68,6 +78,7 @@ function errMsg(e: unknown): string {
 }
 
 export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props) {
+  const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const canManage = (roleLevel ?? 0) >= MAINTAINER
@@ -93,6 +104,9 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
   const [syncNotice, setSyncNotice] = useState<string | null>(null)
   const [unlinkOpen, setUnlinkOpen] = useState(false)
   const [unlinking, setUnlinking] = useState(false)
+  const [wizardOpen, setWizardOpen] = useState(false)
+  /** Manual board+mapping path, revealed on demand — the AI wizard is primary. */
+  const [manualOpen, setManualOpen] = useState(false)
 
   const aliveRef = useRef(true)
   useEffect(() => {
@@ -129,9 +143,11 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
   const orgConnected = link?.orgConnected ?? connection?.connected ?? false
 
   // ── Boards list (unlinked, maintainer only) ──────────────────────────────
+  // Only fetched once the manual path is opened; the wizard picks the board
+  // server-side, so the default path costs no board listing at all.
   useEffect(() => {
     if (!jwt || orgId == null || !canManage || loading || link || !orgConnected) return
-    if (boards !== null) return
+    if (!manualOpen || boards !== null) return
     let alive = true
     fetchMondayBoards(jwt, orgId)
       .then((got) => {
@@ -146,7 +162,7 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
     return () => {
       alive = false
     }
-  }, [jwt, orgId, canManage, loading, link, orgConnected, boards])
+  }, [jwt, orgId, canManage, loading, link, orgConnected, boards, manualOpen])
 
   // ── Board structure (selected or linked board) ───────────────────────────
   const structureBoardId = link?.boardId ?? selectedBoardId
@@ -300,144 +316,201 @@ export function MondayIntegrationSection({ projectId, orgId, roleLevel }: Props)
   }, [jwt, projectId])
 
   // ── Render ───────────────────────────────────────────────────────────────
+  const orgSettingsLinkLabel = t("projectSettings.monday.orgSettingsLinkText")
+  const connectInstructions = t("projectSettings.monday.orgNotConnectedInstructions", {
+    settingsLink: orgSettingsLinkLabel,
+  })
+  const [connectInstructionsBefore, connectInstructionsAfter] =
+    connectInstructions.split(orgSettingsLinkLabel)
+
   return (
-    <Card id="section-monday">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          Monday.com
-          {link && (
-            <Badge variant={link.enabled ? "default" : "secondary"}>
-              {link.enabled ? "Sync on" : "Sync paused"}
-            </Badge>
-          )}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {loading ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Spinner /> Loading Monday integration…
-          </div>
-        ) : !orgConnected ? (
-          <div className="space-y-2 text-sm text-muted-foreground">
-            <p>Your organization hasn't connected Monday.com yet.</p>
-            <p>
-              An org maintainer can connect it in{" "}
-              <Link to="/settings/monday" className="font-medium text-foreground underline underline-offset-4">
-                organization settings
-              </Link>
-              , or ask an org maintainer to set it up.
-            </p>
-          </div>
-        ) : link ? (
-          <MondayLinkedView
-            link={link}
-            structure={structure}
-            canManage={canManage}
-            toggling={toggling}
-            syncing={syncing}
-            syncNotice={syncNotice}
-            savingMapping={savingMapping}
-            analyzing={analyzing}
-            reconfigureMsg={reconfigureMsg}
-            onReconfigureMsg={setReconfigureMsg}
-            onToggleEnabled={handleToggleEnabled}
-            onSyncNow={handleSyncNow}
-            onSaveMapping={handleSaveMapping}
-            onReconfigure={() => void runAnalyze(link.boardId, reconfigureMsg.trim() || undefined, link.config)}
-            onUnlink={() => setUnlinkOpen(true)}
-            warnings={warnings}
-          />
-        ) : !canManage ? (
-          <p className="text-sm text-muted-foreground">
-            No Monday board is linked to this project. Maintainers can set one up here.
-          </p>
-        ) : (
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Link a Monday board to push this project's translation progress automatically.
-            </p>
-            <div className="flex items-center gap-2">
-              <Select
-                items={Object.fromEntries((boards ?? []).map((b) => [b.id, b.name]))}
-                value={selectedBoardId || null}
-                onValueChange={(value) => setSelectedBoardId((value as string) ?? "")}
-                disabled={boards === null}
-              >
-                <SelectTrigger aria-label="Monday board" className="w-64">
-                  <SelectValue placeholder={boards === null ? "Loading boards…" : "Pick a board"} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    {(boards ?? []).map((b) => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.name}
-                        {b.workspace?.name ? ` — ${b.workspace.name}` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-              <span className="flex items-center gap-1 text-sm text-muted-foreground">
-                <SparkleButton
-                  disabled={!selectedBoardId}
-                  loading={analyzing}
-                  onComplete={() => void runAnalyze(selectedBoardId)}
-                  tooltip="Use AI to configure"
-                />
-                Use AI to configure
-              </span>
+    <div id="section-monday">
+      <SettingsGroup
+        label={
+          <span className="inline-flex items-center gap-2">
+            Monday.com
+            {link ? (
+              <Badge variant={link.enabled ? "default" : "secondary"}>
+                {link.enabled ? "Sync on" : "Sync paused"}
+              </Badge>
+            ) : null}
+          </span>
+        }
+      >
+        <SettingsRow label={t("projectSettings.monday.boardSyncLabel")} block>
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner /> {t("projectSettings.monday.loadingIntegration")}
             </div>
-            {analyzing && (
-              <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Spinner /> Analyzing the board and this project…
+          ) : !orgConnected && !canManage ? (
+            <div className="space-y-2 text-sm text-muted-foreground">
+              <p>{t("projectSettings.monday.orgNotConnected")}</p>
+              <p>
+                {connectInstructionsBefore}
+                {orgId != null ? (
+                  <Link
+                    to={`/orgs/${orgId}/settings/monday`}
+                    className="font-medium text-foreground underline underline-offset-4"
+                  >
+                    {orgSettingsLinkLabel}
+                  </Link>
+                ) : (
+                  orgSettingsLinkLabel
+                )}
+                {connectInstructionsAfter}
               </p>
-            )}
-          </div>
-        )}
-
-        {proposal && (
-          <div className="space-y-3 rounded-lg border p-4" data-testid="monday-proposal-review">
-            <p className="text-sm font-medium">AI proposal</p>
-            <p className="text-sm text-muted-foreground">{proposal.summary}</p>
-            <MondayMappingTable columns={proposal.proposal.columns} structure={structure} />
-            {proposal.proposal.notes && (
-              <p className="text-xs text-muted-foreground">{proposal.proposal.notes}</p>
-            )}
-            <div className="flex items-center gap-2">
-              <Button size="sm" onClick={() => void applyProposal()} disabled={applying}>
-                {applying && <Spinner data-icon="inline-start" />}
-                Apply
-              </Button>
-              <Button variant="ghost" size="sm" onClick={() => setProposal(null)} disabled={applying}>
-                Discard
-              </Button>
             </div>
-          </div>
-        )}
+          ) : link ? (
+            <MondayLinkedView
+              link={link}
+              structure={structure}
+              canManage={canManage}
+              toggling={toggling}
+              syncing={syncing}
+              syncNotice={syncNotice}
+              savingMapping={savingMapping}
+              analyzing={analyzing}
+              reconfigureMsg={reconfigureMsg}
+              onReconfigureMsg={setReconfigureMsg}
+              onToggleEnabled={handleToggleEnabled}
+              onSyncNow={handleSyncNow}
+              onSaveMapping={handleSaveMapping}
+              onReconfigure={() => void runAnalyze(link.boardId, reconfigureMsg.trim() || undefined, link.config)}
+              onUnlink={() => setUnlinkOpen(true)}
+              warnings={warnings}
+            />
+          ) : !canManage ? (
+            <p className="text-sm text-muted-foreground">
+              {t("projectSettings.monday.noBoardLinkedReadOnly")}
+            </p>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                {t("projectSettings.monday.linkBoardPrompt")}
+              </p>
+              <Button onClick={() => setWizardOpen(true)} data-testid="monday-setup-with-ai">
+                <Sparkles data-icon="inline-start" />
+                {t("projectSettings.monday.setupWithAiButton")}
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                {t("projectSettings.monday.setupWithAiBlurb")}
+              </p>
+              {/* Manual board+mapping path, kept as an escape hatch. Hidden until
+                  the org is connected — without a token it can only ever show an
+                  empty board picker. */}
+              {orgConnected &&
+                (!manualOpen ? (
+                  <Button variant="ghost" onClick={() => setManualOpen(true)}>
+                    {t("projectSettings.monday.setupManuallyButton")}
+                  </Button>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Select
+                      items={Object.fromEntries((boards ?? []).map((b) => [b.id, b.name]))}
+                      value={selectedBoardId || null}
+                      onValueChange={(value) => setSelectedBoardId((value as string) ?? "")}
+                      disabled={boards === null}
+                    >
+                      <SelectTrigger aria-label={t("projectSettings.monday.boardSelectAriaLabel")} className="bg-background">
+                        <SelectValue
+                          placeholder={boards === null ? "Loading boards…" : "Pick a board"}
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {(boards ?? []).map((b) => (
+                            <SelectItem key={b.id} value={b.id}>
+                              {b.name}
+                              {b.workspace?.name ? ` — ${b.workspace.name}` : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <span className="flex items-center gap-1 text-sm text-muted-foreground">
+                      <SparkleButton
+                        disabled={!selectedBoardId}
+                        loading={analyzing}
+                        onComplete={() => void runAnalyze(selectedBoardId)}
+                        tooltip={t("projectSettings.monday.useAiToConfigure")}
+                      />
+                      {t("projectSettings.monday.useAiToConfigure")}
+                    </span>
+                  </div>
+                ))}
+              {analyzing && (
+                <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Spinner /> {t("projectSettings.monday.analyzingBoardAndProject")}
+                </p>
+              )}
+            </div>
+          )}
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
-      </CardContent>
+          {proposal && (
+            <div className="mt-3 space-y-3 rounded-lg border bg-background p-4" data-testid="monday-proposal-review">
+              <p className="text-sm font-medium">{t("projectSettings.monday.aiProposalLabel")}</p>
+              <p className="text-sm text-muted-foreground">{proposal.summary}</p>
+              <MondayMappingTable columns={proposal.proposal.columns} structure={structure} />
+              {proposal.proposal.notes && (
+                <p className="text-xs text-muted-foreground">{proposal.proposal.notes}</p>
+              )}
+              <div className="flex items-center gap-2">
+                <Button onClick={() => void applyProposal()} disabled={applying}>
+                  {applying && <Spinner data-icon="inline-start" />}
+                  {t("projectSettings.monday.applyButton")}
+                </Button>
+                <Button variant="ghost" onClick={() => setProposal(null)} disabled={applying}>
+                  {t("common.discard")}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+        </SettingsRow>
+      </SettingsGroup>
+
+      <MondaySetupWizard
+        open={wizardOpen}
+        onOpenChange={setWizardOpen}
+        projectId={projectId}
+        orgId={orgId}
+        jwt={jwt}
+        orgConnected={orgConnected}
+        accountSlug={connection?.account?.slug ?? null}
+        onLinked={(next) => {
+          setLink(next)
+          setWarnings([])
+        }}
+        onUnlinked={() => {
+          setLink(null)
+          setBoards(null)
+          setSelectedBoardId("")
+        }}
+        onConnected={() => void load()}
+      />
 
       <Dialog open={unlinkOpen} onOpenChange={setUnlinkOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Remove board link?</DialogTitle>
+            <DialogTitle>{t("projectSettings.monday.removeBoardLinkTitle")}</DialogTitle>
             <DialogDescription>
-              Progress will stop pushing to {link?.boardName ?? "the linked board"}. The board and
-              its items are left untouched on Monday.
+              {t("projectSettings.monday.removeBoardLinkDescription", {
+                boardName: link?.boardName ?? "the linked board",
+              })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setUnlinkOpen(false)} disabled={unlinking}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button variant="destructive" onClick={handleUnlink} disabled={unlinking}>
               {unlinking && <Spinner data-icon="inline-start" />}
-              Remove link
+              {t("projectSettings.monday.removeLinkButton")}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Card>
+    </div>
   )
 }

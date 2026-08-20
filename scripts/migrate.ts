@@ -20,9 +20,10 @@ import os from "node:os"
 import { parseCodexNotebook } from "../src/lib/codex-editor/parse-codex"
 import { projectIdFor, fileIdFor } from "../src/lib/migrate/ids"
 import { mapFilePairToEvents, collectSpeakers, type FilePairInput, type MapOptions } from "../src/lib/migrate/map"
+import { computeOrphanRetractions } from "./lib/migrate-orphans"
 import { mapComments } from "../src/lib/migrate/comments"
 import { collectCellAudio, audioAttachEvent } from "../src/lib/migrate/audio"
-import { buildCastAdditions } from "../src/lib/import/cast-from-speakers"
+import { buildCastAdditions, castLikeSpeakers } from "../src/lib/import/cast-from-speakers"
 import type { ProjectTtsSettings } from "../src/lib/parsers/types"
 import type { IngestEvent } from "../src/lib/migrate/types"
 import { randomUUID } from "node:crypto"
@@ -145,6 +146,25 @@ async function ingest(projectId: string, events: IngestEvent[], secret: string):
   if (events.length) process.stdout.write("\n")
 }
 
+// The event ids already in the log for this project — proof of what a previous
+// migration created, and the no-op guard for retractions it already landed.
+async function fetchExistingEventIds(projectId: string, secret: string): Promise<Set<string>> {
+  const ids = new Set<string>()
+  let after = 0
+  for (;;) {
+    const res = await fetch(
+      `${SYNC}/migrate/event-ids?projectId=${encodeURIComponent(projectId)}&after=${after}&limit=50000`,
+      { headers: { Authorization: `Bearer ${secret}` } },
+    )
+    if (!res.ok) throw new Error(`event-ids HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`)
+    const page = (await res.json()) as { ids: string[]; lastSeq: number; more: boolean }
+    for (const id of page.ids) ids.add(id)
+    if (!page.more) break
+    after = page.lastSeq
+  }
+  return ids
+}
+
 async function mintSyncToken(jwt: string, projectId: string, fileId: string): Promise<string> {
   const res = await fetch(`${AUTH}/api/v2/sync-token`, {
     method: "POST",
@@ -220,8 +240,10 @@ async function importAudio(
 // speaker; buildCastAdditions mints one Voice per distinct character (reusing
 // existing ones by name → idempotent) + a cellId→voiceId map, merged into the
 // synced project TTS settings via PATCH /settings (mirrors the live import).
+// AQU-813: `castLikeSpeakers` first drops label sets that are per-cell
+// identifiers rather than a cast, so label-less audio imports as one voice.
 async function importCast(projectId: string, pairs: FilePairInput[], jwt: string): Promise<void> {
-  const speakers = pairs.flatMap((p) => collectSpeakers(p))
+  const speakers = castLikeSpeakers(pairs.flatMap((p) => collectSpeakers(p)))
   if (speakers.length === 0) return
   const getRes = await fetch(`${AUTH}/api/v2/projects/${projectId}/settings`, {
     headers: { Authorization: `Bearer ${jwt}` },
@@ -360,6 +382,32 @@ async function main() {
   console.log("\nAuthenticating + creating project…")
   const token = await devLogin()
   await createProject(token, aquillaProjectId, projectName)
+
+  // AQU-910: a re-migration must also purge cells an earlier run created that
+  // Codex has since removed from its notebook ENTIRELY (hard-deleted, or merged
+  // away). The mapper only sees cells still in the array, so nothing else
+  // retracts them and they survive every otherwise-idempotent re-run.
+  const existingEventIds = await fetchExistingEventIds(aquillaProjectId, secret)
+  const { retractions, repairs } = await computeOrphanRetractions({
+    syncBase: SYNC,
+    secret,
+    projectId: aquillaProjectId,
+    events,
+    existingEventIds,
+    fallbackAuthor: FALLBACK_AUTHOR,
+    fallbackTs: opts.fallbackTs,
+  })
+  if (retractions.length) {
+    console.log(`  retracting ${retractions.length} cell(s) removed from Codex since the last migration`)
+    events.push(...retractions)
+  }
+  // AQU-931: retractions delete rows that surviving cells still anchor to (the
+  // deterministic creates never re-project), which scrambles the read order —
+  // re-anchor every survivor whose stored anchor differs from today's chain.
+  if (repairs.length) {
+    console.log(`  re-anchoring ${repairs.length} cell(s) whose chain changed since the last migration`)
+    events.push(...repairs)
+  }
 
   // Source upload requires a projected file row. Project only those genesis
   // events first; canonical/v2 cell events remain withheld until every

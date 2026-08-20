@@ -3,6 +3,7 @@ import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { Page, EmptyState } from "@/components/ui/page"
 import { useActiveOrg } from "@/context/OrgContext"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 export function OrgSettingsShell({
   header,
@@ -11,21 +12,22 @@ export function OrgSettingsShell({
   header: ReactNode
   children: ReactNode
 }) {
+  const { t } = useI18n()
   const { activeOrg, isLoading } = useActiveOrg()
 
   let body: ReactNode
   if (isLoading) {
     body = (
-      <div className="space-y-6">
-        <div className="h-28 animate-pulse rounded-2xl border bg-card" />
-        <div className="h-40 animate-pulse rounded-2xl border bg-card" />
+      <div className="flex flex-col gap-12">
+        <div className="h-28 animate-pulse rounded-lg border bg-card" />
+        <div className="h-40 animate-pulse rounded-lg border bg-card" />
       </div>
     )
   } else if (!activeOrg) {
     body = (
       <EmptyState
-        title="Select an organization"
-        description="Organization settings are managed within a single organization. Choose one from the switcher to continue."
+        title={t("org.teamsList.selectOrgTitle")}
+        description={t("settings.orgSettingsShell.description")}
       />
     )
   } else {

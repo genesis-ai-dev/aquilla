@@ -12,11 +12,14 @@
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
-import type { Env, Variables } from "../types"
+import type { AuthUser, Env, Variables } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, creditsFor, recordCredit, resolveCreditConfig } from "../lib/credits"
+import { countWords } from "../lib/billing/plans"
+import { recordWords, wordCapBody, wordGuard } from "../lib/billing/words"
+import { makeCostMeter } from "../lib/cost-meter"
 import { resolveProjectRole } from "../services/project-permissions"
 import { AliasMap, compressRows } from "../lib/agent/compress"
 import { runGuardedSql, type SqlVarContext } from "../lib/agent/sql-guard"
@@ -42,7 +45,8 @@ import {
 import { buildMemoryContext, type MemoryContext } from "../../../db/shared/agent-memory"
 import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
 import { sandboxDestroy } from "../lib/agent/sandbox-client"
-import { openRouterExtras } from "../lib/llm-vendor"
+import { openRouterExtras, streamUsageOptions } from "../lib/llm-vendor"
+import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 import {
   runCode,
   loadArtifact,
@@ -58,6 +62,13 @@ import {
   type ProposeBriefArgs,
   type ReadMemoryArgs,
 } from "../lib/agent/harness-tools"
+import {
+  proposeCommandTool,
+  describeCommandTool,
+  type CommandToolCtx,
+  type ProposeCommandArgs,
+  type DescribeCommandArgs,
+} from "../lib/agent/command-tools"
 
 const agent = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -69,12 +80,9 @@ function resolveOpenRouterUrl(env: Env): string {
     ? `${env.OPENROUTER_BASE_URL.replace(/\/$/, "")}/chat/completions`
     : OPENROUTER_URL
 }
-/** Haiku-class default from the existing allowlist (lib/ai-budget.ts). Used
- *  when neither platform_settings.agentModel nor AGENT_MODEL_DEFAULT is set. */
-const DEFAULT_AGENT_MODEL = "anthropic/claude-haiku-4-5"
 /** Resolve the agent model: admin-set store wins, then env, then the default. */
 function resolveAgentModel(env: Env, settings: PlatformSettings): string {
-  return settings.agentModel || env.AGENT_MODEL_DEFAULT || DEFAULT_AGENT_MODEL
+  return settings.agentModel || env.AGENT_MODEL_DEFAULT || DEFAULT_LLM_MODEL_ID
 }
 /** The draft tool's translation model — may be stronger than the orchestrator. */
 function resolveDraftModel(env: Env, settings: PlatformSettings, agentModel: string): string {
@@ -203,13 +211,13 @@ function buildTools(bibleResourcesEnabled: boolean) {
       function: {
         name: "draft",
         description:
-          "Draft untranslated cells in scope with the project's drafting pipeline (exemplars + discourse context + rule lint) and STAGE the results as a proposal for user approval. Preferred over writing translations yourself. One call handles up to 50 cells; the result says how many remain.",
+          "Draft untranslated cells with a separate evidence-research pass followed by generation from validated exemplars, discourse context, the project brief, and rules; then STAGE the results for user approval. Preferred over writing translations yourself. One call handles up to 10 cells; the result says how many remain.",
         parameters: {
           type: "object",
           properties: {
             ...SCOPE_PROPS,
             cellIds: { type: "array", items: { type: "string" }, description: "Draft exactly these cells (ids or #c-aliases) instead of every untranslated cell in scope." },
-            limit: { type: "number", description: "Max cells this call (default 20, cap 50)." },
+            limit: { type: "number", description: "Max cells this call (default 10, cap 10)." },
             instructions: { type: "string", description: "Extra guidance for this batch (tone, term choices, fixes from lint)." },
           },
         },
@@ -253,6 +261,40 @@ function buildTools(bibleResourcesEnabled: boolean) {
           type: "object",
           properties: { topic: { type: "string" } },
           required: ["topic"],
+        },
+      },
+    },
+    // ── AQU-926 registered-command tools (COMMAND-REGISTRY §4) ──────────────
+    {
+      type: "function",
+      function: {
+        name: "propose_command",
+        description:
+          "STAGE registered changeset commands (see the Changeset commands index) as one changeset for human review — nothing applies until the user reviews it in-app; do not poll. Call describe_command({kind}) for a command's exact params first. Pass changesetId only to retry the same staging idempotently.",
+        parameters: {
+          type: "object",
+          properties: {
+            commands: {
+              type: "array",
+              items: { type: "object" },
+              description: "Registered commands, each {kind, …params}.",
+            },
+            changesetId: { type: "string", description: "Optional client-generated UUID for idempotent retry." },
+          },
+          required: ["commands"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "describe_command",
+        description:
+          "Full params, gotchas, and a worked example for one changeset command kind — free; call before propose_command.",
+        parameters: {
+          type: "object",
+          properties: { kind: { type: "string", description: "Command kind, e.g. SetTranslation." } },
+          required: ["kind"],
         },
       },
     },
@@ -491,6 +533,10 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
       429,
     )
   }
+  const agentWordCheck = await wordGuard(c.env.AQUILLA_PG, orgId)
+  if (!agentWordCheck.ok) {
+    return c.json(wordCapBody(agentWordCheck.reason), 429)
+  }
 
   // Session-native conversation (v2): load the stored convo — including tool
   // results — so a follow-up reuses what prior runs discovered. Ownership is
@@ -535,7 +581,7 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
       const send = (frame: AgentFrame) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`))
       }
-      runAgentLoop({ env, body, storedConvo, storedUntrusted, user: { id: user.id, username: user.username }, roleLevel: role.level, runId, orgId, model: agentModel, draftModel: resolveDraftModel(c.env, platformSettings, agentModel), signal, send })
+      runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel: role.level, runId, orgId, model: agentModel, draftModel: resolveDraftModel(c.env, platformSettings, agentModel), signal, send })
         .catch((err) => {
           // Last-resort: surface, then settle the ledger as error.
           try {
@@ -599,7 +645,9 @@ interface LoopArgs {
   storedConvo: StoredMessage[]
   /** Session's carried-over untrusted-content bit (false when sessionless). */
   storedUntrusted: boolean
-  user: { id: number; username: string }
+  /** Full auth user — propose_command mints a sync token AS this user
+   *  (resolveProjectRole reads id + email); the loop itself uses id/username. */
+  user: AuthUser
   roleLevel: number
   runId: string
   orgId: number
@@ -695,20 +743,22 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         targetLanguage: languages.targetLanguage,
         bibleResourcesEnabled,
         translatorProfile: body.translatorProfile,
-        // Profile language is the sole driver for the agent — it never had a
-        // response-language setting, and defaulting to the project target
-        // language would force target-language replies on owners/PMs who don't
-        // read it. Unset → current English-default behavior.
+        // A configured profile language wins. When unset, the augmentation
+        // prompt below tells the agent to follow the user's latest message —
+        // never the project's translation target.
         responseLanguage: body.translatorProfile?.responseLanguage,
         briefSummary,
       }),
     },
     // AQU-AGENT §2 — second system message: verbatim brief + approved-memory
-    // index + new-tool guidance + reply-language rule. Kept separate so the
+    // index + new-tool guidance + conversation-language rule. Kept separate so the
     // existing schema-card prompt stays byte-identical.
     {
       role: "system" as const,
-      content: buildAugmentSystemPrompt({ memory, workingLanguage: languages.targetLanguage }),
+      content: buildAugmentSystemPrompt({
+        memory,
+        responseLanguage: body.translatorProfile?.responseLanguage,
+      }),
     },
     // AQU-AGENT Wave-2 — attached artifacts. The user attached these files in
     // the composer; they're already uploaded as project artifacts. Tell the
@@ -727,6 +777,12 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   let steps = 0
   let stagedCount = 0
   let status: "ok" | "capped" | "error" = "ok"
+
+  // Dev cost meter (AQU pricing exercise) — per-call ledger alongside the run
+  // totals below. Unlike the totals, it separates orchestrator turns, the
+  // draft tool's internal model call, and each tool invocation, so the ACU
+  // breakdown shows where an agent run's compute actually goes.
+  const meter = makeCostMeter(env, env.AQUILLA_PG)
 
   // AQU-AGENT §2 run state: cost cap, untrusted-content guard, and the sandbox
   // container id.
@@ -762,6 +818,17 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       untrusted.runHad = true
     },
     isUntrustedActive: () => untrusted.active,
+  }
+  // AQU-926 — registered-command staging (COMMAND-REGISTRY §4): propose_command
+  // stages through sync-worker's changeset engine as the run's user.
+  const commandCtx: CommandToolCtx = {
+    env,
+    runId,
+    projectId: body.projectId,
+    roleLevel,
+    user,
+    signal,
+    send,
   }
 
   send({ type: "run_start", runId, ...(body.sessionId ? { sessionId: body.sessionId } : {}) })
@@ -799,6 +866,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       // untrusted-content tool (contracts §2).
       untrusted.usedThisTurn = false
 
+      const turnStartedAt = Date.now()
       const upstream = await fetch(resolveOpenRouterUrl(env), {
         method: "POST",
         headers: {
@@ -811,12 +879,23 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           tools,
           stream: true,
           ...openRouterExtras(env.OPENROUTER_BASE_URL),
+          ...streamUsageOptions(env.OPENROUTER_BASE_URL),
         }),
         signal,
       })
 
       if (!upstream.ok) {
         const text = await upstream.text()
+        meter.add({
+          surface: "agent",
+          runId,
+          projectId: body.projectId,
+          kind: "llm",
+          label: "orchestrator",
+          model,
+          latencyMs: Date.now() - turnStartedAt,
+          ok: false,
+        })
         send({ type: "error", message: `openrouter_error ${upstream.status}: ${text.slice(0, 500)}` })
         status = "error"
         break
@@ -832,7 +911,30 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
         promptTokens += turn.usage?.prompt_tokens ?? 0
         completionTokens += turn.usage?.completion_tokens ?? 0
         costCents += (turn.usage?.cost ?? 0) * 100
+        meter.add({
+          surface: "agent",
+          runId,
+          projectId: body.projectId,
+          kind: "llm",
+          label: "orchestrator",
+          model,
+          promptTokens: turn.usage?.prompt_tokens ?? 0,
+          completionTokens: turn.usage?.completion_tokens ?? 0,
+          costCents: (turn.usage?.cost ?? 0) * 100,
+          latencyMs: Date.now() - turnStartedAt,
+          ok: turn.usage !== undefined,
+        })
       } catch (err) {
+        meter.add({
+          surface: "agent",
+          runId,
+          projectId: body.projectId,
+          kind: "llm",
+          label: "orchestrator",
+          model,
+          latencyMs: Date.now() - turnStartedAt,
+          ok: false,
+        })
         send({ type: "error", message: err instanceof Error ? err.message : String(err) })
         status = "error"
         break
@@ -877,6 +979,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           break
         }
         steps++
+        const toolStartedAt = Date.now()
         const result = await executeToolCall(call, {
           env,
           aliases,
@@ -897,13 +1000,45 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
             promptTokens += u.prompt_tokens ?? 0
             completionTokens += u.completion_tokens ?? 0
             costCents += (u.cost ?? 0) * 100
+            // A tool's INTERNAL model call (today: draft). Recorded separately
+            // from the orchestrator turn that invoked it — folding the two
+            // together would hide that one `draft` tool call can outspend the
+            // reasoning turn that decided to make it.
+            meter.add({
+              surface: "agent",
+              runId,
+              projectId: body.projectId,
+              kind: "llm",
+              label: `tool-model:${call.function.name}`,
+              model: draftModel,
+              promptTokens: u.prompt_tokens ?? 0,
+              completionTokens: u.completion_tokens ?? 0,
+              costCents: (u.cost ?? 0) * 100,
+              ok: true,
+            })
           },
+          canContinuePaidWork: () =>
+            costCents < costCapCents && promptTokens + completionTokens <= TOKEN_CEILING,
           // Acceptance-rate denominator (0051): staged commits per run. The
           // numerator lands in the event log when the user Applies.
           countStaged: (n) => {
             stagedCount += n
           },
           harness,
+          command: commandCtx,
+        })
+        // Tool wall-clock is the orchestration+infra half of an ACU: `run_code`
+        // is container time, `sql`/`search` are DB time. None of it appears as
+        // tokens, so a token-only meter would price it at zero.
+        const toolOk = !/^(error|tool_error)\b/i.test(result.trimStart())
+        meter.add({
+          surface: "agent",
+          runId,
+          projectId: body.projectId,
+          kind: "tool",
+          label: call.function.name,
+          latencyMs: Date.now() - toolStartedAt,
+          ok: toolOk,
         })
         convo.push({ role: "tool", tool_call_id: call.id, content: result })
       }
@@ -931,6 +1066,9 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
 
   send({ type: "usage", promptTokens, completionTokens, costCredits: toCredits(costCents) })
   send({ type: "done", runId, status })
+
+  // Drain the cost ledger. After `done` so it never delays the client's frame.
+  await meter.flush()
 
   try {
     await finishAgentRun(env.AQUILLA_PG, { runId, status, promptTokens, completionTokens, costCents, steps, stagedCount })
@@ -962,6 +1100,13 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
   // Record agent cost in org credit ledger (graceful-degrade — never throws).
   // costCents is the sum of OpenRouter usage.cost×100 across all iterations.
   await recordCredit(env.AQUILLA_PG, orgId, user.id, "agent", costCents, 1)
+  await recordWords(
+    env.AQUILLA_PG,
+    orgId,
+    user.id,
+    "agent",
+    countWords(body.messages.map((m) => m.content).join(" ")),
+  )
 }
 
 interface ToolCallEnv {
@@ -983,10 +1128,14 @@ interface ToolCallEnv {
   }
   /** Folds a tool-internal model call's usage into the run totals. */
   addUsage: (usage: { prompt_tokens?: number; completion_tokens?: number; cost?: number }) => void
+  /** True while another paid sub-call fits under the run's cost/token caps. */
+  canContinuePaidWork: () => boolean
   /** Folds staged target.cell.commit events into the run's staged_count. */
   countStaged: (n: number) => void
   /** AQU-AGENT §2 harness context (sandbox / import / memory tools). */
   harness: HarnessToolCtx
+  /** AQU-926 registered-command context (propose_command / describe_command). */
+  command: CommandToolCtx
 }
 
 /** Does this tool call consume the write/SQL iteration budget? Write-shaped
@@ -996,6 +1145,9 @@ function budgetedCall(call: ToolCall): boolean {
   const name = call.function.name
   if (name === "draft" || name === "propose" || name === "sql") return true
   if (name === "propose_memory" || name === "propose_brief_update") return true
+  // AQU-926: stages a changeset server-side — write-shaped, so budgeted
+  // (describe_command stays free like the other read-shaped tools).
+  if (name === "propose_command") return true
   if (name !== "execute") return false
   try {
     const args = JSON.parse(call.function.arguments ?? "{}") as Record<string, unknown>
@@ -1131,6 +1283,7 @@ async function runDraftTool(args: DraftArgs, t: ToolCallEnv): Promise<string> {
       signal: t.signal,
       sendProgress: (label, done, total) => t.send({ type: "progress", label, done, total }),
       addUsage: t.addUsage,
+      canContinuePaidWork: t.canContinuePaidWork,
     },
     { model: t.draft.model, apiKey: t.draft.apiKey, url: t.draft.url },
   )
@@ -1184,6 +1337,12 @@ async function executeToolCall(call: ToolCall, t: ToolCallEnv): Promise<string> 
       return proposeBriefUpdateTool(args as ProposeBriefArgs, t.harness)
     case "read_memory":
       return readMemoryTool(args as ReadMemoryArgs, t.harness)
+    // AQU-926 registered-command tools (COMMAND-REGISTRY §4). propose_command
+    // emits its own changeset.staged frame; describe_command is a pure read.
+    case "propose_command":
+      return proposeCommandTool(args as ProposeCommandArgs, t.command)
+    case "describe_command":
+      return describeCommandTool(args as DescribeCommandArgs, t.command)
     case "propose": {
       if (!Array.isArray(args.events)) {
         t.send({ type: "code_start", step: t.step, kind: "emit", summary: "(invalid call)" })

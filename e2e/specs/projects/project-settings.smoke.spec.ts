@@ -1,11 +1,15 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
+import { LivingMemory } from "../../helpers/page-objects/LivingMemory"
 
 /**
  * AQU-765: synced projects can now be renamed from Settings — the name field
  * is editable for maintainer+ and persists through the server rename endpoint
  * (PATCH /api/v2/projects/:id), the source of truth every surface reads.
  * Other general settings save alongside in the same pass.
+ *
+ * Entry: project Overview (`/projects/:id`) → header "Project settings" gear
+ * → `/project/:id/settings` (then General).
  */
 test("project settings renames the project and saves source language", async ({ alice }) => {
   const dash = new Dashboard(alice)
@@ -19,9 +23,20 @@ test("project settings renames the project and saves source language", async ({ 
   const projectId = alice.url().match(/\/projects\/([^/]+)$/)?.[1]
   expect(projectId).toBeTruthy()
 
-  // Navigate directly to the settings page.
-  await alice.goto(`/project/${projectId}/settings/general`)
+  // Overview header gear → project settings (same discovery path as managers).
+  const settingsLink = alice.getByRole("link", { name: "Project settings" })
+  await expect(settingsLink).toBeVisible({ timeout: 10_000 })
+  await settingsLink.click()
+  await alice.waitForURL(new RegExp(`/project/${projectId}/settings`), { timeout: 10_000 })
+
+  // Index → General (name / languages live there).
+  const generalLink = alice.getByRole("link", { name: /General/i })
   const nameInput = alice.locator("#pname")
+  await expect(generalLink.or(nameInput).first()).toBeVisible({ timeout: 10_000 })
+  if (!(await nameInput.isVisible())) {
+    await generalLink.click()
+  }
+
   await expect(nameInput).toBeVisible({ timeout: 10_000 })
   await expect(nameInput).toHaveValue(originalName, { timeout: 5_000 })
   // The creator holds maintainer+, so the field is editable (AQU-765).
@@ -48,7 +63,7 @@ test("project settings renames the project and saves source language", async ({ 
   // AQU-501: the General pane is expressed via `?section=general`, so match
   // the path prefix rather than anchoring on end-of-string.
   await expect(alice).toHaveURL(new RegExp(`/project/${projectId}/settings(?:/|\\?|$)`), { timeout: 10_000 })
-  await expect(alice.getByText(/Saved: project name, source language/i)).toBeVisible({ timeout: 10_000 })
+  await expect(alice.getByText(/Saved: project title, source language/i)).toBeVisible({ timeout: 10_000 })
   await expect(nameInput).toHaveValue(renamedName, { timeout: 5_000 })
   await expect(sourceLanguage).toHaveValue("English (US)", { timeout: 5_000 })
 
@@ -56,4 +71,20 @@ test("project settings renames the project and saves source language", async ({ 
   // reload and confirm the settings page hydrates the new name back.
   await alice.reload()
   await expect(alice.locator("#pname")).toHaveValue(renamedName, { timeout: 10_000 })
+
+  // AQU-825: Knowledge Base originals cross SPA → auth-worker → Postgres + R2.
+  // Exercise the real upload, rehydrate it after navigation, read the server-
+  // extracted content, and delete it. AQU-932 moved the Knowledge Base to the
+  // standalone Living Memory surface (/project/:id/memory/knowledge).
+  const memory = new LivingMemory(alice)
+  const knowledgeName = `style-${Date.now()}.md`
+  const knowledgeText = "Use formal language for every translated heading."
+  await memory.openKnowledge(projectId!)
+  await memory.uploadKnowledgeDocument(knowledgeName, knowledgeText)
+
+  await alice.reload()
+  const knowledgeDialog = await memory.openKnowledgeDocument(knowledgeName)
+  await expect(knowledgeDialog.getByText(knowledgeText)).toBeVisible({ timeout: 10_000 })
+  await knowledgeDialog.getByRole("button", { name: "Close" }).click()
+  await memory.deleteKnowledgeDocument(knowledgeName)
 })

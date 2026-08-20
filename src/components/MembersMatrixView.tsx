@@ -5,6 +5,7 @@ import { useOrg } from "@/hooks/useOrg"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { ROLE } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { MembersMatrixCellEditor } from "./MembersMatrixCellEditor"
 import { MemberAccessDrillDown } from "./MemberAccessDrillDown"
 import { AccessModelLegend } from "./AccessModelLegend"
@@ -27,6 +28,7 @@ import {
 import { fetchMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
 import type { MatrixMember, MatrixCell } from "@/hooks/useProjectsMembersMatrix"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 /** projectId → scopes, for one member. */
 type MemberScopeMap = Map<string, MemberScope[]>
@@ -64,6 +66,7 @@ type MemberScopeMap = Map<string, MemberScope[]>
 interface SelectedMember { userId: number; username: string }
 
 export function MembersMatrixView() {
+  const { t } = useI18n()
   const { matrix, isLoading, error, refresh } = useProjectsMembersMatrix()
   const { state: orgState } = useOrg()
   const orgId = orgState.kind === "success" ? orgState.org.id : null
@@ -114,8 +117,8 @@ export function MembersMatrixView() {
   if (isLoading && !matrix) {
     return (
       <div className="flex items-center justify-center py-12 text-muted-foreground">
-        <Spinner className="mr-2" />
-        <span className="text-sm">Building portfolio matrix…</span>
+        <Spinner className="me-2" />
+        <span className="text-sm">{t("org.membersMatrixView.buildingMatrix")}</span>
       </div>
     )
   }
@@ -154,10 +157,10 @@ export function MembersMatrixView() {
             <TableRow>
               <TableHead
                 scope="col"
-                className="sticky left-0 z-10 border-r bg-background"
+                className="sticky start-0 z-10 border-e bg-background"
               >
                 <div className="flex items-center gap-1">
-                  <span>Member</span>
+                  <span>{t("org.membersMatrixView.memberColumnHeader")}</span>
                   {/* On-demand model explainer — opens a tooltip with the full explanation */}
                   <Tooltip>
                     <TooltipTrigger
@@ -165,7 +168,7 @@ export function MembersMatrixView() {
                         <button
                           type="button"
                           className="inline-flex items-center text-muted-foreground hover:text-foreground focus-visible:outline-none"
-                          aria-label="How access is resolved"
+                          aria-label={t("org.membersMatrixView.howAccessResolvedAriaLabel")}
                         />
                       }
                     >
@@ -175,11 +178,7 @@ export function MembersMatrixView() {
                       side="bottom"
                       className="max-w-xs leading-snug"
                     >
-                      Every member's access is the highest role they hold across
-                      up to four paths: a direct project grant, any group attached
-                      to this project, their org-wide role, or creator status.
-                      Adding a lower grant never reduces access — to fully remove
-                      someone, all contributing paths must be cleared.
+                      {t("org.membersMatrixView.accessResolutionExplanation")}
                     </TooltipContent>
                   </Tooltip>
                 </div>
@@ -215,7 +214,7 @@ export function MembersMatrixView() {
 
       {/* Per-member drill-down panel — shown when a member row is selected */}
       {selectedMember && orgId != null && (
-        <div className="w-72 shrink-0 border-l">
+        <div className="w-72 shrink-0 border-s">
           <MemberAccessDrillDown
             orgId={orgId}
             userId={selectedMember.userId}
@@ -235,11 +234,12 @@ function ProjectHeaderCell({
   project: CloudProjectSummary
   ownerCount: number
 }) {
+  const { t } = useI18n()
   const concentrationRisk = ownerCount === 1
   return (
     <TableHead
       scope="col"
-      className="border-l align-bottom"
+      className="border-s align-bottom"
       style={{ minWidth: "9rem", maxWidth: "14rem" }}
     >
       <div className="flex items-center gap-1">
@@ -247,7 +247,7 @@ function ProjectHeaderCell({
           <span className="truncate">{project.name}</span>
         </AppTooltip>
         {concentrationRisk && (
-          <AppTooltip content="Sole Owner: losing this person locks the project">
+          <AppTooltip content={t("org.membersMatrixView.soleOwnerWarning")}>
             <span className="inline-flex items-center text-amber-600 dark:text-amber-400">
               <AlertTriangle />
             </span>
@@ -289,6 +289,7 @@ const MatrixRow = memo(function MatrixRow({
   onHoverRow: (userId: number, projectIds: string[]) => void
   onScopesSaved: (userId: number, projectId: string, saved: MemberScope[]) => void
 }) {
+  const { t } = useI18n()
   function handleMemberClick() {
     onSelectMember(isSelected ? null : { userId: member.userId, username: member.username })
   }
@@ -302,7 +303,7 @@ const MatrixRow = memo(function MatrixRow({
     <TableRow onMouseEnter={handleRowHover} onFocus={handleRowHover}>
       <TableHead
         scope="row"
-        className="sticky left-0 z-10 border-r bg-background font-normal"
+        className="sticky start-0 z-10 border-e bg-background font-normal"
       >
         <button
           onClick={handleMemberClick}
@@ -311,11 +312,14 @@ const MatrixRow = memo(function MatrixRow({
             isSelected ? "font-semibold text-primary" : "",
           ].join(" ")}
         >
-          {member.username}
+          <UsernameWithAvatar
+            username={member.username}
+            nameClassName={isSelected ? "font-semibold text-primary" : undefined}
+          />
         </button>
         {member.isOrgInherited && (
-          <AppTooltip content="Access on every project comes from org-wide role; no per-project overrides.">
-            <span className="ml-1.5 align-middle rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">
+          <AppTooltip content={t("org.membersMatrixView.orgInheritedTooltip")}>
+            <span className="ms-1.5 align-middle rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">
               org-wide
             </span>
           </AppTooltip>

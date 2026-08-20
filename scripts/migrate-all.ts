@@ -43,13 +43,14 @@ import { projectIdFor, fileIdFor } from "../src/lib/migrate/ids"
 import { syncGroupsToNeon, type Placement } from "../src/lib/migrate/group-sync"
 import { parseCodexNotebook } from "../src/lib/codex-editor/parse-codex"
 import { mapFilePairToEvents, collectSpeakers, type FilePairInput } from "../src/lib/migrate/map"
+import { computeOrphanRetractions } from "./lib/migrate-orphans"
 import { collectCellAudio, audioAttachEvent } from "../src/lib/migrate/audio"
 import type { AudioImport } from "../src/lib/migrate/audio"
 import { buildOidIndex, planCellAudio, buildCellAudioEvents } from "../src/lib/migrate/audio-copy"
 import { discoverPointers } from "../src/lib/migrate/gitlab/lfs"
 import { R2Client, gitlabLfsKey, audioDestKey } from "../src/lib/migrate/r2-s3"
 import { mapComments } from "../src/lib/migrate/comments"
-import { buildCastAdditions } from "../src/lib/import/cast-from-speakers"
+import { buildCastAdditions, castLikeSpeakers } from "../src/lib/import/cast-from-speakers"
 import type { ProjectTtsSettings } from "../src/lib/parsers/types"
 import type { IngestEvent } from "../src/lib/migrate/types"
 import type { CodexNotebookFile } from "../src/lib/codex-editor/types"
@@ -123,7 +124,19 @@ async function copyAsset(srcKey: string, destKey: string): Promise<"copied" | "l
 // in .migrate-state.json so re-runs are cheap. --force ignores it. ───────────
 let CREDS: GitLabCredentials
 const STATE_FILE = ".migrate-state.json"
-type MigState = Record<string, { contentSha?: string; audioSha?: string; audioFastSha?: string }>
+// AQU-910: an unchanged GitLab HEAD is only a safe skip while the mapping logic
+// is unchanged too. The AQU-673/AQU-747 fixes each shipped into a fleet whose
+// projects all had unchanged HEADs, so the sweep skipped every one of them and
+// the fix never reached the data — a large part of why deleted headings kept
+// coming back. BUMP THIS whenever the mapped event stream changes so the next
+// sweep re-derives every project once.
+// v3: milestone cells are retracted instead of migrated as pairs (AQU-930).
+// v4: merged-away cells (`data.merged`) are retracted like deleted ones (AQU-944).
+const CONTENT_LOGIC_VERSION = 4
+type MigState = Record<
+  string,
+  { contentSha?: string; contentLogic?: number; audioSha?: string; audioFastSha?: string }
+>
 let STATE: MigState = {}
 let FORCE = false
 function loadState(): MigState {
@@ -376,7 +389,9 @@ async function ingest(
 }
 
 async function applyCast(projectId: string, pairs: FilePairInput[]): Promise<number> {
-  const speakers = pairs.flatMap((p) => collectSpeakers(p))
+  // AQU-813: judge cast-ness across the whole project's labels — a project whose
+  // clips carry no voice labels must not mint a phantom voice per clip.
+  const speakers = castLikeSpeakers(pairs.flatMap((p) => collectSpeakers(p)))
   if (speakers.length === 0) return 0
   const settings = (await getSettings(projectId)) as { ttsSettings?: ProjectTtsSettings }
   const tts = settings.ttsSettings
@@ -410,7 +425,13 @@ async function doProject(
   const place = placeIdx.get(p.namespace)
   console.log(`\n• ${p.name}  [${p.namespace}]  (gitlab ${p.id})`)
   const sha = await headSha(p.id)
-  if (args.apply && !FORCE && sha && STATE[String(p.id)]?.contentSha === sha) {
+  if (
+    args.apply
+    && !FORCE
+    && sha
+    && STATE[String(p.id)]?.contentSha === sha
+    && STATE[String(p.id)]?.contentLogic === CONTENT_LOGIC_VERSION
+  ) {
     console.log(`  ↩ content unchanged (${sha.slice(0, 8)}) — skipped`)
     return
   }
@@ -467,7 +488,7 @@ async function doProject(
       /* skip bad comments */
     }
   }
-  const speakerCount = new Set(pairs.flatMap((x) => collectSpeakers(x)).map((s) => s.speaker)).size
+  const speakerCount = new Set(castLikeSpeakers(pairs.flatMap((x) => collectSpeakers(x))).map((s) => s.speaker)).size
 
   console.log(
     `  → aquilla ${projectId}  org_id=${org.id}${team ? ` team_id=${team.id}` : " (no team)"}  files=${pairs.length} events=${events.length} characters=${speakerCount}`,
@@ -502,6 +523,30 @@ async function doProject(
   // Delta-sync: send only events not already in D1 (no-op for a fresh project,
   // a tiny tail for a partially-imported one, a few edits on a re-sync).
   const existing = await fetchExistingEventIds(projectId)
+  // AQU-910: retract cells a previous migration created that Codex no longer
+  // has AT ALL (hard-deleted, or merged away). The mapper can only skip/retract
+  // cells still present in the notebook, so these are invisible to it and no
+  // amount of re-running purges them.
+  const { retractions, repairs } = await computeOrphanRetractions({
+    syncBase: SYNC,
+    secret: process.env.SYNC_SECRET_KEY!,
+    projectId,
+    events,
+    existingEventIds: existing,
+    fallbackAuthor: FALLBACK_AUTHOR,
+    fallbackTs: Date.now(),
+  })
+  if (retractions.length) {
+    console.log(`  ↳ retracting ${retractions.length} cell(s) removed from Codex since the last migration`)
+    events.push(...retractions)
+  }
+  // AQU-931: retractions delete rows that surviving cells still anchor to (the
+  // deterministic creates never re-project), which scrambles the read order —
+  // re-anchor every survivor whose stored anchor differs from today's chain.
+  if (repairs.length) {
+    console.log(`  ↳ re-anchoring ${repairs.length} cell(s) whose chain changed since the last migration`)
+    events.push(...repairs)
+  }
   const newEvents = existing.size ? events.filter((e) => !existing.has(e.id)) : events
   if (existing.size) {
     console.log(`  ↳ delta: ${newEvents.length} new / ${events.length} total (${existing.size} already in D1)`)
@@ -558,7 +603,11 @@ async function doProject(
   console.log(
     `  ✓ project + ${team ? "team grant + " : ""}content${voices ? ` + cast(${voices})` : " (cast deferred)"}`,
   )
-  STATE[String(p.id)] = { ...STATE[String(p.id)], contentSha: sha ?? undefined }
+  STATE[String(p.id)] = {
+    ...STATE[String(p.id)],
+    contentSha: sha ?? undefined,
+    contentLogic: CONTENT_LOGIC_VERSION,
+  }
   saveState()
 }
 

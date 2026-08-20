@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactNode } from "react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { cn } from "@/lib/utils"
-import { colorFromName, initialsFromName, singleInitialFromName } from "@/lib/avatar-utils"
+import { colorFromName, initialsFromName } from "@/lib/avatar-utils"
 
 export type InitialsAvatarSize = "xs" | "sm" | "default" | "lg"
 export type InitialsAvatarShape = "circle" | "square"
@@ -20,8 +20,13 @@ const textClasses: Record<InitialsAvatarSize, string> = {
   lg: "text-sm font-semibold",
 }
 
-/** Inline color survives dropdown item `focus:**:text-accent-foreground`. */
-function menuSafeStyle(color: string | undefined): CSSProperties | undefined {
+/**
+ * Inline color on the initials node survives menu/combobox descendant paint
+ * (`focus:**:text-accent-foreground`, `data-highlighted:**:text-accent-foreground`).
+ * Class color on the fallback alone is not enough — those selectors set `color`
+ * on the nested initials span.
+ */
+function initialsColorStyle(color: string | undefined): CSSProperties | undefined {
   return color ? { color } : undefined
 }
 
@@ -35,7 +40,6 @@ type InitialsAvatarProps = {
   menuSafe?: boolean
   /** Preserved text/icon color inside menu items. Defaults to white for colored fallbacks. */
   menuSafeColor?: string
-  singleInitial?: boolean
   children?: ReactNode
 }
 
@@ -48,17 +52,21 @@ export function InitialsAvatar({
   fallbackClassName,
   menuSafe = false,
   menuSafeColor,
-  singleInitial = false,
   children,
 }: InitialsAvatarProps) {
   const circle = shape === "circle"
-  const label = singleInitial ? singleInitialFromName(name) : initialsFromName(name)
+  const label = initialsFromName(name)
   const bg = color ?? colorFromName(name)
   const hasCustomFallback = Boolean(fallbackClassName)
   const usesColoredFallback = !children && !hasCustomFallback
-  const preservedColor = menuSafe
+  // Colored fallbacks always pin white inline so button hover:text-* and
+  // menu **:text-* cannot recolor the glyph. menuSafe extends the same
+  // protection to non-colored / custom menuSafeColor cases.
+  const initialsColor = menuSafe
     ? (menuSafeColor ?? (usesColoredFallback ? "#ffffff" : undefined))
-    : undefined
+    : usesColoredFallback
+      ? "#ffffff"
+      : undefined
 
   return (
     <Avatar
@@ -70,18 +78,18 @@ export function InitialsAvatar({
       )}
     >
       <AvatarFallback
-        className={cn(
-          circle && "rounded-full",
-          textClasses[size],
-          usesColoredFallback && !menuSafe && "text-white",
-          fallbackClassName,
-        )}
-        style={{
-          ...(usesColoredFallback ? { backgroundColor: bg } : {}),
-          ...menuSafeStyle(preservedColor),
-        }}
+        className={cn(circle && "rounded-full", fallbackClassName)}
+        style={usesColoredFallback ? { backgroundColor: bg } : undefined}
       >
-        {children ?? label}
+        {children ?? (
+          <span
+            data-slot="avatar-initials"
+            className={cn("leading-none", textClasses[size])}
+            style={initialsColorStyle(initialsColor)}
+          >
+            {label}
+          </span>
+        )}
       </AvatarFallback>
     </Avatar>
   )

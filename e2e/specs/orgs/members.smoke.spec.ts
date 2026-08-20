@@ -46,8 +46,8 @@ test("alice adds bob to Acme via API; bob sees Acme in the org switcher", async 
   await bob.goto("/")
   await bob.reload()
   const orgSwitcher = bob.locator('[data-tour="org-switcher"]')
-  await orgSwitcher.getByRole("button").click()
+  await orgSwitcher.getByRole("combobox", { name: /^Organization switcher:/i }).click()
   // The accessible name starts with the avatar initials ("AC"), so match the
   // organization name as a whole word instead of anchoring at the beginning.
-  await expect(bob.getByRole("menuitem", { name: /\bAcme\b/i })).toBeVisible({ timeout: 10_000 })
+  await expect(bob.getByRole("option", { name: /\bAcme\b/i })).toBeVisible({ timeout: 10_000 })
 })

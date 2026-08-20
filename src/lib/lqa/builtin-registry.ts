@@ -20,10 +20,25 @@ export interface BuiltinCheckDefinition {
   runsOnEmptyTarget: boolean
   run: (source: string, target: string) => InfractionSpan[] | null
   /** Static copy, or a builder that derives copy from the offending spans
-   *  (e.g. placeholder-integrity names the missing token). */
+   *  (e.g. placeholder-integrity names the missing token). Dead field as of
+   *  AQU-832 — no consumer reads it (rule-engine.ts uses only `run` and
+   *  `runsOnEmptyTarget`); kept for the type shape / builtin-registry.test.ts. */
   message: string | ((spans: InfractionSpan[]) => string)
 }
 
+/**
+ * i18n-exempt (AQU-832 WS-H): `name`/`description` below are never rendered
+ * untranslated. `resolveBuiltinRules()` (builtin-resolver.ts) copies them
+ * onto a `TranslationRule`, but every renderer reads that rule's display
+ * text through `translateRuleName`/`translateRuleDescription`
+ * (builtin-resolver.ts), which detects the `builtin:` id prefix and resolves
+ * `rules.builtin.<id>.name`/`.description` from `src/lib/i18n/namespaces/rules.ts`
+ * instead — these English strings are only the (untranslated, English-only)
+ * default-locale text those catalog keys were copied from, plus the shape
+ * `TranslationRule` requires. Do NOT wrap these in `t()`: this is a
+ * module-scope const table, and `t()` is a hook (see rules.ts's header for
+ * the full mechanism this already extends).
+ */
 export const BUILTIN_CHECKS: Record<BuiltinCheckId, BuiltinCheckDefinition> = {
   "empty-target": {
     id: "empty-target",

@@ -11,14 +11,7 @@
 //      rows for a foreign project are invisible (0 rows) — this tests the
 //      SQL function indirectly through a query that reads project_id-scoped data.
 //
-// What we CANNOT test locally (PGlite limitation):
-//   • The app_runtime role itself and the RLS policy enforcement by role.
-//     PGlite runs as a single user; CREATE ROLE + SET ROLE are parsed but
-//     PGlite's in-process WASM engine does not enforce role-level policy
-//     filtering in the same way a live Postgres instance does.  The policies
-//     exist in the migration SQL and are verified at the DDL level (ENABLE ROW
-//     LEVEL SECURITY + CREATE POLICY), but we cannot flip to app_runtime and
-//     show that the policies actually filter rows in this test harness.
+// What we CANNOT test locally:
 //   • Hyperdrive connection-pooling correctness: SET LOCAL is transaction-scoped
 //     and cannot leak to a different connection, but this requires a real pooler
 //     to verify empirically.
@@ -44,6 +37,13 @@ const RLS_MIGRATION = readFileSync(
   ),
   "utf8",
 )
+const CONTEXTUAL_ACTIVITY_MIGRATION = readFileSync(
+  path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../db/postgres/migrations/0074_contextual_run_events.sql",
+  ),
+  "utf8",
+)
 
 beforeAll(async () => {
   // Execute the RLS migration into the shared PGlite.
@@ -52,11 +52,233 @@ beforeAll(async () => {
   // is not enforced by PGlite but the SQL function is available.
   try {
     await pg.exec(RLS_MIGRATION)
+    await pg.exec(CONTEXTUAL_ACTIVITY_MIGRATION)
   } catch (e) {
     // If PGlite rejects a specific clause (e.g. FORCE ROW LEVEL SECURITY or
     // policy syntax), log the error and continue — we still get function tests.
     console.warn("[rls-backstop] RLS migration partial failure (expected on some PGlite versions):", String(e))
   }
+})
+
+describe("contextual activity RLS migration", () => {
+  it("installs separate SELECT/INSERT policies with user-scoped and bare-worker paths", async () => {
+    const relation = await pg.query<{ relrowsecurity: boolean; relforcerowsecurity: boolean }>(
+      `SELECT relrowsecurity, relforcerowsecurity
+         FROM pg_class WHERE oid = 'contextual_run_events'::regclass`,
+    )
+    expect(relation.rows[0]).toEqual({ relrowsecurity: true, relforcerowsecurity: true })
+
+    const policies = await pg.query<{
+      policyname: string
+      cmd: string
+      qual: string | null
+      with_check: string | null
+    }>(
+      `SELECT policyname, cmd, qual, with_check FROM pg_policies
+        WHERE tablename = 'contextual_run_events' ORDER BY cmd`,
+    )
+    expect(policies.rows.map((policy) => policy.cmd).sort()).toEqual(["INSERT", "SELECT"])
+    const select = policies.rows.find((policy) => policy.cmd === "SELECT")
+    const insert = policies.rows.find((policy) => policy.cmd === "INSERT")
+    expect(select?.qual).toContain("current_setting('app.user_id'::text, true)")
+    expect(select?.qual).toContain("current_setting('app.project_id'::text, true)")
+    expect(select?.qual).toContain("project_id = current_setting('app.project_id'::text, true)")
+    expect(select?.qual).toContain("app_user_can_access_project(project_id)")
+    expect(insert?.with_check).toContain("current_setting('app.user_id'::text, true)")
+    expect(insert?.with_check).toContain("current_setting('app.project_id'::text, true)")
+    expect(insert?.with_check).toContain("project_id = current_setting('app.project_id'::text, true)")
+    expect(insert?.with_check).toContain("app_user_can_access_project(project_id)")
+  })
+
+  it("opts every contextual table into exact-project RLS before granting runtime writes", async () => {
+    const tables = ["scene_briefs", "contextual_runs", "contextual_steering", "contextual_drafts"]
+    const relations = await pg.query<{
+      relname: string
+      relrowsecurity: boolean
+      relforcerowsecurity: boolean
+    }>(
+      `SELECT relname, relrowsecurity, relforcerowsecurity
+         FROM pg_class WHERE relname = ANY($1::text[]) ORDER BY relname`,
+      [tables],
+    )
+    expect(relations.rows).toEqual(tables.sort().map((relname) => ({
+      relname,
+      relrowsecurity: true,
+      relforcerowsecurity: true,
+    })))
+
+    const policies = await pg.query<{ tablename: string; cmd: string; expression: string }>(
+      `SELECT tablename, cmd, COALESCE(qual, with_check, '') AS expression
+         FROM pg_policies
+        WHERE tablename = ANY($1::text[])
+        ORDER BY tablename, cmd`,
+      [tables],
+    )
+    for (const table of tables) {
+      const own = policies.rows.filter((policy) => policy.tablename === table)
+      expect(own.map((policy) => policy.cmd).sort()).toEqual(["INSERT", "SELECT", "UPDATE"])
+      expect(own.every((policy) => policy.expression.includes("app_contextual_project_scope(project_id)")))
+        .toBe(true)
+    }
+
+    const helper = await pg.query<{ definition: string }>(
+      `SELECT pg_get_functiondef('app_contextual_project_scope(text)'::regprocedure) AS definition`,
+    )
+    const definition = helper.rows[0]?.definition ?? ""
+    expect(definition).toContain("current_setting('app.user_id', true)")
+    expect(definition).toContain("current_setting('app.project_id', true)")
+    expect(definition).toContain("p_project_id = current_setting('app.project_id', true)")
+    expect(definition).toContain("app_user_can_access_project(p_project_id)")
+
+    const grants = await pg.query<{ table_name: string; privilege_type: string }>(
+      `SELECT table_name, privilege_type
+         FROM information_schema.role_table_grants
+        WHERE grantee = 'app_runtime' AND table_name = ANY($1::text[])
+        ORDER BY table_name, privilege_type`,
+      [tables],
+    )
+    for (const table of tables) {
+      expect(grants.rows.filter((grant) => grant.table_name === table).map((grant) => grant.privilege_type).sort())
+        .toEqual(["INSERT", "SELECT", "UPDATE"])
+    }
+
+    const leasePolicies = await pg.query<{ cmd: string; expression: string }>(
+      `SELECT cmd, COALESCE(qual, with_check, '') AS expression
+         FROM pg_policies
+        WHERE tablename = 'contextual_project_leases'
+        ORDER BY cmd`,
+    )
+    expect(leasePolicies.rows.map((policy) => policy.cmd).sort()).toEqual([
+      "DELETE",
+      "INSERT",
+      "SELECT",
+      "UPDATE",
+    ])
+    expect(leasePolicies.rows.every((policy) =>
+      policy.expression.includes("app_contextual_project_scope(project_id)")))
+      .toBe(true)
+    const leaseGrants = await pg.query<{ privilege_type: string }>(
+      `SELECT privilege_type FROM information_schema.role_table_grants
+        WHERE grantee = 'app_runtime' AND table_name = 'contextual_project_leases'
+        ORDER BY privilege_type`,
+    )
+    expect(leaseGrants.rows.map((grant) => grant.privilege_type).sort()).toEqual([
+      "DELETE",
+      "INSERT",
+      "SELECT",
+      "UPDATE",
+    ])
+  })
+
+  it("contains app_runtime reads and writes to the exact scoped project while preserving bare worker I/O", async () => {
+    const userId = 8_267_401
+    const projectOne = "aqu-826-rls-project-one"
+    const projectTwo = "aqu-826-rls-project-two"
+    const eventOne = "01901234-0000-7000-8000-000000000001"
+    const eventTwo = "01901234-0000-7000-8000-000000000002"
+    const bareEvent = "01901234-0000-7000-8000-000000000003"
+    const deniedEvent = "01901234-0000-7000-8000-000000000004"
+    const runOne = "01901234-0000-7000-8000-000000000011"
+    const runTwo = "01901234-0000-7000-8000-000000000012"
+    const deniedRun = "01901234-0000-7000-8000-000000000013"
+    const leaseOne = "01901234-0000-7000-8000-000000000021"
+    const leaseTwo = "01901234-0000-7000-8000-000000000022"
+    const deniedLease = "01901234-0000-7000-8000-000000000023"
+
+    await seedUser(userId, "aqu826-rls-member")
+    await seedProject(projectOne, userId)
+    await seedProject(projectTwo, userId)
+    await seedDirectMember(projectOne, userId)
+    await seedDirectMember(projectTwo, userId)
+    await pg.query(
+      `INSERT INTO contextual_runs (id, project_id, file_id, status)
+       VALUES ($1, $2, 'file-one', 'done'), ($3, $4, 'file-two', 'done')`,
+      [runOne, projectOne, runTwo, projectTwo],
+    )
+    await pg.query(
+      `INSERT INTO contextual_run_events
+          (id, run_id, project_id, file_id, kind, summary)
+       VALUES ($1, $2, $3, 'file-one', 'run_created', 'created'),
+              ($4, $5, $6, 'file-two', 'run_created', 'created')`,
+      [eventOne, runOne, projectOne, eventTwo, runTwo, projectTwo],
+    )
+    await pg.query(
+      `INSERT INTO contextual_project_leases
+          (id, project_id, run_id, weight, expires_at)
+       VALUES ($1, $2, $3, 1, now() + interval '1 hour'),
+              ($4, $5, $6, 1, now() + interval '1 hour')`,
+      [leaseOne, projectOne, runOne, leaseTwo, projectTwo, runTwo],
+    )
+
+    try {
+      await pg.exec(
+        `SET ROLE app_runtime;
+         SET app.user_id = '${userId}';
+         SET app.project_id = '${projectOne}';`,
+      )
+
+      // Membership in projectTwo is deliberate: the exact project GUC, not
+      // membership alone, must contain a hostile cross-project/cross-join read.
+      const visibleEvents = await pg.query<{ project_id: string }>(
+        `SELECT project_id FROM contextual_run_events
+          WHERE id IN ($1, $2) ORDER BY project_id`,
+        [eventOne, eventTwo],
+      )
+      expect(visibleEvents.rows).toEqual([{ project_id: projectOne }])
+
+      const visibleRuns = await pg.query<{ project_id: string }>(
+        `SELECT project_id FROM contextual_runs
+          WHERE id IN ($1, $2) ORDER BY project_id`,
+        [runOne, runTwo],
+      )
+      expect(visibleRuns.rows).toEqual([{ project_id: projectOne }])
+      const visibleLeases = await pg.query<{ project_id: string }>(
+        `SELECT project_id FROM contextual_project_leases
+          WHERE id IN ($1, $2) ORDER BY project_id`,
+        [leaseOne, leaseTwo],
+      )
+      expect(visibleLeases.rows).toEqual([{ project_id: projectOne }])
+
+      await expect(pg.query(
+        `INSERT INTO contextual_run_events
+            (id, run_id, project_id, file_id, kind, summary)
+         VALUES ($1, $2, $3, 'file-two', 'run_created', 'created')`,
+        [deniedEvent, runTwo, projectTwo],
+      )).rejects.toThrow(/row-level security/i)
+      await expect(pg.query(
+        `INSERT INTO contextual_runs (id, project_id, file_id, status)
+         VALUES ($1, $2, 'file-denied', 'done')`,
+        [deniedRun, projectTwo],
+      )).rejects.toThrow(/row-level security/i)
+      await expect(pg.query(
+        `INSERT INTO contextual_project_leases
+            (id, project_id, run_id, weight, expires_at)
+         VALUES ($1, $2, 'denied-lease-run', 1, now() + interval '1 hour')`,
+        [deniedLease, projectTwo],
+      )).rejects.toThrow(/row-level security/i)
+
+      // Tick/route work uses an identity-less runtime handle. Both GUCs empty
+      // is the intentional bare path, and must continue to append evidence.
+      await pg.exec("RESET app.user_id; RESET app.project_id;")
+      const bareVisible = await pg.query<{ project_id: string }>(
+        `SELECT project_id FROM contextual_run_events
+          WHERE id IN ($1, $2) ORDER BY project_id`,
+        [eventOne, eventTwo],
+      )
+      expect(bareVisible.rows).toEqual([
+        { project_id: projectOne },
+        { project_id: projectTwo },
+      ])
+      await pg.query(
+        `INSERT INTO contextual_run_events
+            (id, run_id, project_id, file_id, kind, summary)
+         VALUES ($1, $2, $3, 'file-two', 'run_state', 'bare worker append')`,
+        [bareEvent, runTwo, projectTwo],
+      )
+    } finally {
+      await pg.exec("RESET ROLE; RESET app.user_id; RESET app.project_id;")
+    }
+  })
 })
 
 // Helper: build a PgExecutor-backed PostgresDb from the shared PGlite.

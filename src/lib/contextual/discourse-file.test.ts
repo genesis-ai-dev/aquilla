@@ -6,6 +6,9 @@ describe("isDiscourseFile", () => {
     expect(isDiscourseFile({ type: "json" })).toBe(false)
     expect(isDiscourseFile({ type: "po" })).toBe(false)
     expect(isDiscourseFile({ type: "properties" })).toBe(false)
+    // Contextual drafts are plain text and cannot preserve IDML protected
+    // anchors, so Autopilot must not create an unreviewable proposal there.
+    expect(isDiscourseFile({ type: "idml" })).toBe(false)
   })
 
   it("tabular formats count only with Scripture content", () => {

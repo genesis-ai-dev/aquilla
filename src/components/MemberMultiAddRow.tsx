@@ -1,13 +1,10 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
-import { RoleLabel } from "@/components/RoleLabel";
-import { roleDisplayText } from "@/lib/frontier/roles";
+import { RoleSelect } from "@/components/RoleSelect";
 import { UsernameTypeahead, type RecipientValue } from "@/components/UsernameTypeahead";
 import type { UserSearchResult } from "@/hooks/useUserSearch";
+import { useI18n } from "@/lib/i18n/I18nProvider";
 
 /**
  * AQU-734: per-person outcome of a batch add, mirrored from the server's
@@ -37,7 +34,7 @@ const sameName = (a: string, b: string) =>
 
 interface MemberMultiAddRowProps {
   /** Roles offered in the picker — pass them already capped to the caller. */
-  roleOptions: MemberAddRoleOption[];
+  roleOptions: readonly MemberAddRoleOption[];
   /** Initial value of the role picker (local UI state only). */
   defaultRole: number;
   /**
@@ -87,6 +84,7 @@ export function MemberMultiAddRow({
   disabled = false,
   buttonSize = "default",
 }: MemberMultiAddRowProps) {
+  const { t } = useI18n();
   // Typeahead-mode-only here. Email-mode is for project-link invites
   // (handled in MultiProjectInviteDialog / SharePanel), not direct grants —
   // granting requires a real Frontier user id, which we don't have for an
@@ -188,14 +186,14 @@ export function MemberMultiAddRow({
   return (
     <div className="space-y-2">
       {staged.length > 0 && (
-        <ul className="flex flex-wrap gap-1.5" aria-label="People to add">
+        <ul className="flex flex-wrap gap-1.5" aria-label={t("org.memberMultiAddRow.peopleToAddAriaLabel")}>
           {staged.map((s) => (
             <li key={s.username}>
-              <span className="inline-flex items-center gap-1 rounded-full border bg-muted/40 py-0.5 pl-2.5 pr-1 text-xs">
+              <span className="inline-flex items-center gap-1 rounded-full border bg-muted/40 py-0.5 ps-2.5 pe-1 text-xs">
                 <span className="max-w-[12rem] truncate">{s.username}</span>
                 <button
                   type="button"
-                  aria-label={`Remove ${s.username}`}
+                  aria-label={t("org.teamDetail.removeAriaLabel", { name: s.username })}
                   onClick={() => removeStaged(s.username)}
                   disabled={adding || disabled}
                   className="flex h-4 w-4 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -226,25 +224,13 @@ export function MemberMultiAddRow({
             }}
           />
         </div>
-        <Select
-          items={roleOptions.map((r) => ({ value: String(r.level), label: roleDisplayText(r.name) }))}
-          value={String(role)}
-          onValueChange={(v) => setRole(parseInt(v ?? "", 10))}
+        <RoleSelect
+          options={roleOptions}
+          value={role}
+          onValueChange={setRole}
           disabled={adding || disabled}
-        >
-          <SelectTrigger aria-label="Role">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              {roleOptions.map((r) => (
-                <SelectItem key={r.level} value={String(r.level)}>
-                  <RoleLabel name={r.name} />
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
+          aria-label={t("common.roleLabel")}
+        />
         <Button
           size={buttonSize}
           className="sm:whitespace-nowrap"

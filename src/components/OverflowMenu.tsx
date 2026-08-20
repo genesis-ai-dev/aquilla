@@ -5,21 +5,23 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuCheckboxItem,
   DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { AppTooltip } from "@/components/ui/tooltip"
 
 export interface OverflowMenuItem {
   id: string
-  type?: "item" | "separator"
+  type?: "item" | "checkbox" | "separator"
   label?: string
   icon?: ComponentType<{ className?: string }>
   /** Optional trailing badge (e.g. check-file finding count). */
   badge?: ReactNode
   onClick?: () => void
+  checked?: boolean
+  onCheckedChange?: (checked: boolean) => void
   disabled?: boolean
   destructive?: boolean
 }
@@ -30,11 +32,8 @@ interface Props {
   triggerVariant?: "ghost" | "outline"
   triggerSize?: NonNullable<VariantProps<typeof buttonVariants>["size"]>
   triggerClassName?: string
-  tooltip?: string
   ariaLabel?: string
   testId?: string
-  /** Skip tooltip wrapper so the trigger can sit inside a ButtonGroup. */
-  inButtonGroup?: boolean
   /** Anchor for popovers opened from this menu (e.g. View settings). */
   triggerRef?: Ref<HTMLButtonElement>
   /**
@@ -66,6 +65,17 @@ function OverflowMenuPanel({ items }: { items: OverflowMenuItem[] }) {
         {items.map((item) =>
           item.type === "separator" ? (
             <DropdownMenuSeparator key={item.id} />
+          ) : item.type === "checkbox" ? (
+            <DropdownMenuCheckboxItem
+              key={item.id}
+              checked={item.checked}
+              disabled={item.disabled}
+              onCheckedChange={(checked) => item.onCheckedChange?.(checked)}
+            >
+              {item.icon && <item.icon className="h-4 w-4" />}
+              <span className="flex-1">{item.label}</span>
+              {item.badge}
+            </DropdownMenuCheckboxItem>
           ) : (
             <DropdownMenuItem
               key={item.id}
@@ -89,10 +99,8 @@ export function OverflowMenu({
   triggerVariant = "ghost",
   triggerSize = "icon",
   triggerClassName,
-  tooltip = "More",
   ariaLabel = "More",
   testId,
-  inButtonGroup = false,
   triggerRef,
   triggerLabel,
   triggerIcon,
@@ -101,33 +109,26 @@ export function OverflowMenu({
   if (items.length === 0) return null
 
   const TriggerIcon = triggerIcon ?? MoreHorizontal
-  const trigger = (
-    <DropdownMenuTrigger
-      render={
-        <Button
-          ref={triggerRef}
-          variant={triggerVariant}
-          // A labelled trigger cannot be an icon-sized square.
-          size={triggerLabel ? (triggerSize === "icon" ? "sm" : triggerSize) : triggerSize}
-          className={triggerClassName}
-          aria-label={triggerLabel ?? ariaLabel}
-          data-testid={testId}
-        >
-          <TriggerIcon className="h-4 w-4" />
-          {triggerLabel}
-          {triggerBadge}
-        </Button>
-      }
-    />
-  )
 
   return (
     <DropdownMenu>
-      {inButtonGroup ? trigger : (
-        <AppTooltip content={tooltip}>
-          {trigger}
-        </AppTooltip>
-      )}
+      <DropdownMenuTrigger
+        render={
+          <Button
+            ref={triggerRef}
+            variant={triggerVariant}
+            // A labelled trigger cannot be an icon-sized square.
+            size={triggerLabel ? (triggerSize === "icon" ? "sm" : triggerSize) : triggerSize}
+            className={triggerClassName}
+            aria-label={triggerLabel ?? ariaLabel}
+            data-testid={testId}
+          >
+            <TriggerIcon className="h-4 w-4" />
+            {triggerLabel}
+            {triggerBadge}
+          </Button>
+        }
+      />
       <OverflowMenuPanel items={items} />
     </DropdownMenu>
   )

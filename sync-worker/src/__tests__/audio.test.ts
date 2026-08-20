@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from "vitest"
 import { sign } from "hono/jwt"
-import { handleAudioRequest, audioObjectKey, MAX_AUDIO_BYTES } from "../audio"
+import { handleAudioRequest, audioObjectKey, isPathSafeId, MAX_AUDIO_BYTES } from "../audio"
 import { handleAdminRequest } from "../admin"
 import type { SyncTokenClaims } from "../auth"
 import { makeTestDb } from "./helpers/pg-test-db"
@@ -133,6 +133,25 @@ async function makeToken(
   return sign(claims as unknown as Record<string, unknown>, secret, "HS256")
 }
 
+describe("isPathSafeId", () => {
+  it("accepts ordinary ids", () => {
+    expect(isPathSafeId("f1")).toBe(true)
+    expect(isPathSafeId("0198abc1-2345-7def-89ab-0123456789ab")).toBe(true)
+  })
+
+  it("rejects path separators, NUL, and bare dot-segments", () => {
+    // These are the ids `tts.ts`/`voice-convert.ts` reject before interpolating
+    // them into an R2 key (audioObjectKey) built from a template literal.
+    expect(isPathSafeId("")).toBe(false)
+    expect(isPathSafeId(".")).toBe(false)
+    expect(isPathSafeId("..")).toBe(false)
+    expect(isPathSafeId("a/b")).toBe(false)
+    expect(isPathSafeId("../other-project")).toBe(false)
+    expect(isPathSafeId("a\\b")).toBe(false)
+    expect(isPathSafeId("a\0b")).toBe(false)
+  })
+})
+
 describe("audio R2 endpoints", () => {
   it("returns null for unrelated paths", async () => {
     const env = makeEnv()
@@ -166,6 +185,43 @@ describe("audio R2 endpoints", () => {
       env as unknown as Parameters<typeof handleAudioRequest>[1],
     )) as Response
     expect(res.status).toBe(401)
+  })
+
+  it("rejects PUT from a viewer-role token (write requires CONTRIBUTOR+)", async () => {
+    const env = makeEnv()
+    const token = await makeToken({ role: 100 })
+    const body = new Uint8Array([1, 2, 3, 4])
+    const res = (await handleAudioRequest(
+      new Request("https://w/audio/p1/f1/clip.webm", {
+        method: "PUT",
+        body,
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "audio/webm" },
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(res.status).toBe(403)
+    expect(env.SNAPSHOTS._allKeys()).not.toContain(audioObjectKey(env, "p1", "f1", "clip.webm"))
+  })
+
+  it("allows GET (read) with a viewer-role token", async () => {
+    const env = makeEnv()
+    const writer = await makeToken({ role: 400 })
+    await handleAudioRequest(
+      new Request("https://w/audio/p1/f1/clip.webm", {
+        method: "PUT",
+        body: new Uint8Array([9, 9]),
+        headers: { Authorization: `Bearer ${writer}`, "Content-Type": "audio/webm" },
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )
+    const viewer = await makeToken({ role: 100 })
+    const get = (await handleAudioRequest(
+      new Request("https://w/audio/p1/f1/clip.webm", {
+        headers: { Authorization: `Bearer ${viewer}` },
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(get.status).toBe(200)
   })
 
   it("PUT then GET round-trips bytes with a valid sync-token", async () => {
@@ -551,6 +607,22 @@ describe("audio R2 endpoints", () => {
     )) as Response
     expect(ownerOk.status).toBe(200)
     expect(env.SNAPSHOTS._size()).toBe(0)
+  })
+
+  it("rejects DELETE from a viewer-role sync-token (F8 floor is CONTRIBUTOR+)", async () => {
+    const env = makeEnv()
+    const key = audioObjectKey(env, "p1", "f1", "clip.webm")
+    env.SNAPSHOTS._seed(key, new Uint8Array([9]))
+    const viewerToken = await makeToken({ role: 100 })
+    const res = (await handleAudioRequest(
+      new Request("https://w/audio/p1/f1/clip.webm", {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${viewerToken}` },
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(res.status).toBe(403)
+    expect(env.SNAPSHOTS._allKeys()).toContain(key)
   })
 
   it("honors R2_KEY_PREFIX when building object keys", async () => {

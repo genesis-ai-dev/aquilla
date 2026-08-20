@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { MessageSquare, Bot, Plus, X } from "lucide-react"
+import { MessageSquare, Bot, Plus, X, Zap, Microscope } from "lucide-react"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -9,6 +9,15 @@ export interface ModelListValue {
   models: string[]
   chatModel: string
   agentModel: string
+  /**
+   * Autopilot tiers. Unlike chat and agent these are OPTIONAL — "" means the
+   * server falls back to its env var and then to the product default, which is
+   * the behaviour every deployment has today (one frontier model on all three
+   * tiers). So these toggles clear when clicked again, and adding the first
+   * model to the list does not silently claim them.
+   */
+  fastModel: string
+  deepModel: string
 }
 
 /**
@@ -25,7 +34,7 @@ export function ModelListEditor({
   value: ModelListValue
   onChange: (next: ModelListValue) => void
 }) {
-  const { models, chatModel, agentModel } = value
+  const { models, chatModel, agentModel, fastModel, deepModel } = value
   const [draft, setDraft] = useState("")
 
   const addModel = () => {
@@ -35,8 +44,11 @@ export function ModelListEditor({
       return
     }
     const nextModels = [...models, id]
-    // First model added becomes the default for whichever role is still unset.
+    // First model added becomes the default for whichever REQUIRED role is
+    // still unset. The optional autopilot tiers are left alone: claiming them
+    // here would silently change what the pipeline runs on.
     onChange({
+      ...value,
       models: nextModels,
       chatModel: chatModel || id,
       agentModel: agentModel || id,
@@ -51,6 +63,10 @@ export function ModelListEditor({
       models: nextModels,
       chatModel: chatModel === id ? fallback : chatModel,
       agentModel: agentModel === id ? fallback : agentModel,
+      // Optional roles CLEAR rather than move to another model: reassigning a
+      // tier the admin never chose is a worse surprise than falling back.
+      fastModel: fastModel === id ? "" : fastModel,
+      deepModel: deepModel === id ? "" : deepModel,
     })
   }
 
@@ -66,12 +82,12 @@ export function ModelListEditor({
               addModel()
             }
           }}
-          placeholder="e.g. anthropic/claude-sonnet-4.5"
+          placeholder="e.g. openai/gpt-5.6-luna"
           aria-label="Add a model ID"
           spellCheck={false}
           className="font-mono text-xs"
         />
-        <Button type="button" variant="outline" size="sm" onClick={addModel} disabled={!draft.trim()}>
+        <Button type="button" variant="outline" onClick={addModel} disabled={!draft.trim()}>
           <Plus className="size-3.5" /> Add
         </Button>
       </div>
@@ -99,6 +115,20 @@ export function ModelListEditor({
                 label="Agent"
                 title="Use as the agent model"
               />
+              <RoleToggle
+                active={fastModel === id}
+                onClick={() => onChange({ ...value, fastModel: fastModel === id ? "" : id })}
+                icon={Zap}
+                label="Fast"
+                title="Autopilot fast tier — scene summaries, the support check, and passage detection. Optional: click again to clear and fall back to the default."
+              />
+              <RoleToggle
+                active={deepModel === id}
+                onClick={() => onChange({ ...value, deepModel: deepModel === id ? "" : id })}
+                icon={Microscope}
+                label="Deep"
+                title="Autopilot deep tier — the adversarial verifier stances. Optional: click again to clear and fall back to the drafting model."
+              />
               <Button
                 type="button"
                 variant="ghost"
@@ -113,11 +143,22 @@ export function ModelListEditor({
           ))}
         </ul>
       )}
-      <p className="text-xs text-muted-foreground">
-        <MessageSquare className="mr-1 inline size-3" />
-        marks the default chat model; <Bot className="mx-1 inline size-3" />
-        marks the agent model. Both must be in this list.
-      </p>
+      <div className="space-y-1 text-xs text-muted-foreground">
+        <p>
+          <MessageSquare className="mr-1 inline size-3" />
+          marks the default chat model; <Bot className="mx-1 inline size-3" />
+          marks the agent model. Both are required and must be in this list.
+        </p>
+        <p>
+          <Zap className="mr-1 inline size-3" />
+          and <Microscope className="mx-1 inline size-3" />
+          set the autopilot&apos;s fast and deep tiers. Both are optional — click an
+          active one to clear it. <strong>Fast</strong> is the highest-leverage
+          setting here: unset, the pipeline runs its cheap-judgment work (scene
+          summaries, the retrieval-support check, passage detection) on the same
+          frontier model it drafts with.
+        </p>
+      </div>
     </div>
   )
 }

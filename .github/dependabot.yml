@@ -4,8 +4,10 @@ updates:
   - package-ecosystem: npm
     directory: "/"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
+      interval: monthly
+    cooldown:
+      default-days: 30
+    open-pull-requests-limit: 2
     groups:
       npm-minor-patch:
         update-types:
@@ -14,12 +16,21 @@ updates:
       npm-major:
         update-types:
           - major
+    ignore:
+      # v9 is a full API rewrite (no useReactTable/getCoreRowModel root
+      # exports); ~18 files still use the v8 API. Remove once a deliberate
+      # migration lands.
+      - dependency-name: "@tanstack/react-table"
+        update-types:
+          - "version-update:semver-major"
 
   - package-ecosystem: npm
     directory: "/auth-worker"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
+      interval: monthly
+    cooldown:
+      default-days: 30
+    open-pull-requests-limit: 2
     groups:
       auth-worker-deps:
         patterns:
@@ -28,18 +39,38 @@ updates:
   - package-ecosystem: npm
     directory: "/sync-worker"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
+      interval: monthly
+    cooldown:
+      default-days: 30
+    open-pull-requests-limit: 2
     groups:
       sync-worker-deps:
+        patterns:
+          - "*"
+
+  # agent-worker has its own package-lock.json and was the one Worker no
+  # ecosystem entry covered, so a CVE in its dependencies — it shares hono with
+  # the other two — would have gone unflagged. Partially addresses OPS-6 of
+  # docs/OPSEC-REVIEW-2026-08-10.md ("no dependency-vulnerability step in CI").
+  - package-ecosystem: npm
+    directory: "/agent-worker"
+    schedule:
+      interval: monthly
+    cooldown:
+      default-days: 30
+    open-pull-requests-limit: 2
+    groups:
+      agent-worker-deps:
         patterns:
           - "*"
 
   - package-ecosystem: cargo
     directory: "/src-tauri"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
+      interval: monthly
+    cooldown:
+      default-days: 30
+    open-pull-requests-limit: 2
     groups:
       cargo-deps:
         patterns:
@@ -48,8 +79,10 @@ updates:
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
+      interval: monthly
+    cooldown:
+      default-days: 30
+    open-pull-requests-limit: 2
     groups:
       github-actions:
         patterns:

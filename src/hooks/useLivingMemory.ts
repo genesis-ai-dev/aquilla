@@ -2,10 +2,10 @@
 
 import { useCallback, useMemo } from "react"
 import type { CellData } from "@/hooks/useCells"
-import { useProject } from "@/hooks/useProject"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
+import type { ProjectRecord } from "@/lib/parsers/types"
 
 /** Return only cells that have been validated. */
 export function filterValidated(cells: CellData[]): CellData[] {
@@ -41,10 +41,21 @@ export interface UseLivingMemoryResult {
   error?: Error
 }
 
-export function useLivingMemory({ projectId }: { projectId: string }): UseLivingMemoryResult {
+export function useLivingMemory({
+  projectId,
+  project,
+  enabled = true,
+}: {
+  projectId: string
+  /** The calling surface already owns project loading. Keeping that ownership
+   * here avoids a second project resolve before the corpus query can start. */
+  project: ProjectRecord | null
+  /** Validated examples are expensive: every project file is read. Callers
+   * should enable this only while a surface actually consumes those cells. */
+  enabled?: boolean
+}): UseLivingMemoryResult {
   const { session } = useFrontierSession()
   const jwt = session?.jwt
-  const { project, status } = useProject(projectId)
   const projectFiles = useMemo(
     () => (project?.files ?? []).map((file) => ({ id: file.id, name: file.name, type: file.type })),
     [project?.files],
@@ -65,7 +76,7 @@ export function useLivingMemory({ projectId }: { projectId: string }): UseLiving
     projectId,
     projectFiles,
     getToken,
-    enabled: status === "ready" && Boolean(jwt),
+    enabled: enabled && Boolean(project) && Boolean(jwt),
   })
 
   const cells = useMemo(() => {
@@ -78,11 +89,11 @@ export function useLivingMemory({ projectId }: { projectId: string }): UseLiving
     return sortValidated(validated)
   }, [files])
 
-  const isLoading = status === "loading" || projectCellsLoading
+  const isLoading = enabled && (project == null || projectCellsLoading)
   return {
     cells,
     isLoading,
-    isEmpty: !isLoading && !error && cells.length === 0,
+    isEmpty: enabled && !isLoading && !error && cells.length === 0,
     isTruncated: false,
     fileCount: projectFiles.length,
     error,

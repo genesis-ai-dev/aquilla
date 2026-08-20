@@ -5,7 +5,7 @@
 - Items always inside their Group component
 - Callouts use Alert
 - Empty states use Empty component
-- Toast notifications use sonner
+- Toast notifications use Base UI toast
 - Choosing between overlay components
 - Dialog, Sheet, and Drawer always need a Title
 - Card structure
@@ -88,16 +88,27 @@ Chat components nest in a fixed order (`MessageScrollerProvider` → `MessageScr
 
 ---
 
-## Toast notifications use sonner
+## Toast notifications use Base UI toast
 
 ```tsx
-import { toast } from "sonner"
+import { toast } from "@/components/ui/toast"
 
-toast.success("Changes saved.")
-toast.error("Something went wrong.")
-toast("File deleted.", {
-  action: { label: "Undo", onClick: () => undoDelete() },
+toast.add({ type: "success", title: "Changes saved." })
+toast.add({ type: "error", priority: "high", title: "Something went wrong." })
+const id = toast.add({
+  title: "File deleted.",
+  actionProps: {
+    children: "Undo",
+    onClick() {
+      undoDelete()
+      toast.close(id)
+    },
+  },
 })
+
+// Identical string title/description upserts in place (dedupe + pulse).
+// Pass an explicit `id` when you want a named status slot:
+toast.add({ id: "save-status", title: "Draft saved" })
 ```
 
 ---

@@ -48,6 +48,12 @@ export interface ServerEventApplied {
   /** Verified author username (JWT claims) — clients suppress the
    * "changed elsewhere" banner when this matches their own identity. */
   by?: string
+  /** Set when the write arrived via the external Agent API channel
+   * (token-bridge minted token). Clients must NOT treat such frames as
+   * own-write echoes even when `by` matches their identity — the agent's
+   * commit made no local outbox write, so the echo refetch is the only way
+   * the approving human's editor learns the result. */
+  via?: "external"
 }
 export interface ServerEventStale {
   t: "event.stale"

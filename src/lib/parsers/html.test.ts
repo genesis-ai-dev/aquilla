@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { CellData } from "@/hooks/useCells"
-import { exportHtml, extractHtmlStrings } from "./html"
+import { applyHtmlTranslations, exportHtml, extractHtmlStrings } from "./html"
 
 function makeCell(overrides: Partial<CellData>): CellData {
   return {
@@ -113,6 +113,19 @@ describe("extractHtmlStrings", () => {
   it("skips whitespace-only blocks and collapses internal whitespace", () => {
     const strings = extractHtmlStrings("<p>  </p><p>two\n  lines</p>")
     expect(strings.map((s) => s.original)).toEqual(["two lines"])
+  })
+
+  it("can omit the document title so extract and export stay aligned", () => {
+    const src = "<html><head><title>Tab title</title></head><body><h1>Visible heading</h1><p>Body.</p></body></html>"
+    const strings = extractHtmlStrings(src, { skipDocumentTitle: true })
+    expect(strings.map((s) => s.original)).toEqual(["Visible heading", "Body."])
+    const html = applyHtmlTranslations(src, [
+      { original: "Visible heading", translated: "Titre visible" },
+      { original: "Body.", translated: "Corps." },
+    ], { skipDocumentTitle: true })
+    expect(html).toContain("<title>Tab title</title>")
+    expect(html).toContain("Titre visible")
+    expect(html).toContain("Corps.")
   })
 })
 

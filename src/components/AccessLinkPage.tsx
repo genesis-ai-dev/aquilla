@@ -18,10 +18,10 @@ import { redeemAccessLink } from "@/lib/frontier/auth"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-
-const GENERIC_ERROR = "This link is invalid or has expired."
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export function AccessLinkPage() {
+  const t = useT()
   const { token } = useParams<{ token: string }>()
   const navigate = useNavigate()
   const [pin, setPin] = useState("")
@@ -47,12 +47,16 @@ export function AccessLinkPage() {
       }
       navigate(`/project/${projectId}/editor`, { replace: true })
     } catch (err) {
-      // Show the generic dead-link message regardless of the specific failure
-      // (no PIN/token oracle). Only a genuine network error gets its own text.
-      const message =
-        err instanceof Error && err.message && !/^Login failed/.test(err.message)
-          ? err.message
-          : GENERIC_ERROR
+      // AQU-820: redeemAccessLink() (lib/frontier/auth.ts) always throws with
+      // an already-translated, keyed message now — either the generic
+      // dead-link text or the network-unreachable text — never raw server
+      // English, so it's safe to display directly. The `!/^Login failed/`
+      // check this replaced was dead: redeemAccessLink never produces that
+      // string, so err.message unconditionally won regardless, which was
+      // exactly the keyed-but-dead bug (auth.accessLink.genericError could
+      // never render). Only a genuinely unexpected non-Error throw falls
+      // back to the generic key here.
+      const message = err instanceof Error ? err.message : t("auth.accessLink.genericError")
       setError(message)
       setPin("")
       setSubmitting(false)
@@ -64,17 +68,17 @@ export function AccessLinkPage() {
       <form
         onSubmit={onSubmit}
         className="w-full max-w-sm space-y-5 rounded-lg border bg-card p-6 shadow-sm"
-        aria-label="Enter your access PIN"
+        aria-label={t("auth.accessLink.ariaLabel")}
       >
         <div className="space-y-1 text-center">
-          <h1 className="text-lg font-semibold">Enter your PIN</h1>
+          <h1 className="text-lg font-semibold">{t("auth.accessLink.title")}</h1>
           <p className="text-sm text-muted-foreground">
-            Enter the PIN you were given to open your project.
+            {t("auth.accessLink.instructions")}
           </p>
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="access-pin">PIN</Label>
+          <Label htmlFor="access-pin">{t("auth.accessLink.pinLabel")}</Label>
           <Input
             id="access-pin"
             type="password"
@@ -95,7 +99,7 @@ export function AccessLinkPage() {
         )}
 
         <Button type="submit" className="w-full" disabled={submitting || pin.trim().length === 0}>
-          {submitting ? "Opening…" : "Open project"}
+          {submitting ? t("auth.accessLink.submitOpening") : t("auth.accessLink.submitDefault")}
         </Button>
       </form>
     </div>

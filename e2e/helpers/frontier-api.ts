@@ -1,5 +1,5 @@
 /**
- * Thin HTTP client for frontier-server, used by E2E specs to set up
+ * Thin HTTP client for the identity worker, used by E2E specs to set up
  * server-side state (projects, org members, project members) without
  * driving brittle UI flows.
  *
@@ -13,6 +13,8 @@
  *   500 project_lead, 600 maintainer, 700 owner.
  */
 
+import { postIdempotentJson } from "./idempotent-request"
+
 const FRONTIER_BASE = process.env.VITE_FRONTIER_BASE ?? "http://127.0.0.1:8787"
 
 export const ROLE = {
@@ -25,7 +27,7 @@ export const ROLE = {
   OWNER: 700,
 } as const
 
-function authHeaders(jwt: string): HeadersInit {
+function authHeaders(jwt: string): Record<string, string> {
   return {
     "Content-Type": "application/json",
     Authorization: `Bearer ${jwt}`,
@@ -96,12 +98,15 @@ export async function createProjectServerSide(
   jwt: string,
   args: { id: string; name: string },
 ): Promise<CreatedProject> {
-  const r = await fetch(`${FRONTIER_BASE}/api/v2/projects`, {
-    method: "POST",
+  // The caller supplies a stable project id and the worker insert uses
+  // ON CONFLICT(id) DO NOTHING, so replaying this byte-identical fixture POST
+  // is safe when Wrangler restarts after accepting or during the request.
+  const r = await postIdempotentJson({
+    url: `${FRONTIER_BASE}/api/v2/projects`,
     headers: authHeaders(jwt),
-    body: JSON.stringify(args),
+    body: args,
+    operation: "createProjectServerSide",
   })
-  if (!r.ok) throw new Error(`createProjectServerSide failed: HTTP ${r.status} — ${await r.text()}`)
   return (await r.json()) as CreatedProject
 }
 

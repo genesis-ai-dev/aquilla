@@ -9,7 +9,11 @@ function RadioGroup({ className, ...props }: RadioGroupPrimitive.Props) {
   return (
     <RadioGroupPrimitive
       data-slot="radio-group"
-      className={cn("grid w-full gap-2", className)}
+      // `relative` contains Base UI's native <input position:absolute> siblings.
+      // Without a positioned ancestor those inputs use the initial containing
+      // block, so their static position deep in a Page scroll well inflates
+      // document scrollHeight past AppShell's h-screen (empty void under chrome).
+      className={cn("relative grid w-full gap-2", className)}
       {...props}
     />
   )

@@ -315,9 +315,54 @@ export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | '
  * The returned `touches` list lets the route layer compute the
  * `projection.dirty` broadcast payload.
  */
+/**
+ * AQU-927: payload keys that are projected into a Postgres **BIGINT** column
+ * (`cells.start_ms/end_ms`, `cell_audio.duration_ms/trim_start_ms/trim_end_ms`)
+ * or into a ms-valued metadata key compared against them.
+ */
+const INTEGER_MS_PAYLOAD_KEYS = [
+  'durationMs',
+  'startMs',
+  'endMs',
+  'trimStartMs',
+  'trimEndMs',
+  'subtitleStartMs',
+  'subtitleEndMs',
+  'targetStartMs',
+] as const
+
+/**
+ * AQU-927: round fractional millisecond payload values before they are bound
+ * into a BIGINT column.
+ *
+ * Postgres rejects a fractional bigint literal, and a `/events` flush is
+ * applied as ONE batch — so a single stray float (e.g. a duration of `2403.5`
+ * from an un-rounded client producer) failed *every* event in that flush, which
+ * is how whole groups of cells silently lost their audio on refresh. Clients
+ * now round at the source and again at the emit boundary; this is the server's
+ * last line of defence, and it also covers clients already deployed with the
+ * old code.
+ *
+ * Returns the event unchanged (same object identity) when nothing needed
+ * rounding, which is the overwhelmingly common case. Non-finite values are left
+ * alone so the existing `Number.isFinite` guards still reject them.
+ */
+export function coerceIntegerMsPayload(event: PersistedEvent): PersistedEvent {
+  const payload = event.payload
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return event
+  let fixed: Record<string, unknown> | null = null
+  for (const key of INTEGER_MS_PAYLOAD_KEYS) {
+    const value = (payload as Record<string, unknown>)[key]
+    if (typeof value !== 'number' || !Number.isFinite(value) || Number.isInteger(value)) continue
+    fixed ??= { ...(payload as Record<string, unknown>) }
+    fixed[key] = Math.round(value)
+  }
+  return fixed === null ? event : { ...event, payload: fixed }
+}
+
 export function buildEventProjectionStmts(
   db: AquillaDb,
-  event: PersistedEvent,
+  rawEvent: PersistedEvent,
   stmts: AquillaStatement[],
   opts?: {
     deferFileCounters?: boolean
@@ -337,6 +382,8 @@ export function buildEventProjectionStmts(
     validationCount?: number
   },
 ): ProjectionTouches[] {
+  // AQU-927: one un-rounded ms value would otherwise reject the whole batch.
+  const event = coerceIntegerMsPayload(rawEvent)
   // Gate fragments for chain-advancing cells writes. `gateWhere` suffixes an
   // INSERT…SELECT row source; `gateAnd` extends an UPDATE/DELETE WHERE.
   const gate = opts?.chainGate
@@ -514,45 +561,36 @@ export function buildEventProjectionStmts(
       return ['cells']
     }
 
+    case 'source.cell.reanchor': {
+      const p = event.payload as EventPayloads['source.cell.reanchor']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
+      }
+      // Anchor-ONLY repair (AQU-931): re-point the source row's anchor without
+      // advancing the chain head. `event_id` moves only when content changes —
+      // the AD-9 staleness comparison (target pin vs source head) depends on
+      // that — and validation, counters, and FTS are untouched. Non-chain-
+      // mutating by design: rebuild replays it unconditionally in seq order
+      // (a chain-mutating event with a null parent would lose first-child
+      // arbitration to the genesis create and the repair would evaporate on
+      // every rebuild).
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cells SET anchor_cell_id = ?
+             WHERE project_id = ? AND file_id = ? AND cell_id = ?
+               AND side = 'source' AND target_lang = ''`,
+          )
+          .bind(p.anchorCellId ?? null, event.projectId, event.fileId, event.cellId),
+      )
+      return ['cells']
+    }
+
     case 'source.cell.commit':
     case 'target.cell.commit': {
       const p = event.payload as EventPayloads['source.cell.commit'] | EventPayloads['target.cell.commit']
       if (!event.fileId || !event.cellId) {
         throw new Error(`${event.kind} event ${event.id} is missing fileId or cellId`)
-      }
-      // AQU-646: a source commit may carry a media cell's TRANSCRIPTION — its
-      // translatable source text — instead of a value. For imported media the
-      // stored value is the audio FILENAME (an import record, not prose), so
-      // this variant leaves value/value_html/word_count untouched and lands
-      // only the transcript. The chain head still advances, which is what
-      // flags downstream targets stale (AD-9) — the text translators work
-      // from has changed.
-      if (event.kind === 'source.cell.commit') {
-        const sp = p as EventPayloads['source.cell.commit']
-        if (typeof sp.transcription === 'string') {
-          stmts.push(
-            db
-              .prepare(
-                `UPDATE cells SET
-                  transcription = ?,
-                  event_id      = ?,
-                  last_editor   = ?,
-                  last_edit_at  = ?
-                WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'${gateAnd}`,
-              )
-              .bind(
-                sp.transcription,
-                event.id,
-                event.author,
-                event.serverTs,
-                event.projectId,
-                event.fileId,
-                event.cellId,
-                ...gateBinds,
-              ),
-          )
-          return ['cells']
-        }
       }
       const value = p.value ?? ''
       const valueHtml = p.valueHtml ?? null
@@ -595,8 +633,8 @@ export function buildEventProjectionStmts(
                 project_id, file_id, cell_id, side, target_lang, value, value_html, type,
                 canonical_ref, anchor_cell_id, event_id, source_event_id,
                 last_editor, last_edit_at, validated, word_count, content_hash,
-                ai_drafted
-              ) SELECT ?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?${gateWhere}
+                ai_drafted, ai_draft
+              ) SELECT ?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?${gateWhere}
               ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
                 value             = excluded.value,
                 value_html        = excluded.value_html,
@@ -608,7 +646,8 @@ export function buildEventProjectionStmts(
                 content_hash      = excluded.content_hash,
                 validated         = 0,
                 endorsement_count = 0,
-                ai_drafted        = excluded.ai_drafted`,
+                ai_drafted        = excluded.ai_drafted,
+                ai_draft          = excluded.ai_draft`,
             )
             .bind(
               event.projectId,
@@ -624,7 +663,95 @@ export function buildEventProjectionStmts(
               wordCount,
               hash,
               aiDrafted,
+              aiDrafted ? JSON.stringify(tp.ai_draft ?? null) : null,
               ...gateBinds,
+            ),
+        )
+
+        // AQU-826: the winning human target commit is the durable review
+        // boundary for Autopilot drafts. Accepted cards intentionally do not
+        // call the review route: an IDB enqueue is not proof that this event
+        // won projection. Resolve every still-live proposal for this exact
+        // project/file/cell/lane in the same transaction as the cell write.
+        //
+        // `cells.event_id = event.id` is deliberately the final authority:
+        // an AD-2 sibling that lost `chainGate` did not advance the cell, so it
+        // must not resolve a proposal either. `draft.created_at <= serverTs`
+        // is the rebuild causality boundary: replaying a historical commit may
+        // rebuild the cell head, but it can never review a proposal staged
+        // later. Drafts carry their own `target_lang` (copied from the owning
+        // run at insert) so a French commit cannot apply a Spanish proposal.
+        // Text equality is exact; normalizing whitespace here would claim a
+        // proposal was applied when the committed artifact differs byte-for-
+        // byte. The partial live-draft index permits at most one reconciled row
+        // for this cell+lane, so its activity fact reuses the winning commit's
+        // UUIDv7: stable on replay, with no invented ID shape. A malformed
+        // legacy envelope skips only the evidence INSERT via the UUIDv7
+        // predicate; it must never roll back the cell/draft projection.
+        stmts.push(
+          db
+            .prepare(
+              `WITH reconciled AS (
+                 UPDATE contextual_drafts AS draft
+                    SET status = CASE WHEN draft.text = ? THEN 'applied' ELSE 'superseded' END,
+                        reviewed_at = to_timestamp(?::double precision / 1000.0),
+                        reviewed_by = ?
+                  WHERE draft.project_id = ?
+                    AND draft.file_id = ?
+                    AND draft.cell_id = ?
+                    AND draft.created_at <= to_timestamp(?::double precision / 1000.0)
+                    AND draft.status = 'proposed'
+                    AND draft.target_lang = ?
+                    AND EXISTS (
+                      SELECT 1
+                        FROM cells AS projected
+                       WHERE projected.project_id = ?
+                         AND projected.file_id = ?
+                         AND projected.cell_id = ?
+                         AND projected.side = 'target'
+                         AND projected.target_lang = ?
+                         AND projected.event_id = ?
+                    )
+                 RETURNING draft.id, draft.run_id, draft.project_id,
+                           draft.file_id, draft.cell_id, draft.status
+               )
+               INSERT INTO contextual_run_events
+                 (id, run_id, project_id, file_id, kind, span_id, span_label,
+                  status, phase, summary, details, created_at)
+               SELECT ?, run_id, project_id, file_id, 'draft_reviewed', NULL, NULL,
+                      status,
+                      NULL,
+                      CASE WHEN status = 'applied' THEN 'Draft applied' ELSE 'Draft superseded' END,
+                      jsonb_build_object(
+                        'draftId', left(id, 256),
+                        'cellId', left(cell_id, 256),
+                        'outcome', status
+                      ),
+                      to_timestamp(?::double precision / 1000.0)
+                 FROM reconciled
+                WHERE octet_length(run_id) <= 512
+                  AND octet_length(project_id) <= 512
+                  AND octet_length(file_id) <= 512
+                  AND ? ~ '^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-7[0-9A-Fa-f]{3}-[89ABab][0-9A-Fa-f]{3}-[0-9A-Fa-f]{12}$'
+               ON CONFLICT (id) DO NOTHING`,
+            )
+            .bind(
+              value,
+              event.serverTs,
+              event.author,
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              event.serverTs,
+              lane,
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              lane,
+              event.id,
+              event.id,
+              event.serverTs,
+              event.id,
             ),
         )
       } else {
@@ -632,33 +759,64 @@ export function buildEventProjectionStmts(
         // (it's null on source-side rows by definition). Source-side
         // validations aren't a v1 concept, so `validated` is left alone
         // here — for source-side rows it stays at its initial 0 forever.
+        // A TRANSCRIPT-ONLY COMMIT MUST NOT BLANK THE FILENAME. The editor
+        // resends `value` unchanged on a media correction, so normally this
+        // writes the filename back over itself — but a payload carrying only
+        // `transcription` (an older client, or any other caller) would
+        // otherwise land `value = ''` through the `?? ''` above and destroy
+        // the import record the correction was written to protect. The chain
+        // head still advances either way, which is what flags downstream
+        // targets stale (AD-9): the text translators work from has changed.
+        const spCommit = p as EventPayloads['source.cell.commit']
+        const transcriptOnly = p.value === undefined && typeof spCommit.transcription === 'string'
         stmts.push(
           db
             .prepare(
-              `UPDATE cells SET
-                value         = ?,
-                value_html    = ?,
-                event_id      = ?,
-                last_editor   = ?,
-                last_edit_at  = ?,
-                word_count    = ?,
-                content_hash  = ?
-              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'${gateAnd}`,
+              transcriptOnly
+                ? `UPDATE cells SET
+                    event_id      = ?,
+                    last_editor   = ?,
+                    last_edit_at  = ?
+                  WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'${gateAnd}`
+                : `UPDATE cells SET
+                    value         = ?,
+                    value_html    = ?,
+                    event_id      = ?,
+                    last_editor   = ?,
+                    last_edit_at  = ?,
+                    word_count    = ?,
+                    content_hash  = ?
+                  WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'${gateAnd}`,
             )
             .bind(
-              value,
-              valueHtml,
-              event.id,
-              event.author,
-              event.serverTs,
-              wordCount,
-              hash,
+              ...(transcriptOnly
+                ? [event.id, event.author, event.serverTs]
+                : [value, valueHtml, event.id, event.author, event.serverTs, wordCount, hash]),
               event.projectId,
               event.fileId,
               event.cellId,
               ...gateBinds,
             ),
         )
+
+        // AQU-847: a source edit on an imported MEDIA section corrects its
+        // TRANSCRIPT, not its `value` — `value` holds the import filename and
+        // stays put as provenance. Conditional (only when supplied) so every
+        // ordinary text-cell source commit projects exactly as before, and
+        // scoped to side='source' like the `cell.audio.attach` transcript
+        // write it mirrors. Without this the correction was accepted, chained,
+        // and then silently discarded.
+        const sp = p as EventPayloads['source.cell.commit']
+        if (typeof sp.transcription === 'string') {
+          stmts.push(
+            db
+              .prepare(
+                `UPDATE cells SET transcription = ?
+                  WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+              )
+              .bind(sp.transcription, event.projectId, event.fileId, event.cellId),
+          )
+        }
       }
 
       // FTS5 maintenance (post-DML): insert the new indexed value now that
@@ -816,7 +974,7 @@ export function buildEventProjectionStmts(
         stmts.push(
           db
             .prepare(
-              `UPDATE cells SET ai_drafted = 0
+              `UPDATE cells SET ai_drafted = 0, ai_draft = NULL
                WHERE project_id = ? AND file_id = ? AND cell_id = ?
                  AND side = 'target' AND target_lang = ?`,
             )
@@ -2166,6 +2324,26 @@ export function isChainMutatingKind(kind: string): boolean {
 }
 
 /**
+ * AQU-931: whether an event COMPETES for its AD-2 chain slot. Chain-mutating
+ * kinds arbitrate first-child-of-parent — EXCEPT a parent-null cell delete.
+ * That shape is the trusted tombstone (the AQU-747 mapper retraction and the
+ * AQU-910 deletion-by-absence pass both mint deletes with parentId null): it
+ * extends no chain, and arbitrating it at the genesis slot makes it LOSE to
+ * the cell's own `source.cell.create` on replay — so a projection rebuild
+ * silently resurrected every retracted cell. All three arbitration sites
+ * (the live claim in handlers/cell-events.ts, rebuild.ts's in-memory
+ * childKey, and isWinningChild's sibling filter) must use this predicate —
+ * or replay diverges from live.
+ */
+export function isChainArbitrated(kind: string, parentId: string | null | undefined): boolean {
+  if (!CHAIN_MUTATING_KINDS.has(kind)) return false
+  if (parentId == null && (kind === 'source.cell.delete' || kind === 'target.cell.delete')) {
+    return false
+  }
+  return true
+}
+
+/**
  * AD-2 first-child-of-parent guard. Returns true if this event is the
  * winning child for its `(project_id, file_id, cell_id, parent_id)` — that
  * is, no other CHAIN-MUTATING event with the same key has been accepted
@@ -2191,6 +2369,9 @@ export async function isWinningChild(
     // File-level events have no chain — always "winning".
     return true
   }
+  // A non-arbitrated event (parent-null delete tombstone) never competes —
+  // and never blocks a competitor (see the sibling loop below). AQU-931.
+  if (!isChainArbitrated(candidate.kind, candidate.parentId)) return true
 
   // Build the SQL with a NULL-aware parent_id predicate. We also filter
   // to chain-mutating kinds so a sibling validation event doesn't block a
@@ -2229,6 +2410,9 @@ export async function isWinningChild(
     candidate.payload,
   )
   for (const row of results ?? []) {
+    // Non-arbitrated siblings (parent-null delete tombstones) hold no slot —
+    // they must not beat a later genesis create to it (AQU-931).
+    if (parentIsNull && !isChainArbitrated(row.kind, null)) continue
     let rowPayload: unknown = null
     try {
       rowPayload = JSON.parse(row.payload)

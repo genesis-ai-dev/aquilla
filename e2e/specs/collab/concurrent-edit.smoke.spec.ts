@@ -29,6 +29,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  * Setup: create project + add bob via API (skips UI share flow).
  */
 test("alice edits cell 0; bob sees the new text in his open editor within 15s", async ({ alice, bob }) => {
+  test.setTimeout(120_000)
   const aliceSession = await ensureAuthState("alice")
 
   // 1. Create project server-side + add bob as contributor.

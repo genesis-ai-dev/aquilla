@@ -2,6 +2,7 @@ import { useCallback, useState, useTransition } from "react"
 import { useNavigate, type NavigateOptions } from "react-router-dom"
 
 import { BlockingLoadingOverlay } from "@/components/ui/loading-overlay"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 /**
  * Navigate into a lazy route while surfacing the load as an observable pending
@@ -27,6 +28,7 @@ import { BlockingLoadingOverlay } from "@/components/ui/loading-overlay"
  * moment the transition commits or aborts.
  */
 export function useOpenWorkspace() {
+  const t = useT()
   const navigate = useNavigate()
   const [isPending, startTransition] = useTransition()
   const [pendingTo, setPendingTo] = useState<string | null>(null)
@@ -48,7 +50,7 @@ export function useOpenWorkspace() {
 
   const overlay = isPending ? (
     <BlockingLoadingOverlay
-      label="Opening project"
+      label={t("workspace.openWorkspace.openingProject")}
       data-testid="workspace-opening-overlay"
     />
   ) : null

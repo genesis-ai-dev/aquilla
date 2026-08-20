@@ -13,6 +13,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { addLlmCall } from "@/lib/usage/record-usage"
 import { getProject, updateProject } from "@/lib/store/project-index"
 import type { CompletionSettings, FileReference, TranslationRule } from "@/lib/parsers/types"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 const FALLBACK_SETTINGS: CompletionSettings = {
   provider: "frontier",
@@ -49,6 +50,7 @@ interface RuleSuggestDialogProps {
 }
 
 export function RuleSuggestDialog({ files: _files, completionSettings, onAdd, projectId, cells, canManage = true, deniedReason }: RuleSuggestDialogProps) {
+  const { t } = useI18n()
   const { session } = useFrontierSession()
   const { available: frontierAvailable } = useFrontierHealth()
   const [open, setOpen] = useState(false)
@@ -159,13 +161,12 @@ export function RuleSuggestDialog({ files: _files, completionSettings, onAdd, pr
             render={
               <Button
                 variant="outline"
-                size="sm"
                 disabled={!isConfigured || !canManage}
               />
             }
           >
             <Sparkles className="mr-1 h-3.5 w-3.5" />
-            Suggest from edits
+            {t("rules.suggestFromEdits.triggerButton")}
           </DialogTrigger>
         </span>
       </AppTooltip>
@@ -180,17 +181,16 @@ export function RuleSuggestDialog({ files: _files, completionSettings, onAdd, pr
         {stage === "idle" && (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              The LLM will analyze your human-validated translations and propose rules based on patterns it finds.
-              You'll review each suggestion before anything is saved.
+              {t("rules.suggestDialog.description")}
             </p>
             {error && <p className="text-sm text-destructive">{error}</p>}
             <Button onClick={handleSuggest} disabled={!isConfigured} className="w-full">
               <Sparkles className="mr-1 h-4 w-4" />
-              Analyze my validated edits
+              {t("rules.suggestDialog.analyzeButton")}
             </Button>
             {!isConfigured && (
               <p className="text-xs text-muted-foreground">
-                Configure your LLM endpoint in project settings first.
+                {t("rules.importDialog.configureLlmFirst")}
               </p>
             )}
           </div>
@@ -208,7 +208,7 @@ export function RuleSuggestDialog({ files: _files, completionSettings, onAdd, pr
         {stage === "review" && (
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Analyzed {pairCount} validated pair{pairCount !== 1 ? "s" : ""}. Toggle suggestions to include or exclude.
+              {t("rules.suggestDialog.analyzedSummary", { count: pairCount })}
             </p>
             <ul className="space-y-2 max-h-[400px] overflow-auto">
               {suggestions.map((s, i) => {
@@ -238,20 +238,19 @@ export function RuleSuggestDialog({ files: _files, completionSettings, onAdd, pr
                         <div className="mt-1 rounded bg-muted/50 p-1.5">
                           <p className="font-mono text-[11px] leading-relaxed break-all">
                             {s.check.type === "source-target-match" && (
-                              <>match both: <span className="font-semibold">{s.check.pattern}</span></>
+                              <>{t("rules.importReview.checkLabel.sourceTargetMatch")} <span className="font-semibold">{s.check.pattern}</span></>
                             )}
                             {s.check.type === "target-forbids" && (
-                              <>target forbids: <span className="font-semibold">{s.check.targetPattern}</span></>
+                              <>{t("rules.importReview.checkLabel.targetForbids")} <span className="font-semibold">{s.check.targetPattern}</span></>
                             )}
                             {s.check.type === "source-requires-target" && (
-                              <>if source has <span className="font-semibold">{s.check.sourcePattern}</span> → target needs <span className="font-semibold">{s.check.targetPattern}</span></>
+                              <>{t("rules.importReview.checkLabel.sourceRequiresTargetPrefix")} <span className="font-semibold">{s.check.sourcePattern}</span> {t("rules.importReview.checkLabel.sourceRequiresTargetSuffix")} <span className="font-semibold">{s.check.targetPattern}</span></>
                             )}
                           </p>
                         </div>
                       </div>
                       <Button
                         variant={isAccepted ? "default" : "outline"}
-                        size="sm"
                         onClick={() => toggleAccept(i)}
                         className="flex-shrink-0"
                       >
@@ -264,14 +263,14 @@ export function RuleSuggestDialog({ files: _files, completionSettings, onAdd, pr
             </ul>
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setStage("idle")} className="flex-1">
-                Back
+                {t("common.back")}
               </Button>
               <Button
                 onClick={handleCommit}
                 disabled={accepted.size === 0}
                 className="flex-1"
               >
-                Add {accepted.size} rule{accepted.size !== 1 ? "s" : ""}
+                {t("rules.importReview.addButton", { count: accepted.size })}
               </Button>
             </div>
           </div>

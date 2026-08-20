@@ -1,11 +1,13 @@
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 function Spinner({ className, ...props }: React.ComponentProps<"svg">) {
+  const t = useT()
   return (
     <svg
       data-slot="spinner"
       role="status"
-      aria-label="Loading"
+      aria-label={t("common.loadingSpinner")}
       xmlns="http://www.w3.org/2000/svg"
       fill="none"
       viewBox="0 0 24 24"

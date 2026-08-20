@@ -1,5 +1,6 @@
 import { FRONTIER_API_URL } from "./sync-token"
 import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
+import { t } from "@/lib/i18n/standalone"
 
 /**
  * Provider-keyed map of org-scoped API keys. Keys are provider identifiers
@@ -59,6 +60,21 @@ export interface OrgWideSettings {
    * Enforced server-side in sync-worker (authorize.ts self-assign carve-out).
    */
   allowSelfAssignment?: boolean
+  /**
+   * AQU-822: Minimum role level allowed to manage a project's termbase —
+   * add, edit, delete, and archive concepts. Default (when absent) =
+   * PROJECT_LEAD (500), the level the terminology UI has always shown the
+   * editor at. Org owners can lower it (e.g. CONTRIBUTOR = 400, so
+   * translators own their own terminology) or raise it.
+   *
+   * Lowering the floor grants FULL terminology management at that level —
+   * there is no draft/suggestion/approval layer. It does NOT widen any other
+   * project setting: the server carve-out applies only to a write whose sole
+   * changed key is `terminology` (auth-worker project-settings route).
+   *
+   * Same OWNER-only write gate as exportMinRole / rosterViewMinRole.
+   */
+  termbaseEditMinRole?: number
   /**
    * AQU-433: Org-scoped provider API keys. Set once by an org owner/maintainer;
    * used as the baseline for all members and projects in the org.
@@ -137,7 +153,7 @@ export async function patchOrgSettings(
   if (res.status === 409) {
     const body = (await res.json()) as { current?: OrgSettingsResponse }
     if (body.current) return { kind: "conflict", latest: body.current }
-    return { kind: "error", status: res.status, message: "version conflict" }
+    return { kind: "error", status: res.status, message: t("org.sync.versionConflictError") }
   }
   if (res.status === 403) {
     return { kind: "forbidden" }

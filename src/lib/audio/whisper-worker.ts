@@ -46,7 +46,12 @@ interface CancelRequest {
   type: "cancel"
 }
 
-type IncomingMessage = TranscribeRequest | WarmupRequest | CancelRequest
+/** AQU-929: drop the cached model session and free its tensors. */
+interface ReleaseRequest {
+  type: "release"
+}
+
+type IncomingMessage = TranscribeRequest | WarmupRequest | CancelRequest | ReleaseRequest
 
 interface ProgressMessage {
   type: "progress"
@@ -80,8 +85,29 @@ type OutgoingMessage = ProgressMessage | ResultMessage | ErrorMessage | WarmedMe
 let pipePromise: Promise<AutomaticSpeechRecognitionPipeline> | null = null
 let activeModel: string | null = null
 
+/**
+ * AQU-929: tear the cached session down. transformers.js pipelines own ONNX
+ * Runtime sessions whose tensors live outside the JS heap, so dropping the
+ * reference alone does not give the memory back — an un-disposed session
+ * stacked on top of the next one on every model switch.
+ */
+async function disposePipe(): Promise<void> {
+  const pending = pipePromise
+  pipePromise = null
+  activeModel = null
+  if (!pending) return
+  try {
+    const pipe = (await pending) as unknown as { dispose?: () => Promise<void> | void }
+    await pipe.dispose?.()
+  } catch (e) {
+    console.warn("[whisper-worker] dispose failed:", e)
+  }
+}
+
 async function getPipe(model: string, requestId: string): Promise<AutomaticSpeechRecognitionPipeline> {
   if (pipePromise && activeModel === model) return pipePromise
+  // Switching models: release the previous session before loading the next one.
+  if (pipePromise) await disposePipe()
   activeModel = model
   const progressCb = throttleModelProgress((info: unknown) => {
     const i = info as { status?: string; file?: string; loaded?: number; total?: number }
@@ -135,6 +161,10 @@ self.addEventListener("message", async (event: MessageEvent<IncomingMessage>) =>
     }
     return
   }
+  if (msg.type === "release") {
+    await disposePipe()
+    return
+  }
   if (msg.type !== "transcribe") return
 
   try {
@@ -172,4 +202,4 @@ self.addEventListener("message", async (event: MessageEvent<IncomingMessage>) =>
   }
 })
 
-export type { OutgoingMessage, IncomingMessage, TranscribeRequest, WarmupRequest, ProgressMessage, ResultMessage, ErrorMessage, WarmedMessage }
+export type { OutgoingMessage, IncomingMessage, TranscribeRequest, WarmupRequest, ReleaseRequest, ProgressMessage, ResultMessage, ErrorMessage, WarmedMessage }

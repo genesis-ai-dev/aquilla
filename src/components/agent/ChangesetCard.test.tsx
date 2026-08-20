@@ -1,17 +1,58 @@
 /**
- * ChangesetCard tests — the summary/cell-count facts render, the
- * "Review & approve" link points at approvalUrl and opens in a new tab, and
- * (mem-M5) the card polls GET /api/v2/changesets/:id/approval and flips its
- * visual state (badge + disabled link) once the status turns terminal.
+ * ChangesetCard tests.
+ *
+ * Legacy frames (no `digest` on the frame — AQU-926 feature detection): the
+ * summary/cell-count facts render, sample per-cell changes from
+ * GET /api/v2/changesets/:id/approval render inline, Approve/Reject act
+ * in-conversation (approve POSTs the GET's digest — never one the frame
+ * carried), the "View full details" link still points at approvalUrl in a new
+ * tab, and (mem-M5) polling stops once the status turns terminal. These are
+ * the REGRESSION suite for "frames without the new fields render as before".
+ *
+ * Fresh frames (digest/tier/kinds present) render the live review card:
+ * load → diffs, Approve & apply (approve then sync-worker commit, in order),
+ * execution receipt + onApplied revalidation seam, per-item testimony gating,
+ * reject, and the stale/expired drift surface with Refresh. Fixtures mirror
+ * auth-worker/src/routes/changeset-approvals.ts (approval lines 143-156,
+ * approve 234-238, reject 273) and sync-worker/src/external/store.ts
+ * changesetToResponse (166-184) + types.ts ChangesetReceipt (140-148).
+ *
+ * AQU-CMDREG-P1 (docs/COMMAND-REGISTRY-P1.md §1/§2.2/§3.3/§5): the
+ * `superseded` outcome, the `assignedToUserId` routing line (approval literal
+ * line 152), and the held-count line a capped pending list ends with
+ * (sync-worker session-routes.ts handleList 142-151).
  */
 
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ChangesetItem } from "@/lib/agent/run-state"
 import { ChangesetCard } from "./ChangesetCard"
+import { ChangesetHeldNotice } from "./ChangesetHeldNotice"
+import {
+  changesetStatusBadgeClass,
+  changesetStatusLabel,
+  changesetStatusVariant,
+  isTerminalChangesetStatus,
+  testimonyEntriesFor,
+} from "@/lib/agent/changeset-review"
+import { t as standaloneT } from "@/lib/i18n/standalone"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: vi.fn(() => ({ session: { jwt: "test-jwt", username: "alice" }, loading: false })),
+}))
+
+/** Roster the card resolves an assignee's name against. Mutable so one test
+ *  can name the person and the rest can leave it empty (the card then falls
+ *  back to the raw user id, exactly as it does when org policy hides the
+ *  roster). Read lazily inside the hook, so no TDZ against the hoisted mock. */
+let rosterMembers: { userId: number; username: string }[] = []
+vi.mock("@/hooks/useProjectMembers", () => ({
+  useProjectMembers: vi.fn(() => ({
+    members: rosterMembers,
+    isLoading: false,
+    error: null,
+    rosterHidden: false,
+  })),
 }))
 
 function item(overrides: Partial<ChangesetItem> = {}): ChangesetItem {
@@ -26,16 +67,37 @@ function item(overrides: Partial<ChangesetItem> = {}): ChangesetItem {
   }
 }
 
-function mockApprovalStatus(status: string) {
+const DIGEST = "sha256:0123456789abcdef"
+
+function approvalPayload(status: string, extra: Record<string, unknown> = {}) {
+  return {
+    status,
+    digest: DIGEST,
+    changes: {
+      total: 5,
+      truncated: false,
+      items: [
+        { fileId: "f1", fileName: "Genesis", cellId: "c1", canonicalRef: "GEN 1:1", source: "src 1", before: "old 1", after: "new 1" },
+        { fileId: "f1", fileName: "Genesis", cellId: "c2", canonicalRef: "GEN 1:2", source: "src 2", before: null, after: "new 2" },
+        { fileId: "f1", fileName: "Genesis", cellId: "c3", canonicalRef: "GEN 1:3", source: "src 3", before: "old 3", after: "new 3" },
+        { fileId: "f1", fileName: "Genesis", cellId: "c4", canonicalRef: "GEN 1:4", source: "src 4", before: "old 4", after: "new 4" },
+        { fileId: "f1", fileName: "Genesis", cellId: "c5", canonicalRef: "GEN 1:5", source: "src 5", before: "old 5", after: "new 5" },
+      ],
+    },
+    ...extra,
+  }
+}
+
+function mockApproval(status: string, extra: Record<string, unknown> = {}) {
   return vi.fn().mockResolvedValue({
     ok: true,
-    json: async () => ({ status }),
+    json: async () => approvalPayload(status, extra),
   } as Response)
 }
 
 describe("ChangesetCard", () => {
   beforeEach(() => {
-    vi.stubGlobal("fetch", mockApprovalStatus("staged"))
+    vi.stubGlobal("fetch", mockApproval("staged"))
   })
 
   afterEach(() => {
@@ -58,35 +120,105 @@ describe("ChangesetCard", () => {
     expect(container.querySelector('[data-frame-type="changeset.staged"]')).not.toBeNull()
   })
 
-  it("links Review & approve to approvalUrl, opened in a new tab", () => {
+  it("links View full details to approvalUrl, opened in a new tab", () => {
     render(<ChangesetCard item={item()} />)
-    const link = screen.getByRole("link", { name: /Review & approve/ })
+    const link = screen.getByRole("link", { name: /View full details/ })
     expect(link).toHaveAttribute("href", "https://app.example/approve/cs-1")
     expect(link).toHaveAttribute("target", "_blank")
     expect(link).toHaveAttribute("rel", expect.stringContaining("noopener"))
   })
 
-  it("polls the approval route and flips the badge + disables the link once approved", async () => {
-    const fetchMock = mockApprovalStatus("approved")
+  it("renders a capped sample of the per-cell changes from the approval payload", async () => {
+    render(<ChangesetCard item={item()} />)
+
+    // First three of five changes render; the rest are counted, not shown.
+    expect(await screen.findByText("new 1")).toBeInTheDocument()
+    expect(screen.getByText("old 1")).toBeInTheDocument()
+    expect(screen.getByText("new 3")).toBeInTheDocument()
+    expect(screen.queryByText("new 4")).not.toBeInTheDocument()
+    expect(screen.getByText(/and 2 more changes/i)).toBeInTheDocument()
+  })
+
+  it("approves in place: POSTs the fetched digest and shows the approved state", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).endsWith("/approval")) {
+        return { ok: true, json: async () => approvalPayload("staged") } as Response
+      }
+      if (String(url).endsWith("/approve")) {
+        const body = JSON.parse(String(init?.body)) as { digest: string }
+        expect(body.digest).toBe(DIGEST)
+        return { ok: true, json: async () => ({ confirmationId: "conf-1" }) } as Response
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
     vi.stubGlobal("fetch", fetchMock)
+
     const { container } = render(<ChangesetCard item={item()} />)
+    const approveBtn = await screen.findByRole("button", { name: /Approve/ })
+    approveBtn.click()
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        expect.stringContaining("/api/v2/changesets/cs-1/approval"),
-        expect.objectContaining({ headers: { Authorization: "Bearer test-jwt" } }),
-      ),
+      expect(screen.getByText(/the agent can now commit/i)).toBeInTheDocument(),
     )
-    await waitFor(() => expect(screen.getByText("Approved")).toBeInTheDocument())
     expect(container.querySelector('[data-changeset-status="approved"]')).not.toBeNull()
-    expect(screen.queryByRole("link", { name: /Review & approve/ })).not.toBeInTheDocument()
-    expect(screen.getByText("Review & approve")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Approve/ })).not.toBeInTheDocument()
+  })
+
+  it("rejects in place and flips to Discarded", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).endsWith("/approval")) {
+        return { ok: true, json: async () => approvalPayload("staged") } as Response
+      }
+      if (String(url).endsWith("/reject")) {
+        return { ok: true, json: async () => ({ changesetId: "cs-1", status: "discarded" }) } as Response
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    render(<ChangesetCard item={item()} />)
+    const rejectBtn = await screen.findByRole("button", { name: /Reject/ })
+    rejectBtn.click()
+
+    await waitFor(() => expect(screen.getByText("Discarded")).toBeInTheDocument())
+    expect(screen.queryByRole("button", { name: /Approve/ })).not.toBeInTheDocument()
+  })
+
+  it("surfaces an action error without losing the card", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).endsWith("/approval")) {
+        return { ok: true, json: async () => approvalPayload("staged") } as Response
+      }
+      return {
+        ok: false,
+        status: 409,
+        json: async () => ({ error: { code: "validation_failed", message: "changeset has expired" } }),
+      } as Response
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    render(<ChangesetCard item={item()} />)
+    const approveBtn = await screen.findByRole("button", { name: /Approve/ })
+    approveBtn.click()
+
+    await waitFor(() => expect(screen.getByText("changeset has expired")).toBeInTheDocument())
+    // Still actionable after a failed attempt.
+    expect(screen.getByRole("button", { name: /Approve/ })).toBeInTheDocument()
+  })
+
+  it("shows Committed and no action buttons for a committed changeset", async () => {
+    vi.stubGlobal("fetch", mockApproval("committed"))
+    render(<ChangesetCard item={item()} />)
+
+    await waitFor(() => expect(screen.getByText("Committed")).toBeInTheDocument())
+    expect(screen.queryByRole("button", { name: /Approve/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Reject/ })).not.toBeInTheDocument()
   })
 
   it("stops polling once a terminal status is reached", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     try {
-      const fetchMock = mockApprovalStatus("discarded")
+      const fetchMock = mockApproval("discarded")
       vi.stubGlobal("fetch", fetchMock)
       render(<ChangesetCard item={item()} />)
 
@@ -99,5 +231,527 @@ describe("ChangesetCard", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it("treats a superseded legacy frame as terminal: labelled, unactionable, and it stops polling", async () => {
+    // Adding `superseded` to the terminal set is the one behaviour change the
+    // legacy card sees (P1 §1) — before it, this status polled forever.
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const fetchMock = mockApproval("superseded")
+      vi.stubGlobal("fetch", fetchMock)
+      render(<ChangesetCard item={item()} />)
+
+      await waitFor(() => expect(screen.getByText("Already done")).toBeInTheDocument())
+      expect(screen.queryByRole("button", { name: /Approve/ })).not.toBeInTheDocument()
+      const callsAtTerminal = fetchMock.mock.calls.length
+      await vi.advanceTimersByTimeAsync(15000)
+      expect(fetchMock.mock.calls.length).toBe(callsAtTerminal)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("never shows the live-flow Approve & apply for a legacy frame (regression)", async () => {
+    render(<ChangesetCard item={item()} />)
+    await screen.findByRole("button", { name: /^Approve$/ })
+    expect(screen.queryByRole("button", { name: /Approve & apply/ })).not.toBeInTheDocument()
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// Live review card — frames carrying the AQU-926 digest/tier/kinds fields.
+// ───────────────────────────────────────────────────────────────────────────
+
+const LIVE_DIGEST = "sha256:feedfacefeedface0123456789abcdef"
+
+function liveItem(overrides: Partial<ChangesetItem> = {}): ChangesetItem {
+  return {
+    id: "i0",
+    kind: "changeset",
+    changesetId: "cs-9",
+    approvalUrl: "https://app.example/approve/cs-9",
+    summary: "Set 2 translations in Genesis",
+    cellCount: 2,
+    digest: LIVE_DIGEST,
+    tier: "prepared",
+    kinds: ["SetTranslation"],
+    ...overrides,
+  }
+}
+
+/** Mirrors auth-worker changeset-approvals.ts GET response (lines 143-156),
+ *  with per-cell rows shaped by buildChangeDetails. `assignedToUserId` is the
+ *  P1 §2.2 field (literal line 152) — always sent, null when unassigned. */
+function liveApproval(overrides: Record<string, unknown> = {}) {
+  return {
+    changesetId: "cs-9",
+    projectId: "proj-1",
+    projectName: "Blackfoot",
+    status: "staged",
+    autonomyMode: "ask",
+    assignedToUserId: null,
+    summary: { translationsAdded: 1, translationsModified: 1, warnings: [] },
+    changes: {
+      total: 2,
+      truncated: false,
+      items: [
+        { fileId: "f1", fileName: "Genesis", cellId: "c1", canonicalRef: "GEN 1:1", source: "In the beginning", before: null, after: "Im Anfang" },
+        { fileId: "f1", fileName: "Genesis", cellId: "c2", canonicalRef: "GEN 1:2", source: "And the earth", before: "alt", after: "Und die Erde" },
+      ],
+    },
+    digest: LIVE_DIGEST,
+    createdAt: "2026-08-01T00:00:00.000Z",
+    expiresAt: "2026-08-02T00:00:00.000Z",
+    ...overrides,
+  }
+}
+
+/** Mirrors sync-worker store.ts changesetToResponse (lines 98-116); receipt
+ *  per types.ts ChangesetReceipt (lines 113-121). */
+const COMMITTED_RESPONSE = {
+  id: "cs-9",
+  projectId: "proj-1",
+  createdByUserId: "42",
+  credentialId: "session",
+  autonomyMode: "ask",
+  status: "committed",
+  commands: [{ kind: "SetTranslation", fileId: "f1", cellId: "c1", value: "Im Anfang" }],
+  preconditions: [],
+  summary: { translationsAdded: 1, translationsModified: 1, warnings: [] },
+  digest: LIVE_DIGEST,
+  receipt: {
+    eventIds: ["ev-1", "ev-2"],
+    appliedCount: 2,
+    staleCount: 0,
+    warnings: [],
+    committedAt: "2026-08-01T01:00:00.000Z",
+  },
+  confirmationId: "conf-1",
+  createdAt: "2026-08-01T00:00:00.000Z",
+  expiresAt: "2026-08-02T00:00:00.000Z",
+  committedAt: "2026-08-01T01:00:00.000Z",
+}
+
+const SYNC_TOKEN_RESPONSE = {
+  token: "sync-tok",
+  expiresIn: 900,
+  role: { level: 700, name: "OWNER", source: "creator" },
+}
+
+type RouteMap = Partial<Record<"approval" | "approve" | "syncToken" | "commit" | "reject", () => Response>>
+
+/** URL-dispatching fetch stub covering the full approve→mint→commit chain. */
+function routedFetch(routes: RouteMap) {
+  return vi.fn(async (url: string, _init?: RequestInit) => {
+    const u = String(url)
+    if (u.includes("/approval")) return (routes.approval ?? (() => json(liveApproval())))()
+    if (u.includes("/approve")) {
+      return (routes.approve ?? (() => json({ confirmationId: "conf-1", expiresAt: "2026-08-01T00:15:00.000Z" })))()
+    }
+    if (u.includes("/sync-token")) return (routes.syncToken ?? (() => json(SYNC_TOKEN_RESPONSE)))()
+    if (u.includes("/commit")) return (routes.commit ?? (() => json(COMMITTED_RESPONSE)))()
+    if (u.includes("/reject")) return (routes.reject ?? (() => json({ changesetId: "cs-9", status: "discarded" })))()
+    throw new Error(`unexpected fetch: ${u}`)
+  })
+}
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } })
+}
+
+function errorJson(status: number, code: string, message: string): Response {
+  return json({ error: { code, message } }, status)
+}
+
+describe("ChangesetCard — live review (AQU-926 frames)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it("loads the approval and renders diffs, kinds, and Approve & apply", async () => {
+    vi.stubGlobal("fetch", routedFetch({}))
+    render(<ChangesetCard item={liveItem()} />)
+
+    expect(await screen.findByText("Im Anfang")).toBeInTheDocument()
+    expect(screen.getByText("Und die Erde")).toBeInTheDocument()
+    // Replaced text renders struck through as the before value.
+    expect(screen.getByText("alt")).toBeInTheDocument()
+    expect(screen.getByText("SetTranslation")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Approve & apply/ })).toBeEnabled()
+    expect(screen.getByRole("button", { name: /Reject/ })).toBeEnabled()
+    // The frame's summary line still heads the card.
+    expect(screen.getByText("Set 2 translations in Genesis")).toBeInTheDocument()
+  })
+
+  it("caps the diff list at 20 rows and counts the remainder", async () => {
+    const items = Array.from({ length: 25 }, (_, i) => ({
+      fileId: "f1",
+      fileName: "Genesis",
+      cellId: `c${i}`,
+      canonicalRef: `GEN 1:${i + 1}`,
+      source: `src ${i}`,
+      before: null,
+      after: `after ${i}`,
+    }))
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({ approval: () => json(liveApproval({ changes: { total: 25, truncated: false, items } })) }),
+    )
+    render(<ChangesetCard item={liveItem()} />)
+
+    expect(await screen.findByText("after 0")).toBeInTheDocument()
+    expect(screen.getByText("after 19")).toBeInTheDocument()
+    expect(screen.queryByText("after 20")).not.toBeInTheDocument()
+    expect(screen.getByText(/and 5 more changes/i)).toBeInTheDocument()
+  })
+
+  it("Approve & apply: approves with the GET digest, then commits, then reports the receipt", async () => {
+    const fetchMock = routedFetch({})
+    vi.stubGlobal("fetch", fetchMock)
+    const onApplied = vi.fn()
+    const { container } = render(<ChangesetCard item={liveItem()} onApplied={onApplied} />)
+
+    fireEvent.click(await screen.findByRole("button", { name: /Approve & apply/ }))
+
+    await waitFor(() => expect(screen.getByText(/Applied 2 changes\./)).toBeInTheDocument())
+    expect(container.querySelector('[data-changeset-status="committed"]')).not.toBeNull()
+    expect(screen.getByText("Committed")).toBeInTheDocument()
+
+    // Call order: approval GET, approve POST (with the GET's digest), sync-token
+    // mint, sync-worker commit.
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]))
+    expect(urls[0]).toContain("/api/v2/changesets/cs-9/approval")
+    expect(urls[1]).toContain("/api/v2/changesets/cs-9/approve")
+    expect(urls[2]).toContain("/api/v2/sync-token")
+    expect(urls[3]).toContain("/api/v1/changesets/proj-1/cs-9/commit")
+    const approveInit = fetchMock.mock.calls[1][1]
+    expect(JSON.parse(String(approveInit?.body))).toEqual({ digest: LIVE_DIGEST })
+
+    // Revalidation seam: receipt event ids + the diffed cell ids.
+    expect(onApplied).toHaveBeenCalledWith(["ev-1", "ev-2"], ["c1", "c2"])
+    // Buttons are gone once committed.
+    expect(screen.queryByRole("button", { name: /Approve & apply/ })).not.toBeInTheDocument()
+  })
+
+  it("gates Approve & apply behind per-item testimony confirmation", async () => {
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({
+        approval: () =>
+          json(
+            liveApproval({
+              summary: {
+                warnings: [],
+                events: [
+                  { kind: "cell.validate", count: 2, testimony: true },
+                  { kind: "comment.create", count: 1, testimony: false },
+                ],
+              },
+            }),
+          ),
+      }),
+    )
+    render(<ChangesetCard item={liveItem({ tier: "structural", kinds: ["EmitEvents"] })} />)
+
+    // Only the testimony-marked entry needs confirmation.
+    const label = await screen.findByText("cell.validate × 2")
+    expect(screen.queryByText(/comment\.create/)).not.toBeInTheDocument()
+    expect(screen.getAllByRole("checkbox")).toHaveLength(1)
+    const applyButton = screen.getByRole("button", { name: /Approve & apply/ })
+    expect(applyButton).toBeDisabled()
+
+    // Clicking the label toggles the Base UI checkbox through its hidden
+    // labelable input (same idiom as AssignModal tests).
+    fireEvent.click(label)
+    await waitFor(() => expect(screen.getByRole("button", { name: /Approve & apply/ })).toBeEnabled())
+    expect(screen.getByRole("checkbox").getAttribute("aria-checked")).toBe("true")
+  })
+
+  it("requires EVERY testimony item before enabling (two entries)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({
+        approval: () =>
+          json(
+            liveApproval({
+              summary: {
+                warnings: [],
+                events: [
+                  { kind: "cell.validate", count: 2, testimony: true },
+                  { kind: "cell.unvalidate", count: 1, testimony: true },
+                ],
+              },
+            }),
+          ),
+      }),
+    )
+    render(<ChangesetCard item={liveItem({ tier: "structural", kinds: ["EmitEvents"] })} />)
+
+    fireEvent.click(await screen.findByText("cell.validate × 2"))
+    // One of two confirmed — still gated.
+    await waitFor(() =>
+      expect(screen.getAllByRole("checkbox")[0].getAttribute("aria-checked")).toBe("true"),
+    )
+    expect(screen.getByRole("button", { name: /Approve & apply/ })).toBeDisabled()
+
+    fireEvent.click(screen.getByText("cell.unvalidate × 1"))
+    await waitFor(() => expect(screen.getByRole("button", { name: /Approve & apply/ })).toBeEnabled())
+  })
+
+  it("rejects in place and flips to Discarded", async () => {
+    const fetchMock = routedFetch({})
+    vi.stubGlobal("fetch", fetchMock)
+    render(<ChangesetCard item={liveItem()} />)
+
+    fireEvent.click(await screen.findByRole("button", { name: /Reject/ }))
+
+    await waitFor(() => expect(screen.getByText("Discarded")).toBeInTheDocument())
+    expect(screen.queryByRole("button", { name: /Approve & apply/ })).not.toBeInTheDocument()
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]))
+    expect(urls.some((u) => u.includes("/api/v2/changesets/cs-9/reject"))).toBe(true)
+  })
+
+  it("surfaces a stale commit (plan_stale) with the message, Stale chip, and a working Refresh", async () => {
+    const fetchMock = routedFetch({
+      commit: () => errorJson(409, "plan_stale", "cells changed since staging"),
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    render(<ChangesetCard item={liveItem()} />)
+
+    fireEvent.click(await screen.findByRole("button", { name: /Approve & apply/ }))
+
+    await waitFor(() => expect(screen.getByText("cells changed since staging")).toBeInTheDocument())
+    expect(screen.getByText("Stale")).toBeInTheDocument()
+
+    const approvalCallsBefore = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/approval")).length
+    fireEvent.click(screen.getByRole("button", { name: /Refresh/ }))
+    await waitFor(() => {
+      const approvalCalls = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/approval")).length
+      expect(approvalCalls).toBe(approvalCallsBefore + 1)
+    })
+  })
+
+  it("surfaces an expired approve with the server message and a Refresh", async () => {
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({ approve: () => errorJson(409, "validation_failed", "changeset has expired") }),
+    )
+    render(<ChangesetCard item={liveItem()} />)
+
+    fireEvent.click(await screen.findByRole("button", { name: /Approve & apply/ }))
+
+    await waitFor(() => expect(screen.getByText("changeset has expired")).toBeInTheDocument())
+    expect(screen.getByRole("button", { name: /Refresh/ })).toBeInTheDocument()
+    // Still reviewable after the failure — the card is not lost.
+    expect(screen.getByRole("button", { name: /Approve & apply/ })).toBeInTheDocument()
+  })
+
+  it("surfaces a digest mismatch as a refreshable drift error", async () => {
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({
+        approve: () =>
+          json(
+            {
+              error: {
+                code: "validation_failed",
+                message: "digest mismatch — the plan you're approving doesn't match the staged changeset",
+                details: { code: "digest_mismatch" },
+              },
+            },
+            409,
+          ),
+      }),
+    )
+    render(<ChangesetCard item={liveItem()} />)
+
+    fireEvent.click(await screen.findByRole("button", { name: /Approve & apply/ }))
+
+    await waitFor(() => expect(screen.getByText(/digest mismatch/)).toBeInTheDocument())
+    expect(screen.getByRole("button", { name: /Refresh/ })).toBeInTheDocument()
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// testimonyEntriesFor — the fallback ladder when the summary doesn't itemize.
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("testimonyEntriesFor", () => {
+  const base = { summary: "Validate MRK 4", tier: undefined, kinds: undefined } as const
+
+  function approvalWith(events?: { kind: string; count: number; testimony?: boolean }[]) {
+    return liveApproval(
+      events ? { summary: { warnings: [], events } } : { summary: { warnings: [] } },
+    ) as unknown as import("@/lib/agent/changeset-api").ChangesetApproval
+  }
+
+  it("prefers summary-marked testimony events, ignoring prepared ones", () => {
+    const entries = testimonyEntriesFor(
+      { ...base, tier: "structural", kinds: ["EmitEvents"] },
+      approvalWith([
+        { kind: "cell.validate", count: 2, testimony: true },
+        { kind: "comment.create", count: 5 },
+      ]),
+    )
+    expect(entries).toEqual([{ key: "event:cell.validate", label: "cell.validate × 2" }])
+  })
+
+  it("treats registry testimony kinds as testimony even without the summary mark", () => {
+    const entries = testimonyEntriesFor(
+      { ...base },
+      approvalWith([{ kind: "cell.unvalidate", count: 1 }]),
+    )
+    expect(entries).toEqual([{ key: "event:cell.unvalidate", label: "cell.unvalidate × 1" }])
+  })
+
+  it("tier=testimony with no itemized events falls back to the frame kinds", () => {
+    const entries = testimonyEntriesFor(
+      { ...base, tier: "testimony", kinds: ["EmitEvents"] },
+      approvalWith(),
+    )
+    expect(entries).toEqual([{ key: "kind:EmitEvents", label: "EmitEvents" }])
+  })
+
+  it("tier=testimony with nothing itemizable gates on a single changeset-wide entry", () => {
+    const entries = testimonyEntriesFor({ ...base, tier: "testimony" }, approvalWith())
+    expect(entries).toEqual([{ key: "changeset", label: "Validate MRK 4" }])
+  })
+
+  it("prepared changesets with no testimony marks need no confirmations", () => {
+    const entries = testimonyEntriesFor(
+      { ...base, tier: "prepared", kinds: ["SetTranslation"] },
+      approvalWith([{ kind: "target.cell.commit", count: 4 }]),
+    )
+    expect(entries).toEqual([])
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────────────
+// AQU-CMDREG-P1 — supersession, routing, and the held count (§1/§2.2/§3.3/§5).
+// ───────────────────────────────────────────────────────────────────────────
+
+describe("changeset status helpers (P1 §1)", () => {
+  it("gives superseded its own label — never stale's", () => {
+    expect(changesetStatusLabel(standaloneT, "superseded", false)).toBe("Already done")
+    expect(changesetStatusLabel(standaloneT, "stale", false)).toBe("Stale")
+    expect(changesetStatusLabel(standaloneT, "superseded", false)).not.toBe(
+      changesetStatusLabel(standaloneT, "stale", false),
+    )
+  })
+
+  it("styles superseded as a healthy outcome, not as the stale problem", () => {
+    // stale/expired are the unhealthy terminals: bare outline chips.
+    expect(changesetStatusVariant("stale", false)).toBe("outline")
+    expect(changesetStatusVariant("expired", false)).toBe("outline")
+    // superseded joins committed in the healthy group…
+    expect(changesetStatusVariant("superseded", false)).toBe("default")
+    // …and carries its own tone class, so it doesn't read as work this card did.
+    expect(changesetStatusBadgeClass("superseded")).toContain("emerald")
+    expect(changesetStatusBadgeClass("stale")).toBe("")
+    expect(changesetStatusBadgeClass("committed")).toBe("")
+  })
+
+  it("treats superseded as terminal — nothing left to act on", () => {
+    expect(isTerminalChangesetStatus("superseded")).toBe(true)
+    expect(isTerminalChangesetStatus("staged")).toBe(false)
+  })
+})
+
+describe("ChangesetCard — superseded (P1 §1/§5)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it("renders the Already done chip with the healthy tone and explains why", async () => {
+    vi.stubGlobal("fetch", routedFetch({ approval: () => json(liveApproval({ status: "superseded" })) }))
+    const { container } = render(<ChangesetCard item={liveItem()} />)
+
+    const chip = await screen.findByText("Already done")
+    expect(chip.className).toContain("emerald")
+    expect(screen.queryByText("Stale")).not.toBeInTheDocument()
+    expect(container.querySelector('[data-changeset-status="superseded"]')).not.toBeNull()
+    expect(
+      screen.getByText(/already made this change by hand/i),
+    ).toBeInTheDocument()
+  })
+
+  it("offers no Approve action for a superseded changeset", async () => {
+    vi.stubGlobal("fetch", routedFetch({ approval: () => json(liveApproval({ status: "superseded" })) }))
+    render(<ChangesetCard item={liveItem()} />)
+
+    await screen.findByText("Already done")
+    expect(screen.queryByRole("button", { name: /Approve/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Reject/ })).not.toBeInTheDocument()
+    // Terminal: not a drift the reviewer can refresh their way out of.
+    expect(screen.queryByRole("button", { name: /Refresh/ })).not.toBeInTheDocument()
+  })
+
+  it("keeps the stale chip untinted, so the two outcomes never look alike", async () => {
+    vi.stubGlobal("fetch", routedFetch({ approval: () => json(liveApproval({ status: "stale" })) }))
+    render(<ChangesetCard item={liveItem()} />)
+
+    const chip = await screen.findByText("Stale")
+    expect(chip.className).not.toContain("emerald")
+    expect(screen.queryByText("Already done")).not.toBeInTheDocument()
+  })
+})
+
+describe("ChangesetCard — assignment (P1 §2.2)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    rosterMembers = []
+  })
+
+  it("names the assignee and says routing decides nothing", async () => {
+    rosterMembers = [{ userId: 77, username: "priya" }]
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({ approval: () => json(liveApproval({ assignedToUserId: "77" })) }),
+    )
+    render(<ChangesetCard item={liveItem()} />)
+
+    expect(await screen.findByText("Routed to priya")).toBeInTheDocument()
+    expect(screen.getByText(/approves nothing/i)).toBeInTheDocument()
+    // Assignment never changes status — it is still awaiting a person.
+    expect(screen.getByText("Pending review")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /Approve & apply/ })).toBeInTheDocument()
+  })
+
+  it("falls back to the user id when the roster can't name them", async () => {
+    vi.stubGlobal(
+      "fetch",
+      routedFetch({ approval: () => json(liveApproval({ assignedToUserId: "77" })) }),
+    )
+    render(<ChangesetCard item={liveItem()} />)
+    expect(await screen.findByText("Routed to 77")).toBeInTheDocument()
+  })
+
+  it("renders no routing line when the changeset is unassigned", async () => {
+    vi.stubGlobal("fetch", routedFetch({}))
+    render(<ChangesetCard item={liveItem()} />)
+
+    await screen.findByRole("button", { name: /Approve & apply/ })
+    expect(screen.queryByText(/Routed to/)).not.toBeInTheDocument()
+  })
+})
+
+describe("ChangesetHeldNotice (P1 §3.3)", () => {
+  it("reports the held remainder as one line, not as rows", () => {
+    const { container } = render(<ChangesetHeldNotice heldCount={2} />)
+    expect(screen.getByText("2 more held")).toBeInTheDocument()
+    // Held, not closed — the line has to say so, or it reads as discarded.
+    expect(screen.getByText(/still staged/i)).toBeInTheDocument()
+    expect(container.querySelector('[data-held-count="2"]')).not.toBeNull()
+  })
+
+  it("says '1 more held' for a single held changeset", () => {
+    render(<ChangesetHeldNotice heldCount={1} />)
+    expect(screen.getByText("1 more held")).toBeInTheDocument()
+  })
+
+  it("renders nothing when the list is showing everything", () => {
+    const { container } = render(<ChangesetHeldNotice heldCount={0} />)
+    expect(container).toBeEmptyDOMElement()
   })
 })

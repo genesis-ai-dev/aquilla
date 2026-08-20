@@ -19,8 +19,8 @@
 // (projectId, fileId). Reading the project-scoped reference clip is gated by the
 // verified projectId claim.
 
-import { audioObjectKey, r2KeyPrefix } from "./audio"
-import { verifyTokenForFile, verifyTokenForProject } from "./auth"
+import { audioObjectKey, isPathSafeId, r2KeyPrefix } from "./audio"
+import { verifyTokenForFile, verifyTokenForProject, WRITE_ROLE_LEVEL } from "./auth"
 
 export interface VoiceConvertEnv {
   SNAPSHOTS: R2Bucket
@@ -76,6 +76,12 @@ export async function handleVoiceReferenceRequest(
   const key = voiceRefObjectKey(env, projectId, referenceAudioId)
 
   if (request.method === "PUT") {
+    // Overwriting the project's shared voice-clone reference clip is a
+    // contributor-level action, same floor as attaching cell audio — a
+    // viewer-role member must not be able to clobber it for the whole project.
+    if (verified.claims.role < WRITE_ROLE_LEVEL) {
+      return new Response("insufficient role", { status: 403 })
+    }
     const body = await request.arrayBuffer()
     const contentType = request.headers.get("Content-Type") || "application/octet-stream"
     await env.SNAPSHOTS.put(key, body, { httpMetadata: { contentType } })
@@ -139,6 +145,12 @@ export async function handleVoiceConvertRequest(
   if (!projectId || !fileId || !referenceAudioId) {
     return new Response("missing projectId, fileId, or referenceAudioId", { status: 400 })
   }
+  // projectId/fileId are form fields (unlike /audio, whose ids are URL-path
+  // segments matched by `[^/]+`) and land directly in an R2 key below, so
+  // reject anything that could act as a path separator there.
+  if (!isPathSafeId(projectId) || !isPathSafeId(fileId)) {
+    return new Response("invalid projectId or fileId", { status: 400 })
+  }
 
   // Auth: sync-token scoped to this (projectId, fileId), same as /audio.
   const header = request.headers.get("Authorization") ?? ""
@@ -149,6 +161,12 @@ export async function handleVoiceConvertRequest(
   }
   if (verified.claims.projectId !== projectId) {
     return new Response("token scoped to different project", { status: 403 })
+  }
+  // Conversion spends real GPU money (Seed-VC on Modal) — require the same
+  // CONTRIBUTOR floor as cell.audio.attach so a viewer/commenter/reviewer
+  // token can't trigger billed work.
+  if (verified.claims.role < WRITE_ROLE_LEVEL) {
+    return new Response("insufficient role", { status: 403 })
   }
 
   // Resolve the source bytes: inline upload, or an existing R2 recording.

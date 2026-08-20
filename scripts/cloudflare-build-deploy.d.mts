@@ -1,24 +1,21 @@
 export type WorkerSurface = "web" | "identity" | "sync"
-export type DeploymentEnvironment = "production" | "staging" | "development"
+export type DeploymentEnvironment = "production" | "development"
 
 export interface DeploymentPlan {
-  mode: "production" | "preview"
+  mode: "preview"
   environment: DeploymentEnvironment
-  promote: boolean
+  promote: false
 }
 
 export function deploymentPlan(branch?: string): DeploymentPlan
 
 export function runDeployment(options?: {
   surface?: WorkerSurface
-  branch?: string
-  workersCi?: string
-  commitSha?: string
-  buildUuid?: string
+  env?: NodeJS.ProcessEnv
   deployVersion?: (options: {
     surface: WorkerSurface
     environment: DeploymentEnvironment
-    promote: boolean
+    promote: false
     expectedWorker: string
     sourceId: string
     sourceLabel: string

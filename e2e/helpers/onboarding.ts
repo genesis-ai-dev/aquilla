@@ -51,7 +51,7 @@ export async function advanceOnboardingTo(
       case 6:
         throw new Error("Personal onboarding unexpectedly entered the team organization step")
       case 7:
-        await page.locator("#proj-name").fill(values.projectName ?? `E2E Onboarding ${Date.now()}`)
+        await page.locator("#proj-title").fill(values.projectName ?? `E2E Onboarding ${Date.now()}`)
         await page.locator("#src-lang").fill(values.sourceLanguage ?? "English")
         await page.locator("#tgt-lang").fill(values.targetLanguage ?? "French")
         await page.getByRole("button", { name: /^Create Project$/i }).click()

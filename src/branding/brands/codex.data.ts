@@ -1,4 +1,4 @@
-import type { BrandData } from "../types"
+import type { BrandData } from "../types.ts"
 
 export const codexData: BrandData = {
   id: "codex",
@@ -6,6 +6,9 @@ export const codexData: BrandData = {
     name: "Codex Translator",
     shortName: "Codex",
     tagline: "The translation steering system.",
+    // i18n-exempt brand asset — build-time SEO <meta name="description">/OG-alt
+    // text (scripts/vite-html-branding.ts), baked into index.html per brand
+    // before the app or its locale system ever runs. Not a runtime UI string.
     description: "The translation steering system.",
     htmlTitle: "Codex Translator",
   },

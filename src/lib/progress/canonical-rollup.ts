@@ -227,6 +227,23 @@ export function progressToCanonicalRollup(progress: FileProgressResponse): BookR
   })
 }
 
+/**
+ * AQU-805: format a flat section key for display on the project-overview file
+ * breakdown. Time-bucket keys ("t:<zero-padded bucket-start ms>", produced by
+ * the progress projection for media/timeline files) render as the in-app
+ * jump-navigation minute range (e.g. "0–5m", "5–10m"). Any other key (a
+ * non-canonical document/heading section label) renders verbatim.
+ */
+export function formatFlatSectionKey(key: string): string {
+  const match = /^t:0*(\d+)$/.exec(key)
+  if (!match) return key
+  const startMs = Number(match[1])
+  if (!Number.isFinite(startMs)) return key
+  const startMin = Math.round(startMs / 60_000)
+  const endMin = startMin + 5
+  return `${startMin}–${endMin}m`
+}
+
 /** Convert a compact, explicitly requested chapter detail into verse badges. */
 export function sectionProgressToVerseRollup(detail: SectionProgressDetailResponse): VerseRollup[] {
   return detail.verses.map((verse) => {

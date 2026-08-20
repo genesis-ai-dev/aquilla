@@ -18,7 +18,7 @@
 // shared-settings field on this page; `sharedConflict` in the parent already
 // renders the "Settings changed elsewhere" banner when the hook detects one.
 import { useState } from "react"
-import { Globe, Archive, ArchiveRestore, Plus } from "lucide-react"
+import { Archive, ArchiveRestore, Plus, Globe } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -28,6 +28,7 @@ import { DisabledFieldTooltip } from "./DisabledFieldTooltip"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import type { PatchOutcome } from "@/hooks/useProjectSettings"
 import { activeLanes, archivedRegisteredLanes } from "@/components/project-lane-archive"
+import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 
 const MAX_LANE_LENGTH = 64
 
@@ -62,31 +63,34 @@ function validateNewLane(
   candidate: string,
   defaultTargetLanguage: string,
   existingLanes: string[],
+  t: TFunction,
 ): string | null {
   const trimmed = normalizeLane(candidate)
-  if (!trimmed) return "Enter a language tag."
-  if (trimmed.length > MAX_LANE_LENGTH) return `Must be ${MAX_LANE_LENGTH} characters or fewer.`
+  if (!trimmed) return t("projectSettings.create.extraLanguagesEmptyError")
+  if (trimmed.length > MAX_LANE_LENGTH) {
+    return t("projectSettings.create.extraLanguagesTooLongError", { max: MAX_LANE_LENGTH })
+  }
   const lower = trimmed.toLowerCase()
   if (lower === defaultTargetLanguage.trim().toLowerCase()) {
-    return "This is already the default target language."
+    return t("projectSettings.languages.alreadyDefaultError")
   }
   if (existingLanes.some((l) => l.toLowerCase() === lower)) {
-    return "This lane already exists."
+    return t("projectSettings.languages.alreadyExistsError")
   }
   return null
 }
 
-function outcomeMessage(outcome: PatchOutcome): string | null {
+function outcomeMessage(outcome: PatchOutcome, t: TFunction): string | null {
   if (outcome.kind === "ok") return null
   if (outcome.kind === "conflict") {
-    return "Someone else updated shared settings. Refresh to reapply your change."
+    return t("projectSettings.languages.conflictError")
   }
   if (outcome.kind === "blocked") {
     return outcome.reason === "offline"
-      ? "You're offline. Reconnect to save language lanes."
-      : "You don't have permission to change shared settings."
+      ? t("projectSettings.languages.offlineError")
+      : t("projectSettings.languages.permissionError")
   }
-  return outcome.message || "Saving failed."
+  return outcome.message || t("projectSettings.languages.savingFailedGeneric")
 }
 
 export function LanguagesSection({
@@ -97,6 +101,7 @@ export function LanguagesSection({
   disabledTooltip,
   patch,
 }: LanguagesSectionProps) {
+  const t = useT()
   const [newLane, setNewLane] = useState("")
   const [addError, setAddError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
@@ -112,7 +117,7 @@ export function LanguagesSection({
     const trimmed = normalizeLane(newLane)
     // Dedupe against every registered lane (active + archived) so a tag can't
     // be re-added while an archived copy still holds its cell data.
-    const validationError = validateNewLane(trimmed, defaultTargetLanguage, targetLanes)
+    const validationError = validateNewLane(trimmed, defaultTargetLanguage, targetLanes, t)
     if (validationError) {
       setAddError(validationError)
       return
@@ -121,7 +126,7 @@ export function LanguagesSection({
     setAdding(true)
     try {
       const outcome = await patch({ targetLanes: [...targetLanes, trimmed] } as ProjectWideSettings)
-      const message = outcomeMessage(outcome)
+      const message = outcomeMessage(outcome, t)
       if (message) {
         setAddError(message)
         return
@@ -140,7 +145,7 @@ export function LanguagesSection({
       const outcome = await patch({
         archivedLanes: [...archivedLanes, lane],
       } as ProjectWideSettings)
-      const message = outcomeMessage(outcome)
+      const message = outcomeMessage(outcome, t)
       if (message) {
         setLaneActionError(message)
         return
@@ -159,7 +164,7 @@ export function LanguagesSection({
       const outcome = await patch({
         archivedLanes: archivedLanes.filter((l) => l !== lane),
       } as ProjectWideSettings)
-      const message = outcomeMessage(outcome)
+      const message = outcomeMessage(outcome, t)
       if (message) {
         setLaneActionError(message)
       }
@@ -173,32 +178,31 @@ export function LanguagesSection({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Globe className="h-4 w-4 text-muted-foreground" />
-          Languages
+          {t("projectSettings.section.languages")}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div>
-          <FieldLabel>Default target language</FieldLabel>
+          <FieldLabel>{t("projectSettings.languages.defaultTargetLabel")}</FieldLabel>
           <p className="mt-1 text-sm text-foreground">{defaultTargetLanguage || "—"}</p>
           <p className="text-xs text-muted-foreground">
-            The default (unnamed) lane. Change it on Project Info, above.
+            {t("projectSettings.languages.defaultTargetNote")}
           </p>
         </div>
 
         <div>
-          <FieldLabel>Additional target lanes</FieldLabel>
+          <FieldLabel>{t("projectSettings.languages.additionalLanesLabel")}</FieldLabel>
           <p className="mb-2 text-xs text-muted-foreground">
-            Extra target-language lanes for this project — e.g. dialect variants or
-            parallel drafts of the same source.
+            {t("projectSettings.languages.additionalLanesDescription")}
           </p>
           {active.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No additional lanes yet.</p>
+            <p className="text-sm text-muted-foreground">{t("projectSettings.languages.noAdditionalLanes")}</p>
           ) : (
             <ul data-testid="target-lanes-list" className="flex flex-col gap-1">
               {active.map((lane) => (
                 <li
                   key={lane}
-                  className="flex items-center gap-2 rounded border bg-card px-2 py-1.5 text-sm"
+                  className="flex items-center gap-2 rounded border bg-background px-2 py-1.5 text-sm"
                 >
                   <Badge variant="outline" className="shrink-0">
                     {lane}
@@ -207,25 +211,21 @@ export function LanguagesSection({
                   {pendingArchive === lane ? (
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-muted-foreground">
-                        Archive &ldquo;{lane}&rdquo;? It&rsquo;s hidden from the lane
-                        switcher by default but kept — its cell data is preserved and
-                        you can restore it anytime.
+                        {t("projectSettings.languages.archiveConfirm", { lane })}
                       </span>
                       <Button
                         variant="destructive"
-                        size="sm"
                         disabled={busyLane === lane}
                         onClick={() => void handleConfirmArchive(lane)}
                       >
-                        {busyLane === lane ? "Archiving…" : "Confirm archive"}
+                        {busyLane === lane ? t("projectSettings.languages.archivingButton") : t("projectSettings.languages.confirmArchiveButton")}
                       </Button>
                       <Button
                         variant="ghost"
-                        size="sm"
                         disabled={busyLane === lane}
                         onClick={() => setPendingArchive(null)}
                       >
-                        Cancel
+                        {t("common.cancel")}
                       </Button>
                     </div>
                   ) : (
@@ -236,7 +236,7 @@ export function LanguagesSection({
                         className="h-7 w-7 shrink-0"
                         disabled={!canEdit}
                         data-testid={`archive-lane-${lane}`}
-                        aria-label={`Archive lane ${lane}`}
+                        aria-label={t("projectSettings.languages.archiveLaneAriaLabel", { lane })}
                         onClick={() => {
                           setLaneActionError(null)
                           setPendingArchive(lane)
@@ -252,12 +252,13 @@ export function LanguagesSection({
           )}
         </div>
 
+        {laneActionError && <p className="text-xs text-destructive">{laneActionError}</p>}
+
         {archived.length > 0 && (
           <div>
-            <FieldLabel>Archived lanes</FieldLabel>
+            <FieldLabel>{t("projectSettings.languages.archivedLanesLabel")}</FieldLabel>
             <p className="mb-2 text-xs text-muted-foreground">
-              Hidden from the lane switcher by default. Their translations are kept;
-              restore a lane to make it active again.
+              {t("projectSettings.languages.archivedLanesDescription")}
             </p>
             <ul data-testid="archived-lanes-list" className="flex flex-col gap-1">
               {archived.map((lane) => (
@@ -272,15 +273,14 @@ export function LanguagesSection({
                   <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
                     <Button
                       variant="ghost"
-                      size="sm"
                       className="h-7 shrink-0 gap-1"
                       disabled={!canEdit || busyLane === lane}
                       data-testid={`restore-lane-${lane}`}
-                      aria-label={`Restore lane ${lane}`}
+                      aria-label={t("projectSettings.languages.restoreLaneAriaLabel", { lane })}
                       onClick={() => void handleRestore(lane)}
                     >
                       <ArchiveRestore className="h-4 w-4" />
-                      {busyLane === lane ? "Restoring…" : "Restore"}
+                      {busyLane === lane ? t("projectSettings.languages.restoringButton") : t("common.restore")}
                     </Button>
                   </DisabledFieldTooltip>
                 </li>
@@ -288,12 +288,11 @@ export function LanguagesSection({
             </ul>
           </div>
         )}
-        {laneActionError && <p className="text-xs text-destructive">{laneActionError}</p>}
 
         <DisabledFieldTooltip disabled={!canEdit} tooltip={disabledTooltip}>
           <div className="flex items-end gap-2">
             <div className="flex-1">
-              <FieldLabel htmlFor="add-target-lang">Add a target lane</FieldLabel>
+              <FieldLabel htmlFor="add-target-lang">{t("projectSettings.languages.addLaneLabel")}</FieldLabel>
               <Input
                 id="add-target-lang"
                 data-testid="add-target-lang-input"
@@ -308,7 +307,7 @@ export function LanguagesSection({
                     void handleAdd()
                   }
                 }}
-                placeholder="e.g. fr-CA"
+                placeholder={t("projectSettings.create.extraLanguagesPlaceholder")}
                 disabled={!canEdit || adding}
               />
             </div>
@@ -317,8 +316,8 @@ export function LanguagesSection({
               onClick={() => void handleAdd()}
               disabled={!canEdit || adding}
             >
-              <Plus className="mr-1 h-3.5 w-3.5" />
-              {adding ? "Adding…" : "Add lane"}
+              <Plus className="me-1 h-3.5 w-3.5" />
+              {adding ? t("common.adding") : t("projectSettings.languages.addLaneButton")}
             </Button>
           </div>
         </DisabledFieldTooltip>

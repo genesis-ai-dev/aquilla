@@ -195,7 +195,7 @@ describe('MCP transport', () => {
 })
 
 describe('MCP tools/list', () => {
-  it('returns all 11 tools each with an input schema', async () => {
+  it('returns all 13 tools each with an input schema', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb)
     const res = await rpc(env, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' })
@@ -204,11 +204,12 @@ describe('MCP tools/list', () => {
     expect(names).toEqual(
       [
         'confirm_changeset', 'discard_changeset', 'get_capabilities', 'get_changeset',
-        'get_identity_and_scope', 'get_project', 'list_projects', 'prepare_translations',
-        'read_content', 'read_history', 'search_project',
+        'get_identity_and_scope', 'get_project', 'list_projects', 'prepare_import',
+        'prepare_translations', 'preview_import', 'read_content', 'read_history',
+        'search_project',
       ].sort(),
     )
-    expect(body.result.tools).toHaveLength(11)
+    expect(body.result.tools).toHaveLength(13)
     for (const tool of body.result.tools) {
       expect(typeof tool.description).toBe('string')
       expect(tool.description.length).toBeGreaterThan(20)
@@ -253,13 +254,17 @@ describe('MCP tools/call — reads', () => {
     expect(p.limits.planImportMaxCells).toBe(PLAN_IMPORT_MAX_CELLS)
     expect(p.limits.maxArtifactBytes).toBe(MAX_ARTIFACT_BYTES)
     // PlanImport is truthfully reported as REST-only (no MCP staging tool yet).
-    expect(p.planImport.stagingChannels).toEqual(['rest'])
-    expect(p.planImport.mcpStagingTool).toBeNull()
+    expect(p.planImport.stagingChannels).toEqual(['rest', 'mcp'])
+    expect(p.planImport.mcpStagingTool).toBe('prepare_import')
     expect(p.planImport.maxCellsPerChangeset).toBe(PLAN_IMPORT_MAX_CELLS)
     // CreateProject/UpdateProjectSettings/LinkMedia stage via the SAME MCP
     // tools as SetTranslation — advertised, not a separate tool.
     expect(p.projectLifecycle.mcpStagingTool).toBe('prepare_translations')
     expect(p.projectLifecycle.commitTool).toBe('confirm_changeset')
+    // AQU-538: multi-target-language lanes are self-described — an agent can
+    // learn the register → write-per-lane → read-per-lane workflow from here.
+    expect(p.multiLanguage.note).toContain('targetLanes')
+    expect(p.multiLanguage.workflow.join(' ')).toContain('laneId')
     expect(p.linkMedia.mcpStagingTool).toBe('prepare_translations')
     expect(p.linkMedia.commitTool).toBe('confirm_changeset')
     expect(p.errorCodes).toContain('confirmation_required')

@@ -1,11 +1,13 @@
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const ROWS = 7
 
 export function WorkspaceSkeleton() {
+  const t = useT()
   return (
-    <LoadingOverlay label="Loading project" data-testid="workspace-loading">
+    <LoadingOverlay label={t("workspace.skeleton.loadingProject")} data-testid="workspace-loading">
       <div
         data-testid="workspace-loading-template"
         className="flex min-h-screen bg-sidebar"
@@ -42,7 +44,7 @@ export function WorkspaceSkeleton() {
               {Array.from({ length: ROWS }).map((_, index) => (
                 <div
                   key={index}
-                  className="grid grid-cols-[56px_1fr_1fr_56px] gap-3 rounded-2xl bg-card px-4 py-3"
+                  className="grid grid-cols-[56px_1fr_1fr_56px] gap-3 rounded-lg bg-card px-4 py-3"
                 >
                   <Skeleton className="h-6 w-10" />
                   <Skeleton className="h-16 w-full" />

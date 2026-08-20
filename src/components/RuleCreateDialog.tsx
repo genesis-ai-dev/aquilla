@@ -28,6 +28,7 @@ import type { TranslationRule, RuleCheck } from "@/lib/parsers/types"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { optionalString, requiredString } from "@/lib/forms/schemas"
 import posthog from "@/lib/posthog"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 type UserRuleCheckType = Exclude<RuleCheck["type"], "builtin">
 
@@ -107,6 +108,7 @@ export function RuleCreateDialog({
   canManage = true,
   deniedReason,
 }: RuleCreateDialogProps) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const [testSource, setTestSource] = useState("")
   const [testTarget, setTestTarget] = useState("")
@@ -214,17 +216,16 @@ export function RuleCreateDialog({
         <DialogTrigger
           render={
             <Button
-              size="sm"
               disabled={!canManage}
             />
           }
         >
           <Plus className="size-4" aria-hidden />
-          Add Rule
+          {t("rules.surface.addRuleButton")}
         </DialogTrigger>
       </AppTooltip>
       <DialogContent className="max-w-lg">
-        <DialogHeader><DialogTitle>Create Translation Rule</DialogTitle></DialogHeader>
+        <DialogHeader><DialogTitle>{t("rules.surface.createRuleDialog.title")}</DialogTitle></DialogHeader>
         <form
           id="rule-create-form"
           onSubmit={(e) => {
@@ -240,14 +241,14 @@ export function RuleCreateDialog({
                 const invalid = isFieldInvalid(field)
                 return (
                   <Field data-invalid={invalid}>
-                    <FieldLabel htmlFor="rname">Rule Name</FieldLabel>
+                    <FieldLabel htmlFor="rname">{t("rules.editor.nameLabel")}</FieldLabel>
                     <Input
                       id="rname"
                       name={field.name}
                       value={field.state.value}
                       onBlur={field.handleBlur}
                       onChange={(e) => field.handleChange(e.target.value)}
-                      placeholder="Preserve numbers"
+                      placeholder={t("rules.createDialog.namePlaceholder")}
                       aria-invalid={invalid}
                     />
                     {invalid && <FieldError errors={field.state.meta.errors} />}
@@ -259,14 +260,14 @@ export function RuleCreateDialog({
               name="description"
               children={(field) => (
                 <Field>
-                  <FieldLabel htmlFor="rdesc">Description</FieldLabel>
+                  <FieldLabel htmlFor="rdesc">{t("rules.createDialog.descriptionLabel")}</FieldLabel>
                   <Input
                     id="rdesc"
                     name={field.name}
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(e) => field.handleChange(e.target.value)}
-                    placeholder="Numbers in source must appear in target"
+                    placeholder={t("rules.editor.descriptionPlaceholder")}
                   />
                 </Field>
               )}
@@ -276,19 +277,19 @@ export function RuleCreateDialog({
                 name="severity"
                 children={(field) => (
                   <Field>
-                    <FieldLabel>Severity</FieldLabel>
+                    <FieldLabel>{t("rules.editor.severityLabel")}</FieldLabel>
                     <Select
-                      items={{ minor: "Minor", major: "Major" }}
+                      items={{ minor: t("rules.severity.minor"), major: t("rules.severity.major") }}
                       value={field.state.value}
                       onValueChange={(value) => field.handleChange(value as "major" | "minor")}
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectGroup>
-                          <SelectItem value="minor">Minor</SelectItem>
-                          <SelectItem value="major">Major</SelectItem>
+                          <SelectItem value="minor">{t("rules.severity.minor")}</SelectItem>
+                          <SelectItem value="major">{t("rules.severity.major")}</SelectItem>
                         </SelectGroup>
                       </SelectContent>
                     </Select>
@@ -299,24 +300,24 @@ export function RuleCreateDialog({
                 name="checkType"
                 children={(field) => (
                   <Field>
-                    <FieldLabel>Rule Type</FieldLabel>
+                    <FieldLabel>{t("rules.createDialog.ruleTypeLabel")}</FieldLabel>
                     <Select
                       items={{
-                        "source-target-match": "Source-target match",
-                        "source-requires-target": "Source requires target",
-                        "target-forbids": "Target forbids",
+                        "source-target-match": t("rules.createDialog.checkType.sourceTargetMatch"),
+                        "source-requires-target": t("rules.createDialog.checkType.sourceRequiresTarget"),
+                        "target-forbids": t("rules.createDialog.checkType.targetForbids"),
                       }}
                       value={field.state.value}
                       onValueChange={(value) => field.handleChange(value as UserRuleCheckType)}
                     >
-                      <SelectTrigger className="w-full">
+                      <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectGroup>
-                          <SelectItem value="source-target-match">Source-target match</SelectItem>
-                          <SelectItem value="source-requires-target">Source requires target</SelectItem>
-                          <SelectItem value="target-forbids">Target forbids</SelectItem>
+                          <SelectItem value="source-target-match">{t("rules.createDialog.checkType.sourceTargetMatch")}</SelectItem>
+                          <SelectItem value="source-requires-target">{t("rules.createDialog.checkType.sourceRequiresTarget")}</SelectItem>
+                          <SelectItem value="target-forbids">{t("rules.createDialog.checkType.targetForbids")}</SelectItem>
                         </SelectGroup>
                       </SelectContent>
                     </Select>
@@ -336,7 +337,7 @@ export function RuleCreateDialog({
                         const invalid = isFieldInvalid(field)
                         return (
                           <Field data-invalid={invalid}>
-                            <FieldLabel htmlFor="pat">Pattern (regex)</FieldLabel>
+                            <FieldLabel htmlFor="pat">{t("rules.createDialog.patternRegexLabel")}</FieldLabel>
                             <Input
                               id="pat"
                               name={field.name}
@@ -347,7 +348,7 @@ export function RuleCreateDialog({
                               className="font-mono text-xs"
                               aria-invalid={invalid}
                             />
-                            <FieldDescription>Must appear in both source and target</FieldDescription>
+                            <FieldDescription>{t("rules.createDialog.patternFieldHint.match")}</FieldDescription>
                             {invalid && <FieldError errors={field.state.meta.errors} />}
                           </Field>
                         )
@@ -361,18 +362,18 @@ export function RuleCreateDialog({
                         const invalid = isFieldInvalid(field)
                         return (
                           <Field data-invalid={invalid}>
-                            <FieldLabel htmlFor="tpat">Forbidden pattern (regex)</FieldLabel>
+                            <FieldLabel htmlFor="tpat">{t("rules.createDialog.forbiddenPatternRegexLabel")}</FieldLabel>
                             <Input
                               id="tpat"
                               name={field.name}
                               value={field.state.value}
                               onBlur={field.handleBlur}
                               onChange={(e) => field.handleChange(e.target.value)}
-                              placeholder="\\b(the|a|an)\\b"
+                              placeholder="\\b(the|a|an)\\b" // i18n-exempt regex literal example, not natural-language text
                               className="font-mono text-xs"
                               aria-invalid={invalid}
                             />
-                            <FieldDescription>Target must not contain this</FieldDescription>
+                            <FieldDescription>{t("rules.createDialog.patternFieldHint.forbidden")}</FieldDescription>
                             {invalid && <FieldError errors={field.state.meta.errors} />}
                           </Field>
                         )
@@ -387,7 +388,7 @@ export function RuleCreateDialog({
                           const invalid = isFieldInvalid(field)
                           return (
                             <Field data-invalid={invalid}>
-                              <FieldLabel htmlFor="spat">Source pattern (regex)</FieldLabel>
+                              <FieldLabel htmlFor="spat">{t("rules.createDialog.sourcePatternRegexLabel")}</FieldLabel>
                               <Input
                                 id="spat"
                                 name={field.name}
@@ -409,7 +410,7 @@ export function RuleCreateDialog({
                           const invalid = isFieldInvalid(field)
                           return (
                             <Field data-invalid={invalid}>
-                              <FieldLabel htmlFor="tpat2">Required target pattern (regex)</FieldLabel>
+                              <FieldLabel htmlFor="tpat2">{t("rules.createDialog.requiredTargetPatternRegexLabel")}</FieldLabel>
                               <Input
                                 id="tpat2"
                                 name={field.name}
@@ -434,11 +435,11 @@ export function RuleCreateDialog({
 
           {/* Test area */}
           <div className="rounded border bg-muted/30 p-3 flex flex-col gap-2">
-            <p className="text-xs font-medium text-muted-foreground">Test your rule</p>
-            <Input value={testSource} onChange={(e) => setTestSource(e.target.value)} placeholder="Source text..." className="text-xs" />
-            <Input value={testTarget} onChange={(e) => setTestTarget(e.target.value)} placeholder="Target text..." className="text-xs" />
+            <p className="text-xs font-medium text-muted-foreground">{t("rules.createDialog.testYourRuleHeading")}</p>
+            <Input value={testSource} onChange={(e) => setTestSource(e.target.value)} placeholder={t("rules.createDialog.testSourcePlaceholder")} className="text-xs" />
+            <Input value={testTarget} onChange={(e) => setTestTarget(e.target.value)} placeholder={t("rules.createDialog.testTargetPlaceholder")} className="text-xs" />
             <div className="flex items-center gap-2">
-              <Button type="button" variant="outline" size="sm" onClick={handleTest}>Test</Button>
+              <Button type="button" variant="outline" onClick={handleTest}>{t("rules.createDialog.testButton")}</Button>
               {testResult && (
                 <span className={`text-xs ${testResult.startsWith("✓") ? "text-green-600" : testResult.startsWith("✗") ? "text-destructive" : "text-amber-600"}`}>
                   {testResult}
@@ -449,7 +450,7 @@ export function RuleCreateDialog({
 
           <Button type="submit" form="rule-create-form" className="w-full">
             {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-            Create Rule
+            {t("rules.editor.createRuleButton")}
           </Button>
         </form>
       </DialogContent>

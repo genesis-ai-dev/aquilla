@@ -8,8 +8,9 @@
 /**
  * Resolve the `?lane=` deep-link param against the project's available lanes.
  *
- * - No param (null / '') → `null`: no deep-link intent, leave the current
- *   (persisted / default) lane untouched.
+ * - No param (null / undefined) → `null`: no deep-link intent, leave the
+ *   current persisted lane untouched.
+ * - An explicitly empty param (`?lane=`) → `''`: select Project default.
  * - A param matching an available lane → that lane.
  * - A param that is not an available lane → `''`: an explicit but unknown lane
  *   falls back to the default lane.
@@ -21,6 +22,40 @@ export function resolveDeepLinkLane(
   param: string | null | undefined,
   availableLanes: readonly string[],
 ): string | null {
-  if (!param) return null
+  if (param === null || param === undefined) return null
   return availableLanes.includes(param) ? param : ''
+}
+
+/** Preserve the important distinction between an absent lane and `?lane=`. */
+export function resolveDeepLinkLaneFromSearchParams(
+  searchParams: Pick<URLSearchParams, "get" | "has">,
+  availableLanes: readonly string[],
+): string | null {
+  return resolveDeepLinkLane(
+    searchParams.has("lane") ? (searchParams.get("lane") ?? "") : null,
+    availableLanes,
+  )
+}
+
+/** Open the editor at a proposed Autopilot draft in the given language lane. */
+export function draftReviewHref(
+  projectId: string,
+  fileId: string,
+  cellId?: string | null,
+  targetLang = "",
+): string {
+  const lane = `lane=${encodeURIComponent(targetLang)}`
+  const query = cellId
+    ? `cellId=${encodeURIComponent(cellId)}&${lane}`
+    : lane
+  return `/project/${encodeURIComponent(projectId)}/editor/file/${encodeURIComponent(fileId)}?${query}`
+}
+
+/** @deprecated Use draftReviewHref. Kept for existing default-lane callers. */
+export function defaultLaneDraftReviewHref(
+  projectId: string,
+  fileId: string,
+  cellId?: string | null,
+): string {
+  return draftReviewHref(projectId, fileId, cellId, "")
 }

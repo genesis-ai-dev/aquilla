@@ -106,6 +106,7 @@
         "SYNC_SECRET_KEY"
       ],
       "requiredBindings": {
+        "CF_VERSION_METADATA": "version_metadata",
         "EMAIL": "send_email",
         "ProjectSync": "durable_object_namespace"
       },
@@ -128,6 +129,7 @@
           "plainText": {
             "ENVIRONMENT": "production",
             "AUTH_WORKER_URL": "https://api.aquilla.app/identity",
+            "DEPLOYMENT_WORKER_NAME": "aquilla-sync-worker",
             "POSTHOG_KEY": "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
           },
           "hyperdrives": {
@@ -147,7 +149,8 @@
           "requiredSecrets": [],
           "plainText": {
             "ENVIRONMENT": "development",
-            "AUTH_WORKER_URL": "https://api.dev.aquilla.app/identity"
+            "AUTH_WORKER_URL": "https://api.dev.aquilla.app/identity",
+            "DEPLOYMENT_WORKER_NAME": "aquilla-sync-worker-dev"
           },
           "hyperdrives": {
             "HYPERDRIVE": "53581197ff7a4202a5ed0ef08537d4a6"

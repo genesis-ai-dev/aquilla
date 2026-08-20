@@ -22,6 +22,24 @@ export function isOpenRouterUpstream(baseUrl?: string): boolean {
   }
 }
 
+/**
+ * `stream_options.include_usage` — the OpenAI-standard way to get a usage block
+ * on a STREAMED response.
+ *
+ * OpenRouter reports streamed usage through its own `usage.include` extension
+ * (above), so it neither needs nor wants this. Every other OpenAI-compatible
+ * upstream omits usage from streams unless asked: llama.cpp/llama-swap, vLLM,
+ * Groq. Without it `readModelTurn` sees no usage at all, so the agent loop
+ * counts zero tokens — which silently disables the TOKEN_CEILING guard and
+ * writes zeros to agent_runs and the credit ledger. Non-streaming call sites
+ * are unaffected (they always get usage).
+ */
+export function streamUsageOptions(
+  baseUrl?: string,
+): { stream_options?: { include_usage: true } } {
+  return isOpenRouterUpstream(baseUrl) ? {} : { stream_options: { include_usage: true } }
+}
+
 /** `usage.include` only — for call sites that never sent a reasoning hint. */
 export function openRouterUsage(baseUrl?: string): { usage?: { include: true } } {
   return isOpenRouterUpstream(baseUrl) ? { usage: { include: true } } : {}

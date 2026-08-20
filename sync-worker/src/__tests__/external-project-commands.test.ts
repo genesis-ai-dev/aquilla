@@ -431,13 +431,32 @@ describe('UpdateProjectSettings — happy path + version guard', () => {
   })
 })
 
-describe('UpdateProjectSettings — validation-threshold change triggers reprojection', () => {
-  it('lowering validationCount re-derives cells.validated locally', async () => {
+describe('UpdateProjectSettings — validation threshold is a POLICY key (AQU-926)', () => {
+  it('changing validationCount via the agent surface → permission_denied at prepare', async () => {
     const env = makeEnv(tdb.db)
-    // Project + settings at threshold 3 (validationCount=3), caller maintainer.
+    await seedSettingsProject(tdb, 'proj-v', 1, { validationCount: 3 }, 1)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-0000000000e1', userId: 1, username: 'alice',
+      orgId: null, projectId: 'proj-v', mode: 'act',
+    })
+
+    // validationCount 3 → 1 is a policy change: an agent must not be able to
+    // lower the validation bar that reviews its own work. Rejected at prepare,
+    // nothing staged.
+    const { res, body } = await prepare(env, 'proj-v', token, [
+      { kind: 'UpdateProjectSettings', projectId: 'proj-v', settings: { validationCount: 1 }, ifMatchVersion: 1 },
+    ])
+    expect(res.status).toBe(403)
+    expect(body.error.code).toBe('permission_denied')
+    expect(body.error.details.policyKeys).toEqual(['validationCount'])
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
+  it('equal-value pass-through keeps working AND a changed threshold re-derives cells.validated (shared module, human path)', async () => {
+    const env = makeEnv(tdb.db)
     await seedSettingsProject(tdb, 'proj-v', 1, { validationCount: 3 }, 1)
     // A target cell with two validators pinned to its head event → validated 0
-    // at threshold 3, but should flip to 1 once the threshold drops to 1.
+    // at threshold 3, but flips to 1 once the threshold drops to 1.
     await tdb.pg.query(
       `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, validated, target_lang, last_edit_at)
        VALUES ('proj-v', 'f1', 'c1', 'target', 'v', 'e1', 0, '', 1)`,
@@ -448,17 +467,35 @@ describe('UpdateProjectSettings — validation-threshold change triggers reproje
     )
 
     const token = await credToken(tdb, {
-      credentialId: '00000000-0000-0000-0000-0000000000e1', userId: 1, username: 'alice',
+      credentialId: '00000000-0000-0000-0000-0000000000e2', userId: 1, username: 'alice',
       orgId: null, projectId: 'proj-v', mode: 'act',
     })
 
+    // Read-modify-write with the policy key UNCHANGED still passes end-to-end.
     const { body: prep } = await prepare(env, 'proj-v', token, [
-      { kind: 'UpdateProjectSettings', projectId: 'proj-v', settings: { validationCount: 1 }, ifMatchVersion: 1 },
+      {
+        kind: 'UpdateProjectSettings', projectId: 'proj-v',
+        settings: { validationCount: 3, targetLanguage: 'de' }, ifMatchVersion: 1,
+      },
     ])
     const { res } = await commit(env, 'proj-v', token, prep.changeset.id)
     expect(res.status).toBe(200)
+    expect(
+      (await tdb.rows<{ cell_id: string; validated: number }>('cells')).find((c) => c.cell_id === 'c1')!.validated,
+    ).toBe(0) // threshold unchanged → flag unchanged
 
-    // The cell's validated flag was re-derived (2 validators >= threshold 1).
+    // The threshold re-projection itself stays covered through the shared
+    // module (the HUMAN path — auth-worker's internal route — still changes
+    // validationCount; sync-worker owns the projection SQL it batches).
+    const { updateProjectSettingsShared, loadProjectSettings } = await import('../../../db/shared/projects')
+    const current = await loadProjectSettings(tdb.db, 'proj-v')
+    const result = await updateProjectSettingsShared(tdb.db, {
+      projectId: 'proj-v',
+      settings: { ...current.settings, validationCount: 1 },
+      ifMatchVersion: current.version,
+      updatedBy: 1,
+    })
+    expect(result.status).toBe('ok')
     const cells = await tdb.rows<{ cell_id: string; validated: number }>('cells')
     expect(cells.find((c) => c.cell_id === 'c1')!.validated).toBe(1)
   })
@@ -711,11 +748,13 @@ describe('blocker 4: receipt-only summary is renderable (no blind approval)', ()
       credentialId: '00000000-0000-0000-0000-0000000004a3', userId: 1, username: 'alice',
       orgId: null, projectId: 'summ-settings', mode: 'act',
     })
+    // AQU-926: validationCount is now a POLICY key an agent may not change, so
+    // the numeric-preview key here is a neutral one (cellsPerPage).
     const { body: prep } = await prepare(env, 'summ-settings', token, [
       {
         kind: 'UpdateProjectSettings',
         projectId: 'summ-settings',
-        settings: { targetLanguage: 'de', validationCount: 5 },
+        settings: { targetLanguage: 'de', cellsPerPage: 5 },
         ifMatchVersion: 1,
       },
     ])
@@ -725,7 +764,7 @@ describe('blocker 4: receipt-only summary is renderable (no blind approval)', ()
     // Per-key preview of each new value (strings, truncated). Object rendered
     // explicitly by the approval page.
     expect(prep.summary.settingsChanges.targetLanguage).toBe('de')
-    expect(prep.summary.settingsChanges.validationCount).toBe('5')
+    expect(prep.summary.settingsChanges.cellsPerPage).toBe('5')
   })
 
   it('UpdateProjectSettings truncates a huge settings value in the preview', async () => {

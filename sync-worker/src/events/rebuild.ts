@@ -25,18 +25,19 @@
 
 import {
   buildEventProjectionStmts,
-  CHAIN_MUTATING_KINDS,
+  isChainArbitrated,
   type PersistedEvent,
 } from './event-projection'
 import type { EventKind } from './types'
 import { eventQualifiedParentKey } from './chain-claims'
 import { fullProgressRecomputeStmts } from './progress-projection'
-import { secureCompare } from '../lib/secure-compare'
+import { isAuthorizedAdminBearer } from '../lib/admin-auth'
 
 const BATCH_LIMIT = 100
 
 export interface RebuildEnv {
   AQUILLA_PG?: AquillaDb
+  ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
 }
 
@@ -73,7 +74,7 @@ export async function handleRebuildProjectionRequest(
     return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   }
   const auth = request.headers.get('Authorization') ?? ''
-  if (!secureCompare(auth, `Bearer ${env.SYNC_SECRET_KEY}`)) {
+  if (!isAuthorizedAdminBearer(auth, env)) {
     return new Response('unauthorized', { status: 401 })
   }
 
@@ -154,10 +155,13 @@ export async function handleRebuildProjectionRequest(
     // so the first event at a given (project, file, cell, parent_id) slot
     // is the winner; siblings stay in `events` (we're not rewriting the log)
     // but do not contribute to the projection. The guard applies ONLY to
-    // chain-mutating kinds — cell.validate (parent_id NULL) would otherwise
-    // collide with source.cell.create at the same slot and be dropped.
+    // chain-arbitrated kinds — cell.validate (parent_id NULL) would otherwise
+    // collide with source.cell.create at the same slot and be dropped, and a
+    // parent-null cell DELETE (a migration retraction, AQU-747/910) would
+    // lose to the cell's own create and resurrect the cell on every rebuild
+    // (AQU-931).
     let isWinner = true
-    if (row.cell_id && CHAIN_MUTATING_KINDS.has(row.kind)) {
+    if (row.cell_id && isChainArbitrated(row.kind, row.parent_id)) {
       const key = childKey(row)
       const winner = winningChildAt.get(key)
       if (!winner) {

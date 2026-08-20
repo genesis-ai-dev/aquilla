@@ -10,7 +10,7 @@ const draft: SpanDraft = {
     { cellId: "c2", text: "t2" },
   ],
   exampleIds: [],
-  promptVersion: "contextual-draft-v1:deadbeef",
+  promptVersion: "contextual-draft-v2:deadbeef",
 }
 
 function vote(verifier: VerifierKey, approve: boolean, cellVerdicts: CellVerdict[] = [], reason = ""): Vote {

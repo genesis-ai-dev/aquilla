@@ -13,6 +13,7 @@ import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import type { Voice } from "@/lib/parsers/types"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export function VoicePickerContent({
   voices,
@@ -28,6 +29,7 @@ export function VoicePickerContent({
   /** Optional extra row under the list (e.g. "apply to all speaker lines"). */
   footer?: ReactNode
 }) {
+  const t = useT()
   const [query, setQuery] = useState("")
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -44,12 +46,12 @@ export function VoicePickerContent({
           autoFocus
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search voices…"
+          placeholder={t("audio.library.searchPlaceholder")}
         />
       </InputGroup>
       <div className="max-h-56 space-y-0.5 overflow-y-auto">
         {filtered.length === 0 ? (
-          <p className="px-2 py-3 text-center text-xs italic text-muted-foreground">No matches</p>
+          <p className="px-2 py-3 text-center text-xs italic text-muted-foreground">{t("common.noMatches")}</p>
         ) : (
           filtered.map((v) => (
             <button
@@ -57,7 +59,7 @@ export function VoicePickerContent({
               type="button"
               disabled={busy}
               onClick={() => onPick(v.id)}
-              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent/50 disabled:opacity-60"
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm transition-colors hover:bg-accent/50 disabled:opacity-60"
             >
               <VoiceAvatar voice={v} size={20} />
               <span className="min-w-0 flex-1 truncate">{v.name}</span>
@@ -86,6 +88,7 @@ export function VoiceCombobox({
   busy: boolean
   onPick: (voiceId: string) => void
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   // Forget the search between openings so the next open starts on the full
   // cast (VoicePickerContent remounts when the popover content does).
@@ -98,7 +101,7 @@ export function VoiceCombobox({
           trigger's title= to AppTooltip — but it edited the OLD copy of this
           component inside CellVoicePanel, which the branch had already moved
           here. Hand-ported so the change isn't silently lost. */}
-      <AppTooltip content="Choose a voice">
+      <AppTooltip content={t("editor.voice.choose")}>
         <PopoverTrigger
           render={
             <Button
@@ -106,7 +109,7 @@ export function VoiceCombobox({
               size="xs"
               variant="outline"
               disabled={busy}
-              aria-label={`Voice: ${active.name}. Choose a voice`}
+              aria-label={t("editor.voice.activeVoice", { name: active.name })}
               className="w-full justify-start gap-1.5"
             />
           }
@@ -119,7 +122,7 @@ export function VoiceCombobox({
               </span>
             )}
           </span>
-          <span className="min-w-0 flex-1 truncate text-left font-medium text-foreground">{active.name}</span>
+          <span className="min-w-0 flex-1 truncate text-start font-medium text-foreground">{active.name}</span>
           <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </PopoverTrigger>
       </AppTooltip>

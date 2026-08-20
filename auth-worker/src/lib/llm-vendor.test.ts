@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest"
-import { isOpenRouterUpstream, openRouterUsage, openRouterExtras } from "./llm-vendor"
+import {
+  isOpenRouterUpstream,
+  openRouterUsage,
+  openRouterExtras,
+  streamUsageOptions,
+} from "./llm-vendor"
 
 describe("isOpenRouterUpstream", () => {
   it("treats an unset/blank override as OpenRouter (the built-in default)", () => {
@@ -55,5 +60,21 @@ describe("openRouterUsage / openRouterExtras", () => {
     const groqBody = { model: "llama-3.3-70b-versatile", ...openRouterExtras("https://api.groq.com/openai/v1") }
     expect(Object.keys(groqBody)).toEqual(["model"])
     expect(JSON.parse(JSON.stringify(groqBody))).not.toHaveProperty("reasoning")
+  })
+})
+
+describe("streamUsageOptions", () => {
+  // Streamed usage is what the agent loop's token counting — and therefore its
+  // TOKEN_CEILING guard — is built on. A self-hosted upstream omits it unless
+  // asked, so this is the difference between real accounting and silent zeros.
+  it("asks a self-hosted upstream to include usage in the stream", () => {
+    expect(streamUsageOptions("http://127.0.0.1:8443/v1")).toEqual({
+      stream_options: { include_usage: true },
+    })
+  })
+
+  it("stays off for OpenRouter, which reports usage via usage.include", () => {
+    expect(streamUsageOptions("https://openrouter.ai/api/v1")).toEqual({})
+    expect(streamUsageOptions(undefined)).toEqual({}) // unset → OpenRouter default
   })
 })

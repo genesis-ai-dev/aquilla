@@ -26,6 +26,19 @@ const BLOCK_TAGS = new Set([
 /** Elements whose subtrees are never translatable. */
 const SKIP_TAGS = new Set(["script", "style", "noscript"])
 
+export interface HtmlExtractOptions {
+  /** Drop `<title>` so document-tab text is not a translation cell. EPUB
+   *  chapters almost always repeat that string as an `<h1>`. */
+  skipDocumentTitle?: boolean
+}
+
+function activeBlockTags(options?: HtmlExtractOptions): Set<string> {
+  if (!options?.skipDocumentTitle) return BLOCK_TAGS
+  const tags = new Set(BLOCK_TAGS)
+  tags.delete("title")
+  return tags
+}
+
 /** Collapse whitespace runs and trim — the "visible text" normalization. */
 function collapseWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim()
@@ -49,20 +62,20 @@ function hasBlockDescendant(el: Element): boolean {
  * `<p>`, never both. Elements with no visible text are skipped, so import and
  * export index the exact same element list.
  */
-function collectBlocks(el: Element, out: Element[]): void {
+function collectBlocks(el: Element, out: Element[], blockTags: Set<string>): void {
   const tag = el.tagName.toLowerCase()
   if (SKIP_TAGS.has(tag)) return
-  if (BLOCK_TAGS.has(tag) && !hasBlockDescendant(el)) {
+  if (blockTags.has(tag) && !hasBlockDescendant(el)) {
     if (collapseWhitespace(el.textContent ?? "")) out.push(el)
     return
   }
-  for (const child of Array.from(el.children)) collectBlocks(child, out)
+  for (const child of Array.from(el.children)) collectBlocks(child, out, blockTags)
 }
 
-function matchedBlocks(doc: Document): Element[] {
+function matchedBlocks(doc: Document, options?: HtmlExtractOptions): Element[] {
   const out: Element[] = []
   const root = doc.documentElement
-  if (root) collectBlocks(root, out)
+  if (root) collectBlocks(root, out, activeBlockTags(options))
   return out
 }
 
@@ -90,11 +103,11 @@ function classify(tag: string): { type: CellType; context: string } {
   }
 }
 
-export function extractHtmlStrings(content: string): TranslatableString[] {
+export function extractHtmlStrings(content: string, options?: HtmlExtractOptions): TranslatableString[] {
   const doc = new DOMParser().parseFromString(content, "text/html")
   const results: TranslatableString[] = []
 
-  for (const [index, el] of matchedBlocks(doc).entries()) {
+  for (const [index, el] of matchedBlocks(doc, options).entries()) {
     const original = collapseWhitespace(el.textContent ?? "")
     const { type, context } = classify(el.tagName.toLowerCase())
     // Keep inline markup (<strong>, <a>, …) only when the element actually
@@ -135,9 +148,13 @@ export function extractHtmlStrings(content: string): TranslatableString[] {
  * out of scope. The surrounding tag structure (lists, tables, headings,
  * attributes) is fully preserved.
  */
-export function exportHtml(originalHtml: string, cells: CellData[]): Blob {
+export function applyHtmlTranslations(
+  originalHtml: string,
+  cells: Array<{ translated: string; original: string }>,
+  options?: HtmlExtractOptions,
+): string {
   const doc = new DOMParser().parseFromString(originalHtml, "text/html")
-  const blocks = matchedBlocks(doc)
+  const blocks = matchedBlocks(doc, options)
 
   for (let i = 0; i < blocks.length && i < cells.length; i++) {
     const cell = cells[i]
@@ -146,6 +163,9 @@ export function exportHtml(originalHtml: string, cells: CellData[]): Blob {
 
   const hadDoctype = originalHtml.toLowerCase().includes("<!doctype")
   const serialized = doc.documentElement?.outerHTML ?? ""
-  const html = hadDoctype ? `<!DOCTYPE html>\n${serialized}` : serialized
-  return new Blob([html], { type: "text/html;charset=utf-8" })
+  return hadDoctype ? `<!DOCTYPE html>\n${serialized}` : serialized
+}
+
+export function exportHtml(originalHtml: string, cells: CellData[]): Blob {
+  return new Blob([applyHtmlTranslations(originalHtml, cells)], { type: "text/html;charset=utf-8" })
 }

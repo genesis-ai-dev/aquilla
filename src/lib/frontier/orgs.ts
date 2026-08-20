@@ -58,6 +58,8 @@ export interface MyOrg {
 export interface OrgMember {
   userId: number;
   username: string;
+  /** Account email when the members API includes it; omitted on older payloads. */
+  email?: string | null;
   role: OrgRole;
   /** ISO timestamp of last project-context activity by this user in this
    * org. NULL when no activity has been recorded since migration 0018
@@ -151,25 +153,6 @@ export async function createOrgInvite(
   });
   if (!res.ok) throw new UserError(res.status, "", "org");
   return (await res.json()) as OrgInviteResult;
-}
-
-export interface ActiveOrgInvite {
-  token: string;
-  role: OrgRole;
-  email: string | null;
-  createdAt: string;
-  expiresAt: string | null;
-}
-
-export async function listOrgInvites(jwt: string, orgId: number): Promise<ActiveOrgInvite[]> {
-  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/invites`, { headers: authHeaders(jwt) });
-  if (!res.ok) throw new UserError(res.status, "", "org");
-  return ((await res.json()) as { invites: ActiveOrgInvite[] }).invites;
-}
-
-export async function revokeOrgInvite(jwt: string, orgId: number, token: string): Promise<void> {
-  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/invites/${token}`, { method: "DELETE", headers: authHeaders(jwt) });
-  if (!res.ok) throw new UserError(res.status, "", "org");
 }
 
 /** Public preview of an org invite (AQU-471) — what JoinOrgPage shows before

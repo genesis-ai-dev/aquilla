@@ -10,6 +10,10 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react"
 import { Copy } from "lucide-react"
+import { buildAgentInstructions } from "@/lib/sync/agent-instructions"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
+import { formatDate } from "@/lib/i18n/format"
+import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -47,11 +51,14 @@ import {
   type MintCredentialResult,
 } from "@/lib/sync/credentials"
 
+/** MessageKey, without importing from the generated catalog — see LeftDock.tsx. */
+type TokenMessageKey = Parameters<ReturnType<typeof useT>>[0]
+
 const EXPIRY_PRESETS = [
-  { id: "30d", label: "30 days", days: 30 },
-  { id: "90d", label: "90 days", days: 90 },
-  { id: "none", label: "No expiry", days: null },
-] as const
+  { id: "30d", labelKey: "common.thirtyDays", days: 30 },
+  { id: "90d", labelKey: "onboarding.apiTokens.expiry.90d", days: 90 },
+  { id: "none", labelKey: "common.noExpiry", days: null },
+] as const satisfies readonly { id: string; labelKey: TokenMessageKey; days: number | null }[]
 type ExpiryPresetId = (typeof EXPIRY_PRESETS)[number]["id"]
 
 function expiryToIso(preset: ExpiryPresetId): string | undefined {
@@ -60,31 +67,28 @@ function expiryToIso(preset: ExpiryPresetId): string | undefined {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
 }
 
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  })
+function fmtDate(iso: string, locale: string): string {
+  return formatDate(iso, locale, { month: "short", day: "numeric", year: "numeric" })
 }
 
 /** Resolve a credential's org/project scope into a friendly label. Falls back
  * to the raw id when the org/project isn't in the caller's current lists
  * (e.g. access was later revoked). */
 function scopeLabel(
+  t: ReturnType<typeof useT>,
   cred: ApiCredential,
   orgs: OrgSummary[],
   projects: CloudProjectSummary[],
 ): string {
   if (cred.projectId) {
     const p = projects.find((p) => p.id === cred.projectId)
-    return p ? p.name : `Project ${cred.projectId}`
+    return p ? p.name : t("onboarding.apiTokens.scope.projectFallback", { id: cred.projectId })
   }
   if (cred.orgId) {
     const o = orgs.find((o) => String(o.id) === cred.orgId)
-    return o ? (o.name ?? `Org ${o.id}`) : `Org ${cred.orgId}`
+    return o ? (o.name ?? t("onboarding.apiTokens.scope.orgFallback", { id: o.id })) : t("onboarding.apiTokens.scope.orgFallback", { id: cred.orgId })
   }
-  return "Unscoped (personal)"
+  return t("onboarding.apiTokens.scope.unscoped")
 }
 
 /** Fetches the caller's orgs + accessible projects once, for scope filtering
@@ -124,6 +128,7 @@ function useOrgsAndProjects(jwt: string | null): {
 }
 
 export function ApiTokensSection() {
+  const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const { orgs, projects } = useOrgsAndProjects(jwt)
@@ -133,6 +138,7 @@ export function ApiTokensSection() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [mintResult, setMintResult] = useState<MintCredentialResult | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<ApiCredential | null>(null)
+  const [instructionsFor, setInstructionsFor] = useState<ApiCredential | null>(null)
 
   useEffect(() => {
     if (!jwt) {
@@ -147,7 +153,7 @@ export function ApiTokensSection() {
         if (!cancelled) setCredentials(list)
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load tokens.")
+        if (!cancelled) setError(err instanceof Error ? err.message : t("onboarding.apiTokens.loadFailed"))
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -165,9 +171,9 @@ export function ApiTokensSection() {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between gap-4 px-1">
+      <div className="flex items-center justify-between gap-4 pl-4">
         <p className="font-heading text-base font-medium tracking-tight text-foreground">
-          Access
+          {t("onboarding.apiTokens.heading")}
         </p>
         <MintTokenDialog
           jwt={jwt}
@@ -180,16 +186,18 @@ export function ApiTokensSection() {
         />
       </div>
       <SettingsGroup>
-        <SettingsRow label="Your tokens" block>
+        <SettingsRow label={t("onboarding.apiTokens.yourTokensLabel")} block>
           {loading && !credentials ? (
-            <p className="text-xs text-muted-foreground">Loading…</p>
+            <div className="flex items-center text-muted-foreground">
+              <Spinner className="size-3.5" />
+            </div>
           ) : error ? (
             <p className="text-xs text-destructive" role="alert">
               {error}
             </p>
           ) : !credentials || credentials.length === 0 ? (
             <p className="text-xs text-muted-foreground">
-              No tokens yet. Mint one to let an agent call the Agent API on your behalf.
+              {t("onboarding.apiTokens.empty")}
             </p>
           ) : (
             <ul className="space-y-2">
@@ -200,6 +208,7 @@ export function ApiTokensSection() {
                   orgs={orgs}
                   projects={projects}
                   onRevoke={() => setRevokeTarget(cred)}
+                  onShowInstructions={() => setInstructionsFor(cred)}
                 />
               ))}
             </ul>
@@ -219,8 +228,20 @@ export function ApiTokensSection() {
         />
       )}
 
+      {instructionsFor && (
+        <AgentInstructionsDialog
+          mode={instructionsFor.mode}
+          scopeLabel={scopeLabel(t, instructionsFor, orgs, projects)}
+          onClose={() => setInstructionsFor(null)}
+        />
+      )}
+
       {mintResult && (
-        <ShowOnceTokenDialog result={mintResult} onClose={() => setMintResult(null)} />
+        <ShowOnceTokenDialog
+          result={mintResult}
+          scopeLabel={scopeLabel(t, mintResult.credential, orgs, projects)}
+          onClose={() => setMintResult(null)}
+        />
       )}
     </div>
   )
@@ -231,12 +252,16 @@ function CredentialRow({
   orgs,
   projects,
   onRevoke,
+  onShowInstructions,
 }: {
   credential: ApiCredential
   orgs: OrgSummary[]
   projects: CloudProjectSummary[]
   onRevoke: () => void
+  onShowInstructions: () => void
 }) {
+  const t = useT()
+  const { locale } = useI18n()
   const revoked = Boolean(credential.revokedAt)
   const expired =
     !revoked && Boolean(credential.expiresAt) && new Date(credential.expiresAt!).getTime() < Date.now()
@@ -249,26 +274,31 @@ function CredentialRow({
           <Badge variant={credential.mode === "act" ? "default" : "secondary"}>
             {credential.mode}
           </Badge>
-          {revoked && <Badge variant="destructive">Revoked</Badge>}
-          {expired && <Badge variant="outline">Expired</Badge>}
+          {revoked && <Badge variant="destructive">{t("onboarding.apiTokens.revokedBadge")}</Badge>}
+          {expired && <Badge variant="outline">{t("onboarding.apiTokens.expiredBadge")}</Badge>}
         </div>
         <p className="text-xs text-muted-foreground">
-          {credential.name} · {scopeLabel(credential, orgs, projects)}
+          {credential.name} · {scopeLabel(t, credential, orgs, projects)}
         </p>
         <p className="text-[11px] text-muted-foreground">
-          {credential.expiresAt ? `Expires ${fmtDate(credential.expiresAt)}` : "No expiry"}
-          {credential.lastUsedAt ? ` · Last used ${fmtDate(credential.lastUsedAt)}` : ""}
+          {credential.expiresAt ? t("common.expiresOn", { date: fmtDate(credential.expiresAt, locale) }) : t("common.noExpiry")}
+          {credential.lastUsedAt ? ` · ${t("onboarding.apiTokens.lastUsedOn", { date: fmtDate(credential.lastUsedAt, locale) })}` : ""}
         </p>
       </div>
       {!revoked && (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="shrink-0 text-muted-foreground hover:text-destructive"
-          onClick={onRevoke}
-        >
-          Revoke
-        </Button>
+        <div className="flex shrink-0 items-center gap-1">
+          <Button size="sm" variant="ghost" onClick={onShowInstructions}>
+            {t("onboarding.apiTokens.agentSetupButton")}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-muted-foreground hover:text-destructive"
+            onClick={onRevoke}
+          >
+            {t("common.revoke")}
+          </Button>
+        </div>
       )}
     </li>
   )
@@ -285,6 +315,7 @@ function RevokeCredentialDialog({
   onClose: () => void
   onRevoked: () => void
 }) {
+  const t = useT()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -295,7 +326,7 @@ function RevokeCredentialDialog({
       await revokeCredential(jwt, credential.id)
       onRevoked()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to revoke token.")
+      setError(err instanceof Error ? err.message : t("onboarding.apiTokens.revokeFailed"))
       setBusy(false)
     }
   }
@@ -309,22 +340,22 @@ function RevokeCredentialDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Revoke token?</DialogTitle>
+          <DialogTitle>{t("onboarding.apiTokens.revokeDialogTitle")}</DialogTitle>
         </DialogHeader>
         <DialogBody className="space-y-2">
           <p className="text-sm">
-            <strong>{credential.name}</strong> ({credential.tokenPrefix}…) will stop working
-            immediately. This can&apos;t be undone.
+            <strong>{credential.name}</strong>{" "}
+            {t("onboarding.apiTokens.revokeWarning", { prefix: credential.tokenPrefix })}
           </p>
           {error && <FieldError role="alert">{error}</FieldError>}
         </DialogBody>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={busy}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button variant="destructive" onClick={() => void handleRevoke()} disabled={busy}>
             {busy && <Spinner data-icon="inline-start" />}
-            {busy ? "Revoking…" : "Revoke token"}
+            {busy ? t("common.revoking") : t("onboarding.apiTokens.revokeTokenButton")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -337,17 +368,36 @@ function RevokeCredentialDialog({
  * it's gone once closed. */
 function ShowOnceTokenDialog({
   result,
+  scopeLabel,
   onClose,
 }: {
   result: MintCredentialResult
+  scopeLabel: string
   onClose: () => void
 }) {
+  const t = useT()
   const [copied, setCopied] = useState(false)
+  const [copiedPrompt, setCopiedPrompt] = useState(false)
 
   function copy() {
     void navigator.clipboard.writeText(result.token)
     setCopied(true)
     setTimeout(() => setCopied(false), 1500)
+  }
+
+  // Copies the token *inside* a ready-to-paste prompt. This is the only moment
+  // we hold the plaintext, so it's the only moment the prompt can be complete.
+  function copyInstructions() {
+    void navigator.clipboard.writeText(
+      buildAgentInstructions({
+        syncOrigin: syncWorkerHttpOrigin(),
+        token: result.token,
+        mode: result.credential.mode,
+        scopeLabel,
+      }),
+    )
+    setCopiedPrompt(true)
+    setTimeout(() => setCopiedPrompt(false), 1500)
   }
 
   return (
@@ -359,25 +409,92 @@ function ShowOnceTokenDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Your new API token</DialogTitle>
+          <DialogTitle>{t("onboarding.apiTokens.newTokenDialogTitle")}</DialogTitle>
         </DialogHeader>
         <DialogBody className="space-y-3">
           <p className="text-sm text-muted-foreground" role="alert">
-            Copy this now — you will not see it again. If you lose it, revoke this token and
-            mint a new one.
+            {t("onboarding.apiTokens.showOnceWarning")}
           </p>
           <div className="flex items-center gap-2">
             <code className="min-w-0 flex-1 truncate rounded bg-muted px-2 py-1.5 text-xs">
               {result.token}
             </code>
             <Button size="sm" variant="outline" onClick={copy}>
-              <Copy className="mr-1 size-3.5" />
-              {copied ? "Copied" : "Copy"}
+              <Copy className="me-1 size-3.5" />
+              {copied ? t("nav.version.copiedLabel") : t("common.copy")}
             </Button>
           </div>
+          <p className="text-xs text-muted-foreground">
+            {t("onboarding.apiTokens.agentHandoffHint", { mode: result.credential.mode })}
+          </p>
         </DialogBody>
         <DialogFooter>
-          <Button onClick={onClose}>Done</Button>
+          <Button variant="outline" onClick={copyInstructions}>
+            <Copy className="me-1 size-3.5" />
+            {copiedPrompt ? t("nav.version.copiedLabel") : t("onboarding.apiTokens.copyAgentInstructions")}
+          </Button>
+          <Button onClick={onClose}>{t("common.done")}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+/** The copy-and-paste prompt a user hands to their agent. Rendered with the real
+ * token right after mint (the only moment we hold it) and with a placeholder
+ * from the section header, for anyone who already closed that dialog. */
+function AgentInstructionsDialog({
+  token,
+  mode,
+  scopeLabel,
+  onClose,
+}: {
+  token?: string
+  mode: CredentialMode
+  scopeLabel: string
+  onClose: () => void
+}) {
+  const t = useT()
+  const [copied, setCopied] = useState(false)
+  const text = useMemo(
+    () => buildAgentInstructions({ syncOrigin: syncWorkerHttpOrigin(), token, mode, scopeLabel }),
+    [token, mode, scopeLabel],
+  )
+
+  function copy() {
+    void navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
+  }
+
+  return (
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) onClose()
+      }}
+    >
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>{t("onboarding.apiTokens.agentInstructionsDialogTitle")}</DialogTitle>
+        </DialogHeader>
+        <DialogBody className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            {t("onboarding.apiTokens.agentInstructionsBody", { mode })}
+            {!token && ` ${t("onboarding.apiTokens.agentInstructionsPlaceholderNote")}`}
+          </p>
+          <pre className="max-h-72 overflow-auto rounded-lg bg-muted p-3 text-xs whitespace-pre-wrap">
+            {text}
+          </pre>
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            {t("common.close")}
+          </Button>
+          <Button onClick={copy}>
+            <Copy className="me-1 size-3.5" />
+            {copied ? t("nav.version.copiedLabel") : t("onboarding.apiTokens.copyInstructionsButton")}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -395,6 +512,7 @@ function MintTokenDialog({
   projects: CloudProjectSummary[]
   onMinted: (result: MintCredentialResult) => void
 }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [name, setName] = useState("")
   const [mode, setMode] = useState<CredentialMode>("ask")
@@ -453,7 +571,7 @@ function MintTokenDialog({
     // flight, before `busy` has re-rendered the button to disabled.
     if (submittingRef.current) return
     if (!name.trim()) {
-      setError("Give this token a name.")
+      setError(t("onboarding.apiTokens.nameRequired"))
       return
     }
     submittingRef.current = true
@@ -470,7 +588,7 @@ function MintTokenDialog({
       onMinted(result)
       setOpen(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to mint token.")
+      setError(err instanceof Error ? err.message : t("onboarding.apiTokens.mintFailed"))
     } finally {
       submittingRef.current = false
       setBusy(false)
@@ -479,25 +597,25 @@ function MintTokenDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" />}>New token</DialogTrigger>
+      <DialogTrigger render={<Button size="sm" />}>{t("onboarding.apiTokens.newTokenTrigger")}</DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New API token</DialogTitle>
+          <DialogTitle>{t("onboarding.apiTokens.newTokenDialogHeading")}</DialogTitle>
         </DialogHeader>
         <form onSubmit={(e) => void handleSubmit(e)} className="contents">
           <DialogBody className="space-y-4">
             <Field>
-              <FieldLabel htmlFor="token-name">Name</FieldLabel>
+              <FieldLabel htmlFor="token-name">{t("common.name")}</FieldLabel>
               <Input
                 id="token-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Import agent"
+                placeholder={t("onboarding.apiTokens.namePlaceholder")}
               />
             </Field>
 
             <Field>
-              <FieldLabel>Mode</FieldLabel>
+              <FieldLabel>{t("common.modeLabel")}</FieldLabel>
               <RadioGroup
                 value={mode}
                 onValueChange={(value) => setMode(value as CredentialMode)}
@@ -506,7 +624,7 @@ function MintTokenDialog({
                 <label className="flex items-start gap-2.5 text-sm">
                   <RadioGroupItem value="ask" className="mt-0.5" />
                   <span>
-                    <strong>Ask</strong> — every write waits for your approval.
+                    <strong>{t("onboarding.apiTokens.modeAskLabel")}</strong> — {t("onboarding.apiTokens.modeAskDescription")}
                   </span>
                 </label>
                 <label
@@ -514,39 +632,38 @@ function MintTokenDialog({
                 >
                   <RadioGroupItem value="act" className="mt-0.5" disabled={!canAct} />
                   <span>
-                    <strong>Act</strong> — writes apply immediately. Requires a project below
-                    where you&apos;re a maintainer.
+                    <strong>{t("onboarding.apiTokens.modeActLabel")}</strong> — {t("onboarding.apiTokens.modeActDescription")}
                   </span>
                 </label>
               </RadioGroup>
             </Field>
 
             <Field>
-              <FieldLabel htmlFor="token-org">Organization</FieldLabel>
+              <FieldLabel htmlFor="token-org">{t("onboarding.apiTokens.orgLabel")}</FieldLabel>
               <Select value={orgId} onValueChange={(value) => setOrgId(value ?? "")}>
                 <SelectTrigger id="token-org" className="w-full">
-                  <SelectValue placeholder="No organization (personal)" />
+                  <SelectValue placeholder={t("onboarding.apiTokens.orgPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
                     {orgOptions.map((o) => (
                       <SelectItem key={o.id} value={String(o.id)}>
-                        {o.name ?? `Org ${o.id}`}
+                        {o.name ?? t("onboarding.apiTokens.scope.orgFallback", { id: o.id })}
                       </SelectItem>
                     ))}
                   </SelectGroup>
                 </SelectContent>
               </Select>
               <FieldDescription>
-                Only orgs where you&apos;re at least a contributor are listed.
+                {t("onboarding.apiTokens.orgHint")}
               </FieldDescription>
             </Field>
 
             <Field>
-              <FieldLabel htmlFor="token-project">Project</FieldLabel>
+              <FieldLabel htmlFor="token-project">{t("common.project")}</FieldLabel>
               <Select value={projectId} onValueChange={(value) => setProjectId(value ?? "")}>
                 <SelectTrigger id="token-project" className="w-full">
-                  <SelectValue placeholder="No project (org-wide)" />
+                  <SelectValue placeholder={t("onboarding.apiTokens.projectPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
@@ -561,19 +678,19 @@ function MintTokenDialog({
             </Field>
 
             <Field>
-              <FieldLabel htmlFor="token-expiry">Expiry</FieldLabel>
+              <FieldLabel htmlFor="token-expiry">{t("onboarding.apiTokens.expiryLabel")}</FieldLabel>
               <Select
                 value={expiry}
                 onValueChange={(value) => setExpiry((value ?? "90d") as ExpiryPresetId)}
               >
-                <SelectTrigger id="token-expiry" className="w-full">
+                <SelectTrigger id="token-expiry">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
                     {EXPIRY_PRESETS.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
-                        {p.label}
+                        {t(p.labelKey)}
                       </SelectItem>
                     ))}
                   </SelectGroup>
@@ -585,11 +702,11 @@ function MintTokenDialog({
           </DialogBody>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={busy}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="submit" disabled={busy}>
               {busy && <Spinner data-icon="inline-start" />}
-              {busy ? "Minting…" : "Mint token"}
+              {busy ? t("onboarding.apiTokens.mintingButton") : t("onboarding.apiTokens.mintTokenButton")}
             </Button>
           </DialogFooter>
         </form>

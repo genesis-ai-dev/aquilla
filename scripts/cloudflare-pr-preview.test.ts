@@ -6,20 +6,22 @@ import {
   previewUrlFromUpload,
   pullRequestPreviewAlias,
   uploadPullRequestPreview,
+  uploadWorkersBuildPreview,
+  workersBuildPreviewAlias,
 } from "./cloudflare-pr-preview.mjs"
 import { REQUIRED_ASSET_IGNORE_PATTERNS } from "./verify-deployment-artifacts.mjs"
 
 const VERSION_ID = "64fca16d-9a57-41da-9f66-990655dfcae2"
 const PREVIEW_URL = "https://pr-274-aquilla-web-preview.blue-darkness-7674.workers.dev"
 
-function versionUploadOutput(outputPath: string) {
+function versionUploadOutput(outputPath: string, alias = "pr-274") {
   writeFileSync(outputPath, `${JSON.stringify({
     type: "version-upload",
     version: 1,
     worker_name: "aquilla-web-preview",
     version_id: VERSION_ID,
     preview_url: "https://64fca16d-aquilla-web-preview.blue-darkness-7674.workers.dev",
-    preview_alias_url: PREVIEW_URL,
+    preview_alias_url: `https://${alias}-aquilla-web-preview.blue-darkness-7674.workers.dev`,
     wrangler_environment: "preview",
   })}\n`)
 }
@@ -27,6 +29,14 @@ function versionUploadOutput(outputPath: string) {
 describe("Cloudflare pull request preview upload", () => {
   it.each([0, -1, "", "feature/name", "1.5"])("rejects unsafe PR number %j", (value) => {
     expect(() => pullRequestPreviewAlias(value)).toThrow("invalid pull request number")
+  })
+
+  it("turns slash-named branches into stable Cloudflare-safe aliases", () => {
+    const alias = workersBuildPreviewAlias("tim/AQU-564/preview hardening")
+    expect(alias).toMatch(/^ci-tim-aqu-564-preview-hardening-[a-f0-9]{8}$/)
+    expect(alias).toBe(workersBuildPreviewAlias("tim/AQU-564/preview hardening"))
+    expect(alias).not.toBe(workersBuildPreviewAlias("tim/AQU-564/another branch"))
+    expect(() => workersBuildPreviewAlias("  ")).toThrow("Workers Builds branch is required")
   })
 
   it("uses the exact structured alias URL returned by Wrangler", () => {
@@ -120,6 +130,35 @@ describe("Cloudflare pull request preview upload", () => {
       ["exec", "wrangler", "versions", "upload"],
     ])
     expect(run.mock.calls[1]?.[1]).toContain("--name=aquilla-web-preview")
+  })
+
+  it("uploads Workers Builds output only to the dedicated preview Worker", async () => {
+    const run = vi.fn(async (_command, args, options) => {
+      const aliasArg = args.find((arg: string) => arg.startsWith("--preview-alias="))
+      const alias = aliasArg?.slice("--preview-alias=".length)
+      expect(alias).toBe(workersBuildPreviewAlias("feature/example"))
+      expect(args).toContain("--env=preview")
+      expect(args).toContain("--name=aquilla-web-preview")
+      expect(args).toContain("workers-build:feature/example:build-123 @ abcdef1234567890")
+      versionUploadOutput(options?.env?.WRANGLER_OUTPUT_FILE_PATH as string, alias)
+      return { stdout: "", stderr: "" }
+    })
+
+    await expect(uploadWorkersBuildPreview({
+      env: {
+        WORKERS_CI: "1",
+        WORKERS_CI_BRANCH: "feature/example",
+        WORKERS_CI_COMMIT_SHA: "abcdef1234567890",
+        WORKERS_CI_BUILD_UUID: "build-123",
+      },
+      githubOutputPath: null,
+      run,
+      log: vi.fn(),
+      verifyArtifacts: vi.fn(),
+    })).resolves.toMatchObject({
+      alias: workersBuildPreviewAlias("feature/example"),
+      workerName: "aquilla-web-preview",
+    })
   })
 
   it("does not turn an unrelated upload failure into a deploy", async () => {

@@ -49,6 +49,11 @@ export class Workspace {
     await this.confirmImportPreview()
   }
 
+  async importPayload(payload: FilePayload): Promise<void> {
+    await this.previewImportPayload(payload)
+    await this.confirmImportPreview()
+  }
+
   /** Select a spreadsheet through the normal Upload files card, accept the
    * auto-detected column mapping, and stop at the shared human-review preview. */
   async previewMappedSpreadsheet(filePath: string): Promise<void> {
@@ -128,6 +133,36 @@ export class Workspace {
     await expect(importBtn).toBeEnabled({ timeout: 5_000 })
     await importBtn.click()
     await this.waitForImportSettled()
+  }
+
+  /**
+   * Start the same specialized import but stop at the panel, so a test can
+   * assert what the panel says when the importer rejects the file. Returns the
+   * open dialog.
+   */
+  async attemptImportViaSpecializedPanel(
+    optionName: RegExp,
+    filePath: string | FilePayload,
+    configure?: (dialog: Locator) => Promise<void>,
+  ): Promise<Locator> {
+    await this.dismissSetupChecklist()
+    await this.openImportDialog()
+
+    const dialog = this.page.getByRole("dialog")
+    const option = dialog.getByRole("button", { name: optionName }).first()
+    await expect(option).toBeVisible({ timeout: 8_000 })
+    await option.click()
+
+    const chooseBtn = dialog.getByRole("button", { name: /^Choose .*file$/i }).first()
+    await expect(chooseBtn).toBeVisible({ timeout: 5_000 })
+    await chooseBtn.locator('input[type="file"]').setInputFiles(filePath)
+
+    if (configure) await configure(dialog)
+
+    const importBtn = dialog.getByRole("button", { name: /^Import$/i }).last()
+    await expect(importBtn).toBeEnabled({ timeout: 5_000 })
+    await importBtn.click()
+    return dialog
   }
 
   /** AQU-244 auto-opens the "Project setup" checklist sheet once per fresh
@@ -273,13 +308,17 @@ export class Workspace {
     throw new Error("Import dialog did not open")
   }
 
-  /** Click a file row in the sidebar, identified by a substring of its name. */
+  /** Click a file row in the sidebar, identified by a substring of its name.
+   * Anchored to the file rows themselves: sidebar chrome (e.g. the history
+   * arrows) embeds the current file's name in its accessible labels, so a
+   * bare role+name match inside <aside> can grab the wrong button. */
   async openFileBySubstring(nameSubstring: string): Promise<void> {
-    await this.page
-      .locator("aside")
-      .getByRole("button", { name: new RegExp(nameSubstring, "i") })
+    const row = this.page
+      .locator('aside [data-showcase="sidebar.file"]')
+      .filter({ hasText: new RegExp(nameSubstring, "i") })
       .first()
-      .click()
+    await expect(row).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await row.click()
   }
 
   /** Wait for a named file to be present in the authoritative sidebar inventory. */
@@ -287,6 +326,28 @@ export class Workspace {
     await expect(
       this.page.locator("aside").getByText(nameSubstring, { exact: false }).first(),
     ).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  /** Hover the first cell until the action rail reveals, then click Translate with AI. */
+  async clickSparkleOnFirstCell(): Promise<void> {
+    const row = this.page.locator("[data-cell-id]").first()
+    const sparkle = row
+      .locator("[data-tooltip*='Translate with AI'] button, button[aria-label*='Translate with AI']")
+      .first()
+    await sparkle.scrollIntoViewIfNeeded()
+    await row.hover()
+    await expect(row.locator('[data-slot="cell-action-rail"]')).toHaveAttribute(
+      "data-revealed",
+      "true",
+      { timeout: 5_000 },
+    )
+    await expect(sparkle).toBeVisible()
+    await expect(sparkle).toBeEnabled({ timeout: 15_000 })
+    await row.hover()
+    // The unrevealed rail wrapper intercepts Playwright's hit-test even after
+    // data-revealed=true if idle-hide races the click. force skips that check;
+    // the button is already asserted visible and enabled.
+    await sparkle.click({ force: true })
   }
 
   async waitForEditor(expectedCellId?: string): Promise<void> {
@@ -512,12 +573,84 @@ export class Workspace {
     for (let press = 0; press < draft.length; press += 1) {
       await this.page.keyboard.press("Backspace")
     }
-    await expect(target).toHaveText("")
+    await this.expectEmptyIdmlTarget(target)
     // The protected anchors must survive the emptied draft.
     await expect(target.locator("span[data-idml-slot]")).toHaveCount(expectedSlotCount)
     await expect(
       this.page.getByText(/This edit would remove protected InDesign formatting/i),
     ).toHaveCount(0)
+    await this.page.keyboard.press("Escape")
+    await expect(target).toBeHidden()
+  }
+
+  /**
+   * AQU-810: type into an IDML target through a real IME composition session.
+   * The raw keydown (keyCode 229) plus CDP `Input.imeSetComposition` drive
+   * Chromium's actual IME pipeline — the same compositionstart/update and
+   * non-cancelable `insertCompositionText` beforeinput sequence a macOS
+   * Japanese or Devanagari input method produces — and `Input.insertText`
+   * commits the candidate. The committed text must land exactly once: the
+   * regression echoed every intermediate update and left the raw romaji
+   * keystrokes between the copies. Ends untranslated (draft backspaced away,
+   * Escape), like `deleteIdmlDraftToEmpty`, so later assertions on the cell
+   * still hold.
+   */
+  /**
+   * An emptied IDML target is not textually blank in the DOM: the slot holding
+   * the caret renders a zero-width-space caret anchor (AQU-810) so the browser
+   * can keep the caret — and IME compositions — inside the span. The anchor is
+   * decoration-only and never committed, so "empty" means no text beyond it.
+   */
+  private async expectEmptyIdmlTarget(target: Locator): Promise<void> {
+    await expect.poll(() => target.evaluate((element) =>
+      (element.textContent ?? "").replace(/\u200b/g, ""))).toBe("")
+  }
+
+  async composeIdmlImeDraft(
+    index: number,
+    compositionUpdates: string[],
+    committedText: string,
+  ): Promise<void> {
+    const target = await this.activateTargetCell(index)
+    const slot = target.locator('span[data-idml-slot="0"]')
+    const session = await this.page.context().newCDPSession(this.page)
+    try {
+      // The keystroke that starts a composition reaches the page as a plain
+      // keydown with keyCode 229 and isComposing still false — the exact
+      // shape that used to leak a literal "k" into the slot.
+      await session.send("Input.dispatchKeyEvent", {
+        type: "rawKeyDown",
+        key: compositionUpdates[0] ?? "k",
+        code: "KeyK",
+        windowsVirtualKeyCode: 229,
+        nativeVirtualKeyCode: 229,
+      })
+      for (const update of compositionUpdates) {
+        await session.send("Input.imeSetComposition", {
+          text: update,
+          selectionStart: update.length,
+          selectionEnd: update.length,
+        })
+        // Real IME keystrokes arrive at human cadence, so ProseMirror's
+        // batched mutation reads keep pace with the browser's composition
+        // node. CDP can outrun them, which no keyboard can — wait for the
+        // editor state to absorb each update before sending the next.
+        await expect.poll(() => target.evaluate((el) => {
+          const editor = (el as HTMLElement & { editor?: { state: { doc: { textContent: string } } } }).editor
+          return (editor?.state.doc.textContent ?? "").replace(/\u200b/g, "")
+        })).toBe(update)
+      }
+      await session.send("Input.insertText", { text: committedText })
+    } finally {
+      await session.detach()
+    }
+    await expect.poll(() => slot.evaluate((element) => element.textContent))
+      .toBe(committedText)
+
+    for (let press = 0; press < committedText.length; press += 1) {
+      await this.page.keyboard.press("Backspace")
+    }
+    await this.expectEmptyIdmlTarget(target)
     await this.page.keyboard.press("Escape")
     await expect(target).toBeHidden()
   }

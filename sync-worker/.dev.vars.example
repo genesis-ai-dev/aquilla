@@ -6,7 +6,55 @@
 # sync-worker compromise cannot forge Frontier access tokens.
 SYNC_SECRET_KEY="test-sync-secret-key"
 
+# OPS-2: dedicated bearer for the operator-only routes (/admin/*, /migrate/*,
+# projection rebuilds, and DELETE /audio/*). Kept separate from SYNC_SECRET_KEY so routine ops calls
+# never put the token-signing key on a command line. When unset, those routes
+# fall back to SYNC_SECRET_KEY; when set, only this value is accepted. Set the
+# SAME value in auth-worker's .dev.vars — it calls /admin/files/* for R2
+# cleanup, and a one-sided value 401s that cleanup silently.
+ADMIN_SECRET="test-admin-secret"
+# Use `pnpm admin:request` from the repository root so the secret is read from
+# AQUILLA_ADMIN_SECRET rather than recorded in a command-line argument.
+
 # Dev bypass. Lets clients connect without a valid sync-token JWT. Safe for
 # local dev while the client isn't yet fetching /sync-token. DO NOT set this
 # in production — prod default (unset) enforces strict auth.
 ALLOW_UNAUTHENTICATED="true"
+
+# Base URL this worker calls back into auth-worker with (member removal
+# notifications, etc). `pnpm dev` overrides this automatically.
+# AUTH_WORKER_URL="http://127.0.0.1:8788"
+
+# Public SPA origin, used to build absolute links.
+# BASE_URL="http://127.0.0.1:5173"
+
+# Outbound email (comment notifications). Goes through the Cloudflare Email
+# Service `send_email` binding in deployed envs; no-op locally.
+# EMAIL_FROM="noreply@support.aquilla.app"
+
+# Modal-hosted diarization service (audio speaker separation).
+# DIARIZATION_MODAL_URL=""
+# DIARIZATION_PUBLIC_BASE=""
+# DIARIZATION_SHARED_SECRET=""
+
+# Modal-hosted voice-conversion services.
+# OMNIVOICE_URL=""
+# OMNIVOICE_TOKEN=""
+# SEED_VC_URL=""
+# SEED_VC_TOKEN=""
+
+# TTS usage/cost guardrails. Leave unset to disable enforcement.
+# TTS_BUDGET_ENFORCE="false"
+# TTS_COST_CENTS_PER_CALL=""
+# TTS_COST_PER_AUDIO_SEC_CENTS=""
+# TTS_USER_DAILY_SECONDS_LIMIT=""
+
+# PostHog server-side analytics (optional — omit to disable).
+# POSTHOG_KEY=""
+# POSTHOG_HOST="https://us.i.posthog.com"
+
+# R2 object key prefix override for audio/artifact storage.
+# R2_KEY_PREFIX=""
+
+# Marks the runtime so routes can dial back error verbosity.
+# ENVIRONMENT="development"

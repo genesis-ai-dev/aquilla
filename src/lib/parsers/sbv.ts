@@ -1,5 +1,5 @@
 import { v4 as uuid } from "uuid"
-import type { TranslatableString } from "./types"
+import type { TranslatableString } from "./core-types"
 
 /** YouTube SBV subtitle importer.
  *

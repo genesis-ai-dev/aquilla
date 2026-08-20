@@ -46,9 +46,14 @@ export interface Env {
   ALGORITHM: string
   ACCESS_TOKEN_EXPIRE_MINUTES: string
 
-  // Sync-token signing AND admin auth to aquilla-sync-worker. Shared
-  // between identity and the sync worker.
+  // Sync-token signing, and — until ADMIN_SECRET is provisioned on both
+  // workers — admin auth to aquilla-sync-worker. Shared between identity and
+  // the sync worker.
   SYNC_SECRET_KEY?: string
+
+  /** Dedicated bearer for aquilla-sync-worker's /admin/* routes. Must match
+   *  the sync worker's own ADMIN_SECRET; provision both together (OPS-2). */
+  ADMIN_SECRET?: string
 
   /** aquilla-sync-worker base URL for archive / file-delete notifications. */
   SYNC_WORKER_URL?: string
@@ -128,7 +133,7 @@ export interface Env {
   OPENROUTER_API_KEY?: string
   DEFAULT_LLM_MODEL?: string
   /** Fallback model for the translation agent (routes/agent.ts) when
-   *  platform_settings.agentModel is unset. Default: anthropic/claude-haiku-4-5. */
+   *  platform_settings.agentModel is unset. Default: openai/gpt-5.6-luna. */
   AGENT_MODEL_DEFAULT?: string
   /** Fallback model for the agent's server-side `draft` tool when
    *  platform_settings.agentDraftModel is unset. Default: the agent model. */
@@ -137,7 +142,7 @@ export interface Env {
    *  in scripts/mock-openrouter.ts). Never set in prod. */
   OPENROUTER_BASE_URL?: string
   /** Contextual pipeline (routes/contextual.ts) fast-tier model override.
-   *  Default: anthropic/claude-haiku-4-5. */
+   *  Default: openai/gpt-5.6-luna. */
   CONTEXTUAL_FAST_MODEL?: string
   /** Contextual pipeline deep-tier (verifier) model override. Default: the
    *  resolved draft (mid) model. */
@@ -177,6 +182,16 @@ export interface Env {
   /** Per-run OpenRouter cost cap in whole cents. Default 500 (frames.ts). The
    *  run halts gracefully with a budget.exhausted frame at this ceiling. */
   AGENT_RUN_COST_CAP_CENTS?: string
+  /** Spans a project-wide autopilot start may drive at once. Lower it for a
+   *  self-hosted upstream with few slots (see routes/contextual.ts). */
+  CONTEXTUAL_MAX_CONCURRENCY?: string
+  /** Hard cap on autopilot model requests in flight at once. Unset = uncapped.
+   *  Set to the upstream's slot count when it has a fixed one; span concurrency
+   *  bursts ~3x wider than it looks (verifier fan-out). */
+  CONTEXTUAL_MAX_INFLIGHT?: string
+  /** "1" enables the per-call cost ledger (lib/cost-meter.ts). Off otherwise —
+   *  no table, no writes. See docs/COST-METERING.md. */
+  COST_METER?: string
   /** R2 bucket `aquilla-snapshots` (same bucket sync-worker + agent-worker
    *  bind as SNAPSHOTS). The agent-artifacts upload route (routes/agent-artifacts.ts)
    *  writes attached files here so the sandbox's fetch-artifact can read them
@@ -227,6 +242,17 @@ export interface Env {
   // CREDIT_ENFORCE: set to "true" to enforce caps with 429s. Default: false.
   CREDIT_ENFORCE?: string
 
+  // ── Stripe Field Plan billing ──────────────────────────────────────────
+  // Secret: `wrangler secret put STRIPE_SECRET_KEY` / auth-worker/.dev.vars.
+  // Never commit the secret. Publishable key + price ids are plain vars.
+  STRIPE_SECRET_KEY?: string
+  STRIPE_WEBHOOK_SECRET?: string
+  STRIPE_PUBLISHABLE_KEY?: string
+  /** Recurring $500 / 4-week Field Plan price id (price_…). */
+  STRIPE_PRICE_FIELD?: string
+  /** One-time $200 / 100k-word add-on price id (price_…). */
+  STRIPE_PRICE_ADDON?: string
+
   /**
    * When set to "1", exposes `/__test__/reset` and skips authentication on
    * sensitive routes that the E2E harness needs to seed. NEVER set in
@@ -238,6 +264,10 @@ export interface Env {
 
 export type Variables = {
   user: AuthUser
+  /** The verified JWT payload for the current request, set by authMiddleware
+   *  so routes (e.g. POST /auth/logout) can read `jti`/`exp` without
+   *  re-verifying the token. */
+  tokenPayload: JWTPayload
 }
 
 /**
@@ -286,6 +316,10 @@ export interface JWTPayload {
   sub: string
   exp: number
   iat: number
+  /** Unique token id, checked against revoked_tokens on logout (migration
+   *  0073). Optional — tokens minted before this field existed have none
+   *  and simply aren't individually revocable. */
+  jti?: string
   [k: string]: unknown
 }
 

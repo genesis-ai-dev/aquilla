@@ -24,6 +24,8 @@ import {
 } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { ChatMarkdown } from "@/components/chat/ChatMarkdown"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import { ROLE } from "@/lib/agent/role-floors"
 import type { AgentMemory } from "@/lib/agent/memory-api"
 
@@ -46,12 +48,13 @@ export function ProposedMemoryList({
   onApprove,
   onReject,
 }: ProposedMemoryListProps) {
+  const t = useT()
   const [rejectTarget, setRejectTarget] = useState<AgentMemory | null>(null)
 
   if (memories.length === 0) {
     return (
       <p className="px-1 py-4 text-xs text-muted-foreground">
-        No proposed memories awaiting review.
+        {t("agent.memory.noneProposed")}
       </p>
     )
   }
@@ -72,12 +75,12 @@ export function ProposedMemoryList({
               <code className="min-w-0 truncate text-xs font-medium">{memory.path}</code>
               {memory.provenance?.runId && (
                 <Badge variant="outline" className="px-1.5 py-0 font-mono text-[10px]">
-                  run {memory.provenance.runId}
+                  {t("agent.memory.provenanceRun", { runId: memory.provenance.runId })}
                 </Badge>
               )}
               {memory.provenance?.sessionId && (
                 <Badge variant="outline" className="px-1.5 py-0 font-mono text-[10px]">
-                  session {memory.provenance.sessionId}
+                  {t("agent.memory.provenanceSession", { sessionId: memory.provenance.sessionId })}
                 </Badge>
               )}
             </div>
@@ -88,7 +91,7 @@ export function ProposedMemoryList({
 
             {memory.rationale && (
               <p className="text-[11px] text-muted-foreground">
-                <span className="font-medium text-foreground">Rationale: </span>
+                <span className="font-medium text-foreground">{t("agent.memory.rationaleLabel")} </span>
                 {memory.rationale}
               </p>
             )}
@@ -97,27 +100,25 @@ export function ProposedMemoryList({
               <div className="flex items-center justify-end gap-1.5">
                 <Button
                   variant="ghost"
-                  size="sm"
                   className="h-6 text-[11px]"
                   disabled={busy}
                   onClick={() => setRejectTarget(memory)}
                 >
-                  Reject
+                  {t("agent.reject")}
                 </Button>
                 <Button
-                  size="sm"
                   className="h-6 text-[11px]"
                   disabled={busy}
                   onClick={() => onApprove(memory)}
                 >
                   {busy && <Spinner data-icon="inline-start" />}
-                  Approve
+                  {t("agent.approve")}
                 </Button>
               </div>
             ) : (
               <div className="flex items-center justify-end gap-1 text-[10px] text-muted-foreground">
                 <ShieldAlert className="h-3 w-3" />
-                Requires project lead or higher to review
+                {t("agent.memory.requiresLeadNotice")}
               </div>
             )}
           </div>
@@ -133,17 +134,19 @@ export function ProposedMemoryList({
         >
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Reject this memory?</DialogTitle>
+              <DialogTitle>{t("agent.memory.rejectConfirmTitle")}</DialogTitle>
             </DialogHeader>
             <DialogBody className="space-y-2">
               <p className="text-sm">
-                <code>{rejectTarget.path}</code> will be marked rejected and dropped from the
-                queue.
+                <RichMessage
+                  k="agent.memory.rejectConfirmBody"
+                  values={{ path: <code>{rejectTarget.path}</code> }}
+                />
               </p>
             </DialogBody>
             <DialogFooter>
               <Button variant="outline" onClick={() => setRejectTarget(null)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button
                 variant="destructive"
@@ -152,7 +155,7 @@ export function ProposedMemoryList({
                   setRejectTarget(null)
                 }}
               >
-                Reject
+                {t("agent.reject")}
               </Button>
             </DialogFooter>
           </DialogContent>

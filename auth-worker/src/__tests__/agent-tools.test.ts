@@ -10,10 +10,10 @@ import { seedUser } from "./helpers/db"
 import { AliasMap } from "../lib/agent/compress"
 import type { EmitStageContext } from "../lib/agent/emit-stage"
 import { parseRefRange, orderPairs, statusOf, type CellPair } from "../lib/agent/tools/select-cells"
-import { executeRead } from "../lib/agent/tools/read"
+import { executeRead, resolveScope } from "../lib/agent/tools/read"
 import { executeExamples, orTsquery } from "../lib/agent/tools/examples"
 import { executeSearch } from "../lib/agent/tools/search"
-import { executeDraft, parseDraftReply } from "../lib/agent/tools/draft"
+import { executeDraft } from "../lib/agent/tools/draft"
 
 const PROJECT = "11111111-1111-4111-8111-111111111111"
 const FILE = "22222222-2222-4222-8222-222222222222"
@@ -161,6 +161,97 @@ describe("executeRead", () => {
   })
 })
 
+// AQU-846 — the agent drafted five verses into Mark while the user had Genesis
+// open, then the approval card never said where they were going. These pin the
+// resolution half: the open file wins, an explicitly named file still wins over
+// it, and an unanchored request must ask rather than pick.
+describe("resolveScope — target-file resolution (AQU-846)", () => {
+  const GEN_FILE = "44444444-4444-4444-8444-444444444444"
+
+  async function seedGenesis() {
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, book_code, event_id) VALUES (?, ?, 'Genesis', 'GEN', ?)`,
+    )
+      .bind(GEN_FILE, PROJECT, crypto.randomUUID())
+      .run()
+    const id = "55555555-5555-4555-8555-555555555555"
+    for (const side of ["source", "target"] as const) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
+         VALUES (?, ?, ?, ?, ?, 'GEN 1:1', ?, 0)`,
+      )
+        .bind(PROJECT, GEN_FILE, id, side, side === "source" ? "In the beginning" : "", crypto.randomUUID())
+        .run()
+    }
+  }
+
+  it("keeps a same-book ref in the OPEN file instead of re-resolving by book code", async () => {
+    await seedWorld()
+    await seedGenesis()
+    // A second Genesis file the book-code lookup could land on instead.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO files (id, project_id, name, book_code, event_id) VALUES (?, ?, 'Genesis (draft)', 'GEN', ?)`,
+    )
+      .bind("66666666-6666-4666-8666-666666666666", PROJECT, crypto.randomUUID())
+      .run()
+
+    const scope = await resolveScope(env.AQUILLA_PG, { ref: "GEN 1" }, {
+      projectId: PROJECT,
+      focusedFileId: GEN_FILE,
+      aliases: new AliasMap(),
+    })
+    expect(scope.ok).toBe(true)
+    expect(scope.ok && scope.fileId).toBe(GEN_FILE)
+  })
+
+  it("still honours a ref that names a DIFFERENT book than the open file", async () => {
+    await seedWorld()
+    await seedGenesis()
+    const scope = await resolveScope(env.AQUILLA_PG, { ref: "MRK 4" }, {
+      projectId: PROJECT,
+      focusedFileId: GEN_FILE, // Genesis is open, but the user said Mark
+      aliases: new AliasMap(),
+    })
+    expect(scope.ok).toBe(true)
+    expect(scope.ok && scope.fileId).toBe(FILE)
+  })
+
+  it("uses the open file when the request names no scope at all", async () => {
+    await seedWorld()
+    await seedGenesis()
+    const scope = await resolveScope(env.AQUILLA_PG, {}, {
+      projectId: PROJECT,
+      focusedFileId: GEN_FILE,
+      aliases: new AliasMap(),
+    })
+    expect(scope.ok).toBe(true)
+    expect(scope.ok && scope.fileId).toBe(GEN_FILE)
+  })
+
+  it("refuses to pick a file — and names the candidates — when nothing is focused", async () => {
+    await seedWorld()
+    await seedGenesis()
+    const scope = await resolveScope(env.AQUILLA_PG, {}, {
+      projectId: PROJECT,
+      aliases: new AliasMap(),
+    })
+    expect(scope.ok).toBe(false)
+    expect(scope.ok === false && scope.error).toContain("ASK THE USER")
+    expect(scope.ok === false && scope.error).toContain("Genesis")
+    expect(scope.ok === false && scope.error).toContain("Mark")
+  })
+
+  it("auto-picks only when the project has a single candidate document", async () => {
+    await seedWorld() // Mark alone
+    const scope = await resolveScope(env.AQUILLA_PG, {}, {
+      projectId: PROJECT,
+      aliases: new AliasMap(),
+    })
+    expect(scope.ok).toBe(true)
+    expect(scope.ok && scope.fileId).toBe(FILE)
+  })
+})
+
 describe("executeExamples", () => {
   it("returns only approved pairs with stable retrieval ids", async () => {
     await seedWorld()
@@ -228,15 +319,18 @@ describe("executeDraft", () => {
 
   it("drafts untranslated cells via the model and stages them through emit-stage", async () => {
     await seedWorld()
-    let draftRequest: { messages: { role: string; content: string }[] } | null = null
+    const draftRequests: { messages: { role: string; content: string }[] }[] = []
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
-      draftRequest = JSON.parse(String(init?.body))
+      draftRequests.push(JSON.parse(String(init?.body)))
+      const isResearch = draftRequests.length === 1
       return new Response(
         JSON.stringify({
           choices: [
             {
               message: {
-                content: '[{"i":1,"t":"¡Oíd! He aquí, el sembrador salió a sembrar"},{"i":2,"t":"Y cuando estuvo solo"}]',
+                content: isResearch
+                  ? "MRK 4:3: preserve command, sower, departure, and purpose; attested teaching register [E1]. MRK 4:10: preserve temporal relation and solitude."
+                  : '[{"i":1,"t":"¡Oíd! He aquí, el sembrador salió a sembrar"},{"i":2,"t":"Y cuando estuvo solo"}]',
               },
             },
           ],
@@ -266,7 +360,7 @@ describe("executeDraft", () => {
         ai_draft: {
           model: "test/drafter",
           provider: "platform",
-          promptVersion: "agent-draft-v1",
+          promptVersion: "agent-draft-v3-staged-research",
           mode: "agent",
           projectState: {
             sourceLanguage: "English",
@@ -281,27 +375,42 @@ describe("executeDraft", () => {
     expect(out.data?.cells?.map((c) => c.status)).toEqual(["untranslated", "untranslated"])
     expect(out.data?.cells?.every((c) => c.target === "")).toBe(true)
     expect(progress).toEqual([
+      { label: "Researching 2 cells", done: 0, total: 2 },
+      { label: "Researching 2 cells", done: 2, total: 2 },
       { label: "Drafting 2 cells", done: 0, total: 2 },
       { label: "Drafting 2 cells", done: 2, total: 2 },
     ])
-    expect(usage).toHaveLength(1)
+    expect(usage).toHaveLength(2)
 
-    // The drafting prompt carried the project's own pairs + language pair.
-    const sys = draftRequest!.messages[0].content
-    expect(sys).toContain("into Spanish")
-    expect(sys).toContain("Y comenzó otra vez a enseñar") // exemplar rode along
-    expect(sys).not.toContain("Y les enseñaba muchas cosas") // unapproved target never becomes context
-    expect(draftRequest!.messages[1].content).toContain("1. [MRK 4:3]")
+    // Research is genuinely a separate call, and only its compact evidence
+    // record crosses into generation. Both passes carry approved project data.
+    expect(draftRequests).toHaveLength(2)
+    const researchSystem = draftRequests[0].messages[0].content
+    expect(researchSystem).toContain("RESEARCH pass")
+    expect(researchSystem).toContain("directly attested")
+    expect(researchSystem).toContain("into Spanish")
+    expect(researchSystem).toContain("Y comenzó otra vez a enseñar")
+    expect(researchSystem).not.toContain("Y les enseñaba muchas cosas") // unapproved target never becomes context
+    expect(draftRequests[0].messages[1].content).toContain("Research these 2 source segments")
+
+    const generationSystem = draftRequests[1].messages[0].content
+    expect(generationSystem).toContain("GENERATION pass")
+    expect(generationSystem).toContain("semantic role")
+    expect(draftRequests[1].messages[1].content).toContain("Evidence record from the completed research pass")
+    expect(draftRequests[1].messages[1].content).toContain("preserve command, sower")
+    expect(draftRequests[1].messages[1].content).toContain("1. [MRK 4:3]")
   })
 
   it("reports scope exhaustion and remaining work honestly", async () => {
     await seedWorld()
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
-      new Response(
-        JSON.stringify({ choices: [{ message: { content: '[{"i":1,"t":"borrador"}]' } }] }),
+    let calls = 0
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      calls++
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: calls % 2 === 1 ? "compact evidence" : '[{"i":1,"t":"borrador"}]' } }] }),
         { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    )
+      )
+    })
     const { ctx } = draftCtx()
     const out = await executeDraft(
       env.AQUILLA_PG,

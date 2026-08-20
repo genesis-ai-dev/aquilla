@@ -23,6 +23,8 @@ export type CommandRunner = (
 
 export function pullRequestPreviewAlias(prNumber: string | number): string
 
+export function workersBuildPreviewAlias(branch: string): string
+
 export function previewUrlFromUpload(
   entry: Record<string, unknown>,
   options: { alias: string; workerName?: string },
@@ -37,6 +39,25 @@ export function runCommand(
 export function uploadPullRequestPreview(options?: {
   prNumber?: string | number
   commitSha?: string
+  cwd?: string
+  githubOutputPath?: string | null
+  run?: CommandRunner
+  log?: (message: string) => void
+  verifyArtifacts?: (directory: string) => unknown
+}): Promise<PullRequestPreviewResult>
+
+export function uploadRouteFreePreview(options?: {
+  alias?: string
+  message?: string
+  cwd?: string
+  githubOutputPath?: string | null
+  run?: CommandRunner
+  log?: (message: string) => void
+  verifyArtifacts?: (directory: string) => unknown
+}): Promise<PullRequestPreviewResult>
+
+export function uploadWorkersBuildPreview(options?: {
+  env?: NodeJS.ProcessEnv
   cwd?: string
   githubOutputPath?: string | null
   run?: CommandRunner

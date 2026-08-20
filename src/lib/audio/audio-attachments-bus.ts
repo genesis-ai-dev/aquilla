@@ -7,7 +7,7 @@
 // playback (audio-coordinator.ts) and TTS status (tts.ts).
 
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
-import { getOutboxFileAudioRecords } from "@/lib/sync/outbox"
+import { getOutboxFileAudioRecords, requeueOutboxEvents } from "@/lib/sync/outbox"
 
 type Listener = () => void
 
@@ -195,15 +195,16 @@ function attachEventBinding(
 }
 
 /**
- * `pendingSync` is a VIEW flag the reader stamps onto the copy it paints. It
- * must never be stored on an overlay: callers routinely re-inject an
- * attachment they read back out of the merged view (the takes strip hands the
+ * `pendingSync` / `syncFailed` are VIEW flags the reader stamps onto the copy it
+ * paints. They must never be stored on an overlay: callers routinely re-inject
+ * an attachment they read back out of the merged view (the takes strip hands the
  * take it is displaying straight to `circle`), and a stored flag would keep
- * claiming "saving…" long after the event was delivered.
+ * claiming "saving…" — or, post-AQU-924, "couldn't save" — long after the event
+ * was delivered. The reader re-derives both from the outbox on every fetch.
  */
 function withoutViewFlags(att: AudioAttachmentOut): AudioAttachmentOut {
-  if (!att.pendingSync) return att
-  const { pendingSync: _ignored, ...rest } = att
+  if (!att.pendingSync && !att.syncFailed) return att
+  const { pendingSync: _pending, syncFailed: _failed, ...rest } = att
   return rest
 }
 
@@ -418,12 +419,53 @@ export function clearOptimisticShadows(fileId: string): void {
 // breaking SUB-48's "a recording stays on screen until it is actually saved".
 // On a file's first read of the session, rebuild the shadows from the queued
 // events themselves; the existing queued-phase lifecycle then takes over.
+//
+// AQU-924: this rebuilds from every UNDELIVERED record — `failed` (quarantined /
+// retry-exhausted) as well as `pending`. Rehydrating only the pending ones was
+// half the silent-data-loss bug: an upload whose attach had been quarantined was
+// skipped here, so after a reload the cell showed no take at all rather than a
+// take that needs attention. The reader paints those as `syncFailed`.
 
 const rehydratedFiles = new Set<string>()
 
 /** @internal — tests. */
 export function __resetShadowRehydrationForTests(): void {
   rehydratedFiles.clear()
+}
+
+/**
+ * AQU-924: put a clip's stuck `cell.audio.*` events back on the queue.
+ *
+ * The retry surface a user needs for a failed take is ON THE TAKE, not buried in
+ * the outbox inspector — they know "this recording didn't save", not which event
+ * id carries it. Resolves the clip's undelivered records by `audioId` and revives
+ * every `failed` one back to `pending`.
+ *
+ * Feedback is immediate without reaching the flusher: the bus poke here makes the
+ * reader re-derive the clip's state, so the badge flips from "not saved" to
+ * "saving" on the click. The send itself rides the flusher's normal cycle (it
+ * cannot be nudged from here — `flushNow` lives behind OutboxProvider, which the
+ * takes strip is not guaranteed to sit inside), which is honest: "saving" is
+ * exactly what a requeued record is doing.
+ *
+ * Returns the number of records requeued, so the caller can tell a real retry
+ * from a no-op (e.g. the record was discarded from the inspector meanwhile).
+ */
+export async function retryFailedAudioSync(
+  projectId: string,
+  fileId: string,
+  cellId: string,
+  audioId: string,
+): Promise<number> {
+  const records = await getOutboxFileAudioRecords(projectId, fileId)
+  const stuck = records
+    .filter((r) => r.status === "failed" && r.event.cellId === cellId)
+    .filter((r) => (r.event.payload as { audioId?: unknown } | null)?.audioId === audioId)
+    .map((r) => r.id)
+  if (stuck.length === 0) return 0
+  await requeueOutboxEvents(stuck)
+  notifyAudioAttachmentsChanged(fileId)
+  return stuck.length
 }
 
 export async function rehydrateShadowsFromOutbox(projectId: string, fileId: string): Promise<void> {
@@ -462,6 +504,12 @@ export async function rehydrateShadowsFromOutbox(projectId: string, fileId: stri
     } else if (event.kind === "cell.audio.remove") {
       const audioId = payload.audioId
       if (typeof audioId !== "string") continue
+      // AQU-924: only ATTACHES are rehydrated from a `failed` record. A stuck
+      // remove has nothing at risk (the clip is still on the server), and
+      // re-injecting it would hide that clip again on load only for the first
+      // read to un-hide it — a flicker asserting a deletion that never
+      // happened. Still-pending removes rehydrate as before.
+      if (record.status !== "pending") continue
       // The slot isn't in the remove payload; "recording" vs "generatedVoice"
       // only matters for which selection the remove shadow clears, and the
       // read-side prune keys removes by audioId — recording covers both.

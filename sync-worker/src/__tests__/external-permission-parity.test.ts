@@ -617,3 +617,86 @@ describe('invariant — credential scoped to project A cannot touch project B', 
     expect(payload.error.code).toBe('scope_denied')
   })
 })
+
+// ── [Pen test] AQU-435 regression: org-path project access via a PAT ───────
+// resolveProjectRoleShared (db/shared/project-roles.ts) previously omitted
+// the ORG_WIDE_ACCESS_FLOOR (Maintainer/600) gate that auth-worker's
+// resolveProjectRole enforces, so ANY org member — down to Viewer — got
+// full org-wide project access through the external Agent API even with no
+// project_members row. Fixed by mirroring the floor into the shared
+// resolver (and into listProjectsForCredential's raw SQL for project
+// enumeration). This pins the corrected behavior.
+
+describe('permission parity — AQU-435: org-path access via PAT requires Maintainer(600)+, no direct project_members row', () => {
+  it.each([
+    { name: 'org-viewer', level: ROLE.VIEWER },
+    { name: 'org-commenter', level: ROLE.COMMENTER },
+    { name: 'org-contributor', level: ROLE.CONTRIBUTOR },
+    { name: 'org-project_lead', level: ROLE.PROJECT_LEAD },
+    { name: 'org-maintainer', level: ROLE.MAINTAINER },
+    { name: 'org-owner', level: ROLE.OWNER },
+  ])('org role=$name (level=$level) reading project files', async ({ level }) => {
+    const orgId = 5000 + level
+    const userId = nextUserId++
+    await tdb.pg.query(
+      `INSERT INTO users (id, username, email, password_hash) VALUES ($1, $2, $3, 'h')`,
+      [userId, `u${userId}`, `u${userId}@x.com`],
+    )
+    await tdb.pg.query(
+      `INSERT INTO organizations (id, name, owner_user_id) VALUES ($1, 'Floor Org', 99999)
+       ON CONFLICT (id) DO NOTHING`,
+      [orgId],
+    )
+    await tdb.pg.query(`UPDATE projects SET org_id = $1 WHERE id = $2`, [orgId, PROJECT])
+    await tdb.pg.query(
+      `INSERT INTO org_members (org_id, user_id, role_level) VALUES ($1, $2, $3)`,
+      [orgId, userId, level],
+    )
+    const { token, tokenHash, tokenPrefix } = await mintApiToken()
+    await tdb.pg.query(
+      `INSERT INTO api_credentials (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id)
+       VALUES (gen_random_uuid(), $1, 'test', $2, $3, 'act', NULL, $4)`,
+      [String(userId), tokenPrefix, tokenHash, PROJECT],
+    )
+
+    const res = await handleExternalReadRequest(
+      req(`https://w/api/v1/external/projects/${PROJECT}/files`, { token }),
+      env(tdb),
+    )
+    const body = (await res!.json()) as any
+    if (level >= ROLE.MAINTAINER) {
+      expect(res!.status).toBe(200)
+    } else {
+      expect(res!.status).toBe(403)
+      expect(body.error.code).toBe('permission_denied')
+    }
+  })
+
+  it('a sub-Maintainer org member cannot enumerate the project via listProjectsForCredential', async () => {
+    const orgId = 6001
+    const userId = nextUserId++
+    await tdb.pg.query(
+      `INSERT INTO users (id, username, email, password_hash) VALUES ($1, $2, $3, 'h')`,
+      [userId, `u${userId}`, `u${userId}@x.com`],
+    )
+    await tdb.pg.query(`INSERT INTO organizations (id, name, owner_user_id) VALUES ($1, 'List Org', 99999)`, [orgId])
+    await tdb.pg.query(`UPDATE projects SET org_id = $1 WHERE id = $2`, [orgId, PROJECT])
+    await tdb.pg.query(
+      `INSERT INTO org_members (org_id, user_id, role_level) VALUES ($1, $2, $3)`,
+      [orgId, userId, ROLE.CONTRIBUTOR],
+    )
+    const { token, tokenHash, tokenPrefix } = await mintApiToken()
+    // Unscoped credential (no org/project pin) so listProjectsForCredential's
+    // own visibility SQL is what's under test, not assertCredentialScope.
+    await tdb.pg.query(
+      `INSERT INTO api_credentials (id, user_id, name, token_prefix, token_hash, mode, org_id, project_id)
+       VALUES (gen_random_uuid(), $1, 'test', $2, $3, 'act', NULL, NULL)`,
+      [String(userId), tokenPrefix, tokenHash],
+    )
+
+    const res = await handleExternalReadRequest(req(`https://w/api/v1/external/projects`, { token }), env(tdb))
+    const body = (await res!.json()) as any
+    const ids = (body.data ?? []).map((p: { id: string }) => p.id)
+    expect(ids).not.toContain(PROJECT)
+  })
+})

@@ -14,6 +14,7 @@ import { BadgeCheck, Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { applyStagedEvent, type ApplyContext } from "@/lib/agent/apply"
 import type { AgentProposal, StagedEvent } from "@/lib/agent/protocol"
 
@@ -29,6 +30,7 @@ export interface ValidationQueueCardProps {
 type RowState = "idle" | "applying" | "done" | "error"
 
 export function ValidationQueueCard({ proposal, applyContext, onApplied, canValidate }: ValidationQueueCardProps) {
+  const t = useT()
   const [rowState, setRowState] = useState<ReadonlyMap<number, RowState>>(new Map())
   const [rowError, setRowError] = useState<string | null>(null)
 
@@ -54,16 +56,16 @@ export function ValidationQueueCard({ proposal, applyContext, onApplied, canVali
       <div className="flex items-center gap-1.5 border-b border-emerald-900/40 px-3 py-1.5 text-xs">
         <BadgeCheck className="h-3.5 w-3.5 text-emerald-500" />
         <span className="font-medium">
-          {validations.length} validation{validations.length === 1 ? "" : "s"} prepared
+          {t("agent.validation.preparedCount", { count: validations.length })}
         </span>
-        <span className="ml-auto text-[10px] text-muted-foreground">
-          {doneCount}/{validations.length} confirmed
+        <span className="ms-auto text-[10px] text-muted-foreground">
+          {t("agent.validation.confirmedCount", { done: doneCount, total: validations.length })}
         </span>
       </div>
 
       {/* The tier-2 contract, stated where the decision happens. */}
       <p className="border-b border-emerald-900/30 px-3 py-1 text-[10px] text-muted-foreground">
-        Validation is your testimony — confirm each line yourself. There is no confirm-all.
+        {t("agent.validation.testimonyNotice")}
       </p>
 
       <div className="divide-y divide-emerald-900/20">
@@ -79,7 +81,7 @@ export function ValidationQueueCard({ proposal, applyContext, onApplied, canVali
               </span>
               {state === "done" ? (
                 <span className="flex shrink-0 items-center gap-1 pt-0.5 text-[10px] text-emerald-600 dark:text-emerald-500">
-                  <Check className="h-3 w-3" /> validated
+                  <Check className="h-3 w-3" /> {t("editor.state.validated")}
                 </span>
               ) : (
                 <AppTooltip
@@ -89,22 +91,23 @@ export function ValidationQueueCard({ proposal, applyContext, onApplied, canVali
                   <Button
                     type="button"
                     variant="outline"
-                    size="sm"
                     className="h-5 shrink-0 px-1.5 text-[10px]"
                     disabled={!canValidate || state === "applying"}
                     onClick={() => void confirm(ev, idx)}
-                    aria-label={`Validate ${ev.display.canonicalRef ?? ev.cellId ?? "cell"}`}
+                    aria-label={t("agent.validation.confirmAriaLabel", {
+                      ref: ev.display.canonicalRef ?? ev.cellId ?? "cell",
+                    })}
                   >
                   {state === "applying" ? (
                     <Spinner className="size-3" />
                   ) : (
                     <Check data-icon="inline-start" />
                   )}
-                  Validate
+                  {t("editor.selection.validate")}
                 </Button>
                 </AppTooltip>
               )}
-              {state === "error" && <X className="h-3 w-3 shrink-0 text-destructive" aria-label="Failed" />}
+              {state === "error" && <X className="h-3 w-3 shrink-0 text-destructive" aria-label={t("onboarding.checklist.aiModels.statusFailed")} />}
             </div>
           )
         })}

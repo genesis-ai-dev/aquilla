@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import {
   buildProjectWsUrl,
   createLinkUpstreamChangedHandler,
+  createReconnectResyncHandler,
   createWsReconciler,
   fileInventoryChanged,
   isOwnWriteEcho,
@@ -9,6 +10,13 @@ import {
   parseProjectWsMessage,
   type ProjectWsServerMessage,
 } from "./ws-reconciler"
+import {
+  applyRemoteFrame,
+  attachContextualRun,
+  getContextualRunProgress,
+  getContextualRunState,
+  resetContextualRunStore,
+} from "@/lib/contextual/run-store"
 
 // ── Fake WebSocket harness ────────────────────────────────────────────────
 
@@ -238,6 +246,113 @@ describe("parseProjectWsMessage", () => {
     expect(parseProjectWsMessage(JSON.stringify({ t: "presence", users: "wrong" }))).toBeNull()
   })
 
+  it("passes the worker's pausing frame through WebSocket parsing into the attached-file mirror", async () => {
+    resetContextualRunStore()
+    await attachContextualRun("p", "file-1")
+    const msg = parseProjectWsMessage(JSON.stringify({
+      t: "contextual.activity",
+      project: "p",
+      frame: {
+        type: "contextual.run.state",
+        runId: "01920000-0000-7000-8000-000000000001",
+        fileId: "file-1",
+        targetLang: "",
+        status: "pausing",
+        done: 4,
+        total: 12,
+        failed: 1,
+      },
+    }))
+
+    expect(msg?.t).toBe("contextual.activity")
+    if (msg?.t !== "contextual.activity" || msg.frame.type !== "contextual.run.state") {
+      throw new Error("producer-shaped pausing frame was rejected")
+    }
+    applyRemoteFrame(msg.project, msg.frame)
+    expect(getContextualRunState()).toMatchObject({ status: "pausing", fileId: "file-1" })
+    expect(getContextualRunProgress()).toEqual({ done: 4, total: 12, failed: 1 })
+  })
+
+  it("keeps a newer project fan-out frame for another file out of the open-file mirror", async () => {
+    resetContextualRunStore()
+    await attachContextualRun("p", "file-open")
+    const own = parseProjectWsMessage(JSON.stringify({
+      t: "contextual.activity",
+      project: "p",
+      frame: {
+        type: "contextual.run.state",
+        runId: "01920000-0000-7000-8000-000000000001",
+        fileId: "file-open",
+        targetLang: "",
+        status: "running",
+        done: 2,
+        total: 8,
+        failed: 0,
+      },
+    }))
+    const other = parseProjectWsMessage(JSON.stringify({
+      t: "contextual.activity",
+      project: "p",
+      frame: {
+        type: "contextual.run.state",
+        runId: "01930000-0000-7000-8000-000000000002",
+        fileId: "file-other",
+        targetLang: "",
+        status: "running",
+        done: 7,
+        total: 9,
+        failed: 0,
+      },
+    }))
+    if (own?.t !== "contextual.activity" || own.frame.type !== "contextual.run.state") {
+      throw new Error("open-file producer frame was rejected")
+    }
+    if (other?.t !== "contextual.activity" || other.frame.type !== "contextual.run.state") {
+      throw new Error("other-file producer frame was rejected")
+    }
+
+    applyRemoteFrame(own.project, own.frame)
+    applyRemoteFrame(other.project, other.frame)
+
+    expect(getContextualRunState()).toMatchObject({
+      fileId: "file-open",
+      runId: own.frame.runId,
+      status: "running",
+    })
+    expect(getContextualRunProgress()).toEqual({ done: 2, total: 8, failed: 0 })
+  })
+
+  it("keeps a late project-A envelope out after project B attaches the same file id", async () => {
+    resetContextualRunStore()
+    await attachContextualRun("project-b", "shared-file")
+    const lateA = parseProjectWsMessage(JSON.stringify({
+      t: "contextual.activity",
+      project: "project-a",
+      frame: {
+        type: "contextual.run.state",
+        runId: "01930000-0000-7000-8000-000000000002",
+        fileId: "shared-file",
+        targetLang: "",
+        status: "running",
+        done: 7,
+        total: 9,
+      },
+    }))
+    if (lateA?.t !== "contextual.activity" || lateA.frame.type !== "contextual.run.state") {
+      throw new Error("producer-shaped cross-project frame was rejected before store composition")
+    }
+
+    applyRemoteFrame(lateA.project, lateA.frame)
+
+    expect(getContextualRunState()).toMatchObject({
+      projectId: "project-b",
+      fileId: "shared-file",
+      runId: null,
+      status: "idle",
+    })
+    expect(getContextualRunProgress()).toEqual({ done: 0, total: 0, failed: 0 })
+  })
+
   it("parses link.upstream-changed (AQU-479 push accelerator)", () => {
     const msg = parseProjectWsMessage(
       JSON.stringify({
@@ -463,6 +578,20 @@ describe("isOwnWriteEcho", () => {
     expect(isOwnWriteEcho({}, "ryder")).toBe(false)
     expect(isOwnWriteEcho({ by: "" }, "ryder")).toBe(false)
   })
+
+  it("treats an Agent API commit as remote even when `by` is this user", () => {
+    // An external agent commits an ask-mode changeset via the Agent API; the
+    // sync-worker routes it through /events with a token minted for the
+    // credential OWNER, so `by` is the owner's own username. If that owner has
+    // the project open, NO outbox write happened in this client — suppressing
+    // the echo would silently hide the agent's committed translation until a
+    // manual reload. `via: "external"` must defeat the `by` match.
+    expect(isOwnWriteEcho({ by: "ryder", via: "external" }, "ryder")).toBe(false)
+  })
+
+  it("`via: external` on another user's write stays remote (no accidental flip)", () => {
+    expect(isOwnWriteEcho({ by: "alice", via: "external" }, "ryder")).toBe(false)
+  })
 })
 
 describe("createLinkUpstreamChangedHandler (AQU-479 push accelerator)", () => {
@@ -622,5 +751,48 @@ describe("fileInventoryChanged (AQU-744 staged-import reveal)", () => {
 
   it("stays progress-only for a known file without the signal", () => {
     expect(fileInventoryChanged(frame("f1", false), new Set(["f1", "f2"]))).toBe(false)
+  })
+})
+
+// AQU-845: the project DO broadcasts `event.applied` live and never replays it,
+// so every frame that lands while a client's socket is down is lost to that
+// client. Without a resync on reopen, a peer's committed cell renders blank
+// until the user happens to blur+refocus the window — the reported "cells are
+// empty for the other member, then fill in on their own".
+describe("createReconnectResyncHandler (AQU-845 missed-broadcast recovery)", () => {
+  it("does not resync on the first open — the initial read is already in flight", () => {
+    const onResync = vi.fn()
+    const onOpen = createReconnectResyncHandler(onResync)
+
+    onOpen()
+
+    expect(onResync).not.toHaveBeenCalled()
+  })
+
+  it("resyncs on every reopen after the first", () => {
+    const onResync = vi.fn()
+    const onOpen = createReconnectResyncHandler(onResync)
+
+    onOpen() // initial connect
+    onOpen() // reconnect after a sync-worker redeploy
+    expect(onResync).toHaveBeenCalledTimes(1)
+
+    onOpen() // and again after the next drop
+    onOpen()
+    expect(onResync).toHaveBeenCalledTimes(3)
+  })
+
+  it("keeps each project's reconciler on its own first-open ledger", () => {
+    const a = vi.fn()
+    const b = vi.fn()
+    const onOpenA = createReconnectResyncHandler(a)
+    const onOpenB = createReconnectResyncHandler(b)
+
+    onOpenA()
+    onOpenA()
+    onOpenB()
+
+    expect(a).toHaveBeenCalledTimes(1)
+    expect(b).not.toHaveBeenCalled()
   })
 })

@@ -1,10 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
+  FRONT_BACK_MATTER,
   SAMPLE_NOTES,
+  biblicaFrontBackMatterStory,
+  bookTitle,
+  divisionHeading,
   makeBiblicaIdml,
   note,
+  noteWithTrailingVerseMarker,
   paragraph,
   run,
+  verseMarkerOnlyNote,
 } from "./biblica/__fixtures__/biblica-idml"
 
 // The production path parses in a transferable Web Worker, which does not exist
@@ -213,6 +219,119 @@ describe("Biblica study-notes import", () => {
     ])
   })
 
+  it("commits no cell for the chapter/verse markers InDesign leaves in the notes", async () => {
+    const requests = captureRequests()
+    const withMarkers = await biblicaFile([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "MRK")),
+      note("p-title", "The Gospel of Mark", "intro%3aimt1"),
+      noteWithTrailingVerseMarker("p-n", "Jesus sends his followers out.", "20"),
+      // Matthew's closing "28:20", flushed into Mark's preface by InDesign.
+      verseMarkerOnlyNote("p-ie", "28", "20"),
+    ])
+
+    const ref = await importBiblicaStudyNotes(withMarkers, {
+      projectId: "p1",
+      author: "alice",
+      getToken: async () => "tok",
+    })
+
+    expect(ref.cellCount).toBe(2)
+    const cells = importBodies(requests).flatMap((body) => body.cells ?? [])
+    expect(cells.map((cell) => cell.value)).toEqual([
+      "The Gospel of Mark",
+      "Jesus sends his followers out.",
+    ])
+    // The note that swallowed a marker is now part of its paragraph, so it
+    // carries the ranges export needs to write it back without the marker.
+    expect(cells[1]?.metadata?.idmlRejoin).toMatchObject({ version: 1, index: 0, count: 1 })
+  })
+
+  it("commits a division section as its own milestone, ahead of the book's preface", async () => {
+    const requests = captureRequests()
+    const withDivision = await biblicaFile([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "GEN")),
+      divisionHeading("p-div", "Israel\u02BCs cove\u00adnant history"),
+      note("p-div-body", "The books from Genesis to Esther record Israel's story."),
+      bookTitle("p-title", "Genesis"),
+      note("p-pref", SAMPLE_NOTES.preface),
+    ])
+
+    await importBiblicaStudyNotes(withDivision, {
+      projectId: "p1",
+      author: "alice",
+      getToken: async () => "tok",
+    })
+
+    const cells = importBodies(requests).flatMap((body) => body.cells ?? [])
+    expect(cells.map((cell) => (
+      (cell.metadata?.aquillaImport as { milestone?: { label?: string } })?.milestone?.label
+    ))).toEqual([
+      "Israel\u02BCs covenant history",
+      "Israel\u02BCs covenant history",
+      // The book title closes the division; Genesis's own preface resumes.
+      "Genesis Preface",
+      "Genesis Preface",
+    ])
+  })
+
+  it("imports a front/back matter volume without a toggle, grouped by its headings", async () => {
+    const requests = captureRequests()
+    const dictionary = new File([await makeBiblicaIdml(biblicaFrontBackMatterStory)], "100BACK.idml")
+
+    const ref = await importBiblicaStudyNotes(dictionary, {
+      projectId: "p1",
+      author: "alice",
+      getToken: async () => "tok",
+    })
+
+    expect(ref.cellCount).toBe(6)
+    const bodies = importBodies(requests)
+    // A front/back volume belongs to no book, so nothing claims one.
+    expect(bodies.find((body) => body.file)?.file?.bookCode).toBeUndefined()
+
+    const cells = bodies.flatMap((body) => body.cells ?? [])
+    expect(cells.map((cell) => cell.value)).toEqual([
+      FRONT_BACK_MATTER.title,
+      FRONT_BACK_MATTER.firstLetter,
+      FRONT_BACK_MATTER.firstEntry,
+      FRONT_BACK_MATTER.firstBody.join(""),
+      FRONT_BACK_MATTER.secondLetter,
+      FRONT_BACK_MATTER.secondEntry,
+    ])
+    expect(cells.map((cell) => (
+      (cell.metadata?.aquillaImport as { milestone?: { label?: string } })?.milestone?.label
+    ))).toEqual([
+      FRONT_BACK_MATTER.title,
+      FRONT_BACK_MATTER.firstLetter,
+      FRONT_BACK_MATTER.firstLetter,
+      FRONT_BACK_MATTER.firstLetter,
+      FRONT_BACK_MATTER.secondLetter,
+      FRONT_BACK_MATTER.secondLetter,
+    ])
+    for (const cell of cells) {
+      expect(cell.metadata?.biblica).toMatchObject({ contentType: "front-back-matter" })
+    }
+  })
+
+  it("imports an artwork-only front/back volume as a file with no cells", async () => {
+    const requests = captureRequests()
+    const maps = new File([await makeBiblicaIdml([])], "120MAPS.idml")
+
+    const ref = await importBiblicaStudyNotes(maps, {
+      projectId: "p1",
+      author: "alice",
+      getToken: async () => "tok",
+    })
+
+    // The maps volume holds no text at all. It still imports, so the file stays
+    // part of the project and its preserved bytes export back unchanged.
+    expect(ref.cellCount).toBe(0)
+    const bodies = importBodies(requests)
+    expect(bodies.flatMap((body) => body.cells ?? [])).toEqual([])
+    expect(bodies.find((body) => body.file)?.file).toMatchObject({ fileType: "idml" })
+    expect(requests.some((request) => request.url.includes("/source"))).toBe(true)
+  })
+
   it("rejects an oversized package before buffering or creating server state", async () => {
     const arrayBuffer = vi.fn(async () => new ArrayBuffer(0))
     const fetchMock = vi.fn()
@@ -221,7 +340,7 @@ describe("Biblica study-notes import", () => {
     await expect(importBiblicaStudyNotes(
       { name: "huge.idml", size: 96 * 1024 * 1024, arrayBuffer } as unknown as File,
       { projectId: "p1", author: "alice", getToken: async () => "tok" },
-    )).rejects.toThrow(/95 MB limit/)
+    )).rejects.toThrow(/95\.0 MB limit/)
     expect(arrayBuffer).not.toHaveBeenCalled()
     expect(fetchMock).not.toHaveBeenCalled()
   })

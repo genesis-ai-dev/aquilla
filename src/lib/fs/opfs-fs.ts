@@ -253,24 +253,3 @@ export function createOpfsFs(root: DirHandle): OpfsFs {
     },
   };
 }
-
-// Open the app's OPFS root and return a subdirectory handle for the given
-// dir-name under `/repos/`, creating it if needed.
-export async function openOpfsRepoDir(repoKey: string): Promise<DirHandle> {
-  const root = await navigator.storage.getDirectory();
-  const repos = await root.getDirectoryHandle("repos", { create: true });
-  return repos.getDirectoryHandle(repoKey, { create: true });
-}
-
-// Purge a repo dir (delete + recreate). Use before re-cloning so isomorphic-git
-// doesn't silently no-op or merge with stale state.
-export async function resetOpfsRepoDir(repoKey: string): Promise<DirHandle> {
-  const root = await navigator.storage.getDirectory();
-  const repos = await root.getDirectoryHandle("repos", { create: true });
-  try {
-    await repos.removeEntry(repoKey, { recursive: true });
-  } catch {
-    // already absent — fine
-  }
-  return repos.getDirectoryHandle(repoKey, { create: true });
-}

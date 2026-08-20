@@ -25,7 +25,7 @@
 import { buildEventProjectionStmts, type PersistedEvent } from './event-projection'
 import { buildEventInsertStmt } from './event-insert'
 import type { EventKind } from './types'
-import { secureCompare } from '../lib/secure-compare'
+import { isAuthorizedAdminBearer } from '../lib/admin-auth'
 
 // Keep each ingest transaction short so it commits and releases its locks
 // quickly — large batches hold a write transaction open longer and serialise
@@ -35,6 +35,7 @@ const BATCH_LIMIT = 100
 
 export interface MigrateIngestEnv {
   AQUILLA_PG?: AquillaDb
+  ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
 }
 
@@ -96,7 +97,7 @@ export async function handleMigrateIngestRequest(
     return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   }
   const authHeader = request.headers.get('Authorization') ?? ''
-  if (!secureCompare(authHeader, `Bearer ${env.SYNC_SECRET_KEY}`)) {
+  if (!isAuthorizedAdminBearer(authHeader, env)) {
     return new Response('unauthorized', { status: 401 })
   }
   if (!env.AQUILLA_PG) {
@@ -177,14 +178,17 @@ export async function handleMigrateIngestRequest(
   }
 
   // Pipelined batch (postgres.js) collapses the per-statement Hyperdrive↔Neon
-  // round-trips that dominated audio ingest (~140ms × thousands of stmts). Order
-  // + atomicity are identical to batch(); we just stop waiting between sends.
-  // Falls back to serial batch() on executors without it (PGlite tests). Larger
-  // limit when pipelined — round-trips no longer scale with batch size, so fewer
-  // commits is a pure win.
+  // round-trips that dominated ingest (2 RTTs × thousands of stmts ≈ 21 stmts/s
+  // — see batchPipelined in db/shim/postgres.ts for the mechanics). Order +
+  // atomicity are identical to batch(). Falls back to serial batch() on
+  // executors without it (PGlite tests). Larger limit when pipelined: each
+  // batch re-pays a ~2-RTT prepare per distinct statement shape (the prepared-
+  // statement cache is per connection, and a batch can land on any pooled
+  // connection), so fewer, bigger transactions amortize the warm-up; at
+  // pipelined speed a 1000-stmt transaction still commits in ~1s.
   const pipelined = typeof db.batchPipelined === "function"
   const runBatch = pipelined ? db.batchPipelined!.bind(db) : db.batch.bind(db)
-  const limit = pipelined ? 250 : BATCH_LIMIT
+  const limit = pipelined ? 1000 : BATCH_LIMIT
   try {
     for (let i = 0; i < stmts.length; i += limit) {
       await runBatch(stmts.slice(i, i + limit))

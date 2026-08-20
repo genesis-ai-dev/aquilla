@@ -3,10 +3,14 @@
 // Used by both the MCP `list_projects` tool (mcp-handlers.ts) and the REST
 // `GET /api/v1/external/projects` route (read-routes.ts) so the two adapters
 // can never drift. Visibility = created-by OR project membership OR org
-// membership, further narrowed to the credential's org/project scope.
-// Archived projects are excluded. Capped at 100 rows.
+// membership at Maintainer+ (AQU-435 floor — mirrors resolveProjectRole /
+// resolveProjectRoleShared so a sub-maintainer org member can't enumerate
+// projects they have no in-app grant to), further narrowed to the
+// credential's org/project scope. Archived projects are excluded. Capped at
+// 100 rows.
 
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
+import { ROLE } from '../events/role-policy'
 
 export interface ExternalProjectListItem {
   id: string
@@ -41,7 +45,10 @@ export async function listProjectsForCredential(
        AND (
          p.created_by::text = ?
          OR EXISTS (SELECT 1 FROM project_members pm WHERE pm.project_id = p.id AND pm.user_id::text = ?)
-         OR (p.org_id IS NOT NULL AND EXISTS (SELECT 1 FROM org_members om WHERE om.org_id = p.org_id AND om.user_id::text = ?))
+         OR (p.org_id IS NOT NULL AND EXISTS (
+           SELECT 1 FROM org_members om
+           WHERE om.org_id = p.org_id AND om.user_id::text = ? AND om.role_level >= ${ROLE.MAINTAINER}
+         ))
        )`
   if (cred.projectId !== null) {
     sql += ` AND p.id = ?`

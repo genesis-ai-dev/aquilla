@@ -17,6 +17,16 @@ export interface NormalizedCompletion {
   readonly valueHtml?: string
 }
 
+export interface IdmlRepairMessage {
+  readonly role: "system" | "user" | "assistant"
+  readonly content: string
+}
+
+/** Second-pass LLM call used only after an IDML draft fails anchor validation. */
+export type IdmlStructureRepairFn = (
+  messages: readonly IdmlRepairMessage[],
+) => Promise<string>
+
 export const IDML_COMPLETION_INSTRUCTION = [
   "IDML protected-anchor output contract:",
   "A Source value beginning with <p data-idml-version=\"2\"> is canonical protected HTML.",
@@ -27,6 +37,17 @@ export const IDML_COMPLETION_INSTRUCTION = [
   "Do not add formatting, wrapper tags, comments, Markdown fences, or explanatory text.",
   "Bare <br> elements are allowed only inside an editable slot when the translation needs a line break.",
   "The application will reject the entire draft if the protected anchor sequence is not exact.",
+].join("\n")
+
+/** Repair asks for slot text only — the app stitches it into the source shell. */
+export const IDML_STRUCTURE_REPAIR_INSTRUCTION = [
+  "IDML slot-repair contract:",
+  "You receive SOURCE protected HTML, the editable slots with their source text, and a BROKEN translation draft.",
+  "Return STRICT JSON only, no prose, no Markdown fences:",
+  '{"slots":[{"i":0,"t":"translated text for slot 0"},{"i":1,"t":"…"}]}',
+  "Include every editable slot index listed below, even if a slot stays empty.",
+  "Put the translated wording from the broken draft into the matching slots.",
+  "Do not return HTML tags. Newlines inside a slot are allowed as \\n in the JSON string.",
 ].join("\n")
 
 export function idmlCompletionPromptSource(
@@ -47,6 +68,51 @@ export function idmlCompletionSystemAddendum(
 }
 
 /**
+ * Strip common model wrappers (Markdown fences) so validation sees the HTML.
+ */
+export function unwrapIdmlCompletionOutput(raw: string): string {
+  const trimmed = raw.trim()
+  const fenced = /^```(?:html|xml|json)?\s*\n?([\s\S]*?)\n?```$/i.exec(trimmed)
+  return (fenced?.[1] ?? trimmed).trim()
+}
+
+export function buildIdmlStructureRepairMessages(
+  sourceHtml: string,
+  brokenDraft: string,
+  diagnostics: readonly IdmlDiagnostic[],
+  editableSlots: ReadonlyMap<number, string>,
+): IdmlRepairMessage[] {
+  const errors = diagnostics.length > 0
+    ? diagnostics.map((entry) => `- ${entry.code}: ${entry.message}`).join("\n")
+    : "- ANCHOR_INVALID: the draft did not match the source protected HTML."
+  const slotLines = [...editableSlots.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([index, text]) => `${index}: ${JSON.stringify(text)}`)
+    .join("\n")
+  return [
+    { role: "system", content: IDML_STRUCTURE_REPAIR_INSTRUCTION },
+    {
+      role: "user",
+      content: [
+        "SOURCE (canonical protected HTML — for reference only; do not return HTML):",
+        sourceHtml,
+        "",
+        "EDITABLE SLOTS (translate each; return every index):",
+        slotLines || "(none)",
+        "",
+        "BROKEN DRAFT (recover its translated wording into the slots):",
+        brokenDraft,
+        "",
+        "VALIDATION ERRORS:",
+        errors,
+        "",
+        'Return JSON only: {"slots":[{"i":<index>,"t":"<text>"},…]}',
+      ].join("\n"),
+    },
+  ]
+}
+
+/**
  * Convert model output into a persistence snapshot. Plain formats pass
  * through. IDML v2 accepts only canonical protected HTML whose exact anchor
  * identity/order validates against the source contract.
@@ -63,7 +129,7 @@ export function normalizeProtectedCompletion(
     )
   }
 
-  let normalizedHtml = generated
+  let normalizedHtml = unwrapIdmlCompletionOutput(generated)
   let validation = validateIdmlTranslation(
     cell.originalHtml,
     normalizedHtml,
@@ -79,7 +145,7 @@ export function normalizeProtectedCompletion(
   if (!validation.valid) {
     normalizedHtml = repairEditableSlotCompletion(
       cell,
-      generated,
+      normalizedHtml,
       metadata,
     )
     validation = validateIdmlTranslation(
@@ -105,6 +171,225 @@ export function normalizeProtectedCompletion(
   return {
     value: plainTextFromProtectedHtml(normalizedHtml, validation.slots),
     valueHtml: normalizedHtml,
+  }
+}
+
+/**
+ * Stitch translated slot texts into the cell's SOURCE protected HTML shell.
+ * The model never rebuilds tags — only the editable text nodes change.
+ */
+export function stitchIdmlSlotTexts(
+  cell: IdmlCompletionCell,
+  slotTexts: ReadonlyMap<number, string>,
+): NormalizedCompletion {
+  const metadata = idmlMetadata(cell)
+  if (!metadata || !cell.originalHtml) {
+    throw new IdmlCompletionError(
+      `Cell ${cell.id} is missing protected source HTML. Re-import the original IDML before using AI drafting.`,
+    )
+  }
+  if (typeof document === "undefined") {
+    throw new IdmlCompletionError(
+      `Cell ${cell.id} IDML slot stitching requires a browser document.`,
+    )
+  }
+
+  const container = document.createElement("div")
+  container.innerHTML = cell.originalHtml
+  const paragraph = container.firstElementChild
+  if (!(paragraph instanceof HTMLParagraphElement) || container.children.length !== 1) {
+    throw new IdmlCompletionError(
+      `Cell ${cell.id} source is not one canonical IDML paragraph.`,
+    )
+  }
+
+  for (const index of metadata.editableSlotIndexes) {
+    const slot = paragraph.querySelector<HTMLElement>(`span[data-idml-slot="${index}"]`)
+    if (!slot) {
+      throw new IdmlCompletionError(
+        `Cell ${cell.id} is missing protected IDML slot ${index}.`,
+      )
+    }
+    replaceSlotContent(slot, slotTexts.get(index) ?? "")
+  }
+
+  return normalizeProtectedCompletion(cell, paragraph.outerHTML)
+}
+
+export function parseIdmlSlotRepairReply(
+  raw: string,
+  editableIndexes: readonly number[],
+): Map<number, string> {
+  const text = unwrapIdmlCompletionOutput(raw)
+  const jsonMatch = text.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) {
+    throw new IdmlCompletionError(
+      "The AI structure repair did not return JSON slot text.",
+    )
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(jsonMatch[0])
+  } catch {
+    throw new IdmlCompletionError(
+      "The AI structure repair returned invalid JSON.",
+    )
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new IdmlCompletionError(
+      "The AI structure repair returned a JSON value that is not an object.",
+    )
+  }
+
+  const map = new Map<number, string>()
+  const slotsValue = (parsed as { slots?: unknown }).slots ?? parsed
+  if (Array.isArray(slotsValue)) {
+    for (const entry of slotsValue) {
+      if (typeof entry !== "object" || entry === null) continue
+      const record = entry as Record<string, unknown>
+      const index = Number(record.i ?? record.index ?? record.slot)
+      const value = record.t ?? record.text ?? record.value
+      if (Number.isInteger(index) && typeof value === "string") {
+        map.set(index, value)
+      }
+    }
+  } else if (typeof slotsValue === "object" && slotsValue !== null) {
+    for (const [key, value] of Object.entries(slotsValue)) {
+      const index = Number(key)
+      if (Number.isInteger(index) && typeof value === "string") {
+        map.set(index, value)
+      }
+    }
+  }
+
+  for (const index of editableIndexes) {
+    if (!map.has(index)) map.set(index, "")
+  }
+  if (![...map.values()].some((value) => value.trim().length > 0)) {
+    throw new IdmlCompletionError(
+      "The AI structure repair returned empty text for every editable slot.",
+    )
+  }
+  return map
+}
+
+function isRepairableIdmlFailure(
+  cell: IdmlCompletionCell,
+  error: unknown,
+): error is IdmlCompletionError {
+  if (!(error instanceof IdmlCompletionError)) return false
+  if (!cell.originalHtml) return false
+  // Structural failures only — missing source HTML / unsupported metadata are
+  // not something a second model call can invent.
+  if (/unsupported IDML metadata|missing protected source HTML/i.test(error.message)) {
+    return false
+  }
+  return (
+    error.diagnostics.length > 0
+    || /protected IDML anchor|malformed|no text inside the editable/i.test(error.message)
+  )
+}
+
+function editableSourceSlots(
+  cell: IdmlCompletionCell,
+  metadata: IdmlFormatMetadataV2,
+): Map<number, string> {
+  const sourceHtml = cell.originalHtml!
+  const validation = validateIdmlTranslation(sourceHtml, sourceHtml, metadata)
+  const map = new Map<number, string>()
+  for (const index of metadata.editableSlotIndexes) {
+    map.set(index, validation.valid ? (validation.slots[index] ?? "") : "")
+  }
+  return map
+}
+
+/** Plain wording recovered from a broken draft (HTML or free text). */
+export function draftPlainTextFromBrokenIdml(brokenDraft: string): string {
+  const unwrapped = unwrapIdmlCompletionOutput(brokenDraft)
+  if (!unwrapped.includes("<") || typeof document === "undefined") {
+    return unwrapped.trim()
+  }
+  const container = document.createElement("div")
+  container.innerHTML = unwrapped
+  for (const lineBreak of container.querySelectorAll("br")) {
+    lineBreak.replaceWith(document.createTextNode("\n"))
+  }
+  return (container.textContent ?? unwrapped).trim()
+}
+
+/**
+ * When there is exactly one editable slot, drop the broken markup and put the
+ * draft's plain text into that slot of the SOURCE shell — no second model call.
+ */
+export function tryDeterministicIdmlSlotStitch(
+  cell: IdmlCompletionCell,
+  brokenDraft: string,
+): NormalizedCompletion | undefined {
+  const metadata = idmlMetadata(cell)
+  if (!metadata || !cell.originalHtml || metadata.editableSlotIndexes.length !== 1) {
+    return undefined
+  }
+  const plain = draftPlainTextFromBrokenIdml(brokenDraft)
+  if (!plain) return undefined
+  const index = metadata.editableSlotIndexes[0]!
+  try {
+    return stitchIdmlSlotTexts(cell, new Map([[index, plain]]))
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Validate an IDML AI draft; if anchors are broken, recover by stitching text
+ * into the SOURCE shell (deterministic for single-slot cells, otherwise one
+ * slot-JSON LLM repair). Non-IDML cells behave like `normalizeProtectedCompletion`.
+ */
+export async function normalizeProtectedCompletionWithRepair(
+  cell: IdmlCompletionCell,
+  generated: string,
+  repair: IdmlStructureRepairFn,
+): Promise<NormalizedCompletion> {
+  try {
+    return normalizeProtectedCompletion(cell, generated)
+  } catch (error) {
+    if (!isRepairableIdmlFailure(cell, error)) throw error
+    const metadata = idmlMetadata(cell)
+    if (!metadata || !cell.originalHtml) throw error
+
+    const brokenDraft = unwrapIdmlCompletionOutput(generated)
+    const deterministic = tryDeterministicIdmlSlotStitch(cell, brokenDraft)
+    if (deterministic) return deterministic
+
+    const editableSlots = editableSourceSlots(cell, metadata)
+    const repaired = await repair(
+      buildIdmlStructureRepairMessages(
+        cell.originalHtml,
+        brokenDraft,
+        error.diagnostics,
+        editableSlots,
+      ),
+    )
+    if (!repaired.trim()) {
+      throw new IdmlCompletionError(
+        `The AI structure repair returned an empty draft for cell ${cell.id}; nothing was saved.`,
+        error.diagnostics,
+      )
+    }
+    try {
+      const slotTexts = parseIdmlSlotRepairReply(
+        repaired,
+        metadata.editableSlotIndexes,
+      )
+      return stitchIdmlSlotTexts(cell, slotTexts)
+    } catch (repairError) {
+      if (repairError instanceof IdmlCompletionError) {
+        throw new IdmlCompletionError(
+          `The AI draft changed a protected IDML anchor in cell ${cell.id}; a repair pass also failed. Nothing was saved.`,
+          repairError.diagnostics.length > 0 ? repairError.diagnostics : error.diagnostics,
+        )
+      }
+      throw repairError
+    }
   }
 }
 
@@ -159,14 +444,14 @@ function repairEditableSlotCompletion(
   }
 
   const generatedContainer = document.createElement("div")
-  generatedContainer.innerHTML = stripMarkdownFence(generated)
+  generatedContainer.innerHTML = unwrapIdmlCompletionOutput(generated)
   const translatedSlots = new Map<number, string>()
   for (const editableIndex of metadata.editableSlotIndexes) {
     const matches = generatedContainer.querySelectorAll<HTMLElement>(
       `span[data-idml-slot="${editableIndex}"]`,
     )
     if (matches.length === 1) {
-      translatedSlots.set(editableIndex, textWithLineBreaks(matches[0]!))
+      translatedSlots.set(editableIndex, textWithLineBreaks(matches[0]))
     }
   }
 
@@ -206,7 +491,7 @@ function repairEditableSlotCompletion(
         `Cell ${cell.id} is missing protected IDML slot ${editableIndex}.`,
       )
     }
-    replaceSlotText(slot, translatedSlots.get(editableIndex) ?? "")
+    replaceSlotContent(slot, translatedSlots.get(editableIndex) ?? "")
   }
   return paragraph.outerHTML
 }
@@ -224,12 +509,6 @@ function validTemplateHtml(
   return cell.originalHtml!
 }
 
-function stripMarkdownFence(value: string): string {
-  const trimmed = value.trim()
-  const match = trimmed.match(/^```(?:html)?\s*\n?([\s\S]*?)\n?\s*```$/i)
-  return match?.[1]?.trim() ?? trimmed
-}
-
 function textWithLineBreaks(element: HTMLElement): string {
   const clone = element.cloneNode(true) as HTMLElement
   for (const unsafe of clone.querySelectorAll("script, style")) unsafe.remove()
@@ -239,11 +518,11 @@ function textWithLineBreaks(element: HTMLElement): string {
   return clone.textContent ?? ""
 }
 
-function replaceSlotText(slot: HTMLElement, text: string): void {
-  const lines = text.split("\n")
+function replaceSlotContent(slot: HTMLElement, text: string): void {
+  const parts = text.split("\n")
   slot.replaceChildren()
-  for (let index = 0; index < lines.length; index += 1) {
+  for (let index = 0; index < parts.length; index += 1) {
     if (index > 0) slot.append(document.createElement("br"))
-    slot.append(document.createTextNode(lines[index] ?? ""))
+    slot.append(document.createTextNode(parts[index] ?? ""))
   }
 }

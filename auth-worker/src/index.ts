@@ -16,6 +16,7 @@
 //   GET  /api/v2/users/lookup
 //   GET  /api/v2/users/search
 //   GET  /api/v2/orgs/me
+//   GET  /api/v2/orgs/:orgId/deleted-files
 //   GET  /api/v2/orgs/:orgId/members
 //   POST /api/v2/orgs/:orgId/members
 //   DELETE /api/v2/orgs/:orgId/members/:userId
@@ -88,10 +89,14 @@ import importSandboxRoutes from "./routes/import-sandbox"
 import agentMemoryRoutes from "./routes/agent-memory"
 import sceneBriefRoutes from "./routes/scene-briefs"
 import contextualRoutes from "./routes/contextual"
+import contextualDecisionsRoutes from "./routes/contextual-decisions"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
+import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
 import mondayRoutes from "./routes/monday"
 import contactRoutes from "./routes/contact"
+import billingRoutes from "./routes/billing"
 import { flushDirtyLinks } from "./lib/monday/push"
+import { sweepStrandedContextualRuns } from "./routes/contextual"
 import {
   deploymentEnvironmentError,
   scheduledDeploymentEnvironmentError,
@@ -110,7 +115,7 @@ const app = new Hono<HonoEnv>()
 const CORS_HEADERS: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match-Version, X-Artifact-Name, X-Source-Language, X-Target-Language",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, If-Match-Version, X-Artifact-Name, X-Doc-Name, X-Source-Language, X-Target-Language",
   // Model A/B assignment echo (routes/chat.ts) — the SPA reads these off the
   // completion response to attribute accept/edit outcomes to the served model.
   "Access-Control-Expose-Headers": "X-AB-Request-Id, X-AB-Arm, X-AB-Model",
@@ -219,6 +224,7 @@ app.route("/api/v2/orgs", orgSettingsRoutes)
 // termbase/*. The two path-spaces are disjoint so one router serves both.
 app.route("/api/v2/orgs", termbaseSubscriptionRoutes)
 app.route("/api/v2/orgs", orgsRoutes)
+app.route("/api/v2/orgs", orgKnowledge)
 // Platform-operator (site-wide admin) surface — cross-tenant.
 // Gated by the ADMIN_EMAILS allowlist via requirePlatformAdmin (see
 // routes/admin.ts); no-op for everyone not on the list.
@@ -243,16 +249,25 @@ app.route("/api/v2/projects", sceneBriefRoutes)
 // Contextual translation run engine (pipeline design §8, slice D1): durable
 // Postgres-backed runs + steering + staged-draft review (routes/contextual.ts).
 app.route("/api/v2/projects", contextualRoutes)
+// Decision routes — the agent → user channel's HTTP surface (seam design
+// §4.3). Sibling router — same base as contextual.ts (routes/contextual-decisions.ts).
+app.route("/api/v2/projects", contextualDecisionsRoutes)
 // Agent artifact upload — session-JWT attach-file path for the SPA agent
 // composer; proxies bytes into the shared artifacts table + SNAPSHOTS R2 so
 // the harness load_artifact tool can read them (routes/agent-artifacts.ts).
 app.route("/api/v2/projects", agentArtifactsRoutes)
+// Knowledge base — project + org document upload/extract/index/read/search
+// (routes/knowledge.ts). Org router mounted below with the other /api/v2/orgs
+// sub-routers.
+app.route("/api/v2/projects", projectKnowledge)
 app.route("/api/v2/projects", projectsRoutes)
 // Multi-project invite surface.
 app.route("/api/v2/invites", invitesRoutes)
 // Public contact surface (marketing homepage "book a call" form) — no auth;
 // honeypot + per-IP throttle inside (routes/contact.ts).
 app.route("/api/v2/contact", contactRoutes)
+// Stripe Field Plan: org checkout/portal + unsigned webhook (signature-verified).
+app.route("/api/v2", billingRoutes)
 // AQU-626: per-user deep link + PIN (fresh-browser / diode-zone flow). Mint is
 // project_lead-gated; redeem is public (the link + PIN is the credential).
 app.route("/api/v2/access-links", accessLinksRoutes)
@@ -387,11 +402,28 @@ const scheduled = async (
     shim = makePostgres(env.HYPERDRIVE.connectionString)
     runEnv = { ...env, AQUILLA_PG: shim as unknown as AquillaDb, HYPERDRIVE: undefined }
   }
+  // Adopted contextual runs keep driving after this handler returns, on the
+  // SAME connection (selfTickLoop only opens its own when PG_CONNECTION_STRING
+  // is configured). The close below must wait for them.
+  let sweepDone: Promise<void> = Promise.resolve()
   try {
     const flushed = await flushDirtyLinks(runEnv, 20)
     if (flushed > 0) console.log(`[monday cron] flushed ${flushed} dirty link(s)`)
+    // Contextual autopilot: restart runs whose driver died and wake runs that
+    // parked with spans still queued, so long files finish unattended. Failing
+    // here must never take the Monday flush down with it.
+    try {
+      const sweep = await sweepStrandedContextualRuns(runEnv)
+      sweepDone = sweep.done
+      if (sweep.adopted > 0) {
+        console.log(`[contextual cron] resumed ${sweep.adopted} stranded run(s)`)
+        ctx.waitUntil(sweep.done)
+      }
+    } catch (err) {
+      console.error("[contextual cron] sweep failed:", err)
+    }
   } finally {
-    if (shim) ctx.waitUntil(shim.close())
+    if (shim) ctx.waitUntil(sweepDone.then(() => shim!.close()))
   }
 }
 

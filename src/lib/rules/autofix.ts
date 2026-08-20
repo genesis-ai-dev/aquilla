@@ -4,6 +4,7 @@ import { effectiveSourceText } from "@/lib/cell-text"
 import { complete } from "@/lib/completion/completion-service"
 import type { CompletionSettings, TranslationRule } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
+import { t } from "@/lib/i18n/standalone"
 
 export function applyRegexFix(fix: RuleAutofix, translated: string): string {
   const re = new RegExp(fix.pattern, fix.flags)
@@ -61,7 +62,7 @@ export function parseBatchResponse(raw: string): BatchResponse | null {
     }
   }
   if (obj.kind === "none") {
-    return { kind: "none", reason: typeof obj.reason === "string" ? obj.reason : "No reason given" }
+    return { kind: "none", reason: typeof obj.reason === "string" ? obj.reason : t("rules.autofix.noReasonGiven") }
   }
   return null
 }
@@ -75,7 +76,7 @@ export function parsePerCellResponse(raw: string): PerCellResponse | null {
   const obj = parsed as Record<string, unknown>
 
   if (obj.kind === "none") {
-    return { kind: "none", reason: typeof obj.reason === "string" ? obj.reason : "No reason given" }
+    return { kind: "none", reason: typeof obj.reason === "string" ? obj.reason : t("rules.autofix.noReasonGiven") }
   }
   if (obj.kind !== "per-cell" || !Array.isArray(obj.fixes)) return null
   const fixes: PerCellFix[] = []
@@ -241,7 +242,7 @@ export async function requestBatchFix(params: RequestBatchFixParams): Promise<Fi
     })
     onLlmCall?.({ kind: "autofix-batch-regex", model, provider })
   } catch {
-    return { kind: "none", reason: "Could not apply fixes" }
+    return { kind: "none", reason: t("rules.autofix.couldNotApplyFixes") }
   }
   const parsed = parseBatchResponse(raw)
   if (parsed && parsed.kind === "regex-replace") {
@@ -252,7 +253,7 @@ export async function requestBatchFix(params: RequestBatchFixParams): Promise<Fi
     if (proposal.kind === "regex-replace" && proposal.previews.length > 0) return proposal
   }
   if (violatingCells.length >= 10) {
-    return { kind: "none", reason: parsed && parsed.kind === "none" ? parsed.reason : "Could not apply fixes" }
+    return { kind: "none", reason: parsed && parsed.kind === "none" ? parsed.reason : t("rules.autofix.couldNotApplyFixes") }
   }
   let rawSemantic: string
   try {
@@ -266,15 +267,15 @@ export async function requestBatchFix(params: RequestBatchFixParams): Promise<Fi
     })
     onLlmCall?.({ kind: "autofix-batch-semantic", model, provider })
   } catch {
-    return { kind: "none", reason: "Could not apply fixes" }
+    return { kind: "none", reason: t("rules.autofix.couldNotApplyFixes") }
   }
   const semantic = parsePerCellResponse(rawSemantic)
   if (!semantic || semantic.kind === "none") {
-    return { kind: "none", reason: semantic?.reason || "Could not apply fixes" }
+    return { kind: "none", reason: semantic?.reason || t("rules.autofix.couldNotApplyFixes") }
   }
   const built = buildPerCellProposal(semantic, violatingCells)
   if (built.kind === "per-cell" && built.previews.length === 0) {
-    return { kind: "none", reason: "Could not apply fixes" }
+    return { kind: "none", reason: t("rules.autofix.couldNotApplyFixes") }
   }
   return built
 }
@@ -303,15 +304,15 @@ export async function requestSurgicalFix(params: RequestSurgicalFixParams): Prom
     })
     onLlmCall?.({ kind: "autofix-surgical", model, provider })
   } catch {
-    return { kind: "none", reason: "Could not apply fixes" }
+    return { kind: "none", reason: t("rules.autofix.couldNotApplyFixes") }
   }
   const parsed = parsePerCellResponse(raw)
   if (!parsed || parsed.kind === "none") {
-    return { kind: "none", reason: parsed?.reason || "Could not apply fixes" }
+    return { kind: "none", reason: parsed?.reason || t("rules.autofix.couldNotApplyFixes") }
   }
   const built = buildPerCellProposal(parsed, [cell])
   if (built.kind === "per-cell" && built.previews.length === 0) {
-    return { kind: "none", reason: "Could not apply fixes" }
+    return { kind: "none", reason: t("rules.autofix.couldNotApplyFixes") }
   }
   return built
 }

@@ -34,6 +34,7 @@ describe('contextual activity realtime notification', () => {
       type: 'contextual.run.state',
       runId: 'run-1',
       fileId: 'file-1',
+      targetLang: '',
       status: 'running',
       done: 3,
       total: 12,
@@ -47,6 +48,23 @@ describe('contextual activity realtime notification', () => {
     expect(JSON.parse(calls[0].init?.body as string)).toEqual({
       t: 'contextual.activity', project: 'project-1', frame,
     })
+  })
+
+  it('accepts and relays the auth route producer\'s pausing state', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = []
+    const frame = {
+      type: 'contextual.run.state',
+      runId: 'run-pausing',
+      fileId: 'file-1',
+      targetLang: '',
+      status: 'pausing',
+      done: 3,
+      total: 12,
+      failed: 0,
+    }
+    const response = await handleContextualActivityRequest(post(frame), makeEnv(calls))
+    expect(response?.status).toBe(200)
+    expect(JSON.parse(calls[0].init?.body as string).frame).toEqual(frame)
   })
 
   it('relays scene and span frames verbatim (field names are the SPA wire contract)', async () => {
@@ -66,6 +84,10 @@ describe('contextual activity realtime notification', () => {
       staged: 7,
       skipped: 1,
       verdictSummary: '7 staged, 1 skipped',
+      outcome: 'partial',
+      reasons: ['rejected_by_quorum'],
+      calls: 9,
+      units: 21,
     }
     expect((await handleContextualActivityRequest(post(scene), env))?.status).toBe(200)
     expect((await handleContextualActivityRequest(post(span), env))?.status).toBe(200)
@@ -88,10 +110,16 @@ describe('contextual activity realtime notification', () => {
     expect(wrongMethod?.status).toBe(405)
 
     const malformed = await handleContextualActivityRequest(
-      post({ type: 'contextual.run.state', runId: 'run-1', fileId: 'f', status: 'sideways', done: 0, total: 1 }),
+      post({ type: 'contextual.run.state', runId: 'run-1', fileId: 'f', targetLang: '', status: 'sideways', done: 0, total: 1 }),
       env,
     )
     expect(malformed?.status).toBe(400)
+
+    const missingLane = await handleContextualActivityRequest(
+      post({ type: 'contextual.run.state', runId: 'run-1', fileId: 'f', status: 'failed', done: 0, total: 1 }),
+      env,
+    )
+    expect(missingLane?.status).toBe(400)
 
     const unknownType = await handleContextualActivityRequest(
       post({ type: 'contextual.mystery', runId: 'run-1' }),
@@ -127,10 +155,16 @@ describe('contextual activity realtime notification', () => {
 describe('parseContextualFrame', () => {
   it('accepts run.state with optional failed and preserves exact field names', () => {
     expect(parseContextualFrame({
-      type: 'contextual.run.state', runId: 'r', fileId: 'f', status: 'paused', done: 1, total: 2, failed: 1,
+      type: 'contextual.run.state', runId: 'r', fileId: 'f', targetLang: 'fr', status: 'paused', done: 1, total: 2, failed: 1,
     })).toEqual({
-      type: 'contextual.run.state', runId: 'r', fileId: 'f', status: 'paused', done: 1, total: 2, failed: 1,
+      type: 'contextual.run.state', runId: 'r', fileId: 'f', targetLang: 'fr', status: 'paused', done: 1, total: 2, failed: 1,
     })
+  })
+
+  it('accepts the guarded pause transition status', () => {
+    expect(parseContextualFrame({
+      type: 'contextual.run.state', runId: 'r', fileId: 'f', targetLang: '', status: 'pausing', done: 1, total: 2,
+    })).toMatchObject({ status: 'pausing' })
   })
 
   it('rejects missing runId, wrong field types, and non-objects', () => {
@@ -138,5 +172,38 @@ describe('parseContextualFrame', () => {
     expect(parseContextualFrame('frame')).toBeNull()
     expect(parseContextualFrame({ type: 'contextual.scene', sceneBriefId: 'b', spanLabel: 's', ambiguityCount: 0 })).toBeNull()
     expect(parseContextualFrame({ type: 'contextual.span', runId: 'r', spanLabel: 's', staged: '7', skipped: 0, verdictSummary: '' })).toBeNull()
+    expect(parseContextualFrame({
+      type: 'contextual.run.state', runId: 'r', fileId: 'f', status: 'failed', done: 0, total: 1,
+    })).toBeNull()
+    expect(parseContextualFrame({
+      type: 'contextual.drafts', runId: 'r', fileId: 'f', spanLabel: 's',
+      drafts: [{ draftId: 'd', cellId: 'c', text: 'missing lane provenance' }],
+    })).toBeNull()
+  })
+
+  it('preserves sanitized outcome metadata and authoritative draft counts', () => {
+    expect(parseContextualFrame({
+      type: 'contextual.span', runId: 'r', spanId: 's1', spanLabel: 'LUK 1',
+      staged: 2, skipped: 1, verdictSummary: 'partial', outcome: 'partial',
+      reasons: ['target_already_filled'], calls: 6, units: 14,
+    })).toMatchObject({
+      type: 'contextual.span', outcome: 'partial', reasons: ['target_already_filled'], calls: 6, units: 14,
+    })
+    expect(parseContextualFrame({
+      type: 'contextual.drafts', runId: 'r', fileId: 'f', targetLang: '', spanId: 's1', spanLabel: 'LUK 1',
+      draftCount: 55, drafts: [{ draftId: 'd1', cellId: 'c1', text: 'visible live payload' }], truncated: true,
+    })).toMatchObject({
+      type: 'contextual.drafts', targetLang: '', spanId: 's1', draftCount: 55, truncated: true,
+    })
+    expect(parseContextualFrame({
+      type: 'contextual.drafts', runId: 'r', fileId: 'f', targetLang: '', spanLabel: 'LUK 1',
+      draftCount: 1, drafts: [], truncated: true,
+    })).toMatchObject({ type: 'contextual.drafts', drafts: [], truncated: true })
+
+    // Free-form/model prose cannot masquerade as a durable reason code.
+    expect(parseContextualFrame({
+      type: 'contextual.span', runId: 'r', spanLabel: 's', staged: 0, skipped: 1,
+      verdictSummary: 'failed', reasons: ['the model thought about it'],
+    })).toBeNull()
   })
 })

@@ -9,6 +9,7 @@ import {
   type IdmlProtectedTokenKind,
 } from "@aquilla/idml-roundtrip"
 import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
+import { t } from "@/lib/i18n/standalone"
 
 export const IDML_PARAGRAPH_NODE_NAME = "idmlParagraph"
 export const IDML_SLOT_NODE_NAME = "idmlSlot"
@@ -400,7 +401,7 @@ export function resolveIdmlEditorConfiguration(
   if (!hasIdmlCellMetadata(cellMetadata)) return null
   const raw = cellMetadata?.idml
   if (!isRecord(raw)) {
-    return { kind: "error", error: "This IDML cell has invalid formatting metadata and must be repaired or re-imported." }
+    return { kind: "error", error: t("editor.idml.invalidMetadataError") }
   }
   if (raw.version !== 2) {
     return {
@@ -411,7 +412,7 @@ export function resolveIdmlEditorConfiguration(
     }
   }
   if (!sourceHtml) {
-    return { kind: "error", error: "This IDML cell is missing its protected source HTML and must be re-imported." }
+    return { kind: "error", error: t("editor.idml.missingSourceHtmlError") }
   }
 
   const metadata = raw as unknown as IdmlFormatMetadataV2
@@ -462,8 +463,7 @@ export function prepareIdmlEditorContent(
   } else if (targetPlain.length > 0) {
     return {
       html: emptyEditableSlots(safeSource, context.metadata),
-      error:
-        "This translated IDML cell has plain text but no formatting anchors. Re-import or repair it before editing.",
+      error: t("editor.idml.plainTextNoAnchorsError"),
     }
   } else {
     candidate = emptyEditableSlots(safeSource, context.metadata)
@@ -709,7 +709,10 @@ function serializeSlotContent(slot: ProseMirrorNode): string | null {
   for (let index = 0; index < slot.childCount; index += 1) {
     const child = slot.child(index)
     if (child.isText) {
-      html += escapeText(child.text ?? "")
+      // AQU-810: zero-width spaces are never translator content — the only
+      // way one enters a slot is the transient composition sentinel below, so
+      // a commit or export can never carry it.
+      html += escapeText((child.text ?? "").replace(/\u200b/g, ""))
     } else if (child.type.name === "hardBreak") {
       html += "<br>"
     } else {
@@ -821,6 +824,50 @@ export function createIdmlTrailingBreakExtension(): Extension {
   })
 }
 
+/**
+ * AQU-810: an empty inline slot gives the DOM caret no *editable* text box,
+ * so the browser hoists the caret — and any IME insertion — up to the
+ * paragraph. Composed text then lands outside the slot span, the guard has to
+ * reject it, and the resulting redraw aborts the IME session on every
+ * keystroke (doubled characters, leaked romaji). Decoration widgets cannot
+ * fix this: ProseMirror renders them `contenteditable="false"`, so their text
+ * box is not an editable position either.
+ *
+ * The editor therefore inserts this real zero-width-space sentinel into the
+ * slot on `compositionstart`, giving the browser a genuinely editable text
+ * node to compose inside — ProseMirror's composition-preserving DOM sync then
+ * applies the composed text like any populated slot. The sentinel is deleted
+ * once the composition ends, and `serializeSlotContent` strips zero-width
+ * spaces besides, so it can never reach a commit or an export.
+ */
+export const IDML_COMPOSITION_SENTINEL = "\u200b"
+
+/**
+ * Every composition sentinel currently inside an editable slot, in document
+ * order. The editor deletes these once a composition has ended; the
+ * serializer above also strips them, so one can never leak into a commit.
+ */
+export function idmlCompositionSentinelRanges(doc: ProseMirrorNode): IdmlRange[] {
+  const ranges: IdmlRange[] = []
+  doc.descendants((node, position) => {
+    if (node.type.name !== IDML_SLOT_NODE_NAME) return true
+    if (node.attrs.editable !== true) return false
+    node.forEach((child, offset) => {
+      if (!child.isText || !child.text) return
+      for (
+        let index = child.text.indexOf(IDML_COMPOSITION_SENTINEL);
+        index !== -1;
+        index = child.text.indexOf(IDML_COMPOSITION_SENTINEL, index + 1)
+      ) {
+        const from = position + 1 + offset + index
+        ranges.push({ from, to: from + 1 })
+      }
+    })
+    return false
+  })
+  return ranges
+}
+
 export function createIdmlGuardExtension({ context, onRejected }: IdmlGuardOptions): Extension {
   return Extension.create({
     name: "idmlTransactionGuard",
@@ -834,7 +881,7 @@ export function createIdmlGuardExtension({ context, onRejected }: IdmlGuardOptio
             onRejected({
               code: "ANCHOR_INVALID",
               severity: "error",
-              message: "This edit would change the protected IDML document structure.",
+              message: t("editor.idml.editWouldChangeStructureError"),
             })
             return false
           }
@@ -843,7 +890,7 @@ export function createIdmlGuardExtension({ context, onRejected }: IdmlGuardOptio
           onRejected(result.diagnostics[0] ?? {
             code: "ANCHOR_INVALID",
             severity: "error",
-            message: "This edit would change protected IDML formatting.",
+            message: t("editor.idml.editWouldChangeFormattingError"),
           })
           return false
         },

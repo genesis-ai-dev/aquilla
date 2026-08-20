@@ -15,7 +15,9 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import type { Concept } from "@/lib/terminology/types"
+import { renderingStatusLabelKey } from "@/lib/terminology/types"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -29,13 +31,13 @@ interface ReviewQueueProps {
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function RenderingList({ concept }: { concept: Concept }) {
-  const statusLabel: Record<string, string> = {
-    preferred: "required",
-    admitted: "alternate",
-    forbidden: "forbidden",
-  }
+  const t = useT()
   if (concept.renderings.length === 0) {
-    return <span className="text-xs text-muted-foreground italic">no renderings</span>
+    return (
+      <span className="text-xs text-muted-foreground italic">
+        {t("terminology.common.noRenderings")}
+      </span>
+    )
   }
   return (
     <div className="flex flex-wrap gap-1">
@@ -52,7 +54,7 @@ function RenderingList({ concept }: { concept: Concept }) {
           )}
         >
           {r.rendering}
-          <span className="opacity-60">·{statusLabel[r.status] ?? r.status}</span>
+          <span className="opacity-60">·{t(renderingStatusLabelKey(r.status))}</span>
         </span>
       ))}
     </div>
@@ -67,6 +69,7 @@ interface QueueRowProps {
 }
 
 function QueueRow({ concept, canManage, onApprove, onReject }: QueueRowProps) {
+  const t = useT()
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null)
 
   async function handleApprove() {
@@ -112,7 +115,7 @@ function QueueRow({ concept, canManage, onApprove, onReject }: QueueRowProps) {
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label={`Approve concept ${concept.sourceTerm}`}
+              aria-label={t("terminology.reviewQueue.approveAria", { term: concept.sourceTerm })}
               disabled={busy !== null}
               onClick={handleApprove}
               className="text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950"
@@ -122,7 +125,7 @@ function QueueRow({ concept, canManage, onApprove, onReject }: QueueRowProps) {
             <Button
               variant="ghost"
               size="icon-sm"
-              aria-label={`Reject concept ${concept.sourceTerm}`}
+              aria-label={t("terminology.reviewQueue.rejectAria", { term: concept.sourceTerm })}
               disabled={busy !== null}
               onClick={handleReject}
               className="text-destructive hover:text-destructive hover:bg-destructive/10"
@@ -133,11 +136,9 @@ function QueueRow({ concept, canManage, onApprove, onReject }: QueueRowProps) {
         ) : (
           <Tooltip>
             <TooltipTrigger render={<span className="text-xs text-muted-foreground" />}>
-              Read-only
+              {t("common.readOnly")}
             </TooltipTrigger>
-            <TooltipContent>
-              Requires Project Lead role or higher to approve/reject concepts.
-            </TooltipContent>
+            <TooltipContent>{t("terminology.reviewQueue.readOnlyTooltip")}</TooltipContent>
           </Tooltip>
         )}
       </div>
@@ -153,6 +154,7 @@ export function TerminologyReviewQueue({
   onApprove,
   onReject,
 }: ReviewQueueProps) {
+  const t = useT()
   const [collapsed, setCollapsed] = useState(false)
 
   if (draftConcepts.length === 0) {
@@ -162,8 +164,8 @@ export function TerminologyReviewQueue({
         className="flex flex-col items-center gap-2 py-10 text-center text-muted-foreground"
       >
         <CheckCircle className="h-6 w-6 opacity-40" />
-        <p className="text-sm">No concepts awaiting review.</p>
-        <p className="text-xs">Draft concepts promoted from candidates will appear here.</p>
+        <p className="text-sm">{t("terminology.reviewQueue.emptyTitle")}</p>
+        <p className="text-xs">{t("terminology.reviewQueue.emptyDescription")}</p>
       </div>
     )
   }
@@ -174,21 +176,19 @@ export function TerminologyReviewQueue({
       <button
         type="button"
         onClick={() => setCollapsed((c) => !c)}
-        className="flex w-full items-center gap-2 pb-3 text-sm font-medium text-left"
+        className="flex w-full items-center gap-2 pb-3 text-sm font-medium text-start"
         aria-expanded={!collapsed}
       >
         <Badge variant="secondary" className="tabular-nums">
           {draftConcepts.length}
         </Badge>
         <span>
-          {draftConcepts.length === 1
-            ? "concept awaiting review"
-            : "concepts awaiting review"}
+          {t("terminology.reviewQueue.awaitingReviewCount", { count: draftConcepts.length })}
         </span>
         {collapsed ? (
-          <ChevronDown className="ml-auto h-4 w-4 text-muted-foreground" />
+          <ChevronDown className="ms-auto h-4 w-4 text-muted-foreground" />
         ) : (
-          <ChevronUp className="ml-auto h-4 w-4 text-muted-foreground" />
+          <ChevronUp className="ms-auto h-4 w-4 text-muted-foreground" />
         )}
       </button>
 

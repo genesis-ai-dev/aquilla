@@ -34,6 +34,7 @@ import { FieldError } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { ChatMarkdown } from "@/components/chat/ChatMarkdown"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 import { ROLE } from "@/lib/agent/role-floors"
 import { diffLines } from "@/lib/agent/text-diff"
@@ -100,10 +101,11 @@ export function BriefPanel({
   onApproveProposal,
   onRejectProposal,
 }: BriefPanelProps) {
+  const t = useT()
   const [editOpen, setEditOpen] = useState(false)
 
   if (!brief) {
-    return <p className="px-1 py-4 text-xs text-muted-foreground">Loading project brief…</p>
+    return <p className="px-1 py-4 text-xs text-muted-foreground">{t("agent.memory.loadingBrief")}</p>
   }
 
   const allowed = canEditBrief(roleLevel)
@@ -114,18 +116,18 @@ export function BriefPanel({
       <div className="space-y-2 rounded-lg border bg-card px-2.5 py-2">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5">
-            <span className="text-xs font-medium">Project brief</span>
+            <span className="text-xs font-medium">{t("agent.memory.projectBriefTitle")}</span>
             <span className="text-[10px] text-muted-foreground">v{brief.version}</span>
           </div>
           {allowed ? (
-            <Button variant="ghost" size="sm" className="h-6 text-[11px]" onClick={() => setEditOpen(true)}>
+            <Button variant="ghost" className="h-6 text-[11px]" onClick={() => setEditOpen(true)}>
               <Pencil data-icon="inline-start" />
-              Edit
+              {t("common.edit")}
             </Button>
           ) : (
             <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
               <ShieldAlert className="h-3 w-3" />
-              Project lead only
+              {t("agent.memory.leadOnly")}
             </span>
           )}
         </div>
@@ -134,17 +136,17 @@ export function BriefPanel({
             <ChatMarkdown content={brief.content} />
           </div>
         ) : (
-          <p className="text-xs italic text-muted-foreground">No brief written yet.</p>
+          <p className="text-xs italic text-muted-foreground">{t("agent.memory.noBriefYet")}</p>
         )}
       </div>
 
       <div className="space-y-2">
         <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <AlertTriangle className="h-3 w-3" />
-          Brief proposals — high-oversight: human approval only.
+          {t("agent.memory.proposalsHeading")}
         </p>
         {pendingProposals.length === 0 ? (
-          <p className="px-1 text-xs text-muted-foreground">No pending brief proposals.</p>
+          <p className="px-1 text-xs text-muted-foreground">{t("agent.memory.noPendingProposals")}</p>
         ) : (
           <div className="space-y-2">
             {pendingProposals.map((proposal) => {
@@ -155,14 +157,14 @@ export function BriefPanel({
                   <ProposalDiff before={brief.content} after={proposal.content} />
                   {proposal.rationale && (
                     <p className="text-[11px] text-muted-foreground">
-                      <span className="font-medium text-foreground">Rationale: </span>
+                      <span className="font-medium text-foreground">{t("agent.memory.rationaleLabel")} </span>
                       {proposal.rationale}
                     </p>
                   )}
                   {stale && (
                     <p className="flex items-center gap-1 text-[11px] font-medium text-amber-700 dark:text-amber-400" role="alert">
                       <AlertTriangle className="h-3 w-3 shrink-0" />
-                      Stale — brief changed since this was proposed
+                      {t("agent.memory.staleNotice")}
                       {stale.baseVersion != null && stale.currentVersion != null
                         ? ` (v${stale.baseVersion} → v${stale.currentVersion})`
                         : "."}
@@ -172,27 +174,25 @@ export function BriefPanel({
                     <div className="flex items-center justify-end gap-1.5">
                       <Button
                         variant="ghost"
-                        size="sm"
                         className="h-6 text-[11px]"
                         disabled={busy}
                         onClick={() => onRejectProposal(proposal)}
                       >
-                        Reject
+                        {t("agent.reject")}
                       </Button>
                       <Button
-                        size="sm"
                         className="h-6 text-[11px]"
                         disabled={busy || Boolean(stale)}
                         onClick={() => onApproveProposal(proposal)}
                       >
                         {busy && <Spinner data-icon="inline-start" />}
-                        Approve
+                        {t("agent.approve")}
                       </Button>
                     </div>
                   ) : (
                     <div className="flex items-center justify-end gap-1 text-[10px] text-muted-foreground">
                       <ShieldAlert className="h-3 w-3" />
-                      Requires project lead or higher to review
+                      {t("agent.memory.requiresLeadNotice")}
                     </div>
                   )}
                 </div>
@@ -225,6 +225,7 @@ function EditBriefDialog({
   onSave: (content: string, ifMatchVersion: number) => Promise<void>
   onReload: () => void
 }) {
+  const t = useT()
   const [content, setContent] = useState(brief.content)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -258,26 +259,26 @@ function EditBriefDialog({
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Edit project brief</DialogTitle>
+          <DialogTitle>{t("agent.memory.editBriefTitle")}</DialogTitle>
         </DialogHeader>
         <DialogBody className="space-y-2">
           <Textarea
             value={content}
             onChange={(e) => setContent(e.target.value)}
             className="min-h-48 font-mono text-xs"
-            aria-label="Brief content"
+            aria-label={t("agent.memory.briefContentAriaLabel")}
             disabled={conflict}
           />
           {error && <FieldError role="alert">{error}</FieldError>}
           {conflict && (
-            <Button variant="outline" size="sm" onClick={onReload}>
-              Reload latest brief
+            <Button variant="outline" onClick={onReload}>
+              {t("agent.memory.reloadLatestBrief")}
             </Button>
           )}
         </DialogBody>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={busy}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             onClick={() => setConfirmOverwrite(true)}
@@ -298,16 +299,16 @@ function EditBriefDialog({
         >
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Overwrite the project brief?</DialogTitle>
+              <DialogTitle>{t("agent.memory.overwriteTitle")}</DialogTitle>
             </DialogHeader>
             <DialogBody>
               <p className="text-sm">
-                This replaces the brief every agent run reads as ground truth. Continue?
+                {t("agent.memory.overwriteBody")}
               </p>
             </DialogBody>
             <DialogFooter>
               <Button variant="outline" onClick={() => setConfirmOverwrite(false)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button
                 onClick={() => {
@@ -315,7 +316,7 @@ function EditBriefDialog({
                   void doSave()
                 }}
               >
-                Overwrite
+                {t("agent.memory.overwriteConfirm")}
               </Button>
             </DialogFooter>
           </DialogContent>

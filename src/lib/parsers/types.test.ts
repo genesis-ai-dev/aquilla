@@ -14,6 +14,7 @@ import {
 describe("detectFileType", () => {
   it.each([
     ["page.html", "html"],
+    ["book.epub", "epub"],
     ["messages.arb", "json"],
     ["catalog.pot", "po"],
     ["messages.properties", "properties"],

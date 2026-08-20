@@ -27,16 +27,41 @@ export class AgentPage {
 
   // ── Entry ──────────────────────────────────────────────────────────────
 
-  /** Open the docked "Agent" tab from within an already-open project workspace. */
+  /** Open Agent from the sidebar rail.
+   *  While the workbench is the active surface, focuses that tab; otherwise
+   *  opens the compact agent panel inline in the dock. Minimize dismisses
+   *  the editor Agent tab. */
   async openAgentTab(): Promise<void> {
-    await this.page.getByRole("button", { name: "Agent", exact: true }).click()
+    await this.page
+      .getByRole("complementary")
+      .getByRole("button", { name: "Agent", exact: true })
+      .click()
   }
 
-  /** Expand the docked agent panel into the full-screen workbench at
+  /** Assert the compact dock panel is showing (composer, not /agent). */
+  async expectDocked(): Promise<void> {
+    await expect(this.page).not.toHaveURL(/\/agent(?:\?|$)/)
+    await expect(this.page.getByRole("textbox", { name: "Ask the agent" })).toBeVisible()
+    await expect(
+      this.page.getByRole("button", { name: "Open agent in editor tab" }),
+    ).toBeVisible()
+  }
+
+  /** Expand the docked agent panel into an editor tab at
    * `/project/:id/agent`. Mirrors `agent-draft.spec.ts`'s existing pattern. */
   async openFullScreenWorkbench(): Promise<void> {
-    await this.page.getByRole("button", { name: "Open full-screen workbench" }).click()
-    await expect(this.page).toHaveURL(/\/agent$/)
+    await this.page.getByRole("button", { name: "Open agent in editor tab" }).click()
+    await expect(this.page).toHaveURL(/\/agent(?:\?|$)/)
+    await expect(
+      this.page.getByRole("tablist", { name: "Open files" }).getByRole("tab", { name: "Agent" }),
+    ).toBeVisible()
+  }
+
+  /** Assert the editor Agent tab is gone (minimize / close). */
+  async expectWorkbenchTabClosed(): Promise<void> {
+    await expect(
+      this.page.getByRole("tablist", { name: "Open files" }).getByRole("tab", { name: "Agent" }),
+    ).toHaveCount(0)
   }
 
   async closeFullScreenWorkbench(): Promise<void> {
@@ -94,7 +119,7 @@ export class AgentPage {
   async waitForStagedChangeset(): Promise<{ approvalUrl: string; card: Locator }> {
     const card = this.page.locator('[data-frame-type="changeset.staged"]').first()
     await expect(card).toBeVisible({ timeout: 30_000 })
-    const link = card.getByRole("link", { name: /Review|Approve/i })
+    const link = card.getByRole("link", { name: /Review|Approve|full details/i })
     const href = await link.getAttribute("href")
     if (!href) throw new Error("staged-changeset card has no approval link href")
     return { approvalUrl: href, card }

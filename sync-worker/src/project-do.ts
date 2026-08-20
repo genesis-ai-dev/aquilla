@@ -18,7 +18,9 @@
  */
 
 import { DurableObject } from "cloudflare:workers"
-import { verifyTokenForProject } from "./auth"
+import { shouldBeReadOnly, verifyTokenForProject } from "./auth"
+import { isDeployedEnvironment } from "./environment-guard"
+import { secureCompare } from "./lib/secure-compare"
 import {
   applyDisconnect,
   applyFocusClaim,
@@ -37,7 +39,7 @@ import type { OutboxRawEvent } from "./project-do-types"
 import { mondayNotifyProject, notifyMondayProgress } from "./monday-notify"
 import { mirrorSync, type MirrorSyncResult } from "./events/link-sync"
 import { makePostgres } from "../../db/shim/postgres"
-import { secureCompare } from "./lib/secure-compare"
+import { serviceBearerMatches } from "./lib/service-auth"
 
 const LEASE_SWEEP_INTERVAL_MS = 5_000
 
@@ -59,11 +61,25 @@ interface ConnectionState {
   userId: string
   /** Numeric user id from verified token claims; null in ALLOW_UNAUTHENTICATED dev. */
   numericUserId: number | null
+  /**
+   * Role level from verified token claims; null in ALLOW_UNAUTHENTICATED dev
+   * (treated permissively, matching shouldBeReadOnly's null-role default).
+   * [Pen test 2026-08-10] previously unused — focus.claim/renew accepted
+   * any authenticated connection regardless of role, letting a Viewer or
+   * Commenter hold every cell's edit lock and lock out Contributors.
+   */
+  role: number | null
 }
 
 interface DOEnv {
   SYNC_SECRET_KEY?: string
   ALLOW_UNAUTHENTICATED?: string
+  /**
+   * Deployment label ("production" | "development" | "local" | unset). Read
+   * here only so the ALLOW_UNAUTHENTICATED bypass can be refused on deployed
+   * workers — see isDeployedEnvironment.
+   */
+  ENVIRONMENT?: string
   /**
    * Optional binding back to the worker so we can POST to /events via an
    * internal fetch. When absent (tests), outbox.event frames are queued
@@ -136,9 +152,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // that only one fold ran (the second awaited the first's in-flight
     // promise) and B's cells match A's head afterward.
     if (request.method === "POST" && url.pathname === "/__link-sync") {
-      const auth = request.headers.get("Authorization") ?? ""
-      const expected = this.env.SYNC_SECRET_KEY ? `Bearer ${this.env.SYNC_SECRET_KEY}` : null
-      if (!expected || !secureCompare(auth, expected)) {
+      if (!serviceBearerMatches(request.headers.get("Authorization"), this.env)) {
         return new Response("unauthorized", { status: 401 })
       }
       const projectId = url.searchParams.get("project")
@@ -169,11 +183,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // Internal broadcast hook (POST /events fans out to us here). Pre-built
     // ServerMessage; we forward to every connection.
     if (request.method === "POST" && url.pathname === "/__broadcast") {
-      const auth = request.headers.get("Authorization") ?? ""
-      const expected = this.env.SYNC_SECRET_KEY
-        ? `Bearer ${this.env.SYNC_SECRET_KEY}`
-        : null
-      if (!expected || !secureCompare(auth, expected)) {
+      if (!serviceBearerMatches(request.headers.get("Authorization"), this.env)) {
         return new Response("unauthorized", { status: 401 })
       }
       let body: unknown
@@ -206,11 +216,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // and denylist the numeric userId for longer than the token TTL so a
     // cached still-valid token can't just reconnect.
     if (request.method === "POST" && url.pathname === "/__member-removed") {
-      const auth = request.headers.get("Authorization") ?? ""
-      const expected = this.env.SYNC_SECRET_KEY
-        ? `Bearer ${this.env.SYNC_SECRET_KEY}`
-        : null
-      if (!expected || !secureCompare(auth, expected)) {
+      if (!serviceBearerMatches(request.headers.get("Authorization"), this.env)) {
         return new Response("unauthorized", { status: 401 })
       }
       let body: { project?: string; userId?: number; username?: string }
@@ -244,6 +250,43 @@ export class ProjectSync extends DurableObject<DOEnv> {
       return Response.json({ ok: true, ejected })
     }
 
+    // [Pen test 2026-08-17] role-change hook, companion to /__member-removed
+    // above. A live connection's role is captured once at /connect (see
+    // ConnectionState) and gates focus.claim/focus.renew — without this, a
+    // demotion (e.g. contributor -> viewer) doesn't take effect until the
+    // socket reconnects, letting an already-connected demoted user keep
+    // holding/renewing the edit lock. Updates the cached role in place;
+    // deliberately does NOT close the socket (an ordinary role change,
+    // including promotions, isn't itself a reason to force a reconnect).
+    if (request.method === "POST" && url.pathname === "/__member-role-changed") {
+      const auth = request.headers.get("Authorization") ?? ""
+      const expected = this.env.SYNC_SECRET_KEY
+        ? `Bearer ${this.env.SYNC_SECRET_KEY}`
+        : null
+      if (!expected || !secureCompare(auth, expected)) {
+        return new Response("unauthorized", { status: 401 })
+      }
+      let body: { project?: string; userId?: number; username?: string; role?: number }
+      try {
+        body = (await request.json()) as typeof body
+      } catch {
+        return new Response("bad request", { status: 400 })
+      }
+      if (typeof body.userId !== "number" || typeof body.role !== "number") {
+        return new Response("userId (number) and role (number) required", { status: 400 })
+      }
+      let updated = 0
+      for (const conn of this.connections.values()) {
+        const matches =
+          conn.numericUserId === body.userId ||
+          (body.username != null && conn.userId === body.username)
+        if (!matches) continue
+        conn.role = body.role
+        updated++
+      }
+      return Response.json({ ok: true, updated })
+    }
+
     if (url.pathname !== "/connect") {
       return new Response("not found", { status: 404 })
     }
@@ -263,9 +306,17 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // Frontier username (claims.username), which matches the `currentUsername`
     // the client uses for presence/lock filtering. ALLOW_UNAUTHENTICATED dev
     // has no token, so fall back to the optional `user` param or "anon".
+    //
+    // The bypass is honoured only off a deployed worker. index.ts already
+    // 503s the whole worker when the flag is set in a deployed environment,
+    // but the authorization decision lives here, so it re-checks rather than
+    // inheriting the entry point's answer.
+    const bypassAuth =
+      this.env.ALLOW_UNAUTHENTICATED === "true" && !isDeployedEnvironment(this.env)
     let userId: string
     let numericUserId: number | null = null
-    if (this.env.ALLOW_UNAUTHENTICATED !== "true") {
+    let role: number | null = null
+    if (!bypassAuth) {
       const token = url.searchParams.get("token")
       const auth = await verifyTokenForProject(token, projectId, this.env.SYNC_SECRET_KEY)
       if (!auth.ok) {
@@ -283,6 +334,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       }
       userId = auth.claims.username ?? `user:${auth.claims.userId}`
       numericUserId = auth.claims.userId
+      role = auth.claims.role
     } else {
       userId = url.searchParams.get("user") ?? "anon"
     }
@@ -293,7 +345,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
 
     server.accept()
 
-    const conn: ConnectionState = { ws: server, userId, numericUserId }
+    const conn: ConnectionState = { ws: server, userId, numericUserId, role }
     this.connections.set(server, conn)
     this.presence.set(userId, { userId, ts: Date.now() })
     this.startLeaseSweep()
@@ -349,6 +401,12 @@ export class ProjectSync extends DurableObject<DOEnv> {
     if (!msg) return
     const now = Date.now()
     if (msg.t === "focus.claim") {
+      // [Pen test 2026-08-10] a read-only role (viewer/commenter/reviewer)
+      // can observe and render the editor but must not be able to hold an
+      // edit lock — granting one anyway lets them block every contributor
+      // out of a cell indefinitely. Mirrors the write-drop policy already
+      // applied to actual content writes (see shouldBeReadOnly callers).
+      if (shouldBeReadOnly(conn.role)) return
       const result = applyFocusClaim(this.locks, this.presence, conn.userId, msg, now)
       this.locks = result.locks
       this.presence = result.presence
@@ -357,6 +415,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       return
     }
     if (msg.t === "focus.renew") {
+      if (shouldBeReadOnly(conn.role)) return
       const result = applyFocusRenew(this.locks, this.presence, conn.userId, msg, now)
       this.locks = result.locks
       return

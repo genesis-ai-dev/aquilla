@@ -3,14 +3,13 @@ import { ChevronRight, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AppTooltip } from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
 import { formatRelativeTime, isStale } from "@/lib/time/relative";
 import { RoleLabel } from "@/components/RoleLabel";
-import { roleDisplayText } from "@/lib/frontier/roles";
+import { RoleSelect } from "@/components/RoleSelect";
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar";
 import { MemberMultiAddRow, type MemberAddOutcome } from "@/components/MemberMultiAddRow";
 import type { UserSearchResult } from "@/hooks/useUserSearch";
+import { useI18n } from "@/lib/i18n/I18nProvider";
 
 export type { MemberAddOutcome } from "@/components/MemberMultiAddRow";
 
@@ -58,7 +57,11 @@ export interface MembersPanelMember {
 export interface MembersPanelRoleOption {
   level: number;
   name: string;
-  description: string;
+  // No `description` field — MembersPanel never renders one. (It used to be
+  // declared here even though unused; dropped in AQU-832 wave 3/WS-08 so this
+  // interface doesn't force every caller — including roles.ts's `RoleOption`,
+  // which now carries `descriptionKey` instead of a plain string — to shim a
+  // field nothing reads.)
 }
 
 interface MembersPanelProps {
@@ -79,6 +82,16 @@ interface MembersPanelProps {
    * single batch request (never a client-side fan-out).
    */
   onAdd: (usernames: string[], role: number) => Promise<MemberAddOutcome[]>;
+  /**
+   * AQU-780: map a whole-batch add failure (a thrown error where nothing
+   * landed — e.g. a 403 owner-gate, a 429, or a 5xx) to the message shown
+   * under the add row. Forwarded verbatim to MemberMultiAddRow. Without it,
+   * the row falls back to a generic "Could not add — please try again.",
+   * which hides the real cause (a non-owner was told to doubt the username
+   * exists). Return null to suppress the inline message when the caller
+   * surfaces the failure itself.
+   */
+  onAddBatchError?: (e: unknown) => string | null;
   onRemove: (userId: number) => Promise<void>;
   onChangeRole?: (username: string, role: number) => Promise<void>;
   /** Caller's own user id, used to block self-edit affordances. Pass null when
@@ -107,6 +120,7 @@ export function MembersPanel({
   roleOptions,
   newMemberDefaultRole,
   onAdd,
+  onAddBatchError,
   onRemove,
   onChangeRole,
   callerUserId,
@@ -116,6 +130,7 @@ export function MembersPanel({
   suggestions,
   emptySuggestionsHint,
 }: MembersPanelProps) {
+  const { t } = useI18n();
   // AQU-553: the scopes editor is shown only when project context is supplied
   // AND the caller is a lead+ (500). Leads themselves are never scopable, so
   // per-row the editor is further gated on the member being below 500.
@@ -144,52 +159,44 @@ export function MembersPanel({
           return (
             <li key={m.userId} className="flex min-w-0 flex-col gap-2 overflow-x-hidden px-3 py-2">
               <div className="flex min-w-0 items-center gap-3">
-              <span className="min-w-0 truncate font-medium">{m.username}</span>
+              <UsernameWithAvatar username={m.username} className="min-w-0" />
               <RoleLabel name={m.roleName} className="text-xs text-muted-foreground" />
               {m.source === "org" && (
-                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">via org</span>
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  {t("org.membersPage.sourceViaOrg")}
+                </span>
               )}
               {m.source === "group" && (
-                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">via group</span>
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  {t("org.membersPanel.sourceViaGroup")}
+                </span>
               )}
               {m.source === "creator" && (
-                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">creator</span>
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                  {t("org.memberAccessPanel.creatorGrantLabel")}
+                </span>
               )}
               <LastActiveChip lastActiveAt={m.lastActiveAt} />
-              <div className="ml-auto flex items-center gap-2">
+              <div className="ms-auto flex items-center gap-2">
                 {onChangeRole && !m.isLocked && !isSelf && (
-                  <Select
-                    items={[
-                      // Current role may sit above the caller's grantable cap
-                      // (e.g. owner 700); include it so the closed trigger
-                      // renders the role name instead of the raw level.
-                      ...(grantableRoles.some((r) => r.level === m.roleLevel)
-                        ? []
-                        : [{ value: String(m.roleLevel), label: roleDisplayText(m.roleName) }]),
-                      ...grantableRoles.map((r) => ({ value: String(r.level), label: roleDisplayText(r.name) })),
-                    ]}
-                    value={String(m.roleLevel)}
-                    onValueChange={(v) => onChangeRole(m.username, parseInt(v ?? "", 10))}
-                  >
-                    <SelectTrigger size="sm" aria-label="Change role">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        {grantableRoles.map((r) => (
-                          <SelectItem key={r.level} value={String(r.level)}>
-                            <RoleLabel name={r.name} />
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
+                  <RoleSelect
+                    options={grantableRoles}
+                    currentOption={
+                      grantableRoles.some((r) => r.level === m.roleLevel)
+                        ? null
+                        : { level: m.roleLevel, name: m.roleName }
+                    }
+                    value={m.roleLevel}
+                    onValueChange={(level) => void onChangeRole(m.username, level)}
+                    size="sm"
+                    aria-label={t("org.membersPage.changeRoleAria")}
+                  />
                 )}
                 {!m.isLocked && !isSelf ? (
                   <Button
                     size="icon"
                     variant="ghost"
-                    aria-label={`Remove ${m.username}`}
+                    aria-label={t("org.teamDetail.removeAriaLabel", { name: m.username })}
                     onClick={() => onRemove(m.userId)}
                   >
                     <Trash2 className="h-4 w-4" />
@@ -219,6 +226,7 @@ export function MembersPanel({
         roleOptions={grantableRoles}
         defaultRole={newMemberDefaultRole}
         onAdd={onAdd}
+        onBatchErrorMessage={onAddBatchError}
         excludedUserIds={existingUserIds}
         scopedUserSearch={scopedUserSearch}
         suggestions={suggestions}
@@ -266,6 +274,7 @@ function MemberScopesEditor({
   config: MembersPanelScopeConfig;
   current: MemberScopeValue[];
 }) {
+  const { t } = useI18n();
   const initialLanes = new Set(
     current.filter((s) => s.kind === "lane").map((s) => s.value),
   );
@@ -322,7 +331,7 @@ function MemberScopesEditor({
         aria-expanded={expanded}
         aria-controls={bodyId}
         onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center gap-2 px-2 py-1.5 text-left"
+        className="flex w-full items-center gap-2 px-2 py-1.5 text-start"
       >
         <ChevronRight
           className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${
@@ -330,20 +339,22 @@ function MemberScopesEditor({
           }`}
           aria-hidden
         />
-        <span className="font-medium text-muted-foreground">Scopes</span>
-        <span className="ml-auto truncate text-muted-foreground">
+        <span className="font-medium text-muted-foreground">
+          {t("org.membersPanel.scopesToggleLabel")}
+        </span>
+        <span className="ms-auto truncate text-muted-foreground">
           {scopeSummary(savedLaneCount, savedFileCount)}
         </span>
       </button>
       {expanded && (
         <div id={bodyId} className="border-t px-2 pb-2 pt-2">
           <p className="mb-1.5 font-normal text-muted-foreground">
-            Leave empty for full access.
+            {t("org.membersPanel.leaveEmptyForFullAccess")}
           </p>
           {config.lanes.length > 0 && (
             <fieldset className="mb-2">
               <legend className="mb-1 text-[10px] text-muted-foreground">
-                Lanes
+                {t("org.membersPanel.lanesLegend")}
               </legend>
               <div className="flex flex-wrap gap-x-3 gap-y-1">
                 {config.lanes.map((lane) => (
@@ -351,7 +362,7 @@ function MemberScopesEditor({
                     <Checkbox
                       checked={lanes.has(lane.value)}
                       onCheckedChange={() => setLanes((s) => toggle(s, lane.value))}
-                      aria-label={`Lane ${lane.label}`}
+                      aria-label={t("org.membersPanel.laneCheckboxAriaLabel", { lane: lane.label })}
                     />
                     <span>{lane.label}</span>
                   </label>
@@ -362,7 +373,7 @@ function MemberScopesEditor({
           {config.files.length > 0 && (
             <fieldset className="mb-2">
               <legend className="mb-1 text-[10px] text-muted-foreground">
-                Files
+                {t("nav.dock.filesTab")}
               </legend>
               <div className="flex max-h-32 flex-col gap-1 overflow-y-auto">
                 {config.files.map((file) => (
@@ -370,7 +381,7 @@ function MemberScopesEditor({
                     <Checkbox
                       checked={files.has(file.id)}
                       onCheckedChange={() => setFiles((s) => toggle(s, file.id))}
-                      aria-label={`File ${file.name}`}
+                      aria-label={t("comments.scope.file", { file: file.name })}
                     />
                     <span className="truncate">{file.name}</span>
                   </label>
@@ -379,7 +390,7 @@ function MemberScopesEditor({
             </fieldset>
           )}
           <div className="flex items-center gap-2">
-            <Button size="sm" onClick={handleSave} disabled={saving}>
+            <Button onClick={handleSave} disabled={saving}>
               {saving ? "Saving…" : "Save scopes"}
             </Button>
             {saveError && <span className="text-destructive">{saveError}</span>}

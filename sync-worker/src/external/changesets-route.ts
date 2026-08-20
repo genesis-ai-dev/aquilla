@@ -11,11 +11,11 @@
 
 import { errorResponse } from './errors'
 import { AUTH_HINT } from './discovery-route'
-import { handlePrepare } from './prepare'
+import { approvalUrlFor, handlePrepare } from './prepare'
 import { handleCommit } from './commit'
 import { loadChangeset, changesetToResponse } from './store'
 import { ROLE } from '../events/role-policy'
-import type { ExternalEnv } from './types'
+import type { ExternalEnv, StoredChangeset } from './types'
 import { validateApiCredential } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 
@@ -49,7 +49,7 @@ async function handleGet(
   if (!role || role.level < ROLE.VIEWER) {
     return errorResponse('permission_denied', 'no project membership')
   }
-  const approvalUrl = `${env.BASE_URL ?? ''}/approve/${cs.id}`
+  const approvalUrl = approvalUrlFor(env, cs.id)
   return Response.json({ changeset: changesetToResponse(cs), approvalUrl })
 }
 
@@ -76,6 +76,17 @@ async function handleDiscard(
   if (!role) {
     return errorResponse('permission_denied', 'no project membership')
   }
+  return discardChangesetCore(db, projectId, cs)
+}
+
+/** Post-auth discard state machine, shared with the session routes (AQU-926):
+ *  staged/stale/expired → discarded; committed and mid-commit are refused (a
+ *  discard during apply would strand a partially-applied plan). */
+export async function discardChangesetCore(
+  db: AquillaDb,
+  projectId: string,
+  cs: StoredChangeset,
+): Promise<Response> {
   if (cs.status === 'committed') {
     return errorResponse('validation_failed', 'cannot discard a committed changeset')
   }
@@ -85,10 +96,13 @@ async function handleDiscard(
   if (cs.status === 'committing') {
     return errorResponse('validation_failed', 'cannot discard a changeset that is currently committing')
   }
+  // `superseded` (P1 §1) is deliberately absent: it is a terminal, HEALTHY
+  // outcome, and flipping it to `discarded` would erase the fact that the work
+  // exists — the count it feeds is not one to launder.
   if (cs.status === 'staged' || cs.status === 'stale' || cs.status === 'expired') {
-    await db.prepare(`UPDATE changesets SET status = 'discarded' WHERE id = ?`).bind(id).run()
+    await db.prepare(`UPDATE changesets SET status = 'discarded' WHERE id = ?`).bind(cs.id).run()
   }
-  const updated = await loadChangeset(db, projectId, id)
+  const updated = await loadChangeset(db, projectId, cs.id)
   return Response.json({ changeset: updated ? changesetToResponse(updated) : null })
 }
 

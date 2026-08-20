@@ -27,12 +27,11 @@ import {
   PanelLeftOpen,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { HelpMenu } from "@/components/HelpMenu"
-import { VersionTag } from "@/components/VersionBadge"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { useDockRailPosition } from "@/hooks/useDockRailPosition"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -63,13 +62,13 @@ export interface LeftDockProps {
 // Constants
 // ---------------------------------------------------------------------------
 
-type TabMeta = { id: DockTab; icon: typeof Files; label: string }
+type TabMeta = { id: DockTab; icon: typeof Files; labelKey: Parameters<ReturnType<typeof useT>>[0] }
 
 const TAB_META: TabMeta[] = [
-  { id: "files", icon: Files, label: "Files" },
-  { id: "voices", icon: AudioLines, label: "Voices" },
-  { id: "agent", icon: Bot, label: "Agent" },
-  { id: "search", icon: Search, label: "Search" },
+  { id: "files", icon: Files, labelKey: "nav.dock.filesTab" },
+  { id: "voices", icon: AudioLines, labelKey: "common.voices" },
+  { id: "agent", icon: Bot, labelKey: "nav.dock.agentTab" },
+  { id: "search", icon: Search, labelKey: "nav.search" },
 ]
 
 // ---------------------------------------------------------------------------
@@ -85,6 +84,7 @@ interface TabRailProps {
 }
 
 function TabRail({ tabs, activeTab, agentBadge, onTabClick, orientation }: TabRailProps) {
+  const t = useT()
   const isTop = orientation === "top"
 
   return (
@@ -95,7 +95,8 @@ function TabRail({ tabs, activeTab, agentBadge, onTabClick, orientation }: TabRa
           : "flex h-full w-10 shrink-0 flex-col items-center gap-1 pt-2",
       )}
     >
-      {tabs.map(({ id, icon: Icon, label }) => {
+      {tabs.map(({ id, icon: Icon, labelKey }) => {
+        const label = t(labelKey)
         const isActive = activeTab === id
         const button = (
           <button
@@ -127,12 +128,12 @@ function TabRail({ tabs, activeTab, agentBadge, onTabClick, orientation }: TabRa
             {isTop && isActive && <span className="truncate">{label}</span>}
             {id === "agent" && agentBadge != null && agentBadge > 0 && (
               <span
-                aria-label={`${agentBadge} unread`}
+                aria-label={t("nav.dock.agentUnread", { count: agentBadge })}
                 className={cn(
                   "flex items-center justify-center rounded-md bg-primary text-primary-foreground",
                   isTop
-                    ? "ml-0.5 h-4 min-w-4 px-1 text-[9px]"
-                    : "absolute -right-0.5 -top-0.5 h-3.5 w-3.5 text-[9px]",
+                    ? "ms-0.5 h-4 min-w-4 px-1 text-[9px]"
+                    : "absolute -end-0.5 -top-0.5 h-3.5 w-3.5 text-[9px]",
                 )}
               >
                 {agentBadge > 9 ? "9+" : agentBadge}
@@ -165,6 +166,7 @@ export function LeftDock({
   activeTab: controlledTab,
   onActiveTabChange,
 }: LeftDockProps) {
+  const t = useT()
   const { position: railPosition } = useDockRailPosition()
   const isTopRail = railPosition === "top"
 
@@ -210,12 +212,12 @@ export function LeftDock({
   // AppShell's logoAccessory slot. The dock only renders the EXPAND affordance
   // on the collapsed 40px icon strip.
   const expandButton = (
-    <AppTooltip content="Expand sidebar" side="right">
+    <AppTooltip content={t("nav.dock.expandSidebar")} side="right">
       <Button
         type="button"
         variant="ghost"
         size="icon-sm"
-        aria-label="Expand sidebar"
+        aria-label={t("nav.dock.expandSidebar")}
         onClick={() => setActiveTab("files")}
         className="mt-3"
       >
@@ -268,23 +270,16 @@ export function LeftDock({
         )}
       </div>
 
-      {/* Help + account live at the dock root so they're present in every tab
-          and even when collapsed (compact icon / avatar on the 40px rail). */}
+      {/* Account stays at the dock root so it is present in every tab and even
+          when collapsed. Help now shares AppShell's utility row with locale. */}
       <div
         className={cn(
           "shrink-0 border-t pt-2",
           isOpen ? "flex flex-col gap-1 px-2 pb-1" : "flex flex-col items-center gap-1 pb-1",
         )}
       >
-        <HelpMenu compact={!isOpen} showTour={false} />
         <div data-tour="account-switcher">
           <AccountSwitcher variant="sidebar" compact={!isOpen} />
-        </div>
-      </div>
-
-      <div className="flex shrink-0 items-center">
-        <div className="min-w-0 flex-1">
-          <VersionTag />
         </div>
       </div>
     </div>

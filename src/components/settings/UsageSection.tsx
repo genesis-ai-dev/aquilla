@@ -9,7 +9,9 @@
 import { useEffect, useState } from "react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
+import { Spinner } from "@/components/ui/spinner"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { getMyUsage, type MyUsage } from "@/lib/sync/usage"
 
 /** Inline hook — only used by UsageSection. */
@@ -48,11 +50,12 @@ function fmtAudioSeconds(seconds: number): string {
  * totally invisible.
  */
 function MiniBarChart({ history }: { history: MyUsage["history"] }) {
+  const { t } = useI18n()
   const maxSeconds = Math.max(...history.map((d) => d.audioSeconds), 1)
   return (
     <div className="mt-3">
-      <p className="mb-1.5 text-xs text-muted-foreground">7-day audio history</p>
-      <div className="flex items-end gap-1 h-10" aria-label="7-day audio history bar chart">
+      <p className="mb-1.5 text-xs text-muted-foreground">{t("settings.usage.historyLabel")}</p>
+      <div className="flex items-end gap-1 h-10" aria-label={t("settings.usage.historyChartAriaLabel")}>
         {history.map((day) => {
           const pct = Math.max((day.audioSeconds / maxSeconds) * 100, day.audioSeconds > 0 ? 8 : 2)
           const label = `${day.date}: ${fmtAudioSeconds(day.audioSeconds)}`
@@ -85,6 +88,7 @@ function MiniBarChart({ history }: { history: MyUsage["history"] }) {
  * No pricing. Hides gracefully when signed out or when the endpoint fails.
  */
 export function UsageSection() {
+  const { t } = useI18n()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const { data, loading } = useUserUsage(jwt)
@@ -100,23 +104,25 @@ export function UsageSection() {
     hasHistory
 
   return (
-    <SettingsGroup label="This week">
-      <SettingsRow label="Activity" block>
+    <SettingsGroup label={t("onboarding.timeWindow.thisWeek")}>
+      <SettingsRow label={t("autopilot.inspector.activity.title")} block>
         {loading ? (
-          <p className="text-xs text-muted-foreground">Loading…</p>
+          <div className="flex items-center text-muted-foreground">
+            <Spinner className="size-3.5" />
+          </div>
         ) : !hasAnyData ? (
-          <p className="text-xs text-muted-foreground">No usage recorded yet.</p>
+          <p className="text-xs text-muted-foreground">{t("settings.usage.noData")}</p>
         ) : (
           <>
             <div className="flex flex-wrap gap-x-6 gap-y-2">
               <div>
-                <p className="text-xs text-muted-foreground">Audio generated today</p>
+                <p className="text-xs text-muted-foreground">{t("settings.usage.audioGeneratedToday")}</p>
                 <p className="text-sm font-medium tabular-nums">
                   {fmtAudioSeconds(today?.audioSeconds ?? 0)}
                 </p>
               </div>
               <div>
-                <p className="text-xs text-muted-foreground">AI requests today</p>
+                <p className="text-xs text-muted-foreground">{t("settings.usage.aiRequestsToday")}</p>
                 <p className="text-sm font-medium tabular-nums">
                   {(today?.ttsRequests ?? 0) + (today?.llmRequests ?? 0)}
                 </p>

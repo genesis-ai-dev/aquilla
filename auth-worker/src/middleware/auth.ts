@@ -8,6 +8,7 @@
 import type { Context, Next } from "hono"
 import type { Env, Variables } from "../types"
 import { JWTService } from "../auth/jwt"
+import { isTokenRevoked } from "../utils/token-revocation"
 
 export type AuthHonoEnv = { Bindings: Env; Variables: Variables }
 
@@ -36,6 +37,14 @@ export const authMiddleware = async (
     return c.json({ error: "Token expired" }, 401)
   }
 
+  // [Pen test] Auth & session mgmt (2026-08-03): reject tokens the caller
+  // explicitly logged out (POST /auth/logout) rather than only relying on
+  // natural 30-day expiry or a full password reset. See
+  // utils/token-revocation.ts.
+  if (payload.jti && (await isTokenRevoked(c.env.AQUILLA_PG, payload.jti))) {
+    return c.json({ error: "Token has been revoked. Please log in again." }, 401)
+  }
+
   const user = await jwtService.getUserByUsername(payload.sub)
   if (!user) {
     return c.json({ error: "User not found" }, 401)
@@ -60,5 +69,6 @@ export const authMiddleware = async (
   }
 
   c.set("user", user)
+  c.set("tokenPayload", payload)
   await next()
 }

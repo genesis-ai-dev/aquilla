@@ -29,6 +29,19 @@ import { AUTH_API_URL } from "./sync-token"
 import { ROLE } from "@/lib/frontier/roles"
 
 /**
+ * Invite tokens are bearer credentials — anyone holding one can join the
+ * project at the role it was minted for. Never put a whole one in a log line:
+ * console output is routinely captured by session-replay and error-reporting
+ * tools (PostHog is initialised app-wide in src/lib/posthog.ts), which would
+ * turn a debug breadcrumb into a live credential sitting in a third-party
+ * store. A short prefix is enough to correlate a failure with a specific
+ * invite row without being redeemable.
+ */
+function tokenFingerprint(token: string): string {
+  return token.length <= 6 ? "…" : `${token.slice(0, 6)}…`
+}
+
+/**
  * Reason codes for a failed invite preview.
  *
  * - "used"         — the link was already redeemed by someone else (single-use)
@@ -322,7 +335,7 @@ export async function revokeProjectInvite(
       }
     )
     if (!res.ok) {
-      console.warn(`[invites] revokeProjectInvite ${token} → HTTP ${res.status}`)
+      console.warn(`[invites] revokeProjectInvite ${tokenFingerprint(token)} → HTTP ${res.status}`)
       return false
     }
     const body = (await res.json()) as { removed: boolean }

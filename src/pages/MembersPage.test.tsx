@@ -12,6 +12,32 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   }),
 }))
 
+const rosterSettings = vi.hoisted(() => ({ canViewRoster: true }))
+vi.mock("@/hooks/useOrgSettings", () => ({
+  useOrgSettings: () => ({
+    settings: {},
+    orgRules: [],
+    promotionRequests: [],
+    canRequestPromotion: false,
+    version: 1,
+    hasFetched: true,
+    canEdit: true,
+    canEditOrgKeys: true,
+    orgProviderKeys: {},
+    canExport: true,
+    exportMinRole: null,
+    canViewRoster: rosterSettings.canViewRoster,
+    rosterViewMinRole: 600,
+    canViewMemberProgress: true,
+    memberProgressViewMinRole: 600,
+    allowSelfAssignment: false,
+    termbaseEditMinRole: 500,
+    refresh: vi.fn(async () => null),
+    patch: vi.fn(async () => ({ kind: "ok" as const })),
+    requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
+  }),
+}))
+
 // All named exports from @/lib/frontier/orgs used by MembersPage,
 // MembersPageContent, useOrgMembers, useOrgInvites, and useAccessibleProjects.
 //
@@ -50,8 +76,10 @@ vi.mock("@/hooks/useOrg", async (importOriginal) => {
       members: [],
       isLoading: false,
       error: null,
+      rosterHidden: false,
       refresh: vi.fn(async () => {}),
       add: vi.fn(async () => null),
+      addMany: vi.fn(async () => []),
       remove: vi.fn(async () => {}),
       listMemberProjects: vi.fn(async () => []),
     })),
@@ -82,7 +110,10 @@ vi.mock("@/hooks/useAccessibleProjects", () => ({
   })),
 }))
 
-beforeEach(() => localStorage.clear())
+beforeEach(() => {
+  localStorage.clear()
+  rosterSettings.canViewRoster = true
+})
 afterEach(() => vi.restoreAllMocks())
 
 describe("MembersPage active-org", () => {
@@ -114,12 +145,12 @@ describe("MembersPage active-org", () => {
 })
 
 describe("MembersPage — AQU-485 roster visibility", () => {
-  // The whole point of AQU-485 is that a below-floor caller must not see the
-  // roster OR be able to infer it's merely "empty" — those are different
-  // facts (hidden vs. zero members) and conflating them defeats the feature.
-  it("renders a 'Roster hidden' state instead of an empty member list when rosterHidden is true", async () => {
+  // Below-floor callers must not see the roster, an empty list, or a
+  // "hidden" disclosure — the Members page itself is absent.
+  it("redirects to the org overview when the roster is hidden by policy", async () => {
+    rosterSettings.canViewRoster = false
     const { useOrgMembers } = await import("@/hooks/useOrg")
-    vi.mocked(useOrgMembers).mockReturnValue({
+    vi.mocked(useOrgMembers).mockReturnValueOnce({
       members: [],
       isLoading: false,
       error: null,
@@ -138,29 +169,23 @@ describe("MembersPage — AQU-485 roster visibility", () => {
             <Routes>
               <Route path="/orgs/:orgId/members" element={<MembersPage />} />
               <Route path="/orgs/:orgId/members/matrix" element={<MembersPage />} />
+              <Route path="/orgs/:orgId/overview" element={<div>org overview</div>} />
             </Routes>
           </OrgProvider>
         </MemoryRouter>
       </QueryClientProvider>,
     )
 
-    await waitFor(() => expect(screen.getByText(/roster hidden/i)).toBeInTheDocument())
-    // Must not render the roster/add-member editing surface (the username
-    // typeahead used to add a direct org member) — that would itself imply
-    // an editable roster the caller isn't supposed to see.
-    expect(screen.queryByPlaceholderText(/aquilla username/i)).not.toBeInTheDocument()
-    // The "Project access" per-member breakdown section must also be absent
-    // — it would leak roster membership even if the top roster list is
-    // hidden. Match the section heading exactly (a page description sentence
-    // elsewhere mentions "project access" in unrelated prose).
-    expect(screen.queryByRole("heading", { name: /^project access$/i })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText("org overview")).toBeInTheDocument())
+    expect(screen.queryByText(/roster hidden/i)).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText(/search by name or email/i)).not.toBeInTheDocument()
+    expect(screen.queryByTestId("org-members-table")).not.toBeInTheDocument()
   })
 })
 
 describe("MembersPage — AQU-538 §3.4 matrix tab", () => {
-  // MembersMatrixView existed but was mounted nowhere. It's now a tab on
-  // this page: Roster is the default (byte-identical to today), Matrix is
-  // reachable both by clicking the tab and by deep-linking ?tab=matrix.
+  // MembersMatrixView is a tab on this page: Roster is the default Teams-style
+  // table, Matrix is reachable both by clicking the tab and by deep-linking.
   it("renders the Roster tab by default", async () => {
     render(
       <QueryClientProvider client={new QueryClient()}>
@@ -175,7 +200,7 @@ describe("MembersPage — AQU-538 §3.4 matrix tab", () => {
       </QueryClientProvider>,
     )
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: /^roster$/i })).toBeInTheDocument(),
+      expect(screen.getByRole("tab", { name: /^roster$/i })).toBeInTheDocument(),
     )
     expect(screen.queryByText(/no projects yet/i)).not.toBeInTheDocument()
   })
@@ -194,7 +219,7 @@ describe("MembersPage — AQU-538 §3.4 matrix tab", () => {
       </QueryClientProvider>,
     )
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: /^roster$/i })).toBeInTheDocument(),
+      expect(screen.getByRole("tab", { name: /^roster$/i })).toBeInTheDocument(),
     )
 
     fireEvent.click(screen.getByRole("tab", { name: /matrix/i }))
@@ -218,5 +243,92 @@ describe("MembersPage — AQU-538 §3.4 matrix tab", () => {
       </QueryClientProvider>,
     )
     await waitFor(() => expect(screen.getByText(/no projects yet/i)).toBeInTheDocument())
+  })
+})
+
+describe("MembersPage — Teams-style roster table", () => {
+  function renderMembers() {
+    return render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter initialEntries={["/orgs/42/members"]}>
+          <OrgProvider>
+            <Routes>
+              <Route path="/orgs/:orgId/members" element={<MembersPage />} />
+              <Route path="/orgs/:orgId/members/matrix" element={<MembersPage />} />
+            </Routes>
+          </OrgProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+  }
+
+  it("renders members in a searchable table with email and role", async () => {
+    const { useOrgMembers } = await import("@/hooks/useOrg")
+    vi.mocked(useOrgMembers).mockReturnValue({
+      members: [
+        {
+          userId: 1,
+          username: "anna",
+          email: "anna@example.com",
+          role: { level: 700, name: "owner" },
+          lastActiveAt: null,
+        },
+        {
+          userId: 2,
+          username: "ben",
+          email: "ben@example.com",
+          role: { level: 400, name: "contributor" },
+          lastActiveAt: null,
+        },
+      ],
+      isLoading: false,
+      error: null,
+      rosterHidden: false,
+      refresh: vi.fn(async () => {}),
+      add: vi.fn(async () => null),
+      addMany: vi.fn(async () => []),
+      remove: vi.fn(async () => {}),
+      listMemberProjects: vi.fn(async () => []),
+    })
+
+    renderMembers()
+    await waitFor(() => expect(screen.getByTestId("org-members-table")).toBeInTheDocument())
+    expect(screen.getByPlaceholderText(/search by name or email/i)).toBeInTheDocument()
+    expect(screen.getByText("anna")).toBeInTheDocument()
+    expect(screen.getByText("ben")).toBeInTheDocument()
+    expect(screen.getByText("anna@example.com")).toBeInTheDocument()
+    expect(screen.getByText("Contributor")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /add a member/i })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /add to projects/i })).toBeInTheDocument()
+  })
+
+  it("opens the add-member dialog from the toolbar", async () => {
+    const { useOrgMembers } = await import("@/hooks/useOrg")
+    vi.mocked(useOrgMembers).mockReturnValue({
+      members: [
+        {
+          userId: 1,
+          username: "anna",
+          email: "anna@example.com",
+          role: { level: 700, name: "owner" },
+          lastActiveAt: null,
+        },
+      ],
+      isLoading: false,
+      error: null,
+      rosterHidden: false,
+      refresh: vi.fn(async () => {}),
+      add: vi.fn(async () => null),
+      addMany: vi.fn(async () => []),
+      remove: vi.fn(async () => {}),
+      listMemberProjects: vi.fn(async () => []),
+    })
+
+    renderMembers()
+    await waitFor(() => expect(screen.getByRole("button", { name: /add a member/i })).toBeInTheDocument())
+    fireEvent.click(screen.getByRole("button", { name: /add a member/i }))
+    expect(screen.getByRole("dialog", { name: /add a member/i })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /add members/i })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /invite by email/i })).toBeInTheDocument()
   })
 })

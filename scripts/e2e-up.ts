@@ -7,9 +7,12 @@ import {
   killChildTree,
   attachOutput,
   openLogFile,
+  isolatedWranglerName,
+  inspectorPortForWorkerPort,
   type SpawnedWorker,
 } from "./lib/spawn-worker"
 import { MockLLMServer } from "../e2e/helpers/mock-llm-server"
+import { shouldWriteTestEnvFile } from "./lib/e2e-run-mode"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, "..")
@@ -37,6 +40,9 @@ const SYNC_WORKER_DIR = path.join(REPO_ROOT, "sync-worker")
 // sync-worker (writes files/cells/events) see the same aquilla-db rows. Without
 // --persist-to each cwd gets its own isolated sqlite and the two drift apart.
 // Per-shard so concurrent stacks don't trample each other's DO storage.
+// The file-based *dev registry* is a separate concern: spawnWranglerDev
+// isolates WRANGLER_REGISTRY_PATH per worker, and e2e-up also passes a unique
+// --name so Wrangler 3.114 cannot crash on a shared utimesSync heartbeat.
 const PERSIST_DIR = path.join(REPO_ROOT, `.wrangler-e2e-state${SUFFIX}`)
 // Local Postgres used as the Hyperdrive target for e2e. Wrangler reads
 // WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_<BINDING> to override the
@@ -56,14 +62,29 @@ const PG_CONTAINER = "aquilla-dev-pg"
 // Override with E2E_PG_ADMIN_URL for non-standard local setups.
 const E2E_PG_ADMIN_URL = process.env.E2E_PG_ADMIN_URL || "postgresql:///postgres"
 const HYPERDRIVE_ENV = { WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE: E2E_PG_URL }
-// Ports fan out by K*100 so shards never collide (8787/8788, 8887/8888, …).
-const IDENTITY_PORT = 8787 + K * 100
-const SYNC_WORKER_PORT = 8788 + K * 100
-const VITE_PORT = 5173 + K * 100
-const LEGACY_MIGRATION_MOCK_PORT = 9460 + K * 100
+// Live `pnpm dev` owns 5173 (Vite), 8788 (identity), 8789 (sync), 8790
+// (agent), and 9456 (OpenRouter mock). E2E never shares that block — even
+// shard 0 sits `E2E_PORT_SHIFT` above it — so smoke can run beside a live
+// stack. Shards then fan out by K*100 (9787/9788, 9887/9888, …).
+const E2E_PORT_SHIFT = 1000
+const IDENTITY_PORT = 8787 + E2E_PORT_SHIFT + K * 100
+const SYNC_WORKER_PORT = 8788 + E2E_PORT_SHIFT + K * 100
+const VITE_PORT = 5173 + E2E_PORT_SHIFT + K * 100
+const LEGACY_MIGRATION_MOCK_PORT = 9460 + E2E_PORT_SHIFT + K * 100
+const OPENROUTER_MOCK_PORT = 9456 + E2E_PORT_SHIFT + K * 100
+const MANAGED_PORTS = [
+  IDENTITY_PORT,
+  SYNC_WORKER_PORT,
+  VITE_PORT,
+  LEGACY_MIGRATION_MOCK_PORT,
+  OPENROUTER_MOCK_PORT,
+  inspectorPortForWorkerPort(IDENTITY_PORT),
+  inspectorPortForWorkerPort(SYNC_WORKER_PORT),
+]
 // Per-shard build output so concurrent `vite build`s don't overwrite one dist.
 // Single-stack keeps the default `dist` so nothing else changes.
 const DIST_DIR = SHARDED ? `dist-e2e-s${K}` : "dist"
+const VITE_MODE = process.env.E2E_VITE_MODE === "dev" && !SHARDED ? "dev" : "preview"
 
 const VERBOSE = process.env.E2E_VERBOSE === "1" || process.argv.includes("--verbose")
 const LOG_DIR = path.join(REPO_ROOT, `.e2e-logs${SUFFIX}`)
@@ -84,6 +105,11 @@ async function shutdown(code = 0): Promise<never> {
   // Iterate a copy so the array isn't mutated.
   for (const fn of [...cleanup].reverse()) {
     try { await fn() } catch (e) { console.error(e) }
+  }
+  // Reap workerd/vite orphans that survived SIGTERM so the next run (and a
+  // still-running `pnpm dev`) does not inherit our listeners.
+  for (const port of MANAGED_PORTS) {
+    await freePort(port)
   }
   process.exit(code)
 }
@@ -157,6 +183,23 @@ function runOnce(
   })
 }
 
+/** If wrangler/workerd exits mid-suite, Playwright would otherwise keep
+ * going and every remaining spec would fail in 0s with ECONNREFUSED.
+ * Abort the shard immediately and dump worker logs. */
+function abortIfWorkerDies(worker: SpawnedWorker, label: string): void {
+  worker.child.on("exit", (code, signal) => {
+    if (shuttingDown) return
+    const reason = code != null ? `exit ${code}` : `signal ${signal ?? "unknown"}`
+    console.error(
+      `\n${TAG}[fail] ${label} worker on :${worker.port} died (${reason}).\n` +
+        `${TAG}[fail] Remaining tests would fail with ECONNREFUSED ${worker.port} — aborting now.\n` +
+        `${TAG}[hint] Tail ${logFiles[label] ?? `${LOG_DIR}/`}. Common causes: another e2e-up / pnpm dev fighting the port, workerd OOM, Postgres gone, or Wrangler crashing on a shared ~/.wrangler/registry heartbeat file.`,
+    )
+    dumpLogs()
+    void shutdown(1)
+  })
+}
+
 /** Print the last N lines of each known log file to stderr. Used when a
  * subcommand fails so the developer can see what went wrong without
  * needing to know the log paths. */
@@ -212,6 +255,78 @@ function dockerPgAvailable(): boolean {
   return spawnSync("docker", ["exec", PG_CONTAINER, "true"], { stdio: "ignore" }).status === 0
 }
 
+/** Blocks the event loop for `seconds` — used only for the short synchronous
+ * polling loops below (colima/container boot), which run before any workers
+ * are spawned. */
+function sleepSync(seconds: number): void {
+  spawnSync("sleep", [String(seconds)])
+}
+
+/** True when the `colima` CLI is on PATH — this repo's local Docker runtime
+ * (not Docker Desktop). See docs/CLAUDE memory: run `colima start` before
+ * anything that needs Docker. */
+function hasColima(): boolean {
+  return spawnSync("colima", ["version"], { stdio: "ignore" }).status === 0
+}
+
+/** True when the default colima VM is already running. */
+function colimaRunning(): boolean {
+  return spawnSync("colima", ["status"], { stdio: "ignore" }).status === 0
+}
+
+/**
+ * Auto-start Colima when it's installed but not running, so `pnpm test:e2e`
+ * (and the pre-push smoke hook) don't fail with a bare "no Docker container"
+ * error on a machine where Docker itself just isn't up yet. No-op when
+ * Colima isn't installed (Docker Desktop / Homebrew Postgres setups) or is
+ * already running. Failure here is non-fatal — resetE2ePostgres() falls back
+ * to local psql, or reports the original error.
+ *
+ * Sharded runs (scripts/e2e-shard.ts) launch several of these as separate
+ * processes concurrently, so more than one can call this at once — `colima
+ * start` on an instance that's still booting just logs "already running,
+ * ignoring" and returns immediately rather than waiting. We poll
+ * colimaRunning() afterward (with a generous timeout) so every shard blocks
+ * until the VM is actually up, instead of racing ahead to a Docker call that
+ * will fail.
+ */
+function ensureColimaStarted(): void {
+  if (!hasColima()) return
+  if (!colimaRunning()) {
+    console.log(`${TAG}[e2e-up] Colima not running — starting it (this can take ~30s)…`)
+    const result = spawnSync("colima", ["start"], { stdio: "inherit" })
+    if (result.status !== 0) {
+      console.error(`${TAG}[e2e-up] 'colima start' failed (exit ${result.status}) — continuing, will fall back if Docker stays unavailable.`)
+    }
+  }
+  const deadline = Date.now() + 60_000
+  while (!colimaRunning() && Date.now() < deadline) {
+    sleepSync(1)
+  }
+  if (!colimaRunning()) {
+    console.error(`${TAG}[e2e-up] Colima still not reporting 'running' after 60s — continuing, will fall back if Docker stays unavailable.`)
+  }
+}
+
+/**
+ * Start the `aquilla-dev-pg` container when Colima/Docker is up but the
+ * container was previously stopped (e.g. left over from a `colima stop` or a
+ * machine restart). No-op when Docker itself isn't reachable (handled by the
+ * dockerPgAvailable() check in resetE2ePostgres) or the container doesn't
+ * exist at all (first-time setup — see e2e/README.md).
+ */
+function ensureDockerPgContainerStarted(): void {
+  if (dockerPgAvailable()) return
+  const inspect = spawnSync("docker", ["inspect", "-f", "{{.State.Running}}", PG_CONTAINER], { stdio: ["ignore", "pipe", "ignore"] })
+  if (inspect.status !== 0) return // container doesn't exist — nothing to start
+  console.log(`${TAG}[e2e-up] '${PG_CONTAINER}' container exists but isn't running — starting it…`)
+  spawnSync("docker", ["start", PG_CONTAINER], { stdio: "inherit" })
+  const deadline = Date.now() + 30_000
+  while (!dockerPgAvailable() && Date.now() < deadline) {
+    sleepSync(1)
+  }
+}
+
 /** True when a local `psql` client is on PATH (the Docker-less fallback). */
 function hasLocalPsql(): boolean {
   return spawnSync("psql", ["--version"], { stdio: "ignore" }).status === 0
@@ -231,6 +346,9 @@ function hasLocalPsql(): boolean {
  */
 function resetE2ePostgres(): void {
   const schemaSql = readFileSync(path.join(REPO_ROOT, "db/postgres/schema.sql"))
+
+  ensureColimaStarted()
+  ensureDockerPgContainerStarted()
 
   if (dockerPgAvailable()) {
     const dropResult = spawnSync(
@@ -311,14 +429,23 @@ async function main(): Promise<void> {
   const browserEnv: Record<string, string> = {
     VITE_AUTH_BASE: `http://127.0.0.1:${IDENTITY_PORT}`,
     VITE_FRONTIER_BASE: `http://127.0.0.1:${IDENTITY_PORT}`,
+    // Must override .env.local's VITE_CHAT_BASE (often the old chat-worker
+    // port, now sync-worker). Chat + agent/run live on identity; the worker
+    // strips the `/chat` prefix the same way production `api.*.aquilla.app/chat` does.
+    VITE_CHAT_BASE: `http://127.0.0.1:${IDENTITY_PORT}/chat`,
     VITE_SYNC_WORKER_HOST: `127.0.0.1:${SYNC_WORKER_PORT}`,
+    // Pin Google Drive import to unconfigured regardless of the developer's
+    // .env.local — import-dialog.smoke.spec asserts the not-configured notice,
+    // and real creds leaking into the e2e build would flip that panel state.
+    VITE_GOOGLE_CLIENT_ID: "",
+    VITE_GOOGLE_API_KEY: "",
   }
 
-  // 0. Free our managed ports — survives stale processes from a prior aborted run.
-  await freePort(IDENTITY_PORT)
-  await freePort(SYNC_WORKER_PORT)
-  await freePort(VITE_PORT)
-  await freePort(LEGACY_MIGRATION_MOCK_PORT)
+  // 0. Free our managed ports — survives stale processes from a prior aborted
+  // run. These are the e2e block only; never 5173/8788/8789/9456.
+  for (const port of MANAGED_PORTS) {
+    await freePort(port)
+  }
 
   // Set up the log dir. Worker stdout/stderr is piped here in non-verbose
   // mode so the developer's terminal stays clean. On test failure we tail
@@ -353,7 +480,6 @@ async function main(): Promise<void> {
   // reach c.env bindings).
   // Scripted OpenRouter mock (scripts/mock-openrouter.ts) — the agent route's
   // "model brain" for e2e. Per-shard port so concurrent stacks don't clash.
-  const OPENROUTER_MOCK_PORT = 9456 + K * 100
   console.log(`${TAG}[boot 3/8] starting mock OpenRouter on :${OPENROUTER_MOCK_PORT} + identity (auth-worker) on :${IDENTITY_PORT}…`)
   const openrouterMock = spawn(
     "npx",
@@ -362,6 +488,7 @@ async function main(): Promise<void> {
   )
   attachOutput(openrouterMock, "mock-openrouter", openLogFile(path.join(LOG_DIR, "mock-openrouter.log")), VERBOSE)
   cleanup.push(() => killChildTree(openrouterMock))
+  await waitForUrl(`http://127.0.0.1:${OPENROUTER_MOCK_PORT}/healthz`, 30_000)
 
   const legacyMigrationMock = spawn(
     "npx",
@@ -384,6 +511,10 @@ async function main(): Promise<void> {
     cwd: AUTH_WORKER_DIR,
     port: IDENTITY_PORT,
     label: "identity",
+    // Unique local name so this stack's registry heartbeat file cannot
+    // collide with `pnpm dev` or another e2e shard (Wrangler 3.114 dies
+    // on `utimesSync` ENOENT when the shared file is unlinked).
+    name: isolatedWranglerName("aquilla-identity-local", SUFFIX),
     env: { ...HYPERDRIVE_ENV },
     // ADMIN_EMAILS: site-admin identity is by account email; the admin-console
     // specs need alice to be a platform admin. Her seeded email is
@@ -412,6 +543,7 @@ async function main(): Promise<void> {
     streamToParent: VERBOSE,
   })
   cleanup.push(() => identity.kill())
+  abortIfWorkerDies(identity, "identity")
 
   // 4. Boot sync-worker. Same Hyperdrive override so sync SQL also hits Postgres.
   console.log(`${TAG}[boot 4/8] starting sync-worker on :${SYNC_WORKER_PORT}…`)
@@ -419,12 +551,14 @@ async function main(): Promise<void> {
     cwd: SYNC_WORKER_DIR,
     port: SYNC_WORKER_PORT,
     label: "sync",
+    name: isolatedWranglerName("aquilla-sync-worker-local", SUFFIX),
     env: { ...HYPERDRIVE_ENV },
     extraArgs: ["--persist-to", PERSIST_DIR],
     logFile: openLogFile(logFiles.sync),
     streamToParent: VERBOSE,
   })
   cleanup.push(() => sync.kill())
+  abortIfWorkerDies(sync, "sync")
 
   // 5. Boot mock LLM (binds to an OS-assigned free port, so shards never clash).
   console.log(`${TAG}[boot 5/8] starting mock LLM…`)
@@ -440,13 +574,14 @@ async function main(): Promise<void> {
   //
   // Skipped when sharding: concurrent stacks would race on this one shared file,
   // and the build picks the URLs up from process.env (browserEnv) instead.
-  if (!SHARDED) {
+  if (shouldWriteTestEnvFile(SHARDED, VITE_MODE)) {
     const envFile = path.join(REPO_ROOT, ".env.test.local")
     writeFileSync(
       envFile,
       [
         `VITE_AUTH_BASE=${browserEnv.VITE_AUTH_BASE}`,
         `VITE_FRONTIER_BASE=${browserEnv.VITE_FRONTIER_BASE}`,
+        `VITE_CHAT_BASE=${browserEnv.VITE_CHAT_BASE}`,
         `VITE_SYNC_WORKER_HOST=${browserEnv.VITE_SYNC_WORKER_HOST}`,
         `VITE_LLM_BASE_URL=${browserEnv.VITE_LLM_BASE_URL}`,
         "",
@@ -455,23 +590,31 @@ async function main(): Promise<void> {
     cleanup.push(async () => rmSync(envFile, { force: true }))
   }
 
-  // 7. Build once, then serve via `vite preview` (static).
+  // 7. Full suites build once and serve static output. The changed-file gate
+  // runs only a handful of specs on one stack, so dev mode avoids paying the
+  // ~30-second production build before useful feedback.
   //
-  // Why not `vite dev`? Dev mode runs babel/react-compiler on every request,
-  // keeps an HMR watcher alive, and forces re-optimize roundtrips that
-  // crater CPU/RAM under E2E load. A pre-built dist is served by a plain
-  // static server with ~0 ongoing CPU and ~50 MB RAM vs. several hundred MB.
+  // Full suites avoid dev mode because it runs babel/react-compiler on every
+  // request, keeps an HMR watcher alive, and forces re-optimize roundtrips that
+  // crater CPU/RAM under sustained E2E load. A pre-built dist is served by a
+  // plain static server with ~0 ongoing CPU and ~50 MB RAM.
   //
   // The build cost (~15-30s) pays for itself after the second spec. The backend
   // URLs are passed via env so each shard bakes its own (VITE_* process env is
   // inlined by Vite at build time and takes priority over .env files).
-  console.log(`${TAG}[boot 7/8] building app for test mode (one-time, ~30s)…`)
-  await runOnce("npx", ["vite", "build", "--mode", "test", "--outDir", DIST_DIR], REPO_ROOT, "build", browserEnv)
+  if (VITE_MODE === "preview") {
+    console.log(`${TAG}[boot 7/8] building app for test mode (one-time, ~30s)…`)
+    await runOnce("npx", ["vite", "build", "--mode", "test", "--outDir", DIST_DIR], REPO_ROOT, "build", browserEnv)
+  } else {
+    console.log(`${TAG}[boot 7/8] changed-file gate: skipping production build`)
+  }
 
-  console.log(`${TAG}[boot 8/8] starting Vite preview on :${VITE_PORT}…`)
+  console.log(`${TAG}[boot 8/8] starting Vite ${VITE_MODE} server on :${VITE_PORT}…`)
   const vite = spawn(
     "npx",
-    ["vite", "preview", "--port", String(VITE_PORT), "--strictPort", "--mode", "test", "--outDir", DIST_DIR],
+    VITE_MODE === "preview"
+      ? ["vite", "preview", "--port", String(VITE_PORT), "--strictPort", "--mode", "test", "--outDir", DIST_DIR]
+      : ["vite", "--port", String(VITE_PORT), "--strictPort", "--mode", "test"],
     {
       cwd: REPO_ROOT,
       stdio: ["ignore", "pipe", "pipe"],

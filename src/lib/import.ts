@@ -18,6 +18,9 @@
 import { v7 as uuidv7 } from "uuid"
 import type { IdmlProgress } from "@aquilla/idml-roundtrip"
 import { proxyOrigin } from "./net/resource-proxy"
+// This module runs outside React (plain import-pipeline code, no hooks), so it
+// uses the standalone t() rather than useT() — see src/lib/i18n/standalone.ts.
+import { t } from "./i18n/standalone"
 import type { FileType, FileReference, TranslatableString, OrderedBy } from "./parsers/types"
 import { detectFileType, isMediaFileType } from "./parsers/types"
 import { buildAudioId, MAX_AUDIO_UPLOAD_BYTES, uploadCellAudio } from "./audio/upload"
@@ -49,7 +52,10 @@ import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
 import { extractIdmlStrings } from "./parsers/idml"
 import { extractBiblicaStudyNoteStrings } from "./parsers/biblica"
+import { extractTreasureHuntStrings } from "./parsers/biblica-treasure-hunt"
+import { extractReach4LifeStrings } from "./parsers/biblica-reach4life"
 import { extractHtmlStrings } from "./parsers/html"
+import { extractEpubImport, type EpubSpineMember } from "./parsers/epub"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
 import {
   assertSourceUploadByteLength,
@@ -254,11 +260,7 @@ export async function prepareEBibleTargetImport(
   onProgress?.({ phase: "parse" })
   const strings = parseEBibleCorpus(corpusText)
   if (strings.length === 0) {
-    throw new Error(
-      `"${translation.title}" is not available for download. ` +
-      `The eBible corpus file exists but contains no text — ` +
-      `this translation may be restricted due to copyright.`,
-    )
+    throw new Error(t("importExport.errors.ebibleEmptyCorpus", { title: translation.title }))
   }
 
   const verses = strings.map((s) => ({
@@ -426,8 +428,9 @@ export interface ImportResult {
   /** USFM book code (\id), when known. Persisted on the file projection so the
    *  sidebar can group + order by canonical book. */
   bookCode?: string
-  /** OT/NT grouping for the sidebar. */
-  corpusMarker?: "OT" | "NT" | undefined
+  /** Sidebar folder for the imported file — "OT"/"NT" for scripture, or a
+   *  named collection such as "Treasure Hunt Bible" for a Biblica edition. */
+  corpusMarker?: string | undefined
   /** Original filename (e.g. "01GENarONAV12.SFM") — preserved for export naming
    *  and hover-to-see-original when we rename the file to a localized book name. */
   originalName?: string
@@ -439,6 +442,8 @@ export interface ImportResult {
   /** Exact container for a multi-book import. Stored once and bound to every
    * emitted book instead of becoming every book's export skeleton. */
   sharedSourceArtifact?: TargetImportArtifact
+  /** EPUB spine members shown in the chapter picker. Absent for other formats. */
+  epubMembers?: EpubSpineMember[]
 }
 
 export interface ImportContext {
@@ -476,6 +481,11 @@ export interface ImportContext {
   /** Advanced orchestrators can keep fresh files hidden while persisting
    * package-level or format-specific secondary data. */
   deferPublication?: boolean
+  /** Per-file import provenance, keyed by normalized file name
+   *  (`name.trim().toLowerCase()` — the skipKeys vocabulary). A matching
+   *  entry is stamped as `importManifest.origin` and projected verbatim to
+   *  `files.meta.aquillaImport.origin` (linked-sync hook, e.g. Google Drive). */
+  origins?: ReadonlyMap<string, Record<string, unknown>>
 }
 
 type PrepareImportContext = Pick<
@@ -487,13 +497,26 @@ type PrepareImportContext = Pick<
   excludeFrontMatter?: boolean
 }
 
+/**
+ * Renders a caught error for a per-book `skipped[].reason` field — plain-text
+ * diagnostic data shown in the import result report, not a translated UI
+ * string. `.message` is now a clean keyed frame (see source-upload.ts); the
+ * HTTP status/body detail it used to splice into `.message` lives on `.cause`
+ * instead, so append it here to keep the report as informative as before.
+ */
+function errorDetailForSkipReason(error: unknown): string {
+  if (!(error instanceof Error)) return String(error)
+  const cause = typeof error.cause === "string" ? error.cause : undefined
+  return cause ? `${error.message} (${cause})` : error.message
+}
+
 function preparedParsedFile(
   file: File,
   fileType: FileType,
   results: ImportResult[],
 ): PreparedImportFile {
   if (results.length === 0 || results.every((result) => result.strings.length === 0)) {
-    throw new Error(`${file.name} did not contain any content the ${fileType} adapter could import.`)
+    throw new Error(t("importExport.errors.noImportableContent", { fileName: file.name, fileType }))
   }
   return { fileType, results }
 }
@@ -513,7 +536,10 @@ async function prepareSandboxImport(
   }).catch((sandboxError) => {
     const first = firstError instanceof Error ? firstError.message : String(firstError)
     const second = sandboxError instanceof Error ? sandboxError.message : String(sandboxError)
-    throw new Error(`${first}. Sandbox fallback also failed: ${second}`)
+    // `first`/`second` are raw upstream messages (already possibly server
+    // text) — interpolated as data inside the translated frame, not
+    // themselves translated.
+    throw new Error(t("importExport.errors.sandboxFallbackFailed", { primary: first, fallback: second }))
   })
   return {
     fileType: "custom",
@@ -546,6 +572,16 @@ export interface ImportFileResult {
  * deterministic parser id remains `tmx`. */
 export function importedFileKind(fileType: FileType): string {
   return fileType === "tmx" ? "translation-memory" : fileType
+}
+
+/** Merge caller-supplied provenance into the versioned import summary. */
+function manifestWithOrigin(
+  manifest: object,
+  origins: ReadonlyMap<string, Record<string, unknown>> | undefined,
+  fileName: string,
+): object {
+  const origin = origins?.get(fileName.trim().toLowerCase())
+  return origin ? { ...manifest, origin } : manifest
 }
 
 /**
@@ -636,7 +672,7 @@ export async function importFile(
     }
   }
   if (refs.length === 0 && skipped.length > 0) {
-    throw new Error(`Import could not publish any files: ${skipped[0].reason}`)
+    throw new Error(t("importExport.errors.importCouldNotPublish", { reason: skipped[0].reason }))
   }
   return { refs, speakerPairs: imported.speakerPairs, ...(skipped.length ? { skipped } : {}) }
 }
@@ -647,7 +683,7 @@ export async function prepareImportFile(
   file: File,
   ctx: PrepareImportContext,
 ): Promise<PreparedImportFile> {
-  if (file.size === 0) throw new Error(`${file.name} is empty.`)
+  if (file.size === 0) throw new Error(t("importExport.errors.emptyFile", { fileName: file.name }))
   // Fail before parsing/decompression and before any server event. The same
   // ceiling is enforced again by the artifact route as a trust boundary.
   assertSourceUploadByteLength(file.size)
@@ -658,7 +694,7 @@ export async function prepareImportFile(
     // or an XLIFF named .xml by an upstream tool, is not flattened as prose.
     if (isMediaFileType(extensionType)) return { fileType: extensionType, results: [] }
     try {
-      if (extensionType === "docx" || extensionType === "pptx" || extensionType === "idml") {
+      if (extensionType === "docx" || extensionType === "pptx" || extensionType === "idml" || extensionType === "epub") {
         return preparedParsedFile(
           file,
           extensionType,
@@ -716,7 +752,7 @@ export async function prepareImportFile(
           importNotices: [{
             code: "basic-parser-fallback",
             severity: "warning",
-            message: "Aquilla could not verify this structured layout with AI, so it used the basic parser. Check the preview carefully before importing.",
+            message: t("importExport.notices.basicParserFallback"),
           }],
         }))
       }
@@ -743,7 +779,7 @@ export async function prepareImportFile(
       }))
     }
     if (!ctx.identityToken) {
-      throw new Error(`Unsupported file type: ${file.name}. Sign in to use AI-assisted format detection.`)
+      throw new Error(t("importExport.errors.unsupportedFileTypeSignIn", { fileName: file.name }))
     }
     const assisted = await classifyAndParseUnknownText(file, {
       identityToken: ctx.identityToken,
@@ -798,11 +834,7 @@ export async function importEBible(
   if (strings.length === 0) {
     // Many eBible translations marked "downloadable" have empty corpus files —
     // the text is omitted for copyright reasons (only newlines are present).
-    throw new Error(
-      `"${translation.title}" is not available for download. ` +
-      `The eBible corpus file exists but contains no text — ` +
-      `this translation may be restricted due to copyright.`
-    )
+    throw new Error(t("importExport.errors.ebibleEmptyCorpus", { title: translation.title }))
   }
 
   onProgress?.({ phase: "save", cellsEnqueued: 0, cellsTotal: strings.length })
@@ -860,7 +892,8 @@ async function downloadObsStoryFiles(
   const apiUrl = `${OBS_REPO.baseUrl}/api/v1/repos/${OBS_REPO.owner}/${OBS_REPO.repo}/contents/${OBS_REPO.contentPath}?ref=${OBS_REPO.branch}`
   const listRes = await fetch(apiUrl, { signal })
   if (!listRes.ok) {
-    throw new Error(`Failed to list OBS content: ${listRes.status} ${listRes.statusText}`)
+    // HTTP diagnostic — keyed frame; raw status kept on `.cause` for DevTools.
+    throw new Error(t("importExport.errors.obsListFailed"), { cause: `HTTP ${listRes.status} ${listRes.statusText}` })
   }
   const contents = (await listRes.json()) as Array<{ type: string; name: string; path: string }>
   const mdFiles = contents
@@ -870,7 +903,7 @@ async function downloadObsStoryFiles(
   const out: ObsStoryFile[] = []
   const failed: string[] = []
   for (let i = 0; i < mdFiles.length; i++) {
-    if (signal?.aborted) throw new Error("Import cancelled")
+    if (signal?.aborted) throw new Error(t("importExport.errors.importCancelled"))
     const item = mdFiles[i]
     const rawUrl = `${OBS_REPO.baseUrl}/${OBS_REPO.owner}/${OBS_REPO.repo}/raw/branch/${OBS_REPO.branch}/${item.path}`
     const fileRes = await fetch(rawUrl, { signal })
@@ -882,9 +915,10 @@ async function downloadObsStoryFiles(
     onProgress?.(i + 1, mdFiles.length)
   }
   if (failed.length > 0) {
-    throw new Error(`Open Bible Stories download was incomplete: ${failed.join(", ")}. Nothing was imported.`)
+    // `failed` entries are "<file> (<status>)" data pairs, interpolated as-is.
+    throw new Error(t("importExport.errors.obsDownloadIncomplete", { files: failed.join(", ") }))
   }
-  if (out.length === 0) throw new Error("No OBS story files could be downloaded")
+  if (out.length === 0) throw new Error(t("importExport.errors.obsNoFilesDownloaded"))
   return out
 }
 
@@ -931,7 +965,7 @@ export async function importObs(
     strings.push(...parseObsStories(story.content, story.name))
   }
   if (strings.length === 0) {
-    throw new Error("Open Bible Stories downloaded but produced no frames — check the source.")
+    throw new Error(t("importExport.errors.obsNoFrames"))
   }
 
   onProgress?.({ phase: "save", cellsEnqueued: 0, cellsTotal: strings.length })
@@ -986,10 +1020,7 @@ export async function importHelloao(
   onProgress?.({ phase: "parse" })
   const strings = parseHelloaoComplete(complete, selectedBooks)
   if (strings.length === 0) {
-    throw new Error(
-      `"${translation.englishName || translation.name}" downloaded but produced no verses — ` +
-      `check the book selection and try again.`
-    )
+    throw new Error(t("importExport.errors.helloaoNoVerses", { title: translation.englishName || translation.name }))
   }
 
   onProgress?.({ phase: "save", cellsEnqueued: 0, cellsTotal: strings.length })
@@ -1040,7 +1071,7 @@ export async function importMacula(
   const { strings, morphRows, bookCode, sourceLanguage } = parseMaculaTsv(text)
 
   if (strings.length === 0) {
-    throw new Error("Macula file parsed but no verses were found — check the file format.")
+    throw new Error(t("importExport.errors.maculaNoVerses"))
   }
 
   // Build bulk cells (no speaker pairs needed for Macula).
@@ -1159,8 +1190,9 @@ export async function importTranslationNotes(
 
   if (strings.length === 0) {
     throw new Error(
-      "TN file parsed but no valid note rows were found — check that the first three columns are book, chapter, and verse."
-        + (skippedCount > 0 ? ` (${skippedCount} rows skipped due to missing canonical reference)` : ""),
+      skippedCount > 0
+        ? t("importExport.errors.tnNoValidRowsWithSkipped", { count: skippedCount })
+        : t("importExport.errors.tnNoValidRows"),
     )
   }
 
@@ -1207,6 +1239,37 @@ export async function importTranslationNotes(
 /** Distinguishes a notes-only Biblica import from a whole-package IDML import. */
 export const BIBLICA_NOTES_PROFILE_ID = "builtin:biblica-study-notes"
 
+/**
+ * The Treasure Hunt Bible is a different InDesign template with the opposite
+ * marking convention, so it gets its own profile — the cells are not
+ * interchangeable with study-Bible notes even though both are Biblica IDML.
+ */
+export const TREASURE_HUNT_PROFILE_ID = "builtin:biblica-treasure-hunt"
+
+/**
+ * Reach4Life is a third template again — a teenagers' workbook wrapped around
+ * the NIrV, organized by lesson rather than by chapter.
+ */
+export const REACH4LIFE_PROFILE_ID = "builtin:biblica-reach4life"
+
+/**
+ * Which Biblica title an IDML package is. Nothing in the package identifies the
+ * edition, and the three templates disagree about what a paragraph style means,
+ * so the person importing it says which one this is.
+ */
+export type BiblicaEdition = "study-notes" | "treasure-hunt" | "reach4life"
+
+/**
+ * Sidebar folder per edition, so a project holding more than one Biblica title
+ * keeps them apart. The label is the file's corpus marker, which the sidebar
+ * groups by and the user can rename or move a file out of later.
+ */
+const BIBLICA_CORPUS_MARKERS: Readonly<Record<BiblicaEdition, string>> = {
+  "study-notes": "Biblica Study Notes",
+  "treasure-hunt": "Treasure Hunt Bible",
+  reach4life: "Reach 4 Life",
+}
+
 export type BiblicaImportPhase = "parse" | "save"
 export interface BiblicaProgress {
   phase: BiblicaImportPhase
@@ -1219,13 +1282,24 @@ export interface BiblicaProgress {
 }
 
 /**
- * Import the study notes from a Biblica study-Bible IDML package.
+ * Import the notes from a Biblica IDML package.
  *
  * The package parses through the same shared v2 engine as a plain IDML import,
  * so cells keep their protected anchors, exact locators, and preserved source
  * bytes — strict IDML export still works. Only the note paragraphs become cells:
  * the Bible text is set from the publisher's scripture files, so importing it
  * here would ask translators to retype scripture they must not edit.
+ *
+ * Which paragraphs count as notes depends on the edition. A study Bible marks
+ * its notes positively (`intro:*`); the Treasure Hunt Bible and Reach4Life mark
+ * scripture instead, so everything set around the Bible text is imported —
+ * facts and hunts, lessons and journeys, book introductions and front matter.
+ * See `@/lib/biblica/treasure-hunt/notes` and `@/lib/biblica/reach4life/notes`.
+ *
+ * The study Bible's own front and back matter — contents, "how to use", the
+ * Bible Dictionary, the timelines, the maps, the cover — ships as separate
+ * volumes holding no scripture at all, which is how the reader recognizes them
+ * without another toggle. There every text-bearing paragraph is a cell.
  */
 export interface BiblicaImportOptions {
   /**
@@ -1233,6 +1307,8 @@ export interface BiblicaImportOptions {
    * When false, each line stays a single cell (lists still split per line).
    */
   splitSentences?: boolean
+  /** Which template's rules to read the package with. Defaults to a study Bible. */
+  edition?: BiblicaEdition
 }
 
 export async function importBiblicaStudyNotes(
@@ -1242,39 +1318,42 @@ export async function importBiblicaStudyNotes(
   options?: BiblicaImportOptions,
 ): Promise<FileReference> {
   if (!/\.idml$/i.test(file.name)) {
-    throw new Error("Biblica study notes import expects an InDesign .idml package.")
+    throw new Error(t("importExport.errors.biblicaExpectsIdml"))
   }
   assertSourceUploadByteLength(file.size)
   onProgress?.({ phase: "parse" })
 
+  const edition: BiblicaEdition = options?.edition ?? "study-notes"
   // The worker transfers (detaches) its input, so the preserved source artifact
   // is read from the File a second time rather than shared with the parse buffer.
   const parseBuffer = await file.arrayBuffer()
   assertIdmlPackageBytes(parseBuffer, file.name)
-  const { strings, bookCodes, skipped } = await extractBiblicaStudyNoteStrings(
+  const parseOptions = {
+    ...(ctx.signal ? { signal: ctx.signal } : {}),
+    onProgress: (idml: IdmlProgress) => onProgress?.({ phase: "parse", idml }),
+    ...(options?.splitSentences !== undefined
+      ? { splitSentences: options.splitSentences }
+      : {}),
+  }
+  const { strings, bookCodes, skippedScriptureCount, frontBackMatter } = await parseBiblicaEdition(
+    edition,
     parseBuffer,
-    undefined,
-    {
-      ...(ctx.signal ? { signal: ctx.signal } : {}),
-      onProgress: (idml) => onProgress?.({ phase: "parse", idml }),
-      ...(options?.splitSentences !== undefined
-        ? { splitSentences: options.splitSentences }
-        : {}),
-    },
+    parseOptions,
   )
 
-  if (strings.length === 0) {
-    throw new Error(
-      `${file.name} parsed successfully but contained no study notes. `
-        + "Biblica notes live in `intro:*` paragraph styles — check that this is the notes document.",
-    )
+  // A study-Bible volume that yields nothing was almost certainly read with the
+  // wrong edition. A front/back matter volume that yields nothing is simply
+  // artwork — the maps and plates hold no text — and still imports, so the file
+  // stays part of the project and exports back unchanged.
+  if (strings.length === 0 && !frontBackMatter) {
+    throw new Error(emptyBiblicaImportMessage(edition, file.name))
   }
 
   const name = file.name.replace(/\.idml$/i, "").replace(/[-_]?notes$/i, "").trim() || file.name
   const normalized = normalizeTranslatableStrings(strings, {
     fileName: name,
     fileType: "idml",
-    profileId: BIBLICA_NOTES_PROFILE_ID,
+    profileId: BIBLICA_PROFILE_IDS[edition],
     profileVersion: "1",
     fidelity: "content-only",
   })
@@ -1283,7 +1362,7 @@ export async function importBiblicaStudyNotes(
     phase: "save",
     cellsEnqueued: 0,
     cellsTotal: strings.length,
-    verseUnitCount: skipped.verseUnitCount,
+    verseUnitCount: skippedScriptureCount,
   })
 
   const { ref } = await emitParsedFile(
@@ -1294,6 +1373,7 @@ export async function importBiblicaStudyNotes(
       rawBytes: await file.arrayBuffer(),
       rawSourceFormat: "idml",
       roundTripFidelity: "content-only",
+      corpusMarker: BIBLICA_CORPUS_MARKERS[edition],
       ...(bookCodes.length === 1 ? { bookCode: bookCodes[0] } : {}),
     },
     "idml",
@@ -1305,7 +1385,7 @@ export async function importBiblicaStudyNotes(
           phase: "save",
           cellsEnqueued: uploaded,
           cellsTotal: total,
-          verseUnitCount: skipped.verseUnitCount,
+          verseUnitCount: skippedScriptureCount,
         })
       },
     },
@@ -1314,13 +1394,96 @@ export async function importBiblicaStudyNotes(
   return ref
 }
 
+const BIBLICA_PROFILE_IDS: Readonly<Record<BiblicaEdition, string>> = {
+  "study-notes": BIBLICA_NOTES_PROFILE_ID,
+  "treasure-hunt": TREASURE_HUNT_PROFILE_ID,
+  reach4life: REACH4LIFE_PROFILE_ID,
+}
+
+interface BiblicaParseOutcome {
+  strings: TranslatableString[]
+  bookCodes: string[]
+  /** Paragraphs left out because they are the published Bible text. */
+  skippedScriptureCount: number
+  /**
+   * The package is one of the study Bible's front/back matter volumes — no
+   * scripture anywhere, so an empty result is a legitimate artwork-only volume
+   * rather than a package read with the wrong edition.
+   */
+  frontBackMatter: boolean
+}
+
+/**
+ * Run the reader for one edition. Each returns the same three things under its
+ * own names, because each counts a different thing as scripture.
+ */
+async function parseBiblicaEdition(
+  edition: BiblicaEdition,
+  buffer: ArrayBuffer,
+  parseOptions: {
+    signal?: AbortSignal
+    onProgress: (progress: IdmlProgress) => void
+    splitSentences?: boolean
+  },
+): Promise<BiblicaParseOutcome> {
+  if (edition === "treasure-hunt") {
+    const { strings, bookCodes, skipped } =
+      await extractTreasureHuntStrings(buffer, undefined, parseOptions)
+    return {
+      strings,
+      bookCodes,
+      skippedScriptureCount: skipped.scriptureUnitCount,
+      frontBackMatter: false,
+    }
+  }
+  if (edition === "reach4life") {
+    const { strings, bookCodes, skipped } =
+      await extractReach4LifeStrings(buffer, undefined, parseOptions)
+    return {
+      strings,
+      bookCodes,
+      skippedScriptureCount: skipped.scriptureUnitCount,
+      frontBackMatter: false,
+    }
+  }
+  const { strings, bookCodes, skipped, frontBackMatter } =
+    await extractBiblicaStudyNoteStrings(buffer, undefined, parseOptions)
+  return {
+    strings,
+    bookCodes,
+    skippedScriptureCount: skipped.verseUnitCount,
+    frontBackMatter,
+  }
+}
+
+/**
+ * What to say when a package parsed but yielded nothing. The overwhelmingly
+ * likely cause is the wrong edition, so each message names the styles it looked
+ * for and — for the default reading — the toggles that change it.
+ */
+function emptyBiblicaImportMessage(edition: BiblicaEdition, fileName: string): string {
+  if (edition === "treasure-hunt") {
+    return `${fileName} parsed successfully but contained no Treasure Hunt notes. `
+      + "Treasure Hunt content lives in `!meta_*`, `_intro_*` and front-matter paragraph "
+      + "styles — check that this is a Treasure Hunt volume."
+  }
+  if (edition === "reach4life") {
+    return `${fileName} parsed successfully but contained no Reach 4 Life content. `
+      + "Reach 4 Life content lives in the `R4Lv4 Paragraph Styles:*` lesson groups and in "
+      + "the `Metatext_BBI Bible Book Intros:*`, `Intros:*` and `Copyright:*` styles — check "
+      + "that this is a Reach 4 Life package."
+  }
+  return `${fileName} parsed successfully but contained no study notes. `
+    + "Biblica notes live in `intro:*` paragraph styles — check that this is the notes "
+    + "document. If this is a Treasure Hunt Bible or a Reach 4 Life file, tick the matching "
+    + "box and import it again."
+}
+
 /** IDML is a UCF/ZIP package — reject anything that is not one before parsing. */
 function assertIdmlPackageBytes(bytes: ArrayBuffer, fileName: string): void {
   const header = new Uint8Array(bytes.slice(0, 4))
   if (header[0] !== 0x50 || header[1] !== 0x4b || header[2] !== 0x03 || header[3] !== 0x04) {
-    throw new Error(
-      `${fileName} is not a valid IDML package. IDML files are ZIP archives and start with "PK".`,
-    )
+    throw new Error(t("importExport.errors.invalidIdmlPackage", { fileName }))
   }
 }
 
@@ -1367,6 +1530,8 @@ export function buildBulkCellsWithSpeakers(
     profileVersion: options.profileVersion,
   })
   if (normalizedFile.units.length !== strings.length) {
+    // Dev invariant — normalizer/parser desync indicates a bug in this
+    // pipeline, not a user mistake; deliberately not translated.
     throw new Error("Normalized import unit count does not match parsed string count")
   }
   const cells: BulkImportCell[] = []
@@ -1506,7 +1671,7 @@ export async function emitParsedFile(
       kind: importedFileKind(fileType),
       importFormat: fileType,
       parserVersion: `${normalized.profileId}@${normalized.profileVersion}`,
-      importManifest: summarizeNormalizedImport(normalized),
+      importManifest: manifestWithOrigin(summarizeNormalizedImport(normalized), ctx.origins, result.name),
       sourceLanguage: ctx.sourceLanguage,
       targetLanguage: ctx.targetLanguage,
       sourceTextDirection: ctx.sourceTextDirection,
@@ -1617,9 +1782,9 @@ export async function emitMediaFile(
   fileType: FileType,
   ctx: ImportContext,
 ): Promise<FileReference> {
-  if (file.size === 0) throw new Error(`${file.name} is empty.`)
+  if (file.size === 0) throw new Error(t("importExport.errors.emptyFile", { fileName: file.name }))
   if (file.size > MAX_AUDIO_UPLOAD_BYTES) {
-    throw new Error(`${file.name} exceeds the 95 MB media import limit.`)
+    throw new Error(t("importExport.errors.mediaFileTooLarge", { fileName: file.name }))
   }
   const fileId = uuidv7()
   const { durationMs, specs } = await computeMediaSegmentSpecs(file)
@@ -1743,7 +1908,7 @@ async function decodeAudioFile(
     // is user-actionable. The original error is preserved as `cause`.
     const audio = await audioCtx.decodeAudioData(buf).catch((err: unknown) => {
       throw new Error(
-        `Couldn't decode ${file.name} — the file may be corrupt or in an unsupported codec. Try re-exporting it as mp3 or wav.`,
+        t("importExport.errors.couldNotDecodeAudio", { fileName: file.name }),
         { cause: err },
       )
     })
@@ -1811,6 +1976,9 @@ async function decodeDurationMs(blob: Blob): Promise<number> {
     typeof window !== "undefined"
       ? window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
       : undefined
+  // Internal control-flow signals only — the caller (probeMediaDurationMs's
+  // fallback chain) always catches these and falls back to `undefined`
+  // duration; never surfaced to a user. Deliberately not translated.
   if (!AC) throw new Error("no AudioContext")
   const ctx = new AC()
   try {
@@ -1867,9 +2035,7 @@ export async function prepareParatextProject(
 ): Promise<ParatextPlan> {
   const project = await assembleParatextProject(entries)
   if (!project) {
-    throw new Error(
-      "That doesn't look like a Paratext project — no Settings.xml (or .ssf) with USFM books was found.",
-    )
+    throw new Error(t("importExport.errors.notAParatextProject"))
   }
   const books: ParatextBookPlan[] = project.books.map((book) => {
     const { strings, duplicateRefs } = usfmSectionToStrings(book.rawSource, {
@@ -2045,7 +2211,7 @@ export async function commitParatextProject(
   try {
     await preserveParatextPackage(plan, packageBindings, baseCtx)
   } catch (error) {
-    packagePreservationError = error instanceof Error ? error.message : String(error)
+    packagePreservationError = errorDetailForSkipReason(error)
   }
   const visibleRefs: FileReference[] = []
   const freshRefs = refs.filter((ref) => !existingFileIds.has(ref.id))
@@ -2181,7 +2347,7 @@ export async function importParatextAsTarget(
           kind: "usfm",
           importFormat: "usfm",
           parserVersion: `${normalized.profileId}@${normalized.profileVersion}`,
-          importManifest: summarizeNormalizedImport(normalized),
+          importManifest: manifestWithOrigin(summarizeNormalizedImport(normalized), ctx.origins, bookPlan.displayName),
           sourceLanguage: ctx.sourceLanguage,
           targetLanguage: ctx.targetLanguage,
           targetTextDirection: plan.project.settings.rightToLeft ? "rtl" : ctx.targetTextDirection,
@@ -2233,7 +2399,7 @@ export async function importParatextAsTarget(
       targetLang: ctx.targetLang,
     })
   } catch (error) {
-    packagePreservationError = error instanceof Error ? error.message : String(error)
+    packagePreservationError = errorDetailForSkipReason(error)
   }
 
   const visibleRefs: FileReference[] = []
@@ -2403,12 +2569,29 @@ export async function parseFile(
         roundTripFidelity: "content-only",
       }]
     }
+    // The six cases below are internal routing guards: parseFile() is never
+    // called with these fileTypes by any correct call site (each has its own
+    // dedicated import* entry point, or is intercepted earlier in
+    // prepareImportFile). Reaching one means a caller bug, not a user
+    // mistake — deliberately not translated.
     case "xlsx":
       throw new Error("XLSX files import through spreadsheet column mapping")
     case "html": {
       const bytes = await file.arrayBuffer()
       const text = decodeImportText(bytes, file.name)
       return [{ name: file.name, strings: extractHtmlStrings(text), rawBytes: bytes, rawSourceFormat: "html" }]
+    }
+    case "epub": {
+      const buffer = await file.arrayBuffer()
+      const extracted = await extractEpubImport(buffer)
+      return [{
+        name: file.name,
+        strings: extracted.strings,
+        rawBytes: buffer,
+        rawSourceFormat: "epub",
+        roundTripFidelity: "content-only",
+        epubMembers: extracted.members,
+      }]
     }
     case "xliff": {
       const bytes = await file.arrayBuffer()

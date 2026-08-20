@@ -2,10 +2,24 @@
 
 Playwright-driven end-to-end tests against a hermetic local backend.
 
+Smoke covers **~25 cross-layer product journeys** (data persistence, collab,
+access, import/export contracts) — not every UI click. Toggles, dialogs, empty
+states, and keyboard chrome belong in Vitest/RTL (`src/**/*.test.tsx`).
+
+| Gate | Command | When | Budget |
+| --- | --- | --- | --- |
+| Affected | `pnpm test:e2e:affected` | **pre-push** | Changed smoke files + domain sentinels; skips browser for docs/unit-only pushes |
+| Smoke | `pnpm test:e2e:smoke` | **merge / deploy / release** | Keep-list + surface sessions (~35 files), **<2 min** wall-clock on a warm machine |
+| Full | `pnpm test:e2e` | Release / format / agent extras | Smoke + expensive `*.spec.ts` (IDML, Biblica, autopilot, access lifecycle, …) |
+
 ## Prerequisites
 
 - **Docker** must be running. `scripts/e2e-up.ts` (via `pnpm test:e2e`) starts a
   `postgres:16` container named `aquilla-dev-pg` on port 5432.
+  On a Mac that runtime is Colima (`colima start`). On a dedicated Linux CI box
+  use Docker Engine — see [docs/runbooks/hetzner-ci.md](../docs/runbooks/hetzner-ci.md).
+  `e2e-up.ts` execs into `aquilla-dev-pg`; it does not create the container.
+  `scripts/dev-stack.ts` and `scripts/hetzner-ci/ensure-e2e-runtime.sh` do.
 - **Three `pnpm install` runs** — one at the repo root, one in `auth-worker/`, one in
   `sync-worker/`:
 
@@ -17,9 +31,9 @@ Playwright-driven end-to-end tests against a hermetic local backend.
 
 - `npx playwright install chromium` (once per machine).
 
-> **Warning:** `scripts/e2e-up.ts` force-kills whatever is listening on ports 5173
-> (Vite), 8787 (auth-worker), and 8788 (sync-worker) before starting. Do not run
-> it while your live dev stack is using those ports.
+> **Note:** `scripts/e2e-up.ts` binds its own port block (Vite **6173**, identity
+> **9787**, sync **9788** for shard 0; +100 per extra shard) and frees those
+> ports on shutdown. It does **not** take `pnpm dev`'s 5173/8788/8789/9456.
 
 ## Quick start
 
@@ -28,25 +42,50 @@ Playwright-driven end-to-end tests against a hermetic local backend.
 
 npx playwright install chromium
 
-# Run smoke (~2 min target)
+# Run the fast changed-file gate used by pre-push
+pnpm test:e2e:affected
+
+# Run every smoke journey (merge/deploy/release gate)
 pnpm test:e2e:smoke
 
-# Run full suite
+# Run full suite (smoke + expensive format/agent/access specs)
 pnpm test:e2e
 
 # Debug a single spec
 pnpm test:e2e:ui
 ```
 
+`test:e2e:affected` reads Git's pre-push ref stream, always includes smoke
+specs changed by the pushed commits, and adds a small sentinel set for affected
+product domains. It skips browser startup for docs/unit-test-only pushes. Up to
+eight selected specs use a single Vite dev-mode stack; larger selections use
+two or three isolated preview-mode shards. `test:e2e:smoke` runs the keep-list
+in `e2e/JOURNEYS.md` (~25 files) and is required at the merge/deploy/release
+boundary — not on every push.
+
+## Smoke admission
+
+Add a new `*.smoke.spec.ts` only when **all** of these hold:
+
+1. A user can lose data, access, or a committed artifact if it breaks.
+2. The assertion crosses at least two of: SPA, auth-worker, sync-worker,
+   Postgres, R2, a second browser context.
+3. No existing smoke journey already covers that contract — extend that file.
+
+Otherwise: Vitest/RTL or a worker unit test. Prefer deleting a redundant smoke
+after RTL exists over renaming it to non-smoke.
+
+Canonical map: [`e2e/JOURNEYS.md`](./JOURNEYS.md).
+
 ## Architecture
 
 `scripts/e2e-up.ts` boots:
-1. `auth-worker` via `wrangler dev --local` on port 8787 (identity, orgs, members,
+1. `auth-worker` via `wrangler dev --local` on port 9787 (identity, orgs, members,
    sync-token, `/__test__/reset`, `/__dev__/login`)
-2. `sync-worker` via `wrangler dev --local` on port 8788 (event log + projection
+2. `sync-worker` via `wrangler dev --local` on port 9788 (event log + projection
    writer + ProjectSync DO)
 3. `MockLLMServer` on a random port (OpenAI-compatible)
-4. `vite --mode test` on port 5173
+4. `vite preview` on port 6173 (or Vite dev mode for `test:e2e:affected`)
 
 Both workers use
 `WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgresql://aquilla:aquilla@127.0.0.1:5432/aquilla_dev`
@@ -54,12 +93,15 @@ to point Hyperdrive at the local Docker Postgres.
 
 Then writes `.env.test.local` (loaded by Vite via `--mode test`):
 ```
-VITE_AUTH_BASE=http://127.0.0.1:8787
-VITE_SYNC_WORKER_HOST=127.0.0.1:8788
+VITE_AUTH_BASE=http://127.0.0.1:9787
+VITE_SYNC_WORKER_HOST=127.0.0.1:9788
 VITE_LLM_BASE_URL=http://127.0.0.1:<random>
 ```
 
-Playwright runs against `http://127.0.0.1:5173`.
+Playwright runs against `http://127.0.0.1:6173`.
+
+Workers stay **serial inside a shard** (`workers: 1`) because `/__test__/reset`
+is not transactional — do not parallelize Playwright workers.
 
 ## Per-test isolation
 
@@ -67,6 +109,13 @@ Every test calls `resetBackend()` (via the multi-user fixture or directly) which
 `POST /__test__/reset` on `auth-worker`. That truncates user/org/project tables and
 reseeds three known users (`alice`, `bob`, `carol`) plus org `Acme`. The route is gated
 behind `WRANGLER_LOCAL=1`; production deploys return 404.
+
+Surface-session specs collapse chrome into **one** `test()` (with `test.step()`)
+so N checks cost **1** `resetBackend()` via the `{ alice }` fixture — not one
+reset per former micro-test. A `beforeEach` that seeds without requesting
+`{ alice }` races the fixture wipe and is wrong. Files that mutate conflicting
+state (e.g. teams CRUD, invite accept) stay hermetic per-test; see
+[`JOURNEYS.md`](./JOURNEYS.md#surface-sessions-one-test-one-reset).
 
 ## Multi-user fixture
 
@@ -105,8 +154,9 @@ Stick with `resetBackend()` + the multi-user fixture for anything checked in.
 
 ## Spec naming
 
-- `*.smoke.spec.ts` — runs on `git push`. Keep total suite <2 min.
-- `*.spec.ts` — full suite, runs on `pnpm test:e2e`.
+- `*.smoke.spec.ts` — merge/deploy smoke gate. Keep the suite to the JOURNEYS
+  keep-list (~25 files, <2 min). Pre-push runs **affected**, not full smoke.
+- `*.spec.ts` — full suite only (expensive format/agent/access journeys).
 - Files under `e2e/tauri/` — manual pre-release only (not implemented in v1).
 
 ## Adding a test
@@ -164,7 +214,23 @@ screenshots, video, and service logs are retained.
 - **Mock LLM not connected** → `VITE_LLM_BASE_URL` isn't being passed to Vite. Check
   `.env.test.local` contents during a run; it should be regenerated each time
   `e2e-up.ts` boots.
-- **Port already in use** → `e2e-up.ts` force-kills 5173/8787/8788 at startup. If it
-  still fails, kill processes manually before retrying.
+- **Port already in use** → `e2e-up.ts` force-kills only its own block
+  (6173/9787/9788 for shard 0) at startup and again on shutdown. A live
+  `pnpm dev` on 5173/8788/8789 is left alone. If an e2e port is still held,
+  a previous shard was killed mid-boot — rerun; shutdown reaps leftovers.
+- **Many specs fail in 0.0s with `ECONNREFUSED 127.0.0.1:9787`** → this is not
+  a product bug in those specs. Identity (auth-worker) died mid-suite, so
+  `resetBackend()` cannot reach `POST /__test__/reset`. `e2e-up` now aborts the
+  shard as soon as wrangler exits instead of cascading. Check
+  `.e2e-logs-s0/identity.log` (shard 1). On a Mac the Docker runtime is Colima
+  (`colima start` before push); if Postgres/workerd is gone, every remaining
+  test fails the same way.
+- **`sync worker died` / `ENOENT: … utime …/.wrangler/registry/aquilla-sync-worker-local`**
+  → Wrangler 3.114 heartbeats `utimesSync` on a user-level registry file named
+  after the worker. Three smoke shards (and `pnpm dev`) used to share
+  `aquilla-sync-worker-local`, so one process unlinking the file crashed the
+  others. `e2e-up` now gives each stack its own `--name` and
+  `WRANGLER_REGISTRY_PATH`. If you still see the default path in `sync.log`,
+  the orchestrator is not the one that spawned that wrangler.
 - **Cold-start latency** → first run is ~4–5 min on a cold machine (wrangler downloads
   workerd, browser caches build, etc.). Subsequent runs are faster.

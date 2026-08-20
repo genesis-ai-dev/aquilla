@@ -11,6 +11,7 @@ import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface CellExpansionTab {
   value: string
@@ -42,6 +43,7 @@ interface Props {
 export function CellExpansion({
   open, tab, onTabChange, tabs, onClose, className,
 }: Props) {
+  const t = useT()
   const wrapperRef = useRef<HTMLDivElement | null>(null)
   const activeTab = tabs.find((t) => t.value === tab && !t.disabled)
     ?? tabs.find((t) => !t.disabled)
@@ -140,7 +142,7 @@ export function CellExpansion({
               size="icon-sm"
               className="shrink-0 text-muted-foreground"
               onClick={onClose}
-              aria-label="Close cell details"
+              aria-label={t("editor.cell.closeDetails")}
               data-cell-detail-close
             >
               <X className="h-4 w-4" />

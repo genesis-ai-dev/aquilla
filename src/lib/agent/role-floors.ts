@@ -16,13 +16,23 @@
  */
 
 import { requiredRoleFor, ROLE } from "@/lib/sync/role-policy"
-import { roleDisplayLabel } from "@/lib/frontier/roles"
+import { resolveRoleName, type RoleT } from "@/lib/frontier/roles"
 
 export { ROLE }
 
-/** Event kinds the agent ProposalCard knows how to Apply in v1. */
+/**
+ * Event kinds the agent ProposalCard knows how to Apply in v1.
+ *
+ * AQU-890: the two `*.cell.create` kinds are genesis events — they mint a new
+ * row rather than advancing an existing chain. They carry no extra gate here:
+ * `canApply` reads their floors straight out of the shared role-policy mirror
+ * (source.cell.create → project_lead, target.cell.create → contributor), which
+ * is the same floor the native add-row affordance answers to.
+ */
 export const SUPPORTED_APPLY_KINDS = [
   "target.cell.commit",
+  "source.cell.create",
+  "target.cell.create",
   "comment.create",
   "cell.validate",
 ] as const
@@ -50,7 +60,7 @@ export interface CanApplyResult {
  * everything else. Unsupported kinds are handled separately by the card
  * (Apply disabled with a "not supported yet" note), not here.
  */
-export function canApply(kind: string, roleLevel: number | null | undefined): CanApplyResult {
+export function canApply(t: RoleT, kind: string, roleLevel: number | null | undefined): CanApplyResult {
   if (roleLevel == null) return { allowed: true }
   const required = requiredRoleFor(kind)
   if (required == null) return { allowed: true }
@@ -58,6 +68,6 @@ export function canApply(kind: string, roleLevel: number | null | undefined): Ca
   return {
     allowed: false,
     requiredLevel: required,
-    reason: `Requires ${roleDisplayLabel(required)} role or higher`,
+    reason: `Requires ${resolveRoleName(t, required)} role or higher`,
   }
 }

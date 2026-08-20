@@ -1,7 +1,6 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import {
-  ArrowLeft,
   Plus,
   Trash2,
   Pencil,
@@ -31,7 +30,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldGroup, FieldLabel, OptionalMark } from "@/components/ui/field"
 import { Badge } from "@/components/ui/badge"
 import {
   Select,
@@ -42,9 +41,12 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import type { Concept, TermRendering, RenderingStatus } from "@/lib/terminology/types"
+import { renderingStatusLabelKey } from "@/lib/terminology/types"
 import { addConcept, updateConcept, deleteConcept, mergeConcepts, approveConcept, rejectConcept } from "@/lib/terminology/store"
 import { importConceptsCsv, exportConceptsCsv } from "@/lib/terminology/csv"
 import { importConceptsTbx, exportConceptsTbx } from "@/lib/terminology/tbx"
+import { humanRoleName } from "@/lib/frontier/roles"
+import { canEditTermbase, resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
 import { computeTerminologyStats } from "@/lib/terminology/stats"
 import type { CellPair } from "@/lib/terminology/stats"
 import { isAudioCueFile } from "@/lib/parsers/types"
@@ -61,24 +63,28 @@ import { TerminologyViolationsInbox } from "@/components/TerminologyViolationsIn
 import { TerminologyReviewQueue } from "@/components/TerminologyReviewQueue"
 import { TerminologyMergeDialog } from "@/components/TerminologyMergeDialog"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import type { TFunction } from "@/lib/i18n/I18nProvider"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 // ────────────────────────────────────────────────────────────────────────────
 // Rendering status chip helpers
 // ────────────────────────────────────────────────────────────────────────────
 
-const statusLabel: Record<RenderingStatus, string> = {
-  preferred: "required",
-  admitted: "alternate",
-  forbidden: "forbidden",
+const RENDERING_STATUSES: RenderingStatus[] = ["preferred", "admitted", "forbidden"]
+
+/** Options for the per-rendering status `<Select>`, resolved at render time
+ *  off the shared `terminology.status.*` vocabulary (see
+ *  `renderingStatusLabelKey()` in `@/lib/terminology/types`) — mirrors
+ *  `renderingStatusOptions()` in `GlossaryRow.tsx` so the two glossary
+ *  surfaces never drift apart. `t()` must never be called at module scope,
+ *  so this stays a plain function called from within a component body. */
+function renderingStatusOptions(t: TFunction): { value: RenderingStatus; label: string }[] {
+  return RENDERING_STATUSES.map((value) => ({ value, label: t(renderingStatusLabelKey(value)) }))
 }
 
-const RENDERING_STATUS_OPTIONS: { value: RenderingStatus; label: string }[] = [
-  { value: "preferred", label: "required" },
-  { value: "admitted", label: "alternate" },
-  { value: "forbidden", label: "forbidden" },
-]
-
 function RenderingChip({ rendering }: { rendering: TermRendering }) {
+  const { t } = useI18n()
   const chipClass = cn(
     "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium",
     rendering.status === "preferred" &&
@@ -91,7 +97,7 @@ function RenderingChip({ rendering }: { rendering: TermRendering }) {
   return (
     <span className={chipClass}>
       {rendering.rendering}
-      <span className="opacity-60">·{statusLabel[rendering.status]}</span>
+      <span className="opacity-60">·{t(renderingStatusLabelKey(rendering.status))}</span>
     </span>
   )
 }
@@ -100,19 +106,32 @@ function RenderingChip({ rendering }: { rendering: TermRendering }) {
 // Concept status badge
 // ────────────────────────────────────────────────────────────────────────────
 
-const conceptStatusLabel: Record<Concept["status"], string> = {
-  active: "approved",
-  draft: "suggested",
-  deprecated: "old",
+const CONCEPT_STATUSES: Concept["status"][] = ["draft", "active", "deprecated"]
+
+/** MessageKey for a concept's review-status label — reuses the
+ *  `terminology.common.status*` vocabulary already keyed for
+ *  TerminologyTermDetail.tsx rather than minting a duplicate string (see
+ *  `no-duplicates.test.ts`). Returns a key, never a translated string, so
+ *  it's safe to call from a module-scope table (`CONCEPT_STATUSES` above). */
+function conceptStatusLabelKey(status: Concept["status"]): MessageKey {
+  switch (status) {
+    case "active":
+      return "terminology.common.statusApproved"
+    case "draft":
+      return "terminology.common.statusSuggested"
+    case "deprecated":
+      return "terminology.common.statusOld"
+  }
 }
 
-const CONCEPT_STATUS_OPTIONS: { value: Concept["status"]; label: string }[] = [
-  { value: "draft", label: "suggested" },
-  { value: "active", label: "approved" },
-  { value: "deprecated", label: "old" },
-]
+/** Options for the concept-status `<Select>` in ConceptDialog, resolved at
+ *  render time — same pattern as `renderingStatusOptions()` above. */
+function conceptStatusOptions(t: TFunction): { value: Concept["status"]; label: string }[] {
+  return CONCEPT_STATUSES.map((value) => ({ value, label: t(conceptStatusLabelKey(value)) }))
+}
 
 function ConceptStatusBadge({ status }: { status: Concept["status"] }) {
+  const { t } = useI18n()
   const variant =
     status === "active"
       ? "default"
@@ -121,7 +140,7 @@ function ConceptStatusBadge({ status }: { status: Concept["status"] }) {
         : "secondary"
   return (
     <Badge variant={variant} className="text-[10px]">
-      {conceptStatusLabel[status]}
+      {t(conceptStatusLabelKey(status))}
     </Badge>
   )
 }
@@ -138,19 +157,21 @@ interface RenderingRowProps {
 }
 
 function RenderingRow({ rendering, index, onChange, onRemove }: RenderingRowProps) {
+  const { t } = useI18n()
+  const statusOptions = renderingStatusOptions(t)
   return (
     <div className="flex items-center gap-2">
       <Input
         value={rendering.rendering}
-        placeholder="rendering"
-        aria-label={`Rendering ${index + 1} text`}
+        placeholder={t("terminology.conceptDialog.renderingPlaceholder")}
+        aria-label={t("terminology.row.renderingTextAria", { position: index + 1 })}
         className="flex-1"
         onChange={(e) =>
           onChange(index, { ...rendering, rendering: e.target.value })
         }
       />
       <Select
-        items={RENDERING_STATUS_OPTIONS}
+        items={statusOptions}
         value={rendering.status}
         onValueChange={(v) =>
           onChange(index, {
@@ -160,14 +181,14 @@ function RenderingRow({ rendering, index, onChange, onRemove }: RenderingRowProp
         }
       >
         <SelectTrigger
-          aria-label={`Rendering ${index + 1} status`}
+          aria-label={t("terminology.row.renderingStatusAria", { position: index + 1 })}
           className="text-xs"
         >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
           <SelectGroup>
-            {RENDERING_STATUS_OPTIONS.map((o) => (
+            {statusOptions.map((o) => (
               <SelectItem key={o.value} value={o.value}>
                 {o.label}
               </SelectItem>
@@ -178,7 +199,7 @@ function RenderingRow({ rendering, index, onChange, onRemove }: RenderingRowProp
       <Button
         variant="ghost"
         size="icon-sm"
-        aria-label={`Remove rendering ${index + 1}`}
+        aria-label={t("terminology.row.removeRenderingAria", { position: index + 1 })}
         onClick={() => onRemove(index)}
       >
         <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
@@ -200,6 +221,8 @@ interface ConceptDialogProps {
 }
 
 function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogProps) {
+  const { t } = useI18n()
+  const conceptStatusOpts = conceptStatusOptions(t)
   const [sourceTerm, setSourceTerm] = useState(initial?.sourceTerm ?? "")
   const [renderings, setRenderings] = useState<TermRendering[]>(
     initial?.renderings ?? [{ rendering: "", status: "preferred" }],
@@ -276,18 +299,18 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
 
         <FieldGroup className="space-y-4 py-1">
           <Field>
-            <FieldLabel htmlFor="concept-source-term">Source term</FieldLabel>
+            <FieldLabel htmlFor="concept-source-term">{t("terminology.editor.sourceTermLabel")}</FieldLabel>
             <Input
               id="concept-source-term"
               value={sourceTerm}
               onChange={(e) => setSourceTerm(e.target.value)}
-              placeholder="e.g. πνεῦμα"
+              placeholder="e.g. πνεῦμα" // i18n-exempt illustrative source-term example, independent of UI language
               autoFocus
             />
           </Field>
 
           <Field>
-            <FieldLabel>Target renderings</FieldLabel>
+            <FieldLabel>{t("terminology.conceptDialog.targetRenderingsLabel")}</FieldLabel>
             <div className="space-y-2">
               {renderings.map((r, i) => (
                 <RenderingRow
@@ -301,40 +324,41 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
             </div>
             <Button
               variant="outline"
-              size="sm"
               onClick={handleAddRendering}
               className="mt-1"
             >
               <Plus className="mr-1 h-3.5 w-3.5" />
-              Add rendering
+              {t("terminology.row.addRendering")}
             </Button>
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="concept-notes">Notes (optional)</FieldLabel>
+            <FieldLabel htmlFor="concept-notes">
+              {t("terminology.common.notesLabel")} <OptionalMark />
+            </FieldLabel>
             <Input
               id="concept-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Contextual notes for translators"
+              placeholder={t("terminology.row.notesPlaceholder")}
             />
           </Field>
 
           <Field>
-            <FieldLabel htmlFor="concept-status">Status</FieldLabel>
+            <FieldLabel htmlFor="concept-status">{t("terminology.common.statusLabel")}</FieldLabel>
             <Select
-              items={CONCEPT_STATUS_OPTIONS}
+              items={conceptStatusOpts}
               value={status}
               onValueChange={(v) =>
                 setStatus((v ?? "draft") as Concept["status"])
               }
             >
-              <SelectTrigger id="concept-status" className="w-full">
+              <SelectTrigger id="concept-status">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
-                  {CONCEPT_STATUS_OPTIONS.map((o) => (
+                  {conceptStatusOpts.map((o) => (
                     <SelectItem key={o.value} value={o.value}>
                       {o.label}
                     </SelectItem>
@@ -374,6 +398,7 @@ function TermbaseImportDialog({
   onOpenChange,
   onImported,
 }: TermbaseImportDialogProps) {
+  const { t } = useI18n()
   const [tab, setTab] = useState<"csv" | "tbx">("csv")
   const [error, setError] = useState<string | null>(null)
   const [parsing, setParsing] = useState(false)
@@ -414,7 +439,7 @@ function TermbaseImportDialog({
     <Dialog open={open} onOpenChange={(next) => { if (!next) handleClose() }}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Import term base</DialogTitle>
+          <DialogTitle>{t("terminology.importDialog.title")}</DialogTitle>
         </DialogHeader>
 
         {/* Format tab strip */}
@@ -427,7 +452,7 @@ function TermbaseImportDialog({
               className={cn(
                 "rounded px-3 py-1 capitalize transition-colors",
                 tab === fmt
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
@@ -449,19 +474,18 @@ function TermbaseImportDialog({
           }}
         >
           {parsing ? (
-            <p className="text-sm text-muted-foreground">Parsing…</p>
+            <p className="text-sm text-muted-foreground">{t("terminology.importDialog.parsing")}</p>
           ) : (
             <>
               <p className="mb-3 text-sm text-muted-foreground">
-                Drop a .{tab} file here, or
+                {t("terminology.importDialog.dropZoneText", { format: tab })}
               </p>
               <Button
                 variant="outline"
-                size="sm"
                 nativeButton={false}
                 render={<label />}
               >
-                Choose {tab.toUpperCase()} file
+                {t("terminology.importDialog.chooseFileButton", { format: tab.toUpperCase() })}
                 <input
                   type="file"
                   className="hidden"
@@ -471,13 +495,12 @@ function TermbaseImportDialog({
               </Button>
               {tab === "csv" && (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Columns: source_lemma · target_lemma · target_status ·
-                  definition (optional)
+                  {t("terminology.importDialog.csvColumnsHint")}
                 </p>
               )}
               {tab === "tbx" && (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  TBX-Basic and TBX-Min dialects supported
+                  {t("terminology.importDialog.tbxDialectsHint")}
                 </p>
               )}
             </>
@@ -507,6 +530,7 @@ interface ConceptRowProps {
 }
 
 function ConceptRow({ concept, onEdit, onDelete, onDrillDown, canManage }: ConceptRowProps) {
+  const { t } = useI18n()
   return (
     <li
       data-testid="concept-row"
@@ -546,7 +570,7 @@ function ConceptRow({ concept, onEdit, onDelete, onDrillDown, canManage }: Conce
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label={`Edit concept ${concept.sourceTerm}`}
+            aria-label={t("terminology.page.editConceptAria", { term: concept.sourceTerm })}
             onClick={() => onEdit(concept)}
           >
             <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
@@ -554,7 +578,7 @@ function ConceptRow({ concept, onEdit, onDelete, onDrillDown, canManage }: Conce
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label={`Delete concept ${concept.sourceTerm}`}
+            aria-label={t("terminology.page.deleteConceptAria", { term: concept.sourceTerm })}
             onClick={() => onDelete(concept.id)}
           >
             <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
@@ -577,6 +601,7 @@ interface LibraryStatsHeaderProps {
 }
 
 function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
+  const { t } = useI18n()
   const stats = useMemo(
     () => computeTerminologyStats(concepts, cells),
     [concepts, cells],
@@ -589,9 +614,9 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
     <div className="rounded-lg border bg-card p-4">
       <div className="mb-3 flex items-center gap-2">
         <BookOpen className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm font-semibold">Library Overview</span>
+        <span className="text-sm font-semibold">{t("terminology.libraryStats.heading")}</span>
         {!hasData && (
-          <span className="text-xs text-muted-foreground">(no active concepts)</span>
+          <span className="text-xs text-muted-foreground">{t("terminology.libraryStats.noActiveConcepts")}</span>
         )}
       </div>
 
@@ -599,7 +624,7 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
         {/* Total active concepts */}
         <div className="rounded-md bg-muted/40 px-3 py-2">
           <p className="text-xs text-muted-foreground">
-            Active concepts
+            {t("terminology.libraryStats.activeConceptsLabel")}
           </p>
           <p className="mt-0.5 text-xl font-bold tabular-nums">{activeConcepts}</p>
         </div>
@@ -607,7 +632,7 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
         {/* % Enforced */}
         <div className="rounded-md bg-muted/40 px-3 py-2">
           <p className="text-xs text-muted-foreground">
-            Enforced
+            {t("terminology.libraryStats.enforcedLabel")}
           </p>
           <p className={cn(
             "mt-0.5 text-xl font-bold tabular-nums",
@@ -626,7 +651,7 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
         {/* % Infringed */}
         <div className="rounded-md bg-muted/40 px-3 py-2">
           <p className="text-xs text-muted-foreground">
-            Infringed
+            {t("terminology.libraryStats.infringedLabel")}
           </p>
           <p className={cn(
             "mt-0.5 text-xl font-bold tabular-nums",
@@ -647,7 +672,7 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
         {/* Cells analyzed */}
         <div className="rounded-md bg-muted/40 px-3 py-2">
           <p className="text-xs text-muted-foreground">
-            Cells analyzed
+            {t("terminology.libraryStats.cellsAnalyzedLabel")}
           </p>
           <p className="mt-0.5 text-xl font-bold tabular-nums text-muted-foreground">
             {stats.totalCells}
@@ -659,7 +684,7 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
       {stats.top5Infringed.length > 0 && (
         <div className="mt-3 border-t pt-3">
           <p className="mb-2 text-xs text-muted-foreground">
-            Most infringed
+            {t("terminology.libraryStats.mostInfringedLabel")}
           </p>
           <div className="flex flex-wrap gap-2">
             {stats.top5Infringed.map((s) => (
@@ -687,19 +712,14 @@ function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
 // ────────────────────────────────────────────────────────────────────────────
 // Role-gating helpers
 // project_lead = 500, maintainer = 600, owner = 700
-// contributor = 400 — may edit cells but NOT termbase definitions
+// contributor = 400 — may edit cells; may manage termbase definitions only
+//   when the org lowered `termbaseEditMinRole` to 400 (AQU-822)
 // viewer/commenter/reviewer = <400 — read-only throughout
+//
+// The gate itself lives in `@/lib/terminology/glossary-view` (shared with
+// GlossaryEditor) — this page used to carry a byte-identical private copy,
+// which is exactly how the two surfaces would drift apart on a floor change.
 // ────────────────────────────────────────────────────────────────────────────
-
-/** Level at which a user may manage termbase definitions (add/edit/delete concepts, import). */
-const TERMBASE_EDIT_LEVEL = 500
-
-/** For local projects with no syncRole, default to full access (owner-equivalent). */
-function canEditTermbase(syncRole?: { level: number } | null, hasOrigin?: boolean): boolean {
-  if (!hasOrigin) return true // local-only project — no cloud role hierarchy
-  if (!syncRole) return true  // no role cached yet — optimistic allow; server will enforce
-  return syncRole.level >= TERMBASE_EDIT_LEVEL
-}
 
 interface GatedButtonProps extends React.ComponentPropsWithoutRef<typeof Button> {
   allowed: boolean
@@ -724,6 +744,7 @@ function GatedButton({ allowed, tip, children, ...props }: GatedButtonProps) {
 }
 
 export function TerminologyPage() {
+  const { t } = useI18n()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
 
@@ -732,10 +753,13 @@ export function TerminologyPage() {
   // Derive concepts from the project record — single source of truth
   const concepts = project?.terminology ?? []
 
-  // Role-gating: project_lead+ (level >= 500) may manage termbase definitions.
+  // Role-gating: AQU-822 — the floor is the org's configured
+  // termbaseEditMinRole (project_lead 500 unless the org lowered or raised it),
+  // carried on the project record and re-enforced server-side on every write.
   const hasOrigin = Boolean(project?.origin)
-  const canManageTermbase = canEditTermbase(project?.syncRole, hasOrigin)
-  const termbaseGateTip = "Requires Project Lead role or higher to manage term base definitions."
+  const termbaseEditFloor = resolveTermbaseEditFloor(project?.termbaseEditMinRole)
+  const canManageTermbase = canEditTermbase(project?.syncRole, hasOrigin, project?.termbaseEditMinRole)
+  const termbaseGateTip = `Requires ${humanRoleName(termbaseEditFloor)} role or higher to manage term base definitions.`
 
   // Cell editing in the drill-down is allowed for contributor+ (level >= 400),
   // or always for local (no-origin) projects.
@@ -1085,7 +1109,7 @@ export function TerminologyPage() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (loading) {
-    return <LoadingPanel label="Loading terminology" className="min-h-screen" />
+    return <LoadingPanel label={t("terminology.loadingLabel")} className="min-h-screen" />
   }
 
   // Drill-down view: overlay the detail panel when a concept is selected.
@@ -1112,16 +1136,8 @@ export function TerminologyPage() {
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="flex items-center gap-4 border-b px-4 py-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => navigate(`/project/${id}/editor`)}
-        >
-          <ArrowLeft className="mr-1 h-4 w-4" />
-          Back to Editor
-        </Button>
         <BookOpen className="h-4 w-4 text-muted-foreground" />
-        <h2 className="font-semibold">Terminology</h2>
+        <h2 className="font-semibold">{t("nav.sidebarSection.terminology")}</h2>
         <div className="flex-1" />
 
         {/* Export controls */}
@@ -1130,10 +1146,9 @@ export function TerminologyPage() {
             allowed={canManageTermbase}
             tip={termbaseGateTip}
             variant="outline"
-            size="sm"
             onClick={handleExportCsv}
             disabled={concepts.length === 0}
-            aria-label="Export CSV"
+            aria-label={t("terminology.editor.exportCsv")}
           >
             <Download className="mr-1 h-3.5 w-3.5" />
             CSV
@@ -1142,10 +1157,9 @@ export function TerminologyPage() {
             allowed={canManageTermbase}
             tip={termbaseGateTip}
             variant="outline"
-            size="sm"
             onClick={handleExportTbx}
             disabled={concepts.length === 0}
-            aria-label="Export TBX"
+            aria-label={t("terminology.editor.exportTbx")}
           >
             <Download className="mr-1 h-3.5 w-3.5" />
             TBX
@@ -1157,22 +1171,20 @@ export function TerminologyPage() {
           allowed={canManageTermbase}
           tip={termbaseGateTip}
           variant="outline"
-          size="sm"
           onClick={() => setImportOpen(true)}
         >
           <Upload className="mr-1 h-3.5 w-3.5" />
-          Import
+          {t("nav.workspaceActions.import")}
         </GatedButton>
 
         {/* Add concept */}
         <GatedButton
           allowed={canManageTermbase}
           tip={termbaseGateTip}
-          size="sm"
           onClick={() => setAddOpen(true)}
         >
           <Plus className="mr-1 h-3.5 w-3.5" />
-          Add concept
+          {t("terminology.page.addConceptButton")}
         </GatedButton>
       </header>
 
@@ -1191,34 +1203,34 @@ export function TerminologyPage() {
         <div className="flex items-center gap-2">
           <div className="inline-flex rounded-md border p-0.5 text-sm">
             {([
-              { key: "concepts", label: `Concepts (${concepts.length})` },
+              { key: "concepts", label: t("terminology.page.conceptsHeading", { count: concepts.length }) },
               {
                 key: "queue",
                 label:
                   draftConcepts.length > 0
-                    ? `Review queue (${draftConcepts.length})`
-                    : "Review queue",
+                    ? t("terminology.page.reviewQueueCountLabel", { count: draftConcepts.length })
+                    : t("terminology.page.reviewQueueHeading"),
               },
               {
                 key: "candidates",
                 label: candidatesReady
-                  ? `Candidate terms (${candidates.length})`
-                  : "Candidate terms",
+                  ? t("terminology.page.candidateTermsCountLabel", { count: candidates.length })
+                  : t("terminology.page.candidateTermsHeading"),
               },
-              { key: "violations", label: "Violations" },
-            ] as const).map((t) => (
+              { key: "violations", label: t("terminology.violations.title") },
+            ] as const).map((tab_) => (
               <button
-                key={t.key}
+                key={tab_.key}
                 type="button"
-                onClick={() => setTab(t.key)}
+                onClick={() => setTab(tab_.key)}
                 className={cn(
                   "rounded px-3 py-1 transition-colors",
-                  tab === t.key
-                    ? "bg-primary text-primary-foreground"
+                  tab === tab_.key
+                    ? "bg-background text-foreground shadow-sm"
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                {t.label}
+                {tab_.label}
               </button>
             ))}
           </div>
@@ -1227,12 +1239,11 @@ export function TerminologyPage() {
           {concepts.length >= 2 && canManageTermbase && (
             <Button
               variant="outline"
-              size="sm"
               onClick={() => setMergeOpen(true)}
-              aria-label="Merge duplicate concepts"
+              aria-label={t("terminology.mergeDialog.title")}
               data-testid="merge-duplicates-btn"
             >
-              Merge duplicates
+              {t("terminology.page.mergeDuplicatesButton")}
             </Button>
           )}
         </div>
@@ -1248,7 +1259,7 @@ export function TerminologyPage() {
         ) : tab === "queue" ? (
           <Card>
             <CardHeader>
-              <CardTitle>Review queue</CardTitle>
+              <CardTitle>{t("terminology.page.reviewQueueHeading")}</CardTitle>
             </CardHeader>
             <CardContent>
               <TerminologyReviewQueue
@@ -1262,25 +1273,24 @@ export function TerminologyPage() {
         ) : tab === "candidates" ? (
           <Card>
             <CardHeader>
-              <CardTitle>Candidate terms</CardTitle>
+              <CardTitle>{t("terminology.page.candidateTermsHeading")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               <p className="text-xs text-muted-foreground">
-                Mined from{" "}
-                {candidatesReady ? minedCount : Math.min(candidateCorpus.length, CANDIDATE_CORPUS_CEILING)}{" "}
-                source/WIP cell text
-                {(candidatesReady ? minedCount : candidateCorpus.length) === 1 ? "" : "s"}
-                {candidateCorpus.length > CANDIDATE_CORPUS_CEILING
-                  ? ` (capped at the first ${CANDIDATE_CORPUS_CEILING} of ${candidateCorpus.length} loaded cells — corpus exceeds the safety ceiling)`
-                  : " — the full loaded project"}
-                . Mining runs off the main thread. Keyness (G²) uses a derived
-                rest-of-corpus baseline. Promoting adds a suggested concept you
-                can then give renderings.
+                {t("terminology.candidates.minedFromSummary", {
+                  count: candidatesReady ? minedCount : Math.min(candidateCorpus.length, CANDIDATE_CORPUS_CEILING),
+                  note: candidateCorpus.length > CANDIDATE_CORPUS_CEILING
+                    ? t("terminology.candidates.corpusScopeCapped", {
+                        ceiling: CANDIDATE_CORPUS_CEILING,
+                        total: candidateCorpus.length,
+                      })
+                    : t("terminology.candidates.corpusScopeFull"),
+                })}
               </p>
               {candidatesLoading && !candidatesReady ? (
                 <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
                   <Spinner className="size-4" />
-                  Mining candidate terms…
+                  {t("terminology.candidates.miningLabel")}
                 </div>
               ) : (
                 <CandidateTermsPanel
@@ -1294,36 +1304,35 @@ export function TerminologyPage() {
         <Card>
           <CardHeader>
             <CardTitle>
-              Concepts ({concepts.length})
+              {t("terminology.page.conceptsHeading", { count: concepts.length })}
             </CardTitle>
           </CardHeader>
           <CardContent>
             {concepts.length === 0 ? (
               <div className="flex flex-col items-center gap-3 py-12 text-center text-muted-foreground">
                 <BookOpen className="h-8 w-8 opacity-40" />
-                <p className="text-sm">No concepts yet.</p>
+                <p className="text-sm">{t("terminology.page.noConceptsTitle")}</p>
                 <p className="text-xs">
-                  Add a concept manually or import a CSV / TBX file.
+                  {t("terminology.page.noConceptsDescription")}
                 </p>
                 <GatedButton
                   allowed={canManageTermbase}
                   tip={termbaseGateTip}
                   variant="outline"
-                  size="sm"
                   onClick={() => setAddOpen(true)}
                 >
                   <Plus className="mr-1 h-3.5 w-3.5" />
-                  Add first concept
+                  {t("terminology.page.addFirstConceptButton")}
                 </GatedButton>
               </div>
             ) : (
               <>
                 {/* Column header */}
                 <div className="mb-2 hidden items-center gap-3 text-xs text-muted-foreground md:flex">
-                  <span className="w-36 shrink-0">Source term</span>
-                  <span className="flex-1">Renderings</span>
-                  <span className="w-32 shrink-0">Notes</span>
-                  <span className="w-20 shrink-0">Status</span>
+                  <span className="w-36 shrink-0">{t("terminology.editor.sourceTermLabel")}</span>
+                  <span className="flex-1">{t("terminology.page.renderingsColumnHeader")}</span>
+                  <span className="w-32 shrink-0">{t("terminology.common.notesLabel")}</span>
+                  <span className="w-20 shrink-0">{t("terminology.common.statusLabel")}</span>
                   <span className="w-14 shrink-0" />
                 </div>
                 <div className="max-h-[60vh] overflow-y-auto">
@@ -1386,7 +1395,7 @@ export function TerminologyPage() {
       <ConfirmActionDialog
         open={pendingDeleteConceptId !== null}
         onOpenChange={(v) => { if (!v) setPendingDeleteConceptId(null) }}
-        title="Delete concept"
+        title={t("terminology.page.deleteConceptDialogTitle")}
         description={
           pendingDeleteConcept
             ? `Delete "${pendingDeleteConcept.sourceTerm}"? This removes the concept and all its renderings for everyone in the project and cannot be undone.`

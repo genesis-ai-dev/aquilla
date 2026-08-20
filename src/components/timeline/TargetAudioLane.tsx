@@ -12,7 +12,7 @@
 
 import { useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { ChevronsLeft, ChevronsRight, CloudUpload, Mic, Sparkles, VolumeX } from "lucide-react"
+import { ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Sparkles, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
@@ -41,6 +41,7 @@ import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
 import type { TimelineLayout } from "@/lib/timeline/layout"
 import type { CellData } from "@/hooks/useCells"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface TargetAudioItem {
   cell: CellData
@@ -154,6 +155,7 @@ function TargetAudioChip({
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
   onOpenRecording?(cellId: string): void
 }) {
+  const t = useT()
   const { cell } = chip.item
   const { geom, section } = chip
   const [drag, setDrag] = useState<{ mode: ChipDragMode; dx: number } | null>(null)
@@ -165,6 +167,9 @@ function TargetAudioChip({
   const { chipH } = useRowMetrics()
   // SUB-48: this clip is saved on this device but its event is still queued.
   const pendingSync = Boolean(cell.attachments?.[chip.item.audioId]?.pendingSync)
+  // AQU-924: saved on this device, and its attach event will NOT reach the
+  // server without user action (quarantined / out of retries).
+  const syncFailed = Boolean(cell.attachments?.[chip.item.audioId]?.syncFailed)
 
   // The one span transform shared by preview and commit.
   function proposeSpan(mode: ChipDragMode, dxSec: number): { start: number; end: number } {
@@ -331,8 +336,11 @@ function TargetAudioChip({
   // saving (informational). Same width discipline as before: the glyph needs
   // room in the PAINTED box, and the hover mic button must leave the corner
   // alone whenever any glyph wants it.
-  const leftGlyph: "missing" | "loading" | "saving" | null =
-    missing ? "missing" : loading ? "loading" : pendingSync ? "saving" : null
+  // AQU-924: `syncFailed` ranks with `missing` — both are permanent and
+  // actionable, and unlike "saving" this clip is NOT on its way anywhere. It
+  // outranks loading: a spinner over a take that will never sync is a lie.
+  const leftGlyph: "missing" | "syncFailed" | "loading" | "saving" | null =
+    missing ? "missing" : syncFailed ? "syncFailed" : loading ? "loading" : pendingSync ? "saving" : null
   // AQU-646 stage 3: everything on this chip beyond its kind icon and its
   // colours — the "?" unknown-length badge, that corner priority slot, the
   // hover record button — is fixed-size furniture pinned near the top edge, so
@@ -370,7 +378,7 @@ function TargetAudioChip({
               −{tailOverlapSec.toFixed(1)}s{" "}
             </span>
           )}
-          <span className="opacity-90">Overlaps the next dub</span>
+          <span className="opacity-90">{t("workspace.targetAudioLane.overlapsNext")}</span>
         </div>,
       )
     }
@@ -385,32 +393,35 @@ function TargetAudioChip({
               −{headOverlapSec.toFixed(1)}s{" "}
             </span>
           )}
-          <span className="opacity-90">Overlaps the previous dub</span>
+          <span className="opacity-90">{t("workspace.targetAudioLane.overlapsPrevious")}</span>
         </div>,
       )
     }
   } else if (overflow === "soft") {
-    tipLines.push(<div key="soft">{`Runs ${overflowSec.toFixed(1)}s past the section`}</div>)
+    tipLines.push(<div key="soft">{t("workspace.targetAudioLane.runsPastSectionTooltip", { sec: overflowSec.toFixed(1) })}</div>)
   } else {
     tipLines.push(<div key="kind">{lengthNote ? `${kindTitle} · ${lengthNote}` : kindTitle}</div>)
   }
   // Decision 2026-08-05: a definitively 404'd clip says so, in red.
   if (missing) tipLines.push(<div key="missing" className="font-semibold text-red-600 dark:text-red-400">{MISSING_AUDIO_MESSAGE}</div>)
   // SUB-48: never let a guessed width read as a measured one.
-  if (geom.usingFallback) tipLines.push(<div key="fallback" className="text-muted-foreground">Length unknown — re-record or re-upload to fix</div>)
-  if (pendingSync) tipLines.push(<div key="saving" className="text-muted-foreground">Saving — kept safe on this device until it syncs</div>)
+  if (geom.usingFallback) tipLines.push(<div key="fallback" className="text-muted-foreground">{t("audio.takesStrip.unknownLengthTooltip")}</div>)
+  if (pendingSync) tipLines.push(<div key="saving" className="text-muted-foreground">{t("audio.takesStrip.pendingSyncTooltip")}</div>)
+  // AQU-924: a take that never reached the server says so, in red — it used to
+  // disappear from the lane entirely.
+  if (syncFailed) tipLines.push(<div key="sync-failed" className="font-semibold text-red-600 dark:text-red-400">{t("audio.takesStrip.syncFailedTooltip")}</div>)
   // NOTE (2026-08-08): keyed on the CUTS, not on the painted state — hovering
   // is what opens this tooltip and hovering is also what restores full length,
   // so a line keyed on `truncated` could never actually be read.
   if (headCutSec != null || tailCutSec != null) {
-    const who =
+    const drawnShortKey =
       headCutSec != null && tailCutSec != null
-        ? "the neighbouring dubs stay"
+        ? "workspace.targetAudioLane.drawnShortNeighboringDubsStay"
         : headCutSec != null
-          ? "the previous dub stays"
-          : "the next dub stays"
+          ? "workspace.targetAudioLane.drawnShortPreviousDubStays"
+          : "workspace.targetAudioLane.drawnShortNextDubStays"
     tipLines.push(
-      <div key="truncated" className="text-muted-foreground">{`Drawn short at rest so ${who} reachable`}</div>,
+      <div key="truncated" className="text-muted-foreground">{t(drawnShortKey)}</div>,
     )
   }
   const tooltipContent = <div className="flex flex-col gap-0.5">{tipLines}</div>
@@ -427,6 +438,7 @@ function TargetAudioChip({
       data-overflow={overflow}
       {...(geom.usingFallback ? { "data-unknown-length": "true" } : {})}
       {...(pendingSync ? { "data-pending-sync": "true" } : {})}
+      {...(syncFailed ? { "data-sync-failed": "true" } : {})}
       {...(missing ? { "data-missing": "true" } : {})}
       {...(loading ? { "data-loading": "true" } : {})}
       {...(truncated
@@ -498,6 +510,7 @@ function TargetAudioChip({
         </span>
       )}
       {/* The corner priority slot: missing badge (decision 2026-08-05) >
+          AQU-924 sync-failed badge (never reached the server; needs a retry) >
           loading spinner (the readiness gate is parked on this verse) >
           SUB-48 saving glyph (still in the outbox — "safe, on its way"). */}
       {showLeftGlyph && (
@@ -505,15 +518,19 @@ function TargetAudioChip({
           title={
             leftGlyph === "missing"
               ? MISSING_AUDIO_MESSAGE
-              : leftGlyph === "loading"
-                ? "Loading this clip's audio…"
-                : "Saving — kept safe on this device until it syncs"
+              : leftGlyph === "syncFailed"
+                ? t("audio.takesStrip.syncFailedTooltip")
+                : leftGlyph === "loading"
+                  ? "Loading this clip's audio…"
+                  : "Saving — kept safe on this device until it syncs"
           }
           data-testid={`tl-target-${cell.id}-${leftGlyph}`}
           className="absolute left-1.5 top-1 z-10 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-background/85 shadow-sm ring-1 ring-border"
         >
           {leftGlyph === "missing" ? (
             <VolumeX className="h-2.5 w-2.5 text-red-600 dark:text-red-400" />
+          ) : leftGlyph === "syncFailed" ? (
+            <CloudAlert className="h-2.5 w-2.5 text-red-600 dark:text-red-400" />
           ) : leftGlyph === "loading" ? (
             <Spinner className="h-2.5 w-2.5" />
           ) : (
@@ -528,7 +545,7 @@ function TargetAudioChip({
         <span
           role="button"
           tabIndex={0}
-          title="Record audio for this line"
+          title={t("workspace.targetAudioLane.recordAudio")}
           data-testid={`tl-target-${cell.id}-record`}
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => {
@@ -616,6 +633,7 @@ export function TargetAudioLane({
   emptySpans,
   onAddLineAndRecord,
 }: TargetAudioLaneProps) {
+  const t = useT()
   const audioFirst = layout?.mode === "audioFirst"
   // Resolve every chip first — overflow needs the NEXT chip's start, and
   // snapping needs neighbors' effective edges.
@@ -758,7 +776,7 @@ export function TargetAudioLane({
             return (
               <TimelineSlotButton
                 testId={`tl-target-empty-${cell.id}-record`}
-                label="Record audio for this line"
+                label={t("workspace.targetAudioLane.recordAudio")}
                 hot={hotKey === `empty-${cell.id}`}
                 sizePx={buttonPx}
                 onClick={() => {

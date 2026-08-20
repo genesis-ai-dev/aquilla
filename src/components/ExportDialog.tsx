@@ -22,6 +22,10 @@
 
 import { useState, useEffect, useMemo, useRef } from "react"
 import { Download, AlertTriangle, CheckCircle2, ChevronRight } from "lucide-react"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
+import { formatNumber } from "@/lib/i18n/format"
+import { RichMessage } from "@/lib/i18n/RichMessage"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   Dialog,
   DialogContent,
@@ -33,6 +37,14 @@ import {
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { SegmentTabs } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
@@ -51,7 +63,7 @@ import { exportSrt } from "@/lib/export/exporters/srt"
 import { exportPlainTextDump } from "@/lib/export/exporters/plain-text-dump"
 import { buildProjectZip } from "@/lib/export/project-zip-export"
 import type { TextExportFormat } from "@/lib/export/project-zip-export"
-import { toast } from "sonner"
+import { toast } from "@/components/ui/toast"
 
 import { previewAudioByCharacter } from "@/lib/export/audio-by-character"
 import { exportMetadataCsv } from "@/lib/export/exporters/metadata-csv"
@@ -79,154 +91,157 @@ export type ExportScope = "file" | "project"
 
 interface FormatOption {
   id: ExportFormat
-  label: string
+  labelKey: MessageKey
   ext: string
-  description: string
+  descriptionKey: MessageKey
   lossy: boolean
 }
 
+// AQU-832: label/description are catalog keys, not English strings — this
+// table is module-level, evaluated once before any I18nProvider exists, so
+// it cannot call t() itself. Resolved at render time by the format list below.
 const BASE_FORMAT_OPTIONS: FormatOption[] = [
   {
     id: "usfm",
-    label: "USFM",
+    labelKey: "importExport.format.usfm.label",
     ext: ".SFM",
-    description: "Round-trip USFM with translations injected back into the original markup. Requires the original file data on the server (re-import to enable for older files).",
+    descriptionKey: "importExport.format.usfm.description",
     lossy: false,
   },
   {
     // AQU-233: DOCX export with paragraph/heading structure preserved.
     // Only shown for files imported as .docx.
     id: "docx",
-    label: "Word (.docx)",
+    labelKey: "importExport.format.docx.label",
     ext: ".docx",
-    description: "Translations injected back into the original Word document. Paragraph/heading structure is preserved; per-run bold/italic inside translated paragraphs is not preserved. Requires the original file to have been imported after round-trip export support was added — files imported before then may lack a stored original (re-import to enable).",
+    descriptionKey: "importExport.format.docx.description",
     lossy: false,
   },
   {
     // AQU-152a: PPTX export with slide/shape/paragraph structure preserved.
     // Only shown for files imported as .pptx (activeFileType).
     id: "pptx",
-    label: "PowerPoint (.pptx)",
+    labelKey: "importExport.format.pptx.label",
     ext: ".pptx",
-    description: "Translations injected back into the original slide deck. Slide/shape/paragraph structure is preserved; mixed per-run formatting inside a translated paragraph keeps the first run's styling. Requires the original file to have been imported after round-trip export support was added — re-import older files to enable.",
+    descriptionKey: "importExport.format.pptx.description",
     lossy: false,
   },
   {
     // IDML v2 export remains experimental until the Adobe validation gate.
     // Only shown for files imported as .idml (activeFileType).
     id: "idml",
-    label: CURRENT_IDML_FORMAT_COPY.label,
+    labelKey: CURRENT_IDML_FORMAT_COPY.label,
     ext: ".idml",
-    description: CURRENT_IDML_FORMAT_COPY.description,
+    descriptionKey: CURRENT_IDML_FORMAT_COPY.description,
     lossy: false,
   },
   {
     // SDBH lexicon round-trip: translations reinjected into the MARBLE XML
     // edition, keyed by LEXID. Only shown when the project has SDBH files.
     id: "sdbh-xml",
-    label: "SDBH XML (MARBLE)",
+    labelKey: "importExport.format.sdbhXml.label",
     ext: ".XML",
-    description: "Localized lexicon reinjected into the original MARBLE XML edition — pick the original SDBH-<lang>.XML as the skeleton. Whole-project export across all lexicon files.",
+    descriptionKey: "importExport.format.sdbhXml.description",
     lossy: false,
   },
   {
     id: "txt",
-    label: "Plain text",
+    labelKey: "importExport.format.txt.label",
     ext: ".txt",
-    description: "Round-trip plain text: paragraph structure preserved; untranslated paragraphs keep source (media lines use their transcription).",
+    descriptionKey: "importExport.format.txt.description",
     lossy: true,
   },
   {
     id: "md",
-    label: "Markdown",
+    labelKey: "importExport.format.md.label",
     ext: ".md",
-    description: "Round-trip markdown: headings, ordered/unordered lists and quotes reconstructed; untranslated blocks keep source (media lines use their transcription).",
+    descriptionKey: "importExport.format.md.description",
     lossy: true,
   },
   {
     id: "tsv",
-    label: "Bilingual TSV",
+    labelKey: "importExport.format.tsv.label",
     ext: ".tsv",
-    description: "id/source/target tab-separated, one row per segment.",
+    descriptionKey: "importExport.format.tsv.description",
     lossy: true,
   },
   {
     id: "csv",
-    label: "Bilingual CSV",
+    labelKey: "importExport.format.csv.label",
     ext: ".csv",
-    description: "RFC 4180 id/source/target, one row per segment.",
+    descriptionKey: "importExport.format.csv.description",
     lossy: true,
   },
   {
     id: "xlf",
-    label: "XLIFF 1.2",
+    labelKey: "importExport.format.xlf.label",
     ext: ".xlf",
-    description: "Bilingual XLIFF for CAT tools — schema-valid, segment states mapped, imported inline tags preserved for unedited segments.",
+    descriptionKey: "importExport.format.xlf.description",
     lossy: false,
   },
   {
     id: "tmx",
-    label: "TMX 1.4b",
+    labelKey: "importExport.format.tmx.label",
     ext: ".tmx",
-    description: "Translation memory exchange — DTD-valid, imported inline tags preserved for unedited pairs.",
+    descriptionKey: "importExport.format.tmx.description",
     lossy: true,
   },
   {
     id: "srt",
-    label: "SRT (subtitles)",
+    labelKey: "importExport.format.srt.label",
     ext: ".srt",
-    description: "SubRip subtitles: numbered cues with millisecond timecodes; translated text per cue, source kept for untranslated cues (media lines use their transcription).",
+    descriptionKey: "importExport.format.srt.description",
     lossy: true,
   },
   {
     id: "vtt",
-    label: "WebVTT (subtitles)",
+    labelKey: "importExport.format.vtt.label",
     ext: ".vtt",
-    description: "Subtitle file with timed cues. Cast-assigned cells are wrapped in <v Name> voice tags for round-trip speaker identity.",
+    descriptionKey: "importExport.format.vtt.description",
     lossy: true,
   },
   {
     id: "audio-by-character",
-    label: "Audio by character",
+    labelKey: "importExport.format.audioByCharacter.label",
     ext: ".zip",
-    description: "One WAV per character, with every take at its own place on the timeline and silence in between. All files start at 0:00, so they drop onto a DAW already aligned with each other and with the film.",
+    descriptionKey: "importExport.format.audioByCharacter.description",
     lossy: false,
   },
   {
     id: "character-sheets",
-    label: "Character sheets (corrected)",
+    labelKey: "importExport.format.characterSheets.label",
     ext: ".xlsx",
-    description: "Both character spreadsheets back — subtitle and audio — with every resolved disagreement applied and a column saying what changed. Lines still in dispute are left as they are and marked unresolved. Rebuilt from what the app holds, so the audio sheet's own line numbers are renumbered and the Group camera state comes back as Mixed.",
+    descriptionKey: "importExport.format.characterSheets.description",
     lossy: false,
   },
   {
     id: "project-report",
-    label: "Project report",
+    labelKey: "importExport.format.projectReport.label",
     ext: ".html",
-    description: "One document for the whole project: open disagreements, what is recorded and what is not, cues with no subtitle behind them, the timing correction each episode was imported with, and characters spelled more than one way.",
+    descriptionKey: "importExport.format.projectReport.description",
     lossy: false,
   },
   {
     id: "audio-by-line",
-    label: "Audio by line",
+    labelKey: "importExport.format.audioByLine.label",
     ext: ".zip",
-    description: "One file per recording, numbered in playing order and named by character. Each WAV carries a broadcast timestamp a DAW can place from, and a manifest.csv lists every file with its timecode. For reviewing and re-recording individual lines.",
+    descriptionKey: "importExport.format.audioByLine.description",
     lossy: false,
   },
   // Advanced-only option — not shown in the main format list.
   {
     id: "plain-text-dump",
-    label: "Plain-text dump",
+    labelKey: "importExport.format.plainTextDump.label",
     ext: ".txt",
-    description: "Every translated segment, one per line. Quick content extraction only.",
+    descriptionKey: "importExport.format.plainTextDump.description",
     lossy: true,
   },
   // AQU-441: Metadata/cast spreadsheet — listed in Advanced section.
   {
     id: "metadata-csv",
-    label: "Metadata spreadsheet",
+    labelKey: "importExport.format.metadataCsv.label",
     ext: ".csv",
-    description: "Cast (voice/character), camera angle, and cell ref — one row per cell. Export only; the project remains the source of truth.",
+    descriptionKey: "importExport.format.metadataCsv.description",
     lossy: false,
   },
 ]
@@ -371,6 +386,8 @@ export function ExportDialog({
   onReimport,
   outstandingInfractionCount = 0,
 }: ExportDialogProps) {
+  const { locale } = useI18n()
+  const t = useT()
   // The file's own format is the default export — "give me my file back".
   // Types without a 1:1 native exporter (ebible, obs, audio, video, sdbh, …)
   // have no primary download; the format list opens instead.
@@ -380,7 +397,7 @@ export function ExportDialog({
     : idmlFormatCopy({})
   const formatOptions = useMemo(() => BASE_FORMAT_OPTIONS.map((option) => (
     option.id === "idml"
-      ? { ...option, label: effectiveIdmlCopy.label, description: effectiveIdmlCopy.description }
+      ? { ...option, labelKey: effectiveIdmlCopy.label, descriptionKey: effectiveIdmlCopy.description }
       : option
   )), [effectiveIdmlCopy.description, effectiveIdmlCopy.label])
   const nativeOption = nativeFormatId ? formatOptions.find((f) => f.id === nativeFormatId)! : null
@@ -461,7 +478,7 @@ export function ExportDialog({
   // one it has always produced.
   /** The live export toast, so the catch-all below can turn a spinner that
    *  will never finish into the error it actually was. */
-  const exportToastRef = useRef<string | number | null>(null)
+  const exportToastRef = useRef<string | null>(null)
   const [vttCueSplitting, setVttCueSplitting] = useState(false)
   const [vttExcludeLabels, setVttExcludeLabels] = useState(false)
   /** Source above target in every cue — a review artifact, played against the
@@ -796,7 +813,7 @@ export function ExportDialog({
         : (fileOnlyFormats as readonly string[]).includes(fmt)
           ? "file"
           : scope
-    setStatus({ kind: "busy", msg: "Exporting…" })
+    setStatus({ kind: "busy", msg: t("importExport.status.exporting") })
     setFidelityWarnings([])
     setIdmlRecovery(null)
     let recoverableIdmlOriginal: { bytes: ArrayBuffer; downloadName: string } | null = null
@@ -811,11 +828,14 @@ export function ExportDialog({
             getToken,
             targetLang,
             onProgress: (done, total) =>
-              setStatus({ kind: "busy", msg: `Downloading ${done}/${total}…` }),
+              setStatus({ kind: "busy", msg: t("importExport.status.downloadingCount", { done, total }) }),
           })
+          // Two independent counts (exported, skipped) — composed from two
+          // separately-pluralized phrases instead of one template agreeing
+          // with both numbers.
           const msg = result.skipped.length === 0
-            ? `Exported ${result.exported} files`
-            : `Exported ${result.exported}; skipped ${result.skipped.length} (older imports — re-import to enable)`
+            ? t("importExport.status.exportedFilesCount", { count: result.exported })
+            : `${t("importExport.status.exportedFilesCount", { count: result.exported })}; ${t("importExport.status.skippedOlderImports", { count: result.skipped.length })}`
           setStatus({ kind: "ok", msg })
         } else {
           // AQU-437: use user-chosen stem with .SFM extension.
@@ -827,26 +847,23 @@ export function ExportDialog({
           if (lossyCount !== null && lossyCount > 0) {
             setStatus({
               kind: "ok-lossy",
-              msg: `Exported ${downloadName}`,
+              msg: t("importExport.status.exportedFile", { fileName: downloadName }),
               lossyVerseCount: lossyCount,
             })
           } else {
-            setStatus({ kind: "ok", msg: `Exported ${downloadName}` })
+            setStatus({ kind: "ok", msg: t("importExport.status.exportedFile", { fileName: downloadName }) })
           }
         }
       } else if (fmt === "docx") {
         // AQU-233: DOCX round-trip export. Fetch the raw DOCX side-car from the
         // server, then inject translations client-side using JSZip + DOMParser.
-        setStatus({ kind: "busy", msg: "Fetching original document…" })
+        setStatus({ kind: "busy", msg: t("importExport.status.fetchingOriginalDocument") })
         const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
-        setStatus({ kind: "busy", msg: "Injecting translations…" })
+        setStatus({ kind: "busy", msg: t("importExport.status.injectingTranslations") })
         const { exportDocx } = await import("@/lib/export/exporters/docx")
         const result = await exportDocx(rawBytes, cells)
         const baseName = buildExportStem(false) // AQU-437: user-chosen stem
         downloadBlob(result.blob, `${baseName}.docx`)
-        const note = result.injected === 0
-          ? " (no translations to inject — download original structure)"
-          : ` (${result.injected} paragraph${result.injected === 1 ? "" : "s"} translated)`
         setFidelityWarnings([
           ...result.warnings.map((w) => ({
             kind: "inline-style-simplified" as const,
@@ -855,21 +872,24 @@ export function ExportDialog({
           })),
           ...collectInlineStyleWarnings(cells),
         ])
-        setStatus({ kind: "ok", msg: `Downloaded ${baseName}.docx${note}` })
+        const fileName = `${baseName}.docx`
+        setStatus({
+          kind: "ok",
+          msg: result.injected === 0
+            ? t("importExport.status.downloadedNoTranslations", { fileName })
+            : t("importExport.status.downloadedParagraphsTranslated", { fileName, count: result.injected }),
+        })
       } else if (fmt === "pptx") {
         // AQU-152a: PPTX round-trip export. Fetch the raw PPTX side-car from
         // the server, then inject translations client-side (JSZip + DOMParser),
         // mirroring the DOCX path above.
-        setStatus({ kind: "busy", msg: "Fetching original presentation…" })
+        setStatus({ kind: "busy", msg: t("importExport.status.fetchingOriginalPresentation") })
         const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
-        setStatus({ kind: "busy", msg: "Injecting translations…" })
+        setStatus({ kind: "busy", msg: t("importExport.status.injectingTranslations") })
         const { exportPptx } = await import("@/lib/export/exporters/pptx")
         const result = await exportPptx(rawBytes, cells)
         const baseName = buildExportStem(false)
         downloadBlob(result.blob, `${baseName}.pptx`)
-        const note = result.injected === 0
-          ? " (no translations to inject — download original structure)"
-          : ` (${result.injected} paragraph${result.injected === 1 ? "" : "s"} translated)`
         setFidelityWarnings([
           ...result.warnings.map((w) => ({
             kind: "inline-style-simplified" as const,
@@ -878,16 +898,22 @@ export function ExportDialog({
           })),
           ...collectInlineStyleWarnings(cells),
         ])
-        setStatus({ kind: "ok", msg: `Downloaded ${baseName}.pptx${note}` })
+        const fileName = `${baseName}.pptx`
+        setStatus({
+          kind: "ok",
+          msg: result.injected === 0
+            ? t("importExport.status.downloadedNoTranslations", { fileName })
+            : t("importExport.status.downloadedParagraphsTranslated", { fileName, count: result.injected }),
+        })
       } else if (fmt === "idml") {
         idmlTelemetryStartedAt = performance.now()
         // IDML v2 export is fail-closed: the shared engine proves every
         // translated locator and protected anchor before changing package bytes.
-        setStatus({ kind: "busy", msg: "Fetching original document…" })
+        setStatus({ kind: "busy", msg: t("importExport.status.fetchingOriginalDocument") })
         const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
         const baseName = buildExportStem(false)
         recoverableIdmlOriginal = { bytes: rawBytes.slice(0), downloadName: `${baseName}-original.idml` }
-        setStatus({ kind: "busy", msg: "Validating protected translations…" })
+        setStatus({ kind: "busy", msg: t("importExport.status.validatingProtectedTranslations") })
         const { exportIdml } = await import("@/lib/export/exporters/idml")
         const result = await exportIdml(rawBytes, cells)
         posthog.capture("idml export completed", idmlTelemetryProperties({
@@ -897,18 +923,25 @@ export function ExportDialog({
           durationMs: performance.now() - idmlTelemetryStartedAt,
         }))
         downloadBlob(result.blob, `${baseName}.idml`)
-        const note = result.report.translated === 0
-          ? " (no translations — original bytes returned unchanged)"
-          : ` (${result.report.translated} paragraph${result.report.translated === 1 ? "" : "s"} translated)`
-        setStatus({ kind: "ok", msg: `Downloaded ${baseName}.idml${note}` })
+        const fileName = `${baseName}.idml`
+        setStatus({
+          kind: "ok",
+          msg: result.report.translated === 0
+            ? t("importExport.status.downloadedIdmlUnchanged", { fileName })
+            : t("importExport.status.downloadedParagraphsTranslated", { fileName, count: result.report.translated }),
+        })
       } else if (fmt === "audio-by-character") {
         // A TOAST, not just the dialog's own line (Sam, 2026-08-18). This is
         // the one export that takes real time — every take is fetched, decoded
         // and laid onto a track — and the dialog's status is only visible while
         // the dialog is. The toast means you can close it and get on with
         // something else, and still be told when the zip is ready.
-        exportToastRef.current = toast.loading("Preparing the character export…")
-        setStatus({ kind: "busy", msg: "Decoding audio…" })
+        exportToastRef.current = toast.add({
+          type: "loading",
+          timeout: 0,
+          title: t("importExport.status.preparingCharacterExport"),
+        })
+        setStatus({ kind: "busy", msg: t("importExport.status.decodingAudio") })
         const { exportAudioByCharacter } = await import("@/lib/export/audio-by-character")
         const { decodeToMono48k } = await import("@/lib/audio/decode-mono")
         let lastPct = -1
@@ -928,23 +961,28 @@ export function ExportDialog({
           fetchBytes: ({ projectId: pid, fileId, audioId, ext }) =>
             fetchCellAudio({ projectId: pid, fileId, audioId, ext, getSyncToken }),
           decode: decodeToMono48k,
-          onProgress: (d, t) => {
-            setStatus({ kind: "busy", msg: `Decoding ${d}/${t}…` })
+          onProgress: (d, tot) => {
+            setStatus({ kind: "busy", msg: t("importExport.status.decodingCount", { done: d, total: tot }) })
             // Throttled to whole percentage points: an episode has hundreds of
             // takes, and re-rendering the toast for each one buys nothing a
             // person can read.
-            const pct = t > 0 ? Math.floor((d / t) * 100) : 0
-            if (pct === lastPct && d < t) return
+            const pct = tot > 0 ? Math.floor((d / tot) * 100) : 0
+            if (pct === lastPct && d < tot) return
             lastPct = pct
-            toast.loading(
-              d < t
-                ? `Decoding recordings — ${pct}%`
-                : // Everything is decoded; what is left is rendering the last
-                  // character's track and compressing, which on a long episode
-                  // is where the remaining wait actually goes.
-                  "Building the archive…",
-              { id: exportToastRef.current ?? undefined },
-            )
+            const running = exportToastRef.current
+            if (running != null) {
+              toast.update(running, {
+                type: "loading",
+                timeout: 0,
+                title:
+                  d < tot
+                    ? t("importExport.status.decodingPercent", { pct })
+                    : // Everything is decoded; what is left is rendering the
+                      // last character's track and compressing, which on a
+                      // long episode is where the wait actually goes.
+                      t("importExport.status.buildingArchive"),
+              })
+            }
           },
         })
         // REFUSE RATHER THAN DOWNLOAD NOTHING. A zip with no entries is still
@@ -955,7 +993,11 @@ export function ExportDialog({
               ? "No recordings found in this file, so there is nothing to export."
               : `None of the ${result.clips} recordings could be read, so the export would be empty.`
           setStatus({ kind: "error", msg })
-          toast.error(msg, { id: exportToastRef.current ?? undefined })
+          if (exportToastRef.current != null) {
+            toast.update(exportToastRef.current, { type: "error", title: msg })
+          } else {
+            toast.add({ type: "error", title: msg })
+          }
           exportToastRef.current = null
           return
         }
@@ -977,7 +1019,11 @@ export function ExportDialog({
           ? `Exported audio by character — ${notes.join("; ")}.`
           : `Exported ${result.characters} character track${result.characters === 1 ? "" : "s"}.`
         setStatus({ kind: "ok", msg: doneMsg })
-        toast.success(doneMsg, { id: exportToastRef.current ?? undefined })
+        if (exportToastRef.current != null) {
+          toast.update(exportToastRef.current, { type: "success", title: doneMsg })
+        } else {
+          toast.add({ type: "success", title: doneMsg })
+        }
         exportToastRef.current = null
       } else if (fmt === "audio-by-line") {
         // The other shape (Sam, 2026-08-18: "a separate track for each
@@ -1097,15 +1143,15 @@ export function ExportDialog({
         // SDBH round-trip: reinject every translated lexicon cell into the
         // user-supplied MARBLE XML skeleton, keyed by LEXID-derived cell ids.
         if (!sdbhSkeleton) {
-          setStatus({ kind: "error", msg: "Choose the original SDBH-<lang>.XML file as the skeleton first." })
+          setStatus({ kind: "error", msg: t("importExport.status.chooseSkeletonFirst") })
           return
         }
         if (projectCellsLoading) {
-          setStatus({ kind: "busy", msg: "Still loading file cells, please wait…" })
+          setStatus({ kind: "busy", msg: t("importExport.status.stillLoadingCells") })
           return
         }
         if (projectCellsError) {
-          setStatus({ kind: "error", msg: `Couldn't load the complete project: ${projectCellsError.message}` })
+          setStatus({ kind: "error", msg: t("importExport.status.couldNotLoadProject", { message: projectCellsError.message }) })
           return
         }
         const byCellId = new Map<string, string>()
@@ -1122,21 +1168,27 @@ export function ExportDialog({
           rewriteDomainLabels: true,
         })
         if (sensesInjected === 0) {
-          setStatus({ kind: "error", msg: "No LEXMeaning entries found — is that file a MARBLE SDBH XML edition?" })
+          setStatus({ kind: "error", msg: t("importExport.status.noLexMeaningEntries") })
           return
         }
         const stem = buildExportStem(true)
         downloadBlob(new Blob([xml], { type: "application/xml" }), `${stem}.XML`)
-        const warnNote = warnings.length ? ` — ${warnings.length} gloss warning(s), check semicolons` : ""
-        setStatus({ kind: "ok", msg: `Reinjected ${byCellId.size.toLocaleString()} translations into ${sensesInjected.toLocaleString()} senses${warnNote}` })
+        // Two independent counts (senses reinjected, gloss warnings) — composed
+        // from two separately-authored phrases rather than one template.
+        const base = t("importExport.status.reinjectedTranslations", {
+          translations: formatNumber(byCellId.size, locale),
+          senses: formatNumber(sensesInjected, locale),
+        })
+        const warnNote = warnings.length ? t("importExport.status.glossWarnings", { count: warnings.length }) : ""
+        setStatus({ kind: "ok", msg: `${base}${warnNote}` })
       } else if (runScope === "project") {
         // Client-side project-scope zip: use already-loaded per-file cells.
         if (projectCellsLoading) {
-          setStatus({ kind: "busy", msg: "Still loading file cells, please wait…" })
+          setStatus({ kind: "busy", msg: t("importExport.status.stillLoadingCells") })
           return
         }
         if (projectCellsError) {
-          setStatus({ kind: "error", msg: `Couldn't load the complete project: ${projectCellsError.message}` })
+          setStatus({ kind: "error", msg: t("importExport.status.couldNotLoadProject", { message: projectCellsError.message }) })
           return
         }
         // AQU-441: metadata-csv project scope — flatten all file cells into one sheet.
@@ -1145,10 +1197,13 @@ export function ExportDialog({
           const csvBlob = exportMetadataCsv(allCells, ttsSettings)
           const safeName = buildExportStem(true)
           downloadBlob(csvBlob, `${safeName}.csv`)
-          setStatus({ kind: "ok", msg: `Downloaded ${safeName}.csv (${allCells.length} rows)` })
+          setStatus({
+            kind: "ok",
+            msg: t("importExport.status.downloadedMetadataCsvRows", { fileName: `${safeName}.csv`, count: allCells.length }),
+          })
           return
         }
-        setStatus({ kind: "busy", msg: `Building zip for ${projectFileCells.length} files…` })
+        setStatus({ kind: "busy", msg: t("importExport.status.buildingZip", { count: projectFileCells.length }) })
         const zipBlob = await buildProjectZip({
           files: projectFileCells,
           format: fmt as TextExportFormat,
@@ -1159,7 +1214,7 @@ export function ExportDialog({
         const ext = fmtOption.ext
         downloadBlob(zipBlob, `${safeName}${ext}.zip`)
         setFidelityWarnings(projectFileCells.flatMap((f) => collectInlineStyleWarnings(f.cells)))
-        setStatus({ kind: "ok", msg: `Downloaded ${projectFileCells.length} files` })
+        setStatus({ kind: "ok", msg: t("importExport.status.downloadedFilesCount", { count: projectFileCells.length }) })
       } else {
         // Client-side single-file exporter
         // AQU-439: apply voice filter before passing to any exporter.
@@ -1233,7 +1288,7 @@ export function ExportDialog({
         }
         downloadBlob(blob, `${baseName}${ext}`)
         setFidelityWarnings(collectInlineStyleWarnings(filteredCells))
-        setStatus({ kind: "ok", msg: `Downloaded ${baseName}${ext}` })
+        setStatus({ kind: "ok", msg: t("importExport.status.downloadedFile", { fileName: `${baseName}${ext}` }) })
       }
     } catch (e) {
       if (recoverableIdmlOriginal) setIdmlRecovery(recoverableIdmlOriginal)
@@ -1248,13 +1303,13 @@ export function ExportDialog({
           durationMs: performance.now() - idmlTelemetryStartedAt,
         }))
       }
-      const msg = (e as Error).message || "Export failed."
+      const msg = (e as Error).message || t("importExport.status.exportFailed")
       setStatus({ kind: "error", msg })
       // Never leave a spinning toast behind: this catch covers the whole run,
       // including the long audio export, and an orphaned loading toast sits
       // there claiming work is still happening.
       if (exportToastRef.current != null) {
-        toast.error(msg, { id: exportToastRef.current })
+        toast.update(exportToastRef.current, { type: "error", title: msg })
         exportToastRef.current = null
       }
     }
@@ -1424,7 +1479,7 @@ export function ExportDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Export</DialogTitle>
+          <DialogTitle>{t("nav.workspaceActions.export")}</DialogTitle>
         </DialogHeader>
 
         {/* AQU-458: the whole body scrolls as one region (DialogBody =
@@ -1439,17 +1494,15 @@ export function ExportDialog({
              hiding it, and point at the roles & permissions docs. */
           <div
             role="note"
-            aria-label="Export permission required"
+            aria-label={t("importExport.dialog.permissionRequiredAriaLabel")}
             className="flex flex-col gap-2 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/40 px-3 py-3 text-sm text-amber-700 dark:text-amber-300"
           >
             <span className="flex items-center gap-1.5 font-medium">
               <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
-              You don't have export permission
+              {t("importExport.dialog.noExportPermission")}
             </span>
             <p className="text-xs leading-relaxed">
-              An organization owner has restricted exporting to higher roles.
-              Ask an owner to raise your role, or read how roles and permissions
-              work.
+              {t("importExport.dialog.permissionExplanation")}
             </p>
             <a
               href="https://help.aquilla.app/permissions"
@@ -1457,7 +1510,7 @@ export function ExportDialog({
               rel="noreferrer"
               className="text-xs font-medium underline underline-offset-2 hover:opacity-80"
             >
-              Roles &amp; permissions — help.aquilla.app
+              {t("importExport.dialog.permissionsLinkText")}
             </a>
           </div>
         ) : (
@@ -1470,16 +1523,20 @@ export function ExportDialog({
         {outstandingInfractionCount > 0 && (
           <div
             role="note"
-            aria-label="Validation flags do not block export"
+            aria-label={t("importExport.dialog.validationDoesNotBlockAriaLabel")}
             data-testid="export-nonblocking-health-note"
             className="flex items-start gap-2 rounded-xl border border-border/60 bg-muted/40 px-3 py-2.5 text-xs text-muted-foreground"
           >
             <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
             <span>
-              This file has {outstandingInfractionCount} outstanding validation{" "}
-              {outstandingInfractionCount === 1 ? "flag" : "flags"} (terminology, HTML/markup,
-              punctuation, etc.). These <strong>won't block your export</strong> — download now
-              and resolve them anytime.
+              <RichMessage
+                k="importExport.dialog.outstandingFlagsNote"
+                count={outstandingInfractionCount}
+                values={{
+                  count: outstandingInfractionCount,
+                  wontBlock: <strong>{t("importExport.dialog.wontBlockExport")}</strong>,
+                }}
+              />
             </span>
           </div>
         )}
@@ -1684,12 +1741,11 @@ export function ExportDialog({
               ) : (
                 <Download className="h-4 w-4" aria-hidden="true" />
               )}
-              Download {buildExportStem(false)}{nativeOption.ext}
+              {t("importExport.dialog.downloadFile", { fileName: `${buildExportStem(false)}${nativeOption.ext}` })}
             </Button>
             <p className="text-xs text-muted-foreground text-center leading-relaxed">
-              {nativeOption.label} — your file in its original format, with
-              current translations.
-              {nativeOption.lossy && " Some inline formatting may not carry over."}
+              {t("importExport.dialog.nativeFormatHint", { label: t(nativeOption.labelKey) })}
+              {nativeOption.lossy && ` ${t("importExport.dialog.someFormattingMayNotCarryOver")}`}
             </p>
           </div>
         )}
@@ -1732,19 +1788,19 @@ export function ExportDialog({
             >
               ›
             </span>
-            Export to another format
+            {t("importExport.dialog.exportToAnotherFormat")}
           </summary>
           <div className="mt-2.5 flex flex-col gap-4">
         {/* Format selector */}
         <fieldset className="flex flex-col gap-1.5 min-w-0">
           <legend className="text-xs font-medium text-muted-foreground mb-1.5">
-            Format
+            {t("importExport.dialog.formatLegend")}
           </legend>
           <RadioGroup
             value={format}
             onValueChange={(value) => setFormat(value as ExportFormat)}
             className="flex flex-col gap-0.5"
-            aria-label="Export format"
+            aria-label={t("importExport.dialog.formatGroupAriaLabel")}
           >
             {foldFormats.map((f) => (
               <label
@@ -1759,19 +1815,19 @@ export function ExportDialog({
                 <RadioGroupItem
                   value={f.id}
                   className="mt-0.5 shrink-0"
-                  aria-label={`${f.label} (${f.ext})`}
+                  aria-label={t("importExport.dialog.formatOptionAriaLabel", { label: t(f.labelKey), ext: f.ext })}
                 />
                 <span className="flex flex-col gap-0.5 min-w-0">
                   <span className="text-sm font-medium leading-tight flex items-baseline gap-1.5 flex-wrap">
-                    {f.label}
+                    {t(f.labelKey)}
                     <span className="text-xs text-muted-foreground font-normal font-mono">{f.ext}</span>
                     {f.lossy && (
                       <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">
-                        lossy
+                        {t("importExport.dialog.lossyBadge")}
                       </span>
                     )}
                   </span>
-                  <span className="text-xs text-muted-foreground leading-relaxed">{f.description}</span>
+                  <span className="text-xs text-muted-foreground leading-relaxed">{t(f.descriptionKey)}</span>
                 </span>
               </label>
             ))}
@@ -1781,26 +1837,26 @@ export function ExportDialog({
         {/* Scope selector */}
         <fieldset className="flex flex-col gap-1.5">
           <legend className="text-xs font-medium text-muted-foreground mb-1.5">
-            Scope
+            {t("importExport.dialog.scopeLegend")}
           </legend>
           <SegmentTabs<ExportScope>
             value={effectiveScope}
-            aria-label="Export scope"
+            aria-label={t("importExport.dialog.scopeGroupAriaLabel")}
             className="self-start"
             options={[
-              { label: "Current file", value: "file", disabled: isProjectOnlyFormat },
-              { label: "Whole project", value: "project", disabled: isFileOnlyFormat },
+              { label: t("search.dialog.scopeCurrentFile"), value: "file", disabled: isProjectOnlyFormat },
+              { label: t("importExport.dialog.scopeProject"), value: "project", disabled: isFileOnlyFormat },
             ]}
             onValueChange={setScope}
           />
           {isFileOnlyFormat && (
             <p className="text-[10px] text-muted-foreground mt-0.5">
-              Project scope not supported for this format.
+              {t("importExport.dialog.scopeNotSupportedHint")}
             </p>
           )}
           {isProjectOnlyFormat && (
             <p className="text-[10px] text-muted-foreground mt-0.5">
-              This format always exports the whole project.
+              {t("importExport.dialog.scopeAlwaysProjectHint")}
             </p>
           )}
 
@@ -1808,7 +1864,7 @@ export function ExportDialog({
           {format === "sdbh-xml" && (
             <div className="mt-1.5 flex flex-col gap-1">
               <Button variant="outline" size="sm" nativeButton={false} render={<label className="self-start" />}>
-                {sdbhSkeleton ? sdbhSkeleton.name : "Choose skeleton (SDBH-<lang>.XML)"}
+                {sdbhSkeleton ? sdbhSkeleton.name : t("importExport.dialog.chooseSdbhSkeleton")}
                 <input
                   type="file"
                   className="hidden"
@@ -1817,8 +1873,7 @@ export function ExportDialog({
                 />
               </Button>
               <p className="text-[10px] text-muted-foreground">
-                Usually the same edition you imported — its structure is preserved byte-for-byte; only the
-                localized definition, gloss, comment, and domain-label text is replaced.
+                {t("importExport.dialog.sdbhSkeletonHint")}
               </p>
             </div>
           )}
@@ -1836,22 +1891,34 @@ export function ExportDialog({
         {distinctVoices.length > 0 && (
           <fieldset className="flex flex-col gap-1.5">
             <legend className="text-xs font-medium text-muted-foreground mb-1.5">
-              Voice
+              {t("importExport.dialog.voiceLegend")}
             </legend>
-            <select
+            <Select
               value={voiceFilter}
-              onChange={(e) => setVoiceFilter(e.target.value)}
-              aria-label="Filter export by voice"
-              className="h-7 w-full rounded-md border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
+              onValueChange={(v) => setVoiceFilter(v ?? "")}
             >
-              <option value="">All voices</option>
-              {distinctVoices.map((v) => (
-                <option key={v} value={v}>{v}</option>
-              ))}
-            </select>
+              <SelectTrigger
+                size="sm"
+                className="w-full"
+                aria-label={t("importExport.dialog.voiceFilterAriaLabel")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="">{t("importExport.dialog.allVoices")}</SelectItem>
+                  {distinctVoices.map((v) => (
+                    <SelectItem key={v} value={v}>{v}</SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
             {voiceFilter && (
               <p className="text-[10px] text-muted-foreground">
-                Export will include only cells assigned to <strong>{voiceFilter}</strong>, across all camera angles.
+                <RichMessage
+                  k="importExport.dialog.voiceFilterHint"
+                  values={{ voice: <strong>{voiceFilter}</strong> }}
+                />
               </p>
             )}
           </fieldset>
@@ -1860,7 +1927,7 @@ export function ExportDialog({
         {/* AQU-437: Filename control — editable base name + optional suffixes */}
         <fieldset className="flex flex-col gap-1.5">
           <legend className="text-xs font-medium text-muted-foreground mb-1.5">
-            Filename
+            {t("importExport.dialog.filenameLegend")}
           </legend>
           <div className="flex flex-col gap-2">
             {/* Base name input — disabled for project scope (project name drives it) */}
@@ -1868,13 +1935,13 @@ export function ExportDialog({
               value={effectiveScope === "project" ? projectName.replace(/[^\w.-]+/g, "-").replace(/^-+|-+$/g, "") || "project" : customBaseName}
               onChange={(e) => setCustomBaseName(e.target.value)}
               disabled={effectiveScope === "project"}
-              placeholder="filename"
-              aria-label="Export filename (without extension)"
+              placeholder={t("importExport.dialog.filenameLegend")}
+              aria-label={t("importExport.dialog.filenameAriaLabel")}
               className="h-7 text-sm font-mono"
             />
             {effectiveScope === "project" && (
               <p className="text-[10px] text-muted-foreground -mt-0.5">
-                Project-scope exports use the project name.
+                {t("importExport.dialog.projectScopeUsesProjectName")}
               </p>
             )}
             <div className="flex items-center gap-4">
@@ -1883,14 +1950,14 @@ export function ExportDialog({
                   checked={appendTimestamp}
                   onCheckedChange={(c) => setAppendTimestamp(c === true)}
                 />
-                Append timestamp
+                {t("importExport.dialog.appendTimestamp")}
               </label>
               <label className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
                 <Checkbox
                   checked={appendLangTag}
                   onCheckedChange={(c) => setAppendLangTag(c === true)}
                 />
-                Append language tag
+                {t("importExport.dialog.appendLangTag")}
               </label>
             </div>
           </div>
@@ -1908,12 +1975,11 @@ export function ExportDialog({
           <div
             className="flex items-start gap-2 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/40 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-300"
             role="note"
-            aria-label="Lossy format warning"
+            aria-label={t("importExport.dialog.lossyWarningAriaLabel")}
           >
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             <span>
-              This format is lossy — inline markup, paragraph structure, and some metadata will not
-              round-trip back to the original format.
+              {t("importExport.dialog.lossyWarningText")}
             </span>
           </div>
         )}
@@ -1934,16 +2000,16 @@ export function ExportDialog({
             >
               ›
             </span>
-            Advanced
+            {t("importExport.dialog.advanced")}
           </summary>
-          <div className="mt-2.5 flex flex-col gap-2.5 pl-3 border-l border-border/40">
+          <div className="mt-2.5 flex flex-col gap-2.5 ps-3 border-s border-border/40">
             {/* Plain-text dump — shares the `format` state with the main list
                 above, but lives in its own RadioGroup wrapper since Base UI
                 radios need a group ancestor. */}
             <RadioGroup
               value={format}
               onValueChange={(value) => setFormat(value as ExportFormat)}
-              aria-label="Advanced export formats"
+              aria-label={t("importExport.dialog.advancedFormatsAriaLabel")}
             >
             <label
               className={
@@ -1956,22 +2022,21 @@ export function ExportDialog({
               <RadioGroupItem
                 value="plain-text-dump"
                 className="mt-0.5 shrink-0"
-                aria-label="Plain-text dump (.txt)"
+                aria-label={t("importExport.dialog.formatOptionAriaLabel", { label: t("importExport.format.plainTextDump.label"), ext: ".txt" })}
               />
               <span className="flex flex-col gap-0.5 min-w-0">
                 <span className="text-sm font-medium leading-tight flex items-baseline gap-1.5 flex-wrap">
-                  Plain-text dump
+                  {t("importExport.format.plainTextDump.label")}
                   <span className="text-xs text-muted-foreground font-normal font-mono">.txt</span>
                   <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">
-                    lossy
+                    {t("importExport.dialog.lossyBadge")}
                   </span>
                 </span>
                 <span className="text-xs text-muted-foreground leading-relaxed">
-                  Every translated segment, one per line — for quick content extraction.{" "}
-                  <strong className="font-medium text-foreground/70">What this loses:</strong>{" "}
-                  footnotes, cross-references, poetry layout, headings, paragraph markers,
-                  bold/italic character markup, back-translations, validation state, and
-                  untranslated segments. Not suitable for re-import.
+                  <RichMessage
+                    k="importExport.dialog.plainTextDumpDetail"
+                    values={{ whatThisLoses: <strong className="font-medium text-foreground/70">{t("importExport.dialog.whatThisLoses")}</strong> }}
+                  />
                 </span>
                 {format === "plain-text-dump" && (
                   <label className="flex items-center gap-1.5 mt-1">
@@ -1980,7 +2045,11 @@ export function ExportDialog({
                       onCheckedChange={(checked) => setDumpIncludeRefs(checked === true)}
                     />
                     <span className="text-xs text-muted-foreground">
-                      Prefix each line with canonical ref (e.g. <code className="font-mono">GEN 1:1</code>)
+                      <RichMessage
+                        k="importExport.dialog.prefixWithRef"
+                        // i18n-exempt machine-readable USFM reference sample
+                        values={{ example: <code className="font-mono">GEN 1:1</code> }}
+                      />
                     </span>
                   </label>
                 )}
@@ -1998,16 +2067,15 @@ export function ExportDialog({
               <RadioGroupItem
                 value="metadata-csv"
                 className="mt-0.5 shrink-0"
-                aria-label="Metadata spreadsheet (.csv)"
+                aria-label={t("importExport.dialog.formatOptionAriaLabel", { label: t("importExport.format.metadataCsv.label"), ext: ".csv" })}
               />
               <span className="flex flex-col gap-0.5 min-w-0">
                 <span className="text-sm font-medium leading-tight flex items-baseline gap-1.5 flex-wrap">
-                  Metadata spreadsheet
+                  {t("importExport.format.metadataCsv.label")}
                   <span className="text-xs text-muted-foreground font-normal font-mono">.csv</span>
                 </span>
                 <span className="text-xs text-muted-foreground leading-relaxed">
-                  Cast (voice/character), camera angle, and cell ref — one row per cell.
-                  Export only; the project remains the source of truth.
+                  {t("importExport.format.metadataCsv.description")}
                 </span>
               </span>
             </label>
@@ -2046,7 +2114,6 @@ export function ExportDialog({
                 <span className="flex flex-wrap items-center gap-2 pt-1">
                   <Button
                     type="button"
-                    size="sm"
                     variant="outline"
                     onClick={() => {
                       downloadBlob(
@@ -2057,11 +2124,10 @@ export function ExportDialog({
                       )
                     }}
                   >
-                    Download original unchanged
+                    {t("importExport.dialog.downloadOriginalUnchanged")}
                   </Button>
                   <Button
                     type="button"
-                    size="sm"
                     variant="outline"
                     onClick={() => {
                       handleOpenChange(false)
@@ -2069,16 +2135,14 @@ export function ExportDialog({
                     }}
                     disabled={!onReimport}
                   >
-                    Repair by re-importing
+                    {t("importExport.dialog.repairByReimporting")}
                   </Button>
                 </span>
               )}
               {status.kind === "ok-lossy" && (
                 <span className="flex items-start gap-1 text-amber-600 dark:text-amber-400 text-xs font-medium">
                   <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />
-                  {status.lossyVerseCount === 1
-                    ? "1 verse contained footnotes, poetry, or character markers in the source USFM — its structure is replaced by plain translated text."
-                    : `${status.lossyVerseCount} verses contained footnotes, poetry, or character markers in the source USFM — their structure is replaced by plain translated text.`}
+                  {t("importExport.dialog.lossyVerseCount", { count: status.lossyVerseCount })}
                 </span>
               )}
             </span>
@@ -2093,17 +2157,15 @@ export function ExportDialog({
           >
             <span className="flex items-center gap-1 font-medium">
               <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
-              {fidelityWarnings.length === 1
-                ? "1 segment lost inline formatting in this export"
-                : `${fidelityWarnings.length} segments lost inline formatting in this export`}
+              {t("importExport.dialog.fidelityWarningsHeader", { count: fidelityWarnings.length })}
             </span>
-            <ul className="ml-4 list-disc space-y-0.5">
+            <ul className="ms-4 list-disc space-y-0.5">
               {fidelityWarnings.slice(0, 6).map((w, i) => (
                 <li key={i}>
                   <span className="font-medium">{w.segment}</span>: {w.detail}
                 </li>
               ))}
-              {fidelityWarnings.length > 6 && <li>…and {fidelityWarnings.length - 6} more</li>}
+              {fidelityWarnings.length > 6 && <li>{t("importExport.dialog.andMore", { count: fidelityWarnings.length - 6 })}</li>}
             </ul>
           </div>
         )}
@@ -2114,7 +2176,7 @@ export function ExportDialog({
         <DialogFooter>
           {!canExport ? (
             <Button variant="outline" onClick={() => handleOpenChange(false)}>
-              Close
+              {t("common.close")}
             </Button>
           ) : (
             <>
@@ -2123,7 +2185,7 @@ export function ExportDialog({
                 onClick={() => handleOpenChange(false)}
                 disabled={isBusy}
               >
-                {isDone ? "Done" : "Cancel"}
+                {isDone ? t("common.done") : t("common.cancel")}
               </Button>
               <Button
                 onClick={() => handleExport()}
@@ -2136,7 +2198,7 @@ export function ExportDialog({
                 ) : (
                   <Download className="h-4 w-4" aria-hidden="true" />
                 )}
-                {isBusy ? "Exporting…" : isDone ? "Export again" : "Export"}
+                {isBusy ? t("importExport.status.exporting") : isDone ? t("importExport.dialog.exportAgain") : t("nav.workspaceActions.export")}
               </Button>
             </>
           )}

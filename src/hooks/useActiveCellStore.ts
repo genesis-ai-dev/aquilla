@@ -12,6 +12,7 @@ import type { OrderedBy, RuleWaiver } from "@/lib/parsers/types"
 import type { FileProgressResponse, ProgressCounts } from "@/lib/progress/file-progress-resource"
 import { deriveMilestoneNavigation } from "@/lib/milestone-navigation"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
+import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
 const EMPTY_TAKES: ReadonlySet<string> = new Set()
@@ -66,6 +67,7 @@ export interface CellSummary {
   targetEventId?: string
   targetSourceEventId?: string | null
   aiDrafted?: boolean
+  aiDraft?: AiDraftProvenance
   lastEditAt?: number
   startTime?: number
   endTime?: number
@@ -195,10 +197,19 @@ interface PendingOverlay {
   valueHtml?: string
   eventId?: string
   aiDrafted?: boolean
+  aiDraft?: AiDraftProvenance
+  /** Target-language lane this edit belongs to (`''` = Project default). */
+  targetLang?: string
 }
 
 interface OptimisticEdit extends PendingOverlay {
+  cellId: string
+  targetLang: string
   seq: number
+}
+
+function targetOverlayKey(cellId: string, targetLang: string): string {
+  return `${cellId}\u0000${targetLang}`
 }
 
 interface DerivedCache {
@@ -249,6 +260,12 @@ export class CellStore {
   private derivedVersion = 0
   private writeSeq = 0
   private maxServerSeq: number | null = null
+  /** AQU-943: the project incarnation `maxServerSeq` was minted against. A
+   *  wipe + re-migration under the same deterministic ids restarts the seq
+   *  allocator, which inverts the cursor and makes every delta answer
+   *  "nothing newer". Echoed as `?epoch=` so the server can spot that; null ⇒
+   *  the cursor is unverifiable and the delta path is skipped. */
+  private projectEpoch: number | null = null
   private navIndex: CellNavigationEntry[] = []
   private fileProgressSnapshot: FileProgressResponse | null = null
   private sectionLabelById = new Map<string, string>()
@@ -348,6 +365,7 @@ export class CellStore {
     this.freshnessFloors = new Map()
     this.cellVersionById = new Map()
     this.maxServerSeq = null
+    this.projectEpoch = null
     this.writeSeq = 0
     this.footnoteCache = new Map()
     this.rebuildDerivedIndexes()
@@ -386,6 +404,10 @@ export class CellStore {
   getProjectId = (): string | null => this.ctx.projectId
   getCellCount = (): number => this.order.length
   getMaxServerSeq = (): number | null => this.maxServerSeq
+  getProjectEpoch = (): number | null => this.projectEpoch
+  setProjectEpoch(epoch: number | null): void {
+    this.projectEpoch = epoch
+  }
   setMaxServerSeq(seq: number | null): void {
     this.maxServerSeq = seq
     if (this.fileProgressSnapshot) {
@@ -622,6 +644,7 @@ export class CellStore {
       targetEventId: view.targetEventId,
       targetSourceEventId: view.targetSourceEventId,
       aiDrafted: view.aiDrafted,
+      aiDraft: view.aiDraft,
       lastEditAt: view.lastEditAt,
       startTime: view.startTime,
       endTime: view.endTime,
@@ -817,9 +840,10 @@ export class CellStore {
     const changed = new Set<string>()
     for (const row of serverRows) {
       if (row.side !== "target") continue
-      const shadow = this.optimisticEdits.get(row.cellId)
+      const key = targetOverlayKey(row.cellId, laneOf(row))
+      const shadow = this.optimisticEdits.get(key)
       if (shadow && shadow.seq <= fetchStartSeq && (row.value ?? "") === shadow.value) {
-        this.optimisticEdits.delete(row.cellId)
+        this.optimisticEdits.delete(key)
         changed.add(row.cellId)
       }
     }
@@ -833,13 +857,23 @@ export class CellStore {
   mergeProtectedRows(buffer: CellRow[], fetchStartSeq: number): { rows: CellRow[]; discardedCellIds: Set<string> } {
     const protectedIds = new Set<string>()
     for (const [id, seq] of this.freshnessFloors) if (seq > fetchStartSeq) protectedIds.add(id)
-    for (const id of this.optimisticEdits.keys()) protectedIds.add(id)
+    for (const shadow of this.optimisticEdits.values()) protectedIds.add(shadow.cellId)
     const discardedCellIds = new Set<string>()
     if (protectedIds.size === 0) return { rows: buffer, discardedCellIds }
 
+    // A target row is identified by cell AND lane. Collapsing every target
+    // for a cell onto `${cellId}|target` makes a protected concurrent delta
+    // keep whichever lane happened to be visited last and silently discard
+    // its siblings. The selector can then say `es` while the Spanish target
+    // is gone from the in-memory row set even though it projected correctly.
+    const protectedRowKey = (row: CellRow): string => (
+      row.side === "target"
+        ? `${row.cellId}|target|${laneOf(row)}`
+        : `${row.cellId}|source`
+    )
     const keep = new Map<string, CellRow>()
     for (const row of this.toRows()) {
-      if (protectedIds.has(row.cellId)) keep.set(`${row.cellId}|${row.side}`, row)
+      if (protectedIds.has(row.cellId)) keep.set(protectedRowKey(row), row)
     }
 
     const out: CellRow[] = []
@@ -849,7 +883,7 @@ export class CellStore {
         continue
       }
       discardedCellIds.add(row.cellId)
-      const key = `${row.cellId}|${row.side}`
+      const key = protectedRowKey(row)
       const current = keep.get(key)
       if (current) {
         out.push(current)
@@ -861,16 +895,26 @@ export class CellStore {
   }
 
   setPendingOverlay(next: Map<string, PendingOverlay>): void {
+    const activeLane = this.ctx.lane ?? ""
+    const normalized = new Map<string, PendingOverlay>()
+    for (const [cellId, overlay] of next) {
+      normalized.set(cellId, {
+        ...overlay,
+        targetLang: overlay.targetLang ?? activeLane,
+      })
+    }
     const changed = symmetricChangedKeys(
       this.pendingOverlay,
-      next,
+      normalized,
       (a, b) => a.value === b.value
         && a.valueHtml === b.valueHtml
         && a.eventId === b.eventId
-        && a.aiDrafted === b.aiDrafted,
+        && a.aiDrafted === b.aiDrafted
+        && a.aiDraft?.generatedAt === b.aiDraft?.generatedAt
+        && a.targetLang === b.targetLang,
     )
     if (changed.size === 0) return
-    this.pendingOverlay = next
+    this.pendingOverlay = normalized
     this.bumpCells(changed)
     this.rebuildDerivedIndexes()
     this.emit(changed)
@@ -886,9 +930,10 @@ export class CellStore {
   }
 
   clearOptimisticIfValue(cellId: string, value: string): boolean {
-    const shadow = this.optimisticEdits.get(cellId)
+    const key = targetOverlayKey(cellId, this.ctx.lane ?? "")
+    const shadow = this.optimisticEdits.get(key)
     if (!shadow || shadow.value !== value) return false
-    this.optimisticEdits.delete(cellId)
+    this.optimisticEdits.delete(key)
     this.bumpCells([cellId])
     this.rebuildDerivedIndexes()
     this.emit([cellId])
@@ -897,12 +942,24 @@ export class CellStore {
 
   applyOptimisticTargetEdit(cellId: string, patch: PendingOverlay): void {
     const seq = ++this.writeSeq
-    this.optimisticEdits.set(cellId, { ...patch, seq })
+    const targetLang = this.ctx.lane ?? ""
+    this.optimisticEdits.set(targetOverlayKey(cellId, targetLang), {
+      ...patch,
+      cellId,
+      targetLang,
+      seq,
+    })
     this.freshnessFloors.set(cellId, seq)
 
     const existing = this.targetById.get(cellId)
     if (existing) {
-      this.targetById.set(cellId, { ...existing, value: patch.value, valueHtml: patch.valueHtml ?? null, aiDrafted: patch.aiDrafted ?? false })
+      this.targetById.set(cellId, {
+        ...existing,
+        value: patch.value,
+        valueHtml: patch.valueHtml ?? null,
+        aiDrafted: patch.aiDrafted ?? false,
+        aiDraft: patch.aiDrafted ? patch.aiDraft : undefined,
+      })
     } else {
       const source = this.sourceById.get(cellId)
       // No source row (mid-refetch/reset window): the shadow written above is
@@ -919,6 +976,7 @@ export class CellStore {
       this.targetById.set(cellId, {
         ...source,
         side: "target",
+        targetLang,
         value: patch.value,
         valueHtml: patch.valueHtml ?? null,
         eventId: "",
@@ -927,6 +985,7 @@ export class CellStore {
         lastEditAt: Date.now(),
         validated: false,
         aiDrafted: patch.aiDrafted ?? false,
+        aiDraft: patch.aiDrafted ? patch.aiDraft : undefined,
         wordCount: patch.value.trim() ? patch.value.trim().split(/\s+/).length : 0,
       })
       if (!this.targetOrder.includes(cellId)) this.targetOrder.push(cellId)
@@ -997,7 +1056,14 @@ export class CellStore {
     let orderChanged = false
     for (const patch of patches) {
       const seq = ++this.writeSeq
-      this.optimisticEdits.set(patch.cellId, { value: patch.value, valueHtml: patch.valueHtml, seq })
+      const targetLang = this.ctx.lane ?? ""
+      this.optimisticEdits.set(targetOverlayKey(patch.cellId, targetLang), {
+        cellId: patch.cellId,
+        targetLang,
+        value: patch.value,
+        valueHtml: patch.valueHtml,
+        seq,
+      })
       this.freshnessFloors.set(patch.cellId, seq)
 
       const existing = this.targetById.get(patch.cellId)
@@ -1012,6 +1078,7 @@ export class CellStore {
         this.targetById.set(patch.cellId, {
           ...source,
           side: "target",
+          targetLang,
           value: patch.value,
           valueHtml: patch.valueHtml ?? null,
           eventId: "",
@@ -1108,14 +1175,17 @@ export class CellStore {
 
   private applyContentOverlays(cell: CellData): void {
     const pending = this.pendingOverlay.get(cell.id)
-    if (pending) {
-      cell.translated = pending.value
-      if (pending.valueHtml !== undefined) cell.translatedHtml = pending.valueHtml
-      cell.status = deriveStatus(pending.value, false)
-      cell.aiDrafted = pending.aiDrafted ?? false
+    const activeLane = this.ctx.lane ?? ""
+    const activePending = pending?.targetLang === activeLane ? pending : undefined
+    if (activePending) {
+      cell.translated = activePending.value
+      if (activePending.valueHtml !== undefined) cell.translatedHtml = activePending.valueHtml
+      cell.status = deriveStatus(activePending.value, false)
+      cell.aiDrafted = activePending.aiDrafted ?? false
+      cell.aiDraft = activePending.aiDrafted ? activePending.aiDraft : undefined
       cell.hasPendingEdit = true
     }
-    const optimistic = this.optimisticEdits.get(cell.id)
+    const optimistic = this.optimisticEdits.get(targetOverlayKey(cell.id, activeLane))
     if (optimistic) {
       cell.translated = optimistic.value
       // The optimistic value is authoritative for BOTH text and html. When an
@@ -1125,9 +1195,10 @@ export class CellStore {
       cell.translatedHtml = optimistic.valueHtml
       cell.status = deriveStatus(optimistic.value, false)
       cell.aiDrafted = optimistic.aiDrafted ?? false
+      cell.aiDraft = optimistic.aiDrafted ? optimistic.aiDraft : undefined
       cell.hasPendingEdit = true
     }
-    if (pending || optimistic) {
+    if (activePending || optimistic) {
       // The overlay changed `translated`/`status`; recompute validationStatus
       // from the overlaid text so the row's aria/ring can't keep reporting
       // "empty" (or a stale validator state) while showing the fresh value.
@@ -1197,8 +1268,10 @@ export class CellStore {
         const endorsements = audit
           ? audit.activeValidators.length
           : Math.max(0, target?.endorsementCount ?? 0)
-        const targetValue = this.optimisticEdits.get(id)?.value
-          ?? this.pendingOverlay.get(id)?.value
+        const activeLane = this.ctx.lane ?? ""
+        const pending = this.pendingOverlay.get(id)
+        const targetValue = this.optimisticEdits.get(targetOverlayKey(id, activeLane))?.value
+          ?? (pending?.targetLang === activeLane ? pending.value : undefined)
           ?? target?.value
           ?? ''
         const hasAuthoritativeEndorsements = audit !== undefined || target?.endorsementCount !== undefined
@@ -1272,8 +1345,10 @@ export class CellStore {
       let validated = 0
       for (const cellId of cellIds) {
         const target = this.targetById.get(cellId)
-        const targetValue = this.optimisticEdits.get(cellId)?.value
-          ?? this.pendingOverlay.get(cellId)?.value
+        const activeLane = this.ctx.lane ?? ""
+        const pending = this.pendingOverlay.get(cellId)
+        const targetValue = this.optimisticEdits.get(targetOverlayKey(cellId, activeLane))?.value
+          ?? (pending?.targetLang === activeLane ? pending.value : undefined)
           ?? target?.value
           ?? ""
         // AQU-646: a dub with no text is translated work too — same rule the
@@ -1366,7 +1441,7 @@ export interface UseActiveCellStoreResult {
    * this restores the loading state while no authoritative rows are present. */
   retry: () => void
   revalidateCell: (cellId: string) => void
-  applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => void
+  applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean; aiDraft?: AiDraftProvenance }) => void
   /** Bulk version of applyOptimisticTargetEdit — see CellStore.applyOptimisticTargetEdits. */
   applyOptimisticTargetEdits: (patches: { cellId: string; value: string; valueHtml?: string }[]) => void
   /** Round 7: optimistic TIMING/metadata patch — see CellStore.applyOptimisticCellTiming. */
@@ -1439,10 +1514,12 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       if (generationRef.current !== gen) return
       if (cached && cached.rows.length > 0) {
         store.replaceRows(cached.rows, { full: true, maxServerSeq: cached.maxServerSeq ?? null })
+        store.setProjectEpoch(cached.projectEpoch ?? null)
         setIsLoading(false)
         usedCache = true
       } else {
         store.setMaxServerSeq(null)
+        store.setProjectEpoch(null)
         setIsLoading(true)
       }
     }
@@ -1471,22 +1548,31 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       tokenAttemptsRef.current = 0
 
       const since = store.getMaxServerSeq()
-      if (since !== null) {
+      // AQU-943: a cursor whose incarnation is unknown (cache entry written
+      // before the epoch existed) cannot be validated against a wipe + re-
+      // create, so it is not trusted — one full stream re-mints both.
+      const epoch = store.getProjectEpoch()
+      if (since !== null && epoch !== null) {
         const deltaStartSeq = store.getWriteSeq()
-        const result = await fetchCellsDelta(pid, fid, since, token)
+        const result = await fetchCellsDelta(pid, fid, since, token, undefined, epoch)
         if (generationRef.current !== gen) return
         if (result.kind === "delta") {
           let nextWatermark = result.maxServerSeq
+          // The server answered with a delta rather than a resync, so it
+          // confirmed the cursor's incarnation; pre-AQU-943 servers report
+          // none — hold the epoch we already had.
+          const nextEpoch = result.projectEpoch ?? epoch
+          store.setProjectEpoch(nextEpoch)
           if (result.changedCellIds.length > 0) {
             store.clearConfirmedShadows(result.cells, deltaStartSeq)
             const merged = mergeCellsDelta(store.toRows(), result.changedCellIds, result.cells)
             const { rows: kept, discardedCellIds } = store.mergeProtectedRows(merged, deltaStartSeq)
             store.replaceRows(kept, { changedCellIds: result.changedCellIds, maxServerSeq: discardedCellIds.size > 0 ? since : nextWatermark })
             if (discardedCellIds.size > 0) nextWatermark = since
-            void writeCellsCache(pid, fid, store.toRows(), nextWatermark)
+            void writeCellsCache(pid, fid, store.toRows(), nextWatermark, nextEpoch ?? undefined)
           } else if (result.maxServerSeq !== since) {
             store.setMaxServerSeq(result.maxServerSeq)
-            void writeCellsCache(pid, fid, store.toRows(), result.maxServerSeq)
+            void writeCellsCache(pid, fid, store.toRows(), result.maxServerSeq, nextEpoch ?? undefined)
           }
           setIsLoading(false)
           return
@@ -1512,16 +1598,20 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
 
       const startSeq = store.getWriteSeq()
       let streamMaxSeq: number | null = null
+      // AQU-943: incarnation of `streamMaxSeq`, taken from the same first page
+      // so cursor and epoch always describe the same snapshot.
+      let streamEpoch: number | null = null
       let streamTorn = false
       let cursorSeen = false
       const trackStreamMeta = () => {
         let sideFirst: number | null = null
         let sideSeen = false
-        return (meta: { maxServerSeq?: number | null }) => {
+        return (meta: { maxServerSeq?: number | null; projectEpoch?: number | null }) => {
           const value = typeof meta.maxServerSeq === "number" ? meta.maxServerSeq : null
           if (!cursorSeen) {
             cursorSeen = true
             streamMaxSeq = value
+            streamEpoch = typeof meta.projectEpoch === "number" ? meta.projectEpoch : null
           }
           if (!sideSeen) {
             sideSeen = true
@@ -1548,8 +1638,10 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       }
 
       const watermark = streamTorn || discardedProtected ? null : streamMaxSeq
+      const watermarkEpoch = watermark === null ? null : streamEpoch
       store.setMaxServerSeq(watermark)
-      void writeCellsCache(pid, fid, store.toRows(), watermark ?? undefined)
+      store.setProjectEpoch(watermarkEpoch)
+      void writeCellsCache(pid, fid, store.toRows(), watermark ?? undefined, watermarkEpoch ?? undefined)
       setIsLoading(false)
     } catch (err) {
       if (generationRef.current !== gen) return
@@ -1572,21 +1664,35 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   }, [projectId, fileId, enabled])
 
   useEffect(() => {
-    if (!enabled || !fileId) {
+    if (!enabled || !projectId || !fileId) {
       store.setPendingOverlay(new Map())
       store.setPendingProgressEventIds([])
       return
     }
+    const activeProjectId = projectId
+    const activeFileId = fileId
+    const activeLane = lane
     let cancelled = false
     async function refresh() {
       const all = await peekOutboxBatch(2000)
       if (cancelled) return
-      const fid = fileRef.current
       const next = new Map<string, PendingOverlay>()
       const pendingProgressEventIds: string[] = []
       for (const record of all) {
-        if (fid && record.event.fileId !== fid) continue
+        if (record.event.projectId !== activeProjectId || record.event.fileId !== activeFileId) continue
         const kind = record.event.kind
+        const payload = record.event.payload as {
+          value?: string
+          valueHtml?: string
+          ai_suggestion?: true
+          ai_draft?: AiDraftProvenance
+          targetLang?: string
+        }
+        const eventLane = typeof payload.targetLang === "string" ? payload.targetLang : ""
+        const laneScoped = kind.startsWith("target.cell.")
+          || kind === "cell.validate"
+          || kind === "cell.unvalidate"
+        if (laneScoped && eventLane !== activeLane) continue
         const failed = (record.status ?? "pending") === "failed"
         if (!failed && (
           kind.startsWith("source.cell.") ||
@@ -1599,7 +1705,6 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         if (kind !== "target.cell.commit" && kind !== "target.cell.create") continue
         const cellId = record.event.cellId
         if (!cellId) continue
-        const payload = record.event.payload as { value?: string; valueHtml?: string; ai_suggestion?: true }
         if (failed) {
           if (typeof payload.value === "string") store.clearOptimisticIfValue(cellId, payload.value)
           continue
@@ -1610,6 +1715,8 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
           valueHtml: payload.valueHtml,
           eventId: record.event.id,
           aiDrafted: payload.ai_suggestion === true,
+          aiDraft: payload.ai_suggestion === true ? payload.ai_draft : undefined,
+          targetLang: eventLane,
         })
       }
       store.setPendingOverlay(next)
@@ -1621,7 +1728,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       cancelled = true
       unsub()
     }
-  }, [enabled, fileId, store])
+  }, [enabled, fileId, lane, projectId, store])
 
   useEffect(() => () => {
     if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
@@ -1653,7 +1760,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     const pid = projectRef.current
     const fid = fileRef.current
     if (!pid || !fid) return
-    void writeCellsCache(pid, fid, store.toRows(), maxServerSeq ?? store.getMaxServerSeq() ?? undefined)
+    void writeCellsCache(
+      pid,
+      fid,
+      store.toRows(),
+      maxServerSeq ?? store.getMaxServerSeq() ?? undefined,
+      store.getProjectEpoch() ?? undefined,
+    )
   }, [store])
 
   const revalidateCellRef = useRef<(cellId: string) => void>(() => {})
@@ -1707,7 +1820,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   }, [doFetch, refreshCellsCacheFromStore, store])
   revalidateCellRef.current = revalidateCell
 
-  const applyOptimisticTargetEdit = useCallback((cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => {
+  const applyOptimisticTargetEdit = useCallback((cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean; aiDraft?: AiDraftProvenance }) => {
     store.applyOptimisticTargetEdit(cellId, patch)
   }, [store])
 

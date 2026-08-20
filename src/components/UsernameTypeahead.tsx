@@ -9,7 +9,11 @@ import {
 } from "@/components/ui/input-group"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
+import { useExactUserLookup } from "@/hooks/useExactUserLookup"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 
 /**
  * AQU-734: multi-select wiring. When passed, each search result renders as a
@@ -102,6 +106,7 @@ export function UsernameTypeahead({
   suggestions,
   emptySuggestionsHint,
 }: Props) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   // Anchored below the input by default (`top`), flipped above (`bottom`)
   // when the viewport can't fit the dropdown underneath — e.g. the add row
@@ -168,6 +173,18 @@ export function UsernameTypeahead({
     trimmedRaw.length === 0 &&
     matchingSuggestions.length === 0 &&
     emptySuggestionsHint != null
+  // AQU-781: when the scoped search settles with no match, resolve the exact
+  // typed username against the unscoped lookup so a miss isn't reported as
+  // "no such user" when the account merely lies outside the caller's scope.
+  const exactLookup = useExactUserLookup(
+    value.mode === "username" ? trimmedRaw : "",
+    canShowSettledEmptyState && lastFetchOk,
+  )
+  const exactLookupCurrent = exactLookup.forUsername === trimmedRaw
+  const exactUser =
+    exactLookupCurrent && exactLookup.status === "found" ? exactLookup.user : null
+  const exactAlreadyAdded = exactUser != null && excludedUserIdSet.has(exactUser.id)
+  const exactFoundUser = exactUser && !exactAlreadyAdded ? exactUser : null
   const showSuggestions =
     value.mode === "username" &&
     open &&
@@ -247,7 +264,7 @@ export function UsernameTypeahead({
       <div className="flex items-center gap-1.5">
         {showModeToggle && (
           <div className="inline-flex shrink-0 rounded-md border bg-muted/20 p-0.5 text-[10px]">
-            <AppTooltip content="Invite an existing Aquilla user">
+            <AppTooltip content={t("workspace.typeahead.usernameModeTooltip")}>
               <span className="inline-flex">
                 <button
                   type="button"
@@ -259,11 +276,11 @@ export function UsernameTypeahead({
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  @user
+                  {t("workspace.typeahead.usernameModeLabel")}
                 </button>
               </span>
             </AppTooltip>
-            <AppTooltip content="Invite by email; they'll be prompted to sign up if needed" className="max-w-xs">
+            <AppTooltip content={t("workspace.typeahead.emailModeTooltip")} className="max-w-xs">
               <span className="inline-flex">
                 <button
                   type="button"
@@ -275,7 +292,7 @@ export function UsernameTypeahead({
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  email
+                  {t("common.email")}
                 </button>
               </span>
             </AppTooltip>
@@ -312,15 +329,15 @@ export function UsernameTypeahead({
             placeholder={
               placeholder?.[value.mode] ??
               (value.mode === "email"
-                ? "name@example.com"
-                : "Aquilla username")
+                ? t("projectSettings.share.emailPlaceholder")
+                : t("workspace.typeahead.usernamePlaceholder"))
             }
           />
           {value.mode === "username" && value.resolved && (
             <InputGroupAddon align="inline-end">
-              <AppTooltip content="Verified Aquilla user">
+              <AppTooltip content={t("workspace.typeahead.verifiedTooltip")}>
                 <InputGroupText className="rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 px-1.5 py-0.5 text-[10px]">
-                  <Check /> verified
+                  <Check /> {t("workspace.typeahead.verifiedBadge")}
                 </InputGroupText>
               </AppTooltip>
             </InputGroupAddon>
@@ -342,7 +359,7 @@ export function UsernameTypeahead({
         >
           {needsMorePrefix && visibleRows.length === 0 && (
             <p className="px-3 py-2 text-[11px] text-muted-foreground">
-              Type at least 2 characters to search.
+              {t("workspace.typeahead.needsMorePrefix")}
             </p>
           )}
 
@@ -354,49 +371,107 @@ export function UsernameTypeahead({
 
           {searchPendingForInput && visibleRows.length === 0 && (
             <p className="flex items-center gap-1.5 px-3 py-2 text-[11px] text-muted-foreground">
-              <Spinner className="size-3" /> Searching…
+              <Spinner className="size-3" /> {t("common.searching")}
             </p>
           )}
 
           {allMatchesAlreadyAdded && (
             <p className="px-3 py-2 text-[11px] text-muted-foreground">
-              Matching users are already members.
+              {t("workspace.typeahead.allMatchesAlreadyMembers")}
             </p>
           )}
 
-          {/* Only claim "no user named X" when the search actually
-              succeeded (lastFetchOk). When the search endpoint isn't
-              deployed yet (404) or the network errored, we'd otherwise
-              be lying about the user's existence — suppress the
-              false-negative and render a softer fallback hint. */}
+          {/* AQU-781: the scoped search (AQU-321) only sees people who share an
+              org/project with the caller, so a settled miss is NOT proof the
+              account doesn't exist. Resolve the exact typed username against the
+              unscoped lookup (useExactUserLookup) and branch on the truth:
+                - checking  → don't assert anything yet
+                - found     → offer an exact-match add (out-of-scope but real)
+                - notfound  → the definitive "no such user" state
+                - error     → soft fallback; verify by exact username on submit
+              Only claim non-existence when the search itself succeeded
+              (lastFetchOk); the `!lastFetchOk` branch below handles a search
+              that couldn't run. */}
           {canShowSettledEmptyState && lastFetchOk && (
             <div className="px-3 py-2">
-              <p className="text-[11px] text-muted-foreground">
-                {multiSelect && scopedSearch
-                  ? // Scoped search only sees org/project-overlap users
-                    // (AQU-321), so a miss is NOT proof the account doesn't
-                    // exist — don't claim it is.
-                    `No match among people who share an org or project with you.`
-                  : `No Aquilla user named "${trimmedRaw}".`}
-              </p>
-              {multiSelect && (
-                <button
-                  type="button"
-                  onClick={() => multiSelect.onStageTyped()}
-                  className="mt-1 inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
-                >
-                  Add "{trimmedRaw}" by exact username
-                </button>
-              )}
-              {showModeToggle && (
-                <button
-                  type="button"
-                  onClick={() => handleSwitchMode("email")}
-                  className="mt-1 inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
-                >
-                  <AtSign className="h-3 w-3" />
-                  Invite by email instead
-                </button>
+              {!exactLookupCurrent || exactLookup.status === "checking" ? (
+                <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <Spinner className="size-3" /> {t("workspace.typeahead.checkingExactMatch")}
+                </p>
+              ) : exactFoundUser ? (
+                <>
+                  <p className="text-[11px] text-muted-foreground">
+                    <RichMessage
+                      k="workspace.typeahead.exactMatchFound"
+                      values={{
+                        username: (
+                          <span className="font-medium text-foreground">
+                            {exactFoundUser.username}
+                          </span>
+                        ),
+                      }}
+                    />
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      multiSelect
+                        ? multiSelect.onToggleResult(exactFoundUser)
+                        : handlePick(exactFoundUser)
+                    }
+                    className="mt-1 inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+                  >
+                    <Check className="h-3 w-3" />{" "}
+                    {t("workspace.typeahead.addUser", { username: exactFoundUser.username })}
+                  </button>
+                </>
+              ) : exactAlreadyAdded ? (
+                <p className="text-[11px] text-muted-foreground">
+                  {t("workspace.typeahead.alreadyMember", { username: exactUser?.username ?? "" })}
+                </p>
+              ) : exactLookup.status === "notfound" ? (
+                <>
+                  <p className="text-[11px] text-muted-foreground">
+                    {t("workspace.typeahead.noUserNamed", { query: trimmedRaw })}
+                  </p>
+                  {showModeToggle && (
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchMode("email")}
+                      className="mt-1 inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
+                    >
+                      <AtSign className="h-3 w-3" />
+                      {t("workspace.typeahead.inviteByEmailInstead")}
+                    </button>
+                  )}
+                </>
+              ) : (
+                // Lookup couldn't confirm (network/endpoint error) — never
+                // dead-end; let the exact username be resolved on submit.
+                <>
+                  <p className="text-[11px] text-muted-foreground">
+                    {t("workspace.typeahead.noScopedMatch")}
+                  </p>
+                  {multiSelect && (
+                    <button
+                      type="button"
+                      onClick={() => multiSelect.onStageTyped()}
+                      className="mt-1 inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
+                    >
+                      {t("workspace.typeahead.addByExactUsername", { query: trimmedRaw })}
+                    </button>
+                  )}
+                  {showModeToggle && (
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchMode("email")}
+                      className="mt-1 inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
+                    >
+                      <AtSign className="h-3 w-3" />
+                      {t("workspace.typeahead.inviteByEmailInstead")}
+                    </button>
+                  )}
+                </>
               )}
             </div>
           )}
@@ -404,7 +479,7 @@ export function UsernameTypeahead({
           {canShowSettledEmptyState && !lastFetchOk && (
             <div className="px-3 py-2">
               <p className="text-[11px] text-muted-foreground">
-                Couldn't search right now — we'll verify the username when you submit.
+                {t("workspace.typeahead.searchUnavailable")}
               </p>
               {multiSelect && (
                 <button
@@ -412,7 +487,7 @@ export function UsernameTypeahead({
                   onClick={() => multiSelect.onStageTyped()}
                   className="mt-1 inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
                 >
-                  Add "{trimmedRaw}" by exact username
+                  {t("workspace.typeahead.addByExactUsername", { query: trimmedRaw })}
                 </button>
               )}
             </div>
@@ -436,7 +511,7 @@ export function UsernameTypeahead({
                         role="checkbox"
                         aria-checked={checked}
                         onClick={() => multiSelect.onToggleResult(u)}
-                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-muted ${
+                        className={`flex w-full items-center gap-2 px-3 py-1.5 text-start text-sm hover:bg-muted ${
                           checked ? "bg-muted/60" : ""
                         }`}
                       >
@@ -450,7 +525,13 @@ export function UsernameTypeahead({
                         >
                           {checked && <Check className="h-3 w-3" />}
                         </span>
-                        <span className="truncate">{u.username}</span>
+                        <span className="min-w-0 flex-1 truncate">
+                          <UsernameWithAvatar
+                            username={u.username}
+                            size="xs"
+                            nameClassName="text-sm font-normal"
+                          />
+                        </span>
                       </button>
                     </li>
                   )
@@ -462,11 +543,15 @@ export function UsernameTypeahead({
                     <button
                       type="button"
                       onClick={() => handlePick(u)}
-                      className={`flex w-full items-center justify-between px-3 py-1.5 text-left text-sm hover:bg-muted ${
+                      className={`flex w-full items-center justify-between px-3 py-1.5 text-start text-sm hover:bg-muted ${
                         isSelected ? "bg-muted/60" : ""
                       }`}
                     >
-                      <span>{u.username}</span>
+                      <UsernameWithAvatar
+                        username={u.username}
+                        size="xs"
+                        nameClassName="text-sm font-normal"
+                      />
                       {isSelected && (
                         <Check className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
                       )}
@@ -475,8 +560,8 @@ export function UsernameTypeahead({
                 )
               })}
               {isLoading && (
-                <li className="px-3 py-1 text-[10px] text-muted-foreground">
-                  Loading…
+                <li className="flex items-center px-3 py-1 text-muted-foreground">
+                  <Spinner className="size-3" />
                 </li>
               )}
             </ul>

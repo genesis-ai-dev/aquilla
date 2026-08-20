@@ -114,6 +114,34 @@ describe("buildBacktranslationPrompt", () => {
     })
     expect(empty[0].content).toBe(expected)
   })
+
+  it("injects the statistical project-pairs reading as a non-authoritative hint", () => {
+    const messages = buildBacktranslationPrompt({
+      sourceLanguage: "English",
+      targetLanguage: "French",
+      targetText: "maison de lui",
+      examples: [],
+      projectPairsGloss: "house of him",
+    })
+    const system = messages[0].content
+    expect(system).toContain("house of him")
+    expect(system).toContain("not authoritative")
+    expect(system).toContain("Stay literal")
+  })
+
+  it("omits the project-pairs block when the gloss is empty", () => {
+    const withEmpty = buildBacktranslationPrompt({
+      sourceLanguage: "English",
+      targetLanguage: "French",
+      targetText: "Bonjour",
+      examples: [],
+      projectPairsGloss: "  ",
+    })
+    const expected = BACKTRANSLATION_SYSTEM_PROMPT
+      .replace(/\{sourceLanguage\}/g, "English")
+      .replace(/\{targetLanguage\}/g, "French")
+    expect(withEmpty[0].content).toBe(expected)
+  })
 })
 
 describe("deriveTerminologyHints", () => {
@@ -245,5 +273,63 @@ describe("generateBacktranslation terminology seeding", () => {
     const system = lastCompleteArg().messages.find((m) => m.role === "system")!.content
     expect(system).toContain("esprit")
     expect(system).not.toContain("grâce")
+  })
+})
+
+describe("AQU-848 — the configured source language reaches the request payload", () => {
+  beforeEach(() => {
+    completeMock.mockClear()
+  })
+
+  it("carries a low-resource source language through verbatim", () => {
+    // The reported bug: a Gom-source project got English back-translations
+    // because the call site defaulted to "English". The configured language
+    // must reach the system message exactly as configured.
+    const messages = buildBacktranslationPrompt({
+      sourceLanguage: "Gom",
+      targetLanguage: "Gom",
+      targetText: "…",
+      examples: [],
+    })
+    expect(messages[0].content).toContain("BACK into Gom")
+    expect(messages[0].content).not.toContain("English")
+  })
+
+  it("does not name English when the project has no source language", () => {
+    // Unset must stay language-neutral rather than silently claiming English.
+    for (const unset of ["", "   "]) {
+      const messages = buildBacktranslationPrompt({
+        sourceLanguage: unset,
+        targetLanguage: "Gom",
+        targetText: "…",
+        examples: [],
+      })
+      expect(messages[0].content).toContain("BACK into the source language")
+      expect(messages[0].content).not.toContain("English")
+    }
+  })
+
+  it("still names English for a genuinely English-source project", () => {
+    const messages = buildBacktranslationPrompt({
+      sourceLanguage: "English",
+      targetLanguage: "Gom",
+      targetText: "…",
+      examples: [],
+    })
+    expect(messages[0].content).toContain("BACK into English")
+  })
+
+  it("sends the configured source language on the generated request", async () => {
+    await generateBacktranslation({
+      settings: { model: "m", temperature: 0.3 } as never,
+      session: null,
+      sourceLanguage: "Konkani (Goan)",
+      targetLanguage: "Konkani (Goan)",
+      targetText: "…",
+      examples: [],
+    })
+    const system = lastCompleteArg().messages.find((m) => m.role === "system")
+    expect(system?.content).toContain("Konkani (Goan)")
+    expect(system?.content).not.toContain("English")
   })
 })

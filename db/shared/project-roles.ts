@@ -21,6 +21,11 @@
 
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
 
+// AQU-435: mirrors auth-worker/src/services/project-permissions.ts's
+// ORG_WIDE_ACCESS_FLOOR (maintainer) — org-level roles below this contribute
+// no project access.
+const ORG_WIDE_ACCESS_FLOOR = 600
+
 const ROLE_NAMES: Record<number, string> = {
   100: "viewer",
   200: "commenter",
@@ -138,7 +143,13 @@ export async function resolveProjectRoleShared(
   if (override) contributions.push({ source: "override", level: override.role_level })
   if (group?.role_level != null)
     contributions.push({ source: "group", level: group.role_level })
-  if (org) contributions.push({ source: "org", level: org.role_level })
+  // AQU-435: the org path fires only at Maintainer+ — a sub-maintainer
+  // org_members row contributes nothing. Mirrors auth-worker's
+  // project-permissions.ts::resolveProjectRole; without this floor a PAT
+  // held by any org member (down to Viewer) resolved to full org-wide
+  // project access via the external Agent API.
+  if (org && org.role_level >= ORG_WIDE_ACCESS_FLOOR)
+    contributions.push({ source: "org", level: org.role_level })
   if (String(project.created_by) === String(user.id))
     contributions.push({ source: "creator", level: 700 })
   // Platform operators (ADMIN_EMAILS allowlist) get owner-level on every

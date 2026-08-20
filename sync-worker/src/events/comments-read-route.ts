@@ -158,6 +158,7 @@ export async function handleCommentsReadRequest(
     return Response.json({ comments })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    return new Response(`comments read failed: ${message}`, { status: 500 })
+    console.error('comments read failed:', message)
+    return new Response('comments read failed', { status: 500 })
   }
 }

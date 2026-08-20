@@ -1,9 +1,10 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react"
-import { MemoryRouter, Routes, Route } from "react-router-dom"
+import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { ProjectOverview, deriveProjectStatus } from "./ProjectOverview"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { ROLE } from "@/lib/frontier/roles"
 
 const navigate = vi.fn()
 vi.mock("react-router-dom", async (importActual) => {
@@ -21,6 +22,11 @@ vi.mock("@/lib/frontier/orgs", () => ({
   listOrgMembers: vi.fn(async () => []),
 }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
+vi.mock("./ProjectAutopilotPanel", () => ({
+  ProjectAutopilotPanel: ({ canStart }: { canStart: boolean }) => (
+    <div data-testid="project-autopilot-panel-mock" data-can-start={String(canStart)} />
+  ),
+}))
 
 const useProject = vi.fn()
 const refresh = vi.fn()
@@ -75,14 +81,18 @@ const setProjectPm = vi.fn(async (_jwt: string, _projectId: string, _pmUserId: n
 // (the org overview's PM column joins from it, AQU-507). Default to empty so
 // it never interferes with pre-existing tests.
 const fetchAccessibleProjects = vi.fn(async (_jwt: string): Promise<unknown[]> => [])
-vi.mock("@/lib/sync/cloud-projects", () => ({
+// Spread the real module rather than replacing it: ProjectOverview's tree
+// reaches cloud-projects through several paths (useProject -> resolveCloudProjectResult
+// / minimalProjectRecord, SharePanel, useProjectOrgId), and a factory listing
+// only the three functions this file drives makes every one of those an
+// "export is not defined on the mock" failure the moment a new caller appears.
+vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/sync/cloud-projects")>()),
   setProjectDeadline: vi.fn(),
   setProjectPm: (jwt: string, projectId: string, pmUserId: number | null) => setProjectPm(jwt, projectId, pmUserId),
   fetchAccessibleProjects: (jwt: string) => fetchAccessibleProjects(jwt),
-  // MembersTab -> useProjectOrgId (AQU-672) resolves the project's own org to
-  // seed member-add suggestions. These tests drive the roster through the
-  // member-scopes mock, so a miss keeps the suggestion path inert.
-  resolveCloudProjectResult: vi.fn(async () => ({ ok: false as const, reason: "not-found" as const })),
+  // MembersTab → useProjectOrgId reads this; keep it quiet so overview chrome still mounts.
+  resolveCloudProjectResult: vi.fn(async () => ({ ok: true as const, project: { id: "p1", orgId: 1 } })),
 }))
 const downloadProjectBundle = vi.fn()
 vi.mock("@/lib/sync/export-bundle", () => ({
@@ -148,6 +158,8 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   memberProgressViewMinRole: 600,
   // AQU-496: default leads-only (matches the server's safe default).
   allowSelfAssignment: false,
+  // AQU-822: default termbase-edit floor (project_lead), as the server resolves it.
+  termbaseEditMinRole: 500,
   refresh: vi.fn(async () => null),
   patch: vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })),
   requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
@@ -175,11 +187,29 @@ function projectRecord(over: Partial<ProjectRecord> & { level: number; deletedAt
   } as ProjectRecord
 }
 
+function SettingsLocationProbe() {
+  const location = useLocation()
+  const state = location.state as {
+    backgroundLocation?: { pathname?: string }
+    projectSettingsModalDepth?: number
+  } | null
+  return (
+    <div
+      data-testid="settings-location"
+      data-background={state?.backgroundLocation?.pathname}
+      data-depth={state?.projectSettingsModalDepth}
+    />
+  )
+}
+
 function renderOverview() {
   return render(
     <MemoryRouter initialEntries={["/projects/p1"]}>
       <OrgProvider>
-        <Routes><Route path="/projects/:id" element={<ProjectOverview />} /></Routes>
+        <Routes>
+          <Route path="/projects/:id" element={<ProjectOverview />} />
+          <Route path="/project/:id/settings" element={<SettingsLocationProbe />} />
+        </Routes>
       </OrgProvider>
     </MemoryRouter>,
   )
@@ -312,6 +342,61 @@ describe("ProjectOverview load states", () => {
   })
 })
 
+describe("ProjectOverview Autopilot discovery flag", () => {
+  it("hides the overview surface when contextualTranslation is opted out", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    getPortfolio.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({
+        level: 700,
+        experimentalFlags: { contextualTranslation: false },
+      }),
+      status: "ready",
+      refresh,
+    })
+
+    renderOverview()
+
+    await screen.findByRole("heading", { level: 1, name: "John" })
+    expect(screen.queryByTestId("project-autopilot-panel-mock")).not.toBeInTheDocument()
+  })
+
+  it("shows the overview surface under the default-on discovery flag", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    getPortfolio.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700 }),
+      status: "ready",
+      refresh,
+    })
+
+    renderOverview()
+
+    expect(await screen.findByTestId("project-autopilot-panel-mock")).toBeInTheDocument()
+  })
+
+  it("uses the fresh resolved role for Autopilot controls instead of the stale project cache", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    getPortfolio.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 700 }),
+      roleLevel: ROLE.VIEWER,
+      status: "ready",
+      refresh,
+    })
+
+    renderOverview()
+
+    expect(await screen.findByTestId("project-autopilot-panel-mock")).toHaveAttribute(
+      "data-can-start",
+      "false",
+    )
+  })
+})
+
 // ── Per-metric conditionality ──────────────────────────────────────────────
 
 describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
@@ -341,7 +426,7 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     // Neither audio tile may appear (audioCells === 0) — AQU-490: this also
     // guards against a false-positive "Audio Validated" figure on a
     // text-only project, since neither field exists to fabricate one from.
-    expect(screen.queryByText("Has Audio")).not.toBeInTheDocument()
+    expect(screen.queryByText("Has audio")).not.toBeInTheDocument()
     expect(screen.queryByText("Audio Validated")).not.toBeInTheDocument()
   })
 
@@ -365,7 +450,7 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     renderOverview()
 
     // Has Audio (coverage) tile should appear
-    await waitFor(() => expect(screen.getAllByText("Has Audio").length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0))
     // Translated and Validated must NOT appear (filledCells === 0 means showText is false,
     // but note: totalCells > 0 means hasText=true in current logic which guards on totalCells.
     // The real guard is audioCells > 0 for audio, and totalCells > 0 for text.
@@ -374,7 +459,7 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     // totalCells > 0 means there IS translatable content, so text bars appear even if empty.
     // The audio-only guard is specifically: audioCells > 0 shows Has Audio, always shows text when totalCells > 0.
     // This test therefore confirms Has Audio appears when audioCells > 0.
-    expect(screen.getAllByText("Has Audio").length).toBeGreaterThan(0)
+    expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0)
     // AQU-490: a distinct audio-validated count doesn't exist server-side
     // (see the in-component comment for the full investigation). The tile
     // must appear — labeled, honest, and reading "N/A" — never a fabricated
@@ -406,7 +491,7 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     }])
     renderOverview()
 
-    for (const label of ["Translated", "Validated", "Has Audio", "Audio Validated"]) {
+    for (const label of ["Translated", "Validated", "Has audio", "Audio Validated"]) {
       await waitFor(() => expect(screen.getAllByText(label).length).toBeGreaterThan(0))
     }
   })
@@ -573,7 +658,10 @@ describe("ProjectOverview file-breakdown column headers (AQU-492)", () => {
 // ── Archive / restore ──────────────────────────────────────────────────────
 
 describe("ProjectOverview archive/restore", () => {
-  it("owner sees Archive in overflow; clicking archives and returns to /projects", async () => {
+  const ARCHIVE_CHECKBOX =
+    "I understand this project will be hidden from the active list."
+
+  it("owner sees Archive in overflow; confirming archives and returns to /projects", async () => {
     useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
     archiveProjectRemote.mockResolvedValue({ kind: "archived", archivedAt: "now", archivedBy: { id: 1, username: "wendi" } })
     renderOverview()
@@ -585,8 +673,31 @@ describe("ProjectOverview archive/restore", () => {
     const btn = await screen.findByRole("menuitem", { name: "Archive" })
     fireEvent.click(btn)
 
+    // Confirm dialog — archive does not run until the checkbox is checked.
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    expect(archiveProjectRemote).not.toHaveBeenCalled()
+    expect(screen.getByRole("button", { name: "Archive" })).toBeDisabled()
+
+    fireEvent.click(screen.getByText(ARCHIVE_CHECKBOX))
+    fireEvent.click(screen.getByRole("button", { name: "Archive" }))
+
     await waitFor(() => expect(archiveProjectRemote).toHaveBeenCalledWith("p1", "jwt"))
-    expect(navigate).toHaveBeenCalledWith("/projects")
+    expect(navigate).toHaveBeenCalledWith("/orgs/1/projects")
+  })
+
+  it("canceling the archive dialog does not archive", async () => {
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
+    renderOverview()
+
+    fireEvent.click(await screen.findByRole("button", { name: "More actions" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Archive" }))
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
+    expect(archiveProjectRemote).not.toHaveBeenCalled()
+    expect(navigate).not.toHaveBeenCalled()
   })
 
   it("non-owner does not see the overflow menu (no archive)", async () => {
@@ -716,7 +827,7 @@ describe("ProjectOverview audio progress (AQU-160)", () => {
 
     // The progress section should be present (totalCells > 0).
     // The "Has Audio" label must appear in the StatBar list (AQU-490 relabel).
-    await waitFor(() => expect(screen.getAllByText("Has Audio").length).toBeGreaterThan(0))
+    await waitFor(() => expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0))
     // The audio StatBar displays "30%" in its percentage column.
     // getAllByText because translated (80%) and validated (50%) also render %.
     const pctLabels = screen.getAllByText(/^\d+%$/)
@@ -754,7 +865,7 @@ describe("ProjectOverview audio progress (AQU-160)", () => {
     // So we just confirm the progress section renders with text metrics.
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
     // Audio tiles should be hidden
-    expect(screen.queryByText("Has Audio")).not.toBeInTheDocument()
+    expect(screen.queryByText("Has audio")).not.toBeInTheDocument()
     expect(screen.queryByText("Audio Validated")).not.toBeInTheDocument()
   })
 })
@@ -859,6 +970,25 @@ describe("ProjectOverview project-only invitee access (AQU-474)", () => {
     expect(
       navigate.mock.calls.some((call: unknown[]) => call[0] === "/project/p1/editor"),
     ).toBe(true)
+  })
+
+  it("opens Project settings as a route modal over the overview", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [] }),
+      status: "ready",
+      refresh,
+    })
+    getPortfolio.mockResolvedValue([])
+
+    renderOverview()
+
+    const settings = await screen.findByRole("link", { name: "Project settings" })
+    expect(settings).toHaveAttribute("href", "/project/p1/settings")
+    fireEvent.click(settings)
+
+    const destination = await screen.findByTestId("settings-location")
+    expect(destination).toHaveAttribute("data-background", "/projects/p1")
+    expect(destination).toHaveAttribute("data-depth", "1")
   })
 })
 
@@ -1142,7 +1272,7 @@ describe("ProjectOverview chapter/verse rollup (AQU-493)", () => {
     const row = await screen.findByTestId("file-row")
     fireEvent.click(within(row).getByRole("button", { name: /^expand/i }))
 
-    expect(await screen.findByText(/no chapter structure detected/i)).toBeInTheDocument()
+    expect(await screen.findByText(/no section breakdown available/i)).toBeInTheDocument()
     expect(screen.queryByTestId("book-row")).not.toBeInTheDocument()
     expect(screen.queryByTestId("canonical-rollup-books")).not.toBeInTheDocument()
   })
@@ -1168,8 +1298,36 @@ describe("ProjectOverview chapter/verse rollup (AQU-493)", () => {
     expect(sectionRows[0]).toHaveTextContent("GEN")
     expect(sectionRows[0]).toHaveTextContent("1/0/2")
     expect(sectionRows[1]).toHaveTextContent("EXO")
-    expect(screen.queryByText(/no chapter structure detected/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/no section breakdown available/i)).not.toBeInTheDocument()
     expect(screen.queryByTestId("canonical-rollup-books")).not.toBeInTheDocument()
+  })
+
+  // AQU-805: a single-episode media file has no Bible chapters — the server
+  // groups it into ~5-minute time sections, which must render as a "Section
+  // breakdown" with jump-nav minute-range labels, not a flat cell count only.
+  it("expanding a media file renders time sections as a Section breakdown", async () => {
+    fetchProjectFiles.mockResolvedValue([fileSummary(1)])
+    getFileProgress.mockResolvedValue(progress([
+      { key: "t:000000000000", totalCount: 4, filledCount: 2, validatedCount: 1 },
+      { key: "t:000000600000", totalCount: 3, filledCount: 0, validatedCount: 0 },
+    ]))
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400, files: [{ id: "f1", name: "Episode.mp4", type: "video", createdAt: "x", cellCount: 7 }] }),
+      status: "ready", refresh,
+    })
+
+    renderOverview()
+
+    const row = await screen.findByTestId("file-row")
+    fireEvent.click(within(row).getByRole("button", { name: /^expand/i }))
+
+    expect(await within(row).findByLabelText("Section breakdown")).toBeInTheDocument()
+    const sectionRows = within(row).getAllByTestId("section-row")
+    expect(sectionRows).toHaveLength(2)
+    expect(sectionRows[0]).toHaveTextContent("0–5m")
+    expect(sectionRows[1]).toHaveTextContent("10–15m")
+    expect(screen.queryByTestId("canonical-rollup-books")).not.toBeInTheDocument()
+    expect(screen.queryByText(/no section breakdown available/i)).not.toBeInTheDocument()
   })
 
   it("collapsing and re-expanding a file does not re-fetch its compact progress", async () => {
@@ -1212,8 +1370,8 @@ describe("ProjectOverview chapter/verse rollup (AQU-493)", () => {
     const row = await screen.findByTestId("file-row")
     fireEvent.click(within(row).getByRole("button", { name: /^expand/i }))
 
-    const retry = await within(row).findByRole("button", { name: /chapter progress unavailable/i })
-    expect(within(row).queryByText(/no chapter structure detected/i)).not.toBeInTheDocument()
+    const retry = await within(row).findByRole("button", { name: /progress unavailable/i })
+    expect(within(row).queryByText(/no section breakdown available/i)).not.toBeInTheDocument()
     fireEvent.click(retry)
 
     expect(await within(row).findByTestId("book-row")).toBeInTheDocument()
@@ -1458,13 +1616,13 @@ describe("ProjectOverview CSV export (AQU-500)", () => {
   })
 })
 
-// ── AQU-538 §3.3: per-project lane table + lane filter pills ─────────────────
+// ── AQU-538 §3.3: per-project lane table + lane filter tabs ──────────────────
 
-describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
+describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
   // WHY: once a project has more than one target-language lane, a PM must see
   // per-lane progress + people + quick actions directly on the overview, and be
   // able to filter the header StatTiles / per-file drill-down to one lane. N=1
-  // projects must be byte-identical to the pre-lane overview (no table, no pills).
+  // projects must be byte-identical to the pre-lane overview (no table, no tabs).
 
   const NOW = new Date("2026-07-14T12:00:00Z").getTime()
 
@@ -1524,7 +1682,7 @@ describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
     expect(esRow).toHaveTextContent("8%")
   })
 
-  it("does not render the lane table (or pills) for a single-lane project", async () => {
+  it("does not render the lane table (or tabs) for a single-lane project", async () => {
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject({
       lanes: [{ lane: "", totalCells: 100, filledCells: 80, validatedCells: 50, lastEditAt: NOW }],
@@ -1534,42 +1692,43 @@ describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
     // The progress card still renders (Translated tile present) — just no lane UI.
     await waitFor(() => expect(screen.getAllByText("Translated").length).toBeGreaterThan(0))
     expect(screen.queryByTestId("overview-lane-table")).not.toBeInTheDocument()
-    expect(screen.queryByTestId("lane-filter-pills")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("lane-filter-tabs")).not.toBeInTheDocument()
   })
 
-  it("selecting a lane pill swaps the header StatTile percentages to that lane's numbers", async () => {
+  it("selecting a lane tab swaps the header StatTile percentages to that lane's numbers", async () => {
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject()])
     renderOverview()
 
-    await screen.findByTestId("lane-filter-pills")
+    await screen.findByTestId("lane-filter-tabs")
 
     // "All" (default) — cross-lane scalars: 100/200 = 50% translated, 58/200 = 29% validated.
     expect(statTile("Translated")).toHaveTextContent("50%")
     expect(statTile("Validated")).toHaveTextContent("29%")
 
     // Filter to es — laneTranslatedPct(es) = 20/100 = 20%, laneValidatedPct = 8/100 = 8%.
-    fireEvent.click(screen.getByTestId("lane-pill-es"))
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
     await waitFor(() => expect(statTile("Translated")).toHaveTextContent("20%"))
     expect(statTile("Validated")).toHaveTextContent("8%")
 
     // Back to All restores the cross-lane figures.
-    fireEvent.click(screen.getByTestId("lane-pill-all"))
+    fireEvent.click(screen.getByRole("tab", { name: "All" }))
     await waitFor(() => expect(statTile("Translated")).toHaveTextContent("50%"))
   })
 
-  it("each lane row's Open link deep-links the workspace at that lane (?lane=)", async () => {
+  it("lane row ⋯ menu has Assign and Staff, not Open", async () => {
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject()])
     renderOverview()
 
     await screen.findByTestId("overview-lane-table")
-    expect(screen.getByTestId("overview-lane-open-es").getAttribute("href")).toBe("/project/p1/editor?lane=es")
-    // The default lane opens the workspace with no lane param (today's behavior).
-    expect(screen.getByTestId("overview-lane-open-default").getAttribute("href")).toBe("/project/p1/editor")
+    fireEvent.click(screen.getByTestId("overview-lane-actions-es"))
+    expect(screen.queryByRole("menuitem", { name: /^open$/i })).not.toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: /assign/i })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: /staff/i })).toBeInTheDocument()
   })
 
-  it("Assign… on a lane row mounts AssignModal pinned to that lane", async () => {
+  it("Assign… from a lane row ⋯ menu mounts AssignModal pinned to that lane", async () => {
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject()])
     renderOverview()
@@ -1578,7 +1737,8 @@ describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
     // Closed until launched.
     expect(screen.queryByTestId("assign-modal-mock")).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByTestId("overview-lane-assign-es"))
+    fireEvent.click(screen.getByTestId("overview-lane-actions-es"))
+    fireEvent.click(screen.getByRole("menuitem", { name: /assign/i }))
     const modal = await screen.findByTestId("assign-modal-mock")
     expect(modal.getAttribute("data-lane")).toBe("es")
   })
@@ -1619,8 +1779,8 @@ describe("ProjectOverview lane table + pills (AQU-538 §3.3)", () => {
     })
     renderOverview()
 
-    await screen.findByTestId("lane-filter-pills")
-    fireEvent.click(screen.getByTestId("lane-pill-es"))
+    await screen.findByTestId("lane-filter-tabs")
+    fireEvent.click(screen.getByRole("tab", { name: "es" }))
 
     const row = await screen.findByTestId("file-row")
     fireEvent.click(within(row).getByRole("button", { name: /^expand/i }))

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { describe, it, expect } from "vitest"
-import { injectInviteMeta } from "./index"
+import "./index"
 
 // A trimmed copy of the built index.html social-meta block, used to assert the
 // invite-link rewrite hits the real markup shape.
@@ -45,95 +45,46 @@ async function fetchWorker(path: string, cookie?: string) {
 }
 
 describe("worker/index — routing", () => {
-  // `/` is the marketing homepage for everyone. It used to branch on the
-  // aq_hint cookie; that never actually ran in production (the asset router
-  // preempted the Worker) and it made the most-requested URL on the site
-  // uncacheable. Identity is resolved in the browser now — AppEntryBanner.
-  it("GET / serves homepage.html with no cookie", async () => {
+  // The marketing routes belong to the aquilla-marketing Worker in production:
+  // its zone routes are more specific than this Worker's aquilla.app/* catch-all.
+  // When this Worker sees one on a preview alias, it falls through to the SPA.
+  it("GET / passes through to ASSETS (SPA shell)", async () => {
     const res = await fetchWorker("/")
-    expect(await res.text()).toBe("served:/homepage.html")
+    expect(await res.text()).toBe("served:/")
   })
 
-  it("GET / serves homepage.html even with aq_hint=1 — no identity branch", async () => {
-    const res = await fetchWorker("/", "aq_hint=1")
-    expect(await res.text()).toBe("served:/homepage.html")
-  })
-
-  it("GET / is byte-identical regardless of cookies, so it can be shared-cached", async () => {
-    const anon = await (await fetchWorker("/")).text()
-    const signedIn = await (await fetchWorker("/", "aq_hint=1")).text()
-    const other = await (await fetchWorker("/", "someone=else")).text()
-    expect(signedIn).toBe(anon)
-    expect(other).toBe(anon)
-  })
-
-  it("GET / is edge-cacheable and does not vary on Cookie", async () => {
-    const res = await fetchWorker("/", "aq_hint=1")
-    const cc = res.headers.get("Cache-Control") ?? ""
-    expect(cc).toContain("public")
-    expect(cc).toMatch(/s-maxage=\d+/)
-    expect(cc).not.toContain("no-store")
-    expect(res.headers.get("Vary") ?? "").not.toMatch(/cookie/i)
-  })
-
-  it("GET /homepage always serves homepage.html (no cookie)", async () => {
-    const res = await fetchWorker("/homepage")
-    expect(await res.text()).toBe("served:/homepage.html")
-  })
-
-  it("GET /homepage always serves homepage.html (even with aq_hint=1)", async () => {
-    const res = await fetchWorker("/homepage", "aq_hint=1")
-    expect(await res.text()).toBe("served:/homepage.html")
-  })
-
-  it("GET /bible-translation always serves bible-translation.html (no cookie)", async () => {
-    const res = await fetchWorker("/bible-translation")
-    expect(await res.text()).toBe("served:/bible-translation.html")
-  })
-
-  it("GET /bible-translation always serves bible-translation.html (even with aq_hint=1)", async () => {
-    const res = await fetchWorker("/bible-translation", "aq_hint=1")
-    expect(await res.text()).toBe("served:/bible-translation.html")
-  })
-
-  it("GET /beta serves beta.html (static marketing page, no cookie)", async () => {
+  it("GET /beta passes through to ASSETS — no marketing routing here", async () => {
     const res = await fetchWorker("/beta")
-    expect(await res.text()).toBe("served:/beta.html")
-  })
-
-  it("GET /beta serves beta.html even when signed in (aq_hint=1)", async () => {
-    const res = await fetchWorker("/beta", "aq_hint=1")
-    expect(await res.text()).toBe("served:/beta.html")
-  })
-
-  it("GET /betamax is NOT treated as the /beta page (passes through to ASSETS)", async () => {
-    const res = await fetchWorker("/betamax")
-    expect(await res.text()).toBe("served:/betamax")
-  })
-
-  it("GET /case-studies/come-and-see serves case-study.html (static marketing page)", async () => {
-    const res = await fetchWorker("/case-studies/come-and-see")
-    expect(await res.text()).toBe("served:/case-study.html")
-  })
-
-  it("GET /case-studies/come-and-see serves case-study.html even when signed in", async () => {
-    const res = await fetchWorker("/case-studies/come-and-see", "aq_hint=1")
-    expect(await res.text()).toBe("served:/case-study.html")
-  })
-
-  it("GET /case-studies/biblica serves case-study-biblica.html (static marketing page)", async () => {
-    const res = await fetchWorker("/case-studies/biblica")
-    expect(await res.text()).toBe("served:/case-study-biblica.html")
-  })
-
-  it("GET /case-studies/biblica serves case-study-biblica.html even when signed in", async () => {
-    const res = await fetchWorker("/case-studies/biblica", "aq_hint=1")
-    expect(await res.text()).toBe("served:/case-study-biblica.html")
+    expect(await res.text()).toBe("served:/beta")
   })
 
   it("GET /project/abc passes through to ASSETS unchanged", async () => {
     const res = await fetchWorker("/project/abc")
     expect(await res.text()).toBe("served:/project/abc")
+  })
+
+  // /app is the stable entry target linked by the separate marketing site.
+  it("GET /app passes through to ASSETS (SPA shell)", async () => {
+    const res = await fetchWorker("/app")
+    expect(await res.text()).toBe("served:/app")
+  })
+
+  it("GET /app is served the SPA shell even when signed in (aq_hint=1)", async () => {
+    const res = await fetchWorker("/app", "aq_hint=1")
+    expect(await res.text()).toBe("served:/app")
+  })
+
+  // AQU-795 / AQU-719 regression guard: a previously Google-indexed interior URL
+  // must resolve to the SPA shell (not_found_handling = single-page-application
+  // rewrites it to index.html) so React Router opens the page directly — never
+  // bounced to marketing and never the old "page not found until you navigate
+  // from home" symptom. Marketing routes never reach this Worker on the live
+  // custom domains because their more-specific Worker routes win first.
+  it("GET interior deep links pass through to ASSETS (SPA shell), not marketing", async () => {
+    for (const path of ["/orgs/abc", "/project/abc/editor", "/shared", "/settings"]) {
+      const res = await fetchWorker(path)
+      expect(await res.text(), `${path} must reach the SPA shell`).toBe(`served:${path}`)
+    }
   })
 
   it("GET /join/xyz passes through to ASSETS (non-HTML body unchanged)", async () => {
@@ -207,7 +158,7 @@ describe("worker/index — non-canonical host noindex (SEO)", () => {
   it("dev.aquilla.app responses carry X-Robots-Tag: noindex", async () => {
     const res = await fetchHost("dev.aquilla.app")
     expect(res.headers.get("X-Robots-Tag")).toBe("noindex")
-    expect(await res.text()).toBe("served:/homepage.html")
+    expect(await res.text()).toBe("served:/")
   })
 
   it("workers.dev preview responses carry X-Robots-Tag: noindex", async () => {
@@ -227,37 +178,101 @@ describe("worker/index — non-canonical host noindex (SEO)", () => {
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Deployment-config contract.
-//
-// The routing tests above call the Worker's `fetch` directly. In production the
-// Cloudflare asset router runs BEFORE the Worker and serves any path it can
-// resolve to an asset — and `/` resolves to index.html. So "GET / with no
-// cookie serves homepage.html" passed here for months while aquilla.app/`
-// served the empty SPA shell to every signed-out visitor and crawler.
-//
-// `run_worker_first` is what makes the tests above describe reality. It is
-// deployment config, not code, so it needs its own assertion — this is the
-// level the regression escaped at.
-describe("wrangler.toml — asset router must not preempt the Worker at /", () => {
+// Deployment-config contract. The marketing Worker owns `/`; making this
+// catch-all run first there would add latency and imply ownership it no longer has.
+describe("wrangler.toml — SPA-only asset serving", () => {
   const toml = readFileSync(resolve(__dirname, "../wrangler.toml"), "utf8")
   const assetBlocks = toml.split(/^\[.*assets\]$/m).slice(1)
 
   it("declares an assets block per environment", () => {
-    // top-level + production + development + staging + preview
-    expect(assetBlocks).toHaveLength(5)
+    // top-level + preview + production + development. Was 5 until AQU-799
+    // retired the staging environment (7c2c3b5) without updating this count —
+    // the assertion has been failing ever since, unnoticed because no CI job
+    // runs this suite (see docs/OPSEC-REVIEW-2026-08-10.md, OPS-4).
+    expect(assetBlocks).toHaveLength(4)
   })
 
-  it("runs the Worker first for / in every environment", () => {
-    for (const block of assetBlocks) {
-      const decl = /run_worker_first\s*=\s*\[([^\]]*)\]/.exec(block)
-      expect(decl, `an assets block is missing run_worker_first:\n${block.trim().slice(0, 200)}`).toBeTruthy()
-      expect(decl![1]).toContain('"/"')
-    }
+  it("has no run_worker_first — the root is not special here", () => {
+    expect(toml).not.toContain("run_worker_first")
   })
 
   it("keeps SPA fallback on, so app routes still resolve to index.html", () => {
     for (const block of assetBlocks) {
       expect(block).toContain('not_found_handling = "single-page-application"')
     }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Security headers (docs/OPSEC-REVIEW-2026-08-10.md, OPS-1).
+//
+// The browser build shipped with no CSP and no framing/transport hardening
+// while the Tauri shell had a real CSP. These guard the split rollout: the
+// enforced policy stays limited to directives that cannot break a working
+// page, and the full policy ships report-only until its violations are clean.
+describe("worker/index — security headers", () => {
+  it("sets the enforced CSP on every response it serves", async () => {
+    for (const path of ["/", "/app", "/project/abc"]) {
+      const res = await fetchWorker(path)
+      const csp = res.headers.get("Content-Security-Policy") ?? ""
+      expect(csp, `${path} must carry a CSP`).toContain("object-src 'none'")
+      expect(csp).toContain("base-uri 'self'")
+      expect(csp).toContain("frame-ancestors 'self'")
+      expect(csp).toContain("form-action 'self'")
+    }
+  })
+
+  it("keeps script-src/connect-src report-only so a wrong host cannot break prod", async () => {
+    const res = await fetchWorker("/app")
+    const enforced = res.headers.get("Content-Security-Policy") ?? ""
+    const reportOnly = res.headers.get("Content-Security-Policy-Report-Only") ?? ""
+    expect(enforced).not.toContain("script-src")
+    expect(enforced).not.toContain("connect-src")
+    expect(reportOnly).toContain("script-src 'self' 'wasm-unsafe-eval'")
+    expect(reportOnly).toContain("connect-src")
+    expect(reportOnly).toContain("default-src 'self'")
+  })
+
+  it("sets nosniff, framing, referrer and permissions headers", async () => {
+    const res = await fetchWorker("/app")
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff")
+    expect(res.headers.get("X-Frame-Options")).toBe("SAMEORIGIN")
+    expect(res.headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin")
+    const pp = res.headers.get("Permissions-Policy") ?? ""
+    // Audio recording (getUserMedia) must keep working; nothing else is used.
+    expect(pp).toContain("microphone=(self)")
+    expect(pp).toContain("camera=()")
+    expect(pp).toContain("geolocation=()")
+  })
+
+  it("sends HSTS on real hosts and never on localhost", async () => {
+    const { default: worker } = await import("./index")
+    const prod = await worker.fetch(new Request("https://aquilla.app/app"), makeEnv())
+    expect(prod.headers.get("Strict-Transport-Security")).toContain("max-age=31536000")
+    const local = await worker.fetch(new Request("http://localhost:5173/app"), makeEnv())
+    expect(local.headers.get("Strict-Transport-Security")).toBeNull()
+  })
+
+  it("still applies X-Robots-Tag on non-canonical hosts alongside the new headers", async () => {
+    const { default: worker } = await import("./index")
+    const res = await worker.fetch(new Request("https://dev.aquilla.app/app"), makeEnv())
+    expect(res.headers.get("X-Robots-Tag")).toBe("noindex")
+    expect(res.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'self'")
+  })
+
+  it("does not throw when the asset binding returns a null-body status (304)", async () => {
+    const { default: worker } = await import("./index")
+    const env = {
+      ASSETS: { fetch: async (): Promise<Response> => new Response(null, { status: 304 }) },
+    }
+    const res = await worker.fetch(new Request("https://aquilla.app/app"), env)
+    expect(res.status).toBe(304)
+    expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff")
+  })
+
+  it("leaves the routed body and cache policy untouched", async () => {
+    const res = await fetchWorker("/")
+    expect(await res.text()).toBe("served:/")
+    expect(res.headers.get("Cache-Control")).toBeNull()
   })
 })

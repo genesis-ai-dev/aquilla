@@ -16,6 +16,10 @@ import { notifyProjectDo } from "./archive-broadcast"
 import { handleCorsPreflight, withCors } from "./cors"
 import { handleProjectArchiveRequest } from "./project-archive"
 import { handleMemberRemovedRequest, notifyProjectDoMemberRemoved } from "./member-removed"
+import {
+  handleMemberRoleChangedRequest,
+  notifyProjectDoMemberRoleChanged,
+} from "./member-role-changed"
 import { handleProjectSettingsChangedRequest } from "./project-settings-notify"
 import { handleContextualActivityRequest } from "./contextual-activity-notify"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
@@ -29,6 +33,7 @@ import { handleCellLinksReadRequest } from "./events/cell-links-read-route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
 import { handleExternalChangesetsRequest } from "./external/changesets-route"
+import { handleSessionChangesetsRequest } from "./external/session-routes"
 import { handleExternalArtifactsRequest } from "./external/artifacts-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleProgressReadRequest } from "./events/progress-read-route"
@@ -39,6 +44,7 @@ import { handleMigrateIngestRequest } from "./events/migrate-ingest-route"
 import { handleMigrateSettingsRequest } from "./events/migrate-settings-route"
 import { handleMigrateProjectRequest } from "./events/migrate-project-route"
 import { handleMigrateEventIdsRequest } from "./events/migrate-event-ids-route"
+import { handleMigrateCellIdsRequest } from "./events/migrate-cell-ids-route"
 import { handleMigrateFinalizeRequest } from "./events/migrate-finalize-route"
 import { handleMigrateAudioRequest } from "./events/migrate-audio-route"
 import { handleMigrateAudioCopyRequest } from "./events/migrate-audio-copy-route"
@@ -70,7 +76,7 @@ export { ProjectSync } from "./project-do"
 export { FileSync } from "./file-sync-legacy"
 import { makePostgres } from "../../db/shim/postgres"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
-import { deploymentEnvironmentError } from "./environment-guard"
+import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace -- Cloudflare namespace augmentation requires this syntax
@@ -99,10 +105,21 @@ declare global {
       HYPERDRIVE?: Hyperdrive
       /** Shared HMAC key with identity that mints /sync-token JWTs. */
       SYNC_SECRET_KEY?: string
+      /**
+       * OPS-2: dedicated bearer for the operator-only routes (`/admin/files/*`,
+       * `DELETE /audio/*`), so ops calls never carry the token-signing key.
+       * When unset those routes fall back to SYNC_SECRET_KEY; when set, it is
+       * the only value they accept. See `lib/admin-secret.ts`.
+       */
+      ADMIN_SECRET?: string
       /** Deployment profile used to reject cross-environment custom-domain traffic. */
       ENVIRONMENT?: string
       /** Base URL of the identity worker in the same deployment environment. */
       AUTH_WORKER_URL?: string
+      /** Exact Worker namespace selected by the deployment profile. */
+      DEPLOYMENT_WORKER_NAME?: string
+      /** Cloudflare version metadata used to reject a version from another namespace. */
+      CF_VERSION_METADATA?: { id: string; tag: string; timestamp: string }
       /**
        * Dev escape hatch. "true" disables JWT verification for ProjectSync
        * WS connections. Set to "false" (or omit) in production.
@@ -221,6 +238,20 @@ const worker = {
       )
     }
 
+    // Separate from the binding check above: that one only fires on the two
+    // first-party API hostnames, while the auth bypass is unsafe on ANY
+    // deployed worker (workers.dev aliases and PR previews included).
+    const bypassError = unauthenticatedBypassError(env)
+    if (bypassError) {
+      console.error("Refusing request with the sync auth bypass enabled", { bypassError })
+      return withCors(
+        new Response("Worker deployment configuration does not match this API environment", {
+          status: 503,
+        }),
+        request,
+      )
+    }
+
     // Postgres (Neon) is the only datastore. Serve AQUILLA_PG via the
     // D1-compatible Postgres shim (per-request connection, closed after the
     // response). HYPERDRIVE is required — without it we fail fast instead of
@@ -245,6 +276,14 @@ const worker = {
       notifyProjectDoMemberRemoved,
     )
     if (memberRemovedResponse) return memberRemovedResponse
+    // [Pen test 2026-08-17] sync a live connection's cached role after a
+    // direct project-member role change, without forcing a reconnect.
+    const memberRoleChangedResponse = await handleMemberRoleChangedRequest(
+      request,
+      env,
+      notifyProjectDoMemberRoleChanged,
+    )
+    if (memberRoleChangedResponse) return memberRoleChangedResponse
     const projectSettingsChangedResponse = await handleProjectSettingsChangedRequest(request, env)
     if (projectSettingsChangedResponse) return projectSettingsChangedResponse
     const contextualActivityResponse = await handleContextualActivityRequest(request, env)
@@ -328,6 +367,8 @@ const worker = {
     if (migrateProjectResponse) return migrateProjectResponse
     const migrateEventIdsResponse = await handleMigrateEventIdsRequest(request, env)
     if (migrateEventIdsResponse) return migrateEventIdsResponse
+    const migrateCellIdsResponse = await handleMigrateCellIdsRequest(request, env)
+    if (migrateCellIdsResponse) return migrateCellIdsResponse
     const migrateFinalizeResponse = await handleMigrateFinalizeRequest(request, env)
     if (migrateFinalizeResponse) return migrateFinalizeResponse
     const migrateAudioResponse = await handleMigrateAudioRequest(request, env)
@@ -354,6 +395,13 @@ const worker = {
     // AQU-533: Agent API changeset engine (external command layer).
     const externalChangesetsResponse = await handleExternalChangesetsRequest(request, env, ctx)
     if (externalChangesetsResponse) return withCors(externalChangesetsResponse, request)
+
+    // AQU-926: session-token changeset routes (/api/v1/changesets/*) — the
+    // in-app agent harness + review card drive the same engine with the
+    // browser's sync token. Disjoint from /api/v1/external/* and
+    // /api/v1/projects/* so ordering here is not load-bearing.
+    const sessionChangesetsResponse = await handleSessionChangesetsRequest(request, env, ctx)
+    if (sessionChangesetsResponse) return withCors(sessionChangesetsResponse, request)
 
     // AQU-533: Agent API remote MCP server (tools-only, streamable HTTP).
     const externalMcpResponse = await handleExternalMcpRequest(request, env, ctx)

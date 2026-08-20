@@ -1,73 +1,19 @@
-import type { ImportMilestone, ImportSourceLocator } from "../../../shared/import-contract"
+// The parse-core data types (TranslatableString and friends) live in
+// core-types.ts (pure — importable by the parse Web Worker and the sync-worker
+// without dragging in this module's deeper workspace type graph). Re-exported
+// here so every existing "@/lib/parsers/types" import keeps working unchanged.
+export type {
+  CellType,
+  SourceLocation,
+  TranslatableString,
+  ParsedTextFileResult,
+  ExportCellFields,
+} from "./core-types"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { PersistedTrackOverrides } from "@/lib/timeline/tracks"
 import type { CameraState } from "@/lib/sync/cells-read-types"
 
-export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
-
-export type CellType =
-  | "text"
-  | "heading"
-  | "list"
-  | "blockquote"
-  | "cue"
-  | "verse"
-  | "paratext"
-
-export interface SourceLocation {
-  file: string       // e.g. "word/document.xml", "ppt/slides/slide3.xml"
-  blockPath: string  // indexed path to block, e.g. "w:p[2]" or "p:sp[1]/p:txBody/a:p[3]"
-}
-
-export interface TranslatableString {
-  id: string
-  original: string
-  originalHtml?: string
-  translated: string
-  /** Rich target initialized by format-aware parsers. IDML uses this for its
-   * protected empty slot anchors even before any translated words exist. */
-  translatedHtml?: string
-  context: string
-  group: string
-  /** Optional section label for navigation/progress. USFM/ebible set this to "BOOK CHAPTER" (e.g. "GEN 1"). */
-  section?: string
-  /** Explicit semantic milestone supplied by a specialized parser. The shared
-   * planner validates/fills this into every normalized import unit. */
-  milestone?: ImportMilestone
-  /**
-   * Semantic tags external to cell identity. For scripture, the verse ref(s) this cell represents,
-   * e.g. ["LUK 1:1"] or ["LUK 1:1", "LUK 1:2"] for a verse range. Mirrors the codex-editor
-   * extension's `metadata.data.globalReferences`. Empty/omitted for non-scripture content.
-   * Section labels in the sidebar are derived from these when present.
-   */
-  globalReferences?: string[]
-  /** Cue start/end in seconds, parsed from a subtitle timestamp line. Present
-   *  only for `type: "cue"` strings from VTT/SRT import; drives `start_ms`/
-   *  `end_ms` persistence. */
-  start?: number
-  end?: number
-  /** Speaker extracted from a `<v Name>` VTT voice tag, if present. Maps to a
-   *  Cast member on import. */
-  speaker?: string
-  /** Timeline-segment-model: primary content kind. Absent ⇒ 'text'. Set to
-   *  'media' only by the audio/video media-import path (Part B). */
-  medium?: "text" | "media"
-  /** D1: true on the first cell of a paragraph block. Absent/false = continuation.
-   *  Drives paragraph grouping for multi-cell draft operations. */
-  paragraphStart?: boolean
-  /**
-   * Extensible per-cell metadata bucket, mirrored through the import path into
-   * `BulkImportCell.metadata` → `source.cell.create` payload → `cells.metadata`
-   * (JSONB). OBS populates `{ attachments: [{ type: "image", url, alt }] }` —
-   * one frame's reference image per cell. Future attachment kinds (gif/video/
-   * audio) reuse the same bucket without a schema change. Absent for content
-   * with no attachments.
-   */
-  metadata?: Record<string, unknown>
-  type: CellType
-  sourceLocation?: SourceLocation
-  /** Exact format locator when a package-block locator would lose identity. */
-  sourceLocator?: ImportSourceLocator
-}
+export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "epub" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
 
 /** File types whose parsers produce scripture-style sections (globalReferences populated, section labels meaningful). */
 export const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set(["usfm", "ebible", "helloao"])
@@ -184,11 +130,35 @@ export interface RuleWaiver {
   waivedBy?: string
 }
 
+/**
+ * Which predicate fired. `rule-engine.ts` is a pure, locale-less sync
+ * function (called from memos and from the hot keystroke path), so it can't
+ * compose a localized sentence itself — it returns a reason CODE instead,
+ * and a render-time helper (`formatInfractionReason` /
+ * `formatInfractionMessage` in `src/lib/rules/format-infraction.ts`) turns
+ * that into text via `t()`. `builtin:${BuiltinCheckId}` covers the ten
+ * algorithmic checks; the other three are the user-authored rule shapes.
+ */
+export type RuleInfractionReason =
+  | "target-forbids"
+  | "source-requires-target"
+  | "source-target-match"
+  | `builtin:${BuiltinCheckId}`
+
 export interface RuleInfraction {
   ruleId: string
   cellId: string
   fileId: string
-  message: string
+  /** Reason code for the predicate that fired — see `RuleInfractionReason`. */
+  reason: RuleInfractionReason
+  /**
+   * Values substituted into the localized reason text. For
+   * `builtin:placeholder-integrity`: `tokens` (the missing placeholder(s),
+   * joined) and `count` (how many) — both are RAW content lifted from the
+   * cell (via `InfractionSpan.matchedText`) and must never be routed through
+   * `t()`, only interpolated as a variable.
+   */
+  reasonParams?: Record<string, string>
   /** Triggering text spans. Empty when the violation has no identifiable
    *  concrete match (e.g. absence rules with no source trigger) — those
    *  fall back to the gutter icon only. */
@@ -223,22 +193,26 @@ export type AudioMediaStrategy =
    *  button the user has to click. */
   | "manual"
 
-export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { name: string; description: string }> = {
+// AQU-832: this is a pure lib (no React, no `useT()`) so labels are catalog
+// keys a component resolves with `t()` — same "return a descriptor, let the
+// caller localize" shape as `roleNameKey()`/`roleDescriptionKey()` in
+// src/lib/frontier/roles.ts. Only AudioMediaStrategySection.tsx renders these.
+export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { nameKey: MessageKey; descriptionKey: MessageKey }> = {
   stream: {
-    name: "Stream",
-    description: "Play directly from the network. No local cache, no waveforms unless you opt in.",
+    nameKey: "projectSettings.audioMedia.strategyStreamName",
+    descriptionKey: "projectSettings.audioMedia.strategyStreamDescription",
   },
   lazy: {
-    name: "Lazy (default)",
-    description: "Download a cell's audio when you scroll to it or press play. Caches locally.",
+    nameKey: "projectSettings.audioMedia.strategyLazyName",
+    descriptionKey: "projectSettings.audioMedia.strategyLazyDescription",
   },
   eager: {
-    name: "Eager",
-    description: "Prefetch every cell's waveform when the file opens. Best for offline review.",
+    nameKey: "projectSettings.audioMedia.strategyEagerName",
+    descriptionKey: "projectSettings.audioMedia.strategyEagerDescription",
   },
   manual: {
-    name: "Manual",
-    description: "Don't auto-download anything. You click a button per cell to load it.",
+    nameKey: "projectSettings.audioMedia.strategyManualName",
+    descriptionKey: "projectSettings.audioMedia.strategyManualDescription",
   },
 }
 
@@ -367,17 +341,20 @@ export interface CellTtsSettings {
  */
 export type AudioTimingMode = "dubbing" | "audioFirst"
 
-/** The one place the two modes' user-facing names live — consumed by the
- *  Project Settings card AND the media-lens toolbar note (2026-08-05: the
- *  control moved into settings; the toolbar shows a note). */
-export const AUDIO_TIMING_MODE_LABELS: Record<AudioTimingMode, { name: string; description: string }> = {
+/** The one place the two modes' user-facing names live — consumed by
+ *  TimingModeChangedDialog. Catalog keys, not display strings — `src/lib/`
+ *  can't call `useT()`, so the caller resolves them with `t()` at render
+ *  time. Reuses the exact same `editor.timeline.timingMode*` keys
+ *  `TimelineEditor.tsx`'s `TIMING_MODE_KEYS` table already resolves, so the
+ *  two never drift. */
+export const AUDIO_TIMING_MODE_LABELS: Record<AudioTimingMode, { nameKey: MessageKey; descriptionKey: MessageKey }> = {
   dubbing: {
-    name: "Original's timing",
-    description: "The translation is fitted to the original recording's timing.",
+    nameKey: "editor.timeline.timingModeDubbing",
+    descriptionKey: "editor.timeline.timingModeDubbingHint",
   },
   audioFirst: {
-    name: "Free timing",
-    description: "Verses are laid end to end — each takes as much room as its longer side.",
+    nameKey: "editor.timeline.timingModeFree",
+    descriptionKey: "editor.timeline.timingModeFreeHint",
   },
 }
 
@@ -386,6 +363,16 @@ export interface ProjectRecord {
   name: string
   /** Owning org id when the project was hydrated from the server. */
   orgId?: number | null
+  /**
+   * AQU-822: the org's effective `termbaseEditMinRole` — the minimum role
+   * allowed to manage this project's termbase (add/edit/delete/archive
+   * concepts). Sent by the single-project endpoint so the terminology UI and
+   * its settings write share one floor without a second org-settings fetch.
+   * Absent (older server / local-only project) ⇒ the PROJECT_LEAD default in
+   * `src/lib/terminology/glossary-view.ts`. The server re-resolves it on
+   * every terminology write, so this is an affordance value, not authority.
+   */
+  termbaseEditMinRole?: number | null
   sourceLanguage: string
   targetLanguage: string
   /**
@@ -500,10 +487,10 @@ export interface ProjectRecord {
   /** Soft-delete marker. When present the project is in Trash; the Dashboard
    * hides it from "Your projects" and shows it under the Trash section. Set by
    * owner-triggered archive (local projects) or by a sync signal from
-   * frontier-server (cloud-synced projects). */
+   * auth-worker (cloud-synced projects). */
   deletedAt?: string
-  /** Display name of whoever archived the project. Populated from frontier-
-   * server's response, or from the local session for purely local projects. */
+  /** Display name of whoever archived the project. Populated from
+   * auth-worker's response, or from the local session for purely local projects. */
   deletedBy?: string
   /**
    * Active/inactive lifecycle state (migration 0033, AQU-214).
@@ -776,8 +763,8 @@ export interface CompletionSettings {
   // ── v1 AI retrieval-tuning settings (spec: ai-copilot.md config table) ────
 
   /**
-   * How many few-shot examples to retrieve per completion call.
-   * Spec key: `top_k`. Default 15.
+   * Total approved few-shot example budget per completion call.
+   * Spec key: `top_k`. Default 10 for Luna.
    */
   top_k?: number
 
@@ -954,6 +941,7 @@ export function detectFileType(fileName: string): FileType | null {
     txt: "txt",
     html: "html",
     htm: "html",
+    epub: "epub",
     json: "json",
     arb: "json",
     po: "po",

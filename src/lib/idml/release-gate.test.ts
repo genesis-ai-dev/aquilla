@@ -6,7 +6,7 @@ describe("IDML product rollout gate", () => {
     expect(idmlFormatCopy({})).toMatchObject({
       stage: "experimental",
       nativeFidelity: false,
-      label: expect.stringMatching(/experimental/i),
+      label: "importExport.idml.labelExperimental",
     })
   })
 
@@ -25,7 +25,7 @@ describe("IDML product rollout gate", () => {
     expect(idmlFormatCopy({ VITE_IDML_FIDELITY_STAGE: "native" })).toMatchObject({
       stage: "native",
       nativeFidelity: true,
-      label: "InDesign (.idml)",
+      label: "importExport.idml.labelNative",
     })
   })
 })

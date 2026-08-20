@@ -1,69 +1,96 @@
 /**
- * ChangesetCard.tsx — backward-compatible rendering for a PlanImport
- * changeset.staged frame persisted by an older agent run. Current imports use
- * the dedicated Import dialog; an old pending card still links to the existing
- * `/approve/:changesetId` surface so it remains actionable after the change.
+ * ChangesetCard.tsx — in-conversation review surface for a staged agent
+ * changeset (changeset.staged frame).
  *
- * mem-M5 liveness: while the card is mounted and the changeset is still
- * pending, it polls `GET /api/v2/changesets/:id/approval` (same route/shape
- * as src/pages/ApproveChangeset/ApproveChangeset.tsx) every ~5s so the card
- * reflects an approval/rejection made from that page without a page reload.
- * Polling stops once a terminal status lands or the card unmounts.
+ * Two renderings, feature-detected on the frame (AQU-926,
+ * docs/COMMAND-REGISTRY.md §5):
+ * - Frames WITHOUT the additive `digest` field (older server builds, legacy
+ *   persisted PlanImport timelines) render the legacy card below EXACTLY as
+ *   before: sample changes, Approve/Reject (the agent commits afterwards),
+ *   mem-M5 status polling.
+ * - Frames WITH `digest` (fresh AQU-926 stagings) render LiveChangesetCard:
+ *   Approve & apply commits server-side from the card itself (approve →
+ *   sync-worker commit → receipt), with testimony gating.
+ *
+ * Approval always posts the digest taken from the approval GET payload — what
+ * is approved is provably what the server staged, never what a frame carried.
  */
 
 import { useEffect, useState } from "react"
 import { ExternalLink, FileDiff } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
+import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { AUTH_BASE } from "@/lib/frontier/auth"
 import type { ChangesetItem } from "@/lib/agent/run-state"
+import {
+  approveChangeset,
+  ChangesetApiError,
+  fetchChangesetApproval,
+  rejectChangeset,
+  type ChangesetApproval,
+} from "@/lib/agent/changeset-api"
+import {
+  changesetStatusBadgeClass,
+  changesetStatusLabel,
+  changesetStatusVariant,
+  isTerminalChangesetStatus,
+} from "@/lib/agent/changeset-review"
+import { ChangeList, ImportPreviewView } from "@/components/changesets/ChangeList"
+import { LiveChangesetCard } from "./LiveChangesetCard"
 
 const POLL_INTERVAL_MS = 5000
 
-/** Matches ApprovalData['status'] in ApproveChangeset.tsx — a free-form
- *  server string, but these three are the only terminal values it defines. */
-const TERMINAL_STATUSES = new Set(["approved", "committed", "discarded"])
+/** In-chat sample size — enough to sanity-check the writing, not an audit.
+ *  The "View full details" link carries the reviewer to the complete list. */
+const SAMPLE_CHANGES = 3
 
-function isTerminal(status: string): boolean {
-  return TERMINAL_STATUSES.has(status)
-}
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case "approved":
-      return "Approved"
-    case "committed":
-      return "Committed"
-    case "discarded":
-      return "Discarded"
-    default:
-      return "Pending review"
+export function ChangesetCard({
+  item,
+  onApplied,
+}: {
+  item: ChangesetItem
+  /** Post-commit hook: flush outbox + revalidate the touched cells (same seam
+   *  ProposalCard uses). Only the live variant commits, so only it calls this. */
+  onApplied?: (eventIds: string[], cellIds: string[]) => void | Promise<void>
+}) {
+  // Feature-detect the live review flow on the additive digest field — a frame
+  // without it predates AQU-926 and must render exactly as before.
+  if (item.digest !== undefined) {
+    return <LiveChangesetCard item={item} onApplied={onApplied} />
   }
+  return <LegacyChangesetCard item={item} />
 }
 
-function statusVariant(status: string): "default" | "secondary" | "outline" {
-  if (status === "approved" || status === "committed") return "default"
-  if (status === "discarded") return "outline"
-  return "secondary"
-}
-
-export function ChangesetCard({ item }: { item: ChangesetItem }) {
+/**
+ * The pre-AQU-926 card, unchanged in behavior: the AGENT owns the commit, so
+ * a successful approve is remembered locally ("the agent can now commit") and
+ * mem-M5 polling keeps the status honest while the card is mounted.
+ */
+function LegacyChangesetCard({ item }: { item: ChangesetItem }) {
+  const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
+  const [approval, setApproval] = useState<ChangesetApproval | null>(null)
   const [status, setStatus] = useState("staged")
+  // "Approved" isn't a server status (it stays `staged` until the agent
+  // commits), so a successful approve is remembered locally.
+  const [approvedLocally, setApprovedLocally] = useState(false)
+  const [working, setWorking] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!jwt || isTerminal(status)) return
+    if (!jwt || isTerminalChangesetStatus(status)) return
     let cancelled = false
 
     const poll = async () => {
       try {
-        const res = await fetch(`${AUTH_BASE}/api/v2/changesets/${item.changesetId}/approval`, {
-          headers: { Authorization: `Bearer ${jwt}` },
-        })
-        if (cancelled || !res.ok) return
-        const data = (await res.json()) as { status?: string }
-        if (!cancelled && data.status) setStatus(data.status)
+        const data = await fetchChangesetApproval(jwt, item.changesetId)
+        if (cancelled) return
+        setApproval(data)
+        if (data.status) setStatus(data.status)
       } catch {
         // Transient network error — the next tick retries; no need to surface it here.
       }
@@ -77,39 +104,102 @@ export function ChangesetCard({ item }: { item: ChangesetItem }) {
     }
   }, [jwt, item.changesetId, status])
 
-  const terminal = isTerminal(status)
+  async function act(kind: "approve" | "reject") {
+    if (!jwt || !approval) return
+    setWorking(true)
+    setActionError(null)
+    try {
+      if (kind === "approve") {
+        await approveChangeset(jwt, item.changesetId, approval.digest)
+        setApprovedLocally(true)
+      } else {
+        await rejectChangeset(jwt, item.changesetId)
+        setStatus("discarded")
+      }
+    } catch (err) {
+      setActionError(
+        err instanceof ChangesetApiError
+          ? err.message
+          : "Couldn't reach the server. Check your connection and try again.",
+      )
+    } finally {
+      setWorking(false)
+    }
+  }
+
+  const staged = status === "staged"
+  const actionable = staged && !approvedLocally && jwt !== null && approval !== null
+  // "Approved" awaiting the agent's commit — shown while the server still says staged.
+  const approvedAwaitingCommit = approvedLocally && staged
 
   return (
     <div
       data-frame-type="changeset.staged"
-      data-changeset-status={status}
+      data-changeset-status={approvedAwaitingCommit ? "approved" : status}
       className="space-y-1.5 rounded-lg border border-sky-900/60 bg-sky-950/30 px-3 py-2"
     >
       <div className="flex flex-wrap items-center gap-1.5 text-xs">
         <FileDiff className="h-3.5 w-3.5 shrink-0 text-sky-500" />
         <span className="min-w-0 flex-1 truncate font-medium">{item.summary}</span>
         <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
-          {item.cellCount} {item.cellCount === 1 ? "cell" : "cells"}
+          {t("common.cellCount", { count: item.cellCount })}
         </Badge>
-        <Badge variant={statusVariant(status)} className="px-1.5 py-0 text-[10px]">
-          {statusLabel(status)}
+        <Badge
+          variant={changesetStatusVariant(status, approvedLocally)}
+          className={cn("px-1.5 py-0 text-[10px]", changesetStatusBadgeClass(status))}
+        >
+          {changesetStatusLabel(t, status, approvedLocally)}
         </Badge>
       </div>
-      {terminal ? (
-        <span className="inline-flex w-fit items-center gap-1 text-[11px] font-medium text-muted-foreground">
-          Review & approve
-        </span>
-      ) : (
+
+      {approval?.changes && approval.changes.items.length > 0 && (
+        <ChangeList changes={approval.changes} maxItems={SAMPLE_CHANGES} />
+      )}
+      {approval?.importPreview && (
+        <ImportPreviewView
+          preview={{
+            ...approval.importPreview,
+            sampleCells: approval.importPreview.sampleCells.slice(0, SAMPLE_CHANGES),
+          }}
+        />
+      )}
+
+      {approvedAwaitingCommit && (
+        <p className="text-[11px] text-muted-foreground">
+          {t("agent.changeset.approvedNotice")}
+        </p>
+      )}
+
+      {actionError && <p className="text-[11px] text-destructive">{actionError}</p>}
+
+      <div className="flex items-center gap-2">
+        {actionable && (
+          <>
+            <Button size="sm" className="h-6 px-2 text-[11px]" disabled={working} onClick={() => void act("approve")}>
+              {working ? <Spinner data-icon="inline-start" /> : null}
+              {t("agent.approve")}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 px-2 text-[11px]"
+              disabled={working}
+              onClick={() => void act("reject")}
+            >
+              {t("agent.reject")}
+            </Button>
+          </>
+        )}
         <a
           href={item.approvalUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex w-fit items-center gap-1 text-[11px] font-medium text-sky-600 hover:underline dark:text-sky-400"
         >
-          Review & approve
+          {t("agent.changeset.viewFullDetails")}
           <ExternalLink className="h-3 w-3" />
         </a>
-      )}
+      </div>
     </div>
   )
 }

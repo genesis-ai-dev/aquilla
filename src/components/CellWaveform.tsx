@@ -8,6 +8,7 @@ import { Download, RotateCw } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
+import { useT } from "@/lib/i18n/I18nProvider"
 import type { UseCellAudioResult } from "@/hooks/useCellAudio"
 import type { AudioMediaStrategy } from "@/lib/parsers/types"
 
@@ -26,6 +27,7 @@ const AUTO_LOAD_STRATEGIES: ReadonlySet<AudioMediaStrategy> = new Set(["lazy", "
 export function CellWaveform({
   controller, bins = 320, height = 28, className, strategy = "lazy",
 }: Props) {
+  const t = useT()
   const { peaks, peaksState, currentTime, duration, isPlaying, seek, requestPeaks } = controller
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const [userTriggered, setUserTriggered] = useState(false)
@@ -107,12 +109,12 @@ export function CellWaveform({
 
   const waveformTooltip =
     peaksState === "error"
-      ? "Couldn't decode the waveform; click retry"
+      ? t("editor.waveform.decodeErrorTooltip")
       : isLoading
-        ? "Loading waveform..."
+        ? t("editor.waveform.loading")
         : needsUserAction
-          ? "Click to download and decode this clip's waveform"
-          : "Click to seek"
+          ? t("editor.waveform.needsLoadTooltip")
+          : t("editor.waveform.seekTooltip")
 
   return (
     <AppTooltip content={waveformTooltip} disabled={peaksState === "error" || isMissing}>
@@ -126,7 +128,7 @@ export function CellWaveform({
         style={{ height, ["--waveform-bar" as string]: "var(--color-muted-foreground, #888)" } as React.CSSProperties}
         onPointerDown={hasPeaks ? onPointerDown : undefined}
         role={hasPeaks ? "slider" : undefined}
-        aria-label="Audio scrubber"
+        aria-label={t("editor.waveform.scrubber")}
         aria-valuemin={0}
         aria-valuemax={duration || 0}
         aria-valuenow={currentTime}
@@ -154,7 +156,7 @@ export function CellWaveform({
           className="absolute inset-0 flex items-center justify-center gap-1.5 rounded-xl text-[10px] font-medium text-muted-foreground transition-colors hover:bg-muted/30 hover:text-foreground"
         >
           <Download className="h-3 w-3" />
-          <span>Load waveform</span>
+          <span>{t("editor.waveform.load")}</span>
         </button>
       )}
       {isMissing && (
@@ -166,15 +168,15 @@ export function CellWaveform({
         </div>
       )}
       {peaksState === "error" && (
-        <AppTooltip content="Couldn't load this clip's waveform; click to retry">
+        <AppTooltip content={t("editor.waveform.retryTooltip")}>
           <button
             type="button"
             onClick={handleRetryClick}
-            aria-label="Retry waveform"
+            aria-label={t("editor.waveform.retry")}
             className="absolute inset-0 flex items-center justify-center gap-1.5 rounded-xl text-[10px] font-medium text-amber-700 dark:text-amber-300 transition-colors hover:bg-amber-500/10"
           >
             <RotateCw className="h-3 w-3" />
-            <span>Retry waveform</span>
+            <span>{t("editor.waveform.retry")}</span>
           </button>
         </AppTooltip>
       )}

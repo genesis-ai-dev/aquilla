@@ -17,9 +17,25 @@ import { FrontierSignupForm } from "@/components/git-import/FrontierSignupForm"
 import { UserError } from "@/lib/errors/user-error"
 import posthog from "@/lib/posthog"
 import { INVITE_REDEEMED } from "@/lib/event-names"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 type Phase = "initial" | "redeeming" | "done" | "error"
 type AuthMode = "login" | "signup"
+
+/** Which whole-sentence role-line variant to render, mirroring JoinPage's
+ * roleLineKey — one key per combination so word order can move freely in
+ * translation instead of being assembled from glued-together fragments. The
+ * inviter variants are byte-identical to JoinPage's project-invite sentences
+ * (both open with "Invited by …"), so they reuse auth.join.* directly instead
+ * of duplicating them under org.*. */
+function roleLineKey(hasInviter: boolean, hasEmail: boolean): MessageKey {
+  if (hasInviter) {
+    return hasEmail ? "auth.join.roleLineSingleInviterEmail" : "auth.join.roleLineSingleInviter"
+  }
+  return hasEmail ? "org.joinOrgPage.roleLineEmail" : "org.joinOrgPage.roleLine"
+}
 
 function JoinOrgShell({ children }: { children: ReactNode }) {
   return (
@@ -38,6 +54,7 @@ function JoinOrgShell({ children }: { children: ReactNode }) {
  * the old generic copy — the accept endpoint stays the authority on validity.
  */
 export function JoinOrgPage() {
+  const { t } = useI18n()
   const { token } = useParams<{ token: string }>()
   const navigate = useNavigate()
   const { session, loading: sessionLoading } = useFrontierSession()
@@ -65,34 +82,41 @@ export function JoinOrgPage() {
   const previewSummary = preview ? (
     <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
       <p className="text-sm">
-        Organization:{" "}
-        <strong className="font-medium">{preview.orgName ?? "Unnamed organization"}</strong>
+        <RichMessage
+          k="org.joinOrgPage.organizationLine"
+          values={{
+            name: (
+              <strong className="font-medium">
+                {preview.orgName ?? t("org.joinOrgPage.unnamedOrgFallback")}
+              </strong>
+            ),
+          }}
+        />
       </p>
       <p className="text-xs text-muted-foreground">
-        {preview.invitedBy && (
-          <>
-            Invited by <span className="font-medium">{preview.invitedBy}</span> —{" "}
-          </>
-        )}
-        you&apos;ll join as{" "}
-        <span className="capitalize">{preview.role.name.replace(/_/g, " ")}</span>
-        {preview.email && (
-          <>
-            {" "}— invitation sent to <span className="font-mono">{preview.email}</span>
-          </>
-        )}
-        .
+        <RichMessage
+          k={roleLineKey(!!preview.invitedBy, !!preview.email)}
+          values={{
+            ...(preview.invitedBy
+              ? { inviter: <span className="font-medium">{preview.invitedBy}</span> }
+              : {}),
+            role: (
+              <span className="capitalize">{preview.role.name.replace(/_/g, " ")}</span>
+            ),
+            ...(preview.email
+              ? { email: <span className="font-mono">{preview.email}</span> }
+              : {}),
+          }}
+        />
       </p>
     </div>
   ) : previewLoading ? (
     <div className="flex items-center gap-2 py-1">
       <Spinner className="text-muted-foreground" />
-      <p className="text-xs text-muted-foreground">Loading invitation details…</p>
+      <p className="text-xs text-muted-foreground">{t("auth.join.loadingDetails")}</p>
     </div>
   ) : (
-    <p className="text-sm text-muted-foreground">
-      You&apos;ve been invited to join an organization on Aquilla.
-    </p>
+    <p className="text-sm text-muted-foreground">{t("org.joinOrgPage.genericInviteFallback")}</p>
   )
 
   const sessionExpired = !!session?.jwt && isJwtExpired(session.jwt)
@@ -131,11 +155,11 @@ export function JoinOrgPage() {
       <JoinOrgShell>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <AlertCircle className="size-5 text-destructive" /> Invalid invite link
+            <AlertCircle className="size-5 text-destructive" /> {t("auth.join.invalidInviteLink")}
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <Button variant="outline" onClick={() => navigate("/")}>Go home</Button>
+          <Button variant="outline" onClick={() => navigate("/")}>{t("error.notFound.goHome")}</Button>
         </CardContent>
       </JoinOrgShell>
     )
@@ -146,12 +170,12 @@ export function JoinOrgPage() {
       <JoinOrgShell>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <AlertCircle className="size-5 text-destructive" /> Can't join
+            <AlertCircle className="size-5 text-destructive" /> {t("org.joinOrgPage.cantJoinTitle")}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">{error}</p>
-          <Button variant="outline" onClick={() => navigate("/")}>Go home</Button>
+          <Button variant="outline" onClick={() => navigate("/")}>{t("error.notFound.goHome")}</Button>
         </CardContent>
       </JoinOrgShell>
     )
@@ -162,12 +186,14 @@ export function JoinOrgPage() {
       <JoinOrgShell>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <CheckCircle2 className="size-5 text-green-600" /> You're in
+            <CheckCircle2 className="size-5 text-green-600" /> {t("org.joinOrgPage.youreInTitle")}
           </CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            Joined {orgName ?? "the organization"}. Taking you there…
+            {t("org.joinOrgPage.joinedRedirect", {
+              org: orgName ?? t("org.joinOrgPage.fallbackOrgName"),
+            })}
           </p>
         </CardContent>
       </JoinOrgShell>
@@ -178,7 +204,7 @@ export function JoinOrgPage() {
     return (
       <JoinOrgShell>
         <CardContent className="flex items-center justify-center py-10">
-          <Spinner className="mr-2" /> <span className="text-sm">Loading…</span>
+          <Spinner />
         </CardContent>
       </JoinOrgShell>
     )

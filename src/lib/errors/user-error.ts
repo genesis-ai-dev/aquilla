@@ -5,6 +5,11 @@
 //
 // Pattern mirrors src/lib/audio/ai-error.ts but for the general network layer
 // (sync-worker, frontier, auth-worker). See AQU-281.
+//
+// This module runs outside React (plain fetch-helper code, no hooks), so it
+// can't call useT(); it uses the standalone `t()` instead — see AQU-832.
+
+import { t } from "../i18n/standalone"
 
 export type NetworkErrorCategory =
   | "forbidden"
@@ -37,55 +42,55 @@ export function messageForStatus(
   rawBody: string,
   context?: string,
 ): UserFacingError {
-  const ctx = context ? ` for this ${context}` : ""
+  const contextSuffix = context ? t("error.network.contextSuffix", { context }) : ""
   const raw = rawBody.trim()
 
   switch (status) {
     case 400:
       return {
-        message: `The request was invalid${ctx}. Check your input and try again.`,
+        message: t("error.network.badRequest", { contextSuffix }),
         raw,
         category: "unknown",
         status,
       }
     case 401:
       return {
-        message: "Your session expired — sign in again.",
+        message: t("error.network.sessionExpired"),
         raw,
         category: "session-expired",
         status,
       }
     case 403:
       return {
-        message: `You don't have permission to do that${ctx}.`,
+        message: t("error.network.forbidden", { contextSuffix }),
         raw,
         category: "forbidden",
         status,
       }
     case 404:
       return {
-        message: `That item no longer exists${ctx}.`,
+        message: t("error.network.notFound", { contextSuffix }),
         raw,
         category: "not-found",
         status,
       }
     case 409:
       return {
-        message: `A conflict occurred${ctx} — please refresh and try again.`,
+        message: t("error.network.conflict", { contextSuffix }),
         raw,
         category: "conflict",
         status,
       }
     case 410:
       return {
-        message: `That item has been permanently removed${ctx}.`,
+        message: t("error.network.gone", { contextSuffix }),
         raw,
         category: "gone",
         status,
       }
     case 429:
       return {
-        message: "Too many requests — please wait a moment and try again.",
+        message: t("error.network.tooManyRequests"),
         raw,
         category: "server-error",
         status,
@@ -93,14 +98,14 @@ export function messageForStatus(
     default:
       if (status >= 500) {
         return {
-          message: "Something went wrong on the server. Please try again in a moment.",
+          message: t("error.network.serverError"),
           raw,
           category: "server-error",
           status,
         }
       }
       return {
-        message: `The request failed (${status}). Please try again.`,
+        message: t("error.network.unknownStatus", { status }),
         raw,
         category: "unknown",
         status,
@@ -137,7 +142,7 @@ export function toUserFacingError(err: unknown, context?: string): UserFacingErr
   if (isNetworkFailure(err)) {
     const raw = err instanceof Error ? err.message : String(err)
     return {
-      message: "You're offline — changes will sync when you reconnect.",
+      message: t("error.network.offline"),
       raw,
       category: "offline",
     }
@@ -151,7 +156,7 @@ export function toUserFacingError(err: unknown, context?: string): UserFacingErr
     // Parse "... failed: HTTP 403 — <body>" patterns emitted by our fetch helpers.
     const match = err.message.match(/HTTP (\d{3})(?:\s*[—-]\s*(.*))?$/s)
     if (match) {
-      const status = parseInt(match[1]!, 10)
+      const status = parseInt(match[1], 10)
       const body = (match[2] ?? "").trim()
       return messageForStatus(status, body || err.message, context)
     }
@@ -160,7 +165,7 @@ export function toUserFacingError(err: unknown, context?: string): UserFacingErr
   }
 
   const raw = String(err)
-  return { message: "Something went wrong. Please try again.", raw, category: "unknown" }
+  return { message: t("error.network.genericFailure"), raw, category: "unknown" }
 }
 
 /**

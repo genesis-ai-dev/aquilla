@@ -12,7 +12,9 @@ describe("groupByCorpus", () => {
 
   it("places files with no corpusMarker into 'Ungrouped'", () => {
     const groups = groupByCorpus([f("a"), f("b")])
-    expect(groups).toEqual([{ label: "Ungrouped", files: [f("a"), f("b")] }])
+    expect(groups).toEqual([
+      { label: "Ungrouped", labelKey: "nav.fileList.ungroupedLabel", files: [f("a"), f("b")] },
+    ])
   })
 
   it("groups files by corpusMarker and orders OT, NT, alpha, Ungrouped last", () => {

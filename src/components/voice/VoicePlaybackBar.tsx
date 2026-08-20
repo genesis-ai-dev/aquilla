@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import {
   Pause, Play, SkipBack, SkipForward, Volume2, VolumeX,
 } from "lucide-react"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -66,6 +67,7 @@ export function VoicePlaybackBar({
   cells: rawCells, projectId, session, settings, onActiveCell, startCellId, coreMediaUrl,
   videoPaneOnScreen = false, below,
 }: Props) {
+  const t = useT()
 
   // The cells handed down from useCells carry no audio attachments — those are
   // read per-file by useFileAudioAttachments and merged in (the editor table
@@ -235,14 +237,14 @@ export function VoicePlaybackBar({
             {activeVoice && <VoiceAvatar voice={activeVoice} size={26} />}
             <div className="min-w-0">
               <div className="truncate text-xs font-medium leading-tight">
-                {activeCell ? (activeCell.cellLabel || "Line") : "Nothing playing"}
+                {activeCell ? (activeCell.cellLabel || t("audio.playbackBar.lineFallback")) : t("audio.playbackBar.nothingPlaying")}
               </div>
               <div className="truncate text-[10px] leading-tight text-muted-foreground">
                 {transport.errorMessage != null
                   ? transport.errorMessage
                   : activeVoice
                     ? activeVoice.name
-                    : canPlay ? "Press play to listen" : "No voiced lines yet"}
+                    : canPlay ? t("audio.playbackBar.pressPlayToListen") : t("audio.playbackBar.noVoicedLines")}
               </div>
             </div>
           </div>
@@ -252,26 +254,26 @@ export function VoicePlaybackBar({
         {/* Transport */}
         <div className="flex shrink-0 items-center gap-0.5 self-center">
           <SpeedButton rate={rate} onChange={(r) => (drivesVideo ? videoController?.setRate(r) : setQueueRate(r))} />
-          <IconButton title="Previous line" disabled={!canPlay} onClick={() => stepLine(-1)}>
+          <IconButton title={t("audio.playbackBar.previousLine")} disabled={!canPlay} onClick={() => stepLine(-1)}>
             <SkipBack className="h-4 w-4" />
           </IconButton>
-          <AppTooltip content={isPlaying ? "Pause" : "Play all"}>
+          <AppTooltip content={isPlaying ? t("common.pause") : t("audio.playbackBar.playAll")}>
             <Button
               type="button"
               size="icon"
               variant="default"
               onClick={onPlayPause}
               disabled={!canPlay}
-              aria-label={isPlaying ? "Pause" : "Play all"}
+              aria-label={isPlaying ? t("common.pause") : t("audio.playbackBar.playAll")}
               className="bg-foreground text-background hover:bg-foreground/90"
             >
               {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-px" />}
             </Button>
           </AppTooltip>
-          <IconButton title="Next line" disabled={!canPlay} onClick={() => stepLine(1)}>
+          <IconButton title={t("audio.playbackBar.nextLine")} disabled={!canPlay} onClick={() => stepLine(1)}>
             <SkipForward className="h-4 w-4" />
           </IconButton>
-          <span className="ml-1.5 shrink-0 text-[11px] tabular-nums text-muted-foreground">
+          <span className="ms-1.5 shrink-0 text-[11px] tabular-nums text-muted-foreground">
             {fmtTime(currentTime)} / {fmtTime(duration)}
           </span>
         </div>
@@ -335,6 +337,7 @@ function BarScrubber({ fraction, onSeek, disabled }: {
   onSeek: (f: number) => void
   disabled: boolean
 }) {
+  const t = useT()
   const fracFromEvent = (e: React.PointerEvent<HTMLDivElement>): number => {
     const r = e.currentTarget.getBoundingClientRect()
     return Math.max(0, Math.min(1, (e.clientX - r.left) / Math.max(1, r.width)))
@@ -342,7 +345,7 @@ function BarScrubber({ fraction, onSeek, disabled }: {
   return (
     <div
       role="slider"
-      aria-label="Seek"
+      aria-label={t("common.seek")}
       aria-valuemin={0}
       aria-valuemax={100}
       aria-valuenow={Math.round(fraction * 100)}
@@ -363,15 +366,15 @@ function BarScrubber({ fraction, onSeek, disabled }: {
 }
 
 function SpeedButton({ rate, onChange }: { rate: number; onChange: (r: number) => void }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <AppTooltip content="Playback speed">
+      <AppTooltip content={t("audio.playbackBar.playbackSpeed")}>
         <PopoverTrigger
           render={
             <Button
               type="button"
-              size="sm"
               variant="ghost"
               className="min-w-9 px-1.5 tabular-nums"
             >
@@ -427,7 +430,8 @@ function VolumeControl({
   onChange: (v: number) => void
   onToggleMute: () => void
 }) {
-  const label = `${muted ? "Unmute" : "Mute"} ${what}`
+  const t = useT()
+  const label = `${muted ? t("audio.playbackBar.unmute") : t("audio.playbackBar.mute")} ${what}`
   return (
     <div className="flex items-center gap-2">
       <AppTooltip content={label}>
@@ -455,7 +459,7 @@ function VolumeControl({
           // nothing, with the reason two panes away.
           if (muted && v > 0) onToggleMute()
         }}
-        aria-label="Volume"
+        aria-label={t("common.volume")}
         className="hidden w-24 sm:block"
       />
     </div>

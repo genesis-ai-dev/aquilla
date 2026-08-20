@@ -7,9 +7,9 @@ import react, { reactCompilerPreset } from "@vitejs/plugin-react"
 import babel from "@rolldown/plugin-babel"
 import tailwindcss from "@tailwindcss/vite"
 import { nodePolyfills } from "vite-plugin-node-polyfills"
-import { brandingHtmlPlugin } from "./scripts/vite-html-branding"
-import { BRAND_DATA, BRAND_DATA_IDS } from "./src/branding/brands/data"
-import type { BrandId } from "./src/branding/types"
+import { brandingHtmlPlugin } from "./scripts/vite-html-branding.ts"
+import { BRAND_DATA, BRAND_DATA_IDS } from "./src/branding/brands/data.ts"
+import type { BrandId } from "./src/branding/types.ts"
 
 // Cloudflare Pages exposes CF_PAGES_BRANCH / CF_PAGES_COMMIT_SHA in CI builds.
 // Locally we fall back to git so dev shells still show something useful.
@@ -33,6 +33,13 @@ function resolveBuildBrand(): BrandId {
 
 const brandId = resolveBuildBrand()
 const brand = BRAND_DATA[brandId]
+
+// Public marketing documents are built in the sibling aquilla-marketing repo.
+// Keeping this value exported gives the ownership contract a direct unit-test
+// seam instead of relying on source-text inspection.
+export const APP_HTML_INPUTS = Object.freeze({
+  index: path.resolve(import.meta.dirname, "index.html"),
+})
 
 export default defineConfig(({ mode }) => ({
   clearScreen: false,
@@ -104,13 +111,13 @@ export default defineConfig(({ mode }) => ({
       // checkout therefore never needs gitignored package output before tests.
       {
         find: /^@aquilla\/idml-roundtrip\/worker$/,
-        replacement: path.resolve(__dirname, "./packages/idml-roundtrip/src/worker.ts"),
+        replacement: path.resolve(import.meta.dirname, "./packages/idml-roundtrip/src/worker.ts"),
       },
       {
         find: /^@aquilla\/idml-roundtrip$/,
-        replacement: path.resolve(__dirname, "./packages/idml-roundtrip/src/index.ts"),
+        replacement: path.resolve(import.meta.dirname, "./packages/idml-roundtrip/src/index.ts"),
       },
-      { find: "@", replacement: path.resolve(__dirname, "./src") },
+      { find: "@", replacement: path.resolve(import.meta.dirname, "./src") },
     ],
   },
   optimizeDeps: {
@@ -149,17 +156,9 @@ export default defineConfig(({ mode }) => ({
     // app bundle balloons past 2 MB, which trips Cloudflare Pages' asset
     // upload path (observed as repeated ECONNRESET at 26/27 files).
     rolldownOptions: {
-      // Multi-page build: the SPA shell (index.html) and the standalone,
-      // statically-served marketing homepage (homepage.html). The aquilla-web
-      // Worker picks between them at the edge via the aq_hint cookie.
-      input: {
-        index: path.resolve(__dirname, "index.html"),
-        homepage: path.resolve(__dirname, "homepage.html"),
-        "bible-translation": path.resolve(__dirname, "bible-translation.html"),
-        beta: path.resolve(__dirname, "beta.html"),
-        "case-study": path.resolve(__dirname, "case-study.html"),
-        "case-study-biblica": path.resolve(__dirname, "case-study-biblica.html"),
-      },
+      // SPA shell only. More-specific Cloudflare zone routes send the public
+      // marketing surface to the independently deployed aquilla-marketing Worker.
+      input: APP_HTML_INPUTS,
       output: {
         // Keep source module names out of emitted chunk URLs. Brave/EasyList can
         // block app-critical chunks whose filenames look like tracking scripts,

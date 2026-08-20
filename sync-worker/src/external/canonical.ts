@@ -39,3 +39,24 @@ export async function computeDigest(
 ): Promise<string> {
   return sha256Hex(canonicalJson({ commands, preconditions }))
 }
+
+/** Structural deep-equality over JSON values (objects by key set, arrays by
+ *  order). `undefined` equals only `undefined` — a policy key absent from a
+ *  whole-blob replace but present in the live blob is a CHANGE (deletion). */
+export function deepEqualJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false
+    return a.every((v, i) => deepEqualJson(v, b[i]))
+  }
+  if (a !== null && b !== null && typeof a === 'object' && typeof b === 'object') {
+    const ka = Object.keys(a as Record<string, unknown>)
+    const kb = Object.keys(b as Record<string, unknown>)
+    if (ka.length !== kb.length) return false
+    return ka.every((k) =>
+      Object.prototype.hasOwnProperty.call(b, k) &&
+      deepEqualJson((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]),
+    )
+  }
+  return false
+}

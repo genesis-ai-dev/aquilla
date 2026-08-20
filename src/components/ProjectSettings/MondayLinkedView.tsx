@@ -13,6 +13,8 @@ import { SparkleButton } from "@/components/SparkleButton"
 import type { MondayBoardLink, MondayBoardStructure } from "@/lib/monday/api"
 import type { MondayMapping } from "@/lib/monday/types"
 import { MondayMappingEditor, MondayMappingTable } from "./MondayMappingEditor"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { formatDateTime } from "@/lib/i18n/format"
 
 export function MondayLinkedView({
   link,
@@ -49,6 +51,7 @@ export function MondayLinkedView({
   onUnlink: () => void
   warnings: string[]
 }) {
+  const { locale, t } = useI18n()
   return (
     <div className="space-y-4">
       {link.structureStale && (
@@ -57,7 +60,7 @@ export function MondayLinkedView({
           className="flex items-start gap-2 rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
         >
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>Board structure changed — review the mapping below.</span>
+          <span>{t("projectSettings.monday.structureStaleWarning")}</span>
         </div>
       )}
       {warnings.length > 0 && (
@@ -71,12 +74,15 @@ export function MondayLinkedView({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="space-y-1 text-sm">
           <p>
-            Linked board: <span className="font-medium">{link.boardName ?? link.boardId}</span>
+            {t("projectSettings.monday.linkedBoardPrefix")}{" "}
+            <span className="font-medium">{link.boardName ?? link.boardId}</span>
           </p>
           <p className="text-xs text-muted-foreground">
-            One item per {link.config.itemGranularity === "file" ? "file" : "project"}.
+            {t("projectSettings.monday.oneItemPerLabel", {
+              granularity: link.config.itemGranularity === "file" ? "file" : "project",
+            })}
             {link.lastPushedAt
-              ? ` Last push ${new Date(link.lastPushedAt).toLocaleString()} — ${
+              ? ` Last push ${formatDateTime(link.lastPushedAt, locale)} — ${
                   link.lastPushStatus === "ok" ? "ok" : "failed"
                 }.`
               : " Not pushed yet."}
@@ -88,7 +94,7 @@ export function MondayLinkedView({
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-2 text-sm">
             <FieldLabel htmlFor="monday-sync-enabled" className="text-sm">
-              Sync
+              {t("projectSettings.monday.syncToggleLabel")}
             </FieldLabel>
             <Switch
               id="monday-sync-enabled"
@@ -97,14 +103,14 @@ export function MondayLinkedView({
               disabled={!canManage || toggling}
             />
           </span>
-          <Button variant="outline" size="sm" onClick={onSyncNow} disabled={!canManage || syncing}>
+          <Button variant="outline" onClick={onSyncNow} disabled={!canManage || syncing}>
             {syncing ? <Spinner data-icon="inline-start" /> : <RefreshCw data-icon="inline-start" />}
-            Sync now
+            {t("projectSettings.monday.syncNowButton")}
           </Button>
           <Button
             variant="ghost"
             size="icon"
-            aria-label="Remove board link"
+            aria-label={t("projectSettings.monday.removeBoardLinkAriaLabel")}
             onClick={onUnlink}
             disabled={!canManage}
           >
@@ -115,7 +121,7 @@ export function MondayLinkedView({
       {syncNotice && <p className="text-sm text-muted-foreground">{syncNotice}</p>}
 
       <div className="space-y-2">
-        <p className="text-sm font-medium">Column mapping</p>
+        <p className="text-sm font-medium">{t("projectSettings.monday.columnMappingLabel")}</p>
         {canManage ? (
           <MondayMappingEditor
             key={JSON.stringify(link.config.columns)}
@@ -133,21 +139,21 @@ export function MondayLinkedView({
       {canManage && (
         <div className="space-y-2">
           <FieldLabel htmlFor="monday-reconfigure" className="text-sm">
-            Reconfigure with AI
+            {t("projectSettings.monday.reconfigureWithAiLabel")}
           </FieldLabel>
           <div className="flex items-start gap-2">
             <Textarea
               id="monday-reconfigure"
               value={reconfigureMsg}
               onChange={(e) => onReconfigureMsg(e.target.value)}
-              placeholder="Describe what to change — e.g. “track validated % instead of completion, one item per file”"
+              placeholder={t("projectSettings.monday.reconfigurePlaceholder")}
               rows={2}
             />
             <SparkleButton
               disabled={reconfigureMsg.trim().length === 0}
               loading={analyzing}
               onComplete={onReconfigure}
-              tooltip="Ask AI to update the mapping"
+              tooltip={t("projectSettings.monday.reconfigureTooltip")}
             />
           </div>
         </div>

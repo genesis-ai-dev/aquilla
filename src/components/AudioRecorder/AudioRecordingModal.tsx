@@ -23,6 +23,7 @@ import { isLinkableVideoUrl } from "@/components/timeline/LinkVideoUrlDialog"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useAudioRecorder } from "@/hooks/useAudioRecorder"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useOnline } from "@/hooks/useOnline"
 import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
@@ -139,6 +140,7 @@ export function AudioRecordingModal({
   open, project, cells, activeCellId, username,
   onActiveCellChange, onTakeSaved, onLastTakeRemoved, readAloudFor, filmFileId, onClose,
 }: Props) {
+  const t = useT()
   // ONE mic stream and ONE capture graph for as long as this dialog is open
   // (round 4 of the take-head hunt). Opening and closing them around takes is
   // what made the OS reconfigure the input device — measured as the first
@@ -148,6 +150,10 @@ export function AudioRecordingModal({
   const countdown = useCountdown()
   const { session } = useFrontierSession()
   const online = useOnline()
+  // Decision 2026-08-05: recording is blocked UP FRONT while offline (a take
+  // can't be saved without a connection), instead of failing mid-flow with a
+  // raw fetch error. One copy of the message, used by every gate.
+  const offlineMessage = t("audio.recordingModal.offlineMessage")
   const [beepEnabled, setBeepEnabled] = useState(true)
   // SUB-50: saving jumps to the next cell — great on a pass down the file,
   // wrong when working one line over and over. Persisted per device.
@@ -520,12 +526,12 @@ export function AudioRecordingModal({
     // Offline gates FIRST — when both fail it is the truer cause ("sign in"
     // is unactionable without a connection anyway).
     if (!online) {
-      setErrorMessage(OFFLINE_MESSAGE)
+      setErrorMessage(offlineMessage)
       setPhase("error")
       return
     }
     if (!session?.jwt) {
-      setErrorMessage("Sign in to save recordings")
+      setErrorMessage(t("audio.recordingModal.signInRequired"))
       setPhase("error")
       return
     }
@@ -537,9 +543,7 @@ export function AudioRecordingModal({
       if (permState === "denied") {
         // Abort — permission is blocked. Show actionable guidance.
         setPhase("error")
-        setErrorMessage(
-          "Microphone access is blocked. To record audio, allow microphone access in your browser's site settings and reload the page.",
-        )
+        setErrorMessage(t("audio.recordingModal.micBlocked"))
         return
       }
       // "granted" or "prompt" (system will ask, or already asked successfully).
@@ -868,7 +872,7 @@ export function AudioRecordingModal({
     } catch (e) {
       // A network failure that raced the online flag reads as the same
       // offline story, not a raw fetch error.
-      setErrorMessage(!navigator.onLine ? OFFLINE_MESSAGE : e instanceof Error ? e.message : String(e))
+      setErrorMessage(!navigator.onLine ? offlineMessage : e instanceof Error ? e.message : String(e))
       // The take is still in hand (the recorder holds the stopped blob), so
       // go back to the PREVIEW, not the error phase: error's footer has no
       // Save or Retake, and the preview effect can't re-fire for this blob
@@ -1054,7 +1058,9 @@ export function AudioRecordingModal({
         showCloseButton={false}
       >
         <DialogTitle className="sr-only">
-          Record audio — {activeCell.cellLabel ?? `Cell ${activeIndex + 1}`}
+          {t("audio.recordingModal.dialogTitle", {
+            cellLabel: activeCell.cellLabel ?? t("audio.recordingModal.cellFallback", { index: activeIndex + 1 }),
+          })}
         </DialogTitle>
 
         {/* ─── THE PICTURE ──────────────────────────────────────────────────

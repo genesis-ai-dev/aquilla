@@ -239,4 +239,20 @@ describe("cells cache maxServerSeq cursor", () => {
     const entry = await readCellsCache("p1", "f-noseq")
     expect(entry?.maxServerSeq).toBeUndefined()
   })
+
+  // AQU-943: the cursor alone cannot say WHICH incarnation of the project it
+  // was minted against, so a wipe + re-migration under the same ids leaves it
+  // pointing at a seq range that no longer exists. The epoch travels with it.
+  it("round-trips the project incarnation beside the cursor", async () => {
+    await writeCellsCache("p1", "f-epoch", [row("a", "source")], 42, 2_000)
+    const entry = await readCellsCache("p1", "f-epoch")
+    expect(entry?.maxServerSeq).toBe(42)
+    expect(entry?.projectEpoch).toBe(2_000)
+  })
+
+  it("omits the incarnation when the server did not provide one (pre-AQU-943 fallback)", async () => {
+    await writeCellsCache("p1", "f-noepoch", [row("a", "source")], 42)
+    const entry = await readCellsCache("p1", "f-noepoch")
+    expect(entry?.projectEpoch).toBeUndefined()
+  })
 })

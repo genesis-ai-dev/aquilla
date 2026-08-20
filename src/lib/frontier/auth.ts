@@ -24,6 +24,10 @@ import {
   patchSessionEmails,
   saveSession,
 } from "./session-store";
+// This module runs outside React (plain fetch-helper code, no hooks), so it
+// uses the standalone `t()` — see AQU-820/AQU-832.
+import { t } from "../i18n/standalone";
+import { clearSessionExpired } from "@/lib/errors/session-expired-signal";
 
 export class FrontierAuthError extends Error {
   public status: number;
@@ -64,19 +68,40 @@ export async function login(
   if (res.status === 202) {
     const body = (await res.json()) as { status?: string };
     if (body.status !== "migration_required") {
-      throw new FrontierAuthError("Login failed (202)", 202);
+      throw new FrontierAuthError(t("auth.login.failed"), 202);
     }
     options.onMigrationRequired?.();
     res = await requestLogin(args, true);
   }
   if (res.status === 401) {
-    throw new FrontierAuthError("Invalid username or password", 401);
+    throw new FrontierAuthError(t("auth.login.invalidCredentials"), 401);
   }
   if (!res.ok) {
-    throw new FrontierAuthError(`Login failed (${res.status})`, res.status);
+    // The status stays on the error object for diagnostics; it isn't in the
+    // message, which is the string components render verbatim (AQU-820).
+    throw new FrontierAuthError(t("auth.login.failed"), res.status);
   }
   const data = (await res.json()) as AuthResponse;
   return finalizeSession(args.username, data);
+}
+
+/**
+ * [Pen test] Auth & session mgmt (2026-08-03): best-effort server-side
+ * logout — denylists the current access token (POST /api/v2/auth/logout)
+ * so a copy that leaked elsewhere (shared device, synced browser history)
+ * stops authenticating immediately instead of surviving up to its full
+ * 30-day expiry. Never throws: the local sign-out the user asked for
+ * (clearSession) must proceed even if this network call fails.
+ */
+export async function logout(jwt: string): Promise<void> {
+  try {
+    await fetch(`${AUTH_BASE}/api/v2/auth/logout`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${jwt}` },
+    });
+  } catch {
+    // Best-effort — offline or backend hiccup shouldn't block local logout.
+  }
 }
 
 export async function register(args: RegisterArgs): Promise<FrontierSession> {
@@ -86,14 +111,22 @@ export async function register(args: RegisterArgs): Promise<FrontierSession> {
     body: JSON.stringify(args),
   });
   if (!res.ok) {
-    // The server returns { detail, error } for validation/conflict errors.
-    let message = `Sign up failed (${res.status})`;
+    // AQU-820: the server's { detail, error } is a validation/conflict reason
+    // (e.g. "username already taken") — genuinely useful for the user to know
+    // which field to fix, so it's kept, but woven into our own translated
+    // sentence frame rather than shown verbatim and unlocalized. Anything
+    // else (network/server error, no body) falls back to a fully translated
+    // generic message with no server text at all.
+    let detail: string | undefined;
     try {
       const body = (await res.json()) as { detail?: string; error?: string };
-      message = body.detail || body.error || message;
+      detail = body.detail || body.error || undefined;
     } catch {
       // keep generic
     }
+    const message = detail
+      ? t("auth.signup.failedWithDetail", { detail })
+      : t("auth.signup.failedGeneric");
     throw new FrontierAuthError(message, res.status);
   }
   const data = (await res.json()) as AuthResponse;
@@ -172,17 +205,20 @@ export async function redeemAccessLink(token: string, pin: string): Promise<Acce
       body: JSON.stringify({ pin }),
     });
   } catch {
-    throw new FrontierAuthError("Couldn't reach the server. Check your connection and try again.", 0);
+    // Reuses auth.join.networkError (same "couldn't reach the server" copy
+    // already used by the invite-accept flow) rather than a new key with
+    // identical English — see no-duplicates.test.ts.
+    throw new FrontierAuthError(t("auth.join.networkError"), 0);
   }
   if (!res.ok) {
-    let message = "This link is invalid or has expired.";
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body.error) message = body.error;
-    } catch {
-      // keep generic
-    }
-    throw new FrontierAuthError(message, res.status);
+    // AQU-820: never read the response body here. The whole point of this
+    // flow (see file-level doc comment) is that every failure — unknown/
+    // expired/revoked link, or a wrong PIN — is indistinguishable, so a
+    // client guessing PINs against a valid link learns nothing from the
+    // response. Reading body.error and showing it verbatim used to both leak
+    // raw, unlocalized server English AND risk breaking that no-oracle
+    // guarantee the moment the server ever varied its wording per failure.
+    throw new FrontierAuthError(t("auth.accessLink.genericError"), res.status);
   }
   const data = (await res.json()) as AuthResponse & { username: string; project_id: string };
   const session = await finalizeSession(data.username, data);
@@ -196,14 +232,10 @@ export async function requestPasswordReset(email: string): Promise<void> {
     body: JSON.stringify({ email }),
   });
   if (!res.ok) {
-    let message = `Reset request failed (${res.status})`;
-    try {
-      const body = (await res.json()) as { detail?: string; error?: string };
-      message = body.detail || body.error || message;
-    } catch {
-      // keep generic
-    }
-    throw new FrontierAuthError(message, res.status);
+    // AQU-820: dropped body.detail/body.error — showing it here would both
+    // leak raw server English and risk an email-enumeration oracle (a
+    // response that varies by whether the address has an account).
+    throw new FrontierAuthError(t("auth.resetPassword.failedToSend"), res.status);
   }
 }
 
@@ -222,14 +254,11 @@ export async function verifyResetToken(token: string, username: string): Promise
     body: JSON.stringify({ token, username }),
   });
   if (!res.ok) {
-    let message = "Invalid or expired reset link";
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body.error) message = body.error;
-    } catch {
-      // keep generic
-    }
-    throw new FrontierAuthError(message, res.status);
+    // AQU-820: the caller (ResetPassword.tsx) only ever branches on
+    // success/failure here, never reads .message — but drop the raw
+    // { error: "Invalid token" | "Token expired" } body anyway so this
+    // never becomes a second, inconsistent source of unlocalized text.
+    throw new FrontierAuthError(t("auth.resetPassword.tokenNoLongerValid"), res.status);
   }
 }
 
@@ -246,14 +275,11 @@ export async function verifyEmail(token: string): Promise<void> {
     body: JSON.stringify({ token }),
   });
   if (!res.ok) {
-    let message = "This verification link is invalid or has expired.";
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body.error) message = body.error;
-    } catch {
-      // keep generic
-    }
-    throw new FrontierAuthError(message, res.status);
+    // AQU-820: this page is purely confirmatory (verification is optional —
+    // see VerifyEmailPage's own doc comment), so the 404-vs-410 distinction
+    // the server's body could carry doesn't change what the user should do
+    // next. Drop it and always use our translated fallback.
+    throw new FrontierAuthError(t("auth.verifyEmail.verificationFailed"), res.status);
   }
 }
 
@@ -275,13 +301,15 @@ export async function resetPassword(
     body: JSON.stringify({ token, username, new_password: newPassword }),
   });
   if (!res.ok) {
-    let message = "Failed to reset password";
-    try {
-      const body = (await res.json()) as { error?: string };
-      if (body.error) message = body.error;
-    } catch {
-      // keep generic
-    }
+    // AQU-820: the server's { error: "Invalid token" | "Token expired" } (400)
+    // vs "Failed to reset password" (500) is dropped in favour of our own
+    // translated messages — a 400 here means the token lapsed between the
+    // initial verify and this submit, which auth.resetPassword.tokenNoLongerValid
+    // tells the user how to recover from; anything else is a generic failure.
+    const message =
+      res.status === 400
+        ? t("auth.resetPassword.tokenNoLongerValid")
+        : t("auth.resetPassword.failedToReset");
     throw new FrontierAuthError(message, res.status);
   }
 }
@@ -391,5 +419,12 @@ async function finalizeSession(
     ...(email ? { email } : {}),
   };
   await saveSession(session);
+  // AQU-884: every successful auth path funnels through here, so this is the
+  // one place that has to lower the session-expired flag — otherwise the
+  // banner (which no longer clears on navigation) would outlive the re-login.
+  // The ordering matters: saveSession() above committed the new JWT first, so
+  // any straggler 401 still carrying the old JWT is provably stale by the time
+  // this clear runs (see notifySessionExpiredIfCurrent in ./session-expiry).
+  clearSessionExpired();
   return session;
 }

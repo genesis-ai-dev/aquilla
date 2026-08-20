@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, waitFor, act } from "@testing-library/react"
+import { createElement, StrictMode, type ReactNode } from "react"
 import { useProjectSettings, describePatchFailure, type PatchOutcome } from "./useProjectSettings"
 import * as restClient from "@/lib/sync/project-settings"
 
@@ -93,10 +94,26 @@ describe("useProjectSettings — StrictMode race (BUG-TERM-1)", () => {
 })
 
 describe("useProjectSettings — read path", () => {
+  it("starts exactly one settings request on an initially-online mount", async () => {
+    const fetchSpy = mockSettingsFetch({
+      version: 1,
+      updatedAt: "x",
+      updatedBy: null,
+      settings: {},
+    })
+    const wrapper = ({ children }: { children: ReactNode }) =>
+      createElement(StrictMode, null, children)
+    const { result } = renderHook(() => useProjectSettings("p1", 700), { wrapper })
+
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    await waitFor(() => expect(result.current.settings.sourceLanguage).toBe("en"))
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
   it("surfaces local IDB values immediately, then merges server values", async () => {
     // Use a deferred fetch so we can observe the local "en" state before the
-    // server "fr" overwrites it. The hook sequences: IDB read → React render
-    // → server fetch, so this deferred promise gives waitFor a polling window.
+    // server "fr" overwrites it. The local and server reads start together;
+    // this deferred response gives the local state a visible polling window.
     let resolveServerFetch!: (v: any) => void
     vi.spyOn(restClient, "fetchProjectSettingsResult").mockImplementation(
       () =>
@@ -271,6 +288,66 @@ describe("useProjectSettings — write path", () => {
     // CRITICAL: local state must NOT be mutated — AQU-255 acceptance criteria
     expect(result.current.settings.sourceLanguage).toBe("en")
     expect(idbMod.patchProject).not.toHaveBeenCalled()
+  })
+
+  // AQU-822: terminology is the one key whose floor is org-configurable. The
+  // hook-wide MAINTAINER floor must keep applying to every other key, and to
+  // terminology itself once the org floor is above the caller.
+  describe("terminology-only carve-out (AQU-822)", () => {
+    it("lets a contributor write terminology when the org floor is 400", async () => {
+      mockSettingsFetch({
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { sourceLanguage: "en" },
+      })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+        kind: "ok",
+        value: { version: 2, updatedAt: "y", updatedBy: null, settings: { terminology: [] } },
+      })
+      const { result } = renderHook(() =>
+        useProjectSettings("p1", 400, { termbaseEditMinRole: 400 }),
+      )
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ terminology: [] })
+      })
+      expect(got.kind).toBe("ok")
+      expect(patchSpy).toHaveBeenCalled()
+    })
+
+    it("still blocks a contributor's terminology write at the default floor (500)", async () => {
+      mockSettingsFetch(null)
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() => useProjectSettings("p1", 400))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ terminology: [] })
+      })
+      expect(got.kind).toBe("blocked")
+      if (got.kind === "blocked") expect(got.reason).toBe("role")
+      expect(patchSpy).not.toHaveBeenCalled()
+    })
+
+    it("does NOT widen any other key when the floor is lowered", async () => {
+      mockSettingsFetch(null)
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() =>
+        useProjectSettings("p1", 400, { termbaseEditMinRole: 400 }),
+      )
+      await waitFor(() => expect(result.current.settings.sourceLanguage).toBe("en"))
+      let sameCall!: PatchOutcome
+      let mixedCall!: PatchOutcome
+      await act(async () => {
+        sameCall = await result.current.patch({ sourceLanguage: "fr" })
+        // A patch that bundles terminology with another key is NOT
+        // terminology-only — it keeps the maintainer floor.
+        mixedCall = await result.current.patch({ terminology: [], sourceLanguage: "fr" })
+      })
+      expect(sameCall.kind).toBe("blocked")
+      expect(mixedCall.kind).toBe("blocked")
+      expect(patchSpy).not.toHaveBeenCalled()
+    })
   })
 
   it("unsynced project (roleLevel === null) writes locally with no server call", async () => {

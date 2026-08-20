@@ -17,6 +17,8 @@ import {
 import { AppTooltip } from "@/components/ui/tooltip"
 import { prefetchFileProgress } from "@/lib/progress/file-progress-resource"
 import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
+import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface FileStats { translated: number; validated: number; total: number }
 
@@ -31,8 +33,16 @@ interface Props {
   /** Storage lane used when exporting translated source files. */
   targetLang?: string
   onSelectFile: (fileId: string, opts?: { sectionLabel?: string }) => void
+  /** Opens the FileDetailsModal for the given file (rendered by the caller). */
+  onShowDetails?: (fileId: string) => void
   onRename: (fileId: string, newName: string) => void
   onMove: (fileId: string) => void
+  /** Opens the Export dialog for the given file. */
+  onExport?: (fileId: string) => void
+  /** Opens Assign work scoped to the given file. Hidden when omitted. */
+  onAssignWork?: (fileId: string) => void
+  /** Opens the Segmentation dialog for the given file (rendered by the caller). */
+  onSegmentation?: (fileId: string) => void
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead (500). */
   onDelete?: (fileId: string) => void
   onApplySuggestion?: (fileId: string) => void
@@ -46,15 +56,17 @@ interface Props {
   canExportByOrgPolicy?: boolean
   /** When set, opens inline rename for the given file (sidebar + file-options menu). */
   renameSignal?: { fileId: string; nonce: number } | null
+  activeChapterHealth?: BookHealthChapter[]
 }
 
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
-  suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onRename, onMove, onDelete,
+  suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onDelete,
   targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
-  renameSignal,
+  renameSignal, activeChapterHealth,
 }: Props) {
+  const t = useT()
   const { expanded, toggle } = useSidebarExpansion(projectId)
   const { members: collapsed, toggle: toggleCollapsed } = usePersistedToggleSet(
     `codex:sidebar:corpus-collapsed:${projectId}`,
@@ -89,7 +101,7 @@ export function ExpandableFileList({
             type="text"
             role="searchbox"
             name="aquilla-file-filter-query"
-            aria-label="Filter files"
+            aria-label={t("nav.fileList.filterFiles")}
             autoComplete="off"
             autoCapitalize="none"
             spellCheck={false}
@@ -98,7 +110,7 @@ export function ExpandableFileList({
             data-form-type="other"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filter files..."
+            placeholder={t("nav.fileList.filterPlaceholder")}
             className="text-xs"
           />
           {filter && (
@@ -107,7 +119,7 @@ export function ExpandableFileList({
                 type="button"
                 size="icon-xs"
                 onClick={() => setFilter("")}
-                aria-label="Clear filter"
+                aria-label={t("nav.fileList.clearFilter")}
               >
                 <X />
               </InputGroupButton>
@@ -119,10 +131,16 @@ export function ExpandableFileList({
         <div className="p-2 space-y-2">
           {groups.length === 0 && (
             <p className="px-2 text-sm text-muted-foreground">
-              {filter ? `No files match "${filter}".` : "No files imported yet."}
+              {filter
+                ? t("nav.fileList.noFilesMatch", { filter })
+                : t("nav.fileList.noFilesImported")}
             </p>
           )}
           {groups.map((group) => {
+            // group.label is the stable identity string (compared/keyed on
+            // below); group.labelKey, set only on the synthetic "Ungrouped"
+            // bucket, is what's actually shown to the user.
+            const displayLabel = group.labelKey ? t(group.labelKey) : group.label
             const showHeader = groups.length > 1 || group.label !== "Ungrouped"
             const isCollapsed = showHeader && collapsed.has(group.label)
             const canEditCorpus =
@@ -134,10 +152,14 @@ export function ExpandableFileList({
                   <div className="group/corpus flex items-center gap-1 px-1 pb-1 text-[10px] text-muted-foreground">
                     <button
                       type="button"
-                      className="flex flex-1 items-center gap-1 rounded-lg px-1 py-0.5 text-left transition-colors hover:text-foreground"
+                      className="flex flex-1 items-center gap-1 rounded-lg px-1 py-0.5 text-start transition-colors hover:text-foreground"
                       onClick={() => toggleCollapsed(group.label)}
                       aria-expanded={!isCollapsed}
-                      aria-label={isCollapsed ? `Expand ${group.label}` : `Collapse ${group.label}`}
+                      aria-label={
+                        isCollapsed
+                          ? t("nav.fileList.expandGroup", { group: displayLabel })
+                          : t("nav.fileList.collapseGroup", { group: displayLabel })
+                      }
                     >
                       <ChevronDown
                         className={cn("h-3 w-3 transition-transform", isCollapsed && "-rotate-90")}
@@ -145,6 +167,7 @@ export function ExpandableFileList({
                       {isEditingCorpus ? (
                         <input
                           autoFocus
+                          autoComplete="off"
                           defaultValue={group.label}
                           onClick={(e) => e.stopPropagation()}
                           onBlur={(e) => {
@@ -159,15 +182,15 @@ export function ExpandableFileList({
                           className="flex-1 rounded-lg bg-background px-1.5 text-[11px] normal-case tracking-normal outline-none"
                         />
                       ) : (
-                        <span>{group.label}</span>
+                        <span>{displayLabel}</span>
                       )}
                     </button>
                     {canEditCorpus && !isEditingCorpus && (
-                      <AppTooltip content={`Rename ${group.label}`} side="right">
+                      <AppTooltip content={t("nav.fileList.renameGroup", { group: displayLabel })} side="right">
                         <button
                           className="rounded-md p-0.5 opacity-0 transition-shadow group-hover/corpus:opacity-100"
                           onClick={(e) => { e.stopPropagation(); setEditingCorpus(group.label) }}
-                          aria-label={`Rename ${group.label}`}
+                          aria-label={t("nav.fileList.renameGroup", { group: displayLabel })}
                         >
                           <Pencil className="h-3 w-3" />
                         </button>
@@ -179,6 +202,7 @@ export function ExpandableFileList({
                   <div className="space-y-0.5">
                     {group.files.map((file) => {
                       const canExpand = fileHasSections(file)
+                        || (file.id === activeFileId && Boolean(activeChapterHealth?.length))
                       const isExpanded = canExpand && expanded.has(file.id)
                       const isEditing = editingFileId === file.id
                       return (
@@ -191,6 +215,7 @@ export function ExpandableFileList({
                             file={file}
                             active={file.id === activeFileId}
                             expanded={isExpanded}
+                            expandable={canExpand}
                             progress={fileProgress.get(file.id)}
                             hasSuggestion={suggestionFileIds.has(file.id)}
                             editing={isEditing}
@@ -201,8 +226,12 @@ export function ExpandableFileList({
                             onEditCancel={() => setEditingFileId(null)}
                             onToggleExpand={() => toggle(file.id)}
                             onSelect={() => onSelectFile(file.id)}
+                            onShowDetails={onShowDetails ? () => onShowDetails(file.id) : undefined}
                             onStartRename={() => setEditingFileId(file.id)}
                             onMove={() => onMove(file.id)}
+                            onExport={onExport ? () => onExport(file.id) : undefined}
+                            onAssignWork={onAssignWork ? () => onAssignWork(file.id) : undefined}
+                            onSegmentation={onSegmentation ? () => onSegmentation(file.id) : undefined}
                             onDelete={onDelete ? () => onDelete(file.id) : undefined}
                             onExportSource={
                               canExportSourceFile(file, canExportByOrgPolicy)
@@ -219,6 +248,7 @@ export function ExpandableFileList({
                               fileId={file.id}
                               validationCount={validationCount}
                               getTokenForFile={getTokenForFile}
+                              chapters={file.id === activeFileId ? activeChapterHealth : undefined}
                               onSectionClick={(label) => {
                                 if (file.id !== activeFileId) {
                                   onSelectFile(file.id, { sectionLabel: label })

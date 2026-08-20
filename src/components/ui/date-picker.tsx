@@ -1,6 +1,7 @@
 import * as React from "react"
 import { CalendarIcon } from "lucide-react"
 
+import { useT } from "@/lib/i18n/I18nProvider"
 import { Calendar } from "@/components/ui/calendar"
 import {
   InputGroup,
@@ -30,6 +31,16 @@ export function dateToDeadlineString(date: Date): string {
   return `${y}-${m}-${d}`
 }
 
+/**
+ * Deliberately locked to "en-US" regardless of the active i18n locale (AQU-511
+ * finding 5). `parseInputDate` below has to be able to read back whatever this
+ * prints, and reliably parsing a *localised* typed date string is not solvable
+ * with `new Date()` — e.g. "03/04" is ambiguous between day-first and
+ * month-first locales, and a wrong guess silently saves the wrong date. A
+ * fixed, unambiguous English format is worth more than a translated one that
+ * can misparse. `common.datePlaceholder`'s context entry documents this
+ * constraint for translators; keep the two in sync if this ever changes.
+ */
 function formatDate(date: Date | undefined) {
   if (!date) return ""
   return date.toLocaleDateString("en-US", {
@@ -39,6 +50,7 @@ function formatDate(date: Date | undefined) {
   })
 }
 
+/** See `formatDate` above — must stay able to parse whatever it prints. */
 function parseInputDate(value: string): Date | undefined {
   const trimmed = value.trim()
   if (!trimmed) return undefined
@@ -73,9 +85,11 @@ export function DatePicker({
   value,
   onChange,
   disabled,
-  placeholder = "June 01, 2025",
+  placeholder,
   id,
 }: DatePickerProps) {
+  const t = useT()
+  const resolvedPlaceholder = placeholder ?? t("common.datePlaceholder")
   const [open, setOpen] = React.useState(false)
   const [textValue, setTextValue] = React.useState(() => formatDate(value))
   const [month, setMonth] = React.useState<Date | undefined>(value)
@@ -93,7 +107,7 @@ export function DatePicker({
       <InputGroupInput
         id={id}
         value={textValue}
-        placeholder={placeholder}
+        placeholder={resolvedPlaceholder}
         disabled={disabled}
         onChange={(e) => {
           const next = e.target.value
@@ -123,11 +137,11 @@ export function DatePicker({
                 id={pickerId}
                 variant="ghost"
                 size="icon-xs"
-                aria-label="Select date"
+                aria-label={t("common.selectDate")}
                 disabled={disabled}
               >
                 <CalendarIcon />
-                <span className="sr-only">Select date</span>
+                <span className="sr-only">{t("common.selectDate")}</span>
               </InputGroupButton>
             }
           />

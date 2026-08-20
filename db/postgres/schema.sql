@@ -305,6 +305,19 @@ CREATE TABLE auth_rate_limit_events (
 );
 CREATE INDEX idx_auth_rate_limit_lookup ON auth_rate_limit_events(kind, identifier, created_at);
 
+-- [Pen test] Auth & session mgmt (2026-08-03): denylist backing server-side
+-- logout (POST /api/v2/auth/logout, utils/token-revocation.ts). Keyed by the
+-- JWT `jti` claim (added to every newly minted access token). expires_at
+-- mirrors the token's own `exp` so rows can be pruned once the token would
+-- have expired naturally anyway.
+CREATE TABLE revoked_tokens (
+    jti        TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL,
+    revoked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at TIMESTAMPTZ NOT NULL
+);
+CREATE INDEX idx_revoked_tokens_expires_at ON revoked_tokens(expires_at);
+
 CREATE TABLE admin_elevations (
     user_id        BIGINT PRIMARY KEY,
     elevated_until TIMESTAMPTZ NOT NULL,
@@ -373,10 +386,22 @@ CREATE TABLE events (
 -- MAX(events.server_seq) — the GET /cells delta/ETag watermark — does not
 -- move; any `?since=` cursor below rebuilt_seq is told to resync and the
 -- value is folded into the ETag. 0 = never rebuilt.
+--
+-- project_epoch (0079, AQU-943): the project's INCARNATION marker, stamped
+-- when this counter row is created. Wiping a project's rows and re-migrating
+-- it under the same deterministic ids restarts the allocator near 1, which
+-- inverts every warm client's `?since=` cursor — deltas answer "nothing newer"
+-- and the client renders its pre-wipe cache forever. The counter row is
+-- exactly what a wipe destroys, so its birth stamp distinguishes incarnations:
+-- it is folded into the cells-read ETag, and a client whose declared `?epoch=`
+-- doesn't match is told to resync (cells-read-route.ts). clock_timestamp() so
+-- a delete + re-create inside one transaction still changes it.
 CREATE TABLE IF NOT EXISTS project_seq_counters (
     project_id  TEXT PRIMARY KEY,
     last_seq    BIGINT NOT NULL,
-    rebuilt_seq BIGINT NOT NULL DEFAULT 0
+    rebuilt_seq BIGINT NOT NULL DEFAULT 0,
+    project_epoch BIGINT NOT NULL
+        DEFAULT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000000)::BIGINT
 );
 
 -- AD-2 first-child arbitration (audit RACE-2 / M1-1). One row per chain slot
@@ -448,6 +473,9 @@ CREATE TABLE cells (
     -- by any subsequent human target.cell.commit or cell.validate. Forward-only:
     -- historical commits without the ai_suggestion field default to 0.
     ai_drafted        INTEGER NOT NULL DEFAULT 0,
+    -- Durable provenance for the current untouched AI head. Cleared together
+    -- with ai_drafted on human edit or validation.
+    ai_draft          JSONB,
     start_ms          BIGINT,
     end_ms            BIGINT,
     medium            TEXT,
@@ -893,7 +921,7 @@ CREATE TABLE IF NOT EXISTS changesets (
     credential_id      TEXT NOT NULL,
     autonomy_mode      TEXT NOT NULL CHECK (autonomy_mode IN ('ask', 'act')),
     status             TEXT NOT NULL DEFAULT 'staged'
-                         CHECK (status IN ('staged', 'committing', 'committed', 'discarded', 'stale', 'expired')),
+                         CHECK (status IN ('staged', 'committing', 'committed', 'discarded', 'stale', 'superseded', 'expired')),
     commands           JSONB NOT NULL,            -- normalized domain commands
     preconditions      JSONB NOT NULL,            -- per-cell head/source pins resolved at prepare
     summary            JSONB NOT NULL,            -- server-computed effect summary
@@ -902,7 +930,8 @@ CREATE TABLE IF NOT EXISTS changesets (
     confirmation_id    TEXT,                      -- consumed ask-mode approval (after commit)
     created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at         TIMESTAMPTZ NOT NULL,
-    committed_at       TIMESTAMPTZ
+    committed_at       TIMESTAMPTZ,
+    assigned_to_user_id TEXT                      -- routing only; never resolves (0079)
 );
 CREATE INDEX IF NOT EXISTS idx_changesets_project_status ON changesets(project_id, status);
 
@@ -1013,6 +1042,31 @@ CREATE INDEX IF NOT EXISTS idx_artifact_bindings_project_file
   ON artifact_bindings(project_id, file_id);
 CREATE INDEX IF NOT EXISTS idx_artifact_bindings_artifact
   ON artifact_bindings(artifact_id);
+
+-- Knowledge base documents (spec: docs/superpowers/specs/2026-08-07-knowledge-base-design.md).
+-- Org XOR project scoped context documents; originals in R2 (kb/ prefix),
+-- extracted text + PageIndex-style tree here.
+CREATE TABLE IF NOT EXISTS knowledge_docs (
+    id UUID PRIMARY KEY,
+    org_id BIGINT REFERENCES organizations(id) ON DELETE CASCADE,
+    project_id TEXT,
+    name TEXT NOT NULL,
+    content_type TEXT,
+    size_bytes BIGINT NOT NULL,
+    sha256 TEXT NOT NULL,
+    r2_key TEXT NOT NULL,
+    extracted_text TEXT NOT NULL,
+    doc_summary TEXT,
+    index_status TEXT NOT NULL DEFAULT 'pending'
+      CHECK (index_status IN ('pending','ready','failed')),
+    index_tree JSONB,
+    created_by TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CHECK ((org_id IS NULL) <> (project_id IS NULL))
+);
+CREATE INDEX IF NOT EXISTS knowledge_docs_project ON knowledge_docs (project_id) WHERE project_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS knowledge_docs_org ON knowledge_docs (org_id) WHERE org_id IS NOT NULL;
 
 -- Agent memory + project brief (0066_agent_memory.sql; AQU-AGENT contracts §3).
 -- Long-term, human-reviewed agent memory. `agent_memories` rows move
@@ -1165,20 +1219,55 @@ CREATE UNIQUE INDEX IF NOT EXISTS scene_briefs_live
   WHERE status='approved';
 CREATE INDEX IF NOT EXISTS scene_briefs_lookup
   ON scene_briefs(project_id, file_id, start_cell_id);
+CREATE INDEX IF NOT EXISTS scene_briefs_run_provenance_time
+  ON scene_briefs(project_id, (provenance ->> 'runId'), created_at DESC, id DESC);
+
+-- Per-file segmentation strategy (0079_file_segmentation.sql). Keyed by
+-- (project, file) with NO target_lang: segmentation is a property of the
+-- SOURCE, so every language lane reads the same boundaries. 'auto' derives
+-- from file structure (the default; an absent row means 'auto'), 'fixed' cuts
+-- every fixed_size cells, and 'explicit' stores the ordered span list verbatim
+-- — the shape an LLM re-segmentation pass writes, with optional title/gist/
+-- depth per entry so the same rows can drive a navigation outline.
+CREATE TABLE IF NOT EXISTS file_segmentation (
+  project_id   text NOT NULL,
+  file_id      text NOT NULL,
+  strategy     text NOT NULL DEFAULT 'auto'
+    CHECK (strategy IN ('auto', 'fixed', 'explicit')),
+  fixed_size   integer,
+  boundaries   jsonb,
+  note         text,
+  generated_by text,
+  model_id     text,
+  human_edited boolean NOT NULL DEFAULT false,
+  stale_since  timestamptz,
+  stale_reason text,
+  version      integer NOT NULL DEFAULT 1,
+  updated_by   text,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  updated_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (project_id, file_id),
+  CHECK (strategy <> 'fixed' OR fixed_size IS NOT NULL),
+  CHECK (strategy <> 'explicit' OR boundaries IS NOT NULL)
+);
+CREATE INDEX IF NOT EXISTS file_segmentation_project
+  ON file_segmentation(project_id);
 
 -- Contextual run engine (0071_contextual_runs.sql; pipeline design §8, slice D1).
 -- contextual_runs: one durable pipeline run; span_cursor {seeds, nextIndex}
 -- makes every tick resumable from Postgres. contextual_steering: the human
 -- steering inbox (consumed, never deleted). contextual_drafts: staged span
 -- drafts awaiting review (v1 deviation: NOT the changesets table); a
--- re-propose supersedes the old proposed row in the same batch.
+-- re-propose supersedes the old proposed row in the same batch. Each
+-- proposal carries target_lang so sibling language lanes keep independent
+-- review queues.
 CREATE TABLE IF NOT EXISTS contextual_runs (
   id text PRIMARY KEY,                  -- uuidv7 (time-ordered; client store compares lexicographically)
   project_id text NOT NULL,
   file_id text NOT NULL,
   target_lang text NOT NULL DEFAULT '', -- lane ('' = the file's single target language)
   status text NOT NULL DEFAULT 'running'
-    CHECK (status IN ('running','pausing','paused','parked','done','failed','terminated')),
+    CHECK (status IN ('running','pausing','paused','parked','waiting','done','failed','terminated')),
   initiated_by text,                    -- username
   role_snapshot jsonb,                  -- {userId, username, level} at start
   span_cursor jsonb,                    -- {seeds:[SpanSeed…], nextIndex:int}; NULL until the first tick derives seeds
@@ -1189,14 +1278,29 @@ CREATE TABLE IF NOT EXISTS contextual_runs (
   calls_spent integer NOT NULL DEFAULT 0,
   last_error text,
   steering_cursor timestamptz,          -- last steering read; informational
+  anchor_cell_id text,                  -- where the user was looking at start; rotates the first wave
+  scope_group text,                     -- shared id across runs one project-wide start created
+  blocked_on_decision_id text,          -- set while status='waiting'; the open contextual_decisions row blocking this run
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now()  -- doubles as the driver heartbeat/lease
 );
 -- One ACTIVE run per (project, file, lane). Partial UNIQUE both serves the
 -- pill's hydrate lookup and enforces createRun's refuse-double-active.
 CREATE UNIQUE INDEX IF NOT EXISTS contextual_runs_active
   ON contextual_runs(project_id, file_id, target_lang)
-  WHERE status IN ('running','pausing','paused','parked');
+  WHERE status IN ('running','pausing','paused','parked','waiting');
+-- Stranded-run sweeper: 'running' with a quiet heartbeat (dead driver) or
+-- 'parked' with spans still on the cursor (loop hit its wave cap).
+CREATE INDEX IF NOT EXISTS contextual_runs_driver
+  ON contextual_runs(status, updated_at)
+  WHERE status IN ('running', 'parked');
+CREATE INDEX IF NOT EXISTS contextual_runs_scope_group
+  ON contextual_runs(scope_group)
+  WHERE scope_group IS NOT NULL;
+CREATE INDEX IF NOT EXISTS contextual_runs_project_time
+  ON contextual_runs(project_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS contextual_runs_project_lane_time
+  ON contextual_runs(project_id, file_id, target_lang, created_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS contextual_steering (
   id text PRIMARY KEY,                  -- uuidv7
@@ -1218,6 +1322,7 @@ CREATE TABLE IF NOT EXISTS contextual_drafts (
   project_id text NOT NULL,
   file_id text NOT NULL,
   cell_id text NOT NULL,
+  target_lang text NOT NULL DEFAULT '', -- lane ('' = project default); copied from the owning run
   scene_brief_id text,
   text text NOT NULL,
   verdicts jsonb,                       -- verifier verdict summary for the review card
@@ -1228,13 +1333,160 @@ CREATE TABLE IF NOT EXISTS contextual_drafts (
   reviewed_at timestamptz,
   reviewed_by text
 );
--- One live proposal per cell; a re-propose supersedes the old row first
--- (same batch) so this index never conflicts.
+-- One live proposal per cell per lane; a re-propose supersedes the old row
+-- first (same batch) so this index never conflicts. Sibling languages on the
+-- same cell keep independent review queues (0075).
 CREATE UNIQUE INDEX IF NOT EXISTS contextual_drafts_live
-  ON contextual_drafts(project_id, file_id, cell_id)
+  ON contextual_drafts(project_id, file_id, cell_id, target_lang)
   WHERE status = 'proposed';
 CREATE INDEX IF NOT EXISTS contextual_drafts_run
   ON contextual_drafts(run_id, status);
+CREATE INDEX IF NOT EXISTS contextual_drafts_project_status_run_time
+  ON contextual_drafts(project_id, status, run_id, created_at DESC, id DESC);
+
+-- Durable contextual-run activity (0074_contextual_run_events.sql; AQU-826).
+-- Append-only, bounded product telemetry: never prompts, draft text, model
+-- reasoning, or token deltas. The shared write primitive applies a strict
+-- per-kind detail allowlist before these database byte guards.
+CREATE TABLE IF NOT EXISTS contextual_run_events (
+  id text PRIMARY KEY,                  -- uuidv7
+  run_id text NOT NULL,
+  project_id text NOT NULL,
+  file_id text NOT NULL,
+  kind text NOT NULL CHECK (kind IN (
+    'run_created',
+    'run_state',
+    'span_started',
+    'phase',
+    'scene_ready',
+    'drafts_staged',
+    'span_outcome',
+    'steering_queued',
+    'draft_reviewed'
+  )),
+  span_id text,
+  span_label text,
+  status text,
+  phase text CHECK (phase IS NULL OR phase IN ('reading','drafting','checking','staging')),
+  summary text NOT NULL,
+  details jsonb NOT NULL DEFAULT '{}'::jsonb
+    CHECK (jsonb_typeof(details) = 'object')
+    CHECK (octet_length(details::text) <= 8192),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (char_length(id) = 36),
+  CHECK (octet_length(run_id) <= 512),
+  CHECK (octet_length(project_id) <= 512),
+  CHECK (octet_length(file_id) <= 512),
+  CHECK (span_id IS NULL OR octet_length(span_id) <= 512),
+  CHECK (status IS NULL OR octet_length(status) <= 64),
+  CHECK (octet_length(summary) <= 512),
+  CHECK (span_label IS NULL OR octet_length(span_label) <= 512)
+);
+CREATE INDEX IF NOT EXISTS contextual_run_events_run_time
+  ON contextual_run_events(run_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS contextual_run_events_project_time
+  ON contextual_run_events(project_id, created_at DESC, id DESC);
+
+-- Cross-isolate weighted capacity leases for project Autopilot waves (0074).
+-- Rows are ephemeral coordination state: every lease expires and is deleted
+-- on normal completion; project-row locking serializes capacity acquisition.
+CREATE TABLE IF NOT EXISTS contextual_project_leases (
+  id text PRIMARY KEY,
+  project_id text NOT NULL,
+  run_id text NOT NULL UNIQUE,
+  weight integer NOT NULL CHECK (weight BETWEEN 1 AND 1000),
+  expires_at timestamptz NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (char_length(id) = 36),
+  CHECK (octet_length(project_id) <= 512),
+  CHECK (octet_length(run_id) <= 512)
+);
+CREATE INDEX IF NOT EXISTS contextual_project_leases_project_expiry
+  ON contextual_project_leases(project_id, expires_at);
+
+-- Stripe Field Plan billing + word-metered AI credits (0077_org_billing.sql).
+-- Additive: unpaid orgs have no row and are treated as plan=none.
+CREATE TABLE IF NOT EXISTS org_billing (
+  org_id                   BIGINT PRIMARY KEY,
+  stripe_customer_id       TEXT UNIQUE,
+  stripe_subscription_id   TEXT UNIQUE,
+  plan                     TEXT NOT NULL DEFAULT 'none',
+  status                   TEXT NOT NULL DEFAULT 'none',
+  current_period_start     TIMESTAMPTZ,
+  current_period_end       TIMESTAMPTZ,
+  addon_packs              INTEGER NOT NULL DEFAULT 0,
+  complimentary_words      INTEGER NOT NULL DEFAULT 0,
+  hard_cap_words           BIGINT,
+  created_at               TIMESTAMPTZ DEFAULT now(),
+  updated_at               TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS org_word_usage_daily (
+  org_id     BIGINT  NOT NULL,
+  user_id    BIGINT  NOT NULL,
+  date_utc   DATE    NOT NULL,
+  rail       TEXT    NOT NULL,
+  words      INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (org_id, user_id, date_utc, rail)
+);
+CREATE INDEX IF NOT EXISTS idx_org_word_org_date ON org_word_usage_daily (org_id, date_utc);
+
+CREATE TABLE IF NOT EXISTS org_billing_events (
+  id              BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  org_id          BIGINT,
+  stripe_event_id TEXT UNIQUE,
+  kind            TEXT NOT NULL,
+  payload_json    TEXT,
+  created_at      TIMESTAMPTZ DEFAULT now()
+);
+
+-- Contextual decisions (0076_contextual_decisions.sql; seam design §4.3) — the
+-- agent → user channel. A decision is a question autopilot cannot answer
+-- alone. It closes exactly two ways (a human answers, or the agent researches
+-- it into a memory proposal); routing only ASSIGNS it and leaves it open. Two
+-- further terminal states are bookkeeping, and are deliberately distinct:
+-- `superseded` means the underlying gap got filled by other means (healthy),
+-- `expired` means nobody ever answered (unhealthy). Merging them would let
+-- the healthy case hide the warning the unhealthy one exists to give.
+CREATE TABLE IF NOT EXISTS contextual_decisions (
+  id text PRIMARY KEY,                  -- uuidv7
+  project_id text NOT NULL,
+  run_id text,                          -- NULL once the owning run ends
+  file_id text NOT NULL,
+  span_id text,
+  cell_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
+  -- WHY the agent cannot proceed, in the user's words. Never "review this".
+  reason text NOT NULL,
+  -- Which readiness item this gap belongs to; NULL for free-text ambiguities,
+  -- which the deterministic sweep can never close.
+  readiness_item text
+    CHECK (readiness_item IS NULL OR
+           readiness_item IN ('terminology','brief','examples','rules','languages')),
+  -- Set only for terminology decisions: the concept whose rendering is missing.
+  concept_id text,
+  -- How many later passages the answer affects. Drives surfacing rank (§4.6)
+  -- and belongs in the reason text too, because it is what makes a card
+  -- answerable.
+  blast_radius integer NOT NULL DEFAULT 0,
+  status text NOT NULL DEFAULT 'open'
+    CHECK (status IN ('open','researching','resolved','dismissed','superseded','expired')),
+  -- Routing is an ASSIGNMENT, not a resolution: an assigned decision is still
+  -- `open`, and anyone who joins later can answer it.
+  assigned_user_id integer,
+  assigned_invite_id text,
+  resolution jsonb,                     -- {kind:'answered'|'researched', …}
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  resolved_at timestamptz
+);
+-- Surfacing reads the open set per project, ranked by blast radius then age.
+CREATE INDEX IF NOT EXISTS contextual_decisions_open
+  ON contextual_decisions(project_id, blast_radius DESC, created_at ASC)
+  WHERE status IN ('open','researching');
+-- The supersession sweep and the run-unblock path both look up by run.
+CREATE INDEX IF NOT EXISTS contextual_decisions_run
+  ON contextual_decisions(run_id)
+  WHERE status IN ('open','researching');
 
 -- ───────────────────────── post-migration notes ─────────────────────────
 -- After the bulk data load (Stage C), reset each identity sequence so new

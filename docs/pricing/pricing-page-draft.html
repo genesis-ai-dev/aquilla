@@ -1,0 +1,852 @@
+<title>Aquilla Pricing</title>
+
+<style>
+  :root {
+    --paper:      oklch(0.985 0.002 264);
+    --card:       oklch(1 0 0);
+    --band:       oklch(0.968 0.003 264);
+    --ink:        oklch(0.24 0.008 264);
+    --ink-2:      oklch(0.44 0.008 264);
+    --ink-3:      oklch(0.60 0.006 264);
+    --rule:       oklch(0.90 0.003 264);
+    --rule-soft:  oklch(0.945 0.003 264);
+    --blue:       oklch(0.52 0.12 250);
+    --blue-fill:  oklch(0.72 0.09 245);
+    --blue-on:    oklch(0.99 0.005 250);
+    --sage:       oklch(0.55 0.06 165);
+    --sand:       oklch(0.55 0.09 70);
+
+    --serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo, Consolas, monospace;
+
+    --s--1: 0.8125rem;
+    --s-0:  1rem;
+    --s-1:  1.1875rem;
+    --s-2:  1.4375rem;
+    --s-3:  1.875rem;
+    --s-4:  2.5rem;
+
+    --wrap: 1120px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:     oklch(0.205 0.004 264);
+      --card:      oklch(0.245 0.005 264);
+      --band:      oklch(0.225 0.004 264);
+      --ink:       oklch(0.93 0.005 264);
+      --ink-2:     oklch(0.72 0.006 264);
+      --ink-3:     oklch(0.56 0.006 264);
+      --rule:      oklch(0.325 0.005 264);
+      --rule-soft: oklch(0.285 0.005 264);
+      --blue:      oklch(0.81 0.09 245);
+      --blue-fill: oklch(0.78 0.09 245);
+      --blue-on:   oklch(0.21 0.03 250);
+      --sage:      oklch(0.75 0.07 165);
+      --sand:      oklch(0.79 0.09 70);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:     oklch(0.205 0.004 264);
+    --card:      oklch(0.245 0.005 264);
+    --band:      oklch(0.225 0.004 264);
+    --ink:       oklch(0.93 0.005 264);
+    --ink-2:     oklch(0.72 0.006 264);
+    --ink-3:     oklch(0.56 0.006 264);
+    --rule:      oklch(0.325 0.005 264);
+    --rule-soft: oklch(0.285 0.005 264);
+    --blue:      oklch(0.81 0.09 245);
+    --blue-fill: oklch(0.78 0.09 245);
+    --blue-on:   oklch(0.21 0.03 250);
+    --sage:      oklch(0.75 0.07 165);
+    --sand:      oklch(0.79 0.09 70);
+  }
+
+  :root[data-theme="light"] {
+    --paper:     oklch(0.985 0.002 264);
+    --card:      oklch(1 0 0);
+    --band:      oklch(0.968 0.003 264);
+    --ink:       oklch(0.24 0.008 264);
+    --ink-2:     oklch(0.44 0.008 264);
+    --ink-3:     oklch(0.60 0.006 264);
+    --rule:      oklch(0.90 0.003 264);
+    --rule-soft: oklch(0.945 0.003 264);
+    --blue:      oklch(0.52 0.12 250);
+    --blue-fill: oklch(0.72 0.09 245);
+    --blue-on:   oklch(0.99 0.005 250);
+    --sage:      oklch(0.55 0.06 165);
+    --sand:      oklch(0.55 0.09 70);
+  }
+
+  html { color-scheme: light dark; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: var(--s-0);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: var(--wrap);
+    margin-inline: auto;
+    padding: 0 1.5rem;
+  }
+
+  a { color: var(--blue); }
+
+  :where(a, button, [tabindex]):focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 3px;
+    border-radius: 2px;
+  }
+
+  .eyebrow {
+    font-family: var(--sans);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  /* ── masthead ───────────────────────────────────────────── */
+
+  .masthead {
+    display: flex;
+    flex-direction: column;
+    gap: 1.125rem;
+    padding: 4.5rem 0 3rem;
+    max-width: 46rem;
+  }
+
+  .masthead h1 {
+    font-family: var(--serif);
+    font-size: var(--s-4);
+    font-weight: 400;
+    line-height: 1.1;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+  }
+
+  .thesis {
+    font-size: var(--s-1);
+    line-height: 1.5;
+    color: var(--ink-2);
+    max-width: 40rem;
+    text-wrap: pretty;
+  }
+
+  .thesis strong { color: var(--ink); font-weight: 600; }
+
+  /* ── tier cards ─────────────────────────────────────────── */
+
+  .tiers {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.25rem;
+    align-items: start;
+  }
+
+  .tier {
+    display: flex;
+    flex-direction: column;
+    gap: 1.375rem;
+    background: var(--card);
+    border: 1px solid var(--rule);
+    border-top: 2px solid var(--tier, var(--rule));
+    border-radius: 4px;
+    padding: 1.75rem 1.5rem 1.625rem;
+  }
+
+  .tier--field { --tier: var(--sage); }
+  .tier--team  { --tier: var(--blue-fill); border-color: var(--blue-fill); }
+  .tier--inst  { --tier: var(--sand); }
+
+  .tier__head { display: flex; flex-direction: column; gap: 0.4375rem; }
+
+  .tier__name {
+    font-family: var(--serif);
+    font-size: var(--s-2);
+    font-weight: 400;
+    letter-spacing: -0.01em;
+  }
+
+  .tier__for { color: var(--tier); }
+
+  .tier__price {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4375rem;
+    flex-wrap: wrap;
+    padding-top: 0.25rem;
+  }
+
+  .tier__amount {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-size: var(--s-3);
+    font-weight: 500;
+    letter-spacing: -0.03em;
+  }
+
+  .tier__unit { font-size: var(--s--1); color: var(--ink-3); }
+
+  .tier__annual {
+    font-family: var(--mono);
+    font-size: var(--s--1);
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .tier__pitch {
+    font-size: var(--s--1);
+    color: var(--ink-2);
+    line-height: 1.5;
+    text-wrap: pretty;
+  }
+
+  /* allowance block — the measured quantities */
+  .allowance {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    border-block: 1px solid var(--rule-soft);
+    padding: 0.9375rem 0;
+  }
+
+  .allowance__row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    font-size: var(--s--1);
+  }
+
+  .allowance__label { color: var(--ink-3); }
+
+  .allowance__value {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+    text-align: right;
+  }
+
+  .feats {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5625rem;
+    font-size: var(--s--1);
+    list-style: none;
+  }
+
+  .feats li {
+    display: grid;
+    grid-template-columns: 0.75rem 1fr;
+    gap: 0.625rem;
+    align-items: start;
+    line-height: 1.45;
+    color: var(--ink-2);
+  }
+
+  .feats li::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    margin-top: 0.5em;
+    background: var(--tier);
+    border-radius: 1px;
+  }
+
+  .feats li strong { color: var(--ink); font-weight: 600; }
+
+  .feats__inherit {
+    font-style: italic;
+    color: var(--ink-3) !important;
+  }
+  .feats__inherit::before { background: transparent !important; }
+
+  .cta {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: auto;
+    padding: 0.6875rem 1rem;
+    border-radius: 4px;
+    border: 1px solid var(--rule);
+    background: transparent;
+    color: var(--ink);
+    font: inherit;
+    font-size: var(--s--1);
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+    transition: background-color 120ms ease, border-color 120ms ease;
+  }
+
+  .cta:hover { background: var(--band); border-color: var(--ink-3); }
+
+  .cta--primary {
+    background: var(--blue-fill);
+    border-color: var(--blue-fill);
+    color: var(--blue-on);
+  }
+
+  .cta--primary:hover { background: var(--blue); border-color: var(--blue); }
+
+  .tier__note {
+    font-size: 0.75rem;
+    color: var(--ink-3);
+    line-height: 1.45;
+    text-wrap: pretty;
+  }
+
+  /* ── section furniture ──────────────────────────────────── */
+
+  .section { padding: 3.75rem 0 0; }
+
+  .section__head {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+    max-width: 42rem;
+    padding-bottom: 1.5rem;
+  }
+
+  .section__head h2 {
+    font-family: var(--serif);
+    font-size: var(--s-2);
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+  }
+
+  .section__head p {
+    font-size: var(--s--1);
+    color: var(--ink-2);
+    text-wrap: pretty;
+  }
+
+  /* ── packs table ────────────────────────────────────────── */
+
+  .table-scroll { overflow-x: auto; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--s--1);
+    min-width: 34rem;
+  }
+
+  caption { text-align: left; }
+
+  th, td {
+    text-align: left;
+    padding: 0.8125rem 1rem 0.8125rem 0;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: baseline;
+  }
+
+  thead th {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    border-bottom-color: var(--rule);
+    padding-top: 0;
+  }
+
+  td.num {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+
+  td.qty {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+
+  td.who { color: var(--ink-2); }
+
+  tbody tr:last-child td { border-bottom: none; }
+
+  .packs__rules {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    gap: 1.25rem 2rem;
+    margin-top: 1.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--rule);
+  }
+
+  .rule-item { display: flex; flex-direction: column; gap: 0.3125rem; }
+
+  .rule-item dt {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--ink);
+  }
+
+  .rule-item dd {
+    font-size: var(--s--1);
+    color: var(--ink-2);
+    line-height: 1.45;
+    text-wrap: pretty;
+  }
+
+  /* ── self-host strip ────────────────────────────────────── */
+
+  .selfhost {
+    display: grid;
+    grid-template-columns: 1.15fr 1fr;
+    gap: 2.5rem;
+    background: var(--band);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 2rem;
+    margin-top: 3.75rem;
+  }
+
+  .selfhost__body { display: flex; flex-direction: column; gap: 0.875rem; }
+
+  .selfhost h2 {
+    font-family: var(--serif);
+    font-size: var(--s-2);
+    font-weight: 400;
+    letter-spacing: -0.01em;
+  }
+
+  .selfhost p {
+    font-size: var(--s--1);
+    color: var(--ink-2);
+    line-height: 1.5;
+    text-wrap: pretty;
+  }
+
+  .ledger {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6875rem;
+    align-self: center;
+    width: 100%;
+  }
+
+  .ledger__row {
+    display: grid;
+    grid-template-columns: 5.5rem 1fr;
+    gap: 0.875rem;
+    font-size: var(--s--1);
+    padding-bottom: 0.6875rem;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .ledger__row:last-child { border-bottom: none; padding-bottom: 0; }
+
+  .ledger__key {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    padding-top: 0.2em;
+  }
+
+  .ledger__val { color: var(--ink-2); line-height: 1.45; }
+
+  /* ── honest-pricing footnote ────────────────────────────── */
+
+  .footnote {
+    margin: 3.75rem 0 5rem;
+    padding-top: 1.75rem;
+    border-top: 2px solid var(--ink);
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+    gap: 1.75rem 2.5rem;
+  }
+
+  .footnote__lead { grid-column: 1 / -1; max-width: 44rem; }
+
+  .footnote__lead h2 {
+    font-family: var(--serif);
+    font-size: var(--s-1);
+    font-weight: 400;
+    margin-bottom: 0.4375rem;
+  }
+
+  .footnote__lead p {
+    font-size: var(--s--1);
+    color: var(--ink-2);
+    line-height: 1.5;
+    text-wrap: pretty;
+  }
+
+  .note { display: flex; flex-direction: column; gap: 0.375rem; }
+
+  .note h3 {
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: var(--ink);
+  }
+
+  .note p {
+    font-size: var(--s--1);
+    color: var(--ink-2);
+    line-height: 1.45;
+    text-wrap: pretty;
+  }
+
+  .note code {
+    font-family: var(--mono);
+    font-size: 0.9em;
+    color: var(--ink);
+  }
+
+  @media (max-width: 940px) {
+    .tiers { grid-template-columns: 1fr; max-width: 30rem; }
+    .selfhost { grid-template-columns: 1fr; gap: 1.75rem; }
+  }
+
+  @media (max-width: 600px) {
+    :root { --s-4: 2rem; --s-3: 1.625rem; --s-2: 1.3125rem; }
+    .masthead { padding: 3rem 0 2.25rem; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+  }
+</style>
+
+<main class="wrap">
+
+  <header class="masthead">
+    <span class="eyebrow">Pricing</span>
+    <h1>Free for translators. Priced for the people who answer for the work.</h1>
+    <p class="thesis">
+      Every translator gets the full workspace at no cost, permanently. Organizations pay for the
+      layer above it: <strong>reviewer sign-off, scoped roles, audit trails, quality checks, and
+      reports a consultant or funder can act on.</strong> AI drafting is included on every plan
+      and measured in translation cells, so you can budget a year of work without thinking in
+      tokens.
+    </p>
+  </header>
+
+  <section class="tiers" aria-label="Plans">
+
+    <article class="tier tier--field">
+      <div class="tier__head">
+        <span class="eyebrow">For <span class="tier__for">translators &amp; church teams</span></span>
+        <h2 class="tier__name">Field</h2>
+        <div class="tier__price">
+          <span class="tier__amount">$0</span>
+          <span class="tier__unit">forever</span>
+        </div>
+      </div>
+
+      <p class="tier__pitch">
+        The complete translation workspace, free. No card, no trial countdown, no seat count,
+        and nothing held back from the translation work itself.
+      </p>
+
+      <div class="allowance">
+        <div class="allowance__row">
+          <span class="allowance__label">AI drafting</span>
+          <span class="allowance__value">300 cells / mo</span>
+        </div>
+        <div class="allowance__row">
+          <span class="allowance__label">Synthesized audio</span>
+          <span class="allowance__value">15 min / mo</span>
+        </div>
+        <div class="allowance__row">
+          <span class="allowance__label">Active projects</span>
+          <span class="allowance__value">3</span>
+        </div>
+      </div>
+
+      <ul class="feats">
+        <li><strong>Unlimited translators</strong> — seats are never billed, on any plan</li>
+        <li>Editor, translation memory, terminology, and comments in one place</li>
+        <li>Import and export USFM, Paratext, and plain text</li>
+        <li>Back-translation and automatic rule checks</li>
+        <li><strong>Bring your own AI key</strong> and draft as much as you like</li>
+        <li>Community support</li>
+      </ul>
+
+      <a class="cta" href="#">Start translating</a>
+      <p class="tier__note">
+        Free field use is a binding commitment, not a promotion. It is written into our public
+        Sovereignty Covenant, and no pricing change can take it away.
+      </p>
+    </article>
+
+    <article class="tier tier--team">
+      <div class="tier__head">
+        <span class="eyebrow">For <span class="tier__for">translation organizations</span></span>
+        <h2 class="tier__name">Team</h2>
+        <div class="tier__price">
+          <span class="tier__amount">$149</span>
+          <span class="tier__unit">/ month</span>
+        </div>
+        <span class="tier__annual">$1,490 / year — two months free</span>
+      </div>
+
+      <p class="tier__pitch">
+        For organizations that have to answer for their translations. Show who approved what, on
+        what evidence, and when.
+      </p>
+
+      <div class="allowance">
+        <div class="allowance__row">
+          <span class="allowance__label">AI drafting</span>
+          <span class="allowance__value">4,000 cells / mo</span>
+        </div>
+        <div class="allowance__row">
+          <span class="allowance__label">Synthesized audio</span>
+          <span class="allowance__value">120 min / mo</span>
+        </div>
+        <div class="allowance__row">
+          <span class="allowance__label">Active projects</span>
+          <span class="allowance__value">15</span>
+        </div>
+      </div>
+
+      <ul class="feats">
+        <li class="feats__inherit">Everything in Field, plus:</li>
+        <li><strong>Nothing lands without a reviewer</strong> signing off on it</li>
+        <li><strong>Roles you control</strong>, assigned per project and per group</li>
+        <li><strong>Every edit, approval, and export</strong> recorded and timestamped</li>
+        <li>Quality checks that catch problems early: validators, waivers, health reports</li>
+        <li>Publishing-ready exports, including InDesign IDML</li>
+        <li>Door43 and DCS sync, plus terminology shared across your organization</li>
+        <li>Agent API and MCP access for your own tooling</li>
+        <li>Weekly digests keep coordinators current without chasing anyone</li>
+        <li>Email support, answered the next business day</li>
+      </ul>
+
+      <a class="cta cta--primary" href="#">Choose Team</a>
+      <p class="tier__note">
+        Dormant projects do not count toward the limit. Only the projects your team is actively
+        working in.
+      </p>
+    </article>
+
+    <article class="tier tier--inst">
+      <div class="tier__head">
+        <span class="eyebrow">For <span class="tier__for">institutions &amp; agencies</span></span>
+        <h2 class="tier__name">Institution</h2>
+        <div class="tier__price">
+          <span class="tier__amount">Custom</span>
+        </div>
+        <span class="tier__annual">Annual, invoice or purchase order</span>
+      </div>
+
+      <p class="tier__pitch">
+        For consultants overseeing many teams at once, and for organizations with procurement,
+        data residency, or sovereignty requirements to satisfy.
+      </p>
+
+      <div class="allowance">
+        <div class="allowance__row">
+          <span class="allowance__label">AI drafting</span>
+          <span class="allowance__value">Negotiated, or your own key</span>
+        </div>
+        <div class="allowance__row">
+          <span class="allowance__label">Synthesized audio</span>
+          <span class="allowance__value">Negotiated</span>
+        </div>
+        <div class="allowance__row">
+          <span class="allowance__label">Active projects</span>
+          <span class="allowance__value">Unlimited</span>
+        </div>
+      </div>
+
+      <ul class="feats">
+        <li class="feats__inherit">Everything in Team, plus:</li>
+        <li><strong>Use your own AI provider key</strong> across the whole organization: your
+          contract, your rates, still fully metered and audited here</li>
+        <li><strong>One oversight view</strong> covering every team you advise</li>
+        <li><strong>Attestations you can hand a funder</strong>, covering fidelity and conformance</li>
+        <li>Single sign-on, directory sync, and enforced access review</li>
+        <li>Data residency, a processor register, and translation-memory opt-out</li>
+        <li>Named support contact with a committed response time</li>
+        <li><strong>Self-hosting licence</strong> and help deploying it</li>
+      </ul>
+
+      <a class="cta" href="#">Talk to us</a>
+      <p class="tier__note">
+        Start with one language as a pilot. We price the pilot as a single project, so you can see
+        the work before you commit to a tier.
+      </p>
+    </article>
+
+  </section>
+
+  <section class="section" aria-labelledby="packs-title">
+    <div class="section__head">
+      <span class="eyebrow">Extra compute</span>
+      <h2 id="packs-title">Buy more only when a push calls for it</h2>
+      <p>
+        Big drafting weeks happen. When your team goes past the monthly allowance, an organization
+        owner can add a pack. Nothing charges automatically, and no one is cut off mid-sentence.
+        You finish the draft in front of you, then decide.
+      </p>
+    </div>
+
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col">Pack</th>
+            <th scope="col">Adds</th>
+            <th scope="col">Roughly</th>
+            <th scope="col">Typical use</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="num">$100</td>
+            <td class="qty">2,500 cells</td>
+            <td class="qty">or 250 min audio</td>
+            <td class="who">Finishing a book after a drafting workshop</td>
+          </tr>
+          <tr>
+            <td class="num">$250</td>
+            <td class="qty">6,500 cells</td>
+            <td class="qty">or 650 min audio</td>
+            <td class="who">A busy quarter across several teams</td>
+          </tr>
+          <tr>
+            <td class="num">$500</td>
+            <td class="qty">14,000 cells</td>
+            <td class="qty">or 1,400 min audio</td>
+            <td class="who">A sustained push, or an audio recording season</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <dl class="packs__rules">
+      <div class="rule-item">
+        <dt>An owner approves every pack</dt>
+        <dd>
+          Usage never triggers a purchase on its own. An organization owner buys each pack by
+          hand, so the bill holds no surprises.
+        </dd>
+      </div>
+      <div class="rule-item">
+        <dt>Packs never expire</dt>
+        <dd>
+          Unused compute carries forward for as long as your organization is active. Seasonal work
+          stays affordable.
+        </dd>
+      </div>
+      <div class="rule-item">
+        <dt>We tell you when to stop buying</dt>
+        <dd>
+          If your packs start costing more than the next plan up, we email you and say so. Same if
+          a cheaper plan would have covered your year.
+        </dd>
+      </div>
+      <div class="rule-item">
+        <dt>Or use your own key</dt>
+        <dd>
+          Institution customers supply a provider key and skip packs altogether. Every call is
+          still metered and audited here.
+        </dd>
+      </div>
+    </dl>
+  </section>
+
+  <section class="selfhost" aria-labelledby="selfhost-title">
+    <div class="selfhost__body">
+      <span class="eyebrow">Self-hosting</span>
+      <h2 id="selfhost-title">Run Aquilla on your own servers</h2>
+      <p>
+        Aquilla's core is open source. With technical staff, your organization can run the whole
+        workspace on its own infrastructure, using its own database and its own AI provider, and
+        pay us nothing.
+      </p>
+      <p>
+        This is a real option, not a footnote. For some institutions it is the right one,
+        especially where translation data cannot legally leave the country. Read the guide before
+        you talk to us about price.
+      </p>
+      <a class="cta" href="#">Read the deployment guide</a>
+    </div>
+
+    <dl class="ledger">
+      <div class="ledger__row">
+        <dt class="ledger__key">You run</dt>
+        <dd class="ledger__val">The application, your Postgres database, your storage, and your AI provider account</dd>
+      </div>
+      <div class="ledger__row">
+        <dt class="ledger__key">You pay</dt>
+        <dd class="ledger__val">Hosting, database, and AI usage at cost, plus the staff time to operate and upgrade it</dd>
+      </div>
+      <div class="ledger__row">
+        <dt class="ledger__key">Stays hosted</dt>
+        <dd class="ledger__val">The shared translation-memory network and the conformance attestation service. An Institution licence connects your deployment to both</dd>
+      </div>
+    </dl>
+  </section>
+
+  <section class="footnote" aria-labelledby="honest-title">
+    <div class="footnote__lead">
+      <span class="eyebrow">How we price compute</span>
+      <h2 id="honest-title">The margin, stated plainly</h2>
+      <p>
+        We resell AI compute at about four times what it costs us, and five times on autonomous
+        agent runs. Here is what that margin buys, and how to route around it if you would rather
+        not pay it.
+      </p>
+    </div>
+
+    <div class="note">
+      <h3>What the margin covers</h3>
+      <p>
+        A pack buys more than tokens. It covers model routing, retries, caching, the evaluation
+        suite that catches quality regressions before your translators see them, and a person to
+        call when a draft comes back wrong.
+      </p>
+    </div>
+
+    <div class="note">
+      <h3>There is always another route</h3>
+      <p>
+        Drafting a complete Bible runs to roughly 31,000 cells: about $1,250 of compute at our
+        rates, or about $310 on your own provider key. Institution customers bring their own key.
+        Anyone can self-host and buy compute direct.
+      </p>
+    </div>
+
+    <div class="note">
+      <h3>Your text stays yours</h3>
+      <p>
+        An unpaid invoice never locks a team out of its own translation. A lapsed plan pauses
+        oversight features and AI drafting, nothing more. The text stays readable and exportable,
+        permanently.
+      </p>
+    </div>
+
+    <div class="note">
+      <h3>What counts as a cell</h3>
+      <p>
+        A cell is one translation unit: roughly a verse of scripture, or a segment of similar
+        length in other work. Long cells cost more than short ones, and owners can see the exact
+        accounting in <code>Settings → Usage</code>.
+      </p>
+    </div>
+  </section>
+
+</main>

@@ -2,6 +2,7 @@ import { useCallback, useEffect } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import {
   login as doLogin,
+  logout as doServerLogout,
   register as doRegister,
   type LoginOptions,
 } from "@/lib/frontier/auth"
@@ -49,16 +50,19 @@ export function useFrontierSession() {
   const logout = useCallback(async () => {
     posthog.capture("user logged out")
     posthog.reset()
+    // Denylist the token server-side before dropping it locally, so a
+    // leaked copy elsewhere doesn't stay valid until its natural expiry.
+    // Best-effort — doServerLogout never throws.
+    if (active?.jwt) await doServerLogout(active.jwt)
     await clearSession()
     await clearAllLocalData()
     await purgeAudioCachesOnSignOut()
     qc.clear()
-  }, [qc])
+  }, [qc, active])
 
-  // Edge-case mitigation: if IDB is empty but aq_hint cookie was somehow
-  // set (storage cleared, old cookie, first deploy), clear the hint so the
-  // next cold visit to aquilla.app/ serves the homepage directly instead of
-  // briefly flashing the empty app shell.
+  // Edge-case mitigation: if IDB is empty but aq_hint remains set (storage
+  // cleared or an old cookie), clear it so SPA entry/login guards do not treat
+  // the next visit as an authenticated session.
   useEffect(() => {
     if (!loading && active === null) {
       clearAuthHint()

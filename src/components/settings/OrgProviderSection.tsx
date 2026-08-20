@@ -7,14 +7,14 @@
 // Precedence at synthesis time:
 //   project key > user (localStorage) key > org key (this section)
 
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { useForm } from "@tanstack/react-form"
-import { Check } from "lucide-react"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { Button } from "@/components/ui/button"
 import { Field, FieldError, FieldGroup } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { UseOrgSettings } from "@/hooks/useOrgSettings"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { optionalString } from "@/lib/forms/schemas"
@@ -30,11 +30,11 @@ interface OrgProviderSectionProps {
 }
 
 export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
+  const { t } = useI18n()
   const { orgProviderKeys, canEditOrgKeys, patch, hasFetched } = orgSettings
 
   const keys = orgProviderKeys ?? {}
   const currentGeminiKey = keys["gemini-tts"] ?? ""
-  const [saved, setSaved] = useState(false)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
 
   const form = useForm({
@@ -50,10 +50,7 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
           "gemini-tts": trimmed || undefined,
         },
       })
-      if (result.kind === "ok") {
-        setSaved(true)
-        setTimeout(() => setSaved(false), 2500)
-      } else if (result.kind === "blocked" || result.kind === "forbidden") {
+      if (result.kind === "blocked" || result.kind === "forbidden") {
         setSubmitError("Only org maintainers and owners can set org-level API keys.")
       } else if (result.kind === "error") {
         setSubmitError(result.message ?? "Save failed")
@@ -67,25 +64,26 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
 
   if (!hasFetched) {
     return (
-      <SettingsGroup label="Provider keys">
-        <SettingsRow label="Gemini TTS API key" block>
-          <p className="text-xs text-muted-foreground">Loading…</p>
+      <SettingsGroup label={t("settings.providerKeys.groupLabel")}>
+        <SettingsRow label={t("settings.providerKeys.geminiTtsLabel")} block>
+          <div className="flex items-center text-muted-foreground">
+            <Spinner className="size-3.5" />
+          </div>
         </SettingsRow>
       </SettingsGroup>
     )
   }
 
   return (
-    <SettingsGroup label="Provider keys">
+    <SettingsGroup label={t("settings.providerKeys.groupLabel")}>
       {!canEditOrgKeys && (
         <div className="px-5 py-4 text-xs text-muted-foreground">
-          Only org maintainers and owners can set org-level keys. You can still
-          save a personal key in your project or personal settings.
+          {t("settings.providerKeys.restrictedNotice")}
         </div>
       )}
       <SettingsRow
-        label="Gemini TTS API key"
-        description="Used by Gemini TTS synthesis for all org members when no project or personal key is present. Precedence: project key > personal key > org key."
+        label={t("settings.providerKeys.geminiTtsLabel")}
+        description={t("settings.providerKeys.geminiTtsDescription")}
         block
       >
         <form
@@ -126,29 +124,23 @@ export function OrgProviderSection({ orgSettings }: OrgProviderSectionProps) {
 
           {canEditOrgKeys && (
             <div className="flex gap-2">
-              <Button type="submit" form="org-provider-form" size="sm">
+              <Button type="submit" form="org-provider-form">
                 {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
                 {form.state.isSubmitting ? "Saving…" : "Save key"}
               </Button>
               {currentGeminiKey && (
                 <Button
                   type="button"
-                  size="sm"
                   variant="outline"
                   onClick={() => form.setFieldValue("geminiKey", "")}
                 >
-                  Clear
+                  {t("common.clear")}
                 </Button>
               )}
             </div>
           )}
           {submitError && (
             <FieldError className="text-xs">{submitError}</FieldError>
-          )}
-          {saved && (
-            <p className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400" role="status" data-testid="org-key-saved">
-              <Check className="size-3.5" /> Saved
-            </p>
           )}
         </form>
       </SettingsRow>

@@ -2,13 +2,11 @@ import { useState } from "react"
 import {
   AlertTriangle,
   Clock,
-  Lock,
   Mail,
-  UsersRound,
   X,
 } from "lucide-react"
-import { useLocation, useNavigate } from "react-router-dom"
-import { membersPath } from "@/lib/navigation/org-paths"
+import { useLocation, useNavigate, Navigate } from "react-router-dom"
+import { membersPath, orgOverviewPath } from "@/lib/navigation/org-paths"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -17,57 +15,43 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
+import { OrgMembersTable } from "@/components/org/OrgMembersTable"
 import { useOrgMembers } from "@/hooks/useOrg"
+import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useAccessibleProjects } from "@/hooks/useAccessibleProjects"
 import { useOrgInvites } from "@/hooks/useOrgInvites"
-import { MembersPanel, type MembersPanelMember } from "@/components/MembersPanel"
 import { MembersMatrixView } from "@/components/MembersMatrixView"
 import { MultiProjectInviteDialog } from "@/components/MultiProjectInviteDialog"
 import { RemoveOrgMemberDialog } from "@/components/RemoveOrgMemberDialog"
-import { OrgInviteByEmail } from "@/components/org/OrgInviteByEmail"
-import { MemberAccessRow } from "@/components/org/MemberAccessPanel"
 import { ExternalCollaboratorsSection } from "@/components/org/ExternalCollaboratorsSection"
-import { ROLE, ORG_ROLE_PICKER, roleName } from "@/lib/frontier/roles"
+import { ROLE } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { formatRelativeTime } from "@/lib/time/relative"
-import type { OrgMemberProject, PendingOrgInvite } from "@/lib/frontier/orgs"
-import type { MemberGrantResult } from "@/lib/frontier/members"
+import type { PendingOrgInvite } from "@/lib/frontier/orgs"
 import { useActiveOrg } from "@/context/OrgContext"
+import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 
 type MembersTab = "roster" | "matrix"
 
-const ORG_ROLE_DESCRIPTIONS: Record<number, string> = {
-  [ROLE.VIEWER]: "Read-only across all projects",
-  [ROLE.CONTRIBUTOR]: "Edit content across all projects",
-  [ROLE.PROJECT_LEAD]: "Manage members on every project",
-  [ROLE.MAINTAINER]: "Lead + manage roles",
-}
-
-const ORG_ROLE_OPTIONS = ORG_ROLE_PICKER.map((level) => ({
-  level,
-  name: roleName(level),
-  description: ORG_ROLE_DESCRIPTIONS[level] ?? "",
-}))
-
 /**
- * Operational PM home. The previous /settings/org page collapsed three
- * states into "Loading…" — pre-session, fetching, and silent error all
- * looked the same to the user. This page renders each state distinctly,
- * and adds the multi-project invite + per-member project chips that the
- * design loop concluded operational PMs need.
+ * Operational PM home. Org members render as a Teams-style DataTable (search,
+ * toolbar actions, row menus). Matrix stays a second tab for the members ×
+ * projects grid.
  */
 export function MembersPage() {
+  const t = useT()
   const { activeOrg, isAllOrgs, isLoading, error } = useActiveOrg()
 
   if (isLoading) {
     return (
       <MembersShell>
         <Page size="wide">
-          <PageHeader title="Members" description="People in this organization and their access." />
-          <div className="space-y-4">
-            <div className="h-24 animate-pulse rounded-2xl border bg-card" />
-            <div className="h-40 animate-pulse rounded-2xl border bg-card" />
-          </div>
+          <PageHeader
+            title={t("editor.navTitle.members")}
+            description={t("org.membersPage.orgPage.description")}
+            inset={false}
+          />
+          <div className="h-48 animate-pulse rounded-lg border bg-card" />
         </Page>
       </MembersShell>
     )
@@ -77,13 +61,16 @@ export function MembersPage() {
     return (
       <MembersShell>
         <Page size="wide">
-          <PageHeader title="Members" description="People in this organization and their access." />
+          <PageHeader
+            title={t("editor.navTitle.members")}
+            description={t("org.membersPage.orgPage.description")}
+            inset={false}
+          />
           <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
-            <p className="text-sm font-medium text-destructive">Couldn't load your organization</p>
+            <p className="text-sm font-medium text-destructive">{t("org.membersPage.orgPage.loadErrorTitle")}</p>
             <p className="mt-1 text-xs text-muted-foreground">{error}</p>
             <p className="mt-2 text-xs text-muted-foreground">
-              Common causes: the Frontier worker is unreachable, your session expired,
-              or the request timed out. Check your network and try again.
+              {t("org.membersPage.orgPage.loadErrorHint")}
             </p>
           </div>
         </Page>
@@ -95,14 +82,18 @@ export function MembersPage() {
     return (
       <MembersShell>
         <Page size="wide">
-          <PageHeader title="Members" description="People in this organization and their access." />
+          <PageHeader
+            title={t("editor.navTitle.members")}
+            description={t("org.membersPage.orgPage.description")}
+            inset={false}
+          />
           <EmptyState
             icon={AlertTriangle}
-            title={isAllOrgs ? "Select an organization" : "Sign in to manage members"}
+            title={isAllOrgs ? t("org.teamsList.selectOrgTitle") : t("org.membersPage.orgPage.signInTitle")}
             description={
               isAllOrgs
-                ? "Member access is managed within a single organization. Choose one from the switcher to continue."
-                : "Member access requires a Frontier session. Sign in from the dashboard and come back to this page."
+                ? t("org.membersPage.orgPage.selectOrgDescription")
+                : t("org.membersPage.orgPage.signInDescription")
             }
           />
         </Page>
@@ -110,7 +101,7 @@ export function MembersPage() {
     )
   }
 
-  return <MembersPageContent orgId={activeOrg.id} orgName={activeOrg.name ?? "Organization"} />
+  return <MembersPageContent orgId={activeOrg.id} orgName={activeOrg.name ?? t("org.breadcrumb.organizationFallback")} />
 }
 
 /**
@@ -121,10 +112,11 @@ export function MembersPage() {
  * AppShell's main wrapper is overflow-hidden and the roster can run tall.
  */
 function MembersShell({ children }: { children: React.ReactNode }) {
+  const t = useT()
   return (
     <AppShell
       sidebar={<OrgSidebar />}
-      header={<OrgBreadcrumb section="Members" />}
+      header={<OrgBreadcrumb section={t("editor.navTitle.members")} />}
       statusBar={null}
       main={children}
     />
@@ -137,8 +129,12 @@ interface MembersPageContentProps {
 }
 
 function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
-  const callerUserId = null // FrontierSession has no userId; server enforces self-block.
+  const t = useT()
   const { activeOrg } = useActiveOrg()
+  const { canViewRoster, hasFetched: rosterPolicyReady } = useOrgSettings(
+    orgId,
+    activeOrg?.role?.level,
+  )
   // AQU-326: the External-collaborators governance view is maintainer+ only.
   const canGovern = (activeOrg?.role.level ?? 0) >= ROLE.MAINTAINER
   const { members, isLoading: membersLoading, error: membersError, rosterHidden, add, addMany, remove, listMemberProjects, refresh } =
@@ -158,97 +154,54 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
     navigate(membersPath(orgId, next), { replace: true })
   }
 
-  const panelMembers: MembersPanelMember[] = members.map((m) => ({
-    userId: m.userId,
-    username: m.username,
-    roleLevel: m.role.level,
-    roleName: m.role.name,
-    source: m.role.level === ROLE.OWNER ? "owner-of-org" : "override",
-    isLocked: m.role.level === ROLE.OWNER,
-    lockedHint: m.role.level === ROLE.OWNER ? "Org owner" : undefined,
-    lastActiveAt: m.lastActiveAt ?? null,
-  }))
-
-  const canInviteByEmail = (activeOrg?.role.level ?? 0) >= ROLE.OWNER
+  // AQU-485: below-floor callers must not see this page exist. Redirect to
+  // the org overview rather than a "Roster hidden" disclosure.
+  if (!rosterPolicyReady) {
+    return (
+      <MembersShell>
+        <Page size="wide">
+          <div className="h-48 animate-pulse rounded-lg border bg-card" />
+        </Page>
+      </MembersShell>
+    )
+  }
+  if (!canViewRoster || rosterHidden) {
+    return <Navigate to={orgOverviewPath(orgId)} replace />
+  }
 
   return (
     <MembersShell>
       <Page size="wide">
       <PageHeader
-        title="Members"
-        description={
-          <>
-            People in <strong className="font-medium text-foreground">{orgName}</strong>.
-            Org-level roles apply across every project; per-project access can be
-            granted separately via the Add-to-projects flow.
-          </>
-        }
-        actions={
-          <AppTooltip content="Add someone to specific projects without granting org-wide access.">
-            <Button
-              variant="default"
-              size="sm"
-              onClick={() => setMultiInviteOpen(true)}
-              disabled={accessibleProjects.length === 0}
-            >
-              <UsersRound className="mr-1.5 size-4" />
-              Add to projects
-            </Button>
-          </AppTooltip>
-        }
+        title={t("editor.navTitle.members")}
+        description={t("org.membersPage.orgPage.description")}
+        inset={false}
       />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as MembersTab)}>
-        <TabsList aria-label="Members views">
-          <TabsTrigger value="roster">Roster</TabsTrigger>
-          <TabsTrigger value="matrix">Matrix</TabsTrigger>
+        <TabsList aria-label={t("org.membersPage.orgPage.tabsAriaLabel")}>
+          <TabsTrigger value="roster">{t("org.membersPage.orgPage.roster")}</TabsTrigger>
+          <TabsTrigger value="matrix">{t("org.membersPage.orgPage.matrixTab")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="roster">
           <div className="space-y-6">
-            {canInviteByEmail && (
-              <Section
-                title="Invite a teammate by email"
-                description="Bring someone new into this organization. They don't need an Aquilla account yet — they'll be guided to create one when they accept."
-              >
-                <OrgInviteByEmail orgId={orgId} />
-              </Section>
-            )}
-
             {membersError && (
               <p className="text-xs text-destructive">{membersError}</p>
             )}
 
-            {membersLoading && members.length === 0 && !rosterHidden ? (
-              <Section title="Roster">
-                <div className="flex items-center justify-center py-8 text-muted-foreground">
-                  <Spinner className="mr-2" />
-                  <span className="text-sm">Loading members…</span>
-                </div>
-              </Section>
-            ) : rosterHidden ? (
-              // AQU-485: the org's rosterViewMinRole policy hides the roster (and
-              // count) from this caller. Render a distinct "hidden" state — never
-              // an empty roster, which would falsely imply zero members.
-              <Section title="Roster">
-                <EmptyState
-                  variant="inline"
-                  icon={Lock}
-                  title="Roster hidden"
-                  description="This organization has restricted who can view the member list. Ask an owner or maintainer if you need access."
-                />
-              </Section>
+            {membersLoading && members.length === 0 ? (
+              <div className="h-48 animate-pulse rounded-lg border bg-card" />
             ) : (
               <>
-                <RosterWithProjectChips
+                <OrgMembersTable
                   orgId={orgId}
-                  panelMembers={panelMembers}
-                  listMemberProjects={listMemberProjects}
+                  members={members}
+                  callerOrgRoleLevel={activeOrg?.role.level ?? null}
+                  canAddToProjects={accessibleProjects.length > 0}
+                  onAddToProjects={() => setMultiInviteOpen(true)}
                   add={add}
                   addMany={addMany}
-                  remove={remove}
-                  callerUserId={callerUserId}
-                  callerOrgRoleLevel={activeOrg?.role.level ?? null}
                   onRequestRemove={(userId, username) =>
                     setRemoveTarget({ userId, username })
                   }
@@ -272,8 +225,7 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
           {tab === "matrix" && (
             <div className="space-y-4">
               <p className="text-xs text-muted-foreground">
-                Every member × every project you can see, at a glance. Click a
-                cell to change a role; hover a row to load its lane scopes.
+                {t("org.membersPage.orgPage.matrixHint")}
               </p>
               <MembersMatrixView />
             </div>
@@ -314,90 +266,6 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
 }
 
 /**
- * Roster + per-row inline expand for project memberships. Keeps the existing
- * MembersPanel for add/remove/role-change, and adds a row affordance to
- * see "where on the project portfolio is this person" without leaving the
- * page. Lazy-fetched: the list_member_projects round-trip only fires when
- * the row is expanded.
- */
-interface RosterProps {
-  orgId: number
-  panelMembers: MembersPanelMember[]
-  listMemberProjects: (userId: number) => Promise<OrgMemberProject[]>
-  add: (username: string, role: number) => Promise<unknown>
-  /** AQU-734: batch grant for the multi-select Add flow. */
-  addMany: (members: Array<{ username: string; role: number }>) => Promise<MemberGrantResult[]>
-  remove: (userId: number) => Promise<void>
-  callerUserId: number | null
-  /** AQU-427: the current user's org-level role, forwarded to MemberAccessRow
-   *  so the Revoke button can be disabled-with-explanation for low roles. */
-  callerOrgRoleLevel: number | null
-  onRequestRemove: (userId: number, username: string) => void
-}
-
-function RosterWithProjectChips({
-  orgId,
-  panelMembers,
-  add,
-  addMany,
-  callerUserId,
-  callerOrgRoleLevel,
-  onRequestRemove,
-}: RosterProps) {
-  return (
-    <>
-      <Section
-        title="Roster"
-        description="Org members and their org-wide role. Add by username, change a role, or remove someone."
-      >
-        <MembersPanel
-          members={panelMembers}
-          roleOptions={ORG_ROLE_OPTIONS}
-          newMemberDefaultRole={ROLE.MAINTAINER}
-          callerUserId={callerUserId}
-          callerMaxRole={ROLE.MAINTAINER}
-          scopedUserSearch={false}
-          onAdd={async (usernames, role) => {
-            const results = await addMany(usernames.map((username) => ({ username, role })))
-            return results.map((r) => ({
-              username: r.username,
-              ok: r.ok,
-              error: r.error?.message,
-            }))
-          }}
-          onRemove={(userId) => {
-            const target = panelMembers.find((m) => m.userId === userId)
-            if (target) onRequestRemove(target.userId, target.username)
-            return Promise.resolve()
-          }}
-          onChangeRole={async (username, role) => {
-            await add(username, role)
-          }}
-        />
-      </Section>
-
-      <Section
-        title="Project access"
-        description="Expand a member to see their per-project roles."
-      >
-        <ul className="divide-y">
-          {panelMembers.map((m) => (
-            <MemberAccessRow
-              key={m.userId}
-              orgId={orgId}
-              userId={m.userId}
-              username={m.username}
-              callerOrgRoleLevel={callerOrgRoleLevel}
-            />
-          ))}
-        </ul>
-      </Section>
-    </>
-  )
-}
-
-
-/**
  * Pending share-link invitations across this org. Owner-only (the server
  * gates the listing, returning null on 403, and the hook hides the section
  * for non-owners). Each row shows what was invited where, by whom, and an
@@ -407,6 +275,7 @@ function RosterWithProjectChips({
  * server later errors, the hook re-fetches and the row reappears.
  */
 function PendingInvitesSection({ orgId }: { orgId: number }) {
+  const t = useT()
   const { invites, isLoading, error, revoke } = useOrgInvites(orgId)
 
   // Non-owner callers (server returned null/403) → hide the section entirely.
@@ -419,10 +288,10 @@ function PendingInvitesSection({ orgId }: { orgId: number }) {
       title={
         <span className="flex items-center gap-1.5">
           <Mail className="size-4 text-muted-foreground" aria-hidden />
-          Pending invitations
+          {t("org.orgHome.pendingInvitations.heading")}
         </span>
       }
-      description="Share-link invitations that haven't been redeemed yet. Revoke to cancel."
+      description={t("org.membersPage.orgPage.pendingInvitesDescription")}
       action={isLoading ? <Spinner className="size-3.5 text-muted-foreground" /> : null}
     >
       {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
@@ -445,13 +314,21 @@ function PendingInviteRow({
   invite: PendingOrgInvite
   onRevoke: (projectId: string, token: string) => Promise<boolean>
 }) {
+  const t = useT()
   const [busy, setBusy] = useState(false)
+  // SWARM-TODO(AQU-832): formatRelativeTime (src/lib/time/relative.ts) itself
+  // returns hardcoded, un-i18n'd English ("3 days ago") — out of scope here
+  // (shared util, many other call sites). This wrapper's own literal text is
+  // keyed below; the relative-time fragment inside it stays English until
+  // that util is localized.
   const expiresLabel = invite.expiresAt
-    ? `expires ${formatRelativeTime(invite.expiresAt)?.replace(" ago", " from now") ?? ""}`
-    : "no expiry"
+    ? t("org.membersPage.orgPage.expiresRelativePrefix", {
+        relative: formatRelativeTime(invite.expiresAt)?.replace(" ago", " from now") ?? "",
+      })
+    : t("org.membersPage.orgPage.noExpiry")
   // Hack-y: formatRelativeTime is past-tense; for an expiry we want
   // "expires in 2 days". Recompute properly when expiresAt is in the future.
-  const futureLabel = computeFutureLabel(invite.expiresAt)
+  const futureLabel = computeFutureLabel(t, invite.expiresAt)
 
   return (
     <li className="flex items-center gap-2 py-1.5 text-xs">
@@ -461,33 +338,37 @@ function PendingInviteRow({
           <span className="text-muted-foreground">·</span>
           <RoleLabel name={invite.role.name} className="text-muted-foreground" />
           {invite.email ? (
-            <AppTooltip content="Targeted invite: sign-up form will be prefilled with this email">
+            <AppTooltip content={t("org.membersPage.orgPage.targetedInviteTooltip")}>
               <span className="rounded bg-blue-500/15 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 text-[9px] font-mono">
                 {invite.email}
               </span>
             </AppTooltip>
           ) : (
-            <AppTooltip content="Open link: anyone holding the URL can redeem">
+            <AppTooltip content={t("org.membersPage.orgPage.openLinkTooltip")}>
               <span className="rounded bg-muted px-1.5 py-0.5 text-[9px] text-muted-foreground">
-                open link
+                {t("projectSettings.share.openLinkConnector")}
               </span>
             </AppTooltip>
           )}
         </div>
         <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-          <span>by {invite.createdBy?.username ?? "unknown"}</span>
+          <span>
+            {t("org.membersPage.orgPage.invitedByLabel", {
+              username: invite.createdBy?.username ?? t("org.membersPage.orgPage.unknownInviter"),
+            })}
+          </span>
           <span>·</span>
           <Clock className="h-2.5 w-2.5" />
           <span>{futureLabel ?? expiresLabel}</span>
         </div>
       </div>
-      <AppTooltip content="Revoke invitation">
+      <AppTooltip content={t("org.membersPage.orgPage.revokeInviteTooltip")}>
         <Button
           size="icon-sm"
           variant="ghost"
           className="text-muted-foreground hover:text-destructive"
           disabled={busy}
-          aria-label={`Revoke invitation to ${invite.projectName}`}
+          aria-label={t("org.membersPage.orgPage.revokeInviteAriaLabel", { project: invite.projectName })}
           onClick={async () => {
             setBusy(true)
             try {
@@ -505,16 +386,16 @@ function PendingInviteRow({
 }
 
 /** "expires in 2 days" / "expired" / null when no expiry set. */
-function computeFutureLabel(iso: string | null): string | null {
+function computeFutureLabel(t: TFunction, iso: string | null): string | null {
   if (!iso) return null
-  const t = Date.parse(iso)
-  if (Number.isNaN(t)) return null
-  const ms = t - Date.now()
-  if (ms <= 0) return "expired"
+  const parsed = Date.parse(iso)
+  if (Number.isNaN(parsed)) return null
+  const ms = parsed - Date.now()
+  if (ms <= 0) return t("org.membersPage.orgPage.expired")
   const days = Math.floor(ms / (24 * 60 * 60 * 1000))
-  if (days >= 1) return `expires in ${days} day${days === 1 ? "" : "s"}`
+  if (days >= 1) return t("org.membersPage.orgPage.expiresInDays", { count: days })
   const hours = Math.floor(ms / (60 * 60 * 1000))
-  if (hours >= 1) return `expires in ${hours} hour${hours === 1 ? "" : "s"}`
+  if (hours >= 1) return t("org.membersPage.orgPage.expiresInHours", { count: hours })
   const minutes = Math.max(1, Math.floor(ms / (60 * 1000)))
-  return `expires in ${minutes} minute${minutes === 1 ? "" : "s"}`
+  return t("org.membersPage.orgPage.expiresInMinutes", { count: minutes })
 }

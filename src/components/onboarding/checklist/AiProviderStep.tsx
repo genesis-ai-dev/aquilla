@@ -3,12 +3,13 @@ import { Sparkles, Server, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
-import { FieldError, FieldLabel } from "@/components/ui/field"
+import { FieldError, FieldLabel, OptionalMark } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
 import { FRONTIER_CHAT_URL } from "@/hooks/useCompletionSettings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import type { ProjectRecord, CompletionProvider } from "@/lib/parsers/types"
 import { useSaveCompletionSettings } from "@/hooks/useCompletionSettings"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface AiProviderStepProps {
   project: ProjectRecord
@@ -20,6 +21,7 @@ interface AiProviderStepProps {
 }
 
 export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepProps) {
+  const t = useT()
   const { session } = useFrontierSession()
   const currentProvider =
     project.completionSettings?.provider ??
@@ -39,11 +41,11 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
 
   async function handleSave() {
     if (selected === "frontier" && !session) {
-      setError("Sign in with a Frontier account to use the managed model.")
+      setError(t("onboarding.checklist.aiProvider.frontierSignInRequired"))
       return
     }
     if (selected === "custom" && !customEndpoint.trim()) {
-      setError("Endpoint URL is required")
+      setError(t("projectSettings.advancedLlm.endpointRequiredError"))
       return
     }
     setError(null)
@@ -64,18 +66,17 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        AI fills in suggested translations as you go and keeps style consistent
-        across the project. You can change this later in Project Settings.
+        {t("onboarding.checklist.aiProvider.description")}
       </p>
 
       <ProviderOption
         icon={<Sparkles className="h-4 w-4" />}
-        label="Frontier AI"
-        badge="Recommended"
+        label={t("onboarding.checklist.aiProvider.frontierLabel")}
+        badge={t("onboarding.checklist.aiProvider.recommendedBadge")}
         description={
           session
-            ? `Signed in as ${session.username} — no setup needed.`
-            : "Sign in with a Frontier account to use the managed model."
+            ? t("onboarding.checklist.aiProvider.frontierSignedIn", { username: session.username })
+            : t("onboarding.checklist.aiProvider.frontierSignInRequired")
         }
         selected={selected === "frontier"}
         onClick={() => setSelected("frontier")}
@@ -83,17 +84,17 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
 
       <ProviderOption
         icon={<Server className="h-4 w-4" />}
-        label="Custom endpoint"
-        description="Self-hosted, local, or any OpenAI-compatible server."
+        label={t("projectSettings.advancedLlm.providerCustomName")}
+        description={t("onboarding.checklist.aiProvider.customDescription")}
         selected={selected === "custom"}
         onClick={() => setSelected("custom")}
       />
 
       {selected === "custom" && (
-        <div className="ml-7 space-y-2 rounded-md bg-muted/30 p-2">
+        <div className="ms-7 space-y-2 rounded-md bg-muted/30 p-2">
           <div>
             <FieldLabel htmlFor="ai-endpoint" className="text-xs">
-              Endpoint URL
+              {t("projectSettings.advancedLlm.endpointLabel")}
             </FieldLabel>
             <Input
               id="ai-endpoint"
@@ -105,7 +106,8 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
           </div>
           <div>
             <FieldLabel htmlFor="ai-model" className="text-xs">
-              Model <span className="text-muted-foreground/70">(optional)</span>
+              {t("projectSettings.advancedLlm.modelLabel")}{" "}
+              <OptionalMark />
             </FieldLabel>
             <Input
               id="ai-model"
@@ -120,12 +122,11 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
 
       {error && <FieldError>{error}</FieldError>}
       <Button
-        size="sm"
         onClick={handleSave}
         className="w-full"
       >
         {busy && <Spinner data-icon="inline-start" />}
-        {busy ? "Saving…" : "Save provider"}
+        {busy ? t("common.saving") : t("onboarding.checklist.aiProvider.saveButton")}
       </Button>
     </div>
   )
@@ -154,7 +155,7 @@ function ProviderOption({
       onClick={onClick}
       aria-pressed={selected}
       className={
-        "flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors " +
+        "flex w-full items-start gap-3 rounded-lg border p-3 text-start transition-colors " +
         (selected
           ? "border-primary bg-primary/5"
           : "hover:bg-accent/40")

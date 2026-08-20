@@ -98,9 +98,25 @@ export interface AquillaDb {
   asAdmin?(): AquillaDb
 }
 
+/** Per-statement execution options (see PgRunOpts.prepare). */
+export interface PgRunOpts {
+  /** Issue the statement as a NAMED prepared statement (postgres.js
+   *  `prepare: true`). Required for pipelining: postgres.js flags every
+   *  parameterized UNprepared query `describeFirst`, which (a) costs an extra
+   *  Describe⇆ParameterDescription round-trip per statement and (b) makes
+   *  `execute()` return false, stalling the send queue until the response —
+   *  i.e. `prepare: false` (the `unsafe()` default) serializes everything at
+   *  2 RTTs/statement no matter how the caller schedules. With prepare on,
+   *  only the first occurrence of each distinct SQL string pays the describe;
+   *  repeats are Bind/Execute only and stream back-to-back (max_pipeline=100
+   *  in flight). Hyperdrive supports named prepared statements. Executors
+   *  that don't prepare (PGlite tests) may ignore this. */
+  prepare?: boolean
+}
+
 /** Minimal neutral executor the handle runs against (postgres.js or PGlite). */
 export interface PgExecutor {
-  run(sql: string, params: unknown[]): Promise<{ rows: Record<string, unknown>[]; rowCount: number }>
+  run(sql: string, params: unknown[], opts?: PgRunOpts): Promise<{ rows: Record<string, unknown>[]; rowCount: number }>
   begin<T>(fn: (tx: PgExecutor) => Promise<T>): Promise<T>
   /** Release the underlying connection (postgres.js per-request); no-op for PGlite tests. */
   close?(): Promise<void>
@@ -150,26 +166,28 @@ class PgStatement implements AquillaStatement {
   private mode: IdentityMode
   private query: string
   private args: unknown[]
+  private opts: PgRunOpts
 
-  constructor(executor: PgExecutor, mode: IdentityMode, query: string, args: unknown[] = []) {
+  constructor(executor: PgExecutor, mode: IdentityMode, query: string, args: unknown[] = [], opts: PgRunOpts = {}) {
     this.executor = executor
     this.mode = mode
     this.query = query
     this.args = args
+    this.opts = opts
   }
 
   bind(...args: unknown[]): PgStatement {
-    return new PgStatement(this.executor, this.mode, this.query, args)
+    return new PgStatement(this.executor, this.mode, this.query, args, this.opts)
   }
 
   private async runQuery(): Promise<{ rows: Record<string, unknown>[]; rowCount: number }> {
     const pgQuery = toPg(this.query)
     const args = this.args
     if (this.mode.kind === "none") {
-      return this.executor.run(pgQuery, args)
+      return this.executor.run(pgQuery, args, this.opts)
     }
     // Wrap in a transaction so SET LOCAL takes effect.
-    return withIdentity(this.executor, this.mode, (tx) => tx.run(pgQuery, args))
+    return withIdentity(this.executor, this.mode, (tx) => tx.run(pgQuery, args, this.opts))
   }
 
   async all<T = Record<string, unknown>>(): Promise<AquillaResult<T>> {
@@ -195,8 +213,14 @@ class PgStatement implements AquillaStatement {
   }
 
   /** Re-bind this statement onto a specific executor (used inside batch). */
-  _on(tx: PgExecutor) {
-    return new PgStatement(tx, { kind: "none" }, this.query, this.args)
+  _on(tx: PgExecutor, opts: PgRunOpts = {}) {
+    return new PgStatement(tx, { kind: "none" }, this.query, this.args, opts)
+  }
+
+  /** The raw SQL text — batchPipelined groups statements by it (proxy for the
+   *  postgres.js prepared-statement signature). */
+  _sql(): string {
+    return this.query
   }
 }
 
@@ -219,7 +243,17 @@ export class PostgresDb implements AquillaDb {
    */
   withUser(userId: number | string | null): PostgresDb {
     if (userId == null) return new PostgresDb(this.executor, { kind: "none" })
-    return new PostgresDb(this.executor, { kind: "user", userId: String(userId) })
+    // userId is embedded directly into `SET LOCAL app.user_id = '<userId>'`
+    // (see withIdentity below — SET LOCAL can't take a bind parameter), so it
+    // MUST be validated here rather than trusted from the caller: this is the
+    // one place standing between an unvalidated string and a GUC-injection
+    // primitive. users.id is BIGINT; reject anything that isn't a bare
+    // non-negative integer literal.
+    const id = String(userId)
+    if (!/^\d+$/.test(id)) {
+      throw new Error(`withUser: userId must be a non-negative integer, got ${JSON.stringify(userId)}`)
+    }
+    return new PostgresDb(this.executor, { kind: "user", userId: id })
   }
 
   /**
@@ -254,17 +288,62 @@ export class PostgresDb implements AquillaDb {
     return withIdentity(this.executor, this.mode, run)
   }
 
-  /** Like batch(), but PIPELINED: every statement is dispatched on the
+  /** Like batch(), but PIPELINED: runs of statements are dispatched on the
    *  transaction connection before any response is awaited, so postgres.js
    *  streams them back-to-back and N per-statement network round-trips collapse
-   *  toward 1. Order is preserved — the statements are sent in array order on a
-   *  single connection, so Postgres still executes them sequentially (a
-   *  deselect before its upsert stays before it). Used by the bulk migration
-   *  ingest, where ~140ms-per-statement Hyperdrive↔Neon latency, not server
-   *  work, dominated. Same atomicity as batch(): any failure rolls the lot back. */
+   *  toward N/100 (its max_pipeline window).
+   *
+   *  postgres.js only pipelines a statement whose execute() returns true, which
+   *  requires (a) PREPARED ({ prepare: true }) — an unprepared parameterized
+   *  query is `describeFirst`: an extra Describe⇆ round-trip AND an execute()
+   *  stall — and (b) a signature already in the connection's statement cache.
+   *  Any stalled statement moves the connection to postgres.js's `full` queue,
+   *  after which its queued queries drain ONE PER ROUND-TRIP (see
+   *  connection.js ReadyForQuery → connection.reserved()). A plain
+   *  Promise.all therefore serializes at 1-2 RTTs per statement (~21 stmts/s
+   *  through Hyperdrive↔Neon — the original migrate-ingest symptom).
+   *
+   *  So: the FIRST occurrence of each distinct SQL shape runs alone (awaited —
+   *  this Parses + caches the prepared statement), and each following run of
+   *  already-prepared statements is dispatched concurrently in waves capped at
+   *  the max_pipeline window. Order is preserved — waves are sequential, and
+   *  within a wave statements are written in array order on a single
+   *  connection, so Postgres still executes them sequentially (a deselect
+   *  before its upsert stays before it). Same atomicity as batch(): any
+   *  failure rolls the lot back (later waves are never dispatched).
+   *
+   *  Signature tracking is per-call and by SQL text only: postgres.js keys its
+   *  cache by inferred param types + text and per connection, so a mismatch
+   *  (fresh pooled connection, or a bool/Date param changing the inferred
+   *  types) just degrades that wave to the serial drain — correct, only
+   *  slower — and the next wave pipelines again. */
   async batchPipelined<T = Record<string, unknown>>(stmts: AquillaStatement[]): Promise<AquillaResult<T>[]> {
-    const run = (tx: PgExecutor): Promise<AquillaResult<T>[]> =>
-      Promise.all(stmts.map((s) => (s as PgStatement)._on(tx).all<T>()))
+    // postgres.js max_pipeline is 100; execute() past the window stalls the
+    // connection into the serial drain, so cap waves at it.
+    const WAVE = 100
+    const run = async (tx: PgExecutor): Promise<AquillaResult<T>[]> => {
+      const out: AquillaResult<T>[] = new Array(stmts.length)
+      const prepared = new Set<string>()
+      let i = 0
+      while (i < stmts.length) {
+        const s = stmts[i] as PgStatement
+        if (!prepared.has(s._sql())) {
+          out[i] = await s._on(tx, { prepare: true }).all<T>()
+          prepared.add(s._sql())
+          i++
+          continue
+        }
+        const wave: Array<Promise<void>> = []
+        while (i < stmts.length && wave.length < WAVE) {
+          const w = stmts[i] as PgStatement
+          if (!prepared.has(w._sql())) break
+          const at = i++
+          wave.push(w._on(tx, { prepare: true }).all<T>().then((r) => { out[at] = r }))
+        }
+        await Promise.all(wave)
+      }
+      return out
+    }
     if (this.mode.kind === "none") {
       return this.executor.begin(run)
     }
@@ -297,8 +376,8 @@ export class PostgresDb implements AquillaDb {
 /** postgres.js → PgExecutor (prod path; over Hyperdrive's connection string). */
 function fromPostgresJs(sql: postgres.Sql): PgExecutor {
   const wrap = (s: postgres.Sql): PgExecutor => ({
-    async run(query, params) {
-      const rows = (await s.unsafe(query, params as never[])) as unknown as Record<string, unknown>[] & { count?: number }
+    async run(query, params, opts) {
+      const rows = (await s.unsafe(query, params as never[], opts?.prepare ? { prepare: true } : undefined)) as unknown as Record<string, unknown>[] & { count?: number }
       return { rows, rowCount: rows.count ?? rows.length }
     },
     begin: (fn) => s.begin((tx) => fn(wrap(tx as unknown as postgres.Sql))) as Promise<never>,

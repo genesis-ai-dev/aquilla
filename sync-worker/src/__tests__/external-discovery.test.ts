@@ -63,6 +63,11 @@ describe('discovery root', () => {
     expect(body.mcp.endpoint).toBe('/api/v1/external/mcp')
     expect(Object.keys(body.endpoints)).toContain('GET /api/v1/external/me')
     expect(body.errors.codes.confirmation_required).toBeDefined()
+    // AQU-538: the map teaches the multi-target-language (lanes) workflow —
+    // register targetLanes, write SetTranslation.laneId, read ?lane=.
+    expect(body.multiLanguage.note).toContain('targetLanes')
+    expect(body.multiLanguage.workflow.join(' ')).toContain('laneId')
+    expect(body.multiLanguage.workflow.join(' ')).toContain('lane=es')
   })
 
   it('trailing slash also serves the map; non-GET is a JSON 405', async () => {

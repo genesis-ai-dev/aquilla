@@ -18,6 +18,7 @@ import { AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import posthog from "@/lib/posthog"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 // ---------------------------------------------------------------------------
 // Dev-only crash trigger: appending ?__crash=1 to any URL while
@@ -127,6 +128,7 @@ function ErrorFallback({
   isChunkError?: boolean
   compact?: boolean
 }) {
+  const t = useT()
   return (
     <div className={cn("flex items-center justify-center p-8", compact ? "h-full" : "min-h-screen")}>
       <div className="flex max-w-sm flex-col items-center gap-2 text-center">
@@ -142,8 +144,8 @@ function ErrorFallback({
             : "An unexpected error occurred. Your work is saved locally — reload to continue."}
         </p>
         <div className="mt-2">
-          <Button type="button" size="sm" variant="outline" onClick={onReload}>
-            Reload
+          <Button type="button" variant="outline" onClick={onReload}>
+            {t("workspace.errorBoundary.reload")}
           </Button>
         </div>
       </div>

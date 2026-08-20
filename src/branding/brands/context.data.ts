@@ -1,4 +1,4 @@
-import type { BrandData } from "../types"
+import type { BrandData } from "../types.ts"
 
 export const contextData: BrandData = {
   id: "context",
@@ -6,6 +6,9 @@ export const contextData: BrandData = {
     name: "Context Studio",
     shortName: "Context",
     tagline: "Meaning happens in context.",
+    // i18n-exempt brand asset — build-time SEO <meta name="description">/OG-alt
+    // text (scripts/vite-html-branding.ts), baked into index.html per brand
+    // before the app or its locale system ever runs. Not a runtime UI string.
     description: "Every translation decision is a context decision. We make that explicit.",
     htmlTitle: "Context Studio",
   },

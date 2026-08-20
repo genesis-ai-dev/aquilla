@@ -1,6 +1,6 @@
 // pipeline — one graph instance: run ONE SPAN end to end (construe loop →
-// summarize → persist → draft → lint → route → verifiers → quorum → one
-// redraft → stage → report).
+// summarize → persist → draft → lint → support → route → verifiers → quorum →
+// one redraft → stage → report).
 //
 // This function is PURE composition: every side effect (persisting the brief,
 // linting, staging, neighbor-brief reads) arrives as an injected callback,
@@ -15,6 +15,12 @@ import { statusOf, type CellPair } from "../agent/tools/select-cells"
 import { construeScene, type ClosureContext, type ClosureResult } from "./closure"
 import { performSpan, type ExamplePair, type PerformSpanResult } from "./draft"
 import { classifyRisk } from "./router"
+import {
+  termGuidanceForSpan,
+  type Concept,
+  type TranslationBriefParameters,
+} from "./project-context"
+import { analyzeSupport, confirmSupport, toSupportSignal, type SupportCorpus, type SupportSignal } from "./support"
 import { summarizeConstrual, renderConstrualL2 } from "./summarize"
 import { tallyVotes } from "./quorum"
 import { verifySpan } from "./verify"
@@ -29,6 +35,7 @@ import {
   type Scope,
   type SkippedCell,
   type SpanDraft,
+  type SpanPhase,
   type SpanReport,
   type SpanSeed,
   type StagedOutcome,
@@ -37,8 +44,8 @@ import {
 } from "./types"
 
 /** Retrieval target for few-shot examples (draft tool's EXAMPLES_N). */
-export const EXAMPLES_TARGET = 8
-const PRECEDING_CONTEXT = 3
+export const EXAMPLES_TARGET = 10
+const PRECEDING_CONTEXT = 5
 /** Barrier at quorum: minimum successful verifier votes with the full panel. */
 const MIN_PANEL_SUCCESS = 2
 
@@ -47,11 +54,18 @@ export interface RunSpanDeps {
   scope: Scope
   /** The whole file's pairs in display order. */
   pairs: CellPair[]
+  /** Cells already carrying a live proposal from another run. Recovery may
+   * fill their siblings but cannot supersede these before human review. */
+  excludedCellIds?: ReadonlySet<string>
   /** Closure context beyond the raw pairs. */
   neighborBriefs: ClosureContext["neighborBriefs"]
   layerAbove: ClosureContext["layerAbove"]
   examples: ExamplePair[]
   projectBriefL1?: string
+  /** The brief's structured answers, used when there is no L1 summary. */
+  briefParameters?: TranslationBriefParameters
+  /** Active key-term concepts for the project (scoped to the span in here). */
+  concepts?: Concept[]
   steeringDirections?: string[]
   rules?: LintRule[]
   sourceLanguage?: string
@@ -66,6 +80,9 @@ export interface RunSpanDeps {
   lint: (draft: SpanDraft) => Promise<LintFlag[]>
   /** Stage accepted commits through the emit-stage perimeter. */
   stage: (draft: SpanDraft) => Promise<StagedOutcome>
+  /** Live progress only (fire-and-forget). Never awaited, never a control
+   *  signal — a throwing reporter must not fail the span. */
+  onPhase?: (phase: SpanPhase) => void
 }
 
 function spanPairs(seed: SpanSeed, pairs: CellPair[]): CellPair[] {
@@ -91,7 +108,19 @@ interface VerifyPhaseResult {
   barrierMet: boolean
 }
 
-/** Run the verifier set with the barrier's retry-once-on-failure policy. */
+/**
+ * Run the verifier set with the barrier's retry-once-on-failure policy.
+ *
+ * The stances are `independent: true` in the graph spec — they share no state
+ * and never read each other's votes — so they dispatch CONCURRENTLY. On a
+ * three-stance panel that turns three serial deep/mid round-trips into one,
+ * which is the single largest latency term in a high-risk span.
+ *
+ * Budget stays exact under concurrency without extra machinery: `chargeBudget`
+ * is synchronous (no await between reading and writing the counters), so on
+ * JS's single thread each charge is atomic and the cap cannot be overshot.
+ * Charges land in dispatch order, exactly as they did serially.
+ */
 async function runVerifiers(
   verifiers: VerifierKey[],
   deps: RunSpanDeps,
@@ -100,14 +129,19 @@ async function runVerifiers(
   pairs: CellPair[],
   budget: RunBudget,
 ): Promise<VerifyPhaseResult> {
+  const settled = await Promise.all(
+    verifiers.map(async (key) => {
+      const args = { sceneBrief: brief, draft, pairs, llm: deps.llm, budget }
+      let result = await verifySpan(key, args)
+      // Barrier on_partial: retry, retries: 1.
+      if (!result.ok) result = await verifySpan(key, args)
+      return { key, result }
+    }),
+  )
+
   const votes: Vote[] = []
   const failed: { verifier: VerifierKey; error: string }[] = []
-  for (const key of verifiers) {
-    let result = await verifySpan(key, { sceneBrief: brief, draft, pairs, llm: deps.llm, budget })
-    if (!result.ok) {
-      // Barrier on_partial: retry, retries: 1.
-      result = await verifySpan(key, { sceneBrief: brief, draft, pairs, llm: deps.llm, budget })
-    }
+  for (const { key, result } of settled) {
     if (result.ok) votes.push(result.vote)
     else failed.push({ verifier: key, error: result.error })
   }
@@ -121,6 +155,14 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
   const skipped: SkippedCell[] = []
   const notes: string[] = []
   const incompleteReasons: string[] = []
+  /** Progress is decoration: a broken reporter must never fail a span. */
+  const phase = (p: SpanPhase): void => {
+    try {
+      deps.onPhase?.(p)
+    } catch {
+      /* ignore */
+    }
+  }
 
   const report = (cellsStaged: string[], ambiguities: number): SpanReport => ({
     spanId: deps.seed.id,
@@ -136,13 +178,16 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
   })
 
   const inSpan = spanPairs(deps.seed, deps.pairs)
-  const work = inSpan.filter((p) => statusOf(p) === "untranslated")
+  const work = inSpan.filter(
+    (p) => statusOf(p) === "untranslated" && !deps.excludedCellIds?.has(p.cellId),
+  )
   if (work.length === 0) {
     notes.push("no untranslated cells in span")
     return report([], 0)
   }
 
   // ── scene_closure loop (construe ⇄ expand_window, register at exit) ──
+  phase("reading")
   const context: ClosureContext = {
     orderedPairs: deps.pairs,
     neighborBriefs: deps.neighborBriefs,
@@ -200,14 +245,34 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
   let carriedConstraints: { cellId: string; constraints: string[] }[] = []
   let stagePromptVersion = ""
 
+  // Key terms are scoped to the SPAN, not the project: a 900-entry termbase in
+  // the prompt buries the eight entries that matter for this passage. Computed
+  // once from the span's source text, before the redraft loop.
+  const spanTerms = deps.concepts
+    ? termGuidanceForSpan(deps.concepts, inSpan.map((p) => p.source))
+    : []
+
+  // The evidence the draft prompt carries, as the support check will see it.
+  // Hoisted: it is the same on both attempts, and building it per attempt
+  // would re-walk the file for no benefit.
+  const preceding = precedingValidated(deps.seed, deps.pairs)
+  const supportCorpus: SupportCorpus = {
+    targets: [...deps.examples.map((e) => e.target), ...preceding.map((p) => p.target)],
+    sources: [...deps.examples.map((e) => e.source), ...inSpan.map((p) => p.source)],
+  }
+  const sourcesByCellId = new Map(deps.pairs.map((p) => [p.cellId, p.source]))
+
   for (let attempt = 1; attempt <= 2; attempt++) {
+    phase("drafting")
     const drafted: PerformSpanResult = await performSpan({
       sceneBrief: brief,
       pairs: attemptPairs,
       examples: deps.examples,
-      precedingValidated: precedingValidated(deps.seed, deps.pairs),
+      precedingValidated: preceding,
       ...(deps.steeringDirections ? { steeringDirections: deps.steeringDirections } : {}),
       ...(deps.projectBriefL1 ? { projectBriefL1: deps.projectBriefL1 } : {}),
+      ...(deps.briefParameters ? { briefParameters: deps.briefParameters } : {}),
+      ...(spanTerms.length > 0 ? { terms: spanTerms } : {}),
       ...(deps.rules ? { rules: deps.rules } : {}),
       ...(carriedConstraints.length > 0 ? { constraints: carriedConstraints } : {}),
       ...(deps.sourceLanguage ? { sourceLanguage: deps.sourceLanguage } : {}),
@@ -226,11 +291,43 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
     }
     if (drafted.draft.cells.length === 0) break
 
+    phase("checking")
     const flags = await deps.lint(drafted.draft)
-    const risk = classifyRisk(drafted.draft, flags, brief.ambiguityRegister, exampleCoverage, {
-      rounds: closure.rounds,
-      exit: closure.exit,
-    })
+
+    // Support: code first (free), the fast model only on what code flagged.
+    // Both tiers are reported — a routing decision nobody can inspect is a
+    // routing decision nobody can fix.
+    const support = analyzeSupport(drafted.draft, supportCorpus)
+    let supportSignal: SupportSignal | undefined
+    if (!support.applicable) {
+      // Corpus-derived, so identical on a redraft — report it once.
+      if (attempt === 1) notes.push(`support check abstained: ${support.abstainReason ?? "corpus too thin"}`)
+    } else {
+      const confirmation = await confirmSupport({
+        draft: drafted.draft,
+        support,
+        sourcesByCellId,
+        ...(deps.targetLanguage ? { targetLanguage: deps.targetLanguage } : {}),
+        llm: deps.llm,
+        budget,
+      })
+      supportSignal = toSupportSignal(support, confirmation)
+      if (support.suspect.length > 0) {
+        notes.push(
+          `support: ${support.suspect.length} cell(s) flagged in code, ${confirmation.riskyCellIds.length} confirmed risky` +
+            (confirmation.confirmed ? "" : ` (confirmation unavailable: ${confirmation.error ?? "unknown"} — all flagged cells escalated)`),
+        )
+      }
+    }
+
+    const risk = classifyRisk(
+      drafted.draft,
+      flags,
+      brief.ambiguityRegister,
+      exampleCoverage,
+      { rounds: closure.rounds, exit: closure.exit },
+      supportSignal,
+    )
     const verified = await runVerifiers(risk.verifiers, deps, brief, drafted.draft, attemptPairs, budget)
     for (const f of verified.failed) {
       notes.push(`verifier ${f.verifier} failed after retry: ${f.error}`)
@@ -270,6 +367,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
   // ── stage → report ──
   let stagedCellIds: string[] = []
   if (accepted.length > 0) {
+    phase("staging")
     const staged = await deps.stage({
       spanId: deps.seed.id,
       sceneBriefId,

@@ -16,14 +16,10 @@ import { Spinner } from "@/components/ui/spinner"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { createOrg } from "@/lib/frontier/orgs"
 import { isFieldInvalid } from "@/lib/forms/field-state"
-import { requiredString } from "@/lib/forms/schemas"
 import { useSubmitError } from "@/lib/forms/submit-error"
 import posthog from "@/lib/posthog"
 import { ORG_CREATED } from "@/lib/event-names"
-
-const formSchema = z.object({
-  name: requiredString("Organization name"),
-})
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface OrgCreateDialogProps {
   open: boolean
@@ -32,9 +28,16 @@ interface OrgCreateDialogProps {
 }
 
 export function OrgCreateDialog({ open, onOpenChange, onCreated }: OrgCreateDialogProps) {
+  const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
+
+  const formSchema = z.object({
+    name: z.string().refine((val) => val.trim().length > 0, {
+      message: t("org.createDialog.nameRequiredError"),
+    }),
+  })
 
   const form = useForm({
     defaultValues: { name: "" },
@@ -48,7 +51,7 @@ export function OrgCreateDialog({ open, onOpenChange, onCreated }: OrgCreateDial
         onCreated(org.id)
         onOpenChange(false)
       } catch (err) {
-        setSubmitError(err instanceof Error ? err.message : "Couldn't create your organization.")
+        setSubmitError(err instanceof Error ? err.message : t("org.createDialog.genericError"))
       }
     },
   })
@@ -63,13 +66,14 @@ export function OrgCreateDialog({ open, onOpenChange, onCreated }: OrgCreateDial
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Create organization</DialogTitle>
+          <DialogTitle>{t("org.createDialog.title")}</DialogTitle>
           <DialogDescription>
-            Give your team a workspace for projects, members, and settings.
+            {t("org.createDialog.description")}
           </DialogDescription>
         </DialogHeader>
         <form
           id="org-create-form"
+          autoComplete="off"
           onSubmit={(e) => {
             e.preventDefault()
             void form.handleSubmit()
@@ -82,14 +86,19 @@ export function OrgCreateDialog({ open, onOpenChange, onCreated }: OrgCreateDial
                 const invalid = isFieldInvalid(field)
                 return (
                   <Field data-invalid={invalid}>
-                    <FieldLabel htmlFor="org-create-name">Organization name</FieldLabel>
+                    <FieldLabel htmlFor="org-create-name">{t("org.createDialog.nameLabel")}</FieldLabel>
                     <Input
                       id="org-create-name"
-                      name={field.name}
+                      // Avoid DOM name="name" — Chrome contact autofill heuristic.
+                      name="aquilla-org-name"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      autoCapitalize="none"
+                      spellCheck={false}
                       value={field.state.value}
                       onBlur={field.handleBlur}
                       onChange={(e) => field.handleChange(e.target.value)}
-                      placeholder="Acme Bible Translation"
+                      placeholder={t("org.createDialog.namePlaceholder")}
                       aria-invalid={invalid}
                       autoFocus
                     />
@@ -106,11 +115,11 @@ export function OrgCreateDialog({ open, onOpenChange, onCreated }: OrgCreateDial
           )}
           <DialogFooter className="mt-4">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button type="submit" form="org-create-form">
               {form.state.isSubmitting && <Spinner data-icon="inline-start" />}
-              {form.state.isSubmitting ? "Creating…" : "Create organization"}
+              {form.state.isSubmitting ? t("common.creating") : t("org.createDialog.title")}
             </Button>
           </DialogFooter>
         </form>

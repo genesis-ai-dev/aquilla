@@ -7,6 +7,8 @@
 // a REVIEWER's prompt simply does not contain target.cell.commit. The server
 // re-validates role on every staged event regardless (emit-stage.ts).
 
+import { catalogIndexLines } from "../../../../db/shared/command-catalog"
+
 // ── Role table ──────────────────────────────────────────────────────────────
 // Mirrored as data from sync-worker/src/events/role-policy.ts (REQUIRED_ROLE).
 // That file is the source of truth — if it changes, change this table too.
@@ -70,10 +72,11 @@ const EVENT_LINES: Record<string, string> = {
   "target.cell.commit":
     "target.cell.commit {value, valueHtml?} — write a target cell's text. Needs fileId+cellId. Server resolves parentId (current target head) and sourceEventId (AD-9 staleness pin) and injects ai_suggestion+agent_run_id.",
   "target.cell.create":
-    "target.cell.create {cellId, value, anchorCellId?} — new target cell (rare; most target rows exist from import).",
+    "target.cell.create {value, anchorCellId?, cellId?} — mint a NEW target row. Needs fileId. anchorCellId is the existing cell it lands after (null/omitted = first); server mints cellId when omitted and injects ai_suggestion+agent_run_id. Rare — most target rows already exist from import; use target.cell.commit to fill one.",
   "target.cell.delete": "target.cell.delete {} — delete a target cell. Needs fileId+cellId.",
   "target.cell.reorder": "target.cell.reorder {anchorCellId|null} — move a cell after another.",
-  "source.cell.create": "source.cell.create {cellId, value, canonicalRef?, anchorCellId?} — import-path only; avoid.",
+  "source.cell.create":
+    "source.cell.create {value, anchorCellId?, canonicalRef?, type?, cellId?} — mint a NEW source row (e.g. a heading the import missed). Needs fileId. anchorCellId is the existing cell it lands after (null/omitted = first); server mints cellId when omitted. Structural — propose only when asked to add a row.",
   "source.cell.commit": "source.cell.commit {value, valueHtml?} — edit source text; avoid unless explicitly asked.",
   "source.cell.delete": "source.cell.delete {} — delete a source cell; avoid.",
   "source.cell.reorder": "source.cell.reorder {anchorCellId|null} — reorder source; avoid.",
@@ -129,7 +132,7 @@ All tables carry project_id; ALWAYS filter with :project.
 // three short calls.
 const DRAFTING_RECIPE = `## Canonical drafting recipe (the 80% case — use this, do not re-derive it)
 1. read({ref:"MRK 4", filter:"untranslated"}) — see what needs work (or skip straight to 2 when the user named the scope).
-2. draft({ref:"MRK 4"}) — the drafting pipeline translates with the project's exemplars + rules and STAGES a proposal. Its verdict reports lint violations and how many cells remain; call draft again with instructions to fix violations, or again on the same scope to continue a big job.
+2. draft({ref:"MRK 4"}) — the drafting pipeline runs a separate evidence-research pass, then translates from that record with the project's validated exemplars, discourse context, brief, and rules, and STAGES a proposal. Its verdict reports lint violations and how many cells remain; call draft again with instructions to fix violations, or again on the same scope to continue a big job.
 3. Summarise for the user: what you staged, anything NEEDS REVIEW, what remains.
 Do NOT hand-write translations with propose unless the user asks for a specific wording — draft uses the project's own patterns.`
 
@@ -148,6 +151,21 @@ Results come back as pipe tables: ∅ = NULL; UUIDs are aliased (#c1 cells, #e1 
 :project = this project's id (REQUIRED in every sql query)
 :user = the requesting user's numeric id`
 
+/** AQU-926 (COMMAND-REGISTRY §4): role-filtered changeset-command index,
+ *  appended to the tools contract. One line per command — the paramsDocs stay
+ *  OUT of the prompt (describe_command fetches them on demand, L2). Roles
+ *  below every command floor get no block at all (same absent-not-rejected
+ *  property as the event card). */
+function commandIndexBlock(roleLevel: number): string {
+  const lines = catalogIndexLines(roleLevel)
+  if (lines.length === 0) return ""
+  return `
+
+## Changeset commands (filtered to your role)
+Stage these with propose_command({commands:[{kind, …}]}) — call describe_command({kind}) for exact params first; the staged changeset waits for the user to review and apply it in-app.
+${lines.join("\n")}`
+}
+
 // Appended to the contract only when project_settings.bibleResourcesEnabled is
 // on. Off → the model is never told the branch exists (and the server rejects
 // it anyway). See docs/superpowers/specs/2026-06-13-aquifer-integration-design.md.
@@ -162,8 +180,9 @@ const SAFETY = `## Safety & stance
 - Never fabricate validated pairs, never invent canonical_refs, never guess payload shapes — fetch the cookbook.
 - Bulk writes are PROPOSALS: stage them and summarise; the user applies.
 - Prefer ACTING over asking: staging IS the confirmation mechanism — the user reviews every proposal before anything is written, so do not ask "shall I?" or "which one?" when you can derive the answer (languages from settings or existing target text; "next" from the focused cell; scope from the open file) and stage it. Ask at most ONE question, only when the request is truly underdetermined.
+- WHICH FILE is the one exception to that: never guess it. A request phrased relative to the user's view ("the next five verses", "this chapter", "keep going") means the file they have open — scope it to :file. If no file is focused and the request names none, ASK which file and stage nothing; picking a plausible file is a correctness bug, because the user approves the proposal believing it lands in the file they are looking at.
 - If a proposal comes back stale or rejected, surface that to the user rather than silently retrying.
-- Reads (read/examples/search/docs) are cheap and unbudgeted; draft/propose/sql are budgeted — plan writes before you make them.
+- Reads (read/examples/search/docs/describe_command) are cheap and unbudgeted; draft/propose/propose_command/sql are budgeted — plan writes before you make them.
 - Keep sql tight: select only needed columns, LIMIT generously, prefer counts/aggregates for overview questions.`
 
 export interface AgentPromptContext {
@@ -271,9 +290,11 @@ export function buildSystemPrompt(ctx: AgentPromptContext): string {
   // "This file" / "the next three" / "segment 8" resolve HERE, not project-wide.
   const situation = ctx.fileId
     ? `## Current situation
-The user is working in file :file${ctx.fileName ? ` — "${ctx.fileName}"` : ""}${ctx.fileKind ? ` (kind: ${ctx.fileKind})` : ""}${ctx.cellId ? ", focused on cell :cell" : ""}. Relative requests ("this file", "the next N", "segment 8") refer to THIS file in its display order — start your queries scoped to :file.${ctx.cellId ? ` "Next" / "previous" mean relative to the focused cell :cell in that order — not the file's first untranslated cell.` : ""}
+The user is working in file :file${ctx.fileName ? ` — "${ctx.fileName}"` : ""}${ctx.fileKind ? ` (kind: ${ctx.fileKind})` : ""}${ctx.cellId ? ", focused on cell :cell" : ""}. Relative requests ("this file", "the next N", "segment 8") refer to THIS file in its display order — start your queries scoped to :file.${ctx.cellId ? ` "Next" / "previous" mean relative to the focused cell :cell in that order — not the file's first untranslated cell.` : ""} Stage writes into THIS file unless the user names a different one outright; never move the work to another file because it looked like a better fit.
 `
-    : ""
+    : `## Current situation
+No file is open. Relative requests ("the next N", "this chapter", "keep going") have no anchor, so you cannot derive a target file — ask the user which file to work in before reading or staging anything. Do not pick one.
+`
 
   const eventCard =
     kinds.length === 0
@@ -291,7 +312,7 @@ ${kinds.map((k) => `- ${EVENT_LINES[k]}`).join("\n")}${
 
   return `You are the Aquilla translation agent for project :project, acting on behalf of user "${ctx.username}" (role: ${roleName}). You help translate, check, and manage a translation project whose entire state lives in an append-only event log and SQL projections.${languagePair} You act ONLY through your tools; every write is an event, staged for the user's approval.${translatorProfileBlock(ctx)}${briefBlock(ctx)}
 
-${TOOLS_CONTRACT}
+${TOOLS_CONTRACT}${commandIndexBlock(ctx.roleLevel)}
 ${ctx.bibleResourcesEnabled ? `\n${AQUIFER_CONTRACT}\n` : ""}
 ${focus.length ? focus.join("\n") + "\n" : ""}
 ${situation}${SCHEMA_CARD}

@@ -253,6 +253,45 @@ export type UpdateProjectSettingsResult =
   | { status: "conflict"; current: ProjectSettingsResponse }
   | { status: "error"; message: string }
 
+export interface PatchProjectSettingsInput {
+  projectId: string
+  /** Top-level settings keys to replace; each op's value replaces that key
+   *  wholesale (no deep merge). JSON cannot express undefined, so ops cannot
+   *  delete a key — write null instead. */
+  ops: { key: string; value: unknown }[]
+  /** Optimistic-concurrency guard — must equal the currently-stored version. */
+  ifMatchVersion: number
+  /** Writer's user id (numeric, or its string form). */
+  updatedBy: number | string
+}
+
+/**
+ * Field-scoped variant of updateProjectSettingsShared (AQU-926 PatchSettings):
+ * load the live blob, replace only the named top-level keys, and delegate the
+ * versioned write to updateProjectSettingsShared — so normalization, the
+ * version guard, and the validation-threshold re-projection are shared, not
+ * forked. Race-safe by composition: a writer landing between our load and the
+ * delegated write moves the version, and the delegate's own `ifMatchVersion`
+ * pre-check / guarded UPDATE returns `conflict`.
+ */
+export async function patchProjectSettingsShared(
+  db: AquillaDb,
+  input: PatchProjectSettingsInput,
+): Promise<UpdateProjectSettingsResult> {
+  const current = await loadProjectSettings(db, input.projectId)
+  if (input.ifMatchVersion !== current.version) {
+    return { status: "conflict", current }
+  }
+  const merged: Record<string, unknown> = { ...current.settings }
+  for (const op of input.ops) merged[op.key] = op.value
+  return updateProjectSettingsShared(db, {
+    projectId: input.projectId,
+    settings: merged,
+    ifMatchVersion: input.ifMatchVersion,
+    updatedBy: input.updatedBy,
+  })
+}
+
 /**
  * Apply a version-guarded settings write. Encapsulates: version pre-check,
  * normalization, first-write INSERT vs `version = version + 1` UPDATE,

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useOnline } from "@/hooks/useOnline"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { getProject, patchProject } from "@/lib/store/project-index"
 import { ROLE } from "@/lib/frontier/roles"
+import { resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
 import {
   fetchProjectSettingsResult,
   patchProjectSettings,
@@ -18,6 +20,25 @@ import posthog from "@/lib/posthog"
 // (row 600). Lowering the floor to PROJECT_LEAD (500) would widen server permissions
 // without spec support — do not change without a matching auth-worker update + spec citation.
 export const SETTINGS_EDIT_ROLE_FLOOR = ROLE.MAINTAINER
+
+/**
+ * AQU-822: the one settings key that does NOT sit behind
+ * {@link SETTINGS_EDIT_ROLE_FLOOR}. A patch that touches only `terminology`
+ * is gated by the org's configurable `termbaseEditMinRole` floor instead
+ * (default project_lead 500), so an org can let translators own terminology
+ * without handing them AI config, languages, or health thresholds.
+ *
+ * Mirrors the server carve-out in auth-worker/src/routes/project-settings.ts,
+ * which re-derives the same "only terminology changed" test against the
+ * stored row and remains authoritative.
+ */
+const TERMINOLOGY_KEY = "terminology"
+
+/** True when a patch changes the termbase and nothing else. */
+export function isTerminologyOnlyPatch(partial: ProjectWideSettings): boolean {
+  const keys = Object.keys(partial)
+  return keys.length > 0 && keys.every((key) => key === TERMINOLOGY_KEY)
+}
 
 export type CannotEditReason = "offline" | "role" | null
 
@@ -75,9 +96,21 @@ export interface UseProjectSettings {
   refresh: () => Promise<ProjectSettingsResponse | null>
   /** Apply a partial settings update. Optimistic local update, server PATCH,
    *  conflict-snap on 409, returns outcome. Blocked when offline or below
-   *  MAINTAINER (600). Server-forbidden writes are surfaced as blocked and
-   *  the optimistic overlay is rolled back — no silent local divergence. */
+   *  MAINTAINER (600) — except a terminology-only patch, which is gated by the
+   *  org's `termbaseEditMinRole` floor (AQU-822). Server-forbidden writes are
+   *  surfaced as blocked and the optimistic overlay is rolled back — no silent
+   *  local divergence. */
   patch: (partial: ProjectWideSettings) => Promise<PatchOutcome>
+}
+
+export interface UseProjectSettingsOptions {
+  /**
+   * AQU-822: the org's effective termbase-edit floor for this project
+   * (`ProjectRecord.termbaseEditMinRole`, resolved server-side). Applies only
+   * to terminology-only patches; every other key keeps the MAINTAINER floor.
+   * Omitted ⇒ the PROJECT_LEAD default.
+   */
+  termbaseEditMinRole?: number | null
 }
 
 function settingsValueEqual(a: unknown, b: unknown): boolean {
@@ -148,10 +181,13 @@ function localSettingsFrom(
 export function useProjectSettings(
   projectId: string | null,
   roleLevel: number | null,
+  options?: UseProjectSettingsOptions,
 ): UseProjectSettings {
+  const termbaseEditMinRole = options?.termbaseEditMinRole
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const isOnline = useOnline()
+  const t = useT()
 
   const [server, setServer] = useState<ProjectSettingsResponse | null>(null)
   const [local, setLocal] = useState<ProjectWideSettings>({})
@@ -204,84 +240,100 @@ export function useProjectSettings(
     isOnlineRef.current = isOnline
   }, [isOnline])
 
+  // React StrictMode invokes the initial hydration effect twice, and settings
+  // can also be requested by more than one effect during a fast route change.
+  // Keep one request per mounted consumer in flight and let every caller await
+  // the same result instead of stacking identical GETs.
+  const refreshInFlightRef = useRef<Promise<ProjectSettingsResponse | null> | null>(null)
   const refresh = useCallback(async (): Promise<ProjectSettingsResponse | null> => {
     if (!projectId || !jwt) return null
     if (!isOnlineRef.current) return null
-    const out = await fetchProjectSettingsResult(jwt, projectId)
-    // Guard against post-unmount state updates. aliveRef is only set false on
-    // final unmount; explicit refresh() calls from still-mounted consumers
-    // should always land (aliveRef.current will be true for them).
-    if (!aliveRef.current) return null
-    if (!out.ok) {
-      // FAIL CLOSED: the GET failed (network / 401 / 5xx) — the settings state
-      // is UNKNOWN, not "empty". Do NOT mark hasFetched (consumers like the DCS
-      // source lockdown treat un-fetched as locked), and do NOT clobber a
-      // previously fetched server snapshot with null. The existing focus /
-      // online / settings-updated revalidation paths retry the GET.
-      return null
-    }
-    const got = out.value
-    writeServer(got)
-    setHasFetched(true)
-    if (got) {
-      posthog.capture("project settings hydrated", {
-        project_id: projectId,
-        within_ms: Math.round(performance.now() - mountAtRef.current),
-        has_server_row: got.version > 0,
-      })
-    }
-    if (got && got.version > 0) {
-      try {
-        await patchProject(projectId, (existing) => ({
-          ...existing,
-          ...(got.settings.sourceLanguage != null
-            ? { sourceLanguage: got.settings.sourceLanguage }
-            : {}),
-          ...(got.settings.targetLanguage != null
-            ? { targetLanguage: got.settings.targetLanguage }
-            : {}),
-          ...(got.settings.systemPrompt != null
-            ? {
-                completionSettings: {
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- spread of partial settings object; exact shape depends on runtime migration state
-                  ...(existing.completionSettings ?? ({} as any)),
-                  systemPrompt: got.settings.systemPrompt,
-                },
-              }
-            : {}),
-          ...(got.settings.rules != null ? { rules: got.settings.rules } : {}),
-          ...(got.settings.rulePenalties != null
-            ? { rulePenalties: got.settings.rulePenalties }
-            : {}),
-          ...(got.settings.algorithmicChecks != null
-            ? { algorithmicChecks: got.settings.algorithmicChecks }
-            : {}),
-          ...(got.settings.validationCount != null
-            ? { validationCount: got.settings.validationCount }
-            : {}),
-          ...(got.settings.validationCountAudio != null
-            ? { validationCountAudio: got.settings.validationCountAudio }
-            : {}),
-          ...(got.settings.terminology != null
-            ? { terminology: got.settings.terminology }
-            : {}),
-          ...(got.settings.livingMemoryEntries != null
-            ? { livingMemoryEntries: got.settings.livingMemoryEntries }
-            : {}),
-          ...(got.settings.translationBrief != null
-            ? { translationBrief: got.settings.translationBrief }
-            : {}),
-        }))
-      } catch (err) {
-        console.warn("[useProjectSettings] failed to mirror settings to IDB", err)
+    if (refreshInFlightRef.current) return refreshInFlightRef.current
+
+    const request = (async (): Promise<ProjectSettingsResponse | null> => {
+      const out = await fetchProjectSettingsResult(jwt, projectId)
+      // Guard against post-unmount state updates. aliveRef is only set false on
+      // final unmount; explicit refresh() calls from still-mounted consumers
+      // should always land (aliveRef.current will be true for them).
+      if (!aliveRef.current) return null
+      if (!out.ok) {
+        // FAIL CLOSED: the GET failed (network / 401 / 5xx) — the settings state
+        // is UNKNOWN, not "empty". Do NOT mark hasFetched (consumers like the DCS
+        // source lockdown treat un-fetched as locked), and do NOT clobber a
+        // previously fetched server snapshot with null. The existing focus /
+        // online / settings-updated revalidation paths retry the GET.
+        return null
       }
+      const got = out.value
+      writeServer(got)
+      setHasFetched(true)
+      if (got) {
+        posthog.capture("project settings hydrated", {
+          project_id: projectId,
+          within_ms: Math.round(performance.now() - mountAtRef.current),
+          has_server_row: got.version > 0,
+        })
+      }
+      if (got && got.version > 0) {
+        try {
+          await patchProject(projectId, (existing) => ({
+            ...existing,
+            ...(got.settings.sourceLanguage != null
+              ? { sourceLanguage: got.settings.sourceLanguage }
+              : {}),
+            ...(got.settings.targetLanguage != null
+              ? { targetLanguage: got.settings.targetLanguage }
+              : {}),
+            ...(got.settings.systemPrompt != null
+              ? {
+                  completionSettings: {
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- spread of partial settings object; exact shape depends on runtime migration state
+                    ...(existing.completionSettings ?? ({} as any)),
+                    systemPrompt: got.settings.systemPrompt,
+                  },
+                }
+              : {}),
+            ...(got.settings.rules != null ? { rules: got.settings.rules } : {}),
+            ...(got.settings.rulePenalties != null
+              ? { rulePenalties: got.settings.rulePenalties }
+              : {}),
+            ...(got.settings.algorithmicChecks != null
+              ? { algorithmicChecks: got.settings.algorithmicChecks }
+              : {}),
+            ...(got.settings.validationCount != null
+              ? { validationCount: got.settings.validationCount }
+              : {}),
+            ...(got.settings.validationCountAudio != null
+              ? { validationCountAudio: got.settings.validationCountAudio }
+              : {}),
+            ...(got.settings.terminology != null
+              ? { terminology: got.settings.terminology }
+              : {}),
+            ...(got.settings.livingMemoryEntries != null
+              ? { livingMemoryEntries: got.settings.livingMemoryEntries }
+              : {}),
+            ...(got.settings.translationBrief != null
+              ? { translationBrief: got.settings.translationBrief }
+              : {}),
+          }))
+        } catch (err) {
+          console.warn("[useProjectSettings] failed to mirror settings to IDB", err)
+        }
+      }
+      return got
+    })()
+    refreshInFlightRef.current = request
+    try {
+      return await request
+    } finally {
+      if (refreshInFlightRef.current === request) refreshInFlightRef.current = null
     }
-    return got
   }, [projectId, jwt])
 
-  // Hydrate local cache on projectId change, then kick off the server fetch.
-  // Sequencing local-before-remote is intentional: local state is shown
-  // immediately while the network round-trip is in flight.
+  // Hydrate local cache and server state in parallel on projectId change. The
+  // server snapshot overlays local values, so their completion order is safe;
+  // serializing these reads only made route-modals wait on IDB before the
+  // authoritative request could even start.
   //
   // IMPORTANT: we use a per-invocation `alive` local (not `aliveRef`) to guard
   // state updates. Under React StrictMode the effect runs twice:
@@ -300,28 +352,30 @@ export function useProjectSettings(
     // runs the cleanup on the first mount.
     aliveRef.current = true
 
+    void refresh()
     void getProject(projectId)
       .then((rec) => {
         if (!alive) return
         const nextLocal = localSettingsFrom(rec)
         setLocal((prev) => projectWideSettingsEqual(prev, nextLocal) ? prev : nextLocal)
-        // Kick off server fetch after local state is set.
-        void refresh()
       })
       .catch((err) => {
         if (!alive) return
         console.warn("[useProjectSettings] failed to read local IDB cache", err)
-        // Continue with empty local; refresh still fires so server values appear.
-        void refresh()
+        // Continue with empty local; the parallel refresh still supplies server values.
       })
     return () => {
       alive = false
     }
   }, [projectId, refresh])
 
-  // Re-fetch when transitioning offline -> online.
+  // Re-fetch only when transitioning offline -> online. Calling refresh on an
+  // initially-online mount duplicates the parallel initial request above.
+  const previousOnlineRef = useRef(isOnline)
   useEffect(() => {
-    if (isOnline && projectId && jwt) void refresh()
+    const wasOnline = previousOnlineRef.current
+    previousOnlineRef.current = isOnline
+    if (!wasOnline && isOnline && projectId && jwt) void refresh()
   }, [isOnline, projectId, jwt, refresh])
 
   // Project settings are written by identity, while the editor's live channel
@@ -429,13 +483,20 @@ export function useProjectSettings(
     // 2. Offline → apply locally (preserve work, server reconciles on reconnect).
     // 3. roleLevel === null → unsynced project (server has no record of this
     //    project); apply locally only, no server roundtrip. Same as original.
-    // 4. roleLevel < SETTINGS_EDIT_ROLE_FLOOR → synced project, below floor. DO NOT apply
-    //    locally — this was the root cause of AQU-255 silent divergence. The
-    //    server would reject, leaving stale IDB data the user can't clear.
-    // 5. roleLevel >= SETTINGS_EDIT_ROLE_FLOOR → optimistic local apply happens *after*
+    // 4. roleLevel < the floor required for THIS patch → synced project, below
+    //    floor. DO NOT apply locally — this was the root cause of AQU-255
+    //    silent divergence. The server would reject, leaving stale IDB data
+    //    the user can't clear.
+    // 5. roleLevel >= that floor → optimistic local apply happens *after*
     //    this block, just before the serialized server write.
+    //
+    // AQU-822: the required floor is SETTINGS_EDIT_ROLE_FLOOR (maintainer) for
+    // every patch EXCEPT a terminology-only one, which uses the org's
+    // configured termbaseEditMinRole. Deriving it per-patch (rather than
+    // loosening the hook-wide floor) keeps the AQU-255 guarantee intact for
+    // all the other keys.
 
-    if (!projectId || !jwt) return { kind: "error", message: "no session or project" }
+    if (!projectId || !jwt) return { kind: "error", message: t("workspace.projectSettingsHook.noSessionError") }
 
     if (!isOnlineRef.current) {
       // Offline — apply locally so work isn't lost; server will reconcile on reconnect.
@@ -455,7 +516,10 @@ export function useProjectSettings(
       return { kind: "blocked", reason: "role" }
     }
 
-    if (roleLevel < SETTINGS_EDIT_ROLE_FLOOR) {
+    const requiredLevel = isTerminologyOnlyPatch(partial)
+      ? resolveTermbaseEditFloor(termbaseEditMinRole)
+      : SETTINGS_EDIT_ROLE_FLOOR
+    if (roleLevel < requiredLevel) {
       // Synced project below floor — do NOT apply locally; the server will
       // reject and we'd silently diverge (the original AQU-255 bug).
       return { kind: "blocked", reason: "role" }
@@ -589,7 +653,7 @@ export function useProjectSettings(
       return next
     })
     return { kind: "error", message: result.message }
-  }, [projectId, jwt, roleLevel, refresh, runSerialized])
+  }, [projectId, jwt, roleLevel, termbaseEditMinRole, refresh, runSerialized, t])
 
   return {
     settings,

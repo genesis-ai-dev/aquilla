@@ -27,6 +27,11 @@ export type EventKind =
   | 'source.cell.reorder'
   // Versioned, metadata-only backfill. Does not advance the source text chain.
   | 'source.cell.metadata.patch'
+  // Anchor-only repair (migration reconciliation, AQU-931). Non-chain-mutating —
+  // moves ONLY cells.anchor_cell_id on the source row; never advances
+  // cells.event_id (the AD-9 staleness comparison depends on the source head
+  // moving only when content changes) and replays unconditionally on rebuild.
+  | 'source.cell.reanchor'
   // Target-side cell events (translator).
   | 'target.cell.create'
   | 'target.cell.commit'
@@ -167,11 +172,13 @@ export interface AiDraftProvenance {
   promptVersion: string
   exampleIds: string[]
   generatedAt: number
-  mode: 'single' | 'batch' | 'paragraph' | 'agent'
+  mode: 'single' | 'batch' | 'paragraph' | 'agent' | 'read'
   projectState: {
     sourceLanguage: string
     targetLanguage: string
     approvedExampleCount: number
+    evidenceCoverage?: number
+    evidenceWeight?: number
   }
 }
 
@@ -198,13 +205,19 @@ export interface EventPayloads {
   'source.cell.commit': {
     value?: string
     valueHtml?: string
-    /** AQU-646: correction to a media cell's transcription (its translatable
-     *  source text). When present the stored value — the import filename — is
-     *  left untouched; the chain head still advances (targets go stale). */
+    /** AQU-847 / AQU-646: corrected source text for a MEDIA section. An
+     *  imported media cell's `value` is the import filename, so the user's
+     *  edit lands here — the field `effectiveSourceText` (and therefore export
+     *  and AI) reads. The stored `value` is left untouched; the chain head
+     *  still advances, so targets go stale. */
     transcription?: string
   }
   'source.cell.delete': Record<string, never>
   'source.cell.reorder': {
+    anchorCellId: string | null
+  }
+  'source.cell.reanchor': {
+    /** The cell this cell should follow; null re-heads it (anchor chain start). */
     anchorCellId: string | null
   }
   'source.cell.metadata.patch': {

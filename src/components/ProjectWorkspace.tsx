@@ -1995,13 +1995,19 @@ export function ProjectWorkspace() {
    * AQU-646 (Sam, 2026-08-20): setting up a project's SOURCES is maintainer
    * work — the audio cues and the character sheets, though not the film.
    *
-   * Deliberately a UI gate rather than a raised floor in role-policy. The
-   * events underneath are shared: `cast.assign` also backs the character-check
-   * resolve drawer and the CSV label panel, and the person who most needs the
-   * drawer is the client contact resolving her own sheets' disagreements —
-   * raising the event's floor would lock her out of the one screen built for
-   * her. Same shape as bulk repin, which role-policy.ts already documents as
-   * "gated higher in the review-panel UI itself, not here".
+   * A UI gate, and for the audio cues it is the ONLY gate — their events
+   * (`file.create`, `source.cell.create`, `file.delete`) stay at project lead
+   * because they are not character-specific. Same shape as bulk repin, which
+   * role-policy.ts documents as "gated higher in the review-panel UI itself,
+   * not here".
+   *
+   * The characters are different: `cast.assign` itself moved to MAINTAINER on
+   * 2026-08-20, so for that half this gate merely agrees with the floor rather
+   * than standing in for it. (An earlier note here claimed the floor was kept
+   * low so the client contact would not lose the resolve drawer. Both halves
+   * of that were wrong — she holds maintainer, and nobody below her reconciles
+   * anything. The real cost of raising it is that the older CSV label
+   * round-trip rides on the same event; see role-policy.ts.)
    *
    * The lock above is the separate mechanism, and the one with teeth: this
    * decides who is OFFERED an import, that decides who may move a timing.

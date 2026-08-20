@@ -71,12 +71,18 @@ describe('cast.assign — role gate', () => {
   // project setup, done before the handoff, not translation work. The floor had
   // been CONTRIBUTOR even though AQU-438's own note described the actor as "a
   // PM or project lead".
-  it('requires PROJECT_LEAD (500)', () => {
-    expect(REQUIRED_ROLE['cast.assign']).toBe(500)
+  // AQU-646 (Sam, 2026-08-20): raised AGAIN, to MAINTAINER (600). Characters
+  // are one person's job — the client's producer owns the sheets and holds
+  // maintainer, and nobody below her reconciles the two sheets against each
+  // other. Accepted consequence: the older CSV label round-trip rides on this
+  // same event and now needs maintainer too.
+  it('requires MAINTAINER (600)', () => {
+    expect(REQUIRED_ROLE['cast.assign']).toBe(600)
   })
 
-  it('is out of reach of a contributor', () => {
+  it('is out of reach of a contributor, and of a project lead', () => {
     expect(REQUIRED_ROLE['cast.assign']).toBeGreaterThan(400)
+    expect(REQUIRED_ROLE['cast.assign']).toBeGreaterThan(500)
   })
 })
 

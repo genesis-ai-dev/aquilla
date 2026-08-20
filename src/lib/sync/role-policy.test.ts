@@ -33,14 +33,23 @@ describe("role-policy (client mirror)", () => {
   it("keeps project SETUP above the contributors who receive the handoff", () => {
     expect(requiredRoleFor("file.video.set")).toBe(ROLE.PROJECT_LEAD)
     expect(requiredRoleFor("cell.link.set")).toBe(ROLE.PROJECT_LEAD)
-    expect(requiredRoleFor("cast.assign")).toBe(ROLE.PROJECT_LEAD)
   })
 
-  it("refuses all three for a contributor, and allows them for a lead", () => {
-    for (const kind of ["file.video.set", "cell.link.set", "cast.assign"]) {
+  it("refuses both for a contributor, and allows them for a lead", () => {
+    for (const kind of ["file.video.set", "cell.link.set"]) {
       expect(canPerform(kind, ROLE.CONTRIBUTOR)).toBe(false)
       expect(canPerform(kind, ROLE.PROJECT_LEAD)).toBe(true)
     }
+  })
+
+  it("puts the characters above even a project lead (Sam, 2026-08-20)", () => {
+    // Characters are one person's job here: the client's producer owns the
+    // sheets and holds maintainer, and nobody below her reconciles them. A
+    // lead can still link the film and cut the pairings — this is the one
+    // piece of setup that went a rung higher than the rest.
+    expect(requiredRoleFor("cast.assign")).toBe(ROLE.MAINTAINER)
+    expect(canPerform("cast.assign", ROLE.PROJECT_LEAD)).toBe(false)
+    expect(canPerform("cast.assign", ROLE.MAINTAINER)).toBe(true)
   })
 
   it("knows about cast.assign at all", () => {

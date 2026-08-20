@@ -76,8 +76,21 @@ const REQUIRED_ROLE: Record<string, number> = {
   // AQU-646: MISSING FROM THIS MIRROR until 2026-08-18, which is why the
   // character-import button appeared for everyone — `canPerform` fails open on
   // a kind it has never heard of, so the UI's own gate always said yes and the
-  // server's 403 was the only thing stopping anyone. Both are now project lead.
-  "cast.assign": ROLE.PROJECT_LEAD,
+  // server's 403 was the only thing stopping anyone.
+  //
+  // AQU-646 (Sam, 2026-08-20): RAISED AGAIN, to MAINTAINER. Characters are one
+  //   person's job here — the client's producer owns the sheets, and she holds
+  //   maintainer. Nobody below her reconciles the two sheets against each other,
+  //   so the resolve drawer this event also backs has an audience of one and does
+  //   not need a lower floor to stay reachable.
+  // 
+  //   KNOWN CONSEQUENCE, accepted deliberately: `cast.assign` also carries the
+  //   older CSV label round-trip (AQU-438 — download a template, fill in a
+  //   `cast_name` column, re-upload), which has no UI role gate of its own. That
+  //   flow now needs maintainer too. It surfaces as the panel's inline error rather
+  //   than a crash, because the client mirror throws before anything reaches the
+  //   durable outbox.
+  "cast.assign": ROLE.MAINTAINER,
   // Structural — keeps the clearance the setting had in Project Settings.
   "file.timing.set": ROLE.MAINTAINER,
   // Track structure IS file structure: a rename or reorder relayouts the

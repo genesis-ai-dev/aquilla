@@ -6,6 +6,7 @@ import { MemberMultiAddRow } from "@/components/MemberMultiAddRow"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { OrgInviteByEmail } from "@/components/org/OrgInviteByEmail"
 import { MemberAccessSubRow } from "@/components/org/MemberAccessPanel"
+import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
 import { Button } from "@/components/ui/button"
 import {
   DataTable,
@@ -45,6 +46,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 
 type AddDialogTab = "members" | "invite"
 
+// Shown on the disabled row-menu Remove item when the caller is not an org owner.
 const REMOVE_REQUIRES_OWNER_TOOLTIP =
   "Only org owners can remove members from the organization. Ask an owner to remove someone."
 
@@ -233,29 +235,12 @@ export function OrgMembersTable({
         enableSorting: false,
         header: () => <span className="sr-only">{t("org.overviewLaneTable.actionsColumn")}</span>,
         meta: { align: "right" as const, className: "w-10" },
-        cell: ({ row }) => {
-          const m = row.original
-          if (!isOwner) {
-            return (
-              <AppTooltip content={REMOVE_REQUIRES_OWNER_TOOLTIP} className="max-w-xs">
-                <span
-                  tabIndex={0}
-                  aria-disabled="true"
-                  aria-label={t("org.membersPage.orgTable.removeOwnersOnlyAriaLabel", { username: m.username })}
-                  className="inline-flex cursor-not-allowed items-center text-xs text-muted-foreground/70 underline decoration-dotted"
-                >
-                  {t("org.membersPage.remove")}
-                </span>
-              </AppTooltip>
-            )
-          }
-          return (
-            <DataTableRowActionsButton
-              label={t("org.rowActionsAriaLabel", { name: m.username })}
-              revealOnHover
-            />
-          )
-        },
+        cell: ({ row }) => (
+          <DataTableRowActionsButton
+            label={t("org.rowActionsAriaLabel", { name: row.original.username })}
+            revealOnHover
+          />
+        ),
       },
     ],
     [expanded, isOwner, t, toggleExpand],
@@ -400,11 +385,11 @@ export function OrgMembersTable({
           }
           rowClassName="group"
           renderRowMenuItems={(m) => {
-            if (!isOwner) return null
             const isOrgOwner = m.role.level === ROLE.OWNER
+            const canRemove = isOwner && !isOrgOwner
             return (
               <>
-                {!isOrgOwner && (
+                {isOwner && !isOrgOwner && (
                   <>
                     <MenuItem onClick={() => openRoleChange(m)}>
                       <ShieldUser className="size-4" />
@@ -413,16 +398,25 @@ export function OrgMembersTable({
                     <MenuSeparator />
                   </>
                 )}
-                <MenuItem
-                  aria-label={t("org.teamDetail.removeAriaLabel", { name: m.username })}
-                  disabled={isOrgOwner}
-                  onClick={() => {
-                    if (!isOrgOwner) onRequestRemove(m.userId, m.username)
-                  }}
+                <DisabledFieldTooltip
+                  disabled={!canRemove}
+                  tooltip={!isOwner ? REMOVE_REQUIRES_OWNER_TOOLTIP : undefined}
                 >
-                  <UserMinus className="size-4" />
-                  {t("org.membersPage.orgTable.removeFromOrg")}
-                </MenuItem>
+                  <MenuItem
+                    aria-label={
+                      canRemove
+                        ? undefined
+                        : t("org.membersPage.orgTable.removeOwnersOnlyAriaLabel", { username: m.username })
+                    }
+                    disabled={!canRemove}
+                    onClick={() => {
+                      if (canRemove) onRequestRemove(m.userId, m.username)
+                    }}
+                  >
+                    <UserMinus className="size-4" />
+                    {t("org.membersPage.orgTable.removeFromOrg")}
+                  </MenuItem>
+                </DisabledFieldTooltip>
               </>
             )
           }}

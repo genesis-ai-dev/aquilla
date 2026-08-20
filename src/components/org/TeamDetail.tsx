@@ -22,6 +22,7 @@ import { toast } from "@/components/ui/toast"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { Page, EmptyState, NotFoundIcon, TableEmptyState } from "@/components/ui/page"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
@@ -71,8 +72,9 @@ function roleLabel(roleLevel: number | null | undefined): string {
     : humanRoleName(roleLevel)
 }
 
-// AQU-789: removing a team member is a maintainer+ (600) action. Non-maintainers
-// who can view a team see this on a disabled Remove control instead of nothing.
+// AQU-789: removing a team member is a maintainer+ (600) action. The row menu
+// always includes Remove; without permission the item is disabled with this
+// explanation instead of a missing control.
 const REMOVE_REQUIRES_MAINTAINER_TOOLTIP =
   "Only maintainers and org owners can remove members from a team. Ask a maintainer to remove someone."
 
@@ -417,35 +419,15 @@ export function TeamDetail() {
         enableSorting: false,
         header: () => <span className="sr-only">{t("org.overviewLaneTable.actionsColumn")}</span>,
         meta: { align: "right" as const, className: "w-10" },
-        cell: ({ row }) => {
-          const m = row.original
-          if (!isAdmin) {
-            /* AQU-789: removing a team member is a maintainer+ action. Show a
-               disabled control with the reason rather than omitting it, so it
-               doesn't read as a missing feature. */
-            return (
-              <AppTooltip content={REMOVE_REQUIRES_MAINTAINER_TOOLTIP} className="max-w-xs">
-                <span
-                  tabIndex={0}
-                  aria-disabled="true"
-                  aria-label={t("org.teamDetail.removeMaintainersOnlyAriaLabel", { username: m.username })}
-                  className="inline-flex cursor-not-allowed items-center text-xs text-muted-foreground/70 underline decoration-dotted"
-                >
-                  {t("org.membersPage.remove")}
-                </span>
-              </AppTooltip>
-            )
-          }
-          return (
-            <DataTableRowActionsButton
-              label={t("org.rowActionsAriaLabel", { name: m.username })}
-              revealOnHover
-            />
-          )
-        },
+        cell: ({ row }) => (
+          <DataTableRowActionsButton
+            label={t("org.rowActionsAriaLabel", { name: row.original.username })}
+            revealOnHover
+          />
+        ),
       },
     ],
-    [isAdmin, t],
+    [isOwner, t],
   )
 
   const teamDescription = team?.description?.trim() || null
@@ -844,25 +826,38 @@ export function TeamDetail() {
                         ) : null
                       }
                       rowClassName="group"
-                      renderRowMenuItems={(m) =>
-                        isAdmin ? (
-                          <>
-                            {isOwner && (
-                              <>
-                                <MenuItem onClick={() => openRoleChange(m)}>
-                                  <ShieldUser className="size-4" />
-                                  {t("org.membersPage.changeRoleAria")}
-                                </MenuItem>
-                                <MenuSeparator />
-                              </>
-                            )}
-                            <MenuItem onClick={() => void handleRemoveMember(m.userId)}>
+                      renderRowMenuItems={(m) => (
+                        <>
+                          {isOwner && (
+                            <>
+                              <MenuItem onClick={() => openRoleChange(m)}>
+                                <ShieldUser className="size-4" />
+                                {t("org.membersPage.changeRoleAria")}
+                              </MenuItem>
+                              <MenuSeparator />
+                            </>
+                          )}
+                          <DisabledFieldTooltip
+                            disabled={!isAdmin}
+                            tooltip={REMOVE_REQUIRES_MAINTAINER_TOOLTIP}
+                          >
+                            <MenuItem
+                              aria-label={
+                                isAdmin
+                                  ? undefined
+                                  : t("org.teamDetail.removeMaintainersOnlyAriaLabel", { username: m.username })
+                              }
+                              disabled={!isAdmin}
+                              onClick={() => {
+                                if (isAdmin) void handleRemoveMember(m.userId)
+                              }}
+                            >
                               <UserMinus className="size-4" />
                               {t("org.teamDetail.removeFromTeamButton")}
                             </MenuItem>
-                          </>
-                        ) : null
-                      }
+                          </DisabledFieldTooltip>
+                        </>
+                      )}
                       emptyState={
                         team.members.length === 0 ? (
                           <TableEmptyState

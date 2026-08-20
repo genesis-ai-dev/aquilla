@@ -269,20 +269,18 @@ describe("TeamDetail non-admin gating", () => {
   })
 
   // AQU-789: a non-maintainer who can view a team (they're a member) must see a
-  // DISABLED Remove affordance explaining who may remove, not a missing control.
-  it("shows a disabled Remove control with an explanation for a non-admin", async () => {
+  // DISABLED Remove item in the row menu explaining who may remove, not a
+  // missing control or an inline table button.
+  it("shows a disabled Remove item in the row menu for a non-admin", async () => {
     listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 100, name: "viewer" } }])
     getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [] })
     renderDetail()
     await openTeamTab(/^members$/i)
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
-    // No actionable (enabled) remove button for a non-admin…
     expect(screen.queryByRole("button", { name: /remove anna/i })).toBeNull()
-    // …but the control is present, disabled, and labelled with the reason.
-    const disabled = screen.getByLabelText(/remove anna — maintainers only/i)
-    expect(disabled).toHaveAttribute("aria-disabled", "true")
-    // It's an inert affordance, not an actionable button.
-    expect(disabled.tagName).toBe("SPAN")
+    await act(async () => { (await screen.findByRole("button", { name: /actions for anna/i })).click() })
+    const remove = await screen.findByRole("menuitem", { name: /remove anna — maintainers only/i })
+    expect(remove).toHaveAttribute("aria-disabled", "true")
   })
 })
 

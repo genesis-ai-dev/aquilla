@@ -43,6 +43,27 @@ export function closedVerse(self: string, verse: string, body: string, chapter?:
   )
 }
 
+/**
+ * A Psalms verse: `[cv:v N][meta:c C:][meta:v N] body [meta:v N]`.
+ * The chapter marker sits *after* the verse number, unlike Job's drop-cap.
+ */
+export function psalmsVerse(
+  self: string,
+  chapter: string,
+  verse: string,
+  body: string,
+): string {
+  return paragraph(
+    self,
+    "text%3aq1",
+    run("cv%3av", verse)
+      + run("meta%3ac", `${chapter}:`)
+      + run("meta%3av", verse)
+      + run(PLAIN, body)
+      + run("meta%3av", verse),
+  )
+}
+
 /** A verse whose closing `meta:v` bookend is missing, so it runs on. */
 export function openVerse(self: string, verse: string, body: string, chapter?: string): string {
   return paragraph(
@@ -101,6 +122,19 @@ export function bookTitle(self: string, text: string): string {
 }
 
 /**
+ * A heading the study Bible sets in the scripture flow (`head:cl`, `head:d_h`,
+ * `head:ms`, …). Unlike the verses around it, this is layout text that has to
+ * be translated here — JOB-SNG uses `head:cl` for "Psalm 1", not `intro:head:cl`.
+ */
+export function scriptureHeading(
+  self: string,
+  text: string,
+  style = "head%3acl",
+): string {
+  return paragraph(self, style, run(PLAIN, text))
+}
+
+/**
  * One note paragraph whose lines are separated by `<Br/>` — how Biblica sets a
  * cross-reference list, a glossary, or an outline.
  */
@@ -134,6 +168,9 @@ export const SAMPLE_NOTES = {
   afterChapterOne: "1:1 God alone creates; the heavens and the earth are not rivals.",
   afterChaptersTwoToThree: "2:5 The garden is planted before there is anyone to till it.",
   psalmHeading: "Psalm 2",
+  psalmSuperscription: "A psalm of David.",
+  psalmBookHeading: "Book I",
+  psalmBookRange: "Psalms 1\u201441",
   psalmNote: "The nations rage, but the LORD reigns.",
   /** A cross-reference list set as one paragraph with line breaks between items. */
   referenceList: [
@@ -162,7 +199,7 @@ export const biblicaSampleStory: readonly string[] = [
   note("p-n2", SAMPLE_NOTES.afterChaptersTwoToThree, "intro%3aipi"),
   // Running header: not scripture, not a note.
   paragraph("p-rh", "meta%3arh", run(PLAIN, "GENESIS 2")),
-  paragraph("p-cl", "intro%3ahead%3acl", run(PLAIN, SAMPLE_NOTES.psalmHeading)),
+  scriptureHeading("p-cl", SAMPLE_NOTES.psalmHeading),
   note("p-n3", SAMPLE_NOTES.psalmNote, "intro%3ad_h"),
   noteList("p-n4", SAMPLE_NOTES.referenceList),
   note("p-n5", SAMPLE_NOTES.noteBlock),

@@ -296,7 +296,7 @@ describe("TeamDetail member role editing (AQU-139)", () => {
     renderDetail()
     await openTeamTab(/^members$/i)
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
-    // Role column shows the current role as plain text, not a combobox.
+    // Role column shows the current role as a badge, not a combobox.
     expect(screen.queryByRole("combobox", { name: /role for anna/i })).toBeNull()
     expect(screen.getByText("Viewer")).toBeInTheDocument()
     await act(async () => { (await screen.findByRole("button", { name: /actions for anna/i })).click() })
@@ -319,7 +319,7 @@ describe("TeamDetail member role editing (AQU-139)", () => {
     await waitFor(() => expect(addOrgMember).toHaveBeenCalledWith("jwt", 1, "anna", 400))
   })
 
-  it("maintainer (600) cannot see Change role — only read-only role text with tooltip", async () => {
+  it("maintainer (600) cannot see Change role — only a read-only role badge with tooltip", async () => {
     // Maintainers can manage teams but only owners can change org-level roles (POST /orgs/:id/members requires 700).
     listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 600, name: "maintainer" } }])
     getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [] })

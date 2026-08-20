@@ -187,7 +187,7 @@ function ProjectRow({
         </span>
 
         {/* Role */}
-        <RoleLabel name={p.role.name} className="shrink-0 justify-self-start text-xs text-muted-foreground" />
+        <RoleLabel name={p.role.name} className="shrink-0 justify-self-start" />
       </button>
     </li>
   )

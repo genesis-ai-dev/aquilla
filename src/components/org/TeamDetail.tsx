@@ -48,6 +48,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { RoleLabel } from "@/components/RoleLabel"
 import { RoleSelect } from "@/components/RoleSelect"
 import {
   ALL_ROLE_LEVELS,
@@ -331,11 +332,7 @@ export function TeamDetail() {
         accessorFn: (p) => p.grantedRoleLevel,
         header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.roleLabel")} />,
         meta: { className: "w-[7.5rem] whitespace-nowrap" },
-        cell: ({ row }) => (
-          <span className="text-sm text-foreground">
-            {roleLabel(row.original.grantedRoleLevel)}
-          </span>
-        ),
+        cell: ({ row }) => <RoleLabel name={row.original.grantedRoleLevel} />,
       },
       {
         id: "actions",
@@ -393,11 +390,9 @@ export function TeamDetail() {
             return <span className="text-sm text-muted-foreground">{t("autopilot.evidence.status.unknown")}</span>
           }
 
-          const label = (
-            <span className="text-sm text-foreground">{roleLabel(m.roleLevel)}</span>
-          )
+          const label = <RoleLabel name={m.roleLevel} />
 
-          // Owners change roles via the actions menu dialog — text is display-only.
+          // Owners change roles via the actions menu dialog — badge is display-only.
           // Non-owners get a tooltip explaining the org-level lock.
           if (isOwner) return label
 

@@ -322,9 +322,7 @@ export function OrgProjectsDataTable({
                 return <span className="text-sm text-muted-foreground">—</span>
               }
               return (
-                <span className="text-sm text-foreground">
-                  <RoleLabel name={name} />
-                </span>
+                <RoleLabel name={name} />
               )
             },
           },

@@ -44,7 +44,7 @@ import {
   roleDisplayText,
 } from "@/lib/frontier/roles"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
-import { RoleLabel } from "@/components/RoleLabel"
+import { RoleLabel, RoleLevelLabel } from "@/components/RoleLabel"
 import { RoleSelect } from "@/components/RoleSelect"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
@@ -182,7 +182,7 @@ export function MembersTab({
       >
         <UsernameWithAvatar username={m.username} />
         <SourceBadge source={m.role.source} />
-        <RoleLabel name={m.role.name} className="text-xs text-muted-foreground" />
+        <RoleLabel name={m.role.name} />
 
         {/* Secondary sources */}
         {m.secondarySources && m.secondarySources.length > 0 && (
@@ -831,7 +831,7 @@ function GrantPathRow({
         {source}
       </span>
       {/* Role LABEL only — numeric levels are internal (FRO-368). */}
-      <span className="text-muted-foreground">→ {humanRoleName(level)}</span>
+      <RoleLevelLabel level={level} />
       {removable ? (
         <span className="text-xs text-destructive/70">{t("org.membersPage.willBeRemoved")}</span>
       ) : (

@@ -153,9 +153,7 @@ export function ProjectCard({
             )}
             {!isTrashed && myRoleLabel && (
               <AppTooltip content={t("workspace.projectCard.yourRoleTooltip")}>
-                <Badge variant="secondary">
-                  <RoleLabel name={myRoleLabel} />
-                </Badge>
+                <RoleLabel name={myRoleLabel} />
               </AppTooltip>
             )}
             {isGit && (

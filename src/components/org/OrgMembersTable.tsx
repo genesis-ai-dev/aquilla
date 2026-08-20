@@ -28,6 +28,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from "@/components/ui/toast"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { RoleLabel } from "@/components/RoleLabel"
 import { RoleSelect } from "@/components/RoleSelect"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import type { MemberGrantResult } from "@/lib/frontier/members"
@@ -213,9 +214,7 @@ export function OrgMembersTable({
         meta: { className: "w-[7.5rem] whitespace-nowrap" },
         cell: ({ row }) => {
           const m = row.original
-          const label = (
-            <span className="text-sm text-foreground">{roleLabel(m.role.level)}</span>
-          )
+          const label = <RoleLabel name={m.role.level} />
           if (isOwner) return label
           return (
             <AppTooltip content={lockedOrgRoleTooltip(m.role.level)} className="max-w-xs">

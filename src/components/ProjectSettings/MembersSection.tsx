@@ -10,7 +10,6 @@ import {
   AlertTriangle, ShieldOff, ShieldUser, UserMinus,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import {
   DataTable,
@@ -38,9 +37,8 @@ import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { type ProjectMember } from "@/lib/frontier/members"
 import {
-  ROLE, PROJECT_ROLE_OPTIONS, humanRoleName, roleDescription, roleDisplayText,
+  ROLE, PROJECT_ROLE_OPTIONS, humanRoleName, roleDescription,
 } from "@/lib/frontier/roles"
-import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
@@ -64,23 +62,6 @@ function memberMatchesFilter(m: ProjectMember, filter: AccessFilter): boolean {
     (s) => s === "override" || s === "group" || s === "creator",
   )
   return filter === "project" ? hasProjectPath : !hasProjectPath
-}
-
-function MemberRoleBadge({ name, level }: { name: string; level: number }) {
-  const elevated = level >= ROLE.MAINTAINER
-  return (
-    <Badge
-      variant="secondary"
-      className={cn(
-        "font-normal",
-        elevated
-          ? "bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300"
-          : "bg-muted text-muted-foreground",
-      )}
-    >
-      {roleDisplayText(name)}
-    </Badge>
-  )
 }
 
 export function MembersSection({ projectId }: { projectId: string }) {
@@ -145,7 +126,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
         header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.roleLabel")} />,
         meta: { className: "w-0 whitespace-nowrap" },
         cell: ({ row }) => (
-          <MemberRoleBadge name={row.original.role.name} level={row.original.role.level} />
+          <RoleLabel name={row.original.role.name} />
         ),
       },
       {
@@ -262,7 +243,7 @@ export function MembersSection({ projectId }: { projectId: string }) {
                           >
                             <span className="flex min-w-0 flex-col gap-0.5">
                               <span>
-                                <RoleLabel name={r.name} className="font-medium" />
+                                <RoleLabel name={r.name} plain className="font-medium" />
                                 {r.level === m.role.level ? " (current)" : ""}
                               </span>
                               <span className="text-xs font-normal whitespace-normal text-muted-foreground">

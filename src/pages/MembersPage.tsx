@@ -346,7 +346,7 @@ function PendingInviteRow({
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="font-medium truncate">{invite.projectName}</span>
           <span className="text-muted-foreground">·</span>
-          <RoleLabel name={invite.role.name} className="text-muted-foreground" />
+          <RoleLabel name={invite.role.name} />
           {invite.email ? (
             <AppTooltip content={t("org.membersPage.orgPage.targetedInviteTooltip")}>
               <span className="rounded bg-blue-500/15 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 text-[9px] font-mono">

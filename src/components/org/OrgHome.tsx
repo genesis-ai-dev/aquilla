@@ -270,7 +270,7 @@ function useOrgSummaryColumns(): ColumnDef<OrgPortfolioSummary>[] {
         ),
         meta: { className: "w-[8.5rem] whitespace-nowrap" },
         cell: ({ row }) => (
-          <span className="text-sm text-foreground">{roleLabel(row.original.org)}</span>
+          <RoleLabel name={row.original.org.role.name} />
         ),
       },
       {

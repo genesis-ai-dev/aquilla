@@ -848,12 +848,30 @@ projects.get("/:projectId/files/:fileId/chapters", authMiddleware, async (c) => 
 })
 
 /**
+ * Parse `?minRole=` for the privileged-members bypass. Only a settings-write
+ * floor (Maintainer+) is accepted — a lower floor would leak the full roster
+ * to callers the org has hidden it from. Invalid / absent → unfiltered list
+ * under the normal AQU-485 roster gate.
+ */
+function parsePrivilegedMinRole(raw: string | undefined): number | null {
+  if (raw == null || raw === "") return null
+  const n = Number.parseInt(raw, 10)
+  if (!Number.isInteger(n) || n < ROLE.MAINTAINER || n > ROLE.OWNER) return null
+  return n
+}
+
+/**
  * AQU-485: additionally gated by the project's org rosterViewMinRole
  * (default MAINTAINER=600) when the project belongs to an org. Projects with
  * no org (org_id null — personal projects) have no org policy to check
  * against and are never gated here. A caller below the floor gets a distinct
  * 403 rather than the member list — the response must not leak the roster
  * or its size.
+ *
+ * Exception: `?minRole=` at Maintainer or Owner returns only members at that
+ * floor or above, even when the full roster is hidden. That is the GitHub
+ * "view admins" contract — a contributor still needs to see who can change
+ * settings, without learning who else is on the project.
  */
 projects.get("/:projectId/members", authMiddleware, async (c) => {
   const user = c.get("user")
@@ -868,19 +886,24 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
     .first<{ created_by: number; org_id: number | null }>()
   if (!project) return c.json({ error: "project not found" }, 404)
 
-  if (project.org_id != null) {
+  const privilegedMinRole = parsePrivilegedMinRole(c.req.query("minRole"))
+
+  if (project.org_id != null && privilegedMinRole == null) {
     const rosterMinRole = await getRosterViewMinRole(c.env, project.org_id)
     if (!canViewRoster(role.level, rosterMinRole)) {
       return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
     }
   }
 
-  const members = await listEffectiveProjectMembers(
+  let members = await listEffectiveProjectMembers(
     c.env,
     projectId,
     project.org_id,
     project.created_by,
   )
+  if (privilegedMinRole != null) {
+    members = members.filter((m) => m.roleLevel >= privilegedMinRole)
+  }
 
   await bumpOrgActivity(c.env, user.id, project.org_id)
 

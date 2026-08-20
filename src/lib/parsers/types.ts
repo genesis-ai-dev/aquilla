@@ -482,6 +482,17 @@ export interface ProjectRecord {
    * ProjectWideSettings.audioTimingMode by useProject's overlaySettings.
    */
   audioTimingMode?: AudioTimingMode
+  /**
+   * AQU-646: is the timeline locked against chip dragging? Overlaid from
+   * ProjectWideSettings.timingLocked by useProject's overlaySettings.
+   *
+   * ABSENT MEANS LOCKED — see `resolveTimingLocked` in lib/sync/project-settings
+   * for why this one setting inverts the file's usual convention. Read it
+   * through that resolver rather than testing this field directly, so a project
+   * whose settings have not arrived yet errs toward frozen rather than
+   * briefly handing everyone the handles.
+   */
+  timingLocked?: boolean
   /** When and how to fetch audio bytes from the storage backend. Default: "lazy". */
   audioMediaStrategy?: AudioMediaStrategy
   /** Soft-delete marker. When present the project is in Trash; the Dashboard

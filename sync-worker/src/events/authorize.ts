@@ -7,6 +7,7 @@ import type { EventKind, EventClaims, RawEvent } from './types'
 import { requiredRoleFor, ROLE } from './role-policy'
 import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from '../auth'
 import { resolveAllowSelfAssignment } from './assignment-authority'
+import { isLockedTimingEvent, isUserInsertedCell, resolveTimingLocked } from './timing-authority'
 import { laneOfEvent } from './event-projection'
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
@@ -233,6 +234,36 @@ export async function authorize<K extends EventKind>(
       (await resolveAllowSelfAssignment(db, raw.projectId))
     if (!selfAssignOk) {
       return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }
+    }
+  }
+
+  // AQU-646: the project-wide timing lock raises cell.retime / cell.lane.retime
+  // from their static CONTRIBUTOR floor to MAINTAINER while a project is
+  // locked. See timing-authority.ts for why it is a raised floor rather than a
+  // flat refusal (short version: an import's retimes are indistinguishable from
+  // a drag, and re-import is maintainer-gated anyway).
+  //
+  // ORDERED SO THE COMMON PATH IS FREE. Retimes arrive in bursts while someone
+  // drags, so a maintainer never reads settings at all, and the per-cell
+  // exemption lookup runs only on an event that was otherwise about to be
+  // rejected. An absent `db` disables the lock rather than erroring, matching
+  // the self-assign carve-out above — every existing caller and test that does
+  // not pass one keeps working.
+  if (db != null && tokenClaims.role < ROLE.MAINTAINER && isLockedTimingEvent(raw.kind, raw.payload)) {
+    if (await resolveTimingLocked(db, raw.projectId)) {
+      // Sam's exemption: a line someone added here never came from the client's
+      // file, so it has no imported timing to corrupt and stays movable.
+      const exempt =
+        raw.fileId != null &&
+        raw.cellId != null &&
+        (await isUserInsertedCell(db, raw.projectId, raw.fileId, raw.cellId))
+      if (!exempt) {
+        return {
+          ok: false,
+          status: 403,
+          reason: `timing is locked for this project (${raw.kind})`,
+        }
+      }
     }
   }
 

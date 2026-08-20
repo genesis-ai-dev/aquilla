@@ -1851,3 +1851,45 @@ describe("the Sources menu disappears when nothing in it is yours", () => {
     expect(screen.getByTestId("tl-sources-menu")).toBeInTheDocument()
   })
 })
+
+// ── What the text column under the timeline is called (Sam, 2026-08-20) ─────
+//
+// It said "Dialogue" — a word of the app's own invention sitting between two
+// labels it kept being confused with: the track gutter directly above already
+// says "Subtitles" for the same cells, and the heard lines from the audio
+// sibling are "Audio cues" a few inches away. These cells are the subtitles,
+// so they say so.
+
+describe("the heading over the text column", () => {
+  const editor = (extra: Record<string, unknown>) => (
+    <TimelineEditor
+      fileId="heading" coreMediaUrl={null} editable cells={[]} onRetimeSubtitle={() => {}} {...extra}
+    />
+  )
+
+  it("says Subtitles for a file imported as subtitles", () => {
+    render(editor({ isSubtitleImport: true }))
+    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Subtitles")
+  })
+
+  it("says it with no video linked, which is where it used to say Dialogue", () => {
+    // The old gate was `coreMediaUrl && no media cells`, so a subtitle file
+    // with no video fell through to the per-cell derivation — which says
+    // "Dialogue" whenever nothing is selected. The confusing case, on the one
+    // file type that can least afford it.
+    render(editor({ isSubtitleImport: true, coreMediaUrl: null }))
+    expect(screen.getByTestId("tl-dialogue-header")).not.toHaveTextContent("Dialogue")
+  })
+
+  it("says it with a video linked too", () => {
+    render(editor({ isSubtitleImport: true, coreMediaUrl: "https://example.test/master.m3u8" }))
+    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Subtitles")
+  })
+
+  it("leaves every other kind of project deriving its own word", () => {
+    // An audio-first project has real media cells and no subtitle import; its
+    // header keeps changing with the selection, which is what it should do.
+    render(editor({}))
+    expect(screen.getByTestId("tl-dialogue-header")).not.toHaveTextContent("Subtitles")
+  })
+})

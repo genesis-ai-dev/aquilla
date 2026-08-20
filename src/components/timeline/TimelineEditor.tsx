@@ -261,6 +261,14 @@ export interface TimelineEditorProps {
    *  only one mode it can be in — a picker with a single choice, or a label
    *  saying so, is a question the user cannot act on. */
   hideTimingMode?: boolean
+  /**
+   * Was this file imported as subtitles (VTT/SRT/SBV)?
+   *
+   * Only the workspace can answer it — the file's type does not otherwise
+   * reach this component — and it decides one thing here: what the text
+   * column under the timeline is called. See `textHeadingLabel`.
+   */
+  isSubtitleImport?: boolean
   /** Needed by the missing-audio probe behind the chip strip's badge. */
   project?: ProjectRecord
   /** Fires when the highlighted section changes so a sibling transport (the
@@ -535,6 +543,7 @@ export function TimelineEditor({
   timingMode = "dubbing",
   onChangeTimingMode,
   hideTimingMode = false,
+  isSubtitleImport = false,
   project,
   onSelectCell,
   session,
@@ -846,11 +855,23 @@ export function TimelineEditor({
   // would be flashing subtitle rows around a stretch where nobody SPOKE. Two
   // tracks, conflated. (EditorTable keeps its pulseCells API for other callers.)
 
-  // AQU-646 round 8: in this workflow every cell is a text cell, so the header
-  // read "Subtitle" and changed as you clicked around. Sam asked for it to stay
-  // "Dialogue" for now — pinned, so it reads the same with a chip selected and
-  // with none.
-  const textHeadingLabel = subtitleFileWithFootage ? "Dialogue" : undefined
+  // What the text column under the timeline is called.
+  //
+  // Pinned rather than derived per-cell, because in this workflow every cell is
+  // a text cell and the header would otherwise change as you clicked around.
+  //
+  // "SUBTITLES", not "Dialogue" (Sam, 2026-08-20): these cells ARE the
+  // subtitles, the track gutter directly above already calls them that, and
+  // the thing they were being confused with — the heard lines from the audio
+  // sibling — is labelled "Audio cues" a few inches away. A heading of its own
+  // invention sitting between those two invited exactly that mix-up.
+  //
+  // Keyed on the FILE now, not on `subtitleFileWithFootage` (a linked-video
+  // heuristic). That gate left a subtitle file with no video falling through to
+  // the per-cell derivation, which says "Dialogue" whenever nothing is
+  // selected — the confusing case, on the one file type that can least afford
+  // it.
+  const textHeadingLabel = isSubtitleImport ? "Subtitles" : undefined
 
   // Stretches of film that no cell covers — where a line can still be added.
   // Derived from the same sweep the Source track draws, so the two can never

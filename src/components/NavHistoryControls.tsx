@@ -40,7 +40,7 @@ export function NavHistoryControls() {
   return (
     <div className="flex items-center gap-1" role="group" aria-label={t("nav.historyControls.groupLabel")}>
       <HistoryMenuButton nav={nav} />
-      <ButtonGroup className="shadow-xs">
+      <ButtonGroup>
         <NavArrowButton direction="back" nav={nav} />
         <NavArrowButton direction="forward" nav={nav} />
       </ButtonGroup>
@@ -165,7 +165,7 @@ function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav
     >
       <Button
         type="button"
-        variant="outline"
+        variant="ghost"
         size="icon-sm"
         disabled={!enabled}
         aria-label={

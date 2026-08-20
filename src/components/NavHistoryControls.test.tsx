@@ -35,5 +35,8 @@ describe("NavHistoryControls", () => {
       forward.closest("[data-slot=button-group]"),
     )
     expect(previouslyViewed.closest("[data-slot=button-group]")).toBeNull()
+    expect(back).toHaveAttribute("data-variant", "ghost")
+    expect(forward).toHaveAttribute("data-variant", "ghost")
+    expect(previouslyViewed).toHaveAttribute("data-variant", "ghost")
   })
 })

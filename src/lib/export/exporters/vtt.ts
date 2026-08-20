@@ -55,6 +55,24 @@ export interface VttExportOptions {
    * `bilingualText`.
    */
   includeSource?: boolean
+  /**
+   * Name the speaker for a cell directly, instead of looking the cell up in
+   * the project's cast assignments.
+   *
+   * REQUIRED FOR EXPORTING AUDIO CUES, and the reason is a trap this codebase
+   * has now hit three times. `assignedCastVoiceId` reads
+   * `settings.castAssignments`, which is keyed by cell id — and an audio cue
+   * only gets an entry there if the AUDIO character sheet was imported. Import
+   * only the subtitle sheet and every cue looks anonymous, so a voice-tagged
+   * export of the cue file comes out completely bare while the app itself
+   * shows names everywhere (they resolve across the cue↔text links; see
+   * `lib/timeline/cue-character.ts`). `audio-by-character.ts` carries the same
+   * parameter for the same reason.
+   *
+   * Returning null or an empty string means "nobody is named", which leaves
+   * the cue untagged rather than tagging it with a blank.
+   */
+  resolveName?: (cell: CellData) => string | null
 }
 
 /** One cue's worth of resolved content, before it is serialized. */
@@ -138,8 +156,13 @@ function unitsFrom(
     // is written inside the cues that were always going to be there.
     const monolingual = raw ? stripHtml(raw) : ""
     const text = options.includeSource === true ? bilingualText(cell, monolingual) : monolingual
-    const voiceId = excludeLabels ? undefined : assignedCastVoiceId(settings, cell.id)
-    const voice = voiceId ? findVoice(settings, voiceId) : undefined
+    // The resolver wins when it has an answer, and falls back to the cast
+    // assignments when it does not — so passing one can only ever ADD tags,
+    // never take away a tag the settings would have produced.
+    const resolved = excludeLabels ? null : options.resolveName?.(cell)?.trim() || null
+    const voiceId = excludeLabels || resolved ? undefined : assignedCastVoiceId(settings, cell.id)
+    const assigned = voiceId ? findVoice(settings, voiceId) : undefined
+    const speaker = resolved ?? assigned?.name ?? null
     units.push({
       startTime: cell.startTime,
       endTime: cell.endTime,
@@ -148,7 +171,7 @@ function unitsFrom(
       // unattributed. It closes on the line below, which is also what keeps an
       // untranslated bilingual cue safe to stack: its last line is `</v>`
       // rather than an empty string, so it cannot terminate a cue early.
-      payload: voice ? `<v ${escapeVoiceName(voice.name)}>${text}</v>` : text,
+      payload: speaker ? `<v ${escapeVoiceName(speaker)}>${text}</v>` : text,
     })
   }
   return units

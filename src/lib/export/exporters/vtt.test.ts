@@ -323,3 +323,69 @@ describe("timestamps a player will accept", () => {
   })
 })
 
+
+// ── Naming the speaker without a cast assignment (AQU-646, 2026-08-20) ──────
+//
+// THE TRAP THIS EXISTS FOR. Voice tags read `settings.castAssignments`, which
+// is keyed by cell id — and an audio cue only appears there if the AUDIO
+// character sheet was imported. Import only the SUBTITLE sheet and every cue
+// looks anonymous to this exporter, while the app itself shows a name on each
+// one (it resolves them across the cue↔text links). So an "audio VTT" of that
+// project came out completely bare while every other surface named everybody.
+// `audio-by-character.ts` carries the same parameter for the same reason.
+
+describe("naming the speaker from outside the cast list", () => {
+  it("tags a cell the cast assignments know nothing about", async () => {
+    // `c9` is in no castAssignments entry — exactly an audio cue's situation.
+    const cells = [cell({ id: "c9", translated: "Rabbi", startTime: 1, endTime: 2 })]
+    const out = await text(
+      exportVtt(cells, SETTINGS, { resolveName: () => "NICODEMUS" }),
+    )
+    expect(out).toContain("<v NICODEMUS>Rabbi</v>")
+  })
+
+  it("wins over the cast assignment when both have an answer", async () => {
+    // Both name the speaker; the resolver is the one that walked the links and
+    // agrees with what the chip strip and the recorder are showing.
+    const cells = [cell({ id: "c1", translated: "Bonjour", startTime: 1, endTime: 2 })]
+    const out = await text(exportVtt(cells, SETTINGS, { resolveName: () => "JESUS" }))
+    expect(out).toContain("<v JESUS>")
+    expect(out).not.toContain("<v Mary>")
+  })
+
+  it("falls back to the cast assignment when the resolver has no answer", async () => {
+    // So passing a resolver can only ever ADD tags, never remove one the
+    // settings would have produced.
+    const cells = [cell({ id: "c1", translated: "Bonjour", startTime: 1, endTime: 2 })]
+    const out = await text(exportVtt(cells, SETTINGS, { resolveName: () => null }))
+    expect(out).toContain("<v Mary>")
+  })
+
+  it("treats a blank name as nobody rather than tagging an empty speaker", async () => {
+    const cells = [cell({ id: "c9", translated: "Rabbi", startTime: 1, endTime: 2 })]
+    const out = await text(exportVtt(cells, SETTINGS, { resolveName: () => "   " }))
+    expect(out).not.toContain("<v")
+    expect(out).toContain("Rabbi")
+  })
+
+  it("still obeys 'leave out character names'", async () => {
+    // The checkbox means no tags at all — whichever source could name them.
+    const cells = [cell({ id: "c9", translated: "Rabbi", startTime: 1, endTime: 2 })]
+    const out = await text(
+      exportVtt(cells, SETTINGS, { resolveName: () => "NICODEMUS", excludeLabels: true }),
+    )
+    expect(out).not.toContain("<v")
+  })
+
+  it("sanitises a resolved name the same way an assigned one is sanitised", async () => {
+    // A name is not free text inside a voice tag: `<` and `>` would end the
+    // annotation early and turn the rest of the name into markup. Both sources
+    // of a name go through the same escaper, so neither can be the one that
+    // gets it wrong.
+    const cells = [cell({ id: "c9", translated: "Rabbi", startTime: 1, endTime: 2 })]
+    const out = await text(
+      exportVtt(cells, SETTINGS, { resolveName: () => "MARY <b>MAGDALENE" }),
+    )
+    expect(out).toContain("<v MARY bMAGDALENE>Rabbi</v>")
+  })
+})

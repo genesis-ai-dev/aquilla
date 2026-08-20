@@ -1,19 +1,25 @@
-// Giving Anna her character sheets back. (AQU-646, 2026-08-19)
+// Giving Anna her character sheets back. (AQU-646, 2026-08-19; annotations
+// dropped 2026-08-20)
 //
 // Two kinds of assertion here, and the second kind matters more.
 //
-// The first kind checks that a corrected row is visibly corrected — the right
-// cell highlighted, the old value named in the Changed column. Those are the
-// tests that would fail if somebody rearranged the columns.
+// The first kind pins her file formats — the column set, the gaps, the casing
+// — measured from her real workbooks, because these are strings something
+// downstream may match on and "close enough" is not a standard this export
+// gets to hold itself to.
 //
 // The second kind checks the things this export REFUSES to do: it does not
-// touch a line the two sheets are still arguing about, it does not claim a
-// correction that never happened, and it does not fill in a blank character
-// from the other team's file. Every one of those guards a way of quietly
-// corrupting a document the client is about to treat as her own team's work,
-// which is a failure nobody would notice until an episode was dubbed wrong.
+// add columns her file never had (the "Changed" annotations were built and
+// then dropped on Sam's call), it does not fill in a blank character from the
+// other team's file, and it does not carry the subtitle sheet's trailing
+// period into the audio sheet when a resolution crossed sides. Every one of
+// those guards a way of quietly corrupting a document the client is about to
+// treat as her own team's work.
 
 import { describe, it, expect } from "vitest"
+import fs from "node:fs"
+import os from "node:os"
+import path from "node:path"
 
 import {
   buildAudioSheet,
@@ -23,13 +29,9 @@ import {
 } from "./character-sheets"
 import type { XlsxSheet } from "./xlsx-write"
 import type { CellData } from "@/hooks/useCells"
-import {
-  buildCueLinkIndex,
-  EMPTY_CUE_LINK_INDEX,
-  type CueLink,
-} from "@/lib/sync/cell-links-read"
-import { resolutionKey } from "@/lib/timeline/character-agreement"
+import type { CameraState } from "@/lib/sync/cells-read-types"
 import { parseXlsxToSheets, splitCastName } from "@/lib/parsers/spreadsheet"
+import { guessCharacterColumns, readCharacterRows } from "@/lib/import/character-sheet"
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -56,7 +58,7 @@ function cell(over: Partial<CellData>): CellData {
 const named = (
   id: string,
   castName: string,
-  cameraState?: "on" | "off" | "mixed",
+  cameraState?: CameraState,
   over: Partial<CellData> = {},
 ): CellData =>
   cell({
@@ -68,32 +70,11 @@ const named = (
     ...over,
   })
 
-const edge = (textCellId: string, cueCellId: string): CueLink => ({
-  kind: "text-audio",
-  fromFileId: "f-subs",
-  fromCellId: textCellId,
-  toFileId: "f-cues",
-  toCellId: cueCellId,
-  origin: "auto",
-  confidence: 1,
-})
-
 const args = (over: Partial<CharacterSheetsArgs> = {}): CharacterSheetsArgs => ({
   textCells: [],
   cueCells: [],
-  links: EMPTY_CUE_LINK_INDEX,
-  settings: undefined,
   ...over,
 })
-
-/** One subtitle row linked to one cue row — the shape every disagreement takes. */
-const onePair = (text: CellData, cue: CellData, over: Partial<CharacterSheetsArgs> = {}) =>
-  args({
-    textCells: [text],
-    cueCells: [cue],
-    links: buildCueLinkIndex([edge(text.id, cue.id)]),
-    ...over,
-  })
 
 // Her columns, by position, so a test reads as "the character cell" rather
 // than "row 0 column 5".
@@ -106,7 +87,6 @@ const SUB = {
   character: 5,
   vttClosest: 6,
   camera: 7,
-  changed: 8,
 } as const
 const AUDIO = {
   line: 0,
@@ -115,166 +95,173 @@ const AUDIO = {
   character: 3,
   translation: 4,
   camera: 5,
-  changed: 6,
 } as const
 
 const valueAt = (sheet: XlsxSheet, row: number, column: number) => sheet.rows[row][column].value
-const isHighlighted = (sheet: XlsxSheet, row: number, column: number) =>
-  sheet.rows[row][column].highlight === true
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
-describe("the sheet whose answer was overruled", () => {
-  // After a resolution BOTH cells hold the winner, so the fixtures below give
-  // both sides the same value — that is what the app looks like the moment
-  // after she clicks. The record is the only surviving trace of the argument.
-  const settledOnAudio = onePair(
-    named("s1", "JESUS", "on", { original: "Come and see." }),
-    named("c1", "JESUS", "on", { original: "Ven y ve." }),
-    {
-      resolutions: {
-        [resolutionKey("s1", "c1")]: { name: { chose: "audio", rejected: "MARY" }, at: 1000 },
-      },
-    },
-  )
+describe("the sheets go back in her columns and nothing else", () => {
+  // The first cut appended a "Changed" column (`was ANDREW`, `unresolved`) and
+  // highlighted every corrected cell. Sam, after reading the real output
+  // (2026-08-20): "I don't think it's necessary to note that something was or
+  // wasn't resolved or what it used to be." So the header row is HERS, exactly
+  // — a column her pipeline has never seen is a change she did not ask for.
 
-  it("shows the corrected name and names the value it replaced", () => {
-    const sheet = buildSubtitleSheet(settledOnAudio)
-    expect(valueAt(sheet, 0, SUB.character)).toBe("JESUS  (On)")
-    expect(valueAt(sheet, 0, SUB.changed)).toBe("was MARY")
+  it("adds no Changed column to either sheet", () => {
+    expect(buildSubtitleSheet(args()).headers).toEqual([
+      "ID",
+      "Source",
+      "endTime",
+      "startTime",
+      "timeStamp",
+      "Character Label",
+      "VTT_closest",
+      "Camera",
+    ])
+    expect(buildAudioSheet(args()).headers).toEqual([
+      "Line #",
+      "startTime",
+      "endTime",
+      "Character",
+      "Translation",
+      "Camera",
+    ])
   })
 
-  it("highlights the cell it changed, so the diff survives being printed", () => {
-    expect(isHighlighted(buildSubtitleSheet(settledOnAudio), 0, SUB.character)).toBe(true)
+  it("marks nothing — a corrected value simply sits where the wrong one was", () => {
+    // After a resolution both cells hold the winner; the sheet's only job is
+    // to carry that value out, unannotated.
+    const sheet = buildAudioSheet(args({ cueCells: [named("c1", "NICODEMUS", "on")] }))
+    expect(valueAt(sheet, 0, AUDIO.character)).toBe("NICODEMUS\u00a0   (ON)")
+    expect(sheet.rows[0]).toHaveLength(6)
+    expect(sheet.rows[0].every((c) => c.highlight !== true)).toBe(true)
   })
 
-  it("leaves the sheet that was believed completely unmarked", () => {
-    // The audio sheet says today what it said when she sent it. Marking it too
-    // would tell her team to review a row nobody touched.
-    const sheet = buildAudioSheet(settledOnAudio)
-    expect(valueAt(sheet, 0, AUDIO.changed)).toBe("")
-    expect(isHighlighted(sheet, 0, AUDIO.character)).toBe(false)
+  it("hands an unresolved line back with whatever each team wrote", () => {
+    // Resolving is the only operation that writes a value across the two
+    // sheets, so a link still in dispute keeps both original answers — the
+    // old safety rule, now enforced by structure rather than by a marker.
+    const sub = buildSubtitleSheet(args({ textCells: [named("s1", "JESUS.", "on")] }))
+    const audio = buildAudioSheet(args({ cueCells: [named("c1", "MARY", "on")] }))
+    expect(valueAt(sub, 0, SUB.character)).toBe("JESUS.  (On)")
+    expect(valueAt(audio, 0, AUDIO.character)).toBe("MARY\u00a0   (ON)")
   })
 
-  it("writes a camera correction in the words that sheet's own column uses", () => {
-    // `chose: "subtitle"` means the AUDIO sheet lost, so its row is the one
-    // that owes an explanation — and its columns shout, where the subtitle
-    // sheet's are title case.
-    const input = onePair(named("s1", "JESUS", "on"), named("c1", "JESUS", "on"), {
-      resolutions: {
-        [resolutionKey("s1", "c1")]: { camera: { chose: "subtitle", rejected: "off" }, at: 1000 },
-      },
-    })
-    const audio = buildAudioSheet(input)
-    expect(valueAt(audio, 0, AUDIO.camera)).toBe("ON")
-    expect(valueAt(audio, 0, AUDIO.changed)).toBe("was Off")
-    expect(isHighlighted(audio, 0, AUDIO.camera)).toBe(true)
-    expect(buildSubtitleSheet(input).rows[0][SUB.changed].value).toBe("")
-  })
-
-  it("highlights the name cell when the CAMERA changed, because the angle is written inside it", () => {
-    // Her audio sheet spells the character as "JESUS\u00a0   (ON)". Settling a
-    // camera dispute rewrites the suffix in that very cell, and an unmarked
-    // "(ON)" where her team wrote "(OFF)" is exactly the silent edit the
-    // highlight exists to prevent.
-    const audio = buildAudioSheet(
-      onePair(named("s1", "JESUS", "on"), named("c1", "JESUS", "on"), {
-        resolutions: {
-          [resolutionKey("s1", "c1")]: { camera: { chose: "subtitle", rejected: "off" }, at: 1000 },
-        },
-      }),
-    )
-    expect(valueAt(audio, 0, AUDIO.character)).toBe("JESUS\u00a0   (ON)")
-    expect(isHighlighted(audio, 0, AUDIO.character)).toBe(true)
-  })
-
-  it("says nothing at all about a line nobody ever argued about", () => {
-    const sheet = buildSubtitleSheet(onePair(named("s1", "JESUS", "on"), named("c1", "JESUS", "on")))
-    expect(valueAt(sheet, 0, SUB.changed)).toBe("")
-    expect(isHighlighted(sheet, 0, SUB.character)).toBe(false)
-  })
-
-  it("does not claim a correction when the value never actually moved", () => {
-    // A record whose rejected answer equals what the cell holds now is a record
-    // of nothing — the resolution was undone, or the 2026-08-18 re-click bug
-    // wrote the winner down as its own loser. "was JESUS" beside a cell reading
-    // JESUS is not a diff; it is a reason to distrust every other row.
-    const sheet = buildSubtitleSheet(
-      onePair(named("s1", "JESUS", "on"), named("c1", "JESUS", "on"), {
-        resolutions: {
-          [resolutionKey("s1", "c1")]: { name: { chose: "audio", rejected: "JESUS" }, at: 1000 },
-        },
-      }),
-    )
-    expect(valueAt(sheet, 0, SUB.changed)).toBe("")
-    expect(isHighlighted(sheet, 0, SUB.character)).toBe(false)
-  })
-
-  it("reads the decisions out of the project settings when the caller passes none", () => {
-    const sheet = buildSubtitleSheet(
-      onePair(named("s1", "JESUS", "on"), named("c1", "JESUS", "on"), {
-        settings: {
-          characterResolutions: {
-            [resolutionKey("s1", "c1")]: { name: { chose: "audio", rejected: "MARY" }, at: 1000 },
-          },
-        },
-      }),
-    )
-    expect(valueAt(sheet, 0, SUB.changed)).toBe("was MARY")
+  it("does not fill a blank character in from anywhere", () => {
+    // Her subtitle sheet leaves "Character Label" empty on most rows. Writing
+    // a name into it would be merging the other team's document into hers,
+    // not correcting hers.
+    const sheet = buildSubtitleSheet(args({ textCells: [cell({ id: "s1", startTime: 1, endTime: 2 })] }))
+    expect(valueAt(sheet, 0, SUB.character)).toBe("")
   })
 })
 
-describe("a disagreement nobody has settled yet", () => {
-  // THE SAFETY RULE. Guessing here would produce a file that looks authoritative
-  // and is wrong in places her team cannot find, which is worse than the errors
-  // she started with — those at least are their own and recognisable.
-  const open = onePair(
-    named("s1", "JESUS", "on", { original: "Come and see." }),
-    named("c1", "MARY", "on", { original: "Ven y ve." }),
-  )
+describe("her own Line #, given back", () => {
+  // Her audio sheet numbers lines 10 to 710 across 548 rows — production
+  // numbering with 86 gaps where lines were cut, none of it derivable. The
+  // importer stores each row's number on its cue; this writes it back.
+  const numbered = (id: string, line: string, startTime: number): CellData =>
+    cell({
+      id,
+      metadata: { cast_name: "JESUS", line_number: line },
+      startTime,
+      endTime: startTime + 1,
+    })
 
-  it("hands the subtitle row back with the name its own team wrote", () => {
-    const sheet = buildSubtitleSheet(open)
-    expect(valueAt(sheet, 0, SUB.character)).toBe("JESUS  (On)")
-    expect(valueAt(sheet, 0, SUB.changed)).toBe("unresolved")
-    expect(isHighlighted(sheet, 0, SUB.character)).toBe(false)
+  it("writes her numbers, gaps and all, instead of counting rows", () => {
+    const sheet = buildAudioSheet(
+      args({ cueCells: [numbered("c1", "10", 1), numbered("c2", "12", 2), numbered("c3", "47", 3)] }),
+    )
+    expect(sheet.rows.map((r) => r[AUDIO.line].value)).toEqual([10, 12, 47])
   })
 
-  it("hands the audio row back with the name its own team wrote", () => {
-    const sheet = buildAudioSheet(open)
-    expect(valueAt(sheet, 0, AUDIO.character)).toBe("MARY\u00a0   (ON)")
-    expect(valueAt(sheet, 0, AUDIO.changed)).toBe("unresolved")
-    expect(isHighlighted(sheet, 0, AUDIO.character)).toBe(false)
+  it("writes them as numbers, so her column still sorts like a number", () => {
+    const sheet = buildAudioSheet(args({ cueCells: [numbered("c1", "10", 1)] }))
+    expect(valueAt(sheet, 0, AUDIO.line)).toBe(10)
   })
 
-  it("reports the settled half of a half-decided line and still warns about the open half", () => {
-    // The two sheets now agree on the speaker and still disagree about the
-    // shot. Hiding the settled half would waste her afternoon's work; claiming
-    // the open half would break the rule above. The row says both.
-    const sheet = buildSubtitleSheet(
-      onePair(named("s1", "JESUS", "on"), named("c1", "JESUS", "off"), {
-        resolutions: {
-          [resolutionKey("s1", "c1")]: { name: { chose: "audio", rejected: "MARY" }, at: 1000 },
-        },
+  it("keeps a number that is not an integer as text rather than coercing it", () => {
+    // A "10a" would become NaN under Number(); as text it survives intact.
+    const sheet = buildAudioSheet(args({ cueCells: [numbered("c1", "10a", 1)] }))
+    expect(valueAt(sheet, 0, AUDIO.line)).toBe("10a")
+  })
+
+  it("leaves a line added in the app blank rather than inventing a number", () => {
+    // It has no number in her production. Inventing one is how a spreadsheet
+    // starts lying about which line is which.
+    const sheet = buildAudioSheet(
+      args({ cueCells: [numbered("c1", "10", 1), named("c2", "MARY", "on", { startTime: 2, endTime: 3 })] }),
+    )
+    expect(sheet.rows.map((r) => r[AUDIO.line].value)).toEqual([10, ""])
+  })
+
+  it("falls back to counting when the file predates the change entirely", () => {
+    // Every cue imported before 2026-08-20 carries no number at all. A column
+    // of 548 blanks would be strictly less useful than our own count, so the
+    // decision is made per FILE, not per row.
+    const sheet = buildAudioSheet(
+      args({
+        cueCells: [
+          named("c1", "JESUS", "on", { startTime: 1, endTime: 2 }),
+          named("c2", "MARY", "on", { startTime: 2, endTime: 3 }),
+        ],
       }),
     )
-    expect(valueAt(sheet, 0, SUB.changed)).toBe("was MARY; unresolved")
-    expect(isHighlighted(sheet, 0, SUB.character)).toBe(true)
-    // The disputed axis itself is untouched on both sides.
-    expect(valueAt(sheet, 0, SUB.camera)).toBe("On")
-    expect(isHighlighted(sheet, 0, SUB.camera)).toBe(false)
+    expect(sheet.rows.map((r) => r[AUDIO.line].value)).toEqual([1, 2])
+  })
+})
+
+describe("Group, her fourth camera label", () => {
+  // Both importers folded Group into `mixed` until 2026-08-20, so this column
+  // could only ever say three of her four words.
+  it("writes Group in the audio sheet's own casing", () => {
+    const sheet = buildAudioSheet(args({ cueCells: [named("c1", "CROWD", "group")] }))
+    expect(valueAt(sheet, 0, AUDIO.camera)).toBe("Group")
+    expect(valueAt(sheet, 0, AUDIO.character)).toBe("CROWD\u00a0   (Group)")
   })
 
-  it("does not fill a blank character in from the other sheet", () => {
-    // Her subtitle sheet leaves "Character Label" empty on most rows and the
-    // app is perfectly happy to resolve a name across the link on screen.
-    // Writing it into the file would be merging the other team's document into
-    // hers, not correcting hers.
-    const sheet = buildSubtitleSheet(
-      onePair(cell({ id: "s1", startTime: 1, endTime: 2 }), named("c1", "MARY", "on")),
+  it("writes it in the subtitle sheet too", () => {
+    const sheet = buildSubtitleSheet(args({ textCells: [named("s1", "CROWD.", "group")] }))
+    expect(valueAt(sheet, 0, SUB.camera)).toBe("Group")
+    expect(valueAt(sheet, 0, SUB.character)).toBe("CROWD.  (Group)")
+  })
+
+  it("round-trips through our own importer as Group, not mixed", () => {
+    const written = String(
+      valueAt(buildAudioSheet(args({ cueCells: [named("c1", "CROWD", "group")] })), 0, AUDIO.character),
     )
-    expect(valueAt(sheet, 0, SUB.character)).toBe("")
-    expect(valueAt(sheet, 0, SUB.changed)).toBe("")
+    expect(splitCastName(written)).toEqual({ voice: "CROWD", cameraState: "group" })
+  })
+})
+
+describe("the trailing period that must not cross sheets", () => {
+  // Her two sheets spell names differently: every subtitle name ends in a full
+  // stop (`NICODEMUS.`, 637 of 650 rows) and no audio name does (0 of 548).
+  // Resolving writes the winning string onto BOTH cells, so a dispute the
+  // subtitle side won leaves `NICODEMUS.` on the audio cue — which is exactly
+  // how Sam's first real export came out. (Sam, 2026-08-20: strip it.)
+
+  it("strips the period the subtitle side's win carried onto the cue", () => {
+    const sheet = buildAudioSheet(args({ cueCells: [named("c1", "NICODEMUS.", "on")] }))
+    expect(valueAt(sheet, 0, AUDIO.character)).toBe("NICODEMUS\u00a0   (ON)")
+  })
+
+  it("strips it from a name with no angle too", () => {
+    const sheet = buildAudioSheet(args({ cueCells: [named("c1", "NICODEMUS.")] }))
+    expect(valueAt(sheet, 0, AUDIO.character)).toBe("NICODEMUS")
+  })
+
+  it("leaves the subtitle sheet's own period alone — it is her convention", () => {
+    const sheet = buildSubtitleSheet(args({ textCells: [named("s1", "NICODEMUS.", "on")] }))
+    expect(valueAt(sheet, 0, SUB.character)).toBe("NICODEMUS.  (On)")
+  })
+
+  it("writes the stripped name in a form her audio pipeline reads back", () => {
+    const written = String(
+      valueAt(buildAudioSheet(args({ cueCells: [named("c1", "NICODEMUS.", "on")] })), 0, AUDIO.character),
+    )
+    expect(splitCastName(written)).toEqual({ voice: "NICODEMUS", cameraState: "on" })
   })
 })
 
@@ -347,15 +334,10 @@ describe("the order the rows come out in", () => {
 })
 
 describe("the workbook that actually leaves the building", () => {
-  const input = onePair(
-    named("s1", "JESUS", "on", { original: "Come and see." }),
-    named("c1", "JESUS", "on", { original: "Ven y ve." }),
-    {
-      resolutions: {
-        [resolutionKey("s1", "c1")]: { name: { chose: "audio", rejected: "MARY" }, at: 1000 },
-      },
-    },
-  )
+  const input = args({
+    textCells: [named("s1", "JESUS.", "on", { original: "Come and see." })],
+    cueCells: [named("c1", "JESUS", "on", { original: "Ven y ve." })],
+  })
 
   it("opens through our own xlsx reader with both of her sheets on it", async () => {
     // Round-tripped through the reader rather than asserted on the builders,
@@ -374,7 +356,6 @@ describe("the workbook that actually leaves the building", () => {
       "Character Label",
       "VTT_closest",
       "Camera",
-      "Changed",
     ])
     expect(sheets[1].rows[0]).toEqual([
       "Line #",
@@ -383,17 +364,15 @@ describe("the workbook that actually leaves the building", () => {
       "Character",
       "Translation",
       "Camera",
-      "Changed",
     ])
   })
 
-  it("carries the correction all the way into the file", async () => {
+  it("carries the values all the way into the file", async () => {
     const blob = await buildCharacterSheets(input)
     const sheets = await parseXlsxToSheets(await blob.arrayBuffer())
     // Row 1 is the header; row 2 is the only line in this fixture.
-    expect(sheets[0].rows[1][SUB.character]).toBe("JESUS  (On)")
-    expect(sheets[0].rows[1][SUB.changed]).toBe("was MARY")
-    expect(sheets[1].rows[1][AUDIO.changed]).toBe("")
+    expect(sheets[0].rows[1][SUB.character]).toBe("JESUS.  (On)")
+    expect(sheets[1].rows[1][AUDIO.character]).toBe("JESUS\u00a0   (ON)")
   })
 
   it("leaves out the frame-grid timecodes rather than guessing at them", async () => {
@@ -419,79 +398,118 @@ describe("the workbook that actually leaves the building", () => {
 
 // ── Measured against her actual workbooks (2026-08-19) ───────────────────
 //
-// Every one of these is a format an adversarial review caught the first cut
-// getting wrong, and the reason it caught them is that nothing here was
-// checked against the real files — the fixtures agreed with the code because
-// the same person wrote both. The numbers below are counted from
-// `~/Code/aquilla-app/the-chosen-media/101/`:
+// Counted from `~/Code/aquilla-app/the-chosen-media/101/`:
 //
 //   audio sheet   `LITTLE MARY MAGDALENE\u00a0   (ON)`   548 rows, NBSP + 3 spaces
 //                 camera column `ON` (329) but `Off` (112), `Mixed` (100)
 //   subtitle      `LITTLE MARY MAGDALENE.  (Mixed)`      637 of 650 rows, 2 spaces
 //                 camera column `On` (333), `Off` (141), `Mixed` (151)
-//
-// These are strings something downstream may well match on, so "close enough"
-// is not a standard this file gets to hold itself to.
 
 describe("the formats measured from her own files", () => {
   const line = (over: Partial<CellData>) =>
     cell({ id: "s1", startTime: 63.209, endTime: 63.667, ...over })
 
   it("writes the audio name with a non-breaking space before the angle", () => {
-    const sheet = buildAudioSheet({
-      textCells: [],
-      cueCells: [line({ id: "c1", metadata: { cast_name: "LITTLE MARY MAGDALENE" }, cameraState: "on" })],
-      links: EMPTY_CUE_LINK_INDEX,
-      settings: undefined,
-    })
+    const sheet = buildAudioSheet(
+      args({ cueCells: [line({ id: "c1", metadata: { cast_name: "LITTLE MARY MAGDALENE" }, cameraState: "on" })] }),
+    )
     expect(sheet.rows[0]![AUDIO.character]!.value).toBe("LITTLE MARY MAGDALENE\u00a0   (ON)")
   })
 
   it("writes the subtitle label with its angle too, two plain spaces", () => {
-    const sheet = buildSubtitleSheet({
-      textCells: [line({ metadata: { cast_name: "LITTLE MARY MAGDALENE." }, cameraState: "mixed" })],
-      cueCells: [],
-      links: EMPTY_CUE_LINK_INDEX,
-      settings: undefined,
-    })
+    const sheet = buildSubtitleSheet(
+      args({ textCells: [line({ metadata: { cast_name: "LITTLE MARY MAGDALENE." }, cameraState: "mixed" })] }),
+    )
     expect(sheet.rows[0]![SUB.character]!.value).toBe("LITTLE MARY MAGDALENE.  (Mixed)")
   })
 
   it("shouts ON but not OFF, which is her house style and not a typo", () => {
     const of = (state: "on" | "off" | "mixed") =>
-      buildAudioSheet({
-        textCells: [],
-        cueCells: [line({ id: "c1", metadata: { cast_name: "X" }, cameraState: state })],
-        links: EMPTY_CUE_LINK_INDEX,
-        settings: undefined,
-      }).rows[0]![AUDIO.camera]!.value
+      buildAudioSheet(
+        args({ cueCells: [line({ id: "c1", metadata: { cast_name: "X" }, cameraState: state })] }),
+      ).rows[0]![AUDIO.camera]!.value
     expect(of("on")).toBe("ON")
     expect(of("off")).toBe("Off")
     expect(of("mixed")).toBe("Mixed")
   })
 
   it("keeps her VTT_closest column rather than quietly dropping it", () => {
-    const sheet = buildSubtitleSheet({
-      textCells: [line({ metadata: { cast_name: "X" } })],
-      cueCells: [],
-      links: EMPTY_CUE_LINK_INDEX,
-      settings: undefined,
-    })
+    const sheet = buildSubtitleSheet(args({ textCells: [line({ metadata: { cast_name: "X" } })] }))
     expect(sheet.headers).toContain("VTT_closest")
     expect(sheet.rows[0]![SUB.vttClosest]!.value).toBe("00:01:03.209 --> 00:01:03.667")
   })
 
   it("writes a name our own importer can read the angle back out of", () => {
     // The two files are far apart and nothing else would notice them drifting.
-    const written = buildAudioSheet({
-      textCells: [],
-      cueCells: [line({ id: "c1", metadata: { cast_name: "MARY MAGDALENE'S FATHER" }, cameraState: "on" })],
-      links: EMPTY_CUE_LINK_INDEX,
-      settings: undefined,
-    }).rows[0]![AUDIO.character]!.value as string
+    const written = buildAudioSheet(
+      args({ cueCells: [line({ id: "c1", metadata: { cast_name: "MARY MAGDALENE'S FATHER" }, cameraState: "on" })] }),
+    ).rows[0]![AUDIO.character]!.value as string
     const back = splitCastName(written)
     expect(back.voice).toBe("MARY MAGDALENE'S FATHER")
     expect(back.cameraState).toBe("on")
   })
 })
 
+// ── Round-tripped through her actual workbook (2026-08-20) ──────────────────
+//
+// Every fixture above was written by the same hand as the code, so the two
+// agreeing proves only that they agree. This one starts from the file the
+// client actually sent, walks it through the importer and back out through the
+// exporter, and compares the two columns that were losing information a day
+// ago against hers, cell for cell.
+
+describe("against The Chosen episode 101", () => {
+  const XLSX = path.join(
+    os.homedir(), "Code", "aquilla-app", "the-chosen-media", "101",
+    "101_audio_DL_camera_CODEX.xlsx",
+  )
+  const haveSample = fs.existsSync(XLSX)
+
+  /** Her rows, read the way the importer reads them, then turned into the cue
+   *  cells the projection would have left behind. */
+  async function cuesFromHerWorkbook(): Promise<{ hers: string[][]; cells: CellData[] }> {
+    const buf = fs.readFileSync(XLSX)
+    const sheets = await parseXlsxToSheets(
+      buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer,
+    )
+    const cols = guessCharacterColumns(sheets[0].rows[0])!
+    const rows = readCharacterRows(sheets[0].rows, cols)
+    const cells = rows.map((r, i) =>
+      cell({
+        id: `c${i}`,
+        original: r.text,
+        startTime: i,
+        endTime: i + 0.5,
+        metadata: {
+          cast_name: r.castName,
+          ...(r.lineNumber ? { line_number: r.lineNumber } : {}),
+        },
+        ...(r.cameraState ? { cameraState: r.cameraState } : {}),
+      }),
+    )
+    return { hers: sheets[0].rows, cells }
+  }
+
+  it.skipIf(!haveSample)("gives her Line # column back exactly as she sent it", async () => {
+    const { hers, cells } = await cuesFromHerWorkbook()
+    const sheet = buildAudioSheet(args({ cueCells: cells }))
+    const mine = sheet.rows.map((r) => String(r[AUDIO.line].value))
+    // Her column, minus the header. Numbers arrive from the reader as strings.
+    const theirs = hers.slice(1).map((r) => String(Number(r[0])))
+    expect(mine).toEqual(theirs)
+    // And spot-check the shape everyone keeps getting wrong: it starts at 10,
+    // not 1, and it skips.
+    expect(mine[0]).toBe("10")
+    expect(mine[mine.length - 1]).toBe("710")
+  })
+
+  it.skipIf(!haveSample)("gives her Camera column back, all four words", async () => {
+    const { hers, cells } = await cuesFromHerWorkbook()
+    const sheet = buildAudioSheet(args({ cueCells: cells }))
+    const mine = sheet.rows.map((r) => String(r[AUDIO.camera].value))
+    const theirs = hers.slice(1).map((r) => (r[5] ?? "").trim())
+    expect(mine).toEqual(theirs)
+    // Including the seven Group rows that used to come back as Mixed.
+    expect(mine.filter((c) => c === "Group")).toHaveLength(7)
+  })
+})

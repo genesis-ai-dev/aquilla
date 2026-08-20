@@ -24,6 +24,14 @@ const nameRow = {
   name: { kind: "character" as const, subtitle: "NICODEMUS.", audio: "QUINTUS" },
 }
 
+/** The two sheets agree who speaks and differ about the shot. */
+const cameraRow = {
+  cueCellId: "q2",
+  textCellId: "s2",
+  heard: "Go!",
+  camera: { subtitle: "off" as const, audio: "on" as const },
+}
+
 function draw(a: CharacterAgreement, over: Record<string, unknown> = {}) {
   const onResolve = vi.fn()
   const onNavigate = vi.fn()
@@ -36,6 +44,8 @@ function draw(a: CharacterAgreement, over: Record<string, unknown> = {}) {
       onNavigate={onNavigate}
       onResolve={onResolve}
       onResetAll={onResetAll}
+      strictCamera={{ mixed: false, group: false }}
+      onStrictCameraChange={() => {}}
       {...over}
     />,
   )
@@ -307,6 +317,69 @@ describe("the card carries what the sheets agree on", () => {
   it("shows nothing when there is nothing agreed to show", () => {
     draw(agreement({ open: [nameRow] }))
     expect(screen.queryByTestId("character-check-context")).not.toBeInTheDocument()
+  })
+})
+
+// ── Asking to see the vague camera answers (Sam, 2026-08-20) ────────────────
+//
+// `mixed` and `group` contradict nothing by default, which is what keeps six
+// real findings on episode 101 from being buried under 189. Whoever knows the
+// sheets can decide otherwise — so the switches have to be FINDABLE, including
+// on a drawer that currently shows no camera work at all, since that is
+// exactly the person who suspects something is being hidden.
+
+describe("also flagging the vague camera answers", () => {
+  it("says what ticking does, rather than what the values mean", () => {
+    // Sam read the first wording ("Count as an answer", over two sentences of
+    // justification) twice without learning what the checkbox would do.
+    draw(agreement({ open: [cameraRow] }))
+    expect(screen.getByText("Also flag")).toBeInTheDocument()
+    expect(screen.getByText("Mixed against on or off")).toBeInTheDocument()
+    expect(screen.getByText("Group against on or off")).toBeInTheDocument()
+  })
+
+  it("offers both switches, off", () => {
+    draw(agreement({ open: [cameraRow] }))
+    expect(screen.getByTestId("character-check-strict-mixed")).not.toBeChecked()
+    expect(screen.getByTestId("character-check-strict-group")).not.toBeChecked()
+  })
+
+  it("is reachable even when nothing disagrees about the camera", () => {
+    draw(agreement({ open: [nameRow] }))
+    expect(screen.getByTestId("character-check-strictness")).toBeInTheDocument()
+    expect(screen.getByTestId("character-check-cameras-clear")).toBeInTheDocument()
+  })
+
+  it("is reachable on a drawer with no open work at all", () => {
+    draw(agreement())
+    expect(screen.getByTestId("character-check-strict-group")).toBeInTheDocument()
+  })
+
+  it("reports a switch flipping without touching the other one", () => {
+    const onStrictCameraChange = vi.fn()
+    draw(agreement({ open: [cameraRow] }), { onStrictCameraChange })
+    fireEvent.click(screen.getByTestId("character-check-strict-group"))
+    expect(onStrictCameraChange).toHaveBeenCalledWith({ mixed: false, group: true })
+  })
+
+  it("shows a switch already on as on", () => {
+    draw(agreement({ open: [cameraRow] }), { strictCamera: { mixed: true, group: false } })
+    expect(screen.getByTestId("character-check-strict-mixed")).toBeChecked()
+    expect(screen.getByTestId("character-check-strict-group")).not.toBeChecked()
+  })
+
+  it("goes inert with the rest of the drawer while a write is in flight", () => {
+    // Same reason every other control freezes: the list is frozen upstream, so
+    // changing what counts mid-write would reshuffle rows under the cursor.
+    const onStrictCameraChange = vi.fn()
+    draw(agreement({ open: [cameraRow] }), {
+      onStrictCameraChange,
+      pending: { done: 3, total: 150, phase: "writing" },
+    })
+    const box = screen.getByTestId("character-check-strict-mixed")
+    expect(box).toHaveAttribute("data-disabled")
+    fireEvent.click(box)
+    expect(onStrictCameraChange).not.toHaveBeenCalled()
   })
 })
 

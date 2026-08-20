@@ -42,6 +42,8 @@ import type {
   ResolvedRow,
 } from "@/lib/timeline/character-agreement"
 import type { CameraState } from "@/lib/sync/cells-read-types"
+import { cameraLabel } from "@/lib/timeline/cue-character"
+import { Checkbox } from "@/components/ui/checkbox"
 
 /** Which sheet an answer came from. */
 export type Side = "subtitle" | "audio"
@@ -72,6 +74,13 @@ interface Props {
    *  every disagreement returns to the open list. */
   onResetAll(): void
   /**
+   * Whether `mixed` and `group` count as real answers when comparing camera
+   * values. Both off by default — see `isSpecific` in `character-agreement.ts`
+   * for why, and for the 189-against-6 measurement behind it.
+   */
+  strictCamera: { mixed: boolean; group: boolean }
+  onStrictCameraChange(next: { mixed: boolean; group: boolean }): void
+  /**
    * A character write is in flight. Set ⇒ the drawer is INERT.
    *
    * Not decoration: a bulk resolve queues ~150 events one at a time, and while
@@ -82,8 +91,13 @@ interface Props {
   pending?: { done: number; total: number; phase: "writing" | "syncing" } | null
 }
 
-const cameraWord = (s: CameraState): string =>
-  s === "on" ? "on camera" : s === "off" ? "off camera" : "mixed"
+/**
+ * The shared one, not a private copy. This file carried its own identical
+ * ternary until 2026-08-20 — which is exactly the sort of duplicate that ends
+ * up an arm behind, as it would have when `group` became a fourth state.
+ * Non-null because every value reaching these buttons is a real state.
+ */
+const cameraWord = (s: CameraState): string => cameraLabel(s) ?? String(s)
 
 /**
  * One decision: the two candidate answers, subtitle LEFT, audio RIGHT, always —
@@ -359,6 +373,8 @@ export function CharacterCheckDrawer({
   onNavigate,
   onResolve,
   onResetAll,
+  strictCamera,
+  onStrictCameraChange,
   pending,
 }: Props) {
   const [showResolved, setShowResolved] = useState(false)
@@ -468,11 +484,67 @@ export function CharacterCheckDrawer({
               </Section>
             )}
 
-            {cameraRows.length > 0 && (
+            {/* ALWAYS RENDERED, even with nothing in it, because the two
+                switches inside are how somebody asks to see MORE — and a
+                control that only appears once there is already work to do
+                cannot be found by the person who suspects there is work being
+                hidden. The zero state says so in a line. */}
+            {(
               <Section
                 title={`Camera · ${cameraRows.length}`}
                 hint="Same person; the sheets disagree about whether the camera is on them."
               >
+                {/* ASKING TO SEE MORE. `mixed` and `group` both mean "several,
+                    or not one answer", so neither contradicts anything by
+                    default — the rule that keeps six real findings on episode
+                    101 from being buried under a hundred and eighty-nine
+                    coarse-against-precise ones. Whoever knows the sheets can
+                    decide otherwise here.
+
+                    Worded as what ticking DOES rather than as what the values
+                    mean. The first cut headed this "Count as an answer" over
+                    two sentences of justification, which Sam read twice
+                    without learning what the checkbox would do
+                    (2026-08-20). */}
+                <div
+                  data-testid="character-check-strictness"
+                  className="flex flex-col gap-1 rounded-md border border-border bg-muted/30 p-2"
+                >
+                  <p className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
+                    Also flag
+                  </p>
+                  {(
+                    [
+                      ["mixed", "Mixed against on or off"],
+                      ["group", "Group against on or off"],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <label
+                      key={key}
+                      className="flex items-center gap-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <Checkbox
+                        data-testid={`character-check-strict-${key}`}
+                        checked={strictCamera[key]}
+                        disabled={Boolean(pending)}
+                        onCheckedChange={(c) =>
+                          onStrictCameraChange({ ...strictCamera, [key]: c === true })
+                        }
+                      />
+                      <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+
+                {cameraRows.length === 0 && (
+                  <p
+                    data-testid="character-check-cameras-clear"
+                    className="text-[11px] text-muted-foreground"
+                  >
+                    Nothing here disagrees about the camera.
+                  </p>
+                )}
+
                 {/* Bulk stays ONE ROW — short labels, the sticky header
                     carries the meaning. (Sam, 2026-08-18: the long labels
                     pushed the drawer off the right edge of the screen.) */}

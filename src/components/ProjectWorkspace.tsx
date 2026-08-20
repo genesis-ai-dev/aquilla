@@ -2157,6 +2157,21 @@ export function ProjectWorkspace() {
    * import, so it shrinks as corrections are made instead of going stale.
    */
   /** The list as it looked when the current write began — see below. */
+  /**
+   * Whether the two vague camera answers count as answers (AQU-646,
+   * 2026-08-20). Both off: `mixed` and `group` contradict nothing, which is
+   * what keeps episode 101's six real camera findings from being buried under
+   * a hundred and eighty-nine coarse-against-precise ones.
+   *
+   * Sam wanted the judgement offered rather than fixed — it belongs to whoever
+   * knows the sheets. Plain component state, not persisted: it is a way of
+   * LOOKING at the list, not a project setting, and a stale one silently
+   * changing what a later session sees would be worse than re-ticking it.
+   */
+  const [strictCamera, setStrictCamera] = useState<{ mixed: boolean; group: boolean }>({
+    mixed: false,
+    group: false,
+  })
   const frozenAgreement = useRef<CharacterAgreement | null>(null)
   const characterAgreement = useMemo(
     () =>
@@ -2174,6 +2189,7 @@ export function ProjectWorkspace() {
             textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews()),
             links: cueLinks,
             resolutions: tts.settings?.characterResolutions,
+            strictCamera,
           }),
     [
       audioCues,
@@ -2184,6 +2200,7 @@ export function ProjectWorkspace() {
       cueLinks,
       tts.settings?.characterResolutions,
       characterWrite,
+      strictCamera,
     ],
   )
   const bothCharacterSheets = audioCharacterCount > 0 && characterCount > 0
@@ -2436,6 +2453,9 @@ export function ProjectWorkspace() {
             cellId: a.cellId,
             castName: a.castName,
             ...(a.cameraState !== undefined ? { cameraState: a.cameraState } : {}),
+            // Her own line number, when her sheet had the column — stored so a
+            // corrected sheet goes back in her numbering (AQU-646).
+            ...(a.lineNumber !== undefined ? { lineNumber: a.lineNumber } : {}),
             author: currentUsername,
           })
           reportCharacterWrite(++done, plan.assignments.length)
@@ -2536,6 +2556,9 @@ export function ProjectWorkspace() {
             cellId: a.cellId,
             castName: a.castName,
             ...(a.cameraState !== undefined ? { cameraState: a.cameraState } : {}),
+            // Her own line number, when her sheet had the column — stored so a
+            // corrected sheet goes back in her numbering (AQU-646).
+            ...(a.lineNumber !== undefined ? { lineNumber: a.lineNumber } : {}),
             author: currentUsername,
           })
           reportCharacterWrite(++done, plan.assignments.length)
@@ -8091,6 +8114,8 @@ export function ProjectWorkspace() {
                     // maintainer can change this" title would be a lie — a
                     // maintainer cannot change it here either.
                     hideTimingMode={isSubtitleFile}
+                    // …and what the text column under the timeline is called.
+                    isSubtitleImport={isSubtitleFile}
                     onOpenRecording={handleOpenRecording}
                     project={editorProject ?? project ?? undefined}
                     onSelectCell={setTimelineSelectedCellId}
@@ -8353,6 +8378,8 @@ export function ProjectWorkspace() {
                 }}
                 onResolve={(choices) => void handleResolveCharacter(choices)}
                 onResetAll={() => void handleResetResolutions()}
+                strictCamera={strictCamera}
+                onStrictCameraChange={setStrictCamera}
                 pending={characterWrite}
               />
             )}
@@ -8681,8 +8708,14 @@ export function ProjectWorkspace() {
           // carries its takes directly and would otherwise be unexportable.
           audioCells={audioCueCells ?? audioMergedCells}
           reportFiles={reportFiles}
-          cueLinks={cueLinks}
           characterResolutions={tts.settings?.characterResolutions}
+          // Whether there is a SECOND file to export — the heard lines as their
+          // own subtitle file. Its absence is what stops the dialog offering a
+          // choice that would silently re-export the subtitles: `audioCells`
+          // falls back to this file's own rows when no sibling exists.
+          audioSiblingName={audioCueSibling?.name ?? null}
+          // The dialog remembers its last selection per project and per user.
+          currentUsername={currentUsername}
           // …and name each one the way every other surface does, so the zip
           // agrees with the chip strip and the recorder whichever character
           // sheet was imported.

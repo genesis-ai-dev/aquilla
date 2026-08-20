@@ -1,5 +1,5 @@
 // Anna's two character sheets, back in her hands with our corrections in them.
-// (AQU-646, 2026-08-19)
+// (AQU-646, 2026-08-19; annotations dropped 2026-08-20)
 //
 // THE LOOP THIS CLOSES. The client contact owns two spreadsheets per episode: a
 // subtitle character sheet and an audio character sheet, made by two different
@@ -13,44 +13,40 @@
 // against everything else in the round: "a big one".
 //
 // So this hands the sheets back: her columns, in her order, with the character
-// and camera values as they now stand, and a visible record of what we changed.
+// and camera values as they now stand. NOTHING ELSE. The first cut also marked
+// every corrected row — a highlight on the changed cell, a "Changed" column
+// reading `was ANDREW`, `unresolved` on links still in dispute — and Sam
+// dropped all of it after seeing the real output (2026-08-20): "I don't think
+// it's necessary to note that something was or wasn't resolved or what it used
+// to be." So the workbook that leaves here has exactly her column set, with
+// the corrected values simply sitting where the wrong ones were.
 //
-// THE TRUST MECHANISM IS THE POINT, not the file format. A corrected
-// spreadsheet that looks exactly like the one she sent us is a spreadsheet
-// nobody can check, and the reasonable response to receiving one is to ignore
-// it — her team would have to diff two files by eye to find out what we
-// claim to have fixed. So every row we changed says so twice: the changed cell
-// is highlighted, and a "Changed" column at the end reads `was ANDREW`, naming
-// the value that used to be there. Her team reviews a list of diffs instead of
-// trusting a file blind, and the sheet stays useful even printed.
+// A LINK STILL IN DISPUTE goes back untouched — not because a rule here says
+// so any more, but structurally: resolving is the only operation that ever
+// writes a value across the two sheets, so an unresolved link's two rows still
+// hold what each team wrote. The old safety rule survived the removal of the
+// feature that used to advertise it.
 //
-// THE SAFETY RULE, and it is the one thing in here that must not be traded
-// away for tidiness: a link whose disagreement is STILL OPEN goes back
-// completely untouched, with "unresolved" in the Changed column. Not our best
-// guess, not the value the majority of the episode uses, not the audio sheet
-// because it is usually righter. Nothing. A half-corrected sheet that silently
-// guessed at the rest would be strictly worse than the errors she started
-// with, because the errors she started with are at least the errors her own
-// team made and can recognise. Guesses wearing our name are errors nobody can
-// account for. When in doubt this export says "I don't know" out loud.
+// WHAT REGENERATING USED TO LOSE, and no longer does (2026-08-20). Both of
+// these were flagged as unfixable-by-regeneration on 2026-08-19; both turned
+// out to be fixable by STORING MORE AT IMPORT, which is a much smaller change
+// than rewriting her original workbook in place:
 //
-// WHAT REGENERATING CANNOT GIVE BACK, and the reason this file may not be the
-// final shape of the feature (flagged to Sam, 2026-08-19):
+//   - `Line #` is HER PRODUCTION NUMBERING — episode 101 runs 10 to 710 across
+//     548 rows, with 86 gaps where lines were cut. It is not derivable from
+//     anything, and a 1..n counter is a different number against every row.
+//     The importer now stores each row's own number on its cue
+//     (`metadata.line_number`) and this file writes it back. A file imported
+//     before that change carries none, so it falls back to the counter rather
+//     than exporting an empty column.
+//   - `Group` is her fourth camera state (25 rows in the subtitle sheet, 7 in
+//     the audio one). Both importers folded it into `mixed`, so it could not
+//     come back out. It is a real `CameraState` now, kept separate end to end.
+//     Sam: "If those are separate camera labels, then they need to remain
+//     separate camera labels throughout the project."
 //
-//   - `Line #` on the audio sheet is HER PRODUCTION NUMBERING, and episode
-//     101's starts at 10. We never stored it — the importer reads character,
-//     camera and timing and nothing else — so what goes back is our own 1..n
-//     counter, which is a different number against every line in the file. If
-//     anything in her process refers to a line by that number, this column is
-//     actively wrong rather than merely absent.
-//   - `Group` is a fourth camera state her sheets use (25 rows in the subtitle
-//     sheet, 7 in the audio one). Our `CameraState` has three; `splitCastName`
-//     folds Group into `mixed` on the way in, so it cannot come back out.
-//
-// Both are consequences of REGENERATING the sheet from what we hold rather
-// than editing the file she sent. The honest fix for both is to take her
-// original workbook as input and rewrite only the cells we have an opinion
-// about — which is a different build, and Sam's call.
+// Neither is retroactive: 101 has to be re-imported for its numbers and Group
+// values to exist at all.
 //
 // TWO COLUMNS ARE DELIBERATELY MISSING. Her audio sheet carries `TC In (orig)`
 // and `TC Out (orig)`, frame-grid timecodes like `00:01:03:05`. We cannot
@@ -67,20 +63,13 @@
 // happy to resolve one across the links on screen. Filling it would not be
 // correcting her file, it would be merging the other team's file into it — new
 // content, from a source she did not ask us to trust, in a document she is
-// about to treat as her own team's work. Same instinct as the safety rule.
+// about to treat as her own team's work.
 //
 // PURE. Two builders and an assembler; no fetching, no React, no dates. The
 // orchestrator reads the cells and calls these.
 
 import type { CellData } from "@/hooks/useCells"
-import type { CharacterResolution, ProjectTtsSettings } from "@/lib/parsers/types"
-import type { CueLinkIndex } from "@/lib/sync/cell-links-read"
 import type { CameraState } from "@/lib/sync/cells-read-types"
-import {
-  compareCharacterSources,
-  resolutionKey,
-  type CharacterDisagreement,
-} from "@/lib/timeline/character-agreement"
 import { formatVttTime } from "@/lib/video/vtt-generator"
 import { buildXlsx, type XlsxCell, type XlsxSheet } from "./xlsx-write"
 
@@ -89,15 +78,6 @@ export interface CharacterSheetsArgs {
   textCells: CellData[]
   /** The audio-cue sibling's cells. */
   cueCells: CellData[]
-  links: CueLinkIndex
-  settings: ProjectTtsSettings | undefined
-  /**
-   * The decisions, when the caller already has them to hand. Otherwise they are
-   * read out of `settings` — which is the only reason `settings` is here at
-   * all, and why an explicit empty record is honoured rather than falling
-   * through to the settings blob.
-   */
-  resolutions?: Record<string, CharacterResolution>
 }
 
 /**
@@ -125,7 +105,6 @@ const SUBTITLE_HEADERS = [
   "Character Label",
   "VTT_closest",
   "Camera",
-  "Changed",
 ]
 
 /** Hers again, minus the two frame-grid timecodes — see the module header. */
@@ -136,7 +115,6 @@ const AUDIO_HEADERS = [
   "Character",
   "Translation",
   "Camera",
-  "Changed",
 ]
 
 /**
@@ -163,6 +141,24 @@ const SUBTITLE_SUFFIX_GAP = "  "
 const castNameOf = (cell: CellData): string =>
   cell.metadata && typeof cell.metadata.cast_name === "string" ? cell.metadata.cast_name : ""
 
+/** Her own `Line #` for this row, stored at import. Empty when this cue never
+ *  came from her sheet — a line added in the app, or a file imported before
+ *  2026-08-20, when nothing stored it. */
+const lineNumberOf = (cell: CellData): string =>
+  cell.metadata && typeof cell.metadata.line_number === "string" ? cell.metadata.line_number : ""
+
+/**
+ * The `Line #` cell: her number where we have one.
+ *
+ * Numeric-looking values go in as NUMBERS so the column sorts and filters in
+ * Excel the way her original does; anything else (a `10a`) goes in as text
+ * rather than being coerced to NaN.
+ */
+function lineNumberCell(stored: string): XlsxCell {
+  if (!stored) return { value: "" }
+  return /^-?\d+$/.test(stored) ? { value: Number(stored) } : { value: stored }
+}
+
 /** A time she can read, or nothing at all. An untimed line gets empty cells
  *  rather than `00:00:00.000`, which would read as "this line is at the top of
  *  the episode" instead of "we do not know when this line is". */
@@ -180,7 +176,11 @@ function rangeCell(start: number | undefined, end: number | undefined): string {
 /** Her subtitle sheet's vocabulary: `On`, `Off`, `Mixed`, or an empty cell for
  *  a line nobody has decided about. */
 function subtitleCamera(state: CameraState | undefined): string {
-  return state === "on" ? "On" : state === "off" ? "Off" : state === "mixed" ? "Mixed" : ""
+  if (state === "on") return "On"
+  if (state === "off") return "Off"
+  if (state === "mixed") return "Mixed"
+  if (state === "group") return "Group"
+  return ""
 }
 
 /**
@@ -190,23 +190,46 @@ function subtitleCamera(state: CameraState | undefined): string {
  * so it is her house style and not a typo in one cell. A first cut derived this
  * by uppercasing the subtitle spelling, which turned `Off` into `OFF` in every
  * row of the file she gets back.
+ *
+ * `Group` reaches here for the first time on 2026-08-20; until then both
+ * importers folded it into `mixed` and this column could only ever say three
+ * of her four words.
  */
 function audioCamera(state: CameraState | undefined): string {
-  return state === "on" ? "ON" : state === "off" ? "Off" : state === "mixed" ? "Mixed" : ""
+  if (state === "on") return "ON"
+  if (state === "off") return "Off"
+  if (state === "mixed") return "Mixed"
+  if (state === "group") return "Group"
+  return ""
 }
+
+/**
+ * A name the way the AUDIO sheet spells it: no trailing full stop.
+ *
+ * Her two sheets have different naming conventions — every subtitle name ends
+ * in a period (`NICODEMUS.`, 637 of 650 rows) and no audio name does (0 of
+ * 548). Resolving a disagreement writes the winning string onto BOTH cells, so
+ * a dispute the subtitle side won leaves `NICODEMUS.` sitting on the audio
+ * cue, and rendering it verbatim puts a subtitle-style name in her audio
+ * column — which is how Sam's first real export came out, and why this strips
+ * it (2026-08-20). Safe on every row, not just resolved ones, because a
+ * trailing period simply is not part of the audio sheet's vocabulary.
+ */
+const audioName = (name: string): string => name.replace(/[.\s]+$/, "")
 
 /** `LITTLE MARY MAGDALENE\u00a0   (ON)`. A name with no angle keeps no brackets
  *  — an empty `()` is not something `splitCastName` will match, and
  *  `(UNKNOWN)` would be us inventing an answer. */
 function audioCharacter(name: string, state: CameraState | undefined): string {
-  if (!name) return ""
+  const clean = audioName(name)
+  if (!clean) return ""
   const angle = audioCamera(state)
-  return angle ? `${name}${AUDIO_SUFFIX_GAP}(${angle})` : name
+  return angle ? `${clean}${AUDIO_SUFFIX_GAP}(${angle})` : clean
 }
 
 /** `LITTLE MARY MAGDALENE.  (On)` — the subtitle sheet carries the angle in the
  *  Character Label too, which a first cut dropped, writing the bare name into a
- *  column that had never held one. */
+ *  column that had never held one. The trailing period is HERS and stays. */
 function subtitleCharacterLabel(name: string, state: CameraState | undefined): string {
   if (!name) return ""
   const angle = subtitleCamera(state)
@@ -229,141 +252,6 @@ const inTimeOrder = (cells: readonly CellData[]): CellData[] =>
       (a.startTime ?? Number.POSITIVE_INFINITY) - (b.startTime ?? Number.POSITIVE_INFINITY),
   )
 
-// ─── What happened to this row ───────────────────────────────────────────────
-
-/** Which of the two sheets a row belongs to. The resolution record names the
- *  side that WON; a row is the rejected side exactly when it is the other one. */
-type Side = "subtitle" | "audio"
-
-interface RowMarks {
-  /** The character value on this row was overruled and now holds the winner. */
-  name: boolean
-  /** The camera value was. */
-  camera: boolean
-  /** What the Changed column says. Empty for a row nobody argued about. */
-  changed: string
-}
-
-const QUIET: RowMarks = { name: false, camera: false, changed: "" }
-
-interface MarksArgs {
-  side: Side
-  cell: CellData
-  /** The cells on the other sheet this one is linked to. */
-  linkedIds: readonly string[]
-  /** Every link still in dispute, by resolution key. */
-  open: ReadonlyMap<string, CharacterDisagreement>
-  resolutions: Record<string, CharacterResolution> | undefined
-  /** The camera vocabulary of the sheet being written, so the note reads in the
-   *  same words as the column it is about. */
-  formatCamera: (state: CameraState | undefined) => string
-}
-
-/**
- * Decide, per axis, whether this row was corrected — and say so in words.
- *
- * WHICH SHEET WAS THE REJECTED SIDE. The record keeps `chose` (the sheet that
- * was believed) and `rejected` (what the other one said), and nothing else: the
- * losing SIDE is not stored because it is always the one `chose` is not. That
- * is enough, because resolving writes the winning value to BOTH cells — so the
- * sheet that changed underneath Anna's team is exactly the sheet `chose` does
- * not name, and its row is the one that owes them an explanation. The winning
- * sheet's row is unremarkable and goes back with an empty Changed cell; it says
- * today what it said when she sent it.
- *
- * PER AXIS, not per row. One line can disagree about the speaker AND the shot,
- * and the two can be settled weeks apart. A row whose name is decided and whose
- * camera is still argued about must be able to say both things at once —
- * hiding the settled half would waste the review, and claiming the open half
- * would break the safety rule.
- *
- * A record whose rejected value EQUALS what the cell holds now says nothing and
- * is skipped, mirroring the self-healing in `character-agreement.ts`. Such
- * records exist: the 2026-08-18 re-click bug wrote them, and undoing a
- * resolution leaves one behind too. Rendering it would put `was ANDREW` beside
- * a cell reading ANDREW, which is not a diff — it is a reason to distrust every
- * other row in the file.
- */
-function marksFor({ side, cell, linkedIds, open, resolutions, formatCamera }: MarksArgs): RowMarks {
-  if (linkedIds.length === 0) return QUIET
-
-  const currentName = castNameOf(cell)
-  const nameNotes: string[] = []
-  const cameraNotes: string[] = []
-  let nameChanged = false
-  let cameraChanged = false
-  let unresolved = false
-
-  for (const otherId of linkedIds) {
-    const key =
-      side === "subtitle" ? resolutionKey(cell.id, otherId) : resolutionKey(otherId, cell.id)
-    const dispute = open.get(key)
-    const record = resolutions?.[key]
-
-    // An OPEN axis wins over any record on that axis, always. A record can
-    // survive a hand edit that reopened the argument, and marking the row
-    // corrected while the two sheets currently contradict each other would be
-    // the one lie this column exists to prevent.
-    if (dispute?.name) {
-      unresolved = true
-    } else if (
-      record?.name &&
-      record.name.chose !== side &&
-      record.name.rejected !== currentName
-    ) {
-      nameChanged = true
-      nameNotes.push(`was ${record.name.rejected}`)
-    }
-
-    if (dispute?.camera) {
-      unresolved = true
-    } else if (
-      record?.camera &&
-      record.camera.chose !== side &&
-      record.camera.rejected !== cell.cameraState
-    ) {
-      cameraChanged = true
-      cameraNotes.push(`was ${formatCamera(record.camera.rejected)}`)
-    }
-  }
-
-  // Notes in column order — the name column comes before the camera column on
-  // both sheets — so a row with two of them reads left to right against the two
-  // highlighted cells. Deduplicated because a row serving several cues can
-  // collect the same note once per cue.
-  const notes = [...new Set([...nameNotes, ...cameraNotes])]
-  if (unresolved) notes.push("unresolved")
-  return { name: nameChanged, camera: cameraChanged, changed: notes.join("; ") }
-}
-
-/** The caller's record if there is one, else the project's. See
- *  `CharacterSheetsArgs.resolutions`. */
-const resolutionsOf = (
-  args: CharacterSheetsArgs,
-): Record<string, CharacterResolution> | undefined =>
-  args.resolutions ?? args.settings?.characterResolutions
-
-/**
- * Every link still in dispute, keyed the way the records are.
- *
- * Asked of `compareCharacterSources` rather than worked out here, because a
- * second implementation of "do these two sheets disagree" would drift from the
- * one on screen — and then the export would mark a row corrected that the
- * drawer is still asking her about. The comparison is the subtle part (trailing
- * full stops, non-breaking spaces, `mixed` contradicting nothing); it lives in
- * one place.
- */
-function openByLink(args: CharacterSheetsArgs): Map<string, CharacterDisagreement> {
-  const resolutions = resolutionsOf(args)
-  const agreement = compareCharacterSources({
-    cues: args.cueCells,
-    textCells: args.textCells,
-    links: args.links,
-    ...(resolutions ? { resolutions } : {}),
-  })
-  return new Map(agreement.open.map((d) => [resolutionKey(d.textCellId, d.cueCellId), d]))
-}
-
 // ─── The two sheets ──────────────────────────────────────────────────────────
 
 /**
@@ -374,38 +262,19 @@ function openByLink(args: CharacterSheetsArgs): Map<string, CharacterDisagreemen
  * UUID in that column would be true and useless.
  */
 export function buildSubtitleSheet(args: CharacterSheetsArgs): XlsxSheet {
-  const open = openByLink(args)
-  const resolutions = resolutionsOf(args)
-
-  const rows: XlsxCell[][] = inTimeOrder(args.textCells).map((cell, index) => {
-    const marks = marksFor({
-      side: "subtitle",
-      cell,
-      linkedIds: args.links.cuesForText.get(cell.id) ?? [],
-      open,
-      resolutions,
-      formatCamera: subtitleCamera,
-    })
-    return [
-      { value: index + 1 },
-      { value: cell.original },
-      { value: timeCell(cell.endTime) },
-      { value: timeCell(cell.startTime) },
-      { value: rangeCell(cell.startTime, cell.endTime) },
-      {
-        value: subtitleCharacterLabel(castNameOf(cell), cell.cameraState),
-        // Highlighted for EITHER axis: the one string carries both, exactly as
-        // it does on the audio sheet.
-        highlight: marks.name || marks.camera,
-      },
-      // `VTT_closest` holds the same range as `timeStamp` in every row of her
-      // file — it is the cue this row was matched to, and after an import that
-      // is by definition the cue whose times these are.
-      { value: rangeCell(cell.startTime, cell.endTime) },
-      { value: subtitleCamera(cell.cameraState), highlight: marks.camera },
-      { value: marks.changed },
-    ]
-  })
+  const rows: XlsxCell[][] = inTimeOrder(args.textCells).map((cell, index) => [
+    { value: index + 1 },
+    { value: cell.original },
+    { value: timeCell(cell.endTime) },
+    { value: timeCell(cell.startTime) },
+    { value: rangeCell(cell.startTime, cell.endTime) },
+    { value: subtitleCharacterLabel(castNameOf(cell), cell.cameraState) },
+    // `VTT_closest` holds the same range as `timeStamp` in every row of her
+    // file — it is the cue this row was matched to, and after an import that
+    // is by definition the cue whose times these are.
+    { value: rangeCell(cell.startTime, cell.endTime) },
+    { value: subtitleCamera(cell.cameraState) },
+  ])
 
   return { name: SUBTITLE_TAB, headers: SUBTITLE_HEADERS, rows }
 }
@@ -420,35 +289,28 @@ export function buildSubtitleSheet(args: CharacterSheetsArgs): XlsxSheet {
  * pipeline is a change she did not ask for.
  */
 export function buildAudioSheet(args: CharacterSheetsArgs): XlsxSheet {
-  const open = openByLink(args)
-  const resolutions = resolutionsOf(args)
+  const ordered = inTimeOrder(args.cueCells)
 
-  const rows: XlsxCell[][] = inTimeOrder(args.cueCells).map((cell, index) => {
-    const marks = marksFor({
-      side: "audio",
-      cell,
-      linkedIds: args.links.textForCue.get(cell.id) ?? [],
-      open,
-      resolutions,
-      formatCamera: audioCamera,
-    })
-    return [
-      { value: index + 1 },
-      { value: timeCell(cell.startTime) },
-      { value: timeCell(cell.endTime) },
-      // Highlighted for EITHER axis, because the string in this one cell
-      // carries both: settling a camera dispute rewrites the `(ON)` suffix
-      // inside it, and an unmarked `(ON)` where her team wrote `(OFF)` is
-      // exactly the silent change the highlight exists to prevent.
-      {
-        value: audioCharacter(castNameOf(cell), cell.cameraState),
-        highlight: marks.name || marks.camera,
-      },
-      { value: cell.original },
-      { value: audioCamera(cell.cameraState), highlight: marks.camera },
-      { value: marks.changed },
-    ]
-  })
+  // HER NUMBERS IF WE HAVE ANY, ours if we have none at all.
+  //
+  // Deciding per FILE rather than per row, because the two answers mean
+  // different things and mixing them would be the worst of both. A file
+  // imported before line numbers were stored has none anywhere: falling back
+  // per row would hand her a column of 548 blanks, which is strictly less
+  // useful than our own count. A file that does carry them has one per line
+  // she gave us, and a blank against anything added in the app since — and
+  // there a blank is the honest answer, because that line has no number in her
+  // production and inventing one is how a spreadsheet starts lying.
+  const useStored = ordered.some((cell) => lineNumberOf(cell) !== "")
+
+  const rows: XlsxCell[][] = ordered.map((cell, index) => [
+    useStored ? lineNumberCell(lineNumberOf(cell)) : { value: index + 1 },
+    { value: timeCell(cell.startTime) },
+    { value: timeCell(cell.endTime) },
+    { value: audioCharacter(castNameOf(cell), cell.cameraState) },
+    { value: cell.original },
+    { value: audioCamera(cell.cameraState) },
+  ])
 
   return { name: AUDIO_TAB, headers: AUDIO_HEADERS, rows }
 }

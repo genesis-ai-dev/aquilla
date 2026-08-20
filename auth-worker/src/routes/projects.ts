@@ -126,6 +126,19 @@ interface FileProjection {
   /** The file's audio timing mode (file.timing.set), read from files.meta.
    *  Omitted when unset → client falls back to the project-level default. */
   timingMode?: "dubbing" | "audioFirst"
+  /**
+   * What the audio-VTT import did about drift, read from
+   * `meta.aquillaImport.audioVtt.timebase`. Only ever present on an audio-cue
+   * sibling, and only when the import measured something.
+   *
+   * AQU-646 (2026-08-19): the measurement had been recorded since the timebase
+   * check shipped and NEVER SENT — the sync-worker's files-read route forwards
+   * it, but the project record's files come through here, so the project
+   * report showed "No record of a timing check" for episodes that were in fact
+   * corrected. Same class of bug as coreMediaUrl above, found the same way: a
+   * field the client mapped that no route ever produced.
+   */
+  audioVttTimebase?: { fromFps?: string; toFps?: string; scale: number }
   /** Per-track deltas keyed by track id (file.track.set), read from files.meta
    *  — NEVER the full track list, which the client derives. Omitted when unset
    *  → client draws the three defaults. Shape is spelled out structurally
@@ -139,7 +152,13 @@ interface FileProjection {
  * Pull file projections for the given project ids from codex-db, grouped by
  * project_id. Returns an empty map if the binding is absent (tests/dev).
  */
-async function loadFilesByProject(
+// Exported for its test alone. This projection has now lost two fields
+// silently — coreMediaUrl (found because the video pane was dead on every cold
+// load) and audioVttTimebase (found because the project report said "no timing
+// check" about corrected episodes) — and both had the same shape: the client
+// mapped a field no route ever produced, and nothing anywhere could notice.
+// A direct test over a seeded row is the thing that notices.
+export async function loadFilesByProject(
   env: AuthHonoEnv["Bindings"],
   projectIds: string[],
 ): Promise<Map<string, FileProjection[]>> {
@@ -178,6 +197,7 @@ async function loadFilesByProject(
     let hasScriptureContent: boolean | undefined
     let coreMediaUrl: string | undefined
     let timingMode: "dubbing" | "audioFirst" | undefined
+    let audioVttTimebase: FileProjection["audioVttTimebase"]
     let trackOverrides: FileProjection["trackOverrides"]
     if (f.meta) {
       try {
@@ -194,7 +214,10 @@ async function loadFilesByProject(
           target_text_direction?: string
           sourceTextDirection?: string
           targetTextDirection?: string
-          aquillaImport?: { hasScriptureContent?: unknown }
+          aquillaImport?: {
+            hasScriptureContent?: unknown
+            audioVtt?: { timebase?: unknown }
+          }
         }
         if (m.orderedBy) orderedBy = m.orderedBy
         sourceLanguage = normalizeLanguage(m.source_language ?? m.sourceLanguage)
@@ -204,6 +227,20 @@ async function loadFilesByProject(
         if (m.aquillaImport?.hasScriptureContent === true) hasScriptureContent = true
         if (typeof m.coreMediaUrl === "string" && m.coreMediaUrl.trim()) coreMediaUrl = m.coreMediaUrl
         if (m.timingMode === "dubbing" || m.timingMode === "audioFirst") timingMode = m.timingMode
+        // `scale` is the only required field: a drift measured from the words
+        // is exact even when neither frame rate could be named, so the labels
+        // are optional by design and a record without a finite scale is noise.
+        const tb = m.aquillaImport?.audioVtt?.timebase
+        if (tb && typeof tb === "object") {
+          const t = tb as { fromFps?: unknown; toFps?: unknown; scale?: unknown }
+          if (typeof t.scale === "number" && Number.isFinite(t.scale)) {
+            audioVttTimebase = {
+              ...(typeof t.fromFps === "string" ? { fromFps: t.fromFps } : {}),
+              ...(typeof t.toFps === "string" ? { toFps: t.toFps } : {}),
+              scale: t.scale,
+            }
+          }
+        }
         // Shape-checked, not value-checked: an array is `typeof "object"` and
         // would reach the client's merge as a map with numeric keys, and the
         // delete projection can leave an empty map behind, which means the same
@@ -238,6 +275,7 @@ async function loadFilesByProject(
       ...(targetTextDirection ? { targetTextDirection } : {}),
       ...(coreMediaUrl ? { coreMediaUrl } : {}),
       ...(timingMode ? { timingMode } : {}),
+      ...(audioVttTimebase ? { audioVttTimebase } : {}),
       ...(trackOverrides ? { trackOverrides } : {}),
     })
     byProject.set(f.project_id, list)

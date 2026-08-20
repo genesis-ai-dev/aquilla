@@ -988,7 +988,8 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
     expect(screen.getByText("Legacy Translation")).toBeInTheDocument()
     expect(screen.getByTestId("project-shared-badge")).toBeInTheDocument()
     // Soft fill — secondary/muted match the table surface in this theme.
-    expect(screen.getByTestId("project-shared-badge")).toHaveClass("bg-foreground/25")
+    expect(screen.getByTestId("project-shared-badge")).toHaveClass("bg-foreground/10")
+    expect(screen.getByTestId("project-shared-badge")).toHaveClass("text-muted-foreground")
     expect(screen.getByText("Host Org")).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "All" })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "Org" })).toBeInTheDocument()

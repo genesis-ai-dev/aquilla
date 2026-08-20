@@ -215,7 +215,8 @@ describe("AdminProjectsSection", () => {
     )
     const sharedRow = screen.getByText("Guest Gospel").closest("tr")!
     expect(within(sharedRow).getByTestId("project-shared-badge")).toHaveTextContent("Shared")
-    expect(within(sharedRow).getByTestId("project-shared-badge")).toHaveClass("bg-foreground/25")
+    expect(within(sharedRow).getByTestId("project-shared-badge")).toHaveClass("bg-foreground/10")
+    expect(within(sharedRow).getByTestId("project-shared-badge")).toHaveClass("text-muted-foreground")
     const ownRow = screen.getByText("In Org").closest("tr")!
     expect(within(ownRow).queryByTestId("project-shared-badge")).not.toBeInTheDocument()
   })

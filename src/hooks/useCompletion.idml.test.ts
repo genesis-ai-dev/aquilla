@@ -101,6 +101,7 @@ describe("useCompletion IDML protected-output boundary", () => {
   it("rejects a model response that drops anchors and never calls persistence", async () => {
     const unit = await parsedUnit()
     const cell = completionCell(unit)
+    // Draft and repair both return plain text → still fail closed.
     mockCompletion("plain translation", [])
     const commit = vi.fn().mockResolvedValue(undefined)
     const { result } = renderCompletion(cell, commit)
@@ -112,7 +113,63 @@ describe("useCompletion IDML protected-output boundary", () => {
 
     expect(saved).toBe(false)
     expect(commit).not.toHaveBeenCalled()
-    expect(result.current.errors.get(cell.id)).toMatch(/protected IDML anchor/i)
+    expect(result.current.errors.get(cell.id)).toMatch(/repair pass also failed|protected IDML anchor/i)
+  })
+
+  it("repairs a broken IDML draft via slot-JSON stitch before committing", async () => {
+    const unit = await parsedUnit()
+    const cell = completionCell(unit)
+    const bodies: string[] = []
+    vi.stubGlobal("fetch", vi.fn()
+      .mockImplementationOnce((_url: string, init: RequestInit) => {
+        bodies.push(init.body as string)
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ choices: [{ message: { content: "plain broken" } }] }),
+          body: null,
+        })
+      })
+      .mockImplementationOnce((_url: string, init: RequestInit) => {
+        bodies.push(init.body as string)
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            choices: [{
+              message: {
+                content: JSON.stringify({
+                  slots: [{ i: 0, t: "Bon" }, { i: 1, t: "JOUR" }],
+                }),
+              },
+            }],
+          }),
+          body: null,
+        })
+      }))
+    const commit = vi.fn().mockResolvedValue(undefined)
+    const { result } = renderCompletion(cell, commit)
+
+    let saved = false
+    await act(async () => {
+      saved = await result.current.completeSingle(cell as never)
+    })
+
+    expect(saved).toBe(true)
+    expect(commit).toHaveBeenCalledWith(
+      cell,
+      expect.stringContaining("Bon"),
+      "test-model",
+      expect.objectContaining({ mode: "single" }),
+    )
+    const committedHtml = commit.mock.calls[0]![1] as string
+    expect(committedHtml).toContain('data-idml-slot="0"')
+    expect(committedHtml).toContain("JOUR")
+    expect(bodies).toHaveLength(2)
+    const repairRequest = JSON.parse(bodies[1]!) as {
+      messages: Array<{ role: string; content: string }>
+    }
+    expect(repairRequest.messages[0]?.content).toContain("IDML slot-repair contract")
+    expect(repairRequest.messages[1]?.content).toContain("EDITABLE SLOTS")
+    expect(repairRequest.messages[1]?.content).toContain("plain broken")
   })
 
   it("repairs a plain one-slot model response before crossing the commit boundary", async () => {

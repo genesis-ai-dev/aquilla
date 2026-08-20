@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest"
+import { buildEpub, TWO_CHAPTER_EPUB } from "./parsers/__fixtures__/build-epub"
 import { parseFile, prepareImportFile, emitParsedFile } from "./import"
 
 const PASS_PROGRAM_DIGEST = "d74ff0ee8da3b9806b18c877dbf29bbde50b5bd8e4dad7a3a725000feb82e8f1"
@@ -127,6 +128,41 @@ describe("parseFile — parse phase only (no upload)", () => {
     expect(result.strings.map((cell) => cell.type)).toEqual(["heading", "verse"])
     expect(result.strings.find((cell) => cell.type === "verse")?.globalReferences).toEqual(["GEN 1:1"])
     expect(captured).toHaveLength(0)
+  })
+
+  it("parses an EPUB package into spine-ordered cells and retains the original bytes", async () => {
+    const bytes = await buildEpub(TWO_CHAPTER_EPUB)
+    const file = new File([bytes], "book.epub", { type: "application/epub+zip" })
+    const results = await parseFile(file, "epub")
+    expect(results).toHaveLength(1)
+    expect(results[0].rawSourceFormat).toBe("epub")
+    expect(results[0].roundTripFidelity).toBe("content-only")
+    expect(results[0].rawBytes?.byteLength).toBe(bytes.byteLength)
+    expect(results[0].strings.map((cell) => cell.original)).toEqual([
+      "Chapter One",
+      "The river was wide.",
+      "Chapter Two",
+      "The mountain was steep.",
+    ])
+    expect(results[0].strings.map((cell) => cell.sourceLocation?.file)).toEqual([
+      "OEBPS/Text/ch1.xhtml",
+      "OEBPS/Text/ch1.xhtml",
+      "OEBPS/Text/ch2.xhtml",
+      "OEBPS/Text/ch2.xhtml",
+    ])
+    expect(results[0].epubMembers?.map((member) => member.role)).toEqual(["chapter", "chapter"])
+    expect(captured).toHaveLength(0)
+  })
+
+  it("prepares an EPUB through the opaque package adapter instead of text sniffing", async () => {
+    const bytes = await buildEpub(TWO_CHAPTER_EPUB)
+    const prepared = await prepareImportFile(
+      new File([bytes], "book.epub", { type: "application/epub+zip" }),
+      { projectId: "p1" },
+    )
+    expect(prepared.fileType).toBe("epub")
+    expect(prepared.results[0].rawSourceFormat).toBe("epub")
+    expect(prepared.results[0].strings[0]?.original).toBe("Chapter One")
   })
 
   it("gives every book in a concatenated USFM its own export skeleton and retains the exact bundle once", async () => {
@@ -424,6 +460,32 @@ describe("emitParsedFile — commit phase calls bulk upload", () => {
       },
     )
     expect(captured[0].file).toMatchObject({ fileType: "tmx", kind: "translation-memory" })
+  })
+
+  it("commits exact EPUB bytes as the source artifact after normalize", async () => {
+    const original = await buildEpub(TWO_CHAPTER_EPUB)
+    const [parsed] = await parseFile(
+      new File([original], "book.epub", { type: "application/epub+zip" }),
+      "epub",
+    )
+
+    const result = await emitParsedFile(parsed, "epub", {
+      projectId: "proj-1",
+      author: "tester",
+      sourceLanguage: "en",
+      targetLanguage: "fr",
+      getToken: async () => "tok",
+    })
+
+    expect(result.ref).toMatchObject({ name: "book.epub", type: "epub", cellCount: 4 })
+    expect(captured[0]?.file).toMatchObject({
+      fileType: "epub",
+      kind: "epub",
+      importManifest: { fidelity: "content-only", profileId: "builtin:epub" },
+    })
+    expect(capturedSourceUploads).toHaveLength(1)
+    expect(capturedSourceUploads[0].format).toBe("epub")
+    expect(new Uint8Array(capturedSourceUploads[0].bytes)).toEqual(new Uint8Array(original))
   })
 })
 

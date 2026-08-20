@@ -11,7 +11,7 @@ import { ArchivedProjects } from "@/components/org/ArchivedProjects"
 import { ProjectOverview } from "@/components/org/ProjectOverview"
 import { AssignedToMe } from "@/components/org/AssignedToMe"
 import { SharedProjectsPage } from "@/components/org/SharedProjectsPage"
-import { resumeOrgPath, projectSettingsPath } from "@/lib/navigation/org-paths"
+import { resumeOrgPath, projectMemoryPath } from "@/lib/navigation/org-paths"
 import { JoinPage } from "@/components/JoinPage"
 import { AccessLinkPage } from "@/components/AccessLinkPage"
 import { JoinOrgPage } from "@/components/JoinOrgPage"
@@ -42,6 +42,7 @@ import { VersionBadge } from "@/components/VersionBadge"
 import { UpdateBanner } from "@/components/UpdateBanner"
 import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
 import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
 
 // Heavy workspace / admin routes — loaded only when navigated to
@@ -50,6 +51,9 @@ const ProjectWorkspace = lazy(() =>
 )
 const ProjectSettings = lazy(() =>
   import("@/components/ProjectSettings").then((m) => ({ default: m.ProjectSettings })),
+)
+const ProjectSettingsDialog = lazy(() =>
+  import("@/components/ProjectSettings").then((m) => ({ default: m.ProjectSettingsDialog })),
 )
 // AQU-254: CommentsPage / LivingMemoryPage / TerminologyPage are now rendered
 // inside ProjectWorkspace shell (lazy-imported there). The routes below all
@@ -64,8 +68,11 @@ const Settings = lazy(() =>
 const OrgSettingsIdentity = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsIdentity })),
 )
-const OrgSettingsExport = lazy(() =>
-  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsExport })),
+const OrgSettingsSecurity = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsSecurity })),
+)
+const OrgSettingsBilling = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsBilling })),
 )
 const OrgSettingsProviders = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsProviders })),
@@ -73,18 +80,12 @@ const OrgSettingsProviders = lazy(() =>
 const OrgSettingsMonday = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsMonday })),
 )
+const OrgSettingsKnowledge = lazy(() =>
+  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsKnowledge })),
+)
 // Monday OAuth landing — Monday's registered redirect URI is this SPA route.
 const MondayOAuthCallback = lazy(() =>
   import("@/pages/settings/MondayOAuthCallback").then((m) => ({ default: m.MondayOAuthCallback })),
-)
-const OrgSettingsRoster = lazy(() =>
-  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsRoster })),
-)
-const OrgSettingsTerminology = lazy(() =>
-  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsTerminology })),
-)
-const OrgSettingsAssignment = lazy(() =>
-  import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsAssignment })),
 )
 const TeamsList = lazy(() =>
   import("@/components/org/TeamsList").then((m) => ({ default: m.TeamsList })),
@@ -115,11 +116,12 @@ function GlobalAudioShortcuts() {
 }
 
 function SyncFreezeOverlay() {
+  const t = useT()
   const { syncing } = useSyncing()
   if (!syncing) return null
   return (
     <div className="fixed top-0 left-0 right-0 z-40 bg-amber-50 text-amber-800 border-b border-amber-200 px-3 py-1 text-xs text-center">
-      Merging incoming changes…
+      {t("workspace.syncFreezeOverlay")}
     </div>
   )
 }
@@ -127,11 +129,10 @@ function SyncFreezeOverlay() {
 /**
  * Workspace entry point, mounted at both `/app` and `/`.
  *
- * `/` is served as the marketing homepage to every visitor now — the Worker
- * doesn't branch on a cookie any more (see worker/index.ts), which is what lets
- * that page be edge-cached. So a fresh load never reaches this component at `/`;
- * only in-app navigation does. `/app` is the URL that opens the workspace, and
- * it's where the marketing nav's "Open app" CTA points.
+ * The separate marketing Worker owns `/` on the live custom domains, so a fresh
+ * production load never reaches this component there. The app Worker and local
+ * Vite server still expose `/` as a SPA fallback; `/app` is the stable workspace
+ * entry linked by the marketing site.
  *
  * Signed-out visitors go to /login rather than back to the marketing page:
  * anyone arriving here clicked something that said "open the app", and bouncing
@@ -152,11 +153,11 @@ function RouteLoadingFallback() {
   return <LoadingOverlay />
 }
 
-/** Preserve bookmarks and e2e gotos to the old workspace overlay URLs. */
-function RedirectToProjectSettingsSection({ section }: { section: string }) {
+/** Preserve bookmarks and e2e gotos to retired paths that moved into Living Memory. */
+function RedirectToProjectMemory({ section }: { section?: string }) {
   const { id } = useParams<{ id: string }>()
   const { search } = useLocation()
-  return <Navigate to={`${projectSettingsPath(id!, section)}${search}`} replace />
+  return <Navigate to={`${projectMemoryPath(id!, section)}${search}`} replace />
 }
 
 function LazyRoute({ children, fallback = <RouteLoadingFallback /> }: { children: ReactNode; fallback?: ReactNode }) {
@@ -273,11 +274,14 @@ function AppRoutes() {
           <Route path="members/matrix" element={<OrgLazyRoute><MembersPage /></OrgLazyRoute>} />
           <Route path="settings" element={<OrgLazyRoute><Settings /></OrgLazyRoute>} />
           <Route path="settings/identity" element={<OrgLazyRoute><OrgSettingsIdentity /></OrgLazyRoute>} />
-          <Route path="settings/export" element={<OrgLazyRoute><OrgSettingsExport /></OrgLazyRoute>} />
-          <Route path="settings/roster" element={<OrgLazyRoute><OrgSettingsRoster /></OrgLazyRoute>} />
-          <Route path="settings/assignment" element={<OrgLazyRoute><OrgSettingsAssignment /></OrgLazyRoute>} />
-          <Route path="settings/terminology" element={<OrgLazyRoute><OrgSettingsTerminology /></OrgLazyRoute>} />
+          <Route path="settings/security" element={<OrgLazyRoute><OrgSettingsSecurity /></OrgLazyRoute>} />
+          <Route path="settings/billing" element={<OrgLazyRoute><OrgSettingsBilling /></OrgLazyRoute>} />
+          <Route path="settings/export" element={<Navigate to="../security" replace relative="path" />} />
+          <Route path="settings/roster" element={<Navigate to="../security" replace relative="path" />} />
+          <Route path="settings/assignment" element={<Navigate to="../security" replace relative="path" />} />
+          <Route path="settings/terminology" element={<Navigate to="../security" replace relative="path" />} />
           <Route path="settings/providers" element={<OrgLazyRoute><OrgSettingsProviders /></OrgLazyRoute>} />
+          <Route path="settings/knowledge" element={<OrgLazyRoute><OrgSettingsKnowledge /></OrgLazyRoute>} />
           <Route path="settings/monday" element={<OrgLazyRoute><OrgSettingsMonday /></OrgLazyRoute>} />
         </Route>
 
@@ -288,12 +292,14 @@ function AppRoutes() {
         <Route path="/project/:id/editor/file/:fileId" element={<ProjectWorkspace />} />
         <Route path="/project/:id/settings" element={<LazyRoute><ProjectSettings /></LazyRoute>} />
         <Route path="/project/:id/settings/:section" element={<LazyRoute><ProjectSettings /></LazyRoute>} />
-        <Route path="/project/:id/rules" element={<RedirectToProjectSettingsSection section="rules" />} />
+        {/* Rules now live on Living Memory's "Translation quality" pane. */}
+        <Route path="/project/:id/rules" element={<RedirectToProjectMemory section="quality" />} />
         <Route path="/project/:id/agent" element={<ProjectWorkspace />} />
         <Route path="/project/:id/voice" element={<ProjectWorkspace />} />
         <Route path="/project/:id/terminology" element={<ProjectWorkspace />} />
         <Route path="/project/:id/comments" element={<ProjectWorkspace />} />
-        <Route path="/project/:id/memory" element={<RedirectToProjectSettingsSection section="memory" />} />
+        <Route path="/project/:id/memory" element={<ProjectWorkspace />} />
+        <Route path="/project/:id/memory/:section" element={<ProjectWorkspace />} />
 
         {/* Monday.com OAuth redirect URI. Stays top-level and un-scoped: the
             path is registered with Monday, so it cannot carry an org segment. */}
@@ -318,6 +324,8 @@ function AppRoutes() {
         <Routes>
           <Route path="/preferences" element={<PreferencesDialog />} />
           <Route path="/preferences/:section" element={<PreferencesDialog />} />
+          <Route path="/project/:id/settings" element={<LazyRoute><ProjectSettingsDialog /></LazyRoute>} />
+          <Route path="/project/:id/settings/:section" element={<LazyRoute><ProjectSettingsDialog /></LazyRoute>} />
         </Routes>
       ) : null}
     </>

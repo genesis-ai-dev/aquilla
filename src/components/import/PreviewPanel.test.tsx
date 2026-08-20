@@ -78,6 +78,69 @@ describe("PreviewPanel — USFM markers stripped from preview (AQU-580)", () => 
   })
 })
 
+describe("PreviewPanel — EPUB chapter picker", () => {
+  const EPUB_RESULT: ImportResult[] = [
+    {
+      name: "book.epub",
+      rawSourceFormat: "epub",
+      epubMembers: [
+        {
+          memberPath: "OEBPS/nav.xhtml",
+          role: "nav",
+          linear: true,
+          includedByDefault: false,
+          title: "Contents",
+          cellCount: 1,
+        },
+        {
+          memberPath: "OEBPS/Text/ch1.xhtml",
+          role: "chapter",
+          linear: true,
+          includedByDefault: true,
+          title: "Chapter One",
+          cellCount: 1,
+        },
+      ],
+      strings: [
+        {
+          id: "nav",
+          original: "Contents",
+          translated: "",
+          context: "Contents · Heading 1",
+          group: "g1",
+          type: "heading",
+          sourceLocation: { file: "OEBPS/nav.xhtml", blockPath: "0" },
+        },
+        {
+          id: "ch",
+          original: "The river was wide.",
+          translated: "",
+          context: "Chapter One · Paragraph",
+          group: "g2",
+          type: "text",
+          sourceLocation: { file: "OEBPS/Text/ch1.xhtml", blockPath: "0" },
+        },
+      ],
+    },
+  ]
+
+  it("hides nav cells by default and confirms with those members skipped", async () => {
+    const onConfirm = vi.fn()
+    render(<PreviewPanel results={EPUB_RESULT} onConfirm={onConfirm} onCancel={vi.fn()} />)
+
+    expect(screen.getByTestId("epub-chapter-picker")).toBeInTheDocument()
+    expect(screen.getByLabelText("Include Contents")).not.toBeChecked()
+    expect(screen.getByLabelText("Include Chapter One")).toBeChecked()
+    expect(screen.getByText("The river was wide.")).toBeInTheDocument()
+    expect(screen.queryByText("Contents · Heading 1")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /confirm import/i }))
+    expect(onConfirm).toHaveBeenCalledTimes(1)
+    const options = onConfirm.mock.calls[0][0] as { skipMemberPaths: Set<string> }
+    expect([...options.skipMemberPaths]).toEqual(["oebps/nav.xhtml"])
+  })
+})
+
 describe("PreviewPanel — transferred-size readout during upload (AQU-520)", () => {
   it("shows an X / Y MB readout alongside the cell count while committing", async () => {
     // onConfirm never resolves, so the panel stays in its in-progress view and

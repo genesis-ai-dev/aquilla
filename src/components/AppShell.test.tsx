@@ -6,12 +6,27 @@
  * (sidebar/header/status bar) survives and the user can navigate away.
  */
 
-import { describe, it, expect } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { MemoryRouter, useLocation, useNavigate } from "react-router-dom"
 import { render, screen, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { AppShell } from "./AppShell"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
+
+const originalMatchMedia = window.matchMedia
+
+function stubLgUp(matches: boolean) {
+  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    matches: query === "(min-width: 1024px)" ? matches : false,
+    media: query,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+    onchange: null,
+  })) as typeof window.matchMedia
+}
 
 function AlwaysThrows(): never {
   throw new Error("main content crash")
@@ -96,7 +111,7 @@ describe("AppShell main-content error containment", () => {
     )
 
     const header = container.querySelector('[data-slot="app-shell-header"]')
-    expect(header).toHaveClass("h-[52px]", "min-h-[52px]", "justify-center")
+    expect(header).toHaveClass("h-[52px]", "min-h-[52px]", "items-center")
 
     rerender(
       <MemoryRouter>
@@ -110,7 +125,7 @@ describe("AppShell main-content error containment", () => {
       </MemoryRouter>,
     )
 
-    expect(container.querySelector('[data-slot="app-shell-header"]')).toHaveClass("h-[52px]", "min-h-[52px]", "justify-center")
+    expect(container.querySelector('[data-slot="app-shell-header"]')).toHaveClass("h-[52px]", "min-h-[52px]", "items-center")
   })
 
   it("sits the floating content card flush under the header (no top margin)", () => {
@@ -181,13 +196,21 @@ describe("AppShell main-content error containment", () => {
     // the two apart.
     const trigger = await screen.findByRole("button", { name: "Quick language switch" })
     expect(trigger).toBeInTheDocument()
+    const footer = trigger.closest('[data-slot="app-shell-sidebar-footer"]')
+    expect(footer).toHaveClass("justify-between", "px-2", "pb-2")
+    const version = screen.getByRole("button", { name: "Copy build info" })
+    expect(version.parentElement).not.toHaveClass("flex-1")
+    expect(version.closest('[data-slot="app-shell-sidebar-footer"]')).toBe(footer)
+    const help = screen.getByRole("button", { name: /help & community/i })
+    expect(footer).toContainElement(help)
+    expect(help.nextElementSibling).toBe(trigger)
     // The picker must list endonyms, not English names — a Burmese speaker
     // looking for their language will not scan for the word "Burmese".
     await userEvent.click(trigger)
     expect(await screen.findByRole("menuitemradio", { name: /မြန်မာ/ })).toBeInTheDocument()
   })
 
-  it("keeps the language control reachable in the leftDock (project workspace) layout", async () => {
+  it("keeps version and language controls on one row in the project workspace", async () => {
     render(
       <MemoryRouter>
         <I18nProvider>
@@ -203,8 +226,67 @@ describe("AppShell main-content error containment", () => {
     // ProjectWorkspace is the only caller that passes leftDock, and it is the
     // screen a translator works in all day. If the switcher only rendered in the
     // org-chrome layout, changing UI language would mean leaving your work.
-    expect(
-      await screen.findByRole("button", { name: "Quick language switch" }),
-    ).toBeInTheDocument()
+    const language = await screen.findByRole("button", { name: "Quick language switch" })
+    const version = screen.getByRole("button", { name: "Copy build info" })
+    const footer = language.closest('[data-slot="app-shell-sidebar-footer"]')
+    expect(footer).toHaveClass("justify-between")
+    expect(version.closest('[data-slot="app-shell-sidebar-footer"]')).toBe(footer)
+    const help = screen.getByRole("button", { name: /help & community/i })
+    expect(footer).toContainElement(help)
+    expect(help).toHaveClass("size-8")
+
+    await userEvent.click(help)
+    expect(await screen.findByRole("menuitem", { name: /homepage/i })).toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: /take the tour/i })).not.toBeInTheDocument()
+  })
+})
+
+describe("AppShell mobile org sidebar sheet", () => {
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia
+  })
+
+  it("keeps the in-flow sidebar and hides the sheet trigger at lg and up", () => {
+    stubLgUp(true)
+    renderShell(<div data-testid="content">hello</div>)
+    expect(screen.getByTestId("sidebar")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Open sidebar" })).not.toBeInTheDocument()
+    expect(document.querySelector('[data-slot="app-shell-header-body"]')).not.toHaveClass("-ml-2")
+  })
+
+  it("opens the org sidebar in a left sheet from a PanelLeft control beside the header", async () => {
+    stubLgUp(false)
+    renderShell(<div data-testid="content">hello</div>)
+
+    const trigger = screen.getByRole("button", { name: "Open sidebar" })
+    expect(trigger).toBeInTheDocument()
+    expect(screen.queryByTestId("sidebar")).not.toBeInTheDocument()
+
+    const header = trigger.closest('[data-slot="app-shell-header"]')
+    expect(header).not.toBeNull()
+    expect(header?.querySelector('[data-slot="app-shell-sidebar-trigger"]')).toContainElement(trigger)
+    expect(header?.querySelector('[data-slot="app-shell-header-body"]')).toHaveClass("-ml-2")
+    expect(header?.textContent).toMatch(/header/)
+
+    await userEvent.click(trigger)
+    const sheet = await screen.findByRole("dialog", { name: "Navigation" })
+    expect(sheet).toBeInTheDocument()
+    expect(sheet.querySelector('[data-testid="sidebar"]')).toHaveTextContent("sidebar")
+  })
+
+  it("does not move the editor leftDock into a sheet on small viewports", () => {
+    stubLgUp(false)
+    render(
+      <MemoryRouter>
+        <AppShell
+          header={<div data-testid="header">header</div>}
+          statusBar={null}
+          leftDock={<div data-testid="left-dock">dock</div>}
+          main={<div data-testid="content">content</div>}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByTestId("left-dock")).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Open sidebar" })).not.toBeInTheDocument()
   })
 })

@@ -2,7 +2,7 @@
  * AQU-687: the target editor must keep a stable width whether or not a
  * prediction/validation affordance is present.
  *
- * Regression: the validation control (health ring + validate toggle) used to
+ * Regression: the validation control used to
  * render `null` for a cell with no content, so the editor's `flex-1` column
  * reclaimed the button's slot + gap — and then snapped narrower the instant a
  * prediction/draft filled the cell (`hasContent` flips true → the 24px button
@@ -127,6 +127,13 @@ describe("EditorTable — AQU-687 stable target width", () => {
     // Fixed-width slot present, and the validate affordance lives inside it.
     expect(gutter.className).toContain("w-6")
     expect(gutter.querySelector("button")).not.toBeNull()
+    const automaticRibbon = screen.getByTestId("health-ribbon")
+    expect(automaticRibbon.dataset.healthStage).toBe("automatic")
+    expect(Number(automaticRibbon.dataset.healthOpacity)).toBeLessThan(0.5)
+    expect(document.querySelector('[data-editor-cell-surface="source"]')).not.toBeNull()
+    expect(document.querySelector('[data-editor-cell-surface="target-column"]')).not.toBeNull()
+    expect(document.querySelector('[data-editor-cell-surface="target"]')).not.toBeNull()
+    expect(document.querySelector('[data-editor-cell-surface="target-read"]')).not.toBeNull()
   })
 
   it("STILL reserves the same fixed-width gutter for an EMPTY cell (no width jump)", async () => {
@@ -138,5 +145,8 @@ describe("EditorTable — AQU-687 stable target width", () => {
     // when a prediction later fills the cell.
     expect(gutter.className).toContain("w-6")
     expect(gutter.querySelector("button")).toBeNull()
+    const untranslatedRibbon = screen.getByTestId("health-ribbon")
+    expect(untranslatedRibbon.dataset.healthStage).toBe("untranslated")
+    expect(Number(untranslatedRibbon.dataset.healthOpacity)).toBeLessThan(0.5)
   })
 })

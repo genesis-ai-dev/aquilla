@@ -25,6 +25,7 @@
  * localize" shape `src/lib/navigation/deriveTitle.ts` uses.
  */
 import type { MessageKey } from "@/lib/i18n/messages/en"
+import { t as tStandalone } from "@/lib/i18n/standalone"
 
 export const ROLE = {
   VIEWER: 100,
@@ -105,6 +106,50 @@ export const VALIDATION_FLOOR_ROLES: readonly RoleLevel[] = [
   ROLE.MAINTAINER,
 ]
 
+/**
+ * Canonical name + capability-blurb catalog key per role level, keyed
+ * identically for `roleName` and `roleDescription` (mirrors server's
+ * ROLE_NAMES). The blurb is a `MessageKey`, never a raw string — this table
+ * is module scope, and `src/lib/` can't call `useT()` there; `t()` is only
+ * ever called inside `roleDescription()`, at call time (see its doc comment).
+ * Distinct from — and displays different, longer copy than — the
+ * `common.role.*Description` blurbs `ROLE_NAME_KEY`'s sibling
+ * `ROLE_DESCRIPTION_KEY` map resolves below; both are genuine, separately
+ * live UI copy for different surfaces (RoleSelect/MembersSection/
+ * StaffLanePopover/roleHelpText here vs. MembersMatrixCellEditor/
+ * ProjectMembersPage/SharePanel there).
+ */
+const ROLE_INFO: Record<number, { name: string; descriptionKey: MessageKey }> = {
+  100: {
+    name: "viewer",
+    descriptionKey: "org.role.descriptionViewer",
+  },
+  200: {
+    name: "commenter",
+    descriptionKey: "org.role.descriptionCommenter",
+  },
+  300: {
+    name: "reviewer",
+    descriptionKey: "org.role.descriptionReviewer",
+  },
+  400: {
+    name: "contributor",
+    descriptionKey: "org.role.descriptionContributor",
+  },
+  500: {
+    name: "project_lead",
+    descriptionKey: "org.role.descriptionProjectLead",
+  },
+  600: {
+    name: "maintainer",
+    descriptionKey: "org.role.descriptionMaintainer",
+  },
+  700: {
+    name: "owner",
+    descriptionKey: "org.role.descriptionOwner",
+  },
+}
+
 /** Canonical role name for a given level (mirrors server's ROLE_NAMES).
  *
  * This is the machine-readable, locale-free identifier — the wire format
@@ -115,16 +160,7 @@ export const VALIDATION_FLOOR_ROLES: readonly RoleLevel[] = [
  * locale renders. For a user-facing label, resolve `roleNameKey()` through
  * `useT()` instead — see the module doc comment below. */
 export function roleName(level: number): string {
-  switch (level) {
-    case 100: return "viewer"
-    case 200: return "commenter"
-    case 300: return "reviewer"
-    case 400: return "contributor"
-    case 500: return "project_lead"
-    case 600: return "maintainer"
-    case 700: return "owner"
-    default: return `level_${level}`
-  }
+  return ROLE_INFO[level]?.name ?? `level_${level}`
 }
 
 /** Underscore-free role string for display with CSS `capitalize`. */
@@ -181,18 +217,17 @@ const ROLE_DESCRIPTION_KEY: Partial<Record<number, MessageKey>> = {
 /**
  * Capability blurb shown under each role in RoleSelect (AD-6 / AQU-138).
  * Name + level stay on the label line — this is the "what it does" copy only.
+ *
+ * Called at render/event time from every current call site (RoleSelect's
+ * `resolveOption`/`roleSelectOptionFromLevel`, MembersSection, StaffLanePopover,
+ * and — via `roleHelpText` below — TeamDetail/OrgMembersTable's locked-role
+ * tooltip), never at module scope, so resolving the catalog key here via the
+ * standalone `t()` is safe (AQU-832 wave-3 pattern 2) — it is NOT called
+ * inside any module-scope `const`.
  */
 export function roleDescription(level: number): string {
-  switch (level) {
-    case 100: return "Can read all org projects. No edit or management actions."
-    case 200: return "Can read and leave comments. Cannot edit content."
-    case 300: return "Can read, comment, and review. Cannot make direct edits."
-    case 400: return "Can edit project content. Maximum level grantable via share link."
-    case 500: return "Can add members to projects, mint share-link invites, and lead project work."
-    case 600: return "Can create/manage teams, rename the org, set project deadlines, and remove project members."
-    case 700: return "Full control: add/remove org members, archive/restore projects, and all maintainer actions."
-    default: return ""
-  }
+  const key = ROLE_INFO[level]?.descriptionKey
+  return key ? tStandalone(key) : ""
 }
 
 /** Full "Viewer (100) — …" string for tooltips and help affordances. */

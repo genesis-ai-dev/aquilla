@@ -91,8 +91,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
  * their existing test files do not mount a provider. Throwing there would force
  * wrapper churn across the whole suite to buy nothing: English is already the
  * documented per-key fallback, so resolving against the `en` catalog is the same
- * answer the provider would give for an unset locale. The prerendered marketing
- * entries get the same benefit — they render without a provider by design.
+ * answer the provider would give for an unset locale.
  *
  * `setLocale` is a no-op because with no provider there is no state to change
  * and nothing to persist; chrome that needs to know whether switching is even

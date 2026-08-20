@@ -23,8 +23,8 @@ import {
 
 /**
  * Platform-admin "Settings" — global, runtime-editable AI config: the allowed
- * model list (with the default chat + agent models marked on it), and the AI
- * request budgets. Saved to platform_settings (auth-worker) and read on the
+ * model list (with the default chat + agent models and the autopilot's
+ * fast/deep tiers marked on it), and the AI request budgets. Saved to platform_settings (auth-worker) and read on the
  * chat/agent hot path with env-var fallbacks. Behind the elevation gate; every
  * call is server-enforced.
  *
@@ -41,7 +41,9 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Draft form state.
-  const [modelList, setModelList] = useState<ModelListValue>({ models: [], chatModel: "", agentModel: "" })
+  const [modelList, setModelList] = useState<ModelListValue>({
+    models: [], chatModel: "", agentModel: "", fastModel: "", deepModel: "",
+  })
   const [userLimit, setUserLimit] = useState("")
   const [globalLimit, setGlobalLimit] = useState("")
   const [enforce, setEnforce] = useState(false)
@@ -62,6 +64,11 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
       models: d.settings.allowedModels ?? d.effective.allowedModels,
       chatModel: d.settings.defaultLlmModel ?? d.effective.defaultLlmModel,
       agentModel: d.settings.agentModel ?? d.effective.agentModel,
+      // Only the STORED value hydrates the optional tiers. `effective` names
+      // what is in force including the fallback, so seeding from it would show
+      // an unset tier as pinned and turn the next save into a real change.
+      fastModel: d.settings.contextualFastModel ?? "",
+      deepModel: d.settings.contextualDeepModel ?? "",
     })
     setUserLimit(d.settings.aiUserDailyLimit != null ? String(d.settings.aiUserDailyLimit) : "")
     setGlobalLimit(d.settings.aiGlobalDailyLimit != null ? String(d.settings.aiGlobalDailyLimit) : "")
@@ -102,6 +109,9 @@ export function AdminSettingsSection({ jwt }: { jwt: string }) {
       await updatePlatformSettings(jwt, {
         defaultLlmModel: modelList.chatModel,
         agentModel: modelList.agentModel,
+        // "" clears the tier server-side, restoring the env/default fallback.
+        contextualFastModel: modelList.fastModel,
+        contextualDeepModel: modelList.deepModel,
         allowedModels: modelList.models,
         aiUserDailyLimit: userLimit === "" ? undefined : Number(userLimit),
         aiGlobalDailyLimit: globalLimit === "" ? undefined : Number(globalLimit),

@@ -1,4 +1,5 @@
 import type { FileType, TranslatableString } from "@/lib/parsers/types"
+import type { EpubSpineMember } from "@/lib/parsers/epub"
 import {
   normalizeTranslatableStrings,
   type DeclarativeImportRecipe,
@@ -23,7 +24,9 @@ export interface ParsedImportResult {
   rawSourceFormat?: SourceArtifactFormat
   rawBytes?: ArrayBuffer
   bookCode?: string
-  corpusMarker?: "OT" | "NT"
+  /** Sidebar folder for the imported file — "OT"/"NT" for scripture, or a named
+   *  collection such as "Reach 4 Life" for a Biblica edition. */
+  corpusMarker?: string
   originalName?: string
   importRecipe?: DeclarativeImportRecipe
   importClassification?: Omit<AiImportClassification, "recipe"> & { recipe: DeclarativeImportRecipe }
@@ -33,6 +36,8 @@ export interface ParsedImportResult {
   roundTripFidelity?: RoundTripFidelity
   /** Exact multi-member container retained once and bound to every emitted file. */
   sharedSourceArtifact?: { name: string; bytes: ArrayBuffer; format: SourceArtifactFormat }
+  /** EPUB spine members shown in the chapter picker. Absent for other formats. */
+  epubMembers?: EpubSpineMember[]
 }
 
 export interface PreparedImportFile {

@@ -26,7 +26,9 @@ import { resolveCreditConfig, readSpend } from "../lib/credits"
 import { loadPlatformSettings, savePlatformSettings } from "../lib/platform-settings"
 import { getAllowedModels } from "../lib/ai-budget"
 import { aggregateAbResults } from "../lib/model-ab"
+import adminBillingRoutes from "./admin-billing"
 import { sendAdminElevationCodeEmail } from "../services/email"
+import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 import {
   ADMIN_ELEVATION_VERIFY_MAX_FAILURES,
   countRecentEvents,
@@ -636,9 +638,22 @@ admin.get("/settings", async (c) => {
     updatedBy: rec.updatedBy,
     effective: {
       defaultLlmModel:
-        rec.settings.defaultLlmModel || c.env.DEFAULT_LLM_MODEL || "anthropic/claude-sonnet-4.5",
+        rec.settings.defaultLlmModel || c.env.DEFAULT_LLM_MODEL || DEFAULT_LLM_MODEL_ID,
       agentModel:
-        rec.settings.agentModel || c.env.AGENT_MODEL_DEFAULT || "anthropic/claude-haiku-4-5",
+        rec.settings.agentModel || c.env.AGENT_MODEL_DEFAULT || DEFAULT_LLM_MODEL_ID,
+      // Autopilot tiers, resolved exactly as lib/contextual/tick.ts does.
+      // `fast` unset means every tier runs on one frontier model, so the
+      // console shows what is ACTUALLY in force rather than an empty field.
+      contextualFastModel:
+        rec.settings.contextualFastModel || c.env.CONTEXTUAL_FAST_MODEL || DEFAULT_LLM_MODEL_ID,
+      contextualDeepModel:
+        rec.settings.contextualDeepModel
+        || c.env.CONTEXTUAL_DEEP_MODEL
+        || rec.settings.agentDraftModel
+        || c.env.AGENT_DRAFT_MODEL_DEFAULT
+        || rec.settings.agentModel
+        || c.env.AGENT_MODEL_DEFAULT
+        || DEFAULT_LLM_MODEL_ID,
       allowedModels: allowedMenu,
     },
   })
@@ -647,6 +662,10 @@ admin.get("/settings", async (c) => {
 const platformSettingsPatchSchema = z.object({
   defaultLlmModel:    z.string().min(1).optional(),
   agentModel:         z.string().min(1).optional(),
+  // Optional tiers: "" CLEARS the stored value so the env/default fallback
+  // takes over again. min(1) would make a set tier impossible to unset.
+  contextualFastModel: z.string().optional(),
+  contextualDeepModel: z.string().optional(),
   allowedModels:      z.array(z.string().min(1)).optional(),
   aiUserDailyLimit:   z.number().int().nonnegative().optional(),
   aiGlobalDailyLimit: z.number().int().nonnegative().optional(),
@@ -676,8 +695,18 @@ admin.patch("/settings", zValidator("json", platformSettingsPatchSchema), async 
   // "shrink the list below the current model".
   const current = await loadPlatformSettings(c.env)
   const merged = { ...current.settings, ...patch }
+  // An empty string is "clear this tier", not "pin it to nothing" — drop the
+  // key so the env/default fallback resolves again.
+  for (const field of ["contextualFastModel", "contextualDeepModel"] as const) {
+    if (merged[field] === "") delete merged[field]
+  }
   const mergedAllowed = getAllowedModels(c.env, merged)
-  for (const field of ["defaultLlmModel", "agentModel"] as const) {
+  for (const field of [
+    "defaultLlmModel",
+    "agentModel",
+    "contextualFastModel",
+    "contextualDeepModel",
+  ] as const) {
     const value = merged[field]
     if (value !== undefined && !mergedAllowed.has(value)) {
       return c.json(
@@ -697,7 +726,7 @@ admin.patch("/settings", zValidator("json", platformSettingsPatchSchema), async 
   if (mergedAb?.enabled) {
     const challenger = mergedAb.challengerModel.trim()
     const champion =
-      merged.defaultLlmModel || c.env.DEFAULT_LLM_MODEL || "anthropic/claude-sonnet-4.5"
+      merged.defaultLlmModel || c.env.DEFAULT_LLM_MODEL || DEFAULT_LLM_MODEL_ID
     if (!challenger || !mergedAllowed.has(challenger)) {
       return c.json(
         {
@@ -745,5 +774,7 @@ admin.get("/ab-results", async (c) => {
   const results = await aggregateAbResults(c.env.AQUILLA_PG, days)
   return c.json({ days, results })
 })
+
+admin.route("/", adminBillingRoutes)
 
 export default admin

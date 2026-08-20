@@ -644,6 +644,17 @@ export const editor = defineNamespace({
       "re-import the IDML.",
     "editor.idml.caretOutsideSlot":
       "Place the caret inside an InDesign text slot before adding a line break.",
+    "editor.idml.invalidMetadataError":
+      "This IDML cell has invalid formatting metadata and must be repaired or re-imported.",
+    "editor.idml.missingSourceHtmlError":
+      "This IDML cell is missing its protected source HTML and must be re-imported.",
+    "editor.idml.plainTextNoAnchorsError":
+      "This translated IDML cell has plain text but no formatting anchors. Re-import or " +
+      "repair it before editing.",
+    "editor.idml.editWouldChangeStructureError":
+      "This edit would change the protected IDML document structure.",
+    "editor.idml.editWouldChangeFormattingError":
+      "This edit would change protected IDML formatting.",
 
     // — Text-to-speech status badge on a row ————————————————————————
     "editor.tts.translatingBeforeVoicing": "Translating before voicing",
@@ -769,17 +780,18 @@ export const editor = defineNamespace({
     // — Expansion tab: back-translation ————————————————————————————
     "editor.bt.label": "Back-translation",
     "editor.bt.explainTooltip":
-      "An AI reading of your translation back in your reference language. Use it " +
-      "to check the meaning carried over — the AI can misread, so treat it as a " +
-      "second opinion, not proof.",
+      "A reading of this translation back in your reference language. " +
+      "AI can misread, and the project's own pairs can be rough — treat both " +
+      "as checks, not proof.",
     "editor.bt.needsAiTooltip":
       "Sign in or add an AI model in project settings to generate back-translations",
     "editor.bt.regenerateTooltip": "Regenerate with AI",
     "editor.bt.regenerateAria": "Regenerate the back-translation",
     "editor.bt.editTooltip": "Edit the back-translation",
     "editor.bt.contributorRequired": "Contributor+ required to edit back-translations",
+    "editor.bt.failed": "Back-translation failed",
     "editor.bt.translateFirst": "Translate this cell to read it back.",
-    "editor.bt.staleWarning": "Your translation changed since this was written",
+    "editor.bt.staleWarning": "This reading describes an earlier version of the translation",
     "editor.bt.emptyPitch":
       "See what your translation says when read back, so you can check the " +
       "meaning carried over.",
@@ -788,6 +800,12 @@ export const editor = defineNamespace({
     "editor.bt.needsAiHint":
       "Sign in or add an AI model in project settings to generate one.",
     "editor.bt.contributorCanGenerate": "A contributor can generate one with AI.",
+    "editor.bt.originAi": "AI reading",
+    "editor.bt.originCorrected": "Corrected reading",
+    "editor.bt.freshLabel": "Matches this translation",
+    "editor.bt.pairsDisagree": "This project's pairs read it differently",
+    "editor.bt.pairsLive": "From this project's own pairs — updates as you translate",
+    "editor.bt.usePairsInstead": "Use this reading",
     "editor.bt.statisticalGloss": "Statistical gloss",
     "editor.bt.statisticalGlossSub": "— word-for-word, from this project's own pairs",
     "editor.bt.glossNotEnoughPairs":
@@ -798,6 +816,9 @@ export const editor = defineNamespace({
       "wrong word choices. Use it as a hint, not a reading.",
     "editor.bt.alignment": "Alignment",
     "editor.bt.alignmentSub": "— word-level source/target view",
+    "editor.transcript.editTooltip": "Correct the transcript",
+    "editor.transcript.editAria": "Correct the transcript",
+    "editor.transcript.contributorRequired": "Contributor+ required to edit transcripts",
 
     // — Expansion tab: recording ————————————————————————————————
     "editor.expansion.recording": "Recording",
@@ -849,7 +870,6 @@ export const editor = defineNamespace({
     "editor.navTitle.projectSettings": "Project settings",
     "editor.navTitle.checksAndRules": "Checks & rules",
     "editor.navTitle.voice": "Voice",
-    "editor.navTitle.projectMemory": "Project memory",
     "editor.navTitle.projectMembers": "Project members",
 
     // — Per-file sync status chip (WS connection to the sync-worker) ————
@@ -3212,6 +3232,41 @@ export const editor = defineNamespace({
           "'InDesign' is the product name and stays as-is; 'text slot' is the " +
           "translatable frame in the layout.",
       },
+      "editor.idml.invalidMetadataError": {
+        description:
+          "Inline error (role=alert) replacing the whole editor when an IDML cell's " +
+          "persisted formatting metadata fails validation on load — a corrupt import, " +
+          "not something the user did in this session. 'IDML' is the file-format name " +
+          "and stays as-is.",
+      },
+      "editor.idml.missingSourceHtmlError": {
+        description:
+          "Inline error (role=alert) replacing the whole editor when an IDML cell's " +
+          "protected source HTML is absent from its metadata — a corrupt or partial " +
+          "import. 'IDML' is the file-format name and stays as-is.",
+      },
+      "editor.idml.plainTextNoAnchorsError": {
+        description:
+          "Inline error (role=alert) shown when a translated IDML cell holds plain " +
+          "text but none of the formatting anchors that plain text should be " +
+          "distributed across — likely edited before IDML support existed. Two " +
+          "sentences: what's wrong, then the two ways out. 'IDML' is the " +
+          "file-format name and stays as-is.",
+      },
+      "editor.idml.editWouldChangeStructureError": {
+        description:
+          "Rejection message (role=alert, via reportIdmlError) for an in-progress " +
+          "edit that would restructure the protected IDML document — the edit is " +
+          "refused before it lands, distinct from editor.idml.structureChanged which " +
+          "reports a structural break already detected on commit. 'IDML' is the " +
+          "file-format name and stays as-is.",
+      },
+      "editor.idml.editWouldChangeFormattingError": {
+        description:
+          "Rejection message (role=alert, via reportIdmlError) for an in-progress " +
+          "edit that would alter protected IDML formatting anchors — the edit is " +
+          "refused before it lands. 'IDML' is the file-format name and stays as-is.",
+      },
       "editor.tts.translatingBeforeVoicing": {
         description:
           "Tooltip on the tiny (9px) status badge beside a row while the AI is " +
@@ -3746,7 +3801,8 @@ export const editor = defineNamespace({
       "editor.bt.explainTooltip": {
         description:
           "Tooltip explaining what a back-translation is and how much to trust it. " +
-          "The caution after the dash is the important half and must survive.",
+          "Names both checks (AI and the project's own pairs) and insists neither " +
+          "is proof. The caution is the load-bearing half and must survive.",
       },
       "editor.bt.needsAiTooltip": {
         description:
@@ -3779,6 +3835,12 @@ export const editor = defineNamespace({
           "contributor. 'Contributor+' means contributor or any higher role — keep " +
           "the 'or above' sense.",
       },
+      "editor.bt.failed": {
+        description:
+          "Label on the inline error shown inside the back-translation tab when the " +
+          "AI request to read the translation back did not complete. The provider's " +
+          "own error message is shown beside it.",
+      },
       "editor.bt.translateFirst": {
         description:
           "Empty state of the back-translation tab when the cell has no translation " +
@@ -3788,7 +3850,8 @@ export const editor = defineNamespace({
         description:
           "Amber warning inside the back-translation tab: the translation was edited " +
           "after this reading was produced, so the reading may describe older text. " +
-          "A Refresh button sits beside it.",
+          "A Refresh button sits beside it. 'Earlier version' is the trust signal — " +
+          "do not soften it into a generic 'out of date'.",
       },
       "editor.bt.emptyPitch": {
         description:
@@ -3819,6 +3882,42 @@ export const editor = defineNamespace({
           "Small print shown instead of the generate button to a user whose role is " +
           "too low: a teammate with more permission can do it. Neutral, not a " +
           "refusal aimed at the reader.",
+      },
+      "editor.bt.originAi": {
+        description:
+          "Quiet provenance chip on a model-produced reading. Names the source so " +
+          "the user does not mistake it for a human check. A noun phrase, not a verb.",
+        maxLength: 18,
+      },
+      "editor.bt.originCorrected": {
+        description:
+          "Quiet provenance chip when a contributor has edited the AI reading. " +
+          "Signals that a human stands behind this wording.",
+        maxLength: 22,
+      },
+      "editor.bt.freshLabel": {
+        description:
+          "Quiet reassurance when the reading still describes the translation on " +
+          "screen. Opposite of editor.bt.staleWarning. A status, not a button.",
+        maxLength: 28,
+      },
+      "editor.bt.pairsDisagree": {
+        description:
+          "Heading of the statistical-clue card when the project's own pairs " +
+          "produce a different wording from the AI reading. This disagreement is " +
+          "the point of the card — keep the contrast.",
+      },
+      "editor.bt.pairsLive": {
+        description:
+          "Heading of the live statistical gloss shown before an AI reading exists. " +
+          "It updates as the translator types. Emphasize that it comes from this " +
+          "project, not from a model.",
+      },
+      "editor.bt.usePairsInstead": {
+        description:
+          "Button that adopts the statistical gloss as the saved reading, replacing " +
+          "the AI wording with a human-confirmed project-pairs reading. Imperative.",
+        maxLength: 22,
       },
       "editor.bt.statisticalGloss": {
         description:
@@ -3857,6 +3956,22 @@ export const editor = defineNamespace({
           "leading dash joins it to the heading; do not start with a capital. The " +
           "slash separates the two sides, named by editor.column.source and " +
           "editor.column.target elsewhere.",
+      },
+      "editor.transcript.editTooltip": {
+        description:
+          "Tooltip on the pencil that opens the recording transcript for correction, " +
+          "so a Whisper mistake can be fixed without re-transcribing. Imperative.",
+        maxLength: 28,
+      },
+      "editor.transcript.editAria": {
+        description:
+          "Screen-reader name of that same transcript-edit control, naming the " +
+          "object because the icon alone is ambiguous next to regenerate.",
+      },
+      "editor.transcript.contributorRequired": {
+        description:
+          "Tooltip on the disabled transcript pencil when the user's role is below " +
+          "contributor. Mirror editor.bt.contributorRequired; keep the 'or above' sense.",
       },
       "editor.expansion.recording": {
         description:
@@ -4063,11 +4178,6 @@ export const editor = defineNamespace({
         description: "Label for the project's voice/audio production surface.",
         screenshot: "workspace-nav",
         maxLength: 16,
-      },
-      "editor.navTitle.projectMemory": {
-        description: "Label for the project's AI agent memory surface.",
-        screenshot: "workspace-nav",
-        maxLength: 24,
       },
       "editor.navTitle.projectMembers": {
         description: "Label for a project's member list.",

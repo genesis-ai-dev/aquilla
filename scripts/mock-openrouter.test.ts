@@ -75,4 +75,39 @@ describe("scripted local agent", () => {
     expect(final.content).toContain("Here's the current state")
     expect(final.content).toContain("c1|validated")
   })
+
+  it("answers both internal passes of the staged draft workflow", () => {
+    const research = message(scriptMockResponse([
+      {
+        role: "system",
+        content: "You are the RESEARCH pass, separate from final generation.",
+      },
+      {
+        role: "user",
+        content: "Research these 2 source segments:\n1. First source\n2. [RUT 1:2] Second source",
+      },
+    ]))
+
+    expect(research.content).toContain("Mock evidence record for 2 source segments")
+    expect(research.tool_calls).toBeUndefined()
+
+    const generation = message(scriptMockResponse([
+      {
+        role: "system",
+        content: "You are the GENERATION pass. Use the separate evidence record supplied by the user.",
+      },
+      {
+        role: "user",
+        content:
+          "Evidence record from the completed research pass:\n<evidence>\nMock evidence\n</evidence>\n\n" +
+          "Translate these 2 segments:\n1. First source\n2. [RUT 1:2] Second source",
+      },
+    ]))
+
+    expect(JSON.parse(generation.content ?? "")).toEqual([
+      { i: 1, t: "[bozza] First source" },
+      { i: 2, t: "[bozza] Second source" },
+    ])
+    expect(generation.tool_calls).toBeUndefined()
+  })
 })

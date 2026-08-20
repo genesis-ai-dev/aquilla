@@ -27,6 +27,8 @@ export const common = defineNamespace({
     "common.breadcrumbNav": "breadcrumb",
     "common.moreBreadcrumbs": "More",
     "common.loadingSpinner": "Loading",
+    "common.showMore": "Show more",
+    "common.showLess": "Show less",
 
     // — Shared vocabulary and status words (AQU-511 wave 4):
     //   promoted here because two or more namespaces render exactly these
@@ -283,6 +285,16 @@ export const common = defineNamespace({
           "is visible status text with a trailing ellipsis; this is announced once by a " +
           "screen reader for the spinner element itself, so it takes no ellipsis.",
         screenshot: "cell-editor",
+      },
+      "common.showMore": {
+        description:
+          "Inline link at the end of a truncated block of text that reveals the rest of " +
+          "it, next to a downward chevron. Names the action, not the hidden content.",
+      },
+      "common.showLess": {
+        description:
+          "Inline link that collapses text expanded by common.showMore back to its " +
+          "truncated form, next to an upward chevron.",
       },
       "common.logIn": {
         description:

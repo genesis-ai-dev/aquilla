@@ -5,12 +5,14 @@ import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { toast } from "@/components/ui/toast"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { renameOrg } from "@/lib/frontier/orgs"
 import { useSubmitError } from "@/lib/forms/submit-error"
 import { ORG_SETTINGS_SECTION_DESCRIPTIONS, ORG_SETTINGS_SECTION_TITLES } from "./constants"
 import { OrgSettingsDetailPage } from "./OrgSettingsDetailPage"
 
 export function OrgSettingsIdentity() {
+  const { t } = useI18n()
   const { activeOrg, activeOrgId, refresh } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -53,8 +55,8 @@ export function OrgSettingsIdentity() {
     >
       <SettingsGroup>
         <SettingsRow
-          label="Organization name"
-          description="Shown across the workspace."
+          label={t("org.createDialog.nameLabel")}
+          description={t("settings.orgIdentity.nameDescription")}
           control={
             <Field
               data-invalid={Boolean(nameError) || undefined}
@@ -62,7 +64,7 @@ export function OrgSettingsIdentity() {
               className="w-auto *:w-auto"
             >
               <FieldLabel htmlFor="org-settings-name" className="sr-only">
-                Organization name
+                {t("org.createDialog.nameLabel")}
               </FieldLabel>
               <Input
                 id="org-settings-name"
@@ -74,7 +76,7 @@ export function OrgSettingsIdentity() {
                 onBlur={() => {
                   void handleNameBlur()
                 }}
-                placeholder="Organization name"
+                placeholder={t("org.createDialog.nameLabel")}
                 aria-invalid={Boolean(nameError) || undefined}
                 disabled={!canEdit}
                 className="w-56 bg-background"

@@ -14,13 +14,13 @@
     "dev:honeycomb": "BRAND=honeycomb vite",
     "predev:context": "node scripts/ensure-port-free.mjs 5173",
     "dev:context": "BRAND=context vite",
-    "build": "pnpm idml:gate && tsc -b && vite build && tsx scripts/prerender-marketing.ts aquilla && tsx scripts/check-brand-build.ts aquilla",
+    "build": "pnpm idml:gate && tsc -b && vite build && tsx scripts/check-app-build.ts && tsx scripts/check-brand-build.ts aquilla",
     "build:workers-build": "node scripts/assert-workers-build-env.mjs && node scripts/cloudflare-ci-checks.mjs",
     "build:workers-build:identity": "CI=1 pnpm --dir auth-worker install --frozen-lockfile && pnpm --dir auth-worker run build:workers-build",
     "build:workers-build:sync": "CI=1 pnpm --dir sync-worker install --frozen-lockfile && pnpm --dir sync-worker run build:workers-build",
-    "build:codex": "pnpm idml:gate && BRAND=codex tsc -b && BRAND=codex vite build && BRAND=codex tsx scripts/prerender-marketing.ts codex && tsx scripts/check-brand-build.ts codex",
-    "build:honeycomb": "pnpm idml:gate && BRAND=honeycomb tsc -b && BRAND=honeycomb vite build && BRAND=honeycomb tsx scripts/prerender-marketing.ts honeycomb && tsx scripts/check-brand-build.ts honeycomb",
-    "build:context": "pnpm idml:gate && BRAND=context tsc -b && BRAND=context vite build && BRAND=context tsx scripts/prerender-marketing.ts context && tsx scripts/check-brand-build.ts context",
+    "build:codex": "pnpm idml:gate && BRAND=codex tsc -b && BRAND=codex vite build && tsx scripts/check-app-build.ts && tsx scripts/check-brand-build.ts codex",
+    "build:honeycomb": "pnpm idml:gate && BRAND=honeycomb tsc -b && BRAND=honeycomb vite build && tsx scripts/check-app-build.ts && tsx scripts/check-brand-build.ts honeycomb",
+    "build:context": "pnpm idml:gate && BRAND=context tsc -b && BRAND=context vite build && tsx scripts/check-app-build.ts && tsx scripts/check-brand-build.ts context",
     "lint": "eslint .",
     "audit:deps": "node scripts/audit-deps.mjs",
     "audit:deps:report": "node scripts/audit-deps.mjs --report",
@@ -33,6 +33,7 @@
     "test": "vitest run",
     "test:worker": "vitest run --config worker/vitest.config.ts --dir worker",
     "scan:secrets": "tsx scripts/secret-scan.ts",
+    "admin:request": "tsx scripts/admin-request.ts",
     "test:idml": "pnpm --filter @aquilla/idml-roundtrip test",
     "build:idml": "pnpm --filter @aquilla/idml-roundtrip build",
     "idml:gate": "tsx scripts/assert-idml-release-gate.ts",
@@ -42,6 +43,7 @@
     "i18n:export": "tsx scripts/i18n-catalog.ts export",
     "i18n:import": "tsx scripts/i18n-catalog.ts import",
     "i18n:shots": "tsx scripts/i18n-shots.ts",
+    "i18n:todo": "tsx scripts/i18n-todo.ts",
     "test:e2e:guard": "vitest run scripts/e2e-determinism.test.ts scripts/e2e-impact.test.ts",
     "test:e2e:affected": "pnpm run test:e2e:guard && tsx scripts/e2e-affected.ts",
     "test:e2e:smoke": "pnpm run test:e2e:guard && tsx scripts/e2e-shard.ts 3 -- smoke.spec",
@@ -186,5 +188,12 @@
     "vitest": "^4.1.10",
     "wrangler": "^4.118.0",
     "yaml": "^2.9.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "tar": ">=7.5.21",
+      "adm-zip": ">=0.6.0",
+      "sharp": ">=0.35.0"
+    }
   }
 }

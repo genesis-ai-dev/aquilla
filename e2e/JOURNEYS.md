@@ -18,12 +18,16 @@ not a micro-spec farm.
 | Projects | Open / delete / restore from trash | `e2e/specs/projects/project-trash.smoke.spec.ts` |
 | Projects | App shell still routes | `e2e/specs/projects/route-health.smoke.spec.ts` |
 | Projects | Project settings rename/save persists | `e2e/specs/projects/project-settings.smoke.spec.ts` |
+| Projects | Knowledge Base upload, extracted-text read, and delete persist through Postgres + R2 (via Living Memory → Knowledge, `/project/:id/memory/knowledge`) | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Setup checklist survives refresh | `e2e/specs/editor/setup-checklist-survives-refresh.smoke.spec.ts` |
 | Orgs | Add member to org, member sees it | `e2e/specs/orgs/members.smoke.spec.ts` |
 | Orgs | Account switcher sessions | `e2e/specs/orgs/account-switcher.smoke.spec.ts` |
 | Orgs | Preferences persist across reload | `e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts` |
+| Orgs | Billing & usage shows the Field Plan CTA and agent-credit meter | `e2e/specs/orgs/org-settings-billing.smoke.spec.ts` |
 | Auth | First-login / account-setup status (sentinel) | `e2e/specs/auth/login-account-setup-status.smoke.spec.ts` |
 | Editor | Import markdown, edit cell, persists across reload | `e2e/specs/editor/import-and-edit.smoke.spec.ts` |
+| Editor | Import EPUB package, preserve spine order, commit source bytes | `e2e/specs/editor/import-epub.smoke.spec.ts` |
+| Editor | EPUB chapter picker excludes navigation, cover, and notes by default | `e2e/specs/editor/import-epub-picker.smoke.spec.ts` |
 | Editor | Commit survives stale in-flight refetch | `e2e/specs/editor/commit-survives-stale-refetch.smoke.spec.ts` |
 | Editor | Re-import updates source while preserving target | `e2e/specs/editor/reimport-preserves-target.smoke.spec.ts` |
 | Editor | eBible import persists across reload | `e2e/specs/editor/import-ebible-persists-reload.smoke.spec.ts` |
@@ -43,7 +47,13 @@ not a micro-spec farm.
 | Collab | Cross-user validate | `e2e/specs/collab/cross-user-validate.smoke.spec.ts` |
 | Sharing | Invite link → join → dashboard visibility (surface) | `e2e/specs/projects/share-invite.smoke.spec.ts` |
 | Terminology | Wildcard term chip (domain sentinel) | `e2e/specs/terminology/wildcard-term-chip.smoke.spec.ts` |
-| Marketing | Homepage book-a-call (domain sentinel) | `e2e/specs/marketing/book-call.smoke.spec.ts` |
+| Admin | Billing credit catalog and organization usage grants | `e2e/specs/projects/admin-console-billing.smoke.spec.ts` |
+
+## Journeys moved to another repository
+
+| Area | Journey | Current owner |
+| --- | --- | --- |
+| Marketing | Homepage book-a-call | `aquilla-marketing`: producer behavior is covered by `src/pages/Homepage/BookCallSection.test.tsx`; the immediate API consumer remains covered by `auth-worker/src/__tests__/contact.test.ts` here. The old app-repo smoke was retired when this repo stopped building the marketing page (AQU-918). |
 
 ## Surface sessions (one `test()`, one reset)
 
@@ -76,12 +86,15 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 | Journey | Spec |
 | --- | --- |
 | IDML roundtrip / IME / protected slots | `e2e/specs/editor/idml-roundtrip.spec.ts` |
-| Biblica study notes import | `e2e/specs/editor/import-biblica-study-notes.spec.ts` |
+| Biblica study notes import (incl. division bookmarks + front/back matter volumes) | `e2e/specs/editor/import-biblica-study-notes.spec.ts` |
+| Treasure Hunt Bible import | `e2e/specs/editor/import-treasure-hunt-bible.spec.ts` |
+| Reach 4 Life import | `e2e/specs/editor/import-reach4life.spec.ts` |
 | Contextual run pill | `e2e/specs/contextual/run-pill.spec.ts` |
 | Project overview autopilot | `e2e/specs/projects/project-overview-autopilot.spec.ts` |
 | Org access lifecycle (multi-path revoke) | `e2e/specs/orgs/org-access-lifecycle.spec.ts` |
 | Legacy D1-only first login | `e2e/specs/auth/legacy-user-first-login.spec.ts` |
 | Agent changeset approval | `e2e/specs/agent/changeset-approval.spec.ts` |
+| Translate-as-read drafting workflow | `e2e/specs/ai/translate-as-read.spec.ts` |
 | Agent draft / sidebar | `e2e/specs/ai/agent-draft.spec.ts` |
 | Completion races / lanes / footnotes | `e2e/specs/ai/completion-*.spec.ts` |
 | Agent-import sandbox | `e2e/specs/agent-import.spec.ts` |
@@ -102,7 +115,8 @@ UI chrome that used to be one smoke file per click is covered under
 - Preferences toggles / theme (except persist-reload)
 - Rules page toggles / severity / regex mode (RTL on RulesPage + rule editor)
 - Comments page empty / filter / sort chrome (RTL + comments-page surface session)
-- Living-memory empty state
+- Living-memory empty states and section IA (index → brief/instructions/quality/knowledge/examples panes, collapsed prediction prompt, role gates — RTL in `LivingMemoryPage.component.test.tsx`; entry points and legacy settings redirects in `ProjectSettings.subMenuIA.test.tsx` + `shell-routing.test.ts`)
+- Back-translation generation, editing, stale/provenance, and statistical-pairs comparison (`BacktranslationPanel.test.tsx`); the cross-user edit lock remains in the smoke keep-list
 - Admin console tab clicks, formatting Ctrl+B alone, breadcrumb-only nav
 
 When you change one of these surfaces, update the matching `*.test.tsx`. If RTL

@@ -2,13 +2,11 @@ import { useState } from "react"
 import {
   AlertTriangle,
   Clock,
-  Lock,
   Mail,
-  UsersRound,
   X,
 } from "lucide-react"
-import { useLocation, useNavigate } from "react-router-dom"
-import { membersPath } from "@/lib/navigation/org-paths"
+import { useLocation, useNavigate, Navigate } from "react-router-dom"
+import { membersPath, orgOverviewPath } from "@/lib/navigation/org-paths"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -17,51 +15,28 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
+import { OrgMembersTable } from "@/components/org/OrgMembersTable"
 import { useOrgMembers } from "@/hooks/useOrg"
+import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useAccessibleProjects } from "@/hooks/useAccessibleProjects"
 import { useOrgInvites } from "@/hooks/useOrgInvites"
-import { MembersPanel, type MembersPanelMember } from "@/components/MembersPanel"
 import { MembersMatrixView } from "@/components/MembersMatrixView"
 import { MultiProjectInviteDialog } from "@/components/MultiProjectInviteDialog"
 import { RemoveOrgMemberDialog } from "@/components/RemoveOrgMemberDialog"
-import { OrgInviteByEmail } from "@/components/org/OrgInviteByEmail"
-import { MemberAccessRow } from "@/components/org/MemberAccessPanel"
 import { ExternalCollaboratorsSection } from "@/components/org/ExternalCollaboratorsSection"
-import { ROLE, ORG_ROLE_PICKER, roleName } from "@/lib/frontier/roles"
+import { ROLE } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { formatRelativeTime } from "@/lib/time/relative"
-import { toUserFacingError } from "@/lib/errors/user-error"
-import type { OrgMemberProject, PendingOrgInvite } from "@/lib/frontier/orgs"
-import type { MemberGrantResult } from "@/lib/frontier/members"
+import type { PendingOrgInvite } from "@/lib/frontier/orgs"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 
 type MembersTab = "roster" | "matrix"
 
-// SWARM-TODO(AQU-832): ORG_ROLE_DESCRIPTIONS/the `description` field below are
-// dead — MembersPanelRoleOption dropped `description` (AQU-832 wave 3/WS-08;
-// see the comment on that interface in MembersPanel.tsx) so nothing ever
-// reads it. Left un-keyed because it's not user-facing; consider deleting
-// both instead of keying text nobody sees.
-const ORG_ROLE_DESCRIPTIONS: Record<number, string> = {
-  [ROLE.VIEWER]: "Read-only across all projects",
-  [ROLE.CONTRIBUTOR]: "Edit content across all projects",
-  [ROLE.PROJECT_LEAD]: "Manage members on every project",
-  [ROLE.MAINTAINER]: "Lead + manage roles",
-}
-
-const ORG_ROLE_OPTIONS = ORG_ROLE_PICKER.map((level) => ({
-  level,
-  name: roleName(level),
-  description: ORG_ROLE_DESCRIPTIONS[level] ?? "",
-}))
-
 /**
- * Operational PM home. The previous /settings/org page collapsed three
- * states into "Loading…" — pre-session, fetching, and silent error all
- * looked the same to the user. This page renders each state distinctly,
- * and adds the multi-project invite + per-member project chips that the
- * design loop concluded operational PMs need.
+ * Operational PM home. Org members render as a Teams-style DataTable (search,
+ * toolbar actions, row menus). Matrix stays a second tab for the members ×
+ * projects grid.
  */
 export function MembersPage() {
   const t = useT()
@@ -71,11 +46,12 @@ export function MembersPage() {
     return (
       <MembersShell>
         <Page size="wide">
-          <PageHeader title={t("editor.navTitle.members")} description={t("org.membersPage.orgPage.description")} />
-          <div className="space-y-4">
-            <div className="h-24 animate-pulse rounded-lg border bg-card" />
-            <div className="h-40 animate-pulse rounded-lg border bg-card" />
-          </div>
+          <PageHeader
+            title={t("editor.navTitle.members")}
+            description={t("org.membersPage.orgPage.description")}
+            inset={false}
+          />
+          <div className="h-48 animate-pulse rounded-lg border bg-card" />
         </Page>
       </MembersShell>
     )
@@ -85,7 +61,11 @@ export function MembersPage() {
     return (
       <MembersShell>
         <Page size="wide">
-          <PageHeader title={t("editor.navTitle.members")} description={t("org.membersPage.orgPage.description")} />
+          <PageHeader
+            title={t("editor.navTitle.members")}
+            description={t("org.membersPage.orgPage.description")}
+            inset={false}
+          />
           <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4">
             <p className="text-sm font-medium text-destructive">{t("org.membersPage.orgPage.loadErrorTitle")}</p>
             <p className="mt-1 text-xs text-muted-foreground">{error}</p>
@@ -102,7 +82,11 @@ export function MembersPage() {
     return (
       <MembersShell>
         <Page size="wide">
-          <PageHeader title={t("editor.navTitle.members")} description={t("org.membersPage.orgPage.description")} />
+          <PageHeader
+            title={t("editor.navTitle.members")}
+            description={t("org.membersPage.orgPage.description")}
+            inset={false}
+          />
           <EmptyState
             icon={AlertTriangle}
             title={isAllOrgs ? t("org.teamsList.selectOrgTitle") : t("org.membersPage.orgPage.signInTitle")}
@@ -146,8 +130,11 @@ interface MembersPageContentProps {
 
 function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
   const t = useT()
-  const callerUserId = null // FrontierSession has no userId; server enforces self-block.
   const { activeOrg } = useActiveOrg()
+  const { canViewRoster, hasFetched: rosterPolicyReady } = useOrgSettings(
+    orgId,
+    activeOrg?.role?.level,
+  )
   // AQU-326: the External-collaborators governance view is maintainer+ only.
   const canGovern = (activeOrg?.role.level ?? 0) >= ROLE.MAINTAINER
   const { members, isLoading: membersLoading, error: membersError, rosterHidden, add, addMany, remove, listMemberProjects, refresh } =
@@ -167,44 +154,28 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
     navigate(membersPath(orgId, next), { replace: true })
   }
 
-  const panelMembers: MembersPanelMember[] = members.map((m) => ({
-    userId: m.userId,
-    username: m.username,
-    roleLevel: m.role.level,
-    roleName: m.role.name,
-    source: m.role.level === ROLE.OWNER ? "owner-of-org" : "override",
-    isLocked: m.role.level === ROLE.OWNER,
-    lockedHint: m.role.level === ROLE.OWNER ? t("org.membersPage.orgPage.orgOwnerHint") : undefined,
-    lastActiveAt: m.lastActiveAt ?? null,
-  }))
-
-  const canInviteByEmail = (activeOrg?.role.level ?? 0) >= ROLE.OWNER
+  // AQU-485: below-floor callers must not see this page exist. Redirect to
+  // the org overview rather than a "Roster hidden" disclosure.
+  if (!rosterPolicyReady) {
+    return (
+      <MembersShell>
+        <Page size="wide">
+          <div className="h-48 animate-pulse rounded-lg border bg-card" />
+        </Page>
+      </MembersShell>
+    )
+  }
+  if (!canViewRoster || rosterHidden) {
+    return <Navigate to={orgOverviewPath(orgId)} replace />
+  }
 
   return (
     <MembersShell>
       <Page size="wide">
       <PageHeader
         title={t("editor.navTitle.members")}
-        description={
-          <>
-            {t("org.membersPage.orgPage.pageDescriptionPrefix")}{" "}
-            <strong className="font-medium text-foreground">{orgName}</strong>
-            {t("org.membersPage.orgPage.pageDescriptionSuffix")}
-          </>
-        }
+        description={t("org.membersPage.orgPage.description")}
         inset={false}
-        actions={
-          <AppTooltip content={t("org.membersPage.orgPage.addToProjectsTooltip")}>
-            <Button
-              variant="default"
-              onClick={() => setMultiInviteOpen(true)}
-              disabled={accessibleProjects.length === 0}
-            >
-              <UsersRound className="me-1.5 size-4" />
-              {t("org.membersPage.orgPage.addToProjectsButton")}
-            </Button>
-          </AppTooltip>
-        }
       />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as MembersTab)}>
@@ -215,49 +186,22 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
 
         <TabsContent value="roster">
           <div className="space-y-6">
-            {canInviteByEmail && (
-              <Section
-                title={t("org.membersPage.orgPage.inviteSectionTitle")}
-                description={t("org.membersPage.orgPage.inviteSectionDescription")}
-              >
-                <OrgInviteByEmail orgId={orgId} />
-              </Section>
-            )}
-
             {membersError && (
               <p className="text-xs text-destructive">{membersError}</p>
             )}
 
-            {membersLoading && members.length === 0 && !rosterHidden ? (
-              <Section title={t("org.membersPage.orgPage.roster")}>
-                <div className="flex items-center justify-center py-8 text-muted-foreground">
-                  <Spinner className="me-2" />
-                  <span className="text-sm">{t("org.membersPage.orgPage.loadingMembers")}</span>
-                </div>
-              </Section>
-            ) : rosterHidden ? (
-              // AQU-485: the org's rosterViewMinRole policy hides the roster (and
-              // count) from this caller. Render a distinct "hidden" state — never
-              // an empty roster, which would falsely imply zero members.
-              <Section title={t("org.membersPage.orgPage.roster")}>
-                <EmptyState
-                  variant="inline"
-                  icon={Lock}
-                  title={t("org.membersPage.rosterHiddenTitle")}
-                  description={t("org.membersPage.rosterHiddenBody")}
-                />
-              </Section>
+            {membersLoading && members.length === 0 ? (
+              <div className="h-48 animate-pulse rounded-lg border bg-card" />
             ) : (
               <>
-                <RosterWithProjectChips
+                <OrgMembersTable
                   orgId={orgId}
-                  panelMembers={panelMembers}
-                  listMemberProjects={listMemberProjects}
+                  members={members}
+                  callerOrgRoleLevel={activeOrg?.role.level ?? null}
+                  canAddToProjects={accessibleProjects.length > 0}
+                  onAddToProjects={() => setMultiInviteOpen(true)}
                   add={add}
                   addMany={addMany}
-                  remove={remove}
-                  callerUserId={callerUserId}
-                  callerOrgRoleLevel={activeOrg?.role.level ?? null}
                   onRequestRemove={(userId, username) =>
                     setRemoveTarget({ userId, username })
                   }
@@ -320,115 +264,6 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
     </MembersShell>
   )
 }
-
-/**
- * Roster + per-row inline expand for project memberships. Keeps the existing
- * MembersPanel for add/remove/role-change, and adds a row affordance to
- * see "where on the project portfolio is this person" without leaving the
- * page. Lazy-fetched: the list_member_projects round-trip only fires when
- * the row is expanded.
- */
-interface RosterProps {
-  orgId: number
-  panelMembers: MembersPanelMember[]
-  listMemberProjects: (userId: number) => Promise<OrgMemberProject[]>
-  add: (username: string, role: number) => Promise<unknown>
-  /** AQU-734: batch grant for the multi-select Add flow. */
-  addMany: (members: Array<{ username: string; role: number }>) => Promise<MemberGrantResult[]>
-  remove: (userId: number) => Promise<void>
-  callerUserId: number | null
-  /** AQU-427: the current user's org-level role, forwarded to MemberAccessRow
-   *  so the Revoke button can be disabled-with-explanation for low roles. */
-  callerOrgRoleLevel: number | null
-  onRequestRemove: (userId: number, username: string) => void
-}
-
-function RosterWithProjectChips({
-  orgId,
-  panelMembers,
-  add,
-  addMany,
-  callerUserId,
-  callerOrgRoleLevel,
-  onRequestRemove,
-}: RosterProps) {
-  const t = useT()
-  // AQU-780: surface the real reason a role change failed (a Maintainer hitting
-  // the owner-only gate used to fail silently — `add()` swallowed the 403).
-  const [roleError, setRoleError] = useState<string | null>(null)
-  return (
-    <>
-      <Section
-        title={t("org.membersPage.orgPage.roster")}
-        description={t("org.membersPage.orgPage.rosterSectionDescription")}
-      >
-        <MembersPanel
-          members={panelMembers}
-          roleOptions={ORG_ROLE_OPTIONS}
-          newMemberDefaultRole={ROLE.MAINTAINER}
-          callerUserId={callerUserId}
-          callerMaxRole={ROLE.MAINTAINER}
-          scopedUserSearch={false}
-          onAdd={async (usernames, role) => {
-            const results = await addMany(usernames.map((username) => ({ username, role })))
-            return results.map((r) => ({
-              username: r.username,
-              ok: r.ok,
-              error: r.error?.message,
-            }))
-          }}
-          onAddBatchError={(e) => {
-            // AQU-780: a whole-batch throw means nothing landed — a 403
-            // owner-gate, a 429, or a 5xx. Report the actual cause instead of
-            // "may not exist" (a genuinely unknown username comes back as a
-            // per-person `user_not_found` result, not a thrown batch error).
-            const uf = toUserFacingError(e, "org")
-            return uf.category === "forbidden"
-              ? "Only org owners can add members."
-              : uf.message
-          }}
-          onRemove={(userId) => {
-            const target = panelMembers.find((m) => m.userId === userId)
-            if (target) onRequestRemove(target.userId, target.username)
-            return Promise.resolve()
-          }}
-          onChangeRole={async (username, role) => {
-            setRoleError(null)
-            try {
-              await add(username, role)
-            } catch (e) {
-              const uf = toUserFacingError(e, "org")
-              setRoleError(
-                uf.category === "forbidden"
-                  ? "Only org owners can change member roles."
-                  : uf.message,
-              )
-            }
-          }}
-        />
-        {roleError && <p className="text-xs text-destructive">{roleError}</p>}
-      </Section>
-
-      <Section
-        title={t("org.membersPage.orgPage.projectAccessTitle")}
-        description={t("org.membersPage.orgPage.projectAccessDescription")}
-      >
-        <ul className="divide-y">
-          {panelMembers.map((m) => (
-            <MemberAccessRow
-              key={m.userId}
-              orgId={orgId}
-              userId={m.userId}
-              username={m.username}
-              callerOrgRoleLevel={callerOrgRoleLevel}
-            />
-          ))}
-        </ul>
-      </Section>
-    </>
-  )
-}
-
 
 /**
  * Pending share-link invitations across this org. Owner-only (the server

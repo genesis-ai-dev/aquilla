@@ -96,7 +96,8 @@ ORDER BY s.canonical_ref`
 
 // ── Contextual pipeline nodes (auth-worker/src/lib/contextual/*) ────────────
 // Each node's system prompt carries a routing marker ([[ctx:construe]],
-// [[ctx:summarize]], [[ctx:draft]], [[ctx:verify:<stance>]]) so the mock can
+// [[ctx:summarize]], [[ctx:draft]], [[ctx:support]], [[ctx:segment]],
+// [[ctx:verify:<stance>]]) so the mock can
 // return a VALID canned JSON body per node without sniffing prompt copy.
 
 /** Cell ids referenced as "[<id>]" in the construe window block. */
@@ -135,6 +136,26 @@ function contextualMockResponse(marker: string, userText: string) {
   if (marker.startsWith("draft")) {
     const lines = extractNumberedLines(userText)
     return respond(JSON.stringify(lines.map(({ i, body }) => ({ i, t: `MOCK ${body}` }))))
+  }
+  if (marker.startsWith("segment")) {
+    // Passage detection. Break every 10 lines so the shape is deterministic
+    // and the coverage invariant is exercised without depending on content.
+    const lines = extractNumberedLines(userText)
+    const count = lines.length
+    const out: { line: number; title: string; gist: string }[] = []
+    for (let line = 1; line <= count; line += 10) {
+      out.push({ line, title: `Mock passage ${out.length + 1}`, gist: "A mock passage." })
+    }
+    return respond(JSON.stringify({ passages: out }))
+  }
+  if (marker.startsWith("support")) {
+    // Fast-tier triage of unattested wording. Clear everything: the mock
+    // drafter echoes the source, so its "novel" tokens are an artifact of the
+    // mock, not a finding — confirming them would escalate every e2e span to
+    // the full verifier panel.
+    const count = Number(userText.match(/Triage these (\d+) draft segment/)?.[1] ?? 0)
+    const cells = Array.from({ length: count }, (_, idx) => ({ i: idx + 1, risky: false, reason: "mock: benign" }))
+    return respond(JSON.stringify({ cells }))
   }
   if (marker.startsWith("verify")) {
     const count = Number(userText.match(/Verify these (\d+) drafted cells/)?.[1] ?? 0)
@@ -253,15 +274,39 @@ export function scriptMockResponse(messages: ChatMessage[]) {
     return respond(`[mock] ${copilotMatch[1].trim()}`)
   }
 
-  // The draft tool's INTERNAL model call: numbered source segments in, strict
-  // [{i,t}] JSON out. Detected by the user-turn shape the tool builds.
-  const translateMatch = userText.match(/^Translate these \d+ segments:/)
-  if (translateMatch) {
-    const drafts: { i: number; t: string }[] = []
-    for (const line of userText.split("\n")) {
-      const m = line.match(/^(\d+)\.\s*(?:\[[^\]]*\]\s*)?(.+)$/)
-      if (m) drafts.push({ i: Number(m[1]), t: `[bozza] ${m[2].trim()}` })
-    }
+  // The draft tool's INTERNAL two-pass model workflow. Route on the
+  // server-owned system contract, not source/user wording: the generation
+  // user message now starts with the completed evidence record, so matching
+  // only `^Translate these …` silently routed it back into the orchestrator's
+  // draft-tool flow and produced no parseable [{i,t}] result.
+  const isDraftResearch = messages.some((message) =>
+    message.role === "system"
+      && typeof message.content === "string"
+      && message.content.includes("You are the RESEARCH pass, separate from final generation."),
+  )
+  if (isDraftResearch) {
+    const count = extractNumberedLines(userText).length
+    return respond(
+      `Mock evidence record for ${count} source segments: preserve every proposition and follow the project evidence.`,
+    )
+  }
+
+  const isDraftGeneration = messages.some((message) =>
+    message.role === "system"
+      && typeof message.content === "string"
+      && message.content.includes("You are the GENERATION pass."),
+  )
+  // Keep the direct prompt shape as a compatibility fallback for older draft
+  // callers while treating the current generation system prompt as canonical.
+  const translateMatch = userText.match(/(?:^|\n)Translate these \d+ segments:[^\n]*(?:\n|$)/)
+  if (isDraftGeneration || translateMatch) {
+    const numberedInput = translateMatch
+      ? userText.slice((translateMatch.index ?? 0) + translateMatch[0].length)
+      : userText
+    const drafts = extractNumberedLines(numberedInput).map(({ i, body }) => ({
+      i,
+      t: `[bozza] ${body}`,
+    }))
     return respond(JSON.stringify(drafts))
   }
   // Match action words, not status adjectives: "translated" and "validated"

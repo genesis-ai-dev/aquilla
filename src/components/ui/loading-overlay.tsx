@@ -4,6 +4,7 @@ import { createPortal } from "react-dom"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
+import { STAT_TILE_GRID } from "@/components/ui/page"
 
 /** The shared spinner pill shown centered on every loading overlay. */
 function LoadingStatusPill({ label }: { label: string }) {
@@ -190,7 +191,7 @@ function NeutralLoadingTemplate() {
         <div className="m-2 flex min-h-0 flex-1 flex-col rounded-xl border bg-background">
           <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 sm:py-8">
             <Skeleton className="h-7 w-48" />
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+            <div className={STAT_TILE_GRID}>
               {Array.from({ length: 6 }).map((_, index) => (
                 <Skeleton key={index} className="h-[88px] rounded-lg" />
               ))}

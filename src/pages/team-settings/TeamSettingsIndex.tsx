@@ -18,11 +18,13 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { deleteTeam, getTeam, updateTeam, type TeamDetail as TeamDetailType } from "@/lib/frontier/teams"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { useSubmitError } from "@/lib/forms/submit-error"
 import { orgPath } from "@/lib/navigation/org-paths"
 import { TeamSettingsShell } from "./TeamSettingsShell"
 
 export function TeamSettingsIndex() {
+  const { t } = useI18n()
   const { groupId } = useParams<{ groupId: string }>()
   const groupIdNum = groupId != null ? Number(groupId) : null
   const { activeOrgId, activeOrg } = useActiveOrg()
@@ -47,10 +49,10 @@ export function TeamSettingsIndex() {
     if (!jwt || activeOrgId == null || groupIdNum == null) return
     setLoading(true)
     try {
-      const t = await getTeam(jwt, activeOrgId, groupIdNum)
-      setTeam(t)
-      setName(t?.name ?? "")
-      setDescription(t?.description ?? "")
+      const fetched = await getTeam(jwt, activeOrgId, groupIdNum)
+      setTeam(fetched)
+      setName(fetched?.name ?? "")
+      setDescription(fetched?.description ?? "")
     } finally {
       setLoading(false)
     }
@@ -129,22 +131,22 @@ export function TeamSettingsIndex() {
   } else if (team == null) {
     body = (
       <EmptyState
-        title="Team not found."
-        description="This team may have been deleted, or you may not have access to it."
+        title={t("org.teamDetail.notFoundTitle")}
+        description={t("org.teamDetail.notFoundDescription")}
       />
     )
   } else {
     body = (
       <>
         <PageHeader
-          title="Team settings"
-          description="Manage this team's name, description, and membership grants."
+          title={t("settings.teamSettings.title")}
+          description={t("settings.teamSettings.description")}
         />
         <div className="flex flex-col gap-12">
           <SettingsGroup>
             <SettingsRow
-              label="Team name"
-              description="Shown on the team page and in organization lists."
+              label={t("org.teamForm.nameLabel")}
+              description={t("settings.teamSettings.nameRowDescription")}
               control={
                 <Field
                   data-invalid={Boolean(nameError) || undefined}
@@ -152,7 +154,7 @@ export function TeamSettingsIndex() {
                   className="w-auto *:w-auto"
                 >
                   <FieldLabel htmlFor="team-settings-name" className="sr-only">
-                    Team name
+                    {t("org.teamForm.nameLabel")}
                   </FieldLabel>
                   <Input
                     id="team-settings-name"
@@ -164,7 +166,7 @@ export function TeamSettingsIndex() {
                     onBlur={() => {
                       void handleNameBlur()
                     }}
-                    placeholder="Team name"
+                    placeholder={t("org.teamForm.nameLabel")}
                     aria-invalid={Boolean(nameError) || undefined}
                     disabled={!canEdit}
                     className="w-56 bg-background"
@@ -178,15 +180,15 @@ export function TeamSettingsIndex() {
           <div className="flex flex-col gap-3">
             <div className="min-w-0 space-y-1 pl-4">
               <p className="font-heading text-base font-medium tracking-tight text-foreground">
-                Description
+                {t("nav.report.descriptionFieldLabel")}
               </p>
               <p className="text-sm text-muted-foreground">
-                A short summary shown on the team page.
+                {t("settings.teamSettings.descriptionSummary")}
               </p>
             </div>
             <Field data-disabled={!canEdit || undefined}>
               <FieldLabel htmlFor="team-settings-desc" className="sr-only">
-                Description
+                {t("nav.report.descriptionFieldLabel")}
               </FieldLabel>
               <Textarea
                 id="team-settings-desc"
@@ -195,7 +197,7 @@ export function TeamSettingsIndex() {
                 onBlur={() => {
                   void handleDescriptionBlur()
                 }}
-                placeholder="Add a description…"
+                placeholder={t("settings.teamSettings.descriptionPlaceholder")}
                 disabled={!canEdit}
                 rows={5}
                 className="min-h-24 resize-none bg-card px-4 py-3"
@@ -208,17 +210,17 @@ export function TeamSettingsIndex() {
           ) : null}
 
           {isAdmin ? (
-            <SettingsGroup label="Danger zone">
+            <SettingsGroup label={t("settings.teamSettings.dangerZoneLabel")}>
               <SettingsRow
-                label="Delete team"
-                description="Permanently remove this team and all of its project grants. Members keep their org roles."
+                label={t("org.teamDetail.deleteTeamButton")}
+                description={t("settings.teamSettings.deleteTeamRowDescription")}
                 control={
                   <Button
                     type="button"
                     variant="destructive"
                     onClick={() => setConfirmDelete(true)}
                   >
-                    Delete team
+                    {t("org.teamDetail.deleteTeamButton")}
                   </Button>
                 }
               />
@@ -230,10 +232,10 @@ export function TeamSettingsIndex() {
           <Dialog open={confirmDelete} onOpenChange={(o) => { if (!o) setConfirmDelete(false) }}>
             <DialogContent className="max-w-md">
               <DialogHeader>
-                <DialogTitle>Delete &apos;{team.name}&apos;?</DialogTitle>
+                <DialogTitle>{t("org.teamDetail.deleteConfirmTitle", { name: team.name })}</DialogTitle>
               </DialogHeader>
               <p className="text-sm text-muted-foreground">
-                This removes the team and all its grants.
+                {t("org.teamDetail.deleteConfirmBody")}
               </p>
               <DialogFooter>
                 <Button
@@ -242,7 +244,7 @@ export function TeamSettingsIndex() {
                   onClick={() => setConfirmDelete(false)}
                   disabled={deleting}
                 >
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
                 <Button
                   type="button"

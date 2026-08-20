@@ -11,6 +11,8 @@ import {
 import { Input } from "@/components/ui/input"
 import { Field, FieldError, FieldGroup, FieldLabel, OptionalMark } from "@/components/ui/field"
 import { SettingsGroup } from "@/components/ui/page"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { optionalString, requiredString } from "@/lib/forms/schemas"
 import {
@@ -32,6 +34,7 @@ const formSchema = z.object({
  * managed model + sign-in).
  */
 export function PersonalProviderSection() {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const [hasOverride, setHasOverride] = useState(false)
 
@@ -70,7 +73,7 @@ export function PersonalProviderSection() {
   }
 
   return (
-    <SettingsGroup label="Personal override">
+    <SettingsGroup label={t("settings.personalProvider.groupLabel")}>
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger className="flex w-full items-start gap-3 px-5 py-4 text-start hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none focus-visible:ring-inset">
           {open ? (
@@ -80,7 +83,7 @@ export function PersonalProviderSection() {
           )}
           <div className="min-w-0 flex flex-col gap-1">
             <p className="text-sm font-medium text-foreground">
-              AI provider (advanced)
+              {t("settings.personalProvider.advancedToggleLabel")}
             </p>
             <p className="text-xs text-muted-foreground">
               {hasOverride
@@ -100,9 +103,7 @@ export function PersonalProviderSection() {
             }}
           >
             <p className="text-xs text-muted-foreground">
-              Use your own OpenAI-compatible endpoint instead of Frontier for AI
-              translations. Stored only in this browser, never synced. Overrides
-              any project-level provider setting.
+              {t("settings.personalProvider.description")}
             </p>
 
             <FieldGroup>
@@ -112,7 +113,9 @@ export function PersonalProviderSection() {
                   const invalid = isFieldInvalid(field)
                   return (
                     <Field data-invalid={invalid}>
-                      <FieldLabel htmlFor="prov-endpoint">Endpoint URL</FieldLabel>
+                      <FieldLabel htmlFor="prov-endpoint">
+                        {t("projectSettings.advancedLlm.endpointLabel")}
+                      </FieldLabel>
                       <Input
                         id="prov-endpoint"
                         name={field.name}
@@ -124,8 +127,14 @@ export function PersonalProviderSection() {
                         autoComplete="off"
                       />
                       <p className="text-[11px] text-muted-foreground">
-                        Trailing <code className="font-mono">/v1</code> or{" "}
-                        <code className="font-mono">/chat/completions</code> is fine.
+                        <RichMessage
+                          k="settings.personalProvider.trailingPathHint"
+                          values={{
+                            v1Path: <code className="font-mono">/v1</code>,
+                            // i18n-exempt literal API path, shown verbatim as syntax
+                            chatCompletionsPath: <code className="font-mono">/chat/completions</code>,
+                          }}
+                        />
                       </p>
                       {invalid && <FieldError errors={field.state.meta.errors} />}
                     </Field>
@@ -138,7 +147,7 @@ export function PersonalProviderSection() {
                 children={(field) => (
                   <Field>
                     <FieldLabel htmlFor="prov-model">
-                      Model <OptionalMark />
+                      {t("projectSettings.advancedLlm.modelLabel")} <OptionalMark />
                     </FieldLabel>
                     <Input
                       id="prov-model"
@@ -158,7 +167,7 @@ export function PersonalProviderSection() {
                 children={(field) => (
                   <Field>
                     <FieldLabel htmlFor="prov-key">
-                      API key <OptionalMark />
+                      {t("projectSettings.field.apiKey")} <OptionalMark />
                     </FieldLabel>
                     <Input
                       id="prov-key"
@@ -167,12 +176,17 @@ export function PersonalProviderSection() {
                       value={field.state.value}
                       onBlur={field.handleBlur}
                       onChange={(e) => field.handleChange(e.target.value)}
-                      placeholder="sk-…"
+                      placeholder={t("settings.personalProvider.apiKeyPlaceholder")}
                       autoComplete="off"
                     />
                     <p className="text-[11px] text-muted-foreground">
-                      Sent as <code className="font-mono">Authorization: Bearer …</code>.
-                      Leave blank for unauthenticated local endpoints.
+                      <RichMessage
+                        k="settings.personalProvider.authHeaderHint"
+                        values={{
+                          // i18n-exempt literal HTTP header, shown verbatim as syntax
+                          authHeader: <code className="font-mono">Authorization: Bearer …</code>,
+                        }}
+                      />
                     </p>
                   </Field>
                 )}
@@ -185,7 +199,7 @@ export function PersonalProviderSection() {
               </Button>
               {hasOverride && (
                 <Button type="button" variant="ghost" onClick={handleClear}>
-                  Remove override
+                  {t("settings.personalProvider.removeOverride")}
                 </Button>
               )}
             </div>

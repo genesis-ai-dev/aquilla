@@ -79,26 +79,33 @@ async function readEnvelope(): Promise<Envelope> {
 }
 
 // ---- auth-hint cookie ----
-// A non-credential, host-only 1-bit cookie that the aquilla-web Worker reads
-// at the edge to decide whether to serve the SPA or the homepage without
-// waiting for IDB. No Domain attribute → cookie is scoped to whichever host
-// (aquilla.app, dev.aquilla.app, localhost) wrote it, keeping envs isolated.
+// A non-credential, host-only 1-bit cookie used by the SPA's entry/login guards
+// before IndexedDB hydration. No Domain attribute → cookie is scoped to the
+// current environment host (aquilla.app, dev.aquilla.app, localhost).
 const HINT_COOKIE = "aq_hint"
 
+// [Pen test 2026-08-17] `Secure` prevents the cookie from ever being sent (or
+// set) over a plaintext connection. Conditional on protocol rather than
+// unconditional: an unconditional `Secure` attribute is silently dropped by
+// the browser on http:// origins, which would break the hint on local dev
+// (http://localhost) and any non-TLS preview host.
+function secureAttr(): string {
+  return typeof location !== "undefined" && location.protocol === "https:" ? "; Secure" : ""
+}
+
 function setAuthHint(): void {
-  document.cookie = `${HINT_COOKIE}=1; Path=/; Max-Age=31536000; SameSite=Lax`
+  document.cookie = `${HINT_COOKIE}=1; Path=/; Max-Age=31536000; SameSite=Lax${secureAttr()}`
 }
 
 export function clearAuthHint(): void {
-  document.cookie = `${HINT_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`
+  document.cookie = `${HINT_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax${secureAttr()}`
 }
 
 /**
  * Returns true when the auth-hint cookie (aq_hint=1) is present.
  *
- * Marketing pages call this during render and are also rendered in Node by the
- * build-time prerender (scripts/prerender-marketing.ts), where there is no
- * `document` — the prerendered fallback is always the signed-out variant.
+ * The guard is also safe in non-browser test/build contexts where `document`
+ * does not exist.
  */
 export function hasAuthHintCookie(): boolean {
   if (typeof document === "undefined") return false

@@ -6,12 +6,9 @@
 //   1. project brief — verbatim, marked human-authored
 //   2. approved-memory index — path + first line; full text via read_memory
 //   3. new-tool guidance — sandbox / import / memory tools
-//   4. language rule — scaffolding is English; reply in the working language
+//   4. conversation-language rule — never confuse it with translation target
 
 import type { MemoryContext } from "../../../../db/shared/agent-memory"
-
-/** Fallback phrasing when no working language is resolvable from settings. */
-const WORKING_LANGUAGE_FALLBACK = "the project's working language"
 
 /** Max approved-memory entries to render in the index (adversarial-panel
  *  mem-m1). The index is ordered most-recently-updated first; the rest are
@@ -20,8 +17,8 @@ const MEMORY_INDEX_RENDER_CAP = 50
 
 export interface AugmentArgs {
   memory: MemoryContext
-  /** Project working (target) language, if resolvable; else the fallback. */
-  workingLanguage?: string
+  /** Explicit user preference. Unset means follow the latest user message. */
+  responseLanguage?: string
 }
 
 /**
@@ -79,11 +76,15 @@ export function buildAugmentSystemPrompt(args: AugmentArgs): string {
       "- propose_memory / propose_brief_update STAGE durable notes for human review. While you are parsing untrusted artifact content (after run_code or load_artifact in a turn), these are temporarily disabled.",
   )
 
-  // 4. Language rule (last, so it is the freshest instruction).
-  const lang = args.workingLanguage?.trim() || WORKING_LANGUAGE_FALLBACK
+  // 4. Conversation language (last, so it cannot be confused with the
+  // project's target language in the resident schema card).
+  const responseLanguage = args.responseLanguage?.trim()
   sections.push(
-    "## Language\n" +
-      `All internal scaffolding (tool names, this prompt) is English. Reply to the user in ${lang}.`,
+    "## Conversation language\n" +
+      (responseLanguage
+        ? `Reply to the user in ${responseLanguage}.`
+        : "Reply in the language of the user's latest message; if it is ambiguous, use English.") +
+      " The project target language applies only to translated content, never ordinary conversation.",
   )
 
   return sections.join("\n\n")

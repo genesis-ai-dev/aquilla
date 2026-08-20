@@ -92,6 +92,8 @@ interface CellActionRailProps {
   /** Faint chevron persists when not revealed so the affordance is always
    *  discoverable even without hovering. */
   alwaysShowChevron?: boolean
+  /** Hide the details toggle when the surrounding surface has no expansion panel. */
+  showDetailsToggle?: boolean
   /** Tiny dot on the chevron — set when something inside the expansion needs
    *  attention (stale BT, transcript mismatch, unresolved infraction). */
   expansionAttentionDot?: "amber" | "red" | "emerald" | "primary" | null
@@ -104,7 +106,7 @@ interface CellActionRailProps {
  */
 export function CellActionRail({
   revealed, expanded, onToggleExpanded,
-  alwaysShowChevron, expansionAttentionDot, children,
+  alwaysShowChevron, showDetailsToggle = true, expansionAttentionDot, children,
 }: CellActionRailProps) {
   const mountActions = revealed || expanded || import.meta.env.MODE === "test"
 
@@ -138,33 +140,35 @@ export function CellActionRail({
         {mountActions ? children : null}
       </div>
 
-      <div
-        className={cn(
-          "transition-opacity duration-150",
-          revealed
-            ? "opacity-100"
-            : alwaysShowChevron
-              ? "opacity-30 hover:opacity-100"
-              : "pointer-events-none opacity-0",
-        )}
-      >
-        <RailButton
-          icon={
-            <ChevronDown
-              className="h-3.5 w-3.5"
-              style={{
-                transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
-              }}
-            />
-          }
-          tooltip={expanded ? "Close cell details" : "Open cell details"}
-          onClick={onToggleExpanded}
-          dot={expansionAttentionDot ?? undefined}
-          toneClass={expanded
-            ? "bg-card text-foreground"
-            : "text-muted-foreground/70 hover:text-foreground"}
-        />
-      </div>
+      {showDetailsToggle && (
+        <div
+          className={cn(
+            "transition-opacity duration-150",
+            revealed
+              ? "opacity-100"
+              : alwaysShowChevron
+                ? "opacity-30 hover:opacity-100"
+                : "pointer-events-none opacity-0",
+          )}
+        >
+          <RailButton
+            icon={
+              <ChevronDown
+                className="h-3.5 w-3.5"
+                style={{
+                  transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
+                }}
+              />
+            }
+            tooltip={expanded ? "Close cell details" : "Open cell details"}
+            onClick={onToggleExpanded}
+            dot={expansionAttentionDot ?? undefined}
+            toneClass={expanded
+              ? "bg-card text-foreground"
+              : "text-muted-foreground/70 hover:text-foreground"}
+          />
+        </div>
+      )}
     </div>
   )
 }

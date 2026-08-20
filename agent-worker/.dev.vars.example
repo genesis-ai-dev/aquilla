@@ -1,0 +1,7 @@
+# Copy to .dev.vars for local dev (.dev.vars is gitignored).
+# For production secrets use: wrangler secret put AGENT_SANDBOX_KEY
+
+# Shared bearer secret required on every route except /health. MUST match
+# auth-worker's AGENT_SANDBOX_KEY — it calls this worker to run sandboxed
+# agent code execution.
+AGENT_SANDBOX_KEY="dev-agent-sandbox-secret"

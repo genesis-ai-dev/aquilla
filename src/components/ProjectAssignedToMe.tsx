@@ -15,6 +15,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { getMyAssignments, type MyAssignment } from "@/lib/sync/assignments"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 interface ProjectAssignedToMeProps {
   projectId: string
@@ -35,6 +36,7 @@ export function ProjectAssignedToMe({
   onJumpToAssignment,
   refreshKey = 0,
 }: ProjectAssignedToMeProps) {
+  const t = useT()
   const [assignments, setAssignments] = useState<MyAssignment[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -71,7 +73,7 @@ export function ProjectAssignedToMe({
       >
         {expanded ? <ChevronDown className="h-3 w-3 shrink-0" /> : <ChevronRight className="h-3 w-3 shrink-0" />}
         <ClipboardList className="h-3 w-3 shrink-0" />
-        <span className="truncate">My assignments</span>
+        <span className="truncate">{t("workspace.assignedToMe.heading")}</span>
         {assignments.length > 0 && (
           <Badge className="ms-auto shrink-0">{assignments.length}</Badge>
         )}
@@ -89,7 +91,14 @@ export function ProjectAssignedToMe({
             assignments.map((a) => {
               const pct = a.cellsTotal > 0 ? Math.round((a.cellsDone / a.cellsTotal) * 100) : 0
               return (
-                <AppTooltip key={a.assignmentId} content={`Jump to ${a.scopeLabel}${a.note ? `: ${a.note}` : ""}`}>
+                <AppTooltip
+                  key={a.assignmentId}
+                  content={
+                    a.note
+                      ? t("workspace.assignedToMe.jumpToWithNoteTooltip", { scope: a.scopeLabel, note: a.note })
+                      : t("workspace.assignedToMe.jumpToTooltip", { scope: a.scopeLabel })
+                  }
+                >
                   <button
                     type="button"
                     onClick={() => handleRowClick(a)}
@@ -115,7 +124,7 @@ export function ProjectAssignedToMe({
                       <div className="h-full rounded-full bg-primary transition-[width]" style={{ width: `${pct}%` }} />
                     </div>
                     <p className="mt-0.5 text-[10px] text-muted-foreground">
-                      {a.cellsDone}/{a.cellsTotal} cells
+                      {t("workspace.assignedToMe.cellsProgress", { done: a.cellsDone, total: a.cellsTotal })}
                       {a.deadline ? ` · Due ${a.deadline}` : ""}
                     </p>
                   </button>

@@ -17,6 +17,7 @@ import { useEditorScroll } from "@/context/EditorScrollContext"
 import {
   attachContextualRun,
   dismissContextualRunSummary,
+  getContextualRunState,
   requestPauseContextualRun,
   resumeContextualRun,
   startContextualRun,
@@ -221,12 +222,22 @@ function ContextualRunPillScoped({
           aria-label={t("autopilot.action.run")}
           onClick={() => {
             setControlError(null)
-            if (!available) { onSetupNeeded?.(); return }
-            void startContextualRun(projectId, fileId, anchorCellId ?? undefined, activeLane).then((started) => {
+            void (async () => {
+              // available starts false until the snapshot lands. Treat that
+              // window as hydration, not "backend missing" — otherwise Play
+              // opens AI setup instead of starting the run.
+              if (!available) {
+                await attachContextualRun(projectId, fileId)
+                if (!getContextualRunState().available) {
+                  onSetupNeeded?.()
+                  return
+                }
+              }
+              const started = await startContextualRun(projectId, fileId, anchorCellId ?? undefined, activeLane)
               if (!started) {
                 setControlError(t("autopilot.pill.startFailed"))
               }
-            })
+            })()
           }}
         >
           <Play className="h-3.5 w-3.5" />

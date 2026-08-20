@@ -1,7 +1,12 @@
 /**
- * ModelListEditor — the managed allowed-models list. Verifies add (first model
- * auto-becomes both defaults), marking chat/agent, and removal (with default
- * reassignment). Rendered through a stateful harness since it's controlled.
+ * ModelListEditor — the managed allowed-models list.
+ *
+ * Two kinds of role live on this list and they behave differently on purpose:
+ * chat and agent are REQUIRED (the first model added claims them, and removing
+ * the holder reassigns), while the autopilot's fast and deep tiers are
+ * OPTIONAL (nothing claims them implicitly, clicking an active one clears it,
+ * and removing the holder falls back rather than reassigning). Reassigning a
+ * tier an admin never chose would silently change what the pipeline runs on.
  */
 import { describe, it, expect } from "vitest"
 import { useState } from "react"
@@ -20,16 +25,35 @@ function Harness({ initial }: { initial: ModelListValue }) {
 
 const state = () => JSON.parse(screen.getByTestId("state").textContent!) as ModelListValue
 
+const value = (over: Partial<ModelListValue> = {}): ModelListValue => ({
+  models: [],
+  chatModel: "",
+  agentModel: "",
+  fastModel: "",
+  deepModel: "",
+  ...over,
+})
+
 describe("ModelListEditor", () => {
   it("adds the first model and makes it both defaults", () => {
-    render(<Harness initial={{ models: [], chatModel: "", agentModel: "" }} />)
+    render(<Harness initial={value()} />)
     fireEvent.change(screen.getByLabelText(/add a model id/i), { target: { value: "a/model" } })
     fireEvent.click(screen.getByRole("button", { name: /^add$/i }))
-    expect(state()).toEqual({ models: ["a/model"], chatModel: "a/model", agentModel: "a/model" })
+    expect(state()).toEqual(
+      value({ models: ["a/model"], chatModel: "a/model", agentModel: "a/model" }),
+    )
+  })
+
+  it("does not let the first model claim the optional autopilot tiers", () => {
+    render(<Harness initial={value()} />)
+    fireEvent.change(screen.getByLabelText(/add a model id/i), { target: { value: "a/model" } })
+    fireEvent.click(screen.getByRole("button", { name: /^add$/i }))
+    expect(state().fastModel).toBe("")
+    expect(state().deepModel).toBe("")
   })
 
   it("ignores duplicate and empty additions", () => {
-    render(<Harness initial={{ models: ["a/model"], chatModel: "a/model", agentModel: "a/model" }} />)
+    render(<Harness initial={value({ models: ["a/model"], chatModel: "a/model", agentModel: "a/model" })} />)
     fireEvent.change(screen.getByLabelText(/add a model id/i), { target: { value: "a/model" } })
     fireEvent.click(screen.getByRole("button", { name: /^add$/i }))
     expect(state().models).toEqual(["a/model"])
@@ -37,18 +61,66 @@ describe("ModelListEditor", () => {
 
   it("marks a row as the agent model without touching the chat default", () => {
     render(
-      <Harness initial={{ models: ["a/model", "b/model"], chatModel: "a/model", agentModel: "a/model" }} />,
+      <Harness
+        initial={value({ models: ["a/model", "b/model"], chatModel: "a/model", agentModel: "a/model" })}
+      />,
     )
     const bRow = screen.getByText("b/model").closest("li")!
     fireEvent.click(within(bRow).getByRole("button", { name: /^Agent/i }))
     expect(state()).toMatchObject({ chatModel: "a/model", agentModel: "b/model" })
   })
 
-  it("reassigns defaults when the selected model is removed", () => {
+  it("sets and then clears the fast tier — it is optional, so the toggle is a toggle", () => {
     render(
-      <Harness initial={{ models: ["a/model", "b/model"], chatModel: "a/model", agentModel: "a/model" }} />,
+      <Harness
+        initial={value({ models: ["a/model", "b/model"], chatModel: "a/model", agentModel: "a/model" })}
+      />,
+    )
+    const bRow = screen.getByText("b/model").closest("li")!
+    fireEvent.click(within(bRow).getByRole("button", { name: /^Fast/i }))
+    expect(state().fastModel).toBe("b/model")
+    fireEvent.click(within(bRow).getByRole("button", { name: /^Fast/i }))
+    expect(state().fastModel).toBe("")
+  })
+
+  it("keeps the fast and deep tiers independent of each other", () => {
+    render(
+      <Harness
+        initial={value({ models: ["a/model", "b/model"], chatModel: "a/model", agentModel: "a/model" })}
+      />,
+    )
+    const aRow = screen.getByText("a/model").closest("li")!
+    const bRow = screen.getByText("b/model").closest("li")!
+    fireEvent.click(within(aRow).getByRole("button", { name: /^Fast/i }))
+    fireEvent.click(within(bRow).getByRole("button", { name: /^Deep/i }))
+    expect(state()).toMatchObject({ fastModel: "a/model", deepModel: "b/model" })
+  })
+
+  it("reassigns the required defaults when the selected model is removed", () => {
+    render(
+      <Harness
+        initial={value({ models: ["a/model", "b/model"], chatModel: "a/model", agentModel: "a/model" })}
+      />,
     )
     fireEvent.click(screen.getByRole("button", { name: /remove a\/model/i }))
-    expect(state()).toEqual({ models: ["b/model"], chatModel: "b/model", agentModel: "b/model" })
+    expect(state()).toEqual(
+      value({ models: ["b/model"], chatModel: "b/model", agentModel: "b/model" }),
+    )
+  })
+
+  it("CLEARS an optional tier when its model is removed rather than reassigning it", () => {
+    render(
+      <Harness
+        initial={value({
+          models: ["a/model", "b/model"],
+          chatModel: "b/model",
+          agentModel: "b/model",
+          fastModel: "a/model",
+          deepModel: "a/model",
+        })}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /remove a\/model/i }))
+    expect(state()).toMatchObject({ fastModel: "", deepModel: "" })
   })
 })

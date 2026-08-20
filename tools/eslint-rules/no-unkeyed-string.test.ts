@@ -32,8 +32,9 @@ ruleTester.run("no-unkeyed-string", noUnkeyedString, {
     // Translatable attribute, but the value is an atomic term / identifier shape.
     { code: "const x = <img alt=\"USFM\" />", filename: "src/components/Foo.tsx" },
     { code: "const x = <input placeholder=\"https://example.com/path\" />", filename: "src/components/Foo.tsx" },
-    // Template literal WITH an expression: known limitation, not flagged (see rule doc comment).
-    { code: "const x = <p>{`Deleted ${n} files`}</p>", filename: "src/components/Foo.tsx" },
+    // Dynamic content and keyed calls contain no authored visible copy.
+    { code: "const x = <p>{serverMessage}</p>", filename: "src/components/Foo.tsx" },
+    { code: "const x = <p>{t('knowledgeBase.empty')}</p>", filename: "src/components/Foo.tsx" },
     // Notification call with a dynamic (non-literal) message is out of scope.
     { code: "toast.error(errorMessage)", filename: "src/components/Foo.tsx" },
     // Escape hatch: inline exemption comment.
@@ -47,6 +48,22 @@ ruleTester.run("no-unkeyed-string", noUnkeyedString, {
     // JSXText between tags — the highest-confidence detection class.
     {
       code: "const x = <p>Save changes</p>",
+      filename: "src/components/Foo.tsx",
+      errors: [{ messageId: "unkeyed" }],
+    },
+    // Authored copy inside JSX expressions must be catalogued too.
+    {
+      code: "const x = <p>{`Deleted ${n} files`}</p>",
+      filename: "src/components/Foo.tsx",
+      errors: [{ messageId: "unkeyed" }],
+    },
+    {
+      code: "const x = <p>{ready ? 'Knowledge base ready' : 'Indexing knowledge base'}</p>",
+      filename: "src/components/Foo.tsx",
+      errors: [{ messageId: "unkeyed" }, { messageId: "unkeyed" }],
+    },
+    {
+      code: "const x = <p>{'Uploaded ' + fileName}</p>",
       filename: "src/components/Foo.tsx",
       errors: [{ messageId: "unkeyed" }],
     },
@@ -67,9 +84,19 @@ ruleTester.run("no-unkeyed-string", noUnkeyedString, {
       filename: "src/components/Foo.tsx",
       errors: [{ messageId: "unkeyed" }],
     },
+    {
+      code: "const x = <button aria-label={open ? 'Close knowledge base' : 'Open knowledge base'} />",
+      filename: "src/components/Foo.tsx",
+      errors: [{ messageId: "unkeyed" }, { messageId: "unkeyed" }],
+    },
     // Notification calls: toast.* and window.alert/confirm.
     {
       code: "toast.error('Failed to save project')",
+      filename: "src/components/Foo.tsx",
+      errors: [{ messageId: "unkeyed" }],
+    },
+    {
+      code: "toast.success(`Uploaded ${name}`)",
       filename: "src/components/Foo.tsx",
       errors: [{ messageId: "unkeyed" }],
     },

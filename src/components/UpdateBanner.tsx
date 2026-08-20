@@ -1,8 +1,10 @@
 import { RefreshCwIcon } from "lucide-react"
 import { useUpdateCheck } from "@/hooks/useUpdateCheck"
 import { Button } from "@/components/ui/button"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export function UpdateBanner() {
+  const t = useT()
   const updateAvailable = useUpdateCheck()
   if (!updateAvailable) return null
 
@@ -16,7 +18,7 @@ export function UpdateBanner() {
         <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-violet-400 opacity-75" />
         <span className="relative inline-flex h-2 w-2 rounded-full bg-violet-500" />
       </span>
-      Update available
+      {t("workspace.updateBanner.updateAvailable")}
       <RefreshCwIcon className="h-3.5 w-3.5" />
     </Button>
   )

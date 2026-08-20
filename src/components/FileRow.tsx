@@ -24,6 +24,7 @@ interface FileRowProps {
   file: FileReference
   active: boolean
   expanded: boolean
+  expandable?: boolean
   progress?: FileStats
   openCommentCount?: number
   hasSuggestion?: boolean
@@ -41,6 +42,8 @@ interface FileRowProps {
   onExportSource?: () => void
   /** Opens Assign work scoped to this file. Hidden when the caller cannot assign. */
   onAssignWork?: () => void
+  /** Opens the Segmentation dialog for this file. */
+  onSegmentation?: () => void
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead. */
   onDelete?: () => void
   onApplySuggestion?: () => void
@@ -50,7 +53,8 @@ export function FileRow(props: FileRowProps) {
   const {
     file, active, expanded, progress, hasSuggestion, editing,
     onEditCommit, onEditCancel, onToggleExpand, onSelect, onShowDetails, onStartRename,
-    onMove, onExport, onExportSource, onAssignWork, onDelete, onApplySuggestion,
+    onMove, onExport, onExportSource, onAssignWork, onSegmentation, onDelete,
+    onApplySuggestion,
   } = props
   const t = useT()
   const inputRef = useRef<HTMLInputElement>(null)
@@ -68,7 +72,7 @@ export function FileRow(props: FileRowProps) {
     ? Math.round((progress.translated / progress.total) * 100) : 0
   const validatedPct = progress && progress.total > 0
     ? Math.round((progress.validated / progress.total) * 100) : 0
-  const canExpand = fileHasSections(file)
+  const canExpand = props.expandable ?? fileHasSections(file)
   // Timeline-segment-model: a file is either time-true (timeline spine) or
   // sequence-true (intrinsic order). Sequence is the default, so only the
   // exceptional timeline files carry a marker — repeating an icon on every
@@ -88,6 +92,7 @@ export function FileRow(props: FileRowProps) {
       onExport={onExport}
       onExportSource={onExportSource}
       onAssignWork={onAssignWork}
+      onSegmentation={onSegmentation}
       onDelete={onDelete}
     />
   )

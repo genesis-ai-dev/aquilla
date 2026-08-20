@@ -6,12 +6,23 @@ import { fetchCellConfidence } from "@/lib/sync/cell-confidence-read"
 // FTS5 similarity to validated cells, instead of the stored endorsement_count.
 // Runs alongside the endorsement path for comparison; nothing is removed.
 //
-// Cost is one FTS5 MATCH per translated-unvalidated cell, so we cap the batch —
-// this is a viewport-scoped read, not an all-cells aggregate.
+// Cost is one FTS5 MATCH per translated-unvalidated cell, so we cap each file's
+// read rather than treating this as an all-cells aggregate.
 const MAX_QUERY_CELLS = 100
 
+function textFingerprint(value: string): string {
+  // Fast FNV-1a-style signature: enough to invalidate a read when source or
+  // target text changes without retaining every full string in the effect key.
+  let hash = 2166136261
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(36)
+}
+
 export interface CellConfidenceResult {
-  /** cellId → health 0..100. validated→100, untranslated→0, else server-derived. */
+  /** cellId → health 0..100. Validated→100; automatic scores are server-derived. */
   healthMap: Map<string, number>
   /** cellId → the best-covering validated neighbor (observability). */
   topNeighbor: Map<string, string | null>
@@ -20,11 +31,12 @@ export interface CellConfidenceResult {
 }
 
 /**
- * Optimistic + lazy: validated cells read 100 and untranslated read 0
- * immediately (local knowledge), so a just-validated cell snaps up with no
- * round-trip; the server confidence for translated-unvalidated cells loads in
- * and adjusts. Refetches when the set of cells or their validation state
- * changes (self-healing against edits and validations).
+ * Optimistic + lazy: validated cells read 100 immediately (local knowledge),
+ * so a just-validated cell snaps up with no round-trip. Untranslated cells are
+ * intentionally absent because pre-translation evidence is calculated by the
+ * editor from source-side retrieval support. Server confidence for translated,
+ * unvalidated cells loads in and adjusts. Refetches when source/target content,
+ * the query set, or validation state changes.
  */
 export function useCellConfidence(args: {
   projectId?: string
@@ -52,7 +64,12 @@ export function useCellConfidence(args: {
     .filter((c) => c.status === "validated")
     .map((c) => c.id)
     .join(",")
-  const sig = `${projectId}|${fileId}|${validatedSig}|${toQuery.join(",")}|${perHopDecay ?? ""}`
+  const querySet = new Set(toQuery)
+  const contentSig = cells
+    .filter((cell) => querySet.has(cell.id))
+    .map((cell) => `${cell.id}:${textFingerprint(cell.original)}:${textFingerprint(cell.translated)}`)
+    .join(",")
+  const sig = `${projectId}|${fileId}|${validatedSig}|${contentSig}|${perHopDecay ?? ""}`
 
   const cellsRef = useRef(cells)
   cellsRef.current = cells
@@ -60,15 +77,13 @@ export function useCellConfidence(args: {
   getTokenRef.current = getToken
 
   useEffect(() => {
-    // Fully inert when disabled: no state writes at all, so the editor renders
-    // exactly as it would without this hook (the overlay is opt-in — see the
-    // flag in ProjectWorkspace).
+    // Fully inert when disabled: local-only projects retain their local health
+    // path; synced projects use this evidence map as the ribbon source.
     if (!enabled) return
 
     // Optimistic local seed (instant, no round-trip): a just-validated cell
     // snaps to 100 immediately, then the server ripple adjusts its neighbors.
-    // Untranslated cells are skipped (not started — they fall through to the
-    // endorsement health rather than being scored).
+    // Untranslated cells are skipped: no target exists to score yet.
     const base = new Map<string, number>()
     for (const c of cellsRef.current) {
       if (c.status === "validated") base.set(c.id, 100)

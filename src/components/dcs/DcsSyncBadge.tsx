@@ -21,7 +21,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { readCursor } from "@/lib/dcs/cursor"
 import type { DcsCursor } from "@/lib/dcs/types"
-import { useI18n } from "@/lib/i18n/I18nProvider"
+import { useI18n, type TFunction } from "@/lib/i18n/I18nProvider"
 import { formatDate } from "@/lib/i18n/format"
 
 export interface DcsSyncBadgeProps {
@@ -33,29 +33,30 @@ export interface DcsSyncBadgeProps {
 
 /** Full-pin tooltip: what's synced, from where, at which release, and where
  *  to manage it. */
-function pinTooltip(cursor: DcsCursor, locale: string): string {
+function pinTooltip(cursor: DcsCursor, locale: string, t: TFunction): string {
   const imported = new Date(cursor.importedAt)
   const importedLabel = Number.isNaN(imported.getTime())
     ? cursor.importedAt
     : formatDate(imported, locale, {})
-  return (
-    `Source synced from ${cursor.owner}/${cursor.repo} (${cursor.subject}) ` +
-    `@ ${cursor.ref} · imported ${importedLabel}. Source cells are managed by ` +
-    `this link — update or detach in Project Settings.`
-  )
+  return t("importExport.dcs.pinTooltip", {
+    repo: `${cursor.owner}/${cursor.repo}`,
+    subject: cursor.subject,
+    ref: cursor.ref,
+    imported: importedLabel,
+  })
 }
 
 export function DcsSyncBadge({ cursor, onClick }: DcsSyncBadgeProps) {
-  const { locale } = useI18n()
+  const { locale, t } = useI18n()
   if (!cursor) return null
   return (
-    <AppTooltip content={pinTooltip(cursor, locale)} side="bottom">
+    <AppTooltip content={pinTooltip(cursor, locale, t)} side="bottom">
       <Badge
         variant="outline"
         data-testid="dcs-sync-badge"
         render={
           onClick
-            ? <button type="button" onClick={onClick} aria-label="Door43 source link — open Project Settings" />
+            ? <button type="button" onClick={onClick} aria-label={t("importExport.dcs.badgeAriaLabel")} />
             : undefined
         }
       >

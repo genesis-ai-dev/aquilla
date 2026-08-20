@@ -9,7 +9,7 @@
 import { useState, useCallback, useEffect, useMemo } from "react"
 import {
   UserPlus, LinkIcon, ShieldOff, RefreshCcw,
-  AlertTriangle, Copy, Lock,
+  AlertTriangle, Copy,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
@@ -248,22 +248,10 @@ export function MembersTab({
   }
 
   // AQU-485: the project's org rosterViewMinRole policy hides the roster
-  // from this caller. Render a distinct "hidden" state — no member list, no
-  // count, and no add-member form (which would itself imply an editable
-  // roster exists) — never an empty shell that leaks "zero members."
-  if (rosterHidden) {
-    return (
-      <div className={className}>
-        <div className="flex flex-col items-center gap-2 rounded border py-10 text-center text-muted-foreground">
-          <Lock className="h-5 w-5" />
-          <p className="text-sm font-medium text-foreground">{t("org.membersPage.rosterHiddenTitle")}</p>
-          <p className="max-w-xs text-xs">
-            {t("org.membersPage.rosterHiddenBody")}
-          </p>
-        </div>
-      </div>
-    )
-  }
+  // from this caller. Render nothing — no "Roster hidden" copy, no empty
+  // list, no add-member form. The overview card and settings nav already
+  // omit this surface; this is defense if we still mount.
+  if (rosterHidden) return null
 
   return (
     <div className={className}>
@@ -742,7 +730,7 @@ export function InviteLinkTab({
               setInviteEmail(e.target.value)
               setEmailError(null)
             }}
-            placeholder="name@example.com"
+            placeholder={t("projectSettings.share.emailPlaceholder")}
             disabled={!session?.jwt}
           />
           {emailError ? (

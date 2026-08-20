@@ -83,7 +83,10 @@ export interface Scope {
   fileKind: string
 }
 
-export type SpanSeedSource = "canonical-ref" | "paragraph" | "chunk"
+/** Where a span's boundaries came from. "explicit" is a stored, human- or
+ *  model-set segmentation (db/shared/file-segmentation.ts); the other three
+ *  are derived from file structure at run time. */
+export type SpanSeedSource = "canonical-ref" | "paragraph" | "chunk" | "explicit"
 
 export interface SpanSeed {
   id: string

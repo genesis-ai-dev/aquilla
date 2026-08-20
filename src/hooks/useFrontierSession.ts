@@ -60,10 +60,9 @@ export function useFrontierSession() {
     qc.clear()
   }, [qc, active])
 
-  // Edge-case mitigation: if IDB is empty but aq_hint cookie was somehow
-  // set (storage cleared, old cookie, first deploy), clear the hint so the
-  // next cold visit to aquilla.app/ serves the homepage directly instead of
-  // briefly flashing the empty app shell.
+  // Edge-case mitigation: if IDB is empty but aq_hint remains set (storage
+  // cleared or an old cookie), clear it so SPA entry/login guards do not treat
+  // the next visit as an authenticated session.
   useEffect(() => {
     if (!loading && active === null) {
       clearAuthHint()

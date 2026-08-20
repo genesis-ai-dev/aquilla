@@ -49,6 +49,11 @@ export class Workspace {
     await this.confirmImportPreview()
   }
 
+  async importPayload(payload: FilePayload): Promise<void> {
+    await this.previewImportPayload(payload)
+    await this.confirmImportPreview()
+  }
+
   /** Select a spreadsheet through the normal Upload files card, accept the
    * auto-detected column mapping, and stop at the shared human-review preview. */
   async previewMappedSpreadsheet(filePath: string): Promise<void> {
@@ -128,6 +133,36 @@ export class Workspace {
     await expect(importBtn).toBeEnabled({ timeout: 5_000 })
     await importBtn.click()
     await this.waitForImportSettled()
+  }
+
+  /**
+   * Start the same specialized import but stop at the panel, so a test can
+   * assert what the panel says when the importer rejects the file. Returns the
+   * open dialog.
+   */
+  async attemptImportViaSpecializedPanel(
+    optionName: RegExp,
+    filePath: string | FilePayload,
+    configure?: (dialog: Locator) => Promise<void>,
+  ): Promise<Locator> {
+    await this.dismissSetupChecklist()
+    await this.openImportDialog()
+
+    const dialog = this.page.getByRole("dialog")
+    const option = dialog.getByRole("button", { name: optionName }).first()
+    await expect(option).toBeVisible({ timeout: 8_000 })
+    await option.click()
+
+    const chooseBtn = dialog.getByRole("button", { name: /^Choose .*file$/i }).first()
+    await expect(chooseBtn).toBeVisible({ timeout: 5_000 })
+    await chooseBtn.locator('input[type="file"]').setInputFiles(filePath)
+
+    if (configure) await configure(dialog)
+
+    const importBtn = dialog.getByRole("button", { name: /^Import$/i }).last()
+    await expect(importBtn).toBeEnabled({ timeout: 5_000 })
+    await importBtn.click()
+    return dialog
   }
 
   /** AQU-244 auto-opens the "Project setup" checklist sheet once per fresh
@@ -278,11 +313,12 @@ export class Workspace {
    * arrows) embeds the current file's name in its accessible labels, so a
    * bare role+name match inside <aside> can grab the wrong button. */
   async openFileBySubstring(nameSubstring: string): Promise<void> {
-    await this.page
+    const row = this.page
       .locator('aside [data-showcase="sidebar.file"]')
       .filter({ hasText: new RegExp(nameSubstring, "i") })
       .first()
-      .click()
+    await expect(row).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await row.click()
   }
 
   /** Wait for a named file to be present in the authoritative sidebar inventory. */
@@ -290,6 +326,28 @@ export class Workspace {
     await expect(
       this.page.locator("aside").getByText(nameSubstring, { exact: false }).first(),
     ).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+  }
+
+  /** Hover the first cell until the action rail reveals, then click Translate with AI. */
+  async clickSparkleOnFirstCell(): Promise<void> {
+    const row = this.page.locator("[data-cell-id]").first()
+    const sparkle = row
+      .locator("[data-tooltip*='Translate with AI'] button, button[aria-label*='Translate with AI']")
+      .first()
+    await sparkle.scrollIntoViewIfNeeded()
+    await row.hover()
+    await expect(row.locator('[data-slot="cell-action-rail"]')).toHaveAttribute(
+      "data-revealed",
+      "true",
+      { timeout: 5_000 },
+    )
+    await expect(sparkle).toBeVisible()
+    await expect(sparkle).toBeEnabled({ timeout: 15_000 })
+    await row.hover()
+    // The unrevealed rail wrapper intercepts Playwright's hit-test even after
+    // data-revealed=true if idle-hide races the click. force skips that check;
+    // the button is already asserted visible and enabled.
+    await sparkle.click({ force: true })
   }
 
   async waitForEditor(expectedCellId?: string): Promise<void> {

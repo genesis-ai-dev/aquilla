@@ -67,7 +67,10 @@ import {
   parseScopeLanes,
   serializeScopeLanes,
 } from "../services/invite-scopes"
-import { notifySyncWorkerOfMemberRemoval } from "../services/sync-worker-notify"
+import {
+  notifySyncWorkerOfMemberRemoval,
+  notifySyncWorkerOfMemberRoleChange,
+} from "../services/sync-worker-notify"
 import { createProjectShared } from "../../../db/shared/projects"
 
 const projects = new Hono<AuthHonoEnv>()
@@ -1005,6 +1008,23 @@ async function grantProjectMemberOne(
   return { ok: true, userId: target.id, username: target.username, role }
 }
 
+// [Pen test 2026-08-17] best-effort: let a live ProjectSync DO connection
+// pick up a role change immediately (see notifySyncWorkerOfMemberRoleChange).
+// Must never fail or delay the grant response — same waitUntil-or-detach
+// pattern as the member-removal notify below.
+function notifyRoleChangeBestEffort(
+  c: { env: Env; executionCtx: { waitUntil(p: Promise<unknown>): void } },
+  projectId: string,
+  changed: { userId: number; username: string; role: number },
+): void {
+  const notifyPromise = notifySyncWorkerOfMemberRoleChange(c.env, projectId, changed)
+  try {
+    c.executionCtx.waitUntil(notifyPromise)
+  } catch {
+    void notifyPromise
+  }
+}
+
 projects.post(
   "/:projectId/members",
   authMiddleware,
@@ -1037,6 +1057,13 @@ projects.post(
       > = []
       for (const entry of entries) {
         const outcome = await grantProjectMemberOne(c.env, projectId, callerRole, user.id, entry)
+        if (outcome.ok) {
+          notifyRoleChangeBestEffort(c, projectId, {
+            userId: outcome.userId,
+            username: outcome.username,
+            role: outcome.role,
+          })
+        }
         results.push(
           outcome.ok
             ? { username: entry.username, ok: true }
@@ -1051,6 +1078,11 @@ projects.post(
     if (!outcome.ok) {
       return c.json({ error: outcome.message }, PROJECT_GRANT_ERROR_STATUS[outcome.code] ?? 400)
     }
+    notifyRoleChangeBestEffort(c, projectId, {
+      userId: outcome.userId,
+      username: outcome.username,
+      role: outcome.role,
+    })
     return c.json({
       userId: outcome.userId,
       username: outcome.username,

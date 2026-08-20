@@ -9,7 +9,8 @@
 // The contract these tests pin down:
 //   • queued in the outbox  → the overlay is authoritative, forever
 //   • left the outbox       → a short grace window, then server truth wins
-//   • quarantined (failed)  → stop asserting it immediately
+//   • quarantined (failed)  → keep the ATTACHMENT (badged, AQU-924) but drop the
+//                             SELECTION claim, which the server never agreed to
 //   • emit rejected         → drop it and re-read
 //   • deletes               → first-class overlay that cancels a pending attach
 
@@ -240,7 +241,7 @@ describe("optimistic overlay — outbox-anchored lifetime (SUB-48)", () => {
     }
   })
 
-  it("a quarantined event stops the overlay at once — the UI must not keep lying", async () => {
+  it("a quarantined event stops claiming SELECTION at once — the UI must not keep lying", async () => {
     fetchMock.mockResolvedValue(serverLongSelected())
     const { result } = mount()
     await waitFor(() => expect(result.current.byCellId.size).toBe(1))
@@ -252,6 +253,126 @@ describe("optimistic overlay — outbox-anchored lifetime (SUB-48)", () => {
       await result.current.revalidate()
     })
     expect(entryOf(result)?.selectedAudioId).toBe(LONG.audioId)
+  })
+
+  // ── AQU-924 ───────────────────────────────────────────────────────────────
+  // Joy uploaded audio to a batch of verses; the bar read "36 failed"; on
+  // refresh some verses were back to "Click a voice to generate" with no
+  // waveform, no error and nothing to retry — while the clips' bytes sat in R2
+  // and their attach events sat undelivered in this very outbox. The overlay was
+  // dropped the instant a record was quarantined, so the ONLY surviving record
+  // that the take existed was thrown away. A failed save must be visible.
+
+  it("AQU-924: a quarantined ATTACH keeps the take visible, flagged syncFailed", async () => {
+    // The server knows nothing about this cell — as it would for an upload whose
+    // attach event never landed.
+    fetchMock.mockResolvedValue(serverEmpty())
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    queued("evt-attach")
+    act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT, "evt-attach"))
+    quarantined("evt-attach")
+    await act(async () => {
+      await result.current.revalidate()
+    })
+
+    const att = entryOf(result)?.attachments[SHORT.audioId]
+    expect(att).toBeTruthy() // the take did NOT vanish
+    expect(att?.syncFailed).toBe(true) // and it says why
+    expect(att?.pendingSync).toBeUndefined() // not "saving" — it isn't coming
+    // Honest about what the server has: nothing is selected/voiced.
+    expect(entryOf(result)?.selectedAudioId).toBeNull()
+  })
+
+  it("AQU-924: the flag survives repeated reads — it is re-derived, never stored", async () => {
+    fetchMock.mockResolvedValue(serverEmpty())
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    queued("evt-attach")
+    act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT, "evt-attach"))
+    quarantined("evt-attach")
+    for (let i = 0; i < 3; i++) {
+      await act(async () => {
+        await result.current.revalidate()
+      })
+      expect(entryOf(result)?.attachments[SHORT.audioId]?.syncFailed).toBe(true)
+    }
+  })
+
+  it("AQU-924: a retry flips the take back to 'saving', and delivery clears it", async () => {
+    fetchMock.mockResolvedValue(serverEmpty())
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    queued("evt-attach")
+    act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT, "evt-attach"))
+    quarantined("evt-attach")
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    expect(entryOf(result)?.attachments[SHORT.audioId]?.syncFailed).toBe(true)
+
+    // The user hits Retry: the record goes back to pending.
+    queued("evt-attach")
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    let att = entryOf(result)?.attachments[SHORT.audioId]
+    expect(att?.pendingSync).toBe(true)
+    expect(att?.syncFailed).toBeUndefined()
+    // Selection is claimed again now that the change is genuinely in flight.
+    expect(entryOf(result)?.selectedAudioId).toBe(SHORT.audioId)
+
+    // It lands: the server now has it and the overlay retires.
+    fetchMock.mockResolvedValue(
+      cells({ attachments: { [SHORT.audioId]: SHORT }, selectedAudioId: SHORT.audioId }),
+    )
+    delivered("evt-attach")
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    att = entryOf(result)?.attachments[SHORT.audioId]
+    expect(att?.syncFailed).toBeUndefined()
+    expect(att?.pendingSync).toBeUndefined()
+  })
+
+  it("AQU-924: a quarantined REMOVE still yields — a failed delete must not keep hiding a live clip", async () => {
+    fetchMock.mockResolvedValue(serverLongSelected())
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    queued("evt-remove")
+    act(() => injectOptimisticAudioRemove("f1", "c1", LONG.audioId, "recording", "evt-remove"))
+    expect(entryOf(result)?.attachments[LONG.audioId]).toBeUndefined() // hidden while queued
+
+    quarantined("evt-remove")
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    // The clip is still on the server, so it comes BACK — the honest signal that
+    // the delete never happened. Nothing was at risk, so nothing is preserved.
+    expect(entryOf(result)?.attachments[LONG.audioId]).toBeTruthy()
+  })
+
+  it("AQU-924: mergeCellsWithAudio forwards syncFailed to the cell attachment", async () => {
+    fetchMock.mockResolvedValue(serverEmpty())
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    queued("evt-attach")
+    act(() => injectOptimisticAudioAttachment("f1", "c1", SHORT, "evt-attach"))
+    quarantined("evt-attach")
+    await act(async () => {
+      await result.current.revalidate()
+    })
+
+    const merged = mergeCellsWithAudio(
+      [{ id: "c1" } as CellData],
+      result.current.byCellId,
+    )
+    expect(merged[0].attachments?.[SHORT.audioId]?.syncFailed).toBe(true)
   })
 
   it("binds a late event id from the emit promise (paint-first callers)", async () => {

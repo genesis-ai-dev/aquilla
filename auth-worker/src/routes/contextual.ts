@@ -6,6 +6,9 @@
 //   POST /:projectId/contextual/runs/:runId/pause|resume|terminate
 //   POST /:projectId/contextual/steering                  direction / refresh_span / note
 //   GET  /:projectId/contextual/drafts?fileId=            staged drafts (VIEWER)
+//   GET  /:projectId/contextual/segmentation?fileId=      strategy + preview (VIEWER)
+//   PUT  /:projectId/contextual/segmentation?fileId=      set the strategy (PROJECT_LEAD)
+//   POST /:projectId/contextual/segmentation/generate     AI re-segmentation (PROJECT_LEAD)
 //   POST /:projectId/contextual/drafts/:draftId/review    {action: applied|rejected}
 //
 // v1 execution (documented deviation): no Workflows binding — POST /runs kicks
@@ -16,18 +19,30 @@
 // Postgres, so a dropped loop resumes exactly where it stopped.
 
 import { Hono, type Context } from "hono"
-import type { ContentfulStatusCode } from "hono/utils/http-status"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE, type Env } from "../types"
-import { resolveProjectRole } from "../services/project-permissions"
+import { errorJson, requireRole } from "./_contextual-helpers"
 import { runAiGuard } from "../lib/ai-budget"
 import { getPlatformSettingsCached } from "../lib/platform-settings"
 import { creditGuard } from "../lib/credits"
+import { wordCapBody, wordGuard } from "../lib/billing/words"
 import { makeCostMeter } from "../lib/cost-meter"
 import { notifySyncWorkerOfContextualActivity } from "../services/sync-worker-notify"
 import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
+import {
+  getFileSegmentation,
+  setFileSegmentation,
+  validateSegmentationInput,
+  MAX_BOUNDARIES,
+  MAX_NOTE_CHARS,
+  MAX_SEGMENT_SIZE,
+  MIN_SEGMENT_SIZE,
+  type SegmentationInput,
+} from "../../../db/shared/file-segmentation"
+import { selectCellPairs } from "../lib/agent/tools/select-cells"
+import { segmentWithModel } from "../lib/contextual/segment-model"
 import {
   createRun,
   getRun,
@@ -71,11 +86,14 @@ import {
   makeLlmCall,
   resolveContextualModels,
   resolveOpenRouterUrl,
+  resolveSpanSeeds,
+  spanLabel,
   runStateFrame,
   persistContextualProgressFrame,
   MAX_WAVE_CONCURRENCY,
   type ContextualProgressFrame,
 } from "../lib/contextual/tick"
+import { decorateActivityLabels, loadCellDisplayIndex } from "../lib/contextual/activity-labels"
 import type { LlmCall } from "../lib/contextual/types"
 
 const contextual = new Hono<AuthHonoEnv>()
@@ -104,41 +122,6 @@ function resolveMaxProjectConcurrency(raw: string | undefined): number {
 /** Files a single project-wide start will fan out to. Additional eligible
  * files are reported as deferred and become reachable on the next start. */
 const MAX_PROJECT_FILES = 24
-
-type ErrorCode =
-  | "not_found"
-  | "permission_denied"
-  | "validation_failed"
-  | "invalid_state"
-  | "not_projected"
-  | "run_exists"
-  | "credit_cap_exceeded"
-  | "not_configured"
-
-function errorJson(code: ErrorCode, message: string, status: ContentfulStatusCode, details?: unknown) {
-  return {
-    body: { error: { code, message, ...(details !== undefined ? { details } : {}) } },
-    status,
-  } as const
-}
-
-async function requireRole(
-  c: Context<AuthHonoEnv>,
-  projectId: string,
-  floor: number,
-): Promise<{ ok: true; level: number } | { ok: false; res: Response }> {
-  const user = c.get("user")
-  const role = await resolveProjectRole(c.env, user, projectId)
-  if (!role || role.level < floor) {
-    const { body, status } = errorJson(
-      "permission_denied",
-      "you do not have sufficient access on this project",
-      403,
-    )
-    return { ok: false, res: c.json(body, status) }
-  }
-  return { ok: true, level: role.level }
-}
 
 /** Activity must never become the reason a translation run wedges. Writes are
  * awaited (so they normally precede the live notification) but degrade to a
@@ -607,6 +590,8 @@ contextual.post(
       )
       return c.json(err, status)
     }
+    const words = await wordGuard(c.env.AQUILLA_PG, orgId)
+    if (!words.ok) return c.json(wordCapBody(words.reason), 429)
 
     const roleSnapshot = { userId: user.id, username: user.username, level: gate.level }
     // ── Project-wide start: one graph per file, all of them at once ──
@@ -964,11 +949,23 @@ contextual.get("/:projectId/contextual/runs/:runId/activity", authMiddleware, as
     sceneBriefs: briefsTruncated,
     drafts: draftPage.truncated,
   }
+  const sceneBriefs = briefsTruncated ? briefRows.slice(-evidenceLimit) : briefRows
+  let labelled = {
+    events: activity.events,
+    sceneBriefs,
+    drafts: draftPage.drafts,
+  }
+  try {
+    const cells = await loadCellDisplayIndex(c.env.AQUILLA_PG, projectId, run.fileId)
+    labelled = decorateActivityLabels(labelled, cells)
+  } catch (err) {
+    console.warn(`[contextual] activity label lookup failed for run ${runId}:`, err)
+  }
   return c.json({
     run: runSnapshot(run, { proposedDrafts: runDraftCounts.proposed }),
-    events: activity.events,
-    sceneBriefs: briefsTruncated ? briefRows.slice(-evidenceLimit) : briefRows,
-    drafts: draftPage.drafts,
+    events: labelled.events,
+    sceneBriefs: labelled.sceneBriefs,
+    drafts: labelled.drafts,
     draftCounts: runDraftCounts,
     draftNextCursor: draftPage.nextCursor,
     truncated: Object.values(truncatedCollections).some(Boolean),
@@ -1196,6 +1193,280 @@ contextual.post(
       },
     })
     return c.json({ draft: result.draft })
+  },
+)
+
+
+// ── Segmentation ────────────────────────────────────────────────────────────
+//
+// One row per file, no target_lang: segmentation is a property of the SOURCE,
+// so every language lane of a file reads the same boundaries.
+//
+// The GET returns the EFFECTIVE segmentation, not just the stored setting —
+// resolved through the same `resolveSpanSeeds` the run itself calls, so the
+// preview a translator approves is the segmentation the autopilot will use.
+// A preview computed by a second, parallel implementation would drift, and it
+// would drift silently.
+
+/** Preview spans returned inline. A long book segments into a few hundred;
+ *  the count is always exact, the list is a sample. */
+const SEGMENTATION_PREVIEW_LIMIT = 60
+
+const segmentationBoundarySchema = z.object({
+  startCellId: z.string().min(1),
+  endCellId: z.string().min(1),
+  title: z.string().optional(),
+  gist: z.string().optional(),
+  depth: z.number().optional(),
+})
+
+const segmentationSchema = z
+  .object({
+    strategy: z.enum(["auto", "fixed", "explicit"]),
+    fixedSize: z.number().optional(),
+    boundaries: z.array(segmentationBoundarySchema).max(MAX_BOUNDARIES).optional(),
+    note: z.string().max(MAX_NOTE_CHARS).optional(),
+  })
+  .strict()
+
+contextual.get("/:projectId/contextual/segmentation", authMiddleware, async (c) => {
+  const projectId = c.req.param("projectId") ?? ""
+  const gate = await requireRole(c, projectId, ROLE.VIEWER)
+  if (!gate.ok) return gate.res
+  const fileId = c.req.query("fileId")
+  if (!fileId) {
+    const { body, status } = errorJson("validation_failed", "fileId is required", 400)
+    return c.json(body, status)
+  }
+
+  const db = c.env.AQUILLA_PG
+  const [segmentation, pairs] = await Promise.all([
+    getFileSegmentation(db, projectId, fileId),
+    selectCellPairs(db, projectId, { fileId }),
+  ])
+  const seeds = await resolveSpanSeeds(db, projectId, fileId, pairs)
+  const order = new Map(pairs.map((p, i) => [p.cellId, i]))
+  const spans = seeds.map((seed) => {
+    const start = order.get(seed.startCellId)
+    const end = order.get(seed.endCellId)
+    return {
+      startCellId: seed.startCellId,
+      endCellId: seed.endCellId,
+      seedSource: seed.seedSource,
+      cellCount: start === undefined || end === undefined ? 0 : end - start + 1,
+      label: spanLabel(seed, pairs),
+    }
+  })
+
+  return c.json({
+    segmentation,
+    limits: { minSize: MIN_SEGMENT_SIZE, maxSize: MAX_SEGMENT_SIZE, maxBoundaries: MAX_BOUNDARIES },
+    effective: {
+      // Which branch actually produced these spans — 'explicit' means the
+      // stored list was used, anything else means it was derived.
+      seedSource: spans[0]?.seedSource ?? "chunk",
+      spanCount: spans.length,
+      cellCount: pairs.length,
+      spans: spans.slice(0, SEGMENTATION_PREVIEW_LIMIT),
+      truncated: spans.length > SEGMENTATION_PREVIEW_LIMIT,
+    },
+  })
+})
+
+// PUT — changing how a file is cut up changes what every future run drafts, so
+// it sits at the same floor as the project's other structural settings.
+contextual.put(
+  "/:projectId/contextual/segmentation",
+  authMiddleware,
+  zValidator("json", segmentationSchema),
+  async (c) => {
+    const projectId = c.req.param("projectId") ?? ""
+    const gate = await requireRole(c, projectId, ROLE.PROJECT_LEAD)
+    if (!gate.ok) return gate.res
+    const fileId = c.req.query("fileId")
+    if (!fileId) {
+      const { body, status } = errorJson("validation_failed", "fileId is required", 400)
+      return c.json(body, status)
+    }
+
+    const db = c.env.AQUILLA_PG
+    const input = c.req.valid("json") as SegmentationInput
+    // Explicit boundaries are checked against the file's real ordered cells;
+    // 'auto'/'fixed' do not need them, so only pay for the read when they do.
+    const orderedCellIds =
+      input.strategy === "explicit"
+        ? (await selectCellPairs(db, projectId, { fileId })).map((p) => p.cellId)
+        : []
+    const checked = validateSegmentationInput(input, orderedCellIds)
+    if (!checked.ok) {
+      const { body, status } = errorJson("validation_failed", checked.error, 400)
+      return c.json(body, status)
+    }
+
+    const user = c.get("user")
+    const segmentation = await setFileSegmentation(
+      db,
+      projectId,
+      fileId,
+      { ...checked.value, humanEdited: true },
+      user.username ?? null,
+    )
+    return c.json({ segmentation })
+  },
+)
+
+// POST /:projectId/contextual/segmentation/generate — have a fast-tier model
+// find the passages, store them as an explicit boundary list.
+//
+// PROJECT_LEAD, and guarded like every other paid surface here: model
+// allowlist, org credit cap, word cap — all BEFORE any tokens are spent.
+//
+// The pass proposes break points; `buildBoundaries` turns them into the
+// segmentation, so contiguity and coverage are structural. The result still
+// goes through `validateSegmentationInput` before it is stored: a generator
+// writing straight to the table would be the one path into this row that skips
+// the check every other path takes.
+contextual.post(
+  "/:projectId/contextual/segmentation/generate",
+  authMiddleware,
+  zValidator("json", z.object({ note: z.string().max(MAX_NOTE_CHARS).optional() }).strict()),
+  async (c) => {
+    const projectId = c.req.param("projectId") ?? ""
+    const gate = await requireRole(c, projectId, ROLE.PROJECT_LEAD)
+    if (!gate.ok) return gate.res
+    const fileId = c.req.query("fileId")
+    if (!fileId) {
+      const { body, status } = errorJson("validation_failed", "fileId is required", 400)
+      return c.json(body, status)
+    }
+    if (!c.env.OPENROUTER_API_KEY) {
+      const { body, status } = errorJson("not_configured", "OPENROUTER_API_KEY is not configured", 500)
+      return c.json(body, status)
+    }
+
+    const db = c.env.AQUILLA_PG
+    const user = c.get("user")
+    const { note } = c.req.valid("json")
+
+    const settings = await getPlatformSettingsCached(c.env)
+    const models = resolveContextualModels(c.env, settings)
+    // The FAST tier is the whole point of this surface — guard the model it
+    // will actually call, not the one the drafting pipeline uses.
+    const guard = await runAiGuard(models.fast, user.id, db, c.env)
+    if (!guard.ok) return c.json(guard.body, guard.status)
+
+    let orgId = 0
+    try {
+      const projectRow = await db
+        .prepare("SELECT org_id FROM projects WHERE id = ?")
+        .bind(projectId)
+        .first<{ org_id: number | null }>()
+      orgId = projectRow?.org_id ?? 0
+    } catch {
+      /* best-effort — degrade to org 0 */
+    }
+    const credit = await creditGuard(db, c.env, orgId, "agent")
+    if (!credit.ok) {
+      const { body: err, status } = errorJson(
+        "credit_cap_exceeded",
+        "Agent credit cap reached. Contact your org admin.",
+        429,
+        { reason: credit.reason },
+      )
+      return c.json(err, status)
+    }
+    const words = await wordGuard(db, orgId)
+    if (!words.ok) return c.json(wordCapBody(words.reason), 429)
+
+    const pairs = await selectCellPairs(db, projectId, { fileId })
+    if (pairs.length === 0) {
+      const { body, status } = errorJson("validation_failed", "this file has no source cells", 400)
+      return c.json(body, status)
+    }
+
+    const meter = makeCostMeter(c.env, db)
+    const llm = makeLlmCall({
+      url: resolveOpenRouterUrl(c.env),
+      apiKey: c.env.OPENROUTER_API_KEY,
+      models,
+      signal: c.req.raw.signal,
+      onUsage: (usage) => {
+        meter.add({
+          surface: "autopilot",
+          runId: `segment:${fileId}`,
+          projectId,
+          kind: "llm",
+          label: usage.label,
+          tier: usage.tier,
+          model: usage.model,
+          promptTokens: usage.promptTokens,
+          completionTokens: usage.completionTokens,
+          costCents: usage.costCents,
+          latencyMs: usage.latencyMs,
+          ok: usage.ok,
+        })
+      },
+    })
+
+    let result: Awaited<ReturnType<typeof segmentWithModel>>
+    try {
+      result = await segmentWithModel({
+        pairs,
+        llm,
+        ...(note ? { note } : {}),
+      })
+    } catch (err) {
+      console.error(`[contextual] segmentation pass failed for ${fileId}:`, err)
+      const { body, status } = errorJson(
+        "segmentation_failed",
+        "The segmentation model could not be reached. Nothing was changed.",
+        502,
+      )
+      return c.json(body, status)
+    } finally {
+      await meter.flush()
+    }
+
+    if (result.boundaries.length === 0) {
+      const { body, status } = errorJson(
+        "segmentation_failed",
+        "The segmentation model returned nothing usable. Nothing was changed.",
+        502,
+      )
+      return c.json(body, status)
+    }
+
+    const checked = validateSegmentationInput(
+      {
+        strategy: "explicit",
+        boundaries: result.boundaries,
+        generatedBy: "model",
+        modelId: models.fast,
+        ...(note ? { note } : {}),
+      },
+      pairs.map((p) => p.cellId),
+    )
+    if (!checked.ok) {
+      // Structurally this should not happen — buildBoundaries constructs the
+      // segments — so a failure here means a real defect, not bad model
+      // output. Refuse rather than store something the run cannot trust.
+      console.error(`[contextual] generated boundaries failed validation for ${fileId}: ${checked.error}`)
+      const { body, status } = errorJson(
+        "segmentation_failed",
+        "The generated passages did not cover the file. Nothing was changed.",
+        500,
+      )
+      return c.json(body, status)
+    }
+
+    // humanEdited stays false: a person ASKED for this, but did not author the
+    // boundaries. The pin is what stops a later automated pass overwriting a
+    // person's own division, and this is not one.
+    const segmentation = await setFileSegmentation(db, projectId, fileId, checked.value, user.username ?? null)
+    return c.json({
+      segmentation,
+      generated: { passageCount: result.boundaries.length, calls: result.calls, notes: result.notes },
+    })
   },
 )
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
-import { useParams, useNavigate, Link } from "react-router-dom"
+import { useLocation, useParams, useNavigate, Link } from "react-router-dom"
 import { MoreHorizontal, ChevronRight, Copy, Check, Download, Search, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -383,7 +383,9 @@ function ChapterRow({
         aria-expanded={open}
       >
         <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
-        <span className="w-10 shrink-0 text-muted-foreground">Ch {chapter.chapterLabel}</span>
+        <span className="w-10 shrink-0 text-muted-foreground">
+          {t("org.projectOverview.chapterAbbrevLabel", { chapter: chapter.chapterLabel })}
+        </span>
         <MiniRollupBar filledPct={chapter.filledPct} approvedPct={chapter.approvedPct} />
         <span className="text-[10px] tabular-nums text-muted-foreground">
           {chapter.filledCount}/{chapter.approvedCount}/{chapter.cellCount}
@@ -516,6 +518,7 @@ export function ProjectOverview() {
   const t = useT()
   const { id = "" } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   // AQU-737: the workspace is a lazy route; surface the load on the Open project
   // button so it spins + disables instead of sitting idle and re-clickable.
   // `openingOverlay` blocks the rest of the page while the open is in flight.
@@ -607,6 +610,7 @@ export function ProjectOverview() {
   // configuring anything.
   const [fileSortMode, setFileSortMode] = useState<FileSortMode>("last-updated")
   const [fileNameFilter, setFileNameFilter] = useState("")
+  const fileSortItems = FILE_SORT_MODES.map((m) => ({ value: m.value, label: t(m.labelKey) }))
 
   // AQU-500: transient "copied" feedback for the CSV-export control, mirroring
   // the copy-affordance pattern used elsewhere (e.g. ChatMarkdown's code-block
@@ -1030,7 +1034,8 @@ export function ProjectOverview() {
                     {id && (
                       <Link
                         to={projectSettingsPath(id)}
-                        aria-label="Project settings"
+                        state={{ backgroundLocation: location, projectSettingsModalDepth: 1 }}
+                        aria-label={t("editor.navTitle.projectSettings")}
                         data-testid="overview-project-settings"
                         className={cn(buttonVariants({ variant: "outline", size: "icon-sm" }), "shrink-0")}
                       >
@@ -1099,7 +1104,7 @@ export function ProjectOverview() {
                 <ConfirmActionDialog
                   open={archiveConfirmOpen}
                   onOpenChange={setArchiveConfirmOpen}
-                  title="Archive project"
+                  title={t("org.projectOverview.archiveDialogTitle")}
                   description={
                     project?.name
                       ? `Archive "${project.name}"? It will be hidden from the active projects list. Data is kept and owners can restore it anytime from Archived projects.`
@@ -1165,7 +1170,7 @@ export function ProjectOverview() {
                                   onCheckedChange={() => toggleStat(w.key)}
                                   data-testid={`customize-stat-${w.key}`}
                                 >
-                                  {w.label}
+                                  {t(w.labelKey)}
                                 </DropdownMenuCheckboxItem>
                               ))}
                             </DropdownMenuGroup>
@@ -1184,7 +1189,7 @@ export function ProjectOverview() {
                       <SegmentTabs
                         value={laneTagToTab(selectedLaneTag)}
                         onValueChange={(next) => setSelectedLaneTag(tabToLaneTag(next))}
-                        aria-label="Filter progress by language"
+                        aria-label={t("org.projectOverview.filterProgressByLanguageAriaLabel")}
                         options={laneTabOptions}
                       />
                     </div>
@@ -1465,7 +1470,7 @@ export function ProjectOverview() {
                         />
                       </InputGroup>
                       <Select
-                        items={FILE_SORT_MODES}
+                        items={fileSortItems}
                         value={fileSortMode}
                         onValueChange={(v) => setFileSortMode((v as FileSortMode) ?? "last-updated")}
                       >
@@ -1474,7 +1479,7 @@ export function ProjectOverview() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectGroup>
-                            {FILE_SORT_MODES.map((m) => (
+                            {fileSortItems.map((m) => (
                               <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
                             ))}
                           </SelectGroup>
@@ -1876,9 +1881,9 @@ export function ProjectOverview() {
                   surface as Project Settings → Team members, so access can be
                   managed from the overview without opening settings. ──
                   AQU-486: gated by AQU-485's rosterViewMinRole — the same
-                  policy MembersTab itself enforces server-side (see its
-                  "Roster hidden" state), applied here one layer up so a
-                  below-floor caller never sees the card shell at all. */}
+                  policy MembersTab itself enforces server-side, applied here
+                  one layer up so a below-floor caller never sees the card
+                  shell at all. */}
               {canManage && !isArchived && (
                 <SectionVisibilityGate
                   minRole={orgSettings.rosterViewMinRole}

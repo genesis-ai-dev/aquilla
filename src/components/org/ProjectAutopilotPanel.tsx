@@ -10,6 +10,7 @@ import {
   Square,
 } from "lucide-react"
 import { AutopilotActivityInspector, type AutopilotInspectorSection } from "@/components/contextual/AutopilotActivityInspector"
+import { AutopilotProcessGraph } from "@/components/contextual/AutopilotProcessGraph"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
@@ -383,6 +384,7 @@ export function ProjectAutopilotPanel({ projectId, fileNames, canStart }: Projec
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {starting && <p role="status" aria-live="polite" className="text-sm font-medium">{t("autopilot.feedback.starting")}</p>}
+          {state !== "not-started" && <AutopilotProcessGraph overview={overview} compact />}
           {state === "working" && !starting && workingTotalsKnown && workingTotal > 0 && (
             <Progress
               value={(workingDone / workingTotal) * 100}

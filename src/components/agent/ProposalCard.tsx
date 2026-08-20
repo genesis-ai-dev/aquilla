@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
@@ -83,6 +84,7 @@ export function lintCellFor(
 const TRUNCATE_AT = 160
 
 function TruncatableText({ text, className }: { text: string; className?: string }) {
+  const t = useT()
   const [expanded, setExpanded] = useState(false)
   const needsTruncation = text.length > TRUNCATE_AT
   const shown = expanded || !needsTruncation ? text : `${text.slice(0, TRUNCATE_AT)}…`
@@ -96,9 +98,9 @@ function TruncatableText({ text, className }: { text: string; className?: string
           className="ms-1 inline-flex items-center align-baseline text-[10px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
         >
           {expanded ? (
-            <>Show less <ChevronUp className="ms-0.5 h-2.5 w-2.5" /></>
+            <>{t("common.showLess")} <ChevronUp className="ms-0.5 h-2.5 w-2.5" /></>
           ) : (
-            <>Show more <ChevronDown className="ms-0.5 h-2.5 w-2.5" /></>
+            <>{t("common.showMore")} <ChevronDown className="ms-0.5 h-2.5 w-2.5" /></>
           )}
         </button>
       )}
@@ -106,14 +108,14 @@ function TruncatableText({ text, className }: { text: string; className?: string
   )
 }
 
-const KIND_META: Record<string, { label: string; Icon: typeof Pencil }> = {
-  "target.cell.commit": { label: "Edit", Icon: Pencil },
+const KIND_META: Record<string, { labelKey: MessageKey; Icon: typeof Pencil }> = {
+  "target.cell.commit": { labelKey: "agent.proposal.kind.edit", Icon: Pencil },
   // AQU-890: creates read as "new row" — the label names the lane so a source
   // insertion is never mistaken for a translation.
-  "source.cell.create": { label: "New source row", Icon: Plus },
-  "target.cell.create": { label: "New target row", Icon: Plus },
-  "comment.create": { label: "Comment", Icon: MessageSquare },
-  "cell.validate": { label: "Validate", Icon: ShieldCheck },
+  "source.cell.create": { labelKey: "agent.proposal.kind.newSourceRow", Icon: Plus },
+  "target.cell.create": { labelKey: "agent.proposal.kind.newTargetRow", Icon: Plus },
+  "comment.create": { labelKey: "agent.proposal.kind.comment", Icon: MessageSquare },
+  "cell.validate": { labelKey: "agent.proposal.kind.validate", Icon: ShieldCheck },
 }
 
 /** True for the genesis kinds that mint a row rather than editing one. */
@@ -141,7 +143,7 @@ function StagedEventRow({
       <div className="space-y-1 rounded-md border border-dashed px-2 py-1.5">
         <div className="flex items-center gap-1.5 text-[11px]">
           <Badge variant="outline" className="px-1.5 py-0 font-mono text-[10px]">{ev.kind}</Badge>
-          <span className="text-muted-foreground">not supported yet — apply this kind in the app directly</span>
+          <span className="text-muted-foreground">{t("autopilot.proposal.unsupportedKind")}</span>
         </div>
         <pre className="overflow-x-auto font-mono text-[10px] leading-relaxed text-muted-foreground">
           {JSON.stringify(ev, null, 2)}
@@ -150,7 +152,8 @@ function StagedEventRow({
     )
   }
 
-  const { label, Icon } = meta
+  const { labelKey, Icon } = meta
+  const label = t(labelKey)
   const body =
     ev.kind === "comment.create" && typeof ev.payload.body === "string"
       ? ev.payload.body
@@ -165,7 +168,7 @@ function StagedEventRow({
             believing the change lands in the file they have open — say so
             explicitly rather than leaving it to a bare verse ref. */}
         {ev.display.fileName && (
-          <AppTooltip content={`This change lands in ${ev.display.fileName}`}>
+          <AppTooltip content={t("agent.proposal.landsInFile", { fileName: ev.display.fileName })}>
             <Badge variant="outline" className="max-w-[12rem] gap-1 px-1.5 py-0 text-[10px]">
               <FileText className="h-2.5 w-2.5 shrink-0" />
               <span className="truncate">{ev.display.fileName}</span>
@@ -195,7 +198,7 @@ function StagedEventRow({
               <TruncatableText text={ev.display.before} />
             </div>
           ) : (
-            <div className="text-[10px] italic text-muted-foreground">(currently empty)</div>
+            <div className="text-[10px] italic text-muted-foreground">{t("autopilot.proposal.currentlyEmpty")}</div>
           )}
           <div>
             <TruncatableText text={ev.display.after ?? ""} />
@@ -205,7 +208,7 @@ function StagedEventRow({
 
       {isCellCreateKind(ev.kind) && (
         <div className="space-y-0.5 text-xs">
-          <div className="text-[10px] italic text-muted-foreground">(new row)</div>
+          <div className="text-[10px] italic text-muted-foreground">{t("autopilot.proposal.newRow")}</div>
           <div>
             <TruncatableText
               text={
@@ -339,7 +342,7 @@ function StagedProposalCard({
   if (state === "discarded") {
     return (
       <div className="rounded-lg border border-dashed px-2.5 py-1.5 text-[11px] text-muted-foreground">
-        Discarded: {proposal.summary}
+        {t("autopilot.proposal.discarded", { summary: proposal.summary })}
       </div>
     )
   }
@@ -365,12 +368,12 @@ function StagedProposalCard({
       </div>
 
       {applyError && (
-        <InlineAiError message={applyError} label="Apply failed" className="text-[11px]" />
+        <InlineAiError message={applyError} label={t("autopilot.proposal.applyFailed")} className="text-[11px]" />
       )}
 
       {state === "applied" ? (
         <div className="flex items-center gap-1 text-[11px] font-medium text-emerald-600">
-          <Check className="h-3 w-3" /> Applied
+          <Check className="h-3 w-3" /> {t("autopilot.evidence.status.applied")}
         </div>
       ) : (
         <div className="space-y-1">
@@ -381,7 +384,7 @@ function StagedProposalCard({
               onClick={() => setState("discarded")}
               disabled={state === "applying"}
             >
-              Discard
+              {t("common.discard")}
             </Button>
             <AppTooltip content={blockedReason ?? undefined} disabled={!blockedReason}>
               <Button
@@ -391,10 +394,10 @@ function StagedProposalCard({
               >
               {state === "applying" ? (
                 <>
-                  <Spinner className="size-3" /> Applying…
+                  <Spinner className="size-3" /> {t("autopilot.proposal.applying")}
                 </>
               ) : (
-                "Apply"
+                t("autopilot.proposal.apply")
               )}
             </Button>
             </AppTooltip>

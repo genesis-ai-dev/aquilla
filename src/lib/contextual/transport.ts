@@ -37,6 +37,7 @@ import {
   type ContextualTransport,
   type ContextualTransportSnapshot,
 } from "./run-store"
+import { isOpaqueId } from "../../../shared/span-label"
 
 // ── Typed errors ────────────────────────────────────────────────────────────
 
@@ -177,7 +178,7 @@ interface DraftListRow {
   runId: string
   cellId: string
   text: string
-  provenance?: { spanId?: string } | null
+  provenance?: { spanId?: string; spanLabel?: string } | null
 }
 
 /**
@@ -203,13 +204,16 @@ export async function fetchContextualDrafts(
   if (res.status === 404 || res.status === 501) return []
   if (!res.ok) return throwFromResponse(res, "fetch contextual drafts failed")
   const { drafts } = (await res.json()) as { drafts?: DraftListRow[] }
-  return (drafts ?? []).map((d) => ({
-    draftId: d.id,
-    runId: d.runId,
-    cellId: d.cellId,
-    text: d.text,
-    ...(d.provenance?.spanId ? { spanLabel: d.provenance.spanId } : {}),
-  }))
+  return (drafts ?? []).map((d) => {
+    const spanLabel = typeof d.provenance?.spanLabel === "string" ? d.provenance.spanLabel : ""
+    return {
+      draftId: d.id,
+      runId: d.runId,
+      cellId: d.cellId,
+      text: d.text,
+      ...(spanLabel && !isOpaqueId(spanLabel) ? { spanLabel } : {}),
+    }
+  })
 }
 
 /**
@@ -352,6 +356,7 @@ export interface ContextualActivitySceneBrief {
   fileId?: string
   startCellId?: string
   endCellId?: string
+  spanLabel?: string | null
   status?: string
   construal?: string
   l1Summary?: string | null
@@ -375,6 +380,8 @@ export interface ContextualActivityDraft {
   runId?: string
   fileId?: string
   cellId?: string
+  cellLabel?: string | null
+  spanLabel?: string | null
   sceneBriefId?: string | null
   text?: string
   status?: string
@@ -751,6 +758,59 @@ export async function sendContextualSteering(runId: string, text: string): Promi
     },
   )
   if (!res.ok) return throwFromResponse(res, "send steering failed")
+}
+
+// ── Contextual decisions (human-in-the-loop question channel) ──────────────
+
+export interface ContextualDecisionView {
+  id: string
+  fileId: string
+  cellIds: string[]
+  reason: string
+  readinessItem: "terminology" | "brief" | "examples" | "rules" | "languages" | null
+  blastRadius: number
+  status: "open" | "researching" | "resolved" | "dismissed" | "superseded" | "expired"
+  assignedUserId: number | null
+}
+
+export interface ContextualDecisionsPage {
+  decisions: ContextualDecisionView[]
+  /** True number of open decisions — may exceed `decisions.length`, because
+   *  surplus is HELD rather than shown (§4.6). */
+  openCount: number
+  cap: number
+}
+
+const EMPTY_DECISIONS: ContextualDecisionsPage = { decisions: [], openCount: 0, cap: 0 }
+
+/** Reports an empty page rather than throwing when the backend predates this
+ *  endpoint, so the inspector still renders without it. */
+export async function fetchContextualDecisions(
+  projectId: string,
+): Promise<ContextualDecisionsPage> {
+  const jwt = await requireJwt()
+  const res = await fetchWithTimeout(
+    `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/contextual/decisions`,
+    { headers: authHeaders(jwt) },
+  )
+  if (res.status === 404 || res.status === 501) return EMPTY_DECISIONS
+  if (!res.ok) return throwFromResponse(res, "fetch decisions failed")
+  const body = (await res.json()) as Partial<ContextualDecisionsPage>
+  return { ...EMPTY_DECISIONS, ...body }
+}
+
+export async function actOnContextualDecision(
+  projectId: string,
+  decisionId: string,
+  action: "answer" | "dismiss" | "assign",
+  payload: Record<string, unknown> = {},
+): Promise<void> {
+  const jwt = await requireJwt()
+  const res = await fetchWithTimeout(
+    `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/contextual/decisions/${encodeURIComponent(decisionId)}/${action}`,
+    { method: "POST", headers: authHeaders(jwt), body: JSON.stringify(payload) },
+  )
+  if (!res.ok) return throwFromResponse(res, `decision ${action} failed`)
 }
 
 let _installed = false

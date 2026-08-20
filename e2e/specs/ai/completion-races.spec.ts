@@ -9,6 +9,7 @@ import { test, expect } from "../../helpers/multi-user"
 import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 import { MockLLMServer } from "../../helpers/mock-llm-server"
 import { ProjectSettings } from "../../helpers/page-objects/ProjectSettings"
+import { Workspace } from "../../helpers/page-objects/Workspace"
 
 const mockLLM = new MockLLMServer()
 test.beforeAll(async () => { await mockLLM.start() })
@@ -30,19 +31,15 @@ async function setupProject(alice: import("@playwright/test").Page, name: string
 }
 
 async function sparkleFirstCell(alice: import("@playwright/test").Page) {
-  const sparkle = alice
-    .locator("[data-tooltip*='Translate with AI'] button, button[aria-label*='Translate with AI']")
-    .first()
-  await sparkle.scrollIntoViewIfNeeded()
-  await alice.locator("[data-cell-id]").first().hover()
-  await expect(sparkle).toBeVisible()
-  await sparkle.click()
-  // A non-empty cell pops the overwrite-confirm dialog — confirm if present.
-  const confirm = alice.getByRole("button", { name: /Replace|Overwrite|Continue/i }).first()
+  const alreadyFilled = /\S/.test((await targetCell(alice).innerText()).replace(/\u00a0/g, " "))
+  await new Workspace(alice).clickSparkleOnFirstCell()
+  // Human-authored text opens GenerateOverwriteDialog; AI drafts and empty
+  // cells do not. Confirm if it appears — do not require it.
+  const confirm = alice.getByRole("button", { name: /^Replace$/i })
   try {
-    await confirm.waitFor({ state: "visible", timeout: 1_500 })
+    await confirm.waitFor({ state: "visible", timeout: alreadyFilled ? 4_000 : 500 })
     await confirm.click()
-  } catch { /* empty cell — no dialog */ }
+  } catch { /* no dialog */ }
 }
 
 function targetCell(alice: import("@playwright/test").Page) {

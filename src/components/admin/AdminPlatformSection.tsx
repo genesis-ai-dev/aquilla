@@ -2,14 +2,15 @@ import { useState } from "react"
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { AdminSettingsSection } from "./AdminSettingsSection"
 import { AdminCreditsSection } from "./AdminCreditsSection"
+import { AdminBillingSection } from "./AdminBillingSection"
 
 /**
- * Platform — the two *editable* admin surfaces grouped together (away from the
- * read-only oversight tabs): global AI settings, and per-org compute/credit
- * caps. A light sub-nav switches between them so the console's top-level tab bar
- * stays about "what's happening" vs. "what I configure".
+ * Platform — editable admin surfaces grouped together (away from the
+ * read-only oversight tabs): AI settings, compute/credit caps, and Field
+ * Plan billing. A light sub-nav switches between them so the console's
+ * top-level tab bar stays about "what's happening" vs. "what I configure".
  */
-type Sub = "settings" | "credits"
+type Sub = "settings" | "credits" | "billing"
 
 export function AdminPlatformSection({ jwt }: { jwt: string }) {
   const [sub, setSub] = useState<Sub>("settings")
@@ -19,12 +20,16 @@ export function AdminPlatformSection({ jwt }: { jwt: string }) {
         <TabsList>
           <TabsTrigger value="settings">AI settings</TabsTrigger>
           <TabsTrigger value="credits">Compute &amp; credits</TabsTrigger>
+          <TabsTrigger value="billing">Billing</TabsTrigger>
         </TabsList>
         <TabsContent value="settings" className="mt-4">
           <AdminSettingsSection jwt={jwt} />
         </TabsContent>
         <TabsContent value="credits" className="mt-4">
           <AdminCreditsSection jwt={jwt} />
+        </TabsContent>
+        <TabsContent value="billing" className="mt-4">
+          <AdminBillingSection jwt={jwt} />
         </TabsContent>
       </Tabs>
     </div>

@@ -301,8 +301,8 @@
      cursor is `auto` and the node is a link, so no amount of removing
      `cursor-pointer` reaches it. An explicit value overrides that. Interactive
      controls that need a non-arrow cursor (resize handles, text, not-allowed)
-     still set it themselves. Marketing pages are a separate entry
-     (homepage.html / homepage.css) and keep their own affordances. */
+     still set it themselves. The separate marketing app owns its own cursor
+     affordances. */
   :where(a):not(:disabled, [aria-disabled="true"]) {
     cursor: default;
   }

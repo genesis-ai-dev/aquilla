@@ -11,7 +11,7 @@ export function OrgSettingsDetailPage({
   children,
 }: {
   title: string
-  description: string
+  description?: string
   children: ReactNode
 }) {
   const { activeOrgId } = useActiveOrg()

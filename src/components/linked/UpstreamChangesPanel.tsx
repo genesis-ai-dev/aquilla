@@ -47,6 +47,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Spinner } from "@/components/ui/spinner"
 import { DiffText } from "./DiffText"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { RichMessage } from "@/lib/i18n/RichMessage"
 import { formatDateTime } from "@/lib/i18n/format"
 import {
   useUpstreamChangesReview,
@@ -80,7 +81,7 @@ export function UpstreamChangesPanel({
   roleLevel,
   username,
 }: UpstreamChangesPanelProps) {
-  const { locale } = useI18n()
+  const { locale, t } = useI18n()
   const navigate = useNavigate()
   const { groups, totalFlagged, isLoading, isError, revalidate } = useUpstreamChangesReview({
     projectId,
@@ -143,7 +144,7 @@ export function UpstreamChangesPanel({
   async function repinOne(item: ReviewItem): Promise<boolean> {
     if (!item.target || !item.newSourceEventId) return false
     const jwt = await getToken(item.fileId)
-    if (!jwt) throw new Error("could not obtain a sync token")
+    if (!jwt) throw new Error(t("importExport.linked.syncTokenError"))
     const newSourceEventId = item.newSourceEventId
     await emitTargetCellRepin({
       projectId,
@@ -213,9 +214,9 @@ export function UpstreamChangesPanel({
   if (isLoading && groups.length === 0) {
     return (
       <Card>
-        <CardHeader><CardTitle>Upstream changes</CardTitle></CardHeader>
+        <CardHeader><CardTitle>{t("projectSettings.section.upstreamChanges")}</CardTitle></CardHeader>
         <CardContent className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Spinner className="h-4 w-4" /> Checking for upstream changes…
+          <Spinner className="h-4 w-4" /> {t("importExport.linked.checking")}
         </CardContent>
       </Card>
     )
@@ -224,10 +225,10 @@ export function UpstreamChangesPanel({
   if (isError && groups.length === 0) {
     return (
       <Card>
-        <CardHeader><CardTitle>Upstream changes</CardTitle></CardHeader>
+        <CardHeader><CardTitle>{t("projectSettings.section.upstreamChanges")}</CardTitle></CardHeader>
         <CardContent className="text-sm text-muted-foreground">
-          Couldn&apos;t load upstream changes right now.{" "}
-          <button type="button" className="underline" onClick={() => revalidate()}>Retry</button>
+          {t("importExport.linked.loadError")}{" "}
+          <button type="button" className="underline" onClick={() => revalidate()}>{t("common.retry")}</button>
         </CardContent>
       </Card>
     )
@@ -236,9 +237,9 @@ export function UpstreamChangesPanel({
   if (totalFlagged === 0) {
     return (
       <Card id="section-upstream-changes">
-        <CardHeader><CardTitle>Upstream changes</CardTitle></CardHeader>
+        <CardHeader><CardTitle>{t("projectSettings.section.upstreamChanges")}</CardTitle></CardHeader>
         <CardContent className="text-sm text-muted-foreground">
-          Nothing flagged — this project is current with its upstream source.
+          {t("importExport.linked.nothingFlagged")}
         </CardContent>
       </Card>
     )
@@ -247,23 +248,23 @@ export function UpstreamChangesPanel({
   return (
     <Card id="section-upstream-changes">
       <CardHeader className="flex-row items-center justify-between gap-2">
-        <CardTitle>Upstream changes</CardTitle>
-        <Badge variant="secondary">{totalFlagged} flagged</Badge>
+        <CardTitle>{t("projectSettings.section.upstreamChanges")}</CardTitle>
+        <Badge variant="secondary">{t("importExport.linked.flaggedCount", { count: totalFlagged })}</Badge>
       </CardHeader>
       <CardContent className="space-y-4">
         {!canRepin && (
           <p className="text-xs text-muted-foreground">
-            Reviewer or above required to accept a change; project lead required to accept in bulk.
+            {t("importExport.linked.repinRoleRequired")}
           </p>
         )}
         {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
 
         {canBulk && selectedItems.length > 0 && (
           <div className="flex items-center justify-between rounded border bg-muted/40 px-3 py-2">
-            <span className="text-sm">{selectedItems.length} selected</span>
+            <span className="text-sm">{t("editor.selection.count", { count: selectedItems.length })}</span>
             <Button size="sm" onClick={() => void handleBulkRepin()}>
               <CheckCheck className="me-1.5 h-4 w-4" />
-              Accept as-is ({selectedItems.length})
+              {t("importExport.linked.acceptAllButton", { count: selectedItems.length })}
             </Button>
           </div>
         )}
@@ -280,9 +281,11 @@ export function UpstreamChangesPanel({
             >
               <CollapsibleTrigger className="flex w-full items-center justify-between rounded border px-3 py-2 text-start text-sm font-medium hover:bg-muted/40">
                 <span>
-                  Sync batch — {formatDateTime(group.serverTs, locale)}
+                  {t("importExport.linked.syncBatchHeading", {
+                    date: formatDateTime(group.serverTs, locale),
+                  })}
                 </span>
-                <Badge variant="outline">{group.cellCount} cell{group.cellCount === 1 ? "" : "s"}</Badge>
+                <Badge variant="outline">{t("common.cellCount", { count: group.cellCount })}</Badge>
               </CollapsibleTrigger>
               <CollapsibleContent className="mt-2 space-y-2">
                 {group.items.map((item) => {
@@ -301,7 +304,9 @@ export function UpstreamChangesPanel({
                             checked={selected.has(key)}
                             onCheckedChange={() => toggleSelected(item)}
                             disabled={!item.target || busy}
-                            aria-label={`Select ${item.cellId} for bulk repin`}
+                            aria-label={t("importExport.linked.selectForBulkAriaLabel", {
+                              cell: item.cellId,
+                            })}
                           />
                         </label>
                       )}
@@ -313,24 +318,34 @@ export function UpstreamChangesPanel({
                           {item.category === "tombstoned" && (
                             <Badge variant="destructive">
                               <Trash2 data-icon="inline-start" />
-                              removed upstream
+                              {t("importExport.linked.removedUpstreamBadge")}
                             </Badge>
                           )}
                           {!item.target && (
-                            <Badge variant="secondary">awaiting upstream translation</Badge>
+                            <Badge variant="secondary">{t("importExport.linked.awaitingTranslationBadge")}</Badge>
                           )}
                           {skipped && (
                             <Badge variant="outline">
                               <AlertTriangle data-icon="inline-start" />
-                              skipped — retranslated since
+                              {t("importExport.linked.skippedRetranslatedBadge")}
                             </Badge>
                           )}
                         </div>
                         {item.category === "tombstoned" ? (
                           <p className="text-sm text-muted-foreground">
-                            This line was removed upstream.
+                            {t("importExport.linked.tombstonedLine")}
                             {item.target && (
-                              <> Its translation is kept: <span className="italic">&ldquo;{item.target.value}&rdquo;</span></>
+                              <>
+                                {" "}
+                                <RichMessage
+                                  k="importExport.linked.tombstonedTranslationKept"
+                                  values={{
+                                    translation: (
+                                      <span className="italic">&ldquo;{item.target.value}&rdquo;</span>
+                                    ),
+                                  }}
+                                />
+                              </>
                             )}
                           </p>
                         ) : (
@@ -340,7 +355,7 @@ export function UpstreamChangesPanel({
                       <div className="flex shrink-0 items-center gap-1.5">
                         <Button variant="outline" size="sm" onClick={() => openToRetranslate(item)}>
                           <ArrowRight className="me-1 h-3.5 w-3.5" />
-                          Open
+                          {t("org.overviewLaneTable.openAction")}
                         </Button>
                         {item.target && (
                           <Button
@@ -349,7 +364,7 @@ export function UpstreamChangesPanel({
                             onClick={() => void handleRepinSingle(item)}
                           >
                             {busy ? <Spinner className="h-3.5 w-3.5" /> : <CheckCheck className="me-1 h-3.5 w-3.5" />}
-                            Accept as-is
+                            {t("importExport.linked.acceptButton")}
                           </Button>
                         )}
                       </div>

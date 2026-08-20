@@ -147,6 +147,7 @@ export function OrgOverview() {
     [portfolio.projects, portfolio.now],
   )
   const projectsExpanded = expandedProjectsOrgId === activeOrgId
+  const hiddenProjectCount = Math.max(0, projectRows.length - PROJECT_PREVIEW_LIMIT)
   const visibleProjectRows = projectsExpanded
     ? projectRows
     : projectRows.slice(0, PROJECT_PREVIEW_LIMIT)
@@ -314,23 +315,6 @@ export function OrgOverview() {
                 description={t("org.overview.projectsDescription")}
                 headerClassName={ADMIN_TABLE_SECTION_HEADER}
                 contentClassName={ADMIN_TABLE_SECTION_CONTENT}
-                action={
-                  projectRows.length > PROJECT_PREVIEW_LIMIT ? (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setExpandedProjectsOrgId(projectsExpanded ? null : activeOrgId)
-                      }
-                      aria-expanded={projectsExpanded}
-                      aria-controls="org-overview-projects-table"
-                      className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-                    >
-                      {projectsExpanded
-                        ? t("org.projectOverview.showFewer")
-                        : t("org.overview.showAllProjects", { count: projectRows.length })}
-                    </button>
-                  ) : null
-                }
               >
                 <div id="org-overview-projects-table">
                   <DataTable
@@ -341,6 +325,23 @@ export function OrgOverview() {
                     testId="org-overview-projects-table"
                     className={ADMIN_TABLE_CLASS}
                     dense
+                    footer={
+                      hiddenProjectCount > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedProjectsOrgId(projectsExpanded ? null : activeOrgId)
+                          }
+                          aria-expanded={projectsExpanded}
+                          aria-controls="org-overview-projects-table"
+                          className="w-full text-start text-sm text-muted-foreground"
+                        >
+                          {projectsExpanded
+                            ? t("org.projectOverview.showFewer")
+                            : t("org.overview.showMoreProjects", { count: hiddenProjectCount })}
+                        </button>
+                      ) : null
+                    }
                     emptyState={
                       <EmptyState
                         variant="inline"

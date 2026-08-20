@@ -994,7 +994,10 @@ export const org = defineNamespace({
     "org.overview.allClearDescription":
       "No active project is overdue, due soon, or stalled right now.",
     "org.overview.projectsDescription": "Most recently updated first.",
-    "org.overview.showAllProjects": "Show all {count}",
+    "org.overview.showMoreProjects": plural({
+      one: "Show {count} more",
+      other: "Show {count} more",
+    }),
     "org.overview.emptyDescription": "Create a project to start translating.",
 
     // -- OrgProjectsDataTable: shared portfolio projects DataTable (page/embedded) --
@@ -1089,10 +1092,10 @@ export const org = defineNamespace({
         "Organizations, teams, members and invitations — the permanent chrome above a project: the org switcher, breadcrumb trail, member and team management, invite flows and permission surfaces. Most of these strings sit in a narrow header or sidebar that is on screen on every route, so they compete for horizontal space with the project's own content.",
     },
     keys: {
-      "org.overview.showAllProjects": {
+      "org.overview.showMoreProjects": {
         description:
-          "Button that expands the single-organization Overview's ten-project preview to reveal every project inline.",
-        placeholders: { count: "Total number of accessible projects in the organization." },
+          "Last-row control on the single-organization Overview's project table that expands the ten-project preview to reveal the remaining projects inline. Count is how many rows are still hidden, not the org total.",
+        placeholders: { count: "Number of projects not currently shown." },
       },
       "org.switcher.triggerAriaLabel": {
         description:

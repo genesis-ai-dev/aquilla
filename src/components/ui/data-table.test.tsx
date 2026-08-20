@@ -307,4 +307,22 @@ describe("DataTable", () => {
     // along the React tree — which runs through the row.
     expect(onRowClick).not.toHaveBeenCalled()
   })
+
+  it("renders footer as the last body row spanning all columns", () => {
+    render(
+      <DataTable
+        columns={columns}
+        data={rows}
+        getRowId={(r) => String(r.id)}
+        footer={<button type="button">Show 2 more</button>}
+      />,
+    )
+
+    const table = screen.getByRole("table")
+    const bodyRows = within(table).getAllByRole("row").slice(1)
+    const footerRow = bodyRows[bodyRows.length - 1]
+    expect(within(footerRow).getByRole("button", { name: "Show 2 more" })).toBeInTheDocument()
+    expect(within(footerRow).getAllByRole("cell")).toHaveLength(1)
+    expect(within(footerRow).getByRole("cell")).toHaveAttribute("colspan", String(columns.length))
+  })
 })

@@ -610,14 +610,16 @@ describe("OrgOverview / OrgProjects", () => {
     expect(within(table).getByText("Project 10")).toBeInTheDocument()
     expect(within(table).queryByText("Project 11")).not.toBeInTheDocument()
 
-    const showAll = screen.getByRole("button", { name: "Show all 12" })
+    const showAll = within(table).getByRole("button", { name: "Show 2 more" })
     expect(showAll).toHaveAttribute("aria-expanded", "false")
+    expect(showAll.closest("tr")).toBe(table.querySelector("tbody tr:last-child"))
     fireEvent.click(showAll)
 
     expect(within(table).getByText("Project 11")).toBeInTheDocument()
     expect(within(table).getByText("Project 12")).toBeInTheDocument()
-    const showFewer = screen.getByRole("button", { name: "Show fewer" })
+    const showFewer = within(table).getByRole("button", { name: "Show fewer" })
     expect(showFewer).toHaveAttribute("aria-expanded", "true")
+    expect(showFewer.closest("tr")).toBe(table.querySelector("tbody tr:last-child"))
 
     fireEvent.click(showFewer)
     expect(within(table).queryByText("Project 11")).not.toBeInTheDocument()

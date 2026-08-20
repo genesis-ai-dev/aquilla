@@ -164,6 +164,12 @@ interface DataTableProps<TData, TValue> {
    * pinned above while rows scroll (in-card portfolio panels).
    */
   fillHeight?: boolean
+  /**
+   * Optional last body row (e.g. "Show N more"). Renders as a single colSpan
+   * cell so it sits in the table instead of as a detached header/footer control.
+   * Hidden while loading or when there are no rows.
+   */
+  footer?: React.ReactNode
 }
 
 function DataTable<TData, TValue>({
@@ -187,6 +193,7 @@ function DataTable<TData, TValue>({
   className,
   tableClassName,
   fillHeight = false,
+  footer,
 }: DataTableProps<TData, TValue>) {
   const t = useT()
   const [sorting, setSorting] = React.useState<SortingState>(
@@ -365,6 +372,16 @@ function DataTable<TData, TValue>({
                   </TableCell>
                 </TableRow>
               )}
+              {footer && hasRows && !loading ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell
+                    colSpan={visibleColumnCount}
+                    className={dense ? "py-1.5" : "py-2.5"}
+                  >
+                    {footer}
+                  </TableCell>
+                </TableRow>
+              ) : null}
             </TableBody>
           </Table>
         )}

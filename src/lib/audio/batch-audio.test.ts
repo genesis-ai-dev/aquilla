@@ -250,3 +250,39 @@ describe("needsTranscription — dub take on a media cell (SUB-29)", () => {
     ).toBe(false)
   })
 })
+
+// ── Batch progress, for whoever is reporting it (AQU-646, 2026-08-18) ────
+
+describe("runTranscribeAll progress", () => {
+  it("reports the total BEFORE any work, then counts up", async () => {
+    const seen: [number, number][] = []
+    await runTranscribeAll({
+      cells: [
+        makeCell({
+          id: "c1",
+          selectedAudioId: "a1",
+          attachments: { a1: { url: "frontier-audio://p/f/a1.wav" } as unknown as import("@/lib/codex-editor/types").CodexCellAttachment },
+        }),
+        makeCell({
+          id: "c2",
+          selectedAudioId: "a2",
+          attachments: { a2: { url: "frontier-audio://p/f/a2.wav" } as unknown as import("@/lib/codex-editor/types").CodexCellAttachment },
+        }),
+      ],
+      projectId: "p1",
+      session: null,
+      onProgress: (done, total) => seen.push([done, total]),
+    })
+    // The zeroth call is the point: on a cold run the Whisper model download
+    // happens inside the first cell, so without it the screen would sit empty
+    // for most of the wait.
+    expect(seen[0]).toEqual([0, 2])
+    expect(seen[seen.length - 1]).toEqual([2, 2])
+  })
+
+  it("stays silent when nothing needs transcribing", async () => {
+    const onProgress = vi.fn()
+    await runTranscribeAll({ cells: [], projectId: "p1", session: null, onProgress })
+    expect(onProgress).not.toHaveBeenCalled()
+  })
+})

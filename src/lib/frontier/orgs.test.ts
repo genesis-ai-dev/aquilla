@@ -26,10 +26,11 @@ describe("getOrCreateMyOrg", () => {
 describe("listOrgMembers", () => {
   it("returns members from GET", async () => {
     (global.fetch as any).mockResolvedValueOnce(
-      new Response(JSON.stringify({ members: [{ userId: 1, username: "wendy", role: { level: 700, name: "owner" } }] }), { status: 200 })
+      new Response(JSON.stringify({ members: [{ userId: 1, username: "wendy", email: "wendy@example.com", role: { level: 700, name: "owner" } }] }), { status: 200 })
     );
     const members = await listOrgMembers("jwt", 5);
     expect(members).toHaveLength(1);
+    expect(members[0].email).toBe("wendy@example.com");
   });
 });
 

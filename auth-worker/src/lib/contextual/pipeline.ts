@@ -1,6 +1,6 @@
 // pipeline — one graph instance: run ONE SPAN end to end (construe loop →
-// summarize → persist → draft → lint → route → verifiers → quorum → one
-// redraft → stage → report).
+// summarize → persist → draft → lint → support → route → verifiers → quorum →
+// one redraft → stage → report).
 //
 // This function is PURE composition: every side effect (persisting the brief,
 // linting, staging, neighbor-brief reads) arrives as an injected callback,
@@ -20,6 +20,7 @@ import {
   type Concept,
   type TranslationBriefParameters,
 } from "./project-context"
+import { analyzeSupport, confirmSupport, toSupportSignal, type SupportCorpus, type SupportSignal } from "./support"
 import { summarizeConstrual, renderConstrualL2 } from "./summarize"
 import { tallyVotes } from "./quorum"
 import { verifySpan } from "./verify"
@@ -43,8 +44,8 @@ import {
 } from "./types"
 
 /** Retrieval target for few-shot examples (draft tool's EXAMPLES_N). */
-export const EXAMPLES_TARGET = 8
-const PRECEDING_CONTEXT = 3
+export const EXAMPLES_TARGET = 10
+const PRECEDING_CONTEXT = 5
 /** Barrier at quorum: minimum successful verifier votes with the full panel. */
 const MIN_PANEL_SUCCESS = 2
 
@@ -251,13 +252,23 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
     ? termGuidanceForSpan(deps.concepts, inSpan.map((p) => p.source))
     : []
 
+  // The evidence the draft prompt carries, as the support check will see it.
+  // Hoisted: it is the same on both attempts, and building it per attempt
+  // would re-walk the file for no benefit.
+  const preceding = precedingValidated(deps.seed, deps.pairs)
+  const supportCorpus: SupportCorpus = {
+    targets: [...deps.examples.map((e) => e.target), ...preceding.map((p) => p.target)],
+    sources: [...deps.examples.map((e) => e.source), ...inSpan.map((p) => p.source)],
+  }
+  const sourcesByCellId = new Map(deps.pairs.map((p) => [p.cellId, p.source]))
+
   for (let attempt = 1; attempt <= 2; attempt++) {
     phase("drafting")
     const drafted: PerformSpanResult = await performSpan({
       sceneBrief: brief,
       pairs: attemptPairs,
       examples: deps.examples,
-      precedingValidated: precedingValidated(deps.seed, deps.pairs),
+      precedingValidated: preceding,
       ...(deps.steeringDirections ? { steeringDirections: deps.steeringDirections } : {}),
       ...(deps.projectBriefL1 ? { projectBriefL1: deps.projectBriefL1 } : {}),
       ...(deps.briefParameters ? { briefParameters: deps.briefParameters } : {}),
@@ -282,10 +293,41 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
 
     phase("checking")
     const flags = await deps.lint(drafted.draft)
-    const risk = classifyRisk(drafted.draft, flags, brief.ambiguityRegister, exampleCoverage, {
-      rounds: closure.rounds,
-      exit: closure.exit,
-    })
+
+    // Support: code first (free), the fast model only on what code flagged.
+    // Both tiers are reported — a routing decision nobody can inspect is a
+    // routing decision nobody can fix.
+    const support = analyzeSupport(drafted.draft, supportCorpus)
+    let supportSignal: SupportSignal | undefined
+    if (!support.applicable) {
+      // Corpus-derived, so identical on a redraft — report it once.
+      if (attempt === 1) notes.push(`support check abstained: ${support.abstainReason ?? "corpus too thin"}`)
+    } else {
+      const confirmation = await confirmSupport({
+        draft: drafted.draft,
+        support,
+        sourcesByCellId,
+        ...(deps.targetLanguage ? { targetLanguage: deps.targetLanguage } : {}),
+        llm: deps.llm,
+        budget,
+      })
+      supportSignal = toSupportSignal(support, confirmation)
+      if (support.suspect.length > 0) {
+        notes.push(
+          `support: ${support.suspect.length} cell(s) flagged in code, ${confirmation.riskyCellIds.length} confirmed risky` +
+            (confirmation.confirmed ? "" : ` (confirmation unavailable: ${confirmation.error ?? "unknown"} — all flagged cells escalated)`),
+        )
+      }
+    }
+
+    const risk = classifyRisk(
+      drafted.draft,
+      flags,
+      brief.ambiguityRegister,
+      exampleCoverage,
+      { rounds: closure.rounds, exit: closure.exit },
+      supportSignal,
+    )
     const verified = await runVerifiers(risk.verifiers, deps, brief, drafted.draft, attemptPairs, budget)
     for (const f of verified.failed) {
       notes.push(`verifier ${f.verifier} failed after retry: ${f.error}`)

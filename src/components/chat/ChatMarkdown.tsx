@@ -12,8 +12,10 @@ import remarkGfm from "remark-gfm"
 import { Copy, Check } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 function CodeBlock({ children }: { children?: ReactNode }) {
+  const t = useT()
   const preRef = useRef<HTMLPreElement>(null)
   const [copied, setCopied] = useState(false)
 
@@ -37,11 +39,11 @@ function CodeBlock({ children }: { children?: ReactNode }) {
       >
         {children}
       </pre>
-      <AppTooltip content="Copy code">
+      <AppTooltip content={t("workspace.chatMarkdown.copyCode")}>
         <button
           type="button"
           onClick={() => void handleCopy()}
-          aria-label="Copy code"
+          aria-label={t("workspace.chatMarkdown.copyCode")}
           className={cn(
             "absolute right-1 top-1 rounded border bg-background p-1 text-muted-foreground",
             "opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/code:opacity-100",

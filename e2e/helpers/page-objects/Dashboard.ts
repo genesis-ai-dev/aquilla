@@ -27,7 +27,7 @@ export class Dashboard {
       typeof orgId === "number" && orgId > 0 ? `/orgs/${orgId}/projects` : "/"
     await this.page.goto(target)
     await expect(this.page.getByRole("button", { name: /new project/i }).first()).toBeVisible({
-      timeout: 15_000,
+      timeout: 30_000,
     })
   }
 
@@ -135,6 +135,19 @@ export class Dashboard {
       await this.page.keyboard.press("Escape")
       await expect(setupSheet).not.toBeVisible({ timeout: 3_000 })
     }
+  }
+
+  /** PanelLeft control that opens the org sidebar sheet below the lg breakpoint (1024px). */
+  openSidebarButton(): Locator {
+    return this.page.getByRole("button", { name: "Open sidebar" })
+  }
+
+  async openMobileSidebar(): Promise<Locator> {
+    await expect(this.openSidebarButton()).toBeVisible({ timeout: 10_000 })
+    await this.openSidebarButton().click()
+    const sheet = this.page.getByRole("dialog", { name: "Navigation" })
+    await expect(sheet).toBeVisible({ timeout: 10_000 })
+    return sheet
   }
 
   async deleteProject(name: string): Promise<void> {

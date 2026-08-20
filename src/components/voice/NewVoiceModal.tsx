@@ -275,7 +275,7 @@ function NewVoiceModalBody({
                   <FieldLabel>{t("audio.newVoice.engineLabel")}</FieldLabel>
                   <div className="grid grid-cols-2 gap-1.5">
                     {TTS_PROVIDER_INFOS.map((info) => (
-                      <AppTooltip key={info.id} content={info.hint} className="max-w-xs">
+                      <AppTooltip key={info.id} content={t(info.hintKey)} className="max-w-xs">
                         <button
                           type="button"
                           onClick={() => pickProvider(info.id)}
@@ -508,6 +508,7 @@ function MmsLanguageField({ value, onChange }: { value: string; onChange: (v: st
             id="voice-mms-code"
             value={value}
             onChange={(e) => onChange(e.target.value.trim().toLowerCase())}
+            // i18n-exempt: fixed ISO 639-3 code example (Italian), not translatable prose
             placeholder="ita"
             className="font-mono"
           />

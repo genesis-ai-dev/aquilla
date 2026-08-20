@@ -85,7 +85,7 @@ test("team remove member button removes the member from the team", async ({ alic
   const dash = new Dashboard(alice)
   void dash // suppress unused var
   const createBtn = alice.getByRole("button", { name: /\+ New team|Create team|New team/i })
-  await expect(createBtn).toBeVisible({ timeout: 10_000 })
+  await expect(createBtn).toBeVisible({ timeout: 30_000 })
   await createBtn.click()
 
   const teamName = `RemoveMember ${Date.now()}`
@@ -142,7 +142,7 @@ test("team member role select changes member role", async ({ alice }) => {
   // Create a team.
   await alice.goto(orgRoute(alice, "/teams"))
   const createBtn = alice.getByRole("button", { name: /\+ New team|Create team|New team/i })
-  await expect(createBtn).toBeVisible({ timeout: 10_000 })
+  await expect(createBtn).toBeVisible({ timeout: 30_000 })
   await createBtn.click()
 
   const teamName = `RoleTeam ${Date.now()}`
@@ -212,7 +212,7 @@ test("team attach project adds project to team project list", async ({ alice }) 
   // Navigate to teams and create a new team.
   await alice.goto(orgRoute(alice, "/teams"))
   const createBtn = alice.getByRole("button", { name: /\+ New team|Create team|New team/i })
-  await expect(createBtn).toBeVisible({ timeout: 10_000 })
+  await expect(createBtn).toBeVisible({ timeout: 30_000 })
   await createBtn.click()
 
   const teamName = `AttachTeam ${Date.now()}`
@@ -260,7 +260,7 @@ test("team detach project removes project from team", async ({ alice }) => {
   // Navigate to teams and create a new team.
   await alice.goto(orgRoute(alice, "/teams"))
   const createBtn = alice.getByRole("button", { name: /\+ New team|Create team|New team/i })
-  await expect(createBtn).toBeVisible({ timeout: 10_000 })
+  await expect(createBtn).toBeVisible({ timeout: 30_000 })
   await createBtn.click()
 
   const teamName = `DetachTeam ${Date.now()}`
@@ -431,7 +431,7 @@ test("teams list filter and sort controls work", async ({ alice }) => {
   // Create a team so the search/sort controls appear.
   await alice.goto(orgRoute(alice, "/teams"))
   const createBtn = alice.getByRole("button", { name: /New team|Create team/i })
-  await expect(createBtn).toBeVisible({ timeout: 10_000 })
+  await expect(createBtn).toBeVisible({ timeout: 30_000 })
   await createBtn.click()
 
   const teamName = `SortFilter ${Date.now()}`

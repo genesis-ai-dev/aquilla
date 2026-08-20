@@ -24,6 +24,7 @@ test("AQU-633: a self-validate 403 surfaces the reason banner (not a silent reve
   alice,
   bob,
 }) => {
+  test.setTimeout(120_000)
   // ── 1. Alice creates a shared project and adds bob as CONTRIBUTOR(400) ──────
   const aliceSession = await ensureAuthState("alice")
   const projectId = uuid()

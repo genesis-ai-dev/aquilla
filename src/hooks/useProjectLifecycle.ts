@@ -8,6 +8,7 @@
 import { useState, useCallback } from "react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { toggleProjectLifecycle } from "@/lib/sync/cloud-projects"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 export interface UseProjectLifecycleResult {
   /**
@@ -36,6 +37,7 @@ export function useProjectLifecycle(
   project: ProjectRecord | null,
   onToggled?: (isActive: boolean) => void,
 ): UseProjectLifecycleResult {
+  const t = useT()
   // isActive absent → treat as true (backward compat with older API responses)
   const serverIsActive = project?.isActive !== false
   const [optimistic, setOptimistic] = useState<boolean | null>(null)
@@ -47,7 +49,7 @@ export function useProjectLifecycle(
 
   const toggle = useCallback(
     async (jwt: string): Promise<{ ok: true } | { ok: false; message: string }> => {
-      if (busy) return { ok: false, message: "toggle already in progress" }
+      if (busy) return { ok: false, message: t("org.projectLifecycle.toggleInProgressError") }
       const nextActive = isFrozen // frozen → toggle to active; active → toggle to inactive
       // Optimistic update
       setOptimistic(nextActive)
@@ -70,7 +72,7 @@ export function useProjectLifecycle(
         setOptimistic(null)
       }
     },
-    [busy, isFrozen, projectId, onToggled],
+    [busy, isFrozen, projectId, onToggled, t],
   )
 
   return { isFrozen, toggle, busy }

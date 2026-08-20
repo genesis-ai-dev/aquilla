@@ -17,6 +17,8 @@ describe("WorkspaceHeaderActions", () => {
     const importBtn = screen.getByRole("button", { name: /^Import$/i })
     const settingsBtn = screen.getByRole("button", { name: /^Settings$/i })
     expect(importBtn.compareDocumentPosition(settingsBtn) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(settingsBtn.closest("[data-slot=button-group]")).toBeNull()
+    expect(importBtn.closest("[data-slot=button-group]")).not.toBeNull()
 
     fireEvent.click(settingsBtn)
     expect(onSettings).toHaveBeenCalledTimes(1)

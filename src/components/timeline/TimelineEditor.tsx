@@ -115,11 +115,12 @@ export interface TimelineEditorProps {
 
 /** The timing modes' user-facing copy, per mode.
  *
- *  `AUDIO_TIMING_MODE_LABELS` (lib/parsers/types) still carries the English for
- *  the Project Settings card; the toolbar reads its copy from the catalog
- *  instead, because a `{mode}` frame filled with a translated noun cannot be
- *  made grammatical in every locale. `lockedDescription` is the same sentence
- *  plus the below-maintainer note, kept whole rather than concatenated. */
+ *  `AUDIO_TIMING_MODE_LABELS` (lib/parsers/types) resolves the same
+ *  `editor.timeline.timingMode*` name/description keys for
+ *  TimingModeChangedDialog; this table adds `lockedDescription` — the same
+ *  sentence plus the below-maintainer note, kept whole rather than
+ *  concatenated, because a `{mode}` frame filled with a translated noun
+ *  cannot be made grammatical in every locale. */
 const TIMING_MODE_KEYS: Record<
   AudioTimingMode,
   { name: MessageKey; description: MessageKey; lockedDescription: MessageKey }

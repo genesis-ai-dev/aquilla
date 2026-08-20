@@ -13,12 +13,15 @@ import { setTranscribeStatus } from "./transcribe-status"
 import { fetchCellAudio, parseFrontierAudioUrl, audioIdSeededWith } from "./upload"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
 import { makeAudioSyncTokenFetcher } from "./sync-token-fetcher"
+import { resolvePcmWindow, type PcmTrimWindow } from "./pcm-window"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { t } from "@/lib/i18n/standalone"
 import type {
   ResultMessage,
   ErrorMessage,
   ProgressMessage,
   TranscribeRequest,
+  ReleaseRequest,
 } from "./whisper-worker"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -66,11 +69,25 @@ async function getWorker(): Promise<Worker> {
   return workerPromise
 }
 
-/** AQU-646: a trim window (ms) selecting one segment of a shared clip. */
-export interface PcmTrimWindow {
-  trimStartMs?: number | null
-  trimEndMs?: number | null
+/** @internal — test-only. Pass null to restore the real (dynamically imported) worker. */
+export function __setWhisperWorkerForTests(worker: Worker | null): void {
+  workerPromise = worker ? Promise.resolve(worker) : null
 }
+
+/**
+ * AQU-929: deliberately tear the Whisper session down. The worker keeps the
+ * model loaded between runs on purpose (re-initialising per cell would be a
+ * large regression for bulk transcribe), so this is the explicit hook for
+ * giving that memory back — e.g. when a low-memory device is done transcribing.
+ * The next transcribe transparently reloads the model from the browser cache.
+ */
+export async function releaseTranscriber(): Promise<void> {
+  if (!workerPromise) return
+  const worker = await workerPromise.catch(() => null)
+  worker?.postMessage({ type: "release" } satisfies ReleaseRequest)
+}
+
+export type { PcmTrimWindow }
 
 /**
  * AQU-646: slice a 16 kHz mono PCM buffer to a trim window. Exported for
@@ -79,15 +96,51 @@ export interface PcmTrimWindow {
  * than none).
  */
 export function slicePcmToTrim(pcm: Float32Array, trim?: PcmTrimWindow): Float32Array {
-  const startMs = trim?.trimStartMs ?? null
-  const endMs = trim?.trimEndMs ?? null
-  if (startMs == null && endMs == null) return pcm
-  const start = Math.max(0, Math.min(pcm.length, Math.round(((startMs ?? 0) / 1000) * WHISPER_SAMPLE_RATE)))
-  const end = endMs == null
-    ? pcm.length
-    : Math.max(0, Math.min(pcm.length, Math.round((endMs / 1000) * WHISPER_SAMPLE_RATE)))
-  if (end <= start) return pcm
-  return pcm.slice(start, end)
+  const win = resolvePcmWindow(pcm.length, WHISPER_SAMPLE_RATE, trim)
+  if (win.isFull) return pcm
+  return pcm.slice(win.start, win.end)
+}
+
+/** Downmix (and window) a decoded 16 kHz buffer into exactly the samples we need. */
+function extractMonoWindow(buffer: AudioBuffer, trim?: PcmTrimWindow): Float32Array {
+  const win = resolvePcmWindow(buffer.length, buffer.sampleRate, trim)
+  const out = new Float32Array(win.length)
+  if (buffer.numberOfChannels === 1) {
+    buffer.copyFromChannel(out, 0, win.start)
+    return out
+  }
+  // Downmix by averaging channels, one channel-sized scratch buffer at a time —
+  // never the whole multi-channel clip at once.
+  const scratch = new Float32Array(win.length)
+  const n = buffer.numberOfChannels
+  for (let ch = 0; ch < n; ch++) {
+    buffer.copyFromChannel(scratch, ch, win.start)
+    for (let i = 0; i < win.length; i++) out[i] += scratch[i] / n
+  }
+  return out
+}
+
+/**
+ * Fallback resample for browsers that decode at their own rate regardless of
+ * the context we asked for. Renders **only the trim window** (AQU-929) — the
+ * old code rendered the whole clip at 16 kHz and then threw most of it away,
+ * so a chapter-length shared clip paid full-clip cost for every one of its
+ * sections.
+ */
+async function resampleWindowTo16k(buffer: AudioBuffer, trim?: PcmTrimWindow): Promise<Float32Array> {
+  const win = resolvePcmWindow(buffer.length, buffer.sampleRate, trim)
+  const startSec = win.start / buffer.sampleRate
+  const durationSec = win.length / buffer.sampleRate
+  const targetLen = Math.max(1, Math.ceil(durationSec * WHISPER_SAMPLE_RATE))
+  const offline = new OfflineAudioContext(1, targetLen, WHISPER_SAMPLE_RATE)
+  const src = offline.createBufferSource()
+  src.buffer = buffer
+  src.connect(offline.destination)
+  src.start(0, startSec, durationSec)
+  const rendered = await offline.startRendering()
+  const out = new Float32Array(rendered.length)
+  rendered.copyFromChannel(out, 0, 0)
+  return out
 }
 
 export async function audioBytesToWhisperPcm(bytes: Uint8Array, trim?: PcmTrimWindow): Promise<Float32Array> {
@@ -95,7 +148,19 @@ export async function audioBytesToWhisperPcm(bytes: Uint8Array, trim?: PcmTrimWi
   const copy = new Uint8Array(bytes.byteLength)
   copy.set(bytes)
 
-  const ctx = new AudioCtxCtor()
+  // AQU-929: decode straight into a 16 kHz context so decodeAudioData resamples
+  // *during* decode. Decoding at the device rate materialised a 48 kHz stereo
+  // AudioBuffer (~6x the bytes of the mono 16 kHz PCM Whisper actually wants)
+  // and then held it alive alongside a full-length resample render — the two
+  // together are the bulk of the peak this ticket is about.
+  let ctx: AudioContext
+  try {
+    ctx = new AudioCtxCtor({ sampleRate: WHISPER_SAMPLE_RATE })
+  } catch {
+    // Some browsers reject non-native context rates; fall back to the default
+    // rate and resample the window below.
+    ctx = new AudioCtxCtor()
+  }
   let buffer: AudioBuffer
   try {
     buffer = await ctx.decodeAudioData(copy.buffer as ArrayBuffer)
@@ -103,18 +168,8 @@ export async function audioBytesToWhisperPcm(bytes: Uint8Array, trim?: PcmTrimWi
     void ctx.close()
   }
 
-  if (buffer.sampleRate === WHISPER_SAMPLE_RATE && buffer.numberOfChannels === 1) {
-    return slicePcmToTrim(buffer.getChannelData(0).slice(0), trim)
-  }
-
-  const targetLen = Math.ceil(buffer.duration * WHISPER_SAMPLE_RATE)
-  const offline = new OfflineAudioContext(1, targetLen, WHISPER_SAMPLE_RATE)
-  const src = offline.createBufferSource()
-  src.buffer = buffer
-  src.connect(offline.destination)
-  src.start()
-  const rendered = await offline.startRendering()
-  return slicePcmToTrim(rendered.getChannelData(0).slice(0), trim)
+  if (buffer.sampleRate === WHISPER_SAMPLE_RATE) return extractMonoWindow(buffer, trim)
+  return resampleWindowTo16k(buffer, trim)
 }
 
 /**
@@ -128,6 +183,21 @@ export async function transcribeAudio(
   const consented = await requestAiModelConsent(WHISPER_MODEL)
   if (!consented) throw new AiModelConsentDeniedError(WHISPER_MODEL.id)
   const pcm = await audioBytesToWhisperPcm(bytes, opts.trim)
+  return runWhisperOnPcm(pcm, opts)
+}
+
+/**
+ * Hand a prepared 16 kHz mono PCM window to the Whisper worker and await the
+ * transcript. Split out from `transcribeAudio` (which needs Web Audio to make
+ * the PCM) so the worker hand-off itself is unit-testable.
+ *
+ * AQU-929: takes **ownership** of `pcm` — the buffer is transferred to the
+ * worker, so it is detached on return here.
+ */
+export async function runWhisperOnPcm(
+  pcm: Float32Array,
+  opts: TranscriptionOptions = {},
+): Promise<TranscriptionResult> {
   const worker = await getWorker()
   const requestId = `t-${++workerSeq}`
 
@@ -169,7 +239,9 @@ export async function transcribeAudio(
         language: opts.language,
         model: opts.model,
       }
-      worker.postMessage(req)
+      // AQU-929: transfer the PCM instead of structured-cloning it — a clone
+      // means both threads hold a full copy of the clip for the whole run.
+      worker.postMessage(req, [pcm.buffer as ArrayBuffer])
     })
 
     if (sawDownload) { noteModelDownloadSettled("whisper", true); settled = true }
@@ -217,13 +289,13 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
   const attachment = cell.attachments?.[audioId]
   const attachmentUrl = attachment?.url
   if (!attachmentUrl) {
-    setTranscribeStatus(audioId, { kind: "error", message: "This recording has no downloadable audio yet. Try again after it finishes syncing." })
+    setTranscribeStatus(audioId, { kind: "error", message: t("audio.error.noDownloadableAudio") })
     return 0
   }
 
   const frontier = parseFrontierAudioUrl(attachmentUrl)
   if (!frontier) {
-    setTranscribeStatus(audioId, { kind: "error", message: "This audio isn't stored in a transcribable location." })
+    setTranscribeStatus(audioId, { kind: "error", message: t("audio.error.notTranscribableLocation") })
     return 0
   }
 
@@ -233,7 +305,7 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
   // sign-in guard moves below the cache probe.
   const cached = await audioCacheGet(frontier.audioId, frontier.ext)
   if (!cached && !session?.jwt) {
-    setTranscribeStatus(audioId, { kind: "error", message: "Sign in to transcribe audio." })
+    setTranscribeStatus(audioId, { kind: "error", message: t("audio.error.signInToTranscribe") })
     return 0
   }
 

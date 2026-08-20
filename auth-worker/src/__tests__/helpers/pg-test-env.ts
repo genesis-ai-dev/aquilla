@@ -49,7 +49,7 @@ export const env = {
   EMAIL_FROM: "noreply@support.aquilla.app",
   BASE_URL: "https://aquilla.app",
   SYNC_WORKER_URL: "https://api.aquilla.app/sync",
-  DEFAULT_LLM_MODEL: "anthropic/claude-sonnet-4.5",
+  DEFAULT_LLM_MODEL: "openai/gpt-5.6-luna",
   OPENROUTER_API_KEY: undefined as string | undefined,
   ENVIRONMENT: "test",
   // AI budget controls (AQU-265). Tests override these per-suite as needed.
@@ -66,6 +66,11 @@ export const env = {
   ELEVATION_TTL_MINUTES: undefined as string | undefined,
   ELEVATION_SESSION_HOURS: undefined as string | undefined,
   WRANGLER_LOCAL: undefined as string | undefined,
+  STRIPE_SECRET_KEY: undefined as string | undefined,
+  STRIPE_WEBHOOK_SECRET: undefined as string | undefined,
+  STRIPE_PUBLISHABLE_KEY: undefined as string | undefined,
+  STRIPE_PRICE_FIELD: "price_test_field",
+  STRIPE_PRICE_ADDON: "price_test_addon",
 }
 
 /** Load the canonical Postgres schema into the test PGlite (call once, beforeAll). */

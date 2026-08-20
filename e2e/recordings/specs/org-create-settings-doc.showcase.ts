@@ -23,8 +23,8 @@ test("Demo · Create an organization and change its settings", async ({ page }) 
   // Bounded pacing — a wrong selector should fail well before the default 5 min.
   test.setTimeout(180_000)
 
-  // The root guard (App.tsx RootRedirect) bounces "/" to /homepage unless the
-  // aq_hint cookie is present. Set it so "/" resolves to OrgHome.
+  // AppEntry redirects an unsigned "/" to login. Set the hint so the seeded
+  // showcase session can resolve the SPA entry without that intermediate hop.
   await page.context().addCookies([{ name: "aq_hint", value: "1", url: APP_ORIGIN }])
 
   // Authenticate through the app's own marketing login → it persists the

@@ -109,6 +109,28 @@ describe("import milestone planning", () => {
     expect(manifest.units[1].milestone.key).not.toBe(manifest.units[3].milestone.key)
   })
 
+  it("uses chapter headings as EPUB navigation milestones", () => {
+    const manifest = normalizeTranslatableStrings([
+      text("c1-title", "Chapter One", {
+        type: "heading",
+        sourceLocation: { file: "OEBPS/Text/ch1.xhtml", blockPath: "0" },
+      }),
+      text("c1-body", "The river was wide.", {
+        sourceLocation: { file: "OEBPS/Text/ch1.xhtml", blockPath: "1" },
+      }),
+      text("c2-title", "Chapter Two", {
+        type: "heading",
+        sourceLocation: { file: "OEBPS/Text/ch2.xhtml", blockPath: "0" },
+      }),
+    ], { fileName: "book.epub", fileType: "epub" })
+
+    expect(manifest.units.map((unit) => unit.milestone.label)).toEqual([
+      "Chapter One",
+      "Chapter One",
+      "Chapter Two",
+    ])
+  })
+
   it("uses slides and their titles as presentation milestones", () => {
     const manifest = normalizeTranslatableStrings([
       text("s1-title", "Welcome", {
@@ -236,7 +258,7 @@ describe("import milestone planning", () => {
   })
 
   it.each([
-    "md", "docx", "pptx", "idml", "xlsx", "txt", "html", "json", "po",
+    "md", "docx", "pptx", "idml", "xlsx", "txt", "html", "epub", "json", "po",
     "properties", "vtt", "srt", "sbv", "usfm", "ebible", "helloao", "xliff",
     "tmx", "csv", "tsv", "audio", "video", "obs", "sdbh", "custom",
   ] satisfies FileType[])("never leaves a %s import unit without a milestone", (fileType) => {

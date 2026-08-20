@@ -6,7 +6,7 @@
 // playable blobs and emits cell.audio.select / .remove / .rename.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Bird, Check, CloudUpload, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
+import { Bird, Check, CloudAlert, CloudUpload, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -22,6 +22,7 @@ import {
   injectOptimisticAudioAttachment,
   injectOptimisticAudioRemove,
   notifyAudioAttachmentsChanged,
+  retryFailedAudioSync,
 } from "@/lib/audio/audio-attachments-bus"
 
 /** "Take 7" → 7; anything else → null. */
@@ -427,6 +428,21 @@ export function TakesStrip({
                       >
                         <CloudUpload className="h-3 w-3 animate-pulse" /> {t("common.saving")}
                       </span>
+                    )}
+                    {/* AQU-924: this take never reached the server. Say so ON the
+                        take and offer the retry here — it used to just vanish. */}
+                    {att.syncFailed && (
+                      <button
+                        type="button"
+                        title={t("audio.takesStrip.syncFailedTooltip")}
+                        data-testid={`take-sync-failed-${att.audioId}`}
+                        onClick={() => {
+                          void retryFailedAudioSync(projectId, fileId, cellId, att.audioId)
+                        }}
+                        className="flex shrink-0 items-center gap-0.5 rounded px-1 text-[10px] text-destructive hover:bg-destructive/10"
+                      >
+                        <CloudAlert className="h-3 w-3" /> {t("audio.takesStrip.syncFailedRetry")}
+                      </button>
                     )}
                     <AppTooltip content={t("audio.takesStrip.renameTooltip")}>
                       <Button

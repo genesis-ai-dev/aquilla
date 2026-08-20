@@ -13,20 +13,26 @@
  * catch regressions where a new subroute accidentally falls through to the
  * editor or re-triggers the redirect loop.
  *
- * Rules and Living Memory live under /project/:id/settings/{rules,memory}
- * (ProjectSettings), not as workspace overlay surfaces.
+ * Living Memory is a workspace overlay at /project/:id/memory[/:section];
+ * Rules pane URLs under /project/:id/settings/{rules,memory} now redirect
+ * there before reaching the shell, so the derivation stays conservative and
+ * still maps them to "editor".
  */
 import { describe, it, expect } from "vitest"
 
 // ── Replicate the pure derivation logic from ProjectWorkspace ──────────────
 // Keep in sync with the `centerSurface` derivation in ProjectWorkspace.tsx.
 
-type CenterSurface = "editor" | "comments" | "terminology" | "agent"
+type CenterSurface = "editor" | "comments" | "terminology" | "agent" | "memory"
+
+// Anchored on the /project/:id prefix so /project/:id/settings/memory never matches.
+const PROJECT_MEMORY_PATH_RE = /^\/project\/[^/]+\/memory(\/[^/]+)?$/
 
 function deriveCenterSurface(pathname: string): CenterSurface {
   if (pathname.endsWith("/comments")) return "comments"
   if (pathname.endsWith("/terminology")) return "terminology"
   if (pathname.endsWith("/agent")) return "agent"
+  if (PROJECT_MEMORY_PATH_RE.test(pathname)) return "memory"
   return "editor"
 }
 
@@ -35,7 +41,8 @@ function isOverlaySurface(pathname: string): boolean {
   return (
     pathname.endsWith("/comments") ||
     pathname.endsWith("/terminology") ||
-    pathname.endsWith("/agent")
+    pathname.endsWith("/agent") ||
+    PROJECT_MEMORY_PATH_RE.test(pathname)
   )
 }
 
@@ -54,6 +61,11 @@ describe("deriveCenterSurface", () => {
     expect(deriveCenterSurface("/project/proj1/agent")).toBe("agent")
   })
 
+  it("returns 'memory' for the Living Memory index and its section panes", () => {
+    expect(deriveCenterSurface("/project/proj1/memory")).toBe("memory")
+    expect(deriveCenterSurface("/project/proj1/memory/instructions")).toBe("memory")
+  })
+
   it("returns 'editor' for the root project path", () => {
     expect(deriveCenterSurface("/project/proj1/editor")).toBe("editor")
   })
@@ -67,6 +79,9 @@ describe("deriveCenterSurface", () => {
   })
 
   it("does not treat settings panes as workspace overlays", () => {
+    // These URLs redirect into /project/:id/memory[/…] before reaching the
+    // shell, but the derivation stays conservative: a settings path must
+    // never read as an overlay surface.
     expect(deriveCenterSurface("/project/proj1/settings/rules")).toBe("editor")
     expect(deriveCenterSurface("/project/proj1/settings/memory")).toBe("editor")
   })
@@ -85,6 +100,11 @@ describe("isOverlaySurface (redirect-guard exclusion)", () => {
 
   it("excludes /agent from the redirect", () => {
     expect(isOverlaySurface("/project/proj1/agent")).toBe(true)
+  })
+
+  it("excludes /memory and /memory/:section from the redirect", () => {
+    expect(isOverlaySurface("/project/proj1/memory")).toBe(true)
+    expect(isOverlaySurface("/project/proj1/memory/instructions")).toBe(true)
   })
 
   it("does NOT exclude the root project path (redirect must fire here)", () => {
@@ -120,7 +140,7 @@ describe("shell-routing: back-nav contract", () => {
   })
 
   it("overlay surface derivation covers all shell overlay subroutes", () => {
-    const overlayRoutes = ["/comments", "/terminology", "/agent"]
+    const overlayRoutes = ["/comments", "/terminology", "/agent", "/memory", "/memory/quality"]
     for (const suffix of overlayRoutes) {
       const path = `/project/proj1${suffix}`
       expect(deriveCenterSurface(path)).not.toBe("editor")
@@ -140,7 +160,7 @@ describe("shouldShowAudioToolbar", () => {
   })
 
   it("hides the playback bar on overlay surfaces even when audio lens is sticky", () => {
-    for (const surface of ["comments", "terminology", "agent"] as const) {
+    for (const surface of ["comments", "terminology", "agent", "memory"] as const) {
       expect(shouldShowAudioToolbar("audio", surface)).toBe(false)
     }
   })

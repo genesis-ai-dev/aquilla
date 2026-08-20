@@ -37,6 +37,13 @@ describe("changed-file E2E impact selection", () => {
     )
   })
 
+  it("maps Knowledge Base clients and routes to the project-settings persistence journey", () => {
+    expect(selectAffectedE2E([
+      "src/components/knowledge/KnowledgeBaseSurface.tsx",
+      "auth-worker/src/routes/knowledge.ts",
+    ], specs).specs).toContain("e2e/specs/projects/project-settings.smoke.spec.ts")
+  })
+
   it("uses core sentinels for unclassified runtime code", () => {
     expect(selectAffectedE2E(["src/context/AppContext.tsx"], specs).specs).toEqual([
       "e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts",

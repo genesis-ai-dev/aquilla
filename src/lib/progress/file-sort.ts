@@ -9,13 +9,19 @@
 // second book list here.
 
 import { getBookOrdinal, isKnownBookCode } from "@/lib/file-labeling/bible-book-names"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 
 export type FileSortMode = "last-updated" | "canonical" | "alphabetical"
 
-export const FILE_SORT_MODES: ReadonlyArray<{ value: FileSortMode; label: string }> = [
-  { value: "last-updated", label: "Last updated" },
-  { value: "canonical", label: "Canonical order" },
-  { value: "alphabetical", label: "Alphabetical" },
+/**
+ * Sort-mode picker options. `labelKey` is a catalog key, not a display
+ * string — `src/lib/` can't call `useT()`, so the caller resolves it with
+ * `t()` at render time (see `ProjectOverview.tsx`).
+ */
+export const FILE_SORT_MODES: ReadonlyArray<{ value: FileSortMode; labelKey: MessageKey }> = [
+  { value: "last-updated", labelKey: "workspace.fileSort.lastUpdated" },
+  { value: "canonical", labelKey: "workspace.fileSort.canonical" },
+  { value: "alphabetical", labelKey: "workspace.fileSort.alphabetical" },
 ]
 
 export interface SortableFile {

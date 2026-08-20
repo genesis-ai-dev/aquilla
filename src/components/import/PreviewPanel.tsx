@@ -13,13 +13,19 @@
  * never mistaken for "doing nothing".
  */
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import type { ImportResult } from "@/lib/import"
 import { formatBytesProgress } from "@/lib/format-bytes"
+import {
+  defaultEpubSkipMemberPaths,
+  filterEpubStrings,
+  type EpubSpineMember,
+} from "@/lib/parsers/epub"
 import { usfmDisplayText } from "@/lib/parsers/usfm-display"
-import { useI18n } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
 
 /**
@@ -34,11 +40,15 @@ export interface ImportUploadProgress {
   bytesTotal?: number
 }
 
+export interface PreviewConfirmOptions {
+  skipMemberPaths?: ReadonlySet<string>
+}
+
 export interface PreviewPanelProps {
   /** One entry per file; USFM may produce multiple results (one per book). */
   results: ImportResult[]
   /** Called when the user clicks Confirm — triggers the actual upload. */
-  onConfirm: () => void | Promise<void>
+  onConfirm: (options?: PreviewConfirmOptions) => void | Promise<void>
   /** Called when the user cancels — parent returns to the upload screen. */
   onCancel: () => void
   /**
@@ -64,15 +74,41 @@ const PREVIEW_LIMIT = 20
 
 export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, uploadProgress, error }: PreviewPanelProps) {
   const { locale } = useI18n()
+  const t = useT()
   const [confirming, setConfirming] = useState(false)
+  const epubMembers = useMemo(
+    () => results.flatMap((result) => result.epubMembers ?? []),
+    [results],
+  )
+  const [skipMemberPaths, setSkipMemberPaths] = useState<ReadonlySet<string>>(
+    () => defaultEpubSkipMemberPaths(epubMembers),
+  )
 
-  const totalCells = results.reduce((n, r) => n + r.strings.length, 0)
+  const visibleResults = useMemo(
+    () => results.map((result) => (
+      result.epubMembers
+        ? { ...result, strings: filterEpubStrings(result.strings, skipMemberPaths) }
+        : result
+    )),
+    [results, skipMemberPaths],
+  )
+  const totalCells = visibleResults.reduce((n, r) => n + r.strings.length, 0)
+
+  function toggleMember(memberPath: string) {
+    const key = memberPath.toLowerCase()
+    setSkipMemberPaths((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   async function handleConfirm() {
-    if (confirming) return
+    if (confirming || totalCells === 0) return
     setConfirming(true)
     try {
-      await onConfirm()
+      await onConfirm(epubMembers.length > 0 ? { skipMemberPaths } : undefined)
     } finally {
       setConfirming(false)
     }
@@ -82,7 +118,7 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
   // never mistaken for doing nothing (the preview cell list disappears, replaced
   // by phase text + optional progress bar).
   if (confirming) {
-    const phase = uploadPhase || "Uploading…"
+    const phase = uploadPhase || t("common.uploading")
     const hasProgress = uploadProgress && uploadProgress.total > 0
     return (
       <div className="flex flex-col items-center gap-4 py-8 text-center">
@@ -97,7 +133,10 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              {formatNumber(uploadProgress.count, locale)} / {formatNumber(uploadProgress.total, locale)} cells
+              {t("importExport.upload.cellsProgress", {
+                count: formatNumber(uploadProgress.count, locale),
+                total: formatNumber(uploadProgress.total, locale),
+              })}
               {uploadProgress.bytesTotal ? (
                 <>
                   {" · "}
@@ -109,7 +148,7 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
             </p>
           </>
         ) : (
-          <p className="text-xs text-muted-foreground">Working…</p>
+          <p className="text-xs text-muted-foreground">{t("importExport.action.working")}</p>
         )}
       </div>
     )
@@ -119,18 +158,29 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
     <div className="flex flex-col gap-4 py-2">
       <div>
         <p className="text-sm font-medium">
-          Preview — {formatNumber(totalCells, locale)} cell{totalCells !== 1 ? "s" : ""} across {results.length} file{results.length !== 1 ? "s" : ""}
+          {t("importExport.preview.headerSummary", {
+            cells: t("common.cellCount", { count: formatNumber(totalCells, locale) }),
+            files: t("search.expanded.fileCount", { count: results.length }),
+          })}
         </p>
         <p className="text-xs text-muted-foreground">
-          Review what will be imported, then click Confirm to upload.
+          {t("importExport.preview.instructions")}
         </p>
       </div>
+
+      {epubMembers.length > 0 && (
+        <EpubChapterPicker
+          members={epubMembers}
+          skipMemberPaths={skipMemberPaths}
+          onToggle={toggleMember}
+        />
+      )}
 
       {/* Native overflow scroll: ScrollArea's size-full viewport can't resolve
           against a max-h-only root, so content paints past the border. */}
       <div className="max-h-80 overflow-y-auto rounded-md border">
         <div className="divide-y">
-          {results.map((r, ri) => {
+          {visibleResults.map((r, ri) => {
             // AQU-580: USFM cell text is stored raw (lossless), so strip the
             // intra-cell markers for the preview — a translator should never
             // see backslash codes. Non-USFM formats are shown verbatim.
@@ -142,33 +192,35 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
               <p className="mb-2 text-xs font-semibold text-foreground/80">
                 {r.name}
                 <span className="ms-2 font-normal normal-case text-muted-foreground">
-                  {formatNumber(r.strings.length, locale)} cells
+                  {t("common.cellCount", { count: formatNumber(r.strings.length, locale) })}
                 </span>
               </p>
               {r.importClassification ? (
                 <div className="mb-3 rounded-md border bg-muted/40 px-3 py-2 text-xs" data-testid="ai-import-classification">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium">AI-assisted structure</span>
+                    <span className="font-medium">{t("importExport.preview.aiAssistedStructure")}</span>
                     <Badge variant="outline">
                       {r.importClassification.category}
                     </Badge>
                     <span className="text-muted-foreground">
-                      {Math.round(r.importClassification.confidence * 100)}% confidence
+                      {t("importExport.preview.confidencePercent", {
+                        percent: Math.round(r.importClassification.confidence * 100),
+                      })}
                     </span>
                     {r.importClassification.confidence < 0.7 ? (
-                      <Badge variant="destructive">Needs careful review</Badge>
+                      <Badge variant="destructive">{t("importExport.preview.needsCarefulReview")}</Badge>
                     ) : null}
                   </div>
                   <p className="mt-1 text-muted-foreground">{r.importClassification.explanation}</p>
                   <p className="mt-1 text-muted-foreground">
-                    Recipe: {r.importClassification.recipe.name}. The original is preserved; translated round-trip is not yet verified.
+                    {t("importExport.preview.recipeNote", { name: r.importClassification.recipe.name })}
                   </p>
                 </div>
               ) : null}
               {r.importNotices?.length ? (
                 <div className="mb-3 flex flex-col gap-1.5 rounded-md border bg-muted/40 px-3 py-2 text-xs" data-testid="import-preview-notices">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium">Review before importing</span>
+                    <span className="font-medium">{t("importExport.preview.reviewBeforeImporting")}</span>
                     <Badge variant="outline">{r.importNotices.length}</Badge>
                   </div>
                   <ul className="flex list-disc flex-col gap-1 ps-4 text-muted-foreground">
@@ -182,7 +234,7 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
                 {r.strings.slice(0, PREVIEW_LIMIT).map((s, i) => (
                   <li key={i} className="flex items-start gap-2 text-xs">
                     {s.type === "heading" || s.type === "paratext" ? (
-                      <span className="shrink-0 font-mono text-muted-foreground w-20 truncate" aria-label="Structural content">
+                      <span className="shrink-0 font-mono text-muted-foreground w-20 truncate" aria-label={t("importExport.preview.structuralContentAriaLabel")}>
                         —
                       </span>
                     ) : s.globalReferences?.[0] ? (
@@ -195,13 +247,15 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
                       </span>
                     )}
                     <span className="truncate text-foreground/80">
-                      {previewText(s.original) || <span className="italic text-muted-foreground">(empty)</span>}
+                      {previewText(s.original) || <span className="italic text-muted-foreground">{t("editor.note.empty")}</span>}
                     </span>
                   </li>
                 ))}
                 {r.strings.length > PREVIEW_LIMIT && (
                   <li className="text-xs text-muted-foreground italic">
-                    … and {formatNumber(r.strings.length - PREVIEW_LIMIT, locale)} more
+                    {t("importExport.dialog.andMore", {
+                      count: formatNumber(r.strings.length - PREVIEW_LIMIT, locale),
+                    })}
                   </li>
                 )}
               </ul>
@@ -217,18 +271,73 @@ export function PreviewPanel({ results, onConfirm, onCancel, uploadPhase, upload
           role="alert"
           data-testid="preview-commit-error"
         >
-          Import failed: {error}
+          {t("importExport.preview.commitFailed", { error })}
         </p>
       )}
 
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={onCancel} disabled={confirming}>
-          Cancel
+          {t("common.cancel")}
         </Button>
-        <Button onClick={handleConfirm} disabled={confirming}>
-          Confirm import
+        <Button onClick={handleConfirm} disabled={confirming || totalCells === 0}>
+          {t("importExport.preview.confirmImport")}
         </Button>
       </div>
+    </div>
+  )
+}
+
+function EpubChapterPicker({
+  members,
+  skipMemberPaths,
+  onToggle,
+}: {
+  members: EpubSpineMember[]
+  skipMemberPaths: ReadonlySet<string>
+  onToggle: (memberPath: string) => void
+}) {
+  const { locale } = useI18n()
+  const t = useT()
+
+  function roleLabel(role: EpubSpineMember["role"]) {
+    switch (role) {
+      case "chapter": return t("importExport.preview.epubRoleChapter")
+      case "nav": return t("importExport.preview.epubRoleNavigation")
+      case "cover": return t("importExport.preview.epubRoleCover")
+      case "notes": return t("importExport.preview.epubRoleNotes")
+      case "empty": return t("importExport.preview.epubRoleEmpty")
+    }
+  }
+
+  return (
+    <div className="rounded-md border" data-testid="epub-chapter-picker">
+      <p className="border-b px-3 py-2 text-xs font-medium">
+        {t("importExport.preview.epubChaptersTitle")}
+      </p>
+      <ul className="max-h-40 divide-y overflow-y-auto">
+        {members.map((member) => {
+          const included = !skipMemberPaths.has(member.memberPath.toLowerCase())
+          return (
+            <li key={member.memberPath} className="flex items-center gap-2 px-3 py-1.5">
+              <Checkbox
+                checked={included}
+                disabled={member.cellCount === 0}
+                onCheckedChange={() => onToggle(member.memberPath)}
+                aria-label={t("importExport.preview.includeEpubMember", { title: member.title })}
+              />
+              <span className={`min-w-0 flex-1 truncate text-sm ${included ? "" : "text-muted-foreground line-through"}`}>
+                {member.title}
+              </span>
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {roleLabel(member.role)}
+                {member.cellCount > 0
+                  ? ` · ${t("common.cellCount", { count: formatNumber(member.cellCount, locale) })}`
+                  : ""}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }

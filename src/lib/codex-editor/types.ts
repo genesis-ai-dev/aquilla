@@ -44,6 +44,9 @@ export interface CodexData {
   chapter?: string;
   verse?: string;
   deleted?: boolean;
+  /** Codex cell-merge marker: the cell's content was absorbed into another
+   *  cell (heading consolidation, verse-range merge) and Codex hides it. */
+  merged?: boolean;
   originalText?: string;
   globalReferences?: string[];
   /**
@@ -75,6 +78,10 @@ export interface CodexCellAttachment {
   /** SUB-48: this clip's event is still queued locally (saved on this device,
    *  not yet at the server). Drives the "saving…" hint on chips/rows. */
   pendingSync?: true;
+  /** AQU-924: this clip's attach event was quarantined / exhausted its retries,
+   *  so the server has no attachment for it and won't without user action. The
+   *  clip stays visible in this state instead of silently disappearing. */
+  syncFailed?: true;
 }
 
 // Per-word timing for karaoke / forced-alignment / ASR output. Character

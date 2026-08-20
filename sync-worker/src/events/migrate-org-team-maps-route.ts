@@ -8,12 +8,13 @@
 // (env.AQUILLA_PG), keyed by legacy_uuid, gated on SYNC_SECRET_KEY — same trust
 // tier as the other /migrate routes.
 
-import { secureCompare } from '../lib/secure-compare'
+import { isAuthorizedAdminBearer } from '../lib/admin-auth'
 
 const PATH = '/migrate/org-team-maps'
 
 export interface MigrateOrgTeamMapsEnv {
   AQUILLA_PG?: AquillaDb
+  ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
 }
 
@@ -34,7 +35,7 @@ export async function handleMigrateOrgTeamMapsRequest(
   if (new URL(request.url).pathname !== PATH) return null
   if (request.method !== 'GET') return new Response('method not allowed', { status: 405 })
   if (!env.SYNC_SECRET_KEY) return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
-  if (!secureCompare(request.headers.get('Authorization') ?? '', `Bearer ${env.SYNC_SECRET_KEY}`)) {
+  if (!isAuthorizedAdminBearer(request.headers.get('Authorization') ?? '', env)) {
     return new Response('unauthorized', { status: 401 })
   }
   if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })

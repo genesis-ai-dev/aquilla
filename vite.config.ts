@@ -34,6 +34,13 @@ function resolveBuildBrand(): BrandId {
 const brandId = resolveBuildBrand()
 const brand = BRAND_DATA[brandId]
 
+// Public marketing documents are built in the sibling aquilla-marketing repo.
+// Keeping this value exported gives the ownership contract a direct unit-test
+// seam instead of relying on source-text inspection.
+export const APP_HTML_INPUTS = Object.freeze({
+  index: path.resolve(import.meta.dirname, "index.html"),
+})
+
 export default defineConfig(({ mode }) => ({
   clearScreen: false,
   envPrefix: ["VITE_", "TAURI_ENV_"],
@@ -149,17 +156,9 @@ export default defineConfig(({ mode }) => ({
     // app bundle balloons past 2 MB, which trips Cloudflare Pages' asset
     // upload path (observed as repeated ECONNRESET at 26/27 files).
     rolldownOptions: {
-      // Multi-page build: the SPA shell (index.html) and the standalone,
-      // statically-served marketing homepage (homepage.html). The aquilla-web
-      // Worker picks between them at the edge via the aq_hint cookie.
-      input: {
-        index: path.resolve(import.meta.dirname, "index.html"),
-        homepage: path.resolve(import.meta.dirname, "homepage.html"),
-        "bible-translation": path.resolve(import.meta.dirname, "bible-translation.html"),
-        beta: path.resolve(import.meta.dirname, "beta.html"),
-        "case-study": path.resolve(import.meta.dirname, "case-study.html"),
-        "case-study-biblica": path.resolve(import.meta.dirname, "case-study-biblica.html"),
-      },
+      // SPA shell only. More-specific Cloudflare zone routes send the public
+      // marketing surface to the independently deployed aquilla-marketing Worker.
+      input: APP_HTML_INPUTS,
       output: {
         // Keep source module names out of emitted chunk URLs. Brave/EasyList can
         // block app-critical chunks whose filenames look like tracking scripts,

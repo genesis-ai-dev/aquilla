@@ -9,8 +9,9 @@
  */
 
 import { useState, type ReactNode } from "react"
-import { useI18n } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   AlertTriangle,
   Book,
@@ -51,20 +52,22 @@ const TOOL_ICON: Record<ToolKind, typeof Database> = {
   draft: PenLine,
 }
 
-const TOOL_LABEL: Record<ToolKind, string> = {
-  sql: "sql",
-  emit: "stage",
-  docs: "docs",
-  aquifer: "Bible reference",
-  read: "read",
-  examples: "examples",
-  search: "search",
-  draft: "draft",
+const TOOL_LABEL_KEY: Record<ToolKind, MessageKey> = {
+  sql: "agent.run.tool.sql",
+  emit: "agent.run.tool.stage",
+  docs: "agent.run.tool.docs",
+  aquifer: "agent.run.tool.bibleReference",
+  read: "agent.run.tool.read",
+  examples: "agent.run.tool.examples",
+  search: "agent.run.tool.search",
+  draft: "agent.run.tool.draft",
 }
 
 function ToolChip({ item }: { item: ToolItem }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const Icon = TOOL_ICON[item.tool] ?? Database
+  const labelKey = TOOL_LABEL_KEY[item.tool]
   return (
     <div className="rounded-md border bg-muted/30">
       <button
@@ -77,14 +80,14 @@ function ToolChip({ item }: { item: ToolItem }) {
           className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
         />
         <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
-        <span className="font-mono text-muted-foreground">{TOOL_LABEL[item.tool] ?? item.tool}</span>
+        <span className="font-mono text-muted-foreground">{labelKey ? t(labelKey) : item.tool}</span>
         <span className="min-w-0 flex-1 truncate font-mono">{item.summary}</span>
         {item.ok === undefined ? (
-          <Spinner className="size-3 shrink-0 text-muted-foreground" aria-label="Step running" />
+          <Spinner className="size-3 shrink-0 text-muted-foreground" aria-label={t("agent.run.stepRunning")} />
         ) : item.ok ? (
-          <Check className="h-3 w-3 shrink-0 text-emerald-600" aria-label="Step succeeded" />
+          <Check className="h-3 w-3 shrink-0 text-emerald-600" aria-label={t("agent.run.stepSucceeded")} />
         ) : (
-          <X className="h-3 w-3 shrink-0 text-destructive" aria-label="Step failed" />
+          <X className="h-3 w-3 shrink-0 text-destructive" aria-label={t("agent.run.stepFailed")} />
         )}
       </button>
       {open && item.resultSummary !== undefined && (
@@ -109,6 +112,10 @@ export interface AgentRunViewProps {
   /** Jump to the workbench's Memory tab from a memory/brief proposal notice.
    *  Omitted where there's no Memory tab to jump to (e.g. the dock panel). */
   onReviewMemory?: () => void
+  /** Post-commit flush + revalidate for the live ChangesetCard (AQU-926) —
+   *  same hook AgentDockView passes to ProposalCard. Omitted → the card
+   *  relies on the project DO's event.applied broadcast alone. */
+  onChangesetApplied?: (eventIds: string[], cellIds: string[]) => void | Promise<void>
 }
 
 export function AgentRunView({
@@ -117,8 +124,9 @@ export function AgentRunView({
   renderAquiferProposal,
   renderToolCard,
   onReviewMemory,
+  onChangesetApplied,
 }: AgentRunViewProps) {
-  const { locale } = useI18n()
+  const { locale, t } = useI18n()
   return (
     <div className="flex flex-col gap-2">
       {/* User prompt — right-aligned primary bubble. */}
@@ -166,7 +174,7 @@ export function AgentRunView({
           case "code":
             return <CodeActivityBlock key={item.id} item={item} />
           case "changeset":
-            return <ChangesetCard key={item.id} item={item} />
+            return <ChangesetCard key={item.id} item={item} onApplied={onChangesetApplied} />
           case "memory-proposed":
             return <MemoryProposalNotice key={item.id} item={item} onReviewMemory={onReviewMemory} />
           case "brief-proposed":
@@ -210,13 +218,16 @@ export function AgentRunView({
           <MarkerIcon>
             <AlertTriangle />
           </MarkerIcon>
-          <MarkerContent>Run hit its step/token cap — results may be partial.</MarkerContent>
+          <MarkerContent>{t("agent.run.capped")}</MarkerContent>
         </Marker>
       )}
 
       {run.usage && (
         <div className="text-[10px] text-muted-foreground">
-          {formatNumber(run.usage.promptTokens, locale)} prompt + {formatNumber(run.usage.completionTokens, locale)} completion tokens
+          {t("agent.run.tokenUsage", {
+            promptTokens: formatNumber(run.usage.promptTokens, locale),
+            completionTokens: formatNumber(run.usage.completionTokens, locale),
+          })}
           {" · "}
           {formatCredits(run.usage.costCredits, locale)}
         </div>

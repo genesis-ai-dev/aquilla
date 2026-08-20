@@ -45,6 +45,41 @@ describe("SidebarProjectSection", () => {
     expect(screen.getByRole("button", { name: /^Recently deleted$/i })).toBeInTheDocument()
   })
 
+  it("renders pinned Recently deleted after Terminology and hides More when nothing overflows", () => {
+    render(
+      <SidebarProjectSection
+        items={[
+          {
+            id: "comments",
+            labelKey: "common.comments",
+            icon: MessagesSquare,
+            pinned: true,
+            onClick: vi.fn(),
+          },
+          {
+            id: "terminology",
+            labelKey: "nav.sidebarSection.terminology",
+            icon: BookOpen,
+            pinned: true,
+            onClick: vi.fn(),
+          },
+          {
+            id: "trash",
+            labelKey: "nav.sidebarSection.trash",
+            icon: Trash2,
+            pinned: true,
+            onClick: vi.fn(),
+          },
+        ]}
+      />,
+    )
+
+    const terminology = screen.getByRole("button", { name: /^Terminology$/i })
+    const trash = screen.getByRole("button", { name: /^Recently deleted$/i })
+    expect(terminology.compareDocumentPosition(trash) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /^More project options$/i })).toBeNull()
+  })
+
   // Opening the popover inserts Base UI focus-guard spans next to the trigger.
   // Those guards must not become siblings of Comments/Terminology in the nav
   // list — space-y margins on the extra siblings used to grow the section and

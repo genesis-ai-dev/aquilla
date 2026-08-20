@@ -51,6 +51,7 @@ import {
 } from "@/lib/monday/api"
 import type { MondayColumnMapping, MondayMapping } from "@/lib/monday/types"
 import { MondayMappingRows } from "./MondayMappingEditor"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 type Stage = "intro" | "connect" | "scanning" | "review" | "applying" | "done"
 
@@ -104,6 +105,7 @@ export function MondaySetupWizard({
   onUnlinked,
   onConnected,
 }: Props) {
+  const t = useT()
   const [stage, setStage] = useState<Stage>("intro")
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -336,9 +338,7 @@ export function MondaySetupWizard({
           </DialogTitle>
           {stage === "intro" && (
             <DialogDescription>
-              Aquilla reads your Monday board names and columns plus this project's progress
-              figures, then proposes which board to use and what to push to each column. Nothing
-              is written to Monday until you approve it.
+              {t("projectSettings.monday.introDescription")}
             </DialogDescription>
           )}
         </DialogHeader>
@@ -346,9 +346,9 @@ export function MondaySetupWizard({
         {stage === "intro" && (
           <div className="space-y-3">
             <ul className="space-y-1.5 text-sm text-muted-foreground">
-              <li>· Picks the board that best matches this project</li>
-              <li>· Maps completion, validation and activity metrics to suitable columns</li>
-              <li>· Skips columns Monday won't let anything write to</li>
+              <li>· {t("projectSettings.monday.introBullet1")}</li>
+              <li>· {t("projectSettings.monday.introBullet2")}</li>
+              <li>· {t("projectSettings.monday.introBullet3")}</li>
             </ul>
             {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
@@ -357,12 +357,11 @@ export function MondaySetupWizard({
         {stage === "connect" && (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Your organization isn't connected to Monday.com yet. Connecting opens Monday in a new
-              tab; come back here when it's done and setup continues automatically.
+              {t("projectSettings.monday.connectGateDescription")}
             </p>
             {awaitingOAuth && (
               <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Spinner className="h-4 w-4" /> Waiting for Monday…
+                <Spinner className="h-4 w-4" /> {t("projectSettings.monday.waitingForMonday")}
               </p>
             )}
             {error && <p className="text-sm text-destructive">{error}</p>}
@@ -373,11 +372,11 @@ export function MondaySetupWizard({
           <ul className="space-y-2 py-2" data-testid="monday-wizard-scan">
             <ScanStep
               state={scanDone >= 1 ? "done" : "running"}
-              label="Reading this project and your Monday boards"
+              label={t("projectSettings.monday.scanStep1Label")}
             />
             <ScanStep
               state={scanDone >= 2 ? "done" : scanDone >= 1 ? "running" : "pending"}
-              label="Matching progress metrics to board columns"
+              label={t("projectSettings.monday.scanStep2Label")}
             />
           </ul>
         )}
@@ -389,7 +388,7 @@ export function MondaySetupWizard({
             <div className="rounded-lg border p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">Board</p>
+                  <p className="text-xs text-muted-foreground">{t("projectSettings.monday.boardCaption")}</p>
                   <p className="text-sm font-medium break-words">
                     {analysis.boardName ??
                       boards?.find((b) => b.id === analysis.boardId)?.name ??
@@ -398,7 +397,7 @@ export function MondaySetupWizard({
                 </div>
                 {!changingBoard && (
                   <Button variant="outline" size="sm" onClick={() => void openBoardPicker()}>
-                    Change
+                    {t("org.projectOverview.change")}
                   </Button>
                 )}
               </div>
@@ -409,11 +408,11 @@ export function MondaySetupWizard({
                 <div className="mt-2">
                   {boards === null ? (
                     <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Spinner className="h-4 w-4" /> Loading boards…
+                      <Spinner className="h-4 w-4" /> {t("projectSettings.monday.loadingBoards")}
                     </p>
                   ) : boards.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
-                      Couldn't list boards — an org maintainer can change the board later.
+                      {t("projectSettings.monday.boardListFailed")}
                     </p>
                   ) : (
                     <Select
@@ -424,8 +423,8 @@ export function MondaySetupWizard({
                         if (id && id !== analysis.boardId) void runScan(id)
                       }}
                     >
-                      <SelectTrigger aria-label="Monday board" className="w-full">
-                        <SelectValue placeholder="Pick a board" />
+                      <SelectTrigger aria-label={t("projectSettings.monday.boardSelectAriaLabel")} className="w-full">
+                        <SelectValue placeholder={t("projectSettings.monday.pickBoardPlaceholder")} />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectGroup>
@@ -444,24 +443,24 @@ export function MondaySetupWizard({
             </div>
 
             <div>
-              <p className="mb-1 text-xs text-muted-foreground">Board items</p>
+              <p className="mb-1 text-xs text-muted-foreground">{t("projectSettings.monday.boardItemsLabel")}</p>
               <Select
                 items={{
-                  project: "One item for the whole project",
-                  file: "One item per file",
+                  project: t("projectSettings.monday.granularityProjectLabel"),
+                  file: t("projectSettings.monday.granularityFileLabel"),
                 }}
                 value={granularity}
                 onValueChange={(value) =>
                   setGranularity((value as MondayMapping["itemGranularity"]) ?? "project")
                 }
               >
-                <SelectTrigger aria-label="Board items" className="w-full">
+                <SelectTrigger aria-label={t("projectSettings.monday.boardItemsLabel")} className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>
-                    <SelectItem value="project">One item for the whole project</SelectItem>
-                    <SelectItem value="file">One item per file</SelectItem>
+                    <SelectItem value="project">{t("projectSettings.monday.granularityProjectLabel")}</SelectItem>
+                    <SelectItem value="file">{t("projectSettings.monday.granularityFileLabel")}</SelectItem>
                   </SelectGroup>
                 </SelectContent>
               </Select>
@@ -471,7 +470,7 @@ export function MondaySetupWizard({
               <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/40">
                 <p className="flex items-center gap-1.5 text-sm font-medium">
                   <AlertTriangle className="h-4 w-4 text-amber-600" />
-                  Some columns were skipped
+                  {t("projectSettings.monday.someColumnsSkipped")}
                 </p>
                 <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
                   {analysis.warnings.map((w) => (
@@ -483,7 +482,7 @@ export function MondaySetupWizard({
 
             <div>
               <p className="mb-1 text-xs text-muted-foreground">
-                What gets pushed — change any row before applying
+                {t("projectSettings.monday.reviewRowsCaption")}
               </p>
               <MondayMappingRows
                 rows={rows}
@@ -499,7 +498,7 @@ export function MondaySetupWizard({
 
         {stage === "applying" && (
           <p className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
-            <Spinner className="h-4 w-4" /> Linking the board and pushing your progress…
+            <Spinner className="h-4 w-4" /> {t("projectSettings.monday.applyingStatus")}
           </p>
         )}
 
@@ -509,7 +508,7 @@ export function MondaySetupWizard({
               {linkedBoardName
                 ? `This project now syncs to ${linkedBoardName}.`
                 : "This project now syncs to Monday."}{" "}
-              Progress pushes automatically as translators work.
+              {t("projectSettings.monday.progressPushesAutomatically")}
             </p>
             {pushNotice && (
               <p
@@ -536,7 +535,7 @@ export function MondaySetupWizard({
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 text-sm font-medium underline underline-offset-4"
               >
-                View board on Monday <ExternalLink className="h-3.5 w-3.5" />
+                {t("projectSettings.monday.viewBoardLink")} <ExternalLink className="h-3.5 w-3.5" />
               </a>
             )}
             {error && <p className="text-sm text-destructive">{error}</p>}
@@ -547,7 +546,7 @@ export function MondaySetupWizard({
           {stage === "intro" && (
             <>
               <Button variant="ghost" onClick={() => onOpenChange(false)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button onClick={handleStart} disabled={!jwt}>
                 <Sparkles data-icon="inline-start" />
@@ -558,21 +557,21 @@ export function MondaySetupWizard({
           {stage === "connect" && (
             <>
               <Button variant="ghost" onClick={() => onOpenChange(false)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button onClick={() => void handleConnect()} disabled={busy || orgId == null}>
                 {busy && <Spinner data-icon="inline-start" />}
-                Connect Monday.com
+                {t("projectSettings.monday.connectButton")}
               </Button>
             </>
           )}
           {stage === "review" && (
             <>
               <Button variant="ghost" onClick={() => onOpenChange(false)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button onClick={() => void handleApply()} disabled={mappedCount === 0}>
-                Apply and push
+                {t("projectSettings.monday.applyAndPushButton")}
               </Button>
             </>
           )}
@@ -580,9 +579,9 @@ export function MondaySetupWizard({
             <>
               <Button variant="ghost" onClick={() => void handleUndo()} disabled={busy}>
                 {busy && <Spinner data-icon="inline-start" />}
-                Undo
+                {t("nav.renameSuggestions.undo")}
               </Button>
-              <Button onClick={() => onOpenChange(false)}>Done</Button>
+              <Button onClick={() => onOpenChange(false)}>{t("common.done")}</Button>
             </>
           )}
         </DialogFooter>

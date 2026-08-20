@@ -28,20 +28,16 @@ const DEFAULT_RETRY_DELAY_MS = 2_000
 
 class NonRetryableVerificationError extends Error {}
 
-// The bare origin serves the prerendered marketing homepage (worker/index.ts),
+// The bare origin is owned by the independently deployed marketing Worker,
 // whose small JS graph never imports the sync client or the chat completion
 // service — crawling it can't prove the SPA targets the right environment
-// (AQU-779). Any non-marketing path falls through to the assets binding's
-// single-page-application fallback and serves the real SPA shell; /app is a
-// stable route in the App.tsx route table.
+// (AQU-779). /app is a stable SPA route served by the app Worker's catch-all.
 const SPA_SHELL_PATH = "/app"
 
-// Cookie-independent static marketing pages mapped by worker/index.ts
-// STATIC_PAGES. A deploy that publishes the Worker but drops these HTML entries
-// from the asset bundle makes each path miss env.ASSETS.fetch() and fall
-// through the single-page-application not-found handler to the SPA index shell
-// — a silent, partner-facing 404 (the homepage footer links straight here).
-// This is exactly the AQU-798 recurrence.
+// Canonical public pages owned by the aquilla-marketing Worker. Post-promotion
+// environment verification still checks these cross-repo routes because they
+// share the public origin. Immutable app previews skip them: they intentionally
+// contain no marketing documents after AQU-918.
 //
 // The tell is the served document's og:url: each case-study page hardcodes its
 // own canonical og:url, while the index shell carries the bare-origin og:url
@@ -52,12 +48,10 @@ const SPA_SHELL_PATH = "/app"
 const STATIC_MARKETING_PAGES = [
   {
     path: "/case-studies/biblica",
-    assetPath: "/case-study-biblica",
     ogUrl: "https://aquilla.app/case-studies/biblica",
   },
   {
     path: "/case-studies/come-and-see",
-    assetPath: "/case-study",
     ogUrl: "https://aquilla.app/case-studies/come-and-see",
   },
 ]
@@ -321,9 +315,8 @@ async function verifySpa(config, options) {
   options.log(`[verify-live] SPA at ${appUrl} targets only the expected live environment`)
 }
 
-// Reads a <meta property="…" content="…"> value. The marketing HTML is
-// hand-authored with a stable attribute order (property before content), and
-// prerender-marketing only injects body content, so a targeted regex is safe.
+// Reads a <meta property="…" content="…"> value. The marketing HTML has a
+// stable attribute order (property before content), so a targeted regex is safe.
 function metaContent(html, property) {
   const escaped = property.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   const match = html.match(
@@ -332,18 +325,11 @@ function metaContent(html, property) {
   return match?.[1]
 }
 
-// AQU-798 regression guard: prove the case-study static pages resolve to their
-// dedicated documents rather than the SPA index-shell fallback. Runs post-deploy
-// as part of the spa surface, so a bundle that silently omits the case-study
-// HTML fails the deploy instead of shipping a partner-facing 404.
+// AQU-798 regression guard: prove the marketing Worker's case-study routes
+// resolve to their dedicated documents rather than the app Worker's SPA shell.
 async function verifyStaticPages(config, options) {
   for (const page of STATIC_MARKETING_PAGES) {
-    // Version-preview hosts run behind Cloudflare's asset router and do not
-    // exercise custom-domain Worker rewrites consistently. Before promotion,
-    // verify the immutable uploaded document itself; after promotion, verify
-    // the canonical public route and its Worker mapping.
-    const requestPath = options.staticAssetPaths ? page.assetPath : page.path
-    const pageUrl = new URL(requestPath, config.appOrigin).href
+    const pageUrl = new URL(page.path, config.appOrigin).href
     await requestWithRetry(
       pageUrl,
       { headers: { Accept: "text/html" } },
@@ -354,8 +340,8 @@ async function verifyStaticPages(config, options) {
         if (ogUrl !== page.ogUrl) {
           throw new Error(
             `${page.path} served the wrong document (og:url ${JSON.stringify(ogUrl)}; `
-            + `expected ${JSON.stringify(page.ogUrl)}). The case-study HTML is likely missing `
-            + `from the deployed asset bundle, so the path fell back to the SPA index shell.`,
+            + `expected ${JSON.stringify(page.ogUrl)}). The marketing route likely fell `
+            + `through to the app Worker's SPA shell.`,
           )
         }
       },
@@ -399,7 +385,7 @@ export async function verifyLiveEnvironment(environment, {
   retryDelayMs = DEFAULT_RETRY_DELAY_MS,
   maxJavascriptAssets = DEFAULT_MAX_JAVASCRIPT_ASSETS,
   retryAssetFallbacks = true,
-  staticAssetPaths = false,
+  verifyMarketingRoutes = true,
   log = console.log,
 } = {}) {
   const environmentConfig = ENVIRONMENTS[environment]
@@ -421,7 +407,7 @@ export async function verifyLiveEnvironment(environment, {
     retryDelayMs,
     maxJavascriptAssets,
     retryAssetFallbacks,
-    staticAssetPaths,
+    verifyMarketingRoutes,
     log,
   }
   if (surface === "all" || surface === "auth" || surface === "sync") {
@@ -431,7 +417,7 @@ export async function verifyLiveEnvironment(environment, {
   if (surface === "all" || surface === "sync") await verifySync(config, options)
   if (surface === "all" || surface === "spa") {
     await verifySpa(config, options)
-    await verifyStaticPages(config, options)
+    if (verifyMarketingRoutes) await verifyStaticPages(config, options)
   }
 
   log(`[verify-live] ${environment}/${surface} verification passed`)

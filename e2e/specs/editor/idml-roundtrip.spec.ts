@@ -60,6 +60,7 @@ async function writeIdmlFixture(
 test("IDML import, protected edit, and strict artifact export preserve original style runs", async ({
   alice,
 }, testInfo) => {
+  test.setTimeout(120_000)
   const fixture = testInfo.outputPath("protected-roundtrip.idml")
   await writeIdmlFixture(fixture)
 

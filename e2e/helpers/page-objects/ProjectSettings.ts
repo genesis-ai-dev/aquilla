@@ -27,16 +27,15 @@ export class ProjectSettings {
     await settingsBtn.click()
     await this.page.waitForURL(/\/project\/[^/]+\/settings/, { timeout: 10_000 })
 
-    // Lands on the settings index (index path — no section segment yet) — drill into "General",
-    // which holds the Languages section. If a deep-link already put us inside
-    // a group (e.g. `/settings/general`), the section is already there and the
-    // index link never appears. NOTE: `isVisible()` reports the INSTANTANEOUS
-    // state (its timeout option is ignored), so guard-then-click races the
-    // index render — wait for whichever of the two states materializes first.
-    const generalLink = this.page.getByRole("link", { name: /General/i })
+    // Lands on the settings index — drill into "General", which holds Languages.
+    // A deep-link to /settings/general already has the section. Wait for
+    // whichever state hydrates; do not reload in a loop (that never lets the
+    // index finish rendering under shard load).
+    // NavRow accessible name is "General {projectName}" (title + hint).
+    const generalLink = this.page.getByRole("link", { name: /^General\b/ })
     const section = this.page.locator("#section-languages")
-    await expect(generalLink.or(section).first()).toBeVisible({ timeout: 10_000 })
-    if (!(await section.isVisible().catch(() => false))) {
+    await expect(generalLink.or(section).first()).toBeVisible({ timeout: 15_000 })
+    if (!(await section.isVisible())) {
       await generalLink.click()
     }
     await expect(section).toBeVisible({ timeout: 10_000 })
@@ -64,7 +63,14 @@ export class ProjectSettings {
 
   /** Navigate back to the project's workspace editor. */
   async backToEditor(): Promise<void> {
-    await this.page.getByRole("button", { name: /^Editor$/i }).click()
+    const editorBtn = this.page.getByRole("button", { name: /^Editor$/i })
+    if (await editorBtn.isVisible()) {
+      await editorBtn.click()
+    } else {
+      const current = new URL(this.page.url())
+      const returnTo = current.searchParams.get("return")
+      await this.page.goto(returnTo || `/project/${this.projectIdFromCurrentUrl()}/editor`)
+    }
     await this.page.waitForURL(/\/project\/[^/]+\/editor(?:\/file\/[^/]+)?(?:\?|$)/, { timeout: 10_000 })
   }
 

@@ -28,18 +28,16 @@ type PageSize = "default" | "wide" | "full"
  * `<div className="h-full overflow-y-auto"><div className="p-6">` boilerplate.
  *
  * - `default` (max-w-2xl, mx-auto): forms & settings — centered, fills up to
- *   max width. Headers still carry their own left padding to align with
- *   settings-card text; the well's `px-6` is the card gutter, not that inset.
+ *   max width. Horizontal pad lives on the scroll shell so the column never
+ *   kisses the AppShell card; headers still carry their own left padding to
+ *   align with settings-card text.
  * - `wide` (max-w-6xl, mx-auto): list/grid surfaces (Overview, Members, Teams).
  * - `full`: no max width, for surfaces that manage their own width.
  *
  * Vertical rhythm: page pad (`py-18`) is 1.5× the section stack gap (`gap-12` /
- * `space-y-12`). Horizontal pad (`px-6`) keeps the well off the AppShell card
- * edge — `scrollbar-gutter: stable` only reserves the inline-end, so without
- * this the start edge kisses the card on viewports ≤ max-w-6xl. PageHeader's
- * bottom margin matches that same section gap. AppShell keeps the floating
- * card flush under the header so the card's top edge still lines up with the
- * org switcher despite this inner pad.
+ * `space-y-12`). PageHeader's bottom margin matches that same section gap.
+ * AppShell keeps the floating card flush under the header so the card's top
+ * edge still lines up with the org switcher despite this inner pad.
  *
  * `scrollbar-gutter: stable` reserves the scrollbar lane so centered
  * `max-w-*` columns (org / project / team settings, Preferences, …) do not
@@ -56,10 +54,10 @@ function Page({
   children: React.ReactNode
 } & Omit<React.ComponentProps<"div">, "children" | "className">) {
   return (
-    <div className="h-full overflow-y-auto scrollbar-gutter-stable" {...props}>
+    <div className="h-full overflow-y-auto px-6 scrollbar-gutter-stable" {...props}>
       <div
         className={cn(
-          "mx-auto w-full px-6 py-18",
+          "mx-auto w-full py-18",
           size === "default" && "max-w-2xl",
           size === "wide" && "max-w-6xl",
           size === "full" && "max-w-none",
@@ -186,8 +184,19 @@ function Section({
 }
 
 /**
+ * Stat-tile strip: 1-up (single-row cards) only on the narrowest screens,
+ * 2-up from 480px so that step lasts through large phones, 3-up from `md`,
+ * 6-up on wide. Pair with `StatTile` (and matching loading skeletons).
+ */
+const STAT_TILE_GRID =
+  "grid grid-cols-1 gap-4 min-[480px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-6"
+
+/**
  * A single at-a-glance metric. Numbers use tabular-nums so columns of figures
  * line up and don't jitter as values change.
+ *
+ * Below 480px the tile is a single row (label left, value right). From 480px
+ * it stacks value-on-top with the 2-up / 3-up / 6-up grid.
  */
 function StatTile({
   label,
@@ -201,12 +210,22 @@ function StatTile({
   className?: string
 }) {
   return (
-    <div className={cn("rounded-lg border bg-card px-5 py-4", className)}>
+    <div
+      className={cn(
+        "flex min-h-[88px] flex-row-reverse items-center justify-between gap-4 rounded-lg border bg-card px-5 py-4",
+        "min-[480px]:flex-col min-[480px]:items-start min-[480px]:justify-start min-[480px]:gap-0",
+        className,
+      )}
+    >
       <div className="text-2xl leading-none font-semibold tracking-normal tabular-nums text-foreground">
         {value}
       </div>
-      <div className="mt-1.5 text-sm text-muted-foreground">{label}</div>
-      {hint ? <div className="mt-1 text-xs text-muted-foreground">{hint}</div> : null}
+      <div className="min-w-0">
+        <div className="text-sm text-muted-foreground min-[480px]:mt-1.5">{label}</div>
+        {hint ? (
+          <div className="mt-0.5 text-xs text-muted-foreground min-[480px]:mt-1">{hint}</div>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -219,19 +238,28 @@ function StatTile({
  */
 function SettingsGroup({
   label,
+  description,
   className,
   children,
 }: {
   label?: React.ReactNode
+  description?: React.ReactNode
   className?: string
   children: React.ReactNode
 }) {
   return (
     <div className={cn("space-y-2", className)}>
-      {label ? (
-        <p className="pl-4 font-heading text-base font-medium tracking-tight text-foreground">
-          {label}
-        </p>
+      {label || description ? (
+        <div className="space-y-1 pl-4">
+          {label ? (
+            <p className="font-heading text-base font-medium tracking-tight text-foreground">
+              {label}
+            </p>
+          ) : null}
+          {description ? (
+            <p className="text-sm text-muted-foreground">{description}</p>
+          ) : null}
+        </div>
       ) : null}
       <div className="divide-y overflow-hidden rounded-lg border bg-card">
         {children}
@@ -287,4 +315,4 @@ function SettingsRow({
   )
 }
 
-export { Page, PageHeader, Section, SettingsGroup, SettingsRow, StatTile, EmptyState }
+export { Page, PageHeader, Section, SettingsGroup, SettingsRow, StatTile, STAT_TILE_GRID, EmptyState }

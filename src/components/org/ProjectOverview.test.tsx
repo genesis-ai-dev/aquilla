@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react"
-import { MemoryRouter, Routes, Route } from "react-router-dom"
+import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { ProjectOverview, deriveProjectStatus } from "./ProjectOverview"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -187,11 +187,29 @@ function projectRecord(over: Partial<ProjectRecord> & { level: number; deletedAt
   } as ProjectRecord
 }
 
+function SettingsLocationProbe() {
+  const location = useLocation()
+  const state = location.state as {
+    backgroundLocation?: { pathname?: string }
+    projectSettingsModalDepth?: number
+  } | null
+  return (
+    <div
+      data-testid="settings-location"
+      data-background={state?.backgroundLocation?.pathname}
+      data-depth={state?.projectSettingsModalDepth}
+    />
+  )
+}
+
 function renderOverview() {
   return render(
     <MemoryRouter initialEntries={["/projects/p1"]}>
       <OrgProvider>
-        <Routes><Route path="/projects/:id" element={<ProjectOverview />} /></Routes>
+        <Routes>
+          <Route path="/projects/:id" element={<ProjectOverview />} />
+          <Route path="/project/:id/settings" element={<SettingsLocationProbe />} />
+        </Routes>
       </OrgProvider>
     </MemoryRouter>,
   )
@@ -954,7 +972,7 @@ describe("ProjectOverview project-only invitee access (AQU-474)", () => {
     ).toBe(true)
   })
 
-  it("exposes a Project settings link to /project/:id/settings", async () => {
+  it("opens Project settings as a route modal over the overview", async () => {
     useProject.mockReturnValue({
       project: projectRecord({ level: 400, files: [] }),
       status: "ready",
@@ -966,6 +984,11 @@ describe("ProjectOverview project-only invitee access (AQU-474)", () => {
 
     const settings = await screen.findByRole("link", { name: "Project settings" })
     expect(settings).toHaveAttribute("href", "/project/p1/settings")
+    fireEvent.click(settings)
+
+    const destination = await screen.findByTestId("settings-location")
+    expect(destination).toHaveAttribute("data-background", "/projects/p1")
+    expect(destination).toHaveAttribute("data-depth", "1")
   })
 })
 
@@ -1693,18 +1716,16 @@ describe("ProjectOverview lane table + tabs (AQU-538 §3.3)", () => {
     await waitFor(() => expect(statTile("Translated")).toHaveTextContent("50%"))
   })
 
-  it("each lane row's Open menu item deep-links the workspace at that lane (?lane=)", async () => {
+  it("lane row ⋯ menu has Assign and Staff, not Open", async () => {
     useLaneProject()
     getPortfolio.mockResolvedValue([laneProject()])
     renderOverview()
 
     await screen.findByTestId("overview-lane-table")
     fireEvent.click(screen.getByTestId("overview-lane-actions-es"))
-    expect(screen.getByTestId("overview-lane-open-es").getAttribute("href")).toBe("/project/p1/editor?lane=es")
-
-    // Close and open the default-lane menu — default lane has no lane param.
-    fireEvent.click(screen.getByTestId("overview-lane-actions-default"))
-    expect(screen.getByTestId("overview-lane-open-default").getAttribute("href")).toBe("/project/p1/editor")
+    expect(screen.queryByRole("menuitem", { name: /^open$/i })).not.toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: /assign/i })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: /staff/i })).toBeInTheDocument()
   })
 
   it("Assign… from a lane row ⋯ menu mounts AssignModal pinned to that lane", async () => {

@@ -7,6 +7,7 @@
 
 import { useEffect, useState } from "react"
 import { WifiOff } from "lucide-react"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 /**
  * Full-width banner that appears when the browser is offline.
@@ -15,6 +16,7 @@ import { WifiOff } from "lucide-react"
  * via browser events — no props required.
  */
 export function OfflineBanner() {
+  const t = useT()
   const [offline, setOffline] = useState(!navigator.onLine)
 
   useEffect(() => {
@@ -39,7 +41,7 @@ export function OfflineBanner() {
     >
       <WifiOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
       <span>
-        You&apos;re offline — changes are queued and will sync when you reconnect.
+        {t("workspace.offlineBanner.message")}
       </span>
     </div>
   )

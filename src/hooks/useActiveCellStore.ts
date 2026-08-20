@@ -12,6 +12,7 @@ import type { OrderedBy, RuleWaiver } from "@/lib/parsers/types"
 import type { FileProgressResponse, ProgressCounts } from "@/lib/progress/file-progress-resource"
 import { deriveMilestoneNavigation } from "@/lib/milestone-navigation"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
+import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
 const EMPTY_CELL_IDS: readonly string[] = Object.freeze([])
@@ -65,6 +66,7 @@ export interface CellSummary {
   targetEventId?: string
   targetSourceEventId?: string | null
   aiDrafted?: boolean
+  aiDraft?: AiDraftProvenance
   lastEditAt?: number
   startTime?: number
   endTime?: number
@@ -181,6 +183,7 @@ interface PendingOverlay {
   valueHtml?: string
   eventId?: string
   aiDrafted?: boolean
+  aiDraft?: AiDraftProvenance
   /** Target-language lane this edit belongs to (`''` = Project default). */
   targetLang?: string
 }
@@ -242,6 +245,12 @@ export class CellStore {
   private derivedVersion = 0
   private writeSeq = 0
   private maxServerSeq: number | null = null
+  /** AQU-943: the project incarnation `maxServerSeq` was minted against. A
+   *  wipe + re-migration under the same deterministic ids restarts the seq
+   *  allocator, which inverts the cursor and makes every delta answer
+   *  "nothing newer". Echoed as `?epoch=` so the server can spot that; null ⇒
+   *  the cursor is unverifiable and the delta path is skipped. */
+  private projectEpoch: number | null = null
   private navIndex: CellNavigationEntry[] = []
   private fileProgressSnapshot: FileProgressResponse | null = null
   private sectionLabelById = new Map<string, string>()
@@ -315,6 +324,7 @@ export class CellStore {
     this.freshnessFloors = new Map()
     this.cellVersionById = new Map()
     this.maxServerSeq = null
+    this.projectEpoch = null
     this.writeSeq = 0
     this.footnoteCache = new Map()
     this.rebuildDerivedIndexes()
@@ -353,6 +363,10 @@ export class CellStore {
   getProjectId = (): string | null => this.ctx.projectId
   getCellCount = (): number => this.order.length
   getMaxServerSeq = (): number | null => this.maxServerSeq
+  getProjectEpoch = (): number | null => this.projectEpoch
+  setProjectEpoch(epoch: number | null): void {
+    this.projectEpoch = epoch
+  }
   setMaxServerSeq(seq: number | null): void {
     this.maxServerSeq = seq
     if (this.fileProgressSnapshot) {
@@ -555,6 +569,7 @@ export class CellStore {
       targetEventId: view.targetEventId,
       targetSourceEventId: view.targetSourceEventId,
       aiDrafted: view.aiDrafted,
+      aiDraft: view.aiDraft,
       lastEditAt: view.lastEditAt,
       startTime: view.startTime,
       endTime: view.endTime,
@@ -763,6 +778,7 @@ export class CellStore {
         && a.valueHtml === b.valueHtml
         && a.eventId === b.eventId
         && a.aiDrafted === b.aiDrafted
+        && a.aiDraft?.generatedAt === b.aiDraft?.generatedAt
         && a.targetLang === b.targetLang,
     )
     if (changed.size === 0) return
@@ -805,7 +821,13 @@ export class CellStore {
 
     const existing = this.targetById.get(cellId)
     if (existing) {
-      this.targetById.set(cellId, { ...existing, value: patch.value, valueHtml: patch.valueHtml ?? null, aiDrafted: patch.aiDrafted ?? false })
+      this.targetById.set(cellId, {
+        ...existing,
+        value: patch.value,
+        valueHtml: patch.valueHtml ?? null,
+        aiDrafted: patch.aiDrafted ?? false,
+        aiDraft: patch.aiDrafted ? patch.aiDraft : undefined,
+      })
     } else {
       const source = this.sourceById.get(cellId)
       // No source row (mid-refetch/reset window): the shadow written above is
@@ -831,6 +853,7 @@ export class CellStore {
         lastEditAt: Date.now(),
         validated: false,
         aiDrafted: patch.aiDrafted ?? false,
+        aiDraft: patch.aiDrafted ? patch.aiDraft : undefined,
         wordCount: patch.value.trim() ? patch.value.trim().split(/\s+/).length : 0,
       })
       if (!this.targetOrder.includes(cellId)) this.targetOrder.push(cellId)
@@ -1027,6 +1050,7 @@ export class CellStore {
       if (activePending.valueHtml !== undefined) cell.translatedHtml = activePending.valueHtml
       cell.status = deriveStatus(activePending.value, false)
       cell.aiDrafted = activePending.aiDrafted ?? false
+      cell.aiDraft = activePending.aiDrafted ? activePending.aiDraft : undefined
       cell.hasPendingEdit = true
     }
     const optimistic = this.optimisticEdits.get(targetOverlayKey(cell.id, activeLane))
@@ -1039,6 +1063,7 @@ export class CellStore {
       cell.translatedHtml = optimistic.valueHtml
       cell.status = deriveStatus(optimistic.value, false)
       cell.aiDrafted = optimistic.aiDrafted ?? false
+      cell.aiDraft = optimistic.aiDrafted ? optimistic.aiDraft : undefined
       cell.hasPendingEdit = true
     }
     if (activePending || optimistic) {
@@ -1282,7 +1307,7 @@ export interface UseActiveCellStoreResult {
    * this restores the loading state while no authoritative rows are present. */
   retry: () => void
   revalidateCell: (cellId: string) => void
-  applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => void
+  applyOptimisticTargetEdit: (cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean; aiDraft?: AiDraftProvenance }) => void
   /** Bulk version of applyOptimisticTargetEdit — see CellStore.applyOptimisticTargetEdits. */
   applyOptimisticTargetEdits: (patches: { cellId: string; value: string; valueHtml?: string }[]) => void
   /** Round 7: optimistic TIMING/metadata patch — see CellStore.applyOptimisticCellTiming. */
@@ -1355,10 +1380,12 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       if (generationRef.current !== gen) return
       if (cached && cached.rows.length > 0) {
         store.replaceRows(cached.rows, { full: true, maxServerSeq: cached.maxServerSeq ?? null })
+        store.setProjectEpoch(cached.projectEpoch ?? null)
         setIsLoading(false)
         usedCache = true
       } else {
         store.setMaxServerSeq(null)
+        store.setProjectEpoch(null)
         setIsLoading(true)
       }
     }
@@ -1387,22 +1414,31 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       tokenAttemptsRef.current = 0
 
       const since = store.getMaxServerSeq()
-      if (since !== null) {
+      // AQU-943: a cursor whose incarnation is unknown (cache entry written
+      // before the epoch existed) cannot be validated against a wipe + re-
+      // create, so it is not trusted — one full stream re-mints both.
+      const epoch = store.getProjectEpoch()
+      if (since !== null && epoch !== null) {
         const deltaStartSeq = store.getWriteSeq()
-        const result = await fetchCellsDelta(pid, fid, since, token)
+        const result = await fetchCellsDelta(pid, fid, since, token, undefined, epoch)
         if (generationRef.current !== gen) return
         if (result.kind === "delta") {
           let nextWatermark = result.maxServerSeq
+          // The server answered with a delta rather than a resync, so it
+          // confirmed the cursor's incarnation; pre-AQU-943 servers report
+          // none — hold the epoch we already had.
+          const nextEpoch = result.projectEpoch ?? epoch
+          store.setProjectEpoch(nextEpoch)
           if (result.changedCellIds.length > 0) {
             store.clearConfirmedShadows(result.cells, deltaStartSeq)
             const merged = mergeCellsDelta(store.toRows(), result.changedCellIds, result.cells)
             const { rows: kept, discardedCellIds } = store.mergeProtectedRows(merged, deltaStartSeq)
             store.replaceRows(kept, { changedCellIds: result.changedCellIds, maxServerSeq: discardedCellIds.size > 0 ? since : nextWatermark })
             if (discardedCellIds.size > 0) nextWatermark = since
-            void writeCellsCache(pid, fid, store.toRows(), nextWatermark)
+            void writeCellsCache(pid, fid, store.toRows(), nextWatermark, nextEpoch ?? undefined)
           } else if (result.maxServerSeq !== since) {
             store.setMaxServerSeq(result.maxServerSeq)
-            void writeCellsCache(pid, fid, store.toRows(), result.maxServerSeq)
+            void writeCellsCache(pid, fid, store.toRows(), result.maxServerSeq, nextEpoch ?? undefined)
           }
           setIsLoading(false)
           return
@@ -1428,16 +1464,20 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
 
       const startSeq = store.getWriteSeq()
       let streamMaxSeq: number | null = null
+      // AQU-943: incarnation of `streamMaxSeq`, taken from the same first page
+      // so cursor and epoch always describe the same snapshot.
+      let streamEpoch: number | null = null
       let streamTorn = false
       let cursorSeen = false
       const trackStreamMeta = () => {
         let sideFirst: number | null = null
         let sideSeen = false
-        return (meta: { maxServerSeq?: number | null }) => {
+        return (meta: { maxServerSeq?: number | null; projectEpoch?: number | null }) => {
           const value = typeof meta.maxServerSeq === "number" ? meta.maxServerSeq : null
           if (!cursorSeen) {
             cursorSeen = true
             streamMaxSeq = value
+            streamEpoch = typeof meta.projectEpoch === "number" ? meta.projectEpoch : null
           }
           if (!sideSeen) {
             sideSeen = true
@@ -1464,8 +1504,10 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       }
 
       const watermark = streamTorn || discardedProtected ? null : streamMaxSeq
+      const watermarkEpoch = watermark === null ? null : streamEpoch
       store.setMaxServerSeq(watermark)
-      void writeCellsCache(pid, fid, store.toRows(), watermark ?? undefined)
+      store.setProjectEpoch(watermarkEpoch)
+      void writeCellsCache(pid, fid, store.toRows(), watermark ?? undefined, watermarkEpoch ?? undefined)
       setIsLoading(false)
     } catch (err) {
       if (generationRef.current !== gen) return
@@ -1509,6 +1551,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
           value?: string
           valueHtml?: string
           ai_suggestion?: true
+          ai_draft?: AiDraftProvenance
           targetLang?: string
         }
         const eventLane = typeof payload.targetLang === "string" ? payload.targetLang : ""
@@ -1538,6 +1581,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
           valueHtml: payload.valueHtml,
           eventId: record.event.id,
           aiDrafted: payload.ai_suggestion === true,
+          aiDraft: payload.ai_suggestion === true ? payload.ai_draft : undefined,
           targetLang: eventLane,
         })
       }
@@ -1582,7 +1626,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     const pid = projectRef.current
     const fid = fileRef.current
     if (!pid || !fid) return
-    void writeCellsCache(pid, fid, store.toRows(), maxServerSeq ?? store.getMaxServerSeq() ?? undefined)
+    void writeCellsCache(
+      pid,
+      fid,
+      store.toRows(),
+      maxServerSeq ?? store.getMaxServerSeq() ?? undefined,
+      store.getProjectEpoch() ?? undefined,
+    )
   }, [store])
 
   const revalidateCellRef = useRef<(cellId: string) => void>(() => {})
@@ -1636,7 +1686,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   }, [doFetch, refreshCellsCacheFromStore, store])
   revalidateCellRef.current = revalidateCell
 
-  const applyOptimisticTargetEdit = useCallback((cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean }) => {
+  const applyOptimisticTargetEdit = useCallback((cellId: string, patch: { value: string; valueHtml?: string; aiDrafted?: boolean; aiDraft?: AiDraftProvenance }) => {
     store.applyOptimisticTargetEdit(cellId, patch)
   }, [store])
 

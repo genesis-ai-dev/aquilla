@@ -86,6 +86,12 @@ export const audio = defineNamespace({
     "audio.recordingModal.autoAdvanceEnableLabel": "Move to the next line after saving",
     "audio.recordingModal.muteBeepTooltip": "Mute countdown beep",
     "audio.recordingModal.unmuteBeepTooltip": "Enable countdown beep",
+    "audio.recordingModal.muteVideoTooltip": "Mute the scene video",
+    "audio.recordingModal.unmuteVideoTooltip": "Unmute the scene video",
+    "audio.recordingModal.videoMutedBadge": "Muted",
+    "audio.recordingModal.videoMutedWhileRecording":
+      "The scene plays muted while recording so it can't bleed into your take.",
+    "audio.recordingModal.videoScenePreview": "Scene for this line — plays while you record.",
     "audio.recordingModal.closeTooltip": "Close (Esc)",
     "audio.recordingModal.emptySource": "empty",
     "audio.recordingModal.readAloudLabel": "Read aloud",
@@ -127,6 +133,9 @@ export const audio = defineNamespace({
     "audio.takesStrip.renameTooltip": "Rename take",
     "audio.takesStrip.unknownLengthTooltip": "Length unknown — re-record or re-upload to fix",
     "audio.takesStrip.pendingSyncTooltip": "Saving — kept safe on this device until it syncs",
+    "audio.takesStrip.syncFailedTooltip":
+      "Couldn't save to the server — this take is still on this device. Retry to send it again.",
+    "audio.takesStrip.syncFailedRetry": "Not saved — retry",
     "audio.takesStrip.playTakeTooltip": "Play take",
     "audio.takesStrip.removeNoiseTooltip": "Remove noise (adds a cleaned take)",
     "audio.takesStrip.revertTooltip": "Revert to the original recording",
@@ -167,6 +176,95 @@ export const audio = defineNamespace({
 
     // AudioBulkProgressBanner — batch transcribe-all / synth-all progress.
     "audio.bulkProgress.cancelTooltip": "Cancel batch",
+
+    // GEMINI_TTS_VOICES (tts-providers.ts) — tone/character description for
+    // each named Gemini voice. Several voices share the same description
+    // (Google's own catalog repeats these words across voices), so this is
+    // one key per DISTINCT description, not one per voice.
+    "audio.voice.bright": "Bright",
+    "audio.voice.upbeat": "Upbeat",
+    "audio.voice.informative": "Informative",
+    "audio.voice.firm": "Firm",
+    "audio.voice.excitable": "Excitable",
+    "audio.voice.youthful": "Youthful",
+    "audio.voice.breezy": "Breezy",
+    "audio.voice.easyGoing": "Easy-going",
+    "audio.voice.breathy": "Breathy",
+    "audio.voice.clear": "Clear",
+    "audio.voice.smooth": "Smooth",
+    "audio.voice.gravelly": "Gravelly",
+    "audio.voice.soft": "Soft",
+    "audio.voice.even": "Even",
+    "audio.voice.mature": "Mature",
+    "audio.voice.forward": "Forward",
+    "audio.voice.friendly": "Friendly",
+    "audio.voice.casual": "Casual",
+    "audio.voice.gentle": "Gentle",
+    "audio.voice.lively": "Lively",
+    "audio.voice.knowledgeable": "Knowledgeable",
+    "audio.voice.warm": "Warm",
+
+    // TTS_PROVIDER_INFOS (tts-providers.ts) — one-line explanatory hint per
+    // TTS engine, shown as a tooltip on the engine picker card in
+    // NewVoiceModal. (Each engine's `title`/`shortTitle` stays plain English —
+    // see audio.newVoice.singleVoiceHint's context note — so only the hint
+    // sentence is keyed here.)
+    "audio.provider.omnivoiceHint":
+      "Runs on our servers. No key or download; usage is cloud-metered. Supports voice cloning from a reference recording.",
+    "audio.provider.geminiHint": "BYOK Google AI key. Promptable, high-quality voices.",
+    "audio.provider.kokoroHint": "Runs in-browser after a one-time local model download.",
+    "audio.provider.mmsHintSherpa": "Local browser voices loaded from the Sherpa-ONNX MMS mirror.",
+    "audio.provider.mmsHintHosted": "Local browser voices loaded from the hosted MMS model bucket.",
+    "audio.provider.mmsHintFallback": "Local browser voices for supported MMS language repos.",
+
+    // CastGutterVoice — the small per-row character/voice avatar in the
+    // stacked media lens' text-table gutter.
+    "audio.castGutter.namedTooltip": "{castName} — voiced by {voiceName}",
+    "audio.castGutter.defaultTooltip": "{voiceName} — default (no one cast yet)",
+    "audio.castGutter.chooseCharacterAriaLabel": "{tooltip}. Choose a character",
+
+    // useCellAudio — errors surfaced while loading/streaming a cell's audio.
+    "audio.error.noAttachment": "No audio attachment on this cell",
+    "audio.error.legacyLfsUnsupported": "Unsupported audio URL (legacy LFS): {url}",
+    "audio.error.notSignedIn": "Not signed in",
+    "audio.error.recordingDeleted": "This audio recording has been deleted and cannot be played.",
+    "audio.error.streamingFailed": "Playback failed — the media source could not be streamed.",
+
+    // play-queue — multi-cell playback queue error, shown in VoicePlaybackBar.
+    "audio.error.queueLoadFailed": "Audio failed to load",
+
+    // transcribe.ts — guard-clause errors before a per-cell transcription
+    // attempt starts, categorized and shown via CellTranscribeBadge.
+    "audio.error.noDownloadableAudio":
+      "This recording has no downloadable audio yet. Try again after it finishes syncing.",
+    "audio.error.notTranscribableLocation": "This audio isn't stored in a transcribable location.",
+    "audio.error.signInToTranscribe": "Sign in to transcribe audio.",
+
+    // ai-consent.ts — display name of each heavy in-browser AI model, shown
+    // in the first-run download-consent dialog (AiModelConsentDialog).
+    "audio.consent.whisperLabel": "Whisper (transcription)",
+    "audio.consent.kokoroLabel": "Kokoro (text-to-speech)",
+    "audio.consent.mmsLabel": "MMS (multilingual TTS)",
+
+    // ai-error.ts categorizeAiError() — plain-language heading for each
+    // failure category, shown as the popover title (InlineAiError et al.).
+    "audio.aiError.dailyLimitTitle": "Daily AI limit reached",
+    "audio.aiError.modelNotAvailableTitle": "Model not available",
+    "audio.aiError.tooLargeTitle": "Too much text for this model",
+    "audio.aiError.geminiKeyRequiredTitle": "Gemini API key required",
+    "audio.aiError.signInRequiredTitle": "Sign in required",
+    "audio.aiError.gitProjectUnsupportedTitle": "Not yet supported on git projects",
+    "audio.aiError.nothingToReadTitle": "Nothing to read aloud",
+    "audio.aiError.translationNotConfiguredTitle": "Translation not configured",
+    "audio.aiError.translationFailedTitle": "Translation failed",
+    "audio.aiError.networkTitle": "Network error",
+    "audio.aiError.modelLoadFailedTitle": "Couldn't load model",
+    "audio.aiError.audioFormatUnsupportedTitle": "Audio format not supported",
+    "audio.aiError.timedOutTitle": "The request timed out",
+    "audio.aiError.rateLimitedTitle": "Too many requests right now",
+    "audio.aiError.providerUnavailableTitle": "The AI service is unavailable",
+    "audio.aiError.providerRejectedTitle": "The AI provider rejected this request",
+    "audio.aiError.unknownTitle": "Something went wrong",
   },
   context: {
     _context: {
@@ -591,6 +689,32 @@ export const audio = defineNamespace({
           "Tooltip and accessible name for the same header button, shown when the " +
           "beep is currently off (pressing it turns the beep back on).",
       },
+      "audio.recordingModal.muteVideoTooltip": {
+        description:
+          "Tooltip and accessible name for the button that mutes the linked scene " +
+          "video shown inside the recording dialog, used while its sound is on.",
+      },
+      "audio.recordingModal.unmuteVideoTooltip": {
+        description:
+          "Tooltip and accessible name for the same button while the scene video is " +
+          "already muted (pressing it turns the video's sound back on).",
+      },
+      "audio.recordingModal.videoMutedBadge": {
+        description:
+          "Very short badge drawn over the top-right corner of the scene video while " +
+          "its sound is off. Keep it to one word if the language allows.",
+      },
+      "audio.recordingModal.videoMutedWhileRecording": {
+        description:
+          "Explains why the scene video's sound is forced off during a take: an " +
+          "audible video would be picked up by the microphone ('bleed into your " +
+          "take' is recording-studio idiom for exactly that).",
+      },
+      "audio.recordingModal.videoScenePreview": {
+        description:
+          "Caption under the scene video between takes, naming what the video is " +
+          "(the footage for the line being dubbed) and when it will play.",
+      },
       "audio.recordingModal.closeTooltip": {
         description:
           "Tooltip for the dialog's close button, including its keyboard shortcut " +
@@ -815,6 +939,19 @@ export const audio = defineNamespace({
           "device but not yet uploaded to the server. Reassurance: nothing is lost " +
           "while it waits.",
       },
+      "audio.takesStrip.syncFailedTooltip": {
+        description:
+          "Hover title on the red badge of a take whose save to the server FAILED " +
+          "and will not be retried automatically. Distinct from the 'saving' badge: " +
+          "that one is still on its way, this one is stuck and needs the user to " +
+          "retry. Reassures that the recording itself is not lost.",
+      },
+      "audio.takesStrip.syncFailedRetry": {
+        description:
+          "Label on the small red button shown on a take that failed to save to the " +
+          "server; pressing it queues the save again. Very short — it sits inline on " +
+          "a compact take row.",
+      },
       "audio.takesStrip.playTakeTooltip": {
         description:
           "Tooltip and accessible name for a take chip's play button, shown while " +
@@ -988,6 +1125,272 @@ export const audio = defineNamespace({
         description:
           "Tooltip and accessible name for the small 'x' button on the bulk-progress " +
           "banner that cancels the running batch job.",
+      },
+      "audio.voice.bright": {
+        description:
+          "One of a fixed set of one-word tone/character descriptions for a named " +
+          "Gemini TTS voice (e.g. 'Zephyr — Bright'), reused verbatim across several " +
+          "voices that share the same description in Google's own voice catalog. Not " +
+          "yet rendered anywhere in the app (data reserved for a future voice-picker " +
+          "list) — keep it a short, standalone adjective, not a sentence.",
+      },
+      "audio.voice.upbeat": { description: "See audio.voice.bright — same class of key." },
+      "audio.voice.informative": { description: "See audio.voice.bright — same class of key." },
+      "audio.voice.firm": { description: "See audio.voice.bright — same class of key." },
+      "audio.voice.excitable": { description: "See audio.voice.bright — same class of key." },
+      "audio.voice.youthful": { description: "See audio.voice.bright — same class of key." },
+      "audio.voice.breezy": { description: "See audio.voice.bright — same class of key." },
+      "audio.voice.easyGoing": { description: "See audio.voice.bright — same class of key." },
+      "audio.voice.breathy": { description: "See audio.voice.bright — same class of key." },
+      "audio.voice.clear": {
+        description:
+          "See audio.voice.bright — same class of key. Describes a VOICE's tone " +
+          "(distinct, easy to make out), an adjective — not the 'Clear' button " +
+          "(common.clear) that resets a filter or field, which is an imperative verb.",
+      },
+      "audio.voice.smooth": { description: "See audio.voice.bright — same class of key." },
+      "audio.voice.gravelly": { description: "See audio.voice.bright — same class of key." },
+      "audio.voice.soft": { description: "See audio.voice.bright — same class of key." },
+      "audio.voice.even": { description: "See audio.voice.bright — same class of key." },
+      "audio.voice.mature": { description: "See audio.voice.bright — same class of key." },
+      "audio.voice.forward": {
+        description:
+          "See audio.voice.bright — same class of key. Describes a VOICE's personality " +
+          "(direct, assertive), an adjective — not the browser-style 'Forward' history " +
+          "button (nav.historyControls.forward), which is a navigation command.",
+      },
+      "audio.voice.friendly": { description: "See audio.voice.bright — same class of key." },
+      "audio.voice.casual": { description: "See audio.voice.bright — same class of key." },
+      "audio.voice.gentle": { description: "See audio.voice.bright — same class of key." },
+      "audio.voice.lively": { description: "See audio.voice.bright — same class of key." },
+      "audio.voice.knowledgeable": { description: "See audio.voice.bright — same class of key." },
+      "audio.voice.warm": { description: "See audio.voice.bright — same class of key." },
+      "audio.provider.omnivoiceHint": {
+        description:
+          "Tooltip on the OmniVoice engine card in the TTS engine picker (New " +
+          "Voice dialog), explaining what running 'on our servers' means: no API key " +
+          "or download, usage-metered, and it supports cloning from a reference clip.",
+      },
+      "audio.provider.geminiHint": {
+        description:
+          "Tooltip on the Gemini engine card in the TTS engine picker. 'BYOK' = " +
+          "bring your own key — the user must supply their own Google AI key for this " +
+          "engine to work.",
+      },
+      "audio.provider.kokoroHint": {
+        description:
+          "Tooltip on the Kokoro engine card in the TTS engine picker, explaining the " +
+          "one-time local model download that happens before this on-device engine " +
+          "can generate audio.",
+      },
+      "audio.provider.mmsHintSherpa": {
+        description:
+          "Tooltip on the MMS engine card in the TTS engine picker, shown in the " +
+          "build variant that loads on-device voices from the Sherpa-ONNX MMS " +
+          "mirror. 'Sherpa-ONNX' is a proper name for the runtime — do not translate " +
+          "it.",
+      },
+      "audio.provider.mmsHintHosted": {
+        description:
+          "Tooltip on the MMS engine card, shown in the build variant that loads " +
+          "on-device voices from Aquilla's own hosted MMS model bucket rather than " +
+          "the Sherpa-ONNX mirror.",
+      },
+      "audio.provider.mmsHintFallback": {
+        description:
+          "Tooltip on the MMS engine card, shown when neither the Sherpa-ONNX mirror " +
+          "nor a hosted model bucket is configured — a generic fallback description.",
+      },
+      "audio.castGutter.namedTooltip": {
+        description:
+          "Hover/accessible text on a line's small voice-avatar circle (the 'cast " +
+          "gutter'), shown when the line has an explicitly cast character whose name " +
+          "differs from the voice's own name — e.g. 'Peter — voiced by Kore'.",
+        placeholders: {
+          castName: "The diarized/VTT speaker (character) name. User content — do not translate.",
+          voiceName: "The TTS voice's own name (e.g. 'Kore'). Proper name — do not translate.",
+        },
+      },
+      "audio.castGutter.defaultTooltip": {
+        description:
+          "Hover/accessible text on the cast-gutter avatar, shown when the line falls " +
+          "back to the default/narrator voice instead of an explicit cast choice — " +
+          "e.g. 'Kore — default (no one cast yet)'.",
+        placeholders: {
+          voiceName: "The fallback voice's own name (e.g. 'Kore'). Proper name — do not translate.",
+        },
+      },
+      "audio.castGutter.chooseCharacterAriaLabel": {
+        description:
+          "Accessible name of the cast-gutter avatar's popover-trigger button, which " +
+          "opens the voice picker. Appends an action to whichever hover text " +
+          "(audio.castGutter.namedTooltip or .defaultTooltip) already describes the " +
+          "current cast state, so a screen-reader user hears both the state and what " +
+          "clicking does.",
+        placeholders: {
+          tooltip:
+            "The already-resolved hover text for this avatar (see " +
+            "audio.castGutter.namedTooltip / .defaultTooltip), inserted verbatim.",
+        },
+      },
+      "audio.error.noAttachment": {
+        description:
+          "Internal error message on a thrown AudioError when a cell's audio bytes " +
+          "are requested but the cell has no audio attachment pointer at all.",
+      },
+      "audio.error.legacyLfsUnsupported": {
+        description:
+          "Internal error message on a thrown AudioError when a cell's audio URL is " +
+          "an old GitLab-LFS-style pointer that codex-web can no longer fetch, " +
+          "surfaced so the UI can offer a 're-record' affordance.",
+        placeholders: {
+          url: "The unsupported attachment URL. Technical value — do not translate.",
+        },
+      },
+      "audio.error.notSignedIn": {
+        description:
+          "Internal error message on a thrown AudioError when a network fetch of a " +
+          "cell's audio needs an authenticated session but none is present.",
+      },
+      "audio.error.recordingDeleted": {
+        description:
+          "Internal error message on a thrown AudioError when the server reports a " +
+          "404 for a cell's audio — the recording was permanently deleted, so the UI " +
+          "should not offer a retry, only re-record.",
+      },
+      "audio.error.streamingFailed": {
+        description:
+          "Internal error message on a thrown AudioError when both the streamed " +
+          "playback URL and the full-bytes fallback fail to play.",
+      },
+      "audio.error.queueLoadFailed": {
+        description:
+          "Error status message for the multi-cell playback queue (play-queue.ts) " +
+          "when an audio element fails to load and no blob-fallback retry applies. " +
+          "Rendered directly in VoicePlaybackBar in place of the current voice's name.",
+      },
+      "audio.error.noDownloadableAudio": {
+        description:
+          "Error status for a single-cell transcription attempt (shown via " +
+          "CellTranscribeBadge) when the cell's audio pointer exists but has no " +
+          "downloadable URL yet — e.g. it is still syncing from another device.",
+      },
+      "audio.error.notTranscribableLocation": {
+        description:
+          "Error status for a single-cell transcription attempt when the cell's " +
+          "audio URL isn't a location transcription can read from (e.g. an " +
+          "unsupported legacy pointer).",
+      },
+      "audio.error.signInToTranscribe": {
+        description:
+          "Error status for a single-cell transcription attempt when it needs a " +
+          "network fetch (no local cache hit) but the user has no signed-in session.",
+      },
+      "audio.consent.whisperLabel": {
+        description:
+          "Display name for the Whisper transcription model in the first-run AI-" +
+          "model download consent dialog (AiModelConsentDialog) — names the feature " +
+          "in parentheses since 'Whisper' alone doesn't say what it's for.",
+      },
+      "audio.consent.kokoroLabel": {
+        description:
+          "Display name for the Kokoro text-to-speech model in the same consent " +
+          "dialog as audio.consent.whisperLabel, same naming pattern.",
+      },
+      "audio.consent.mmsLabel": {
+        description:
+          "Display name for the MMS multilingual text-to-speech model in the same " +
+          "consent dialog as audio.consent.whisperLabel, same naming pattern.",
+      },
+      "audio.aiError.dailyLimitTitle": {
+        description:
+          "Popover heading from categorizeAiError() when the platform's shared daily " +
+          "AI budget has been exhausted (429 from the Aquilla proxy, not a specific " +
+          "provider). Short, plain-language — the explanatory sentence is a separate, " +
+          "not-yet-keyed body string shown underneath.",
+      },
+      "audio.aiError.modelNotAvailableTitle": {
+        description:
+          "Popover heading when the requested model isn't on this platform's " +
+          "allowlist for the signed-in tier.",
+      },
+      "audio.aiError.tooLargeTitle": {
+        description:
+          "Popover heading when a completion/TTS request exceeded the selected " +
+          "model's context window (a 413 or an explicit 'too large' provider error).",
+      },
+      "audio.aiError.geminiKeyRequiredTitle": {
+        description:
+          "Popover heading when a Gemini-voice TTS request fails because no Gemini " +
+          "API key is configured for the project.",
+      },
+      "audio.aiError.signInRequiredTitle": {
+        description:
+          "Popover heading when an AI feature (TTS, transcription, drafting) needs " +
+          "an authenticated session and none is present.",
+      },
+      "audio.aiError.gitProjectUnsupportedTitle": {
+        description:
+          "Popover heading when the attempted AI feature isn't yet supported for " +
+          "git-linked projects.",
+      },
+      "audio.aiError.nothingToReadTitle": {
+        description:
+          "Popover heading when a 'read aloud'/TTS request has no source or " +
+          "translated text to synthesize from.",
+      },
+      "audio.aiError.translationNotConfiguredTitle": {
+        description:
+          "Popover heading when generating voice for an untranslated cell needs " +
+          "on-the-fly translation, but the project has no completion provider set up.",
+      },
+      "audio.aiError.translationFailedTitle": {
+        description:
+          "Popover heading when an on-the-fly translation attempt (see " +
+          "audio.aiError.translationNotConfiguredTitle) ran but produced no usable " +
+          "text.",
+      },
+      "audio.aiError.networkTitle": {
+        description:
+          "Popover heading for a connectivity failure (fetch failed / offline) " +
+          "while calling an AI feature.",
+      },
+      "audio.aiError.modelLoadFailedTitle": {
+        description:
+          "Popover heading when an on-device model (Whisper/Kokoro/MMS/transformers " +
+          "runtime) fails to download or initialize.",
+      },
+      "audio.aiError.audioFormatUnsupportedTitle": {
+        description:
+          "Popover heading when an uploaded/recorded audio file can't be decoded — " +
+          "the explanatory body suggests re-uploading as .wav/.mp3/.ogg.",
+      },
+      "audio.aiError.timedOutTitle": {
+        description: "Popover heading when an AI provider request exceeded its time budget.",
+      },
+      "audio.aiError.rateLimitedTitle": {
+        description:
+          "Popover heading when a specific AI provider (not the platform's own " +
+          "daily budget, see audio.aiError.dailyLimitTitle) is rate-limiting requests.",
+      },
+      "audio.aiError.providerUnavailableTitle": {
+        description:
+          "Popover heading for a 5xx response from the AI provider — framed as " +
+          "usually temporary.",
+      },
+      "audio.aiError.providerRejectedTitle": {
+        description:
+          "Popover heading for a 4xx response from the AI provider that doesn't " +
+          "match any more specific category above.",
+      },
+      "audio.aiError.unknownTitle": {
+        description:
+          "Popover heading (InlineAiError etc.) when a failure doesn't match any " +
+          "specific category — the fallback of categorizeAiError()'s heuristic " +
+          "classifier. Distinct from the app-wide error.generic.title heading (a " +
+          "full failure-screen title): this is an inline popover heading inside an " +
+          "AI-feature affordance, the same register split already documented for " +
+          "audio.recordingModal.genericError just above.",
       },
     },
   },

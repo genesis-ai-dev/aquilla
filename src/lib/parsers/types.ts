@@ -11,7 +11,7 @@ export type {
 } from "./core-types"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
-export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
+export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "epub" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
 
 /** File types whose parsers produce scripture-style sections (globalReferences populated, section labels meaningful). */
 export const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set(["usfm", "ebible", "helloao"])
@@ -299,17 +299,20 @@ export interface CellTtsSettings {
  */
 export type AudioTimingMode = "dubbing" | "audioFirst"
 
-/** The one place the two modes' user-facing names live — consumed by the
- *  Project Settings card AND the media-lens toolbar note (2026-08-05: the
- *  control moved into settings; the toolbar shows a note). */
-export const AUDIO_TIMING_MODE_LABELS: Record<AudioTimingMode, { name: string; description: string }> = {
+/** The one place the two modes' user-facing names live — consumed by
+ *  TimingModeChangedDialog. Catalog keys, not display strings — `src/lib/`
+ *  can't call `useT()`, so the caller resolves them with `t()` at render
+ *  time. Reuses the exact same `editor.timeline.timingMode*` keys
+ *  `TimelineEditor.tsx`'s `TIMING_MODE_KEYS` table already resolves, so the
+ *  two never drift. */
+export const AUDIO_TIMING_MODE_LABELS: Record<AudioTimingMode, { nameKey: MessageKey; descriptionKey: MessageKey }> = {
   dubbing: {
-    name: "Original's timing",
-    description: "The translation is fitted to the original recording's timing.",
+    nameKey: "editor.timeline.timingModeDubbing",
+    descriptionKey: "editor.timeline.timingModeDubbingHint",
   },
   audioFirst: {
-    name: "Free timing",
-    description: "Verses are laid end to end — each takes as much room as its longer side.",
+    nameKey: "editor.timeline.timingModeFree",
+    descriptionKey: "editor.timeline.timingModeFreeHint",
   },
 }
 
@@ -619,8 +622,8 @@ export interface CompletionSettings {
   // ── v1 AI retrieval-tuning settings (spec: ai-copilot.md config table) ────
 
   /**
-   * How many few-shot examples to retrieve per completion call.
-   * Spec key: `top_k`. Default 15.
+   * Total approved few-shot example budget per completion call.
+   * Spec key: `top_k`. Default 10 for Luna.
    */
   top_k?: number
 
@@ -797,6 +800,7 @@ export function detectFileType(fileName: string): FileType | null {
     txt: "txt",
     html: "html",
     htm: "html",
+    epub: "epub",
     json: "json",
     arb: "json",
     po: "po",

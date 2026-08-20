@@ -21,6 +21,7 @@ import { readCellsCache, writeCellsCache, mergeCellsDelta } from "@/lib/sync/cel
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { formatVttTime } from "@/lib/video/vtt-generator"
 import { decodeHtmlEntities } from "@/lib/html-entities"
+import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 
 // AQU-538 (slice 2): one source, N target lanes; `''` is the default lane.
 // SWARM-TODO(AQU-538): slice 1 adds `targetLang` to `CellRow` in
@@ -62,6 +63,8 @@ export interface CellData {
   hasPendingEdit?: boolean
   /** Current target head is machine-generated and has not been human-edited or approved. */
   aiDrafted?: boolean
+  /** Provenance for the current untouched AI draft; absent on human-owned text. */
+  aiDraft?: AiDraftProvenance
   cellLabel?: string
   original: string
   originalHtml?: string
@@ -97,6 +100,9 @@ export interface CellData {
   backtranslation?: string
   backtranslationUpdatedAt?: string
   backtranslationForText?: string
+  backtranslationTargetEventId?: string
+  backtranslationPolished?: boolean
+  backtranslationAuthor?: string
   attachments?: Record<string, CodexCellAttachment>
   selectedAudioId?: string
   selectedGeneratedVoiceAudioId?: string
@@ -171,6 +177,7 @@ function cellsEqual(a: CellData, b: CellData): boolean {
     a.fileId === b.fileId &&
     a.hasPendingEdit === b.hasPendingEdit &&
     a.aiDrafted === b.aiDrafted &&
+    a.aiDraft?.generatedAt === b.aiDraft?.generatedAt &&
     a.cellLabel === b.cellLabel &&
     a.original === b.original &&
     a.originalHtml === b.originalHtml &&
@@ -318,6 +325,7 @@ export function buildCellData(
     translated,
     translatedHtml: target?.valueHtml ?? undefined,
     aiDrafted: target?.aiDrafted ?? false,
+    aiDraft: target?.aiDraft ?? undefined,
     sourceEventId: source?.eventId,
     targetEventId: target?.eventId,
     targetSourceEventId: target?.sourceEventId ?? null,
@@ -501,6 +509,14 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // the whole file. Null ⇒ full stream (cache miss, pre-M2-1 server/cache
   // entry, or explicit resync). Keyed to the current file — reset on switch.
   const maxServerSeqRef = useRef<number | null>(null)
+  // AQU-943 incarnation of `maxServerSeqRef`: which "life" of the project the
+  // cursor was minted against. A project wiped and re-migrated under the same
+  // deterministic ids restarts the seq allocator, so a cursor from the old
+  // incarnation sits above the whole new history and every delta answers
+  // "nothing newer" — pinning the pre-wipe cache forever. Echoed as `?epoch=`
+  // so the server can spot that; null ⇒ the cursor is unverifiable and the
+  // delta path is skipped in favour of one full stream.
+  const projectEpochRef = useRef<number | null>(null)
   const statsRef = useRef<ReadonlyMap<string, CellAuditStats>>(auditStats)
   // AQU-538: the active lane, read inside rebuild/merge/shadow paths (which run
   // off refs, not props) so lane changes take effect without recreating them.
@@ -732,6 +748,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       if (cached && cached.rows.length > 0) {
         rowsRef.current = cached.rows
         maxServerSeqRef.current = cached.maxServerSeq ?? null
+        projectEpochRef.current = cached.projectEpoch ?? null
         rebuildFromCache()
         setIsLoading(false)
         usedCache = true
@@ -740,6 +757,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         // page lands. No cache ⇒ no delta base — force the full stream.
         rowsRef.current = []
         maxServerSeqRef.current = null
+        projectEpochRef.current = null
         setCells([])
         setIsLoading(true)
       }
@@ -780,12 +798,17 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // with their new targetEventId, which is what confirms pending writes
       // in EditorTable. Errors fall to the outer catch: the cached view
       // stays up and the next trigger retries (RES-6).
+      //
+      // AQU-943: a cursor whose incarnation is unknown (cache entry written
+      // before the epoch existed) cannot be validated against a wipe + re-
+      // create, so it is not trusted — one full stream re-mints both.
       const since = maxServerSeqRef.current
-      if (since !== null) {
+      const epoch = projectEpochRef.current
+      if (since !== null && epoch !== null) {
         // Local-mutation clock at snapshot start (AQU-247): rows for any cell
         // mutated after this point outrank the delta's and must survive it.
         const deltaStartSeq = writeSeqRef.current
-        const result = await fetchCellsDelta(projectId, fileId, since, token)
+        const result = await fetchCellsDelta(projectId, fileId, since, token, undefined, epoch)
         if (generationRef.current !== gen) return
         if (result.kind === "delta") {
           // B1: if the protected-row merge discarded any of the delta's rows
@@ -796,6 +819,10 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
           // Holding the cursor at `since` costs one re-delivered delta per
           // trigger, only while local edits are actively in flight.
           let nextWatermark = result.maxServerSeq
+          // The server confirmed the cursor's incarnation by answering with a
+          // delta rather than a resync; keep the epoch it reports (pre-AQU-943
+          // servers report none — hold the one we already had).
+          const nextEpoch = result.projectEpoch ?? epoch
           if (result.changedCellIds.length > 0) {
             // Confirm shadows against the raw server rows BEFORE the merge,
             // mirroring the full-stream path: only a fetch that postdates a
@@ -806,13 +833,20 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
             rowsRef.current = kept
             rebuildFromCache()
             if (discardedCellIds.size > 0) nextWatermark = since
-            void writeCellsCache(projectId, fileId, rowsRef.current, nextWatermark)
+            void writeCellsCache(projectId, fileId, rowsRef.current, nextWatermark, nextEpoch ?? undefined)
           } else if (result.maxServerSeq !== since) {
             // Watermark moved on row-less events (file.rename etc.) — advance
             // the cursor so those events aren't re-scanned forever.
-            void writeCellsCache(projectId, fileId, rowsRef.current, result.maxServerSeq)
+            void writeCellsCache(
+              projectId,
+              fileId,
+              rowsRef.current,
+              result.maxServerSeq,
+              nextEpoch ?? undefined,
+            )
           }
           maxServerSeqRef.current = nextWatermark
+          projectEpochRef.current = nextEpoch
           setIsLoading(false)
           return
         }
@@ -876,16 +910,20 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // rows are kept (better than blanking) but NO cursor is stored, so the
       // next trigger full-streams once and self-heals.
       let streamMaxSeq: number | null = null
+      // AQU-943: incarnation of `streamMaxSeq`, taken from the same first page
+      // so cursor and epoch always describe the same snapshot.
+      let streamEpoch: number | null = null
       let streamTorn = false
       let cursorSeen = false
       const trackStreamMeta = () => {
         let sideFirst: number | null = null
         let sideSeen = false
-        return (meta: { maxServerSeq?: number | null }) => {
+        return (meta: { maxServerSeq?: number | null; projectEpoch?: number | null }) => {
           const v = typeof meta.maxServerSeq === "number" ? meta.maxServerSeq : null
           if (!cursorSeen) {
             cursorSeen = true
             streamMaxSeq = v
+            streamEpoch = typeof meta.projectEpoch === "number" ? meta.projectEpoch : null
           }
           if (!sideSeen) {
             sideSeen = true
@@ -938,8 +976,16 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // a faithful server image at any single seq — store NO cursor so the
       // next trigger full-streams once and self-heals.
       const watermark = streamTorn || discardedProtected ? null : streamMaxSeq
+      const watermarkEpoch = watermark === null ? null : streamEpoch
       maxServerSeqRef.current = watermark
-      void writeCellsCache(projectId, fileId, rowsRef.current, watermark ?? undefined)
+      projectEpochRef.current = watermarkEpoch
+      void writeCellsCache(
+        projectId,
+        fileId,
+        rowsRef.current,
+        watermark ?? undefined,
+        watermarkEpoch ?? undefined,
+      )
       // Always clear loading on completion — including when a soft refetch
       // finishes after a hard load that got superseded — so the skeleton can
       // never get stuck on.
@@ -964,8 +1010,10 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   useEffect(() => {
     optimisticEditsRef.current.clear()
     cellFreshnessRef.current.clear()
-    // The delta cursor belongs to the previous file's event log.
+    // The delta cursor (and the incarnation it was minted against) belongs to
+    // the previous file's event log.
     maxServerSeqRef.current = null
+    projectEpochRef.current = null
     void doFetch()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, fileId, enabled, lane])
@@ -1105,7 +1153,13 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     const projectId = projectRef.current
     const fileId = fileRef.current
     if (!projectId || !fileId) return
-    void writeCellsCache(projectId, fileId, rowsRef.current, maxServerSeqRef.current ?? undefined)
+    void writeCellsCache(
+      projectId,
+      fileId,
+      rowsRef.current,
+      maxServerSeqRef.current ?? undefined,
+      projectEpochRef.current ?? undefined,
+    )
   }, [])
 
   // Targeted single-cell refetch. WS `event.applied` calls this with the

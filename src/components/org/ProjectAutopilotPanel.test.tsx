@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { ProjectAutopilotPanel } from "./ProjectAutopilotPanel"
 import type {
@@ -91,7 +92,13 @@ function fileRow(patch: Partial<ContextualOverview["files"][number]> = {}) {
 const fileNames = new Map([["f1", "MRK.usfm"], ["f2", "LUK.usfm"]])
 
 function renderPanel(canStart = true) {
-  return render(<ProjectAutopilotPanel projectId="p1" fileNames={fileNames} canStart={canStart} />)
+  // MemoryRouter: the inspector sheet embeds the router-linked
+  // LivingMemoryButton (AQU-932).
+  return render(
+    <MemoryRouter>
+      <ProjectAutopilotPanel projectId="p1" fileNames={fileNames} canStart={canStart} />
+    </MemoryRouter>,
+  )
 }
 
 beforeEach(() => {
@@ -166,7 +173,9 @@ describe("ProjectAutopilotPanel", () => {
     }))
     const names = new Map([["file-a", "A.usfm"], ["file-b", "B.usfm"]])
     const rendered = render(
-      <ProjectAutopilotPanel key="project-a" projectId="project-a" fileNames={names} canStart />,
+      <MemoryRouter>
+        <ProjectAutopilotPanel key="project-a" projectId="project-a" fileNames={names} canStart />
+      </MemoryRouter>,
     )
 
     expect(await screen.findByRole("button", { name: "View 9 ready to review" })).toBeInTheDocument()
@@ -176,7 +185,9 @@ describe("ProjectAutopilotPanel", () => {
     // ProjectOverview keys this child by the route id. A param-only route
     // transition must therefore destroy every project-scoped Sheet/list/count.
     rendered.rerender(
-      <ProjectAutopilotPanel key="project-b" projectId="project-b" fileNames={names} canStart />,
+      <MemoryRouter>
+        <ProjectAutopilotPanel key="project-b" projectId="project-b" fileNames={names} canStart />
+      </MemoryRouter>,
     )
 
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Autopilot activity" })).not.toBeInTheDocument())
@@ -355,6 +366,7 @@ describe("ProjectAutopilotPanel", () => {
     const panel = await screen.findByTestId("project-autopilot-panel")
 
     expect(within(panel).getByText("Working")).toBeInTheDocument()
+    expect(within(panel).getByTestId("autopilot-process-graph-mini")).toBeInTheDocument()
     expect(within(panel).getByRole("button", { name: "View 1 needs attention" })).toBeInTheDocument()
     expect(within(panel).queryByRole("button", { name: "Run Autopilot" })).not.toBeInTheDocument()
   })

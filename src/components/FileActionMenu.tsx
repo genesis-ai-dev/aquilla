@@ -1,4 +1,4 @@
-import { Pencil, FolderInput, Trash2, Download, Info, UserCheck } from "lucide-react"
+import { Pencil, FolderInput, Trash2, Download, Info, UserCheck, SplitSquareVertical } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
   MenuGroup,
@@ -20,6 +20,10 @@ interface FileActionMenuProps {
   /** Opens Assign work scoped to this file. Hidden when the caller
    *  cannot open the assign UI. */
   onAssignWork?: () => void
+  /** Opens the Segmentation dialog for this file. Shown to every role — the
+   *  dialog itself is read-only below Project Lead and says so, which is more
+   *  useful than hiding how the file is divided. */
+  onSegmentation?: () => void
   /** AQU-271: Optional — only shown for project_lead+ (level >= 500). */
   onDelete?: () => void
 }
@@ -29,7 +33,8 @@ interface FileActionMenuProps {
  * once per way of opening it (row right-click, ⋯ button).
  */
 export function FileActionMenu({
-  onShowDetails, onRename, onMove, onExport, onExportSource, onAssignWork, onDelete,
+  onShowDetails, onRename, onMove, onExport, onExportSource, onAssignWork,
+  onSegmentation, onDelete,
 }: FileActionMenuProps) {
   const t = useT()
   return (
@@ -41,14 +46,19 @@ export function FileActionMenu({
           </MenuItem>
         )}
         <MenuItem onClick={onRename}>
-          <Pencil /> Rename
+          <Pencil /> {t("fileDetails.rename")}
         </MenuItem>
         <MenuItem onClick={onMove}>
-          <FolderInput /> Move to corpus…
+          <FolderInput /> {t("fileDetails.moveToCorpus")}
         </MenuItem>
         {onAssignWork && (
           <MenuItem onClick={onAssignWork}>
             <UserCheck /> {t("dialog.assign.title")}
+          </MenuItem>
+        )}
+        {onSegmentation && (
+          <MenuItem onClick={onSegmentation}>
+            <SplitSquareVertical /> {t("segmentation.menuItem")}
           </MenuItem>
         )}
         {onExport && (
@@ -58,7 +68,7 @@ export function FileActionMenu({
         )}
         {onExportSource && (
           <MenuItem onClick={onExportSource}>
-            <Download /> Export source (.SFM)
+            <Download /> {t("fileDetails.exportSource")}
           </MenuItem>
         )}
       </MenuGroup>

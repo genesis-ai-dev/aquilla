@@ -339,3 +339,32 @@ export async function creditGuard(
 
   return { ok: true }
 }
+
+/** Zero the dollar-credit ledger for an org. Used by the admin console. */
+export async function resetCreditUsage(db: AquillaDb, orgId: number): Promise<number> {
+  try {
+    const result = await db.prepare(`DELETE FROM org_credit_usage_daily WHERE org_id = ?`).bind(orgId).run()
+    return Number(result.meta?.changes ?? 0)
+  } catch (err) {
+    if (isMissingTableError(err)) return 0
+    throw err
+  }
+}
+
+/**
+ * Apply a complimentary credit grant by recording negative raw cost on the
+ * llm rail (user_id=0 sentinel). `credits` is customer-facing credits; we
+ * convert through the org's markup so readSpend subtracts the same amount.
+ */
+export async function grantCredits(
+  db: AquillaDb,
+  env: Env,
+  orgId: number,
+  credits: number,
+): Promise<void> {
+  const amount = Math.floor(credits)
+  if (!Number.isFinite(amount) || amount <= 0) return
+  const cfg = await resolveCreditConfig(env, db, orgId)
+  const rawCostCents = -(amount / cfg.markup)
+  await recordCredit(db, orgId, 0, "llm", rawCostCents, 0)
+}

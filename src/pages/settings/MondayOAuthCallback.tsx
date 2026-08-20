@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { Spinner } from "@/components/ui/spinner"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 import { completeMondayOAuth } from "@/lib/monday/api"
 
 // Last resort only — callers always send an explicit `backTo`. This page has no
@@ -24,6 +25,7 @@ function withParam(path: string, params: Record<string, string>): string {
 }
 
 export function MondayOAuthCallback() {
+  const { t } = useI18n()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [exchangeError, setExchangeError] = useState<string | null>(null)
@@ -57,10 +59,10 @@ export function MondayOAuthCallback() {
   if (failed) {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-3 px-6 text-center">
-        <p className="text-sm font-medium">Couldn't finish connecting to Monday.com</p>
+        <p className="text-sm font-medium">{t("settings.monday.callback.failedTitle")}</p>
         <p className="text-sm text-muted-foreground">{failed}</p>
         <Link to={FALLBACK} className="text-sm font-medium underline underline-offset-4">
-          Back to Aquilla
+          {t("settings.monday.callback.backToApp")}
         </Link>
       </div>
     )
@@ -69,7 +71,7 @@ export function MondayOAuthCallback() {
   return (
     <div className="flex h-screen items-center justify-center">
       <p className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Spinner /> Connecting to Monday.com…
+        <Spinner /> {t("settings.monday.callback.connecting")}
       </p>
     </div>
   )

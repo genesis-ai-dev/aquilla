@@ -20,8 +20,10 @@ import type { FixProposal } from "@/lib/rules/autofix"
 import { ROLE } from "@/lib/sync/role-policy"
 import type { ProjectRecord, RuleAutofix, TranslationRule } from "@/lib/parsers/types"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
+import { useI18n } from "@/lib/i18n/I18nProvider"
 
 export function RulesPage() {
+  const { t } = useI18n()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -55,7 +57,11 @@ export function RulesPage() {
 
   const { patch: patchShared, settings: projectWideSettings } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
   const { userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(project, refresh, patchShared)
-  const { cells: validatedCells, error: projectCellsError } = useLivingMemory({ projectId: id ?? "" })
+  const { cells: validatedCells, error: projectCellsError } = useLivingMemory({
+    projectId: id ?? "",
+    project,
+    enabled: project != null,
+  })
 
   // AQU-291: pending delete confirmation state.
   const [pendingDeleteRuleId, setPendingDeleteRuleId] = useState<string | null>(null)
@@ -152,7 +158,7 @@ export function RulesPage() {
     return `${u.fixesApplied} fixes applied · ${calls} LLM calls this project`
   }, [project?.usage])
 
-  if (loading) return <LoadingPanel label="Loading rules" className="min-h-screen" />
+  if (loading) return <LoadingPanel label={t("rules.loadingLabel")} className="min-h-screen" />
 
   function toggleExpanded(ruleId: string) {
     setExpandedRuleId((cur) => cur === ruleId ? null : ruleId)
@@ -188,11 +194,11 @@ export function RulesPage() {
         />
       )}
       <header className="flex items-center gap-4 border-b px-4 py-2">
-        <h2 className="font-semibold">Translation Rules</h2>
+        <h2 className="font-semibold">{t("rules.page.heading")}</h2>
         <div className="flex-1" />
         <Button variant="outline" onClick={() => navigate(`/project/${id}/terminology`)}>
           <BookOpen className="mr-1 h-3.5 w-3.5" />
-          Terminology
+          {t("nav.sidebarSection.terminology")}
         </Button>
         <RuleSuggestDialog files={project?.files || []} completionSettings={project?.completionSettings} onAdd={addRule} projectId={id} cells={validatedCells} canManage={canManageRules} deniedReason={manageRulesDeniedReason} />
         <RuleCreateDialog onAdd={addRule} canManage={canManageRules} deniedReason={manageRulesDeniedReason} />
@@ -204,11 +210,11 @@ export function RulesPage() {
             role="alert"
             className="rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
           >
-            Couldn&apos;t load the complete project corpus: {projectCellsError.message}
+            {t("rules.page.corpusLoadErrorPrefix", { message: projectCellsError.message })}
           </div>
         )}
         {usageSummary && (
-          <AppTooltip content="LLM usage on this project">
+          <AppTooltip content={t("rules.surface.usageTooltip")}>
             <p className="text-xs text-muted-foreground">{usageSummary}</p>
           </AppTooltip>
         )}
@@ -220,7 +226,7 @@ export function RulesPage() {
             role="status"
             className="rounded-md border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100"
           >
-            {manageRulesDeniedReason} Changes made here won't be saved.
+            {manageRulesDeniedReason} {t("rules.page.readOnlySuffix")}
           </div>
         )}
 
@@ -234,11 +240,11 @@ export function RulesPage() {
         />
 
         <Card>
-          <CardHeader><CardTitle>Rules ({userRules.length})</CardTitle></CardHeader>
+          <CardHeader><CardTitle>{t("rules.page.rulesCardTitle", { count: userRules.length })}</CardTitle></CardHeader>
           <CardContent>
             {userRules.length === 0 ? (
               <div className="space-y-2 text-sm text-muted-foreground">
-                <p>No rules defined yet.</p>
+                <p>{t("rules.page.noRulesYet")}</p>
               </div>
             ) : (
               <ul className="space-y-2">
@@ -257,14 +263,14 @@ export function RulesPage() {
                             <span className="text-sm font-medium">{rule.name}</span>
                             <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${badgeColor}`}>{rule.severity}</span>
                             <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{rule.source}</span>
-                            {rule.autofix && <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300">autofix</span>}
+                            {rule.autofix && <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300">{t("rules.surface.autofixBadge")}</span>}
                           </div>
                           {rule.description && <p className="mt-0.5 text-xs text-muted-foreground truncate">{rule.description}</p>}
                         </div>
-                        <AppTooltip content="Opens the editor with this rule's drawer">
+                        <AppTooltip content={t("rules.surface.tryToFixAllTooltip")}>
                           <Button variant="outline" onClick={() => navigate(`/project/${id}/editor?openRule=${rule.id}`)}>
                             <Wand2 className="mr-1 h-3.5 w-3.5" />
-                            Try to fix all
+                            {t("rules.surface.tryToFixAllButton")}
                           </Button>
                         </AppTooltip>
                         <Button variant="ghost" onClick={() => toggleExpanded(rule.id)}>
@@ -274,10 +280,10 @@ export function RulesPage() {
                           <Switch size="sm" checked={rule.enabled}
                             disabled={!canManageRules}
                             onCheckedChange={(checked) => updateRule(rule.id, { enabled: checked })} />
-                          <span className="text-muted-foreground">Enabled</span>
+                          <span className="text-muted-foreground">{t("rules.surface.enabledLabel")}</span>
                         </label>
                         <AppTooltip content={manageRulesDeniedReason ?? undefined} disabled={canManageRules || !manageRulesDeniedReason}>
-                          <Button variant="ghost" aria-label={`Delete rule ${rule.name}`}
+                          <Button variant="ghost" aria-label={t("rules.page.deleteRuleAriaLabel", { name: rule.name })}
                             disabled={!canManageRules}
                             onClick={() => setPendingDeleteRuleId(rule.id)}>
                             <Trash2 className="h-3.5 w-3.5 text-muted-foreground" />
@@ -301,7 +307,7 @@ export function RulesPage() {
       <ConfirmActionDialog
         open={pendingDeleteRuleId !== null}
         onOpenChange={(v) => { if (!v) setPendingDeleteRuleId(null) }}
-        title="Delete rule"
+        title={t("rules.page.deleteRuleDialogTitle")}
         description={
           pendingDeleteRule
             ? `Delete "${pendingDeleteRule.name}"? This removes the rule for everyone in the project and cannot be undone.`
@@ -317,23 +323,24 @@ export function RulesPage() {
 }
 
 function AutofixEditor({ rule, onUpdate, disabled = false }: { rule: TranslationRule; onUpdate: (af: RuleAutofix | undefined) => void; disabled?: boolean }) {
+  const { t } = useI18n()
   const [pattern, setPattern] = useState(rule.autofix?.pattern ?? "")
   const [replacement, setReplacement] = useState(rule.autofix?.replacement ?? "")
   const [flags, setFlags] = useState(rule.autofix?.flags ?? "gi")
 
   return (
     <div className="mt-3 space-y-2 border-t pt-3">
-      <p className="text-xs text-muted-foreground">Saved autofix (regex)</p>
+      <p className="text-xs text-muted-foreground">{t("rules.surface.autofixEditor.heading")}</p>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <Input data-autofix-field="pattern" placeholder="Pattern" value={pattern} onChange={(e) => setPattern(e.target.value)} disabled={disabled} />
-        <Input placeholder="Replacement" value={replacement} onChange={(e) => setReplacement(e.target.value)} disabled={disabled} />
-        <Input placeholder="Flags (e.g. gi)" value={flags} onChange={(e) => setFlags(e.target.value)} disabled={disabled} />
+        <Input data-autofix-field="pattern" placeholder={t("rules.editor.patternLabel")} value={pattern} onChange={(e) => setPattern(e.target.value)} disabled={disabled} />
+        <Input placeholder={t("rules.surface.autofixEditor.replacementPlaceholder")} value={replacement} onChange={(e) => setReplacement(e.target.value)} disabled={disabled} />
+        <Input placeholder={t("rules.surface.autofixEditor.flagsPlaceholder")} value={flags} onChange={(e) => setFlags(e.target.value)} disabled={disabled} />
       </div>
       <div className="flex gap-2">
         <Button disabled={disabled} onClick={() => onUpdate(pattern ? { kind: "regex-replace", pattern, replacement, flags } : undefined)}>
-          Save autofix
+          {t("rules.surface.autofixEditor.saveButton")}
         </Button>
-        <Button variant="ghost" disabled={disabled} onClick={() => onUpdate(undefined)}>Clear</Button>
+        <Button variant="ghost" disabled={disabled} onClick={() => onUpdate(undefined)}>{t("common.clear")}</Button>
       </div>
     </div>
   )

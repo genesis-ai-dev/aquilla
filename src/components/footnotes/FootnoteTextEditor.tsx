@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 type FootnoteFormat = "bd" | "it" | "ul"
 
@@ -30,6 +31,7 @@ export function FootnoteTextEditor({
   className,
   initialSelectionStart,
 }: FootnoteTextEditorProps) {
+  const t = useT()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
@@ -66,13 +68,13 @@ export function FootnoteTextEditor({
   return (
     <div className={cn("overflow-hidden rounded-md border border-input bg-background", className)}>
       <div className="flex items-center gap-1 border-b border-border/60 bg-muted/35 px-1.5 py-1">
-        <FormatButton label="Bold" onClick={() => applyFormat("bd")}>
+        <FormatButton label={t("editor.format.bold")} onClick={() => applyFormat("bd")}>
           <Bold className="h-3.5 w-3.5" />
         </FormatButton>
-        <FormatButton label="Italic" onClick={() => applyFormat("it")}>
+        <FormatButton label={t("editor.format.italic")} onClick={() => applyFormat("it")}>
           <Italic className="h-3.5 w-3.5" />
         </FormatButton>
-        <FormatButton label="Underline" onClick={() => applyFormat("ul")}>
+        <FormatButton label={t("editor.format.underline")} onClick={() => applyFormat("ul")}>
           <UnderlineIcon className="h-3.5 w-3.5" />
         </FormatButton>
       </div>

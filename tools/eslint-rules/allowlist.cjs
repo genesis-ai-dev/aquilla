@@ -49,11 +49,6 @@ const IGNORED_FILE_PATTERNS = [
   /\.spec\.tsx?$/,
   /\/__tests__\//,
   /\/e2e\//,
-  // Standalone marketing entries: prerendered, SEO-owned, English-only by design.
-  /\/pages\/Homepage\//,
-  /\/pages\/Beta\//,
-  /\/pages\/CaseStudy\//,
-  /\/marketing\//,
   // Legal pages: translated legal/privacy text creates liability the product
   // does not want to take on. English-by-policy, not a detector gap.
   /\/pages\/PrivacyPolicy\.tsx$/,

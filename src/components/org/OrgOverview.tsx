@@ -1,20 +1,20 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
-import { ShieldAlert } from "lucide-react"
+import { AlertTriangle, FolderKanban } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
 import { Skeleton } from "@/components/ui/skeleton"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
-import { orgProjectsPath } from "@/lib/navigation/org-paths"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { validatedPct } from "@/lib/frontier/portfolio"
 import { listMyPendingInvites, type MyPendingInvite } from "@/lib/sync/invites"
 import { WorkloadRollup } from "./WorkloadRollup"
 import { UsageRollup } from "./UsageRollup"
 import { CreditsPanel } from "./CreditsPanel"
+import { BillingUsagePanel } from "./BillingUsagePanel"
 import {
   SectionVisibilityBadge,
   SectionVisibilityGate,
@@ -26,11 +26,11 @@ import { RoleLabel } from "@/components/RoleLabel"
 import { OrgSetupChecklist } from "./OrgSetupChecklist"
 import {
   useOrgPortfolio,
-  type AttentionRow,
+  type PortfolioProjectRow,
 } from "@/hooks/useOrgPortfolio"
-import { Page, PageHeader, Section, StatTile } from "@/components/ui/page"
+import { Page, PageHeader, Section, StatTile, STAT_TILE_GRID } from "@/components/ui/page"
 import { EmptyState } from "@/components/ui/empty"
-import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
+import { DataTable } from "@/components/ui/data-table"
 import { buttonVariants } from "@/components/ui/button"
 import { ProjectStatus } from "@/components/ProjectStatus"
 import { ValidatedBar } from "@/components/admin/ValidatedBar"
@@ -40,8 +40,16 @@ import {
   ADMIN_TABLE_SECTION_HEADER,
 } from "@/components/admin/shared"
 import { cn } from "@/lib/utils"
+import { useI18n } from "@/lib/i18n/I18nProvider"
+import { portfolioAttentionReasons, type ProjectAttentionReason } from "@/lib/project-status"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 
-const ATTENTION_PREVIEW = 6
+const PROJECT_PREVIEW_LIMIT = 10
+
+type OverviewProjectRow = {
+  project: PortfolioProjectRow
+  reasons: ProjectAttentionReason[]
+}
 
 function OverviewLoadingTemplate() {
   return (
@@ -66,13 +74,13 @@ function OverviewLoadingTemplate() {
         main={
           <Page size="wide">
             <Skeleton className="mb-8 h-7 w-48" />
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+            <div className={STAT_TILE_GRID}>
               {Array.from({ length: 6 }).map((_, index) => (
                 <div
                   key={index}
-                  className="flex h-[88px] flex-col gap-2 rounded-lg border bg-card px-5 py-4"
+                  className="flex h-[88px] items-center justify-between rounded-lg border bg-card px-5 py-4 min-[480px]:flex-col min-[480px]:items-start min-[480px]:justify-start min-[480px]:gap-2"
                 >
-                  <Skeleton className="h-6 w-12" />
+                  <Skeleton className="order-last h-6 w-12 min-[480px]:order-none" />
                   <Skeleton className="h-3 w-20" />
                 </div>
               ))}
@@ -85,11 +93,13 @@ function OverviewLoadingTemplate() {
 }
 
 /**
- * Single-org Overview: admin-style operator home — rollup tiles, projects that
- * need attention, plus team workload / usage / credits. Full project list lives
- * on `/orgs/:id/projects`.
+ * Single-org Overview: admin-style operator home — rollup tiles, recently
+ * updated projects, plus team workload / usage / credits. The first ten
+ * projects are directly reachable here; the full directory also lives on
+ * `/orgs/:id/projects`.
  */
 export function OrgOverview() {
+  const { t } = useI18n()
   const { activeOrg, activeOrgId, accessibleProjects, isLoading: orgLoading } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -102,6 +112,7 @@ export function OrgOverview() {
   const memberProgressViewerRole = activeOrg?.role?.level ?? null
 
   const [pendingInvites, setPendingInvites] = useState<MyPendingInvite[]>([])
+  const [expandedProjectsOrgId, setExpandedProjectsOrgId] = useState<number | null>(null)
 
   useEffect(() => {
     if (!jwt) {
@@ -121,29 +132,58 @@ export function OrgOverview() {
     }
   }, [jwt])
 
-  const atRiskPreview = portfolio.attentionProjects.slice(0, ATTENTION_PREVIEW)
-  const atRiskTotal = portfolio.attentionProjects.length
+  const projectRows = useMemo<OverviewProjectRow[]>(
+    () =>
+      portfolio.projects
+        .map((project) => ({
+          project,
+          reasons: portfolioAttentionReasons(project, portfolio.now),
+        }))
+        .sort(
+          (a, b) =>
+            (b.project.lastEditAt ?? 0) - (a.project.lastEditAt ?? 0) ||
+            a.project.name.localeCompare(b.project.name),
+        ),
+    [portfolio.projects, portfolio.now],
+  )
+  const projectsExpanded = expandedProjectsOrgId === activeOrgId
+  const visibleProjectRows = projectsExpanded
+    ? projectRows
+    : projectRows.slice(0, PROJECT_PREVIEW_LIMIT)
 
-  const atRiskColumns = useMemo<ColumnDef<AttentionRow>[]>(
+  const projectColumns = useMemo<ColumnDef<OverviewProjectRow>[]>(
     () => [
       {
         id: "project",
-        accessorFn: (r) => r.project.name.toLowerCase(),
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Project" />,
+        enableSorting: false,
+        header: t("common.project"),
         cell: ({ row }) => (
-          <span className="font-medium text-foreground">{row.original.project.name}</span>
+          <span className="flex min-w-0 items-center gap-2 font-medium text-foreground">
+            <span className="truncate">{row.original.project.name}</span>
+            {row.original.reasons.length > 0 ? (
+              <span
+                role="img"
+                aria-label={t("org.overview.attentionAriaLabel", {
+                  reasons: row.original.reasons.map((reason) => reason.label).join(", "),
+                })}
+                className="shrink-0 text-amber-600 dark:text-amber-400"
+              >
+                <AlertTriangle className="size-3.5" aria-hidden />
+              </span>
+            ) : null}
+          </span>
         ),
       },
       {
         id: "validated",
-        accessorFn: (r) => validatedPct(r.project),
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Validated" />,
+        enableSorting: false,
+        header: t("org.orgHome.table.validatedHeaderLabel"),
         cell: ({ row }) => <ValidatedBar fraction={validatedPct(row.original.project)} />,
       },
       {
         id: "status",
-        accessorFn: (r) => r.score,
-        header: ({ column }) => <DataTableColumnHeader column={column} title="Status" />,
+        enableSorting: false,
+        header: t("org.orgHome.projectsPanel.statusLabel"),
         cell: ({ row }) => (
           <ProjectStatus
             archived={false}
@@ -152,8 +192,20 @@ export function OrgOverview() {
           />
         ),
       },
+      {
+        id: "updated",
+        enableSorting: false,
+        header: t("org.orgProjectsDataTable.updatedColumn"),
+        cell: ({ row }) => (
+          <DateTooltip
+            value={row.original.project.lastEditAt}
+            label={t("org.orgProjectsDataTable.updatedColumn")}
+            className="text-sm text-muted-foreground"
+          />
+        ),
+      },
     ],
-    [],
+    [t],
   )
 
   if (!sessionLoading && !jwt) {
@@ -164,16 +216,15 @@ export function OrgOverview() {
         statusBar={null}
         main={
           <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-            <p className="text-lg font-medium">Sign in to see your workspace</p>
+            <p className="text-lg font-medium">{t("org.orgHome.signedOut.heading")}</p>
             <p className="max-w-xs text-sm text-muted-foreground">
-              Your session has ended or you are not signed in. Sign in to access your projects and
-              translation data.
+              {t("org.orgHome.signedOut.description")}
             </p>
             <Link
               to={`/login?next=${encodeURIComponent("/")}`}
               className={cn(buttonVariants())}
             >
-              Sign in
+              {t("auth.login.submitDefault")}
             </Link>
           </div>
         }
@@ -185,17 +236,13 @@ export function OrgOverview() {
 
   if (isPageLoading) {
     return (
-      <LoadingOverlay label="Loading overview" data-testid="org-overview-loading">
+      <LoadingOverlay label={t("org.overview.loadingLabel")} data-testid="org-overview-loading">
         <OverviewLoadingTemplate />
       </LoadingOverlay>
     )
   }
 
   const workspaceLabel = activeOrg?.name ?? "Workspace"
-  const openProjects = () => {
-    if (activeOrgId != null) navigate(orgProjectsPath(activeOrgId))
-  }
-
   return (
     <AppShell
       sidebar={<OrgSidebar />}
@@ -210,7 +257,9 @@ export function OrgOverview() {
             <div className="space-y-6">
               {pendingInvites.length > 0 && (
                 <section data-testid="pending-invitations" className="space-y-2">
-                  <h2 className="text-sm font-medium text-muted-foreground">Pending invitations</h2>
+                  <h2 className="text-sm font-medium text-muted-foreground">
+                    {t("org.orgHome.pendingInvitations.heading")}
+                  </h2>
                   <div className="divide-y rounded-lg border">
                     {pendingInvites.map((inv) => (
                       <div key={inv.token} className="flex flex-wrap items-center gap-3 p-4">
@@ -219,7 +268,8 @@ export function OrgOverview() {
                             {inv.projects.map((p) => p.projectName).join(", ")}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            Invited by {inv.createdBy} as <RoleLabel name={inv.role.name} />
+                            {t("org.orgHome.pendingInvitations.invitedByAs", { username: inv.createdBy })}{" "}
+                            <RoleLabel name={inv.role.name} />
                             {inv.expiresAt
                               ? ` · expires ${new Date(inv.expiresAt).toLocaleDateString()}`
                               : ""}
@@ -229,7 +279,7 @@ export function OrgOverview() {
                           to={`/join/${inv.token}`}
                           className={cn(buttonVariants(), "shrink-0")}
                         >
-                          Review &amp; accept
+                          {t("org.orgHome.pendingInvitations.reviewAccept")}
                         </Link>
                       </div>
                     ))}
@@ -246,70 +296,75 @@ export function OrgOverview() {
                 />
               )}
 
-              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
-                <StatTile label="Projects" value={portfolio.projects.length} />
+              <div className={STAT_TILE_GRID}>
+                <StatTile label={t("nav.projects")} value={portfolio.projects.length} />
                 <StatTile
-                  label="Avg translated"
+                  label={t("org.orgHome.avgTranslated")}
                   value={`${Math.round(portfolio.avgTranslatedPct * 100)}%`}
                 />
                 <StatTile
-                  label="Avg validated"
+                  label={t("org.orgHome.avgValidated")}
                   value={`${Math.round(portfolio.avgValidatedPct * 100)}%`}
                 />
                 <StatTile
-                  label="Avg audio"
+                  label={t("org.orgHome.avgAudio")}
                   value={`${Math.round(portfolio.avgAudioPct * 100)}%`}
                 />
-                <StatTile label="Stalled" value={portfolio.stalledCount} />
+                <StatTile label={t("org.orgHome.stalled")} value={portfolio.stalledCount} />
                 <StatTile
-                  label="Overdue"
+                  label={t("org.orgHome.overdue")}
                   value={
                     <span className={portfolio.overdueCount > 0 ? "text-destructive" : undefined}>
                       {portfolio.overdueCount}
                     </span>
                   }
-                  className={atRiskTotal > 0 ? "border-amber-500/40" : undefined}
+                  className={portfolio.attentionProjects.length > 0 ? "border-amber-500/40" : undefined}
                 />
               </div>
 
               <Section
-                title="Needs attention"
-                description="Active projects that are overdue, due soon, or stalled."
+                title={t("nav.projects")}
+                description={t("org.overview.projectsDescription")}
                 headerClassName={ADMIN_TABLE_SECTION_HEADER}
                 contentClassName={ADMIN_TABLE_SECTION_CONTENT}
                 action={
-                  atRiskTotal > 0 ? (
+                  projectRows.length > PROJECT_PREVIEW_LIMIT ? (
                     <button
                       type="button"
-                      onClick={openProjects}
+                      onClick={() =>
+                        setExpandedProjectsOrgId(projectsExpanded ? null : activeOrgId)
+                      }
+                      aria-expanded={projectsExpanded}
+                      aria-controls="org-overview-projects-table"
                       className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
                     >
-                      {atRiskTotal > atRiskPreview.length
-                        ? `View all ${atRiskTotal}`
-                        : "View projects"}
+                      {projectsExpanded
+                        ? t("org.projectOverview.showFewer")
+                        : t("org.overview.showAllProjects", { count: projectRows.length })}
                     </button>
                   ) : null
                 }
               >
-                <DataTable
-                  columns={atRiskColumns}
-                  data={atRiskPreview}
-                  getRowId={(r) => r.project.id}
-                  onRowClick={(r) => navigate(`/projects/${r.project.id}`)}
-                  initialSorting={[{ id: "status", desc: true }]}
-                  testId="org-overview-attention-table"
-                  className={ADMIN_TABLE_CLASS}
-                  dense
-                  emptyState={
-                    <EmptyState
-                      variant="inline"
-                      className="py-6"
-                      icon={ShieldAlert}
-                      title="All clear"
-                      description="No active project is overdue, due soon, or stalled right now."
-                    />
-                  }
-                />
+                <div id="org-overview-projects-table">
+                  <DataTable
+                    columns={projectColumns}
+                    data={visibleProjectRows}
+                    getRowId={(r) => r.project.id}
+                    onRowClick={(r) => navigate(`/projects/${r.project.id}`)}
+                    testId="org-overview-projects-table"
+                    className={ADMIN_TABLE_CLASS}
+                    dense
+                    emptyState={
+                      <EmptyState
+                        variant="inline"
+                        className="py-6"
+                        icon={FolderKanban}
+                        title={t("org.orgHome.projectsPanel.emptyTitle")}
+                        description={t("org.overview.emptyDescription")}
+                      />
+                    }
+                  />
+                </div>
               </Section>
 
               {jwt && activeOrgId != null && (
@@ -335,7 +390,7 @@ export function OrgOverview() {
                           onChangeMinRole={async (next) => {
                             await orgSettings.patch({ memberProgressViewMinRole: next })
                           }}
-                          description="Who can see each teammate's assignment progress on this org's overview."
+                          description={t("org.orgHome.workloadVisibilityDescription")}
                         />
                       }
                     />
@@ -365,9 +420,26 @@ export function OrgOverview() {
                           onChangeMinRole={async (next) => {
                             await orgSettings.patch({ memberProgressViewMinRole: next })
                           }}
-                          description="Who can see each teammate's usage on this org's overview."
+                          description={t("org.orgHome.usageVisibilityDescription")}
                         />
                       }
+                    />
+                  </div>
+                </SectionVisibilityGate>
+              )}
+              {jwt && activeOrgId != null && (
+                <SectionVisibilityGate
+                  minRole={ROLE.MAINTAINER}
+                  viewerRoleLevel={activeOrg?.role?.level ?? null}
+                >
+                  <div
+                    className={cn("relative rounded-lg", sectionTintClass(ROLE.MAINTAINER))}
+                    data-testid="section-billing"
+                  >
+                    <BillingUsagePanel
+                      jwt={jwt}
+                      orgId={activeOrgId}
+                      orgRoleLevel={activeOrg?.role.level ?? 0}
                     />
                   </div>
                 </SectionVisibilityGate>

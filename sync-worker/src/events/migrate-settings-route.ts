@@ -12,12 +12,13 @@
 // CLI reads the current settings first, merges cast additions by name, and
 // posts the merged result, so a re-run converges.
 
-import { secureCompare } from '../lib/secure-compare'
+import { isAuthorizedAdminBearer } from '../lib/admin-auth'
 
 const PATH = '/migrate/settings'
 
 export interface MigrateSettingsEnv {
   AQUILLA_PG?: AquillaDb
+  ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string
 }
 
@@ -42,7 +43,7 @@ export async function handleMigrateSettingsRequest(
     return new Response('method not allowed', { status: 405 })
   }
   if (!env.SYNC_SECRET_KEY) return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
-  if (!secureCompare(request.headers.get('Authorization') ?? '', `Bearer ${env.SYNC_SECRET_KEY}`)) {
+  if (!isAuthorizedAdminBearer(request.headers.get('Authorization') ?? '', env)) {
     return new Response('unauthorized', { status: 401 })
   }
   if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })

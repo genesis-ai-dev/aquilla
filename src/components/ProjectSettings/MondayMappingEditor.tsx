@@ -33,6 +33,7 @@ import {
   type MondayColumnMapping,
   type MondayMetricKey,
 } from "@/lib/monday/types"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 function columnTitle(structure: MondayBoardStructure | null, columnId: string): string {
   return structure?.columns.find((c) => c.id === columnId)?.title ?? columnId
@@ -46,16 +47,17 @@ export function MondayMappingTable({
   columns: MondayColumnMapping[]
   structure: MondayBoardStructure | null
 }) {
+  const t = useT()
   if (columns.length === 0) {
-    return <p className="text-sm text-muted-foreground">No columns mapped.</p>
+    return <p className="text-sm text-muted-foreground">{t("projectSettings.monday.noColumnsMapped")}</p>
   }
   return (
     <Table data-testid="monday-mapping-preview">
       <TableHeader>
         <TableRow>
-          <TableHead>Monday column</TableHead>
-          <TableHead>Type</TableHead>
-          <TableHead>Metric</TableHead>
+          <TableHead>{t("projectSettings.monday.columnHeader")}</TableHead>
+          <TableHead>{t("fileDetails.type")}</TableHead>
+          <TableHead>{t("projectSettings.monday.metricHeader")}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -106,6 +108,7 @@ export function MondayMappingRows({
   disabled: boolean
   onChange: (rows: MondayColumnMapping[]) => void
 }) {
+  const t = useT()
   const writableColumns = useMemo(
     () => (structure?.columns ?? []).filter((c) => !MONDAY_READONLY_COLUMN_TYPES.has(c.type)),
     [structure],
@@ -135,8 +138,8 @@ export function MondayMappingRows({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Monday column</TableHead>
-            <TableHead>Metric</TableHead>
+            <TableHead>{t("projectSettings.monday.columnHeader")}</TableHead>
+            <TableHead>{t("projectSettings.monday.metricHeader")}</TableHead>
             <TableHead className="w-10" />
           </TableRow>
         </TableHeader>
@@ -158,8 +161,8 @@ export function MondayMappingRows({
                   }}
                   disabled={disabled}
                 >
-                  <SelectTrigger aria-label="Monday column">
-                    <SelectValue placeholder="Pick a column" />
+                  <SelectTrigger aria-label={t("projectSettings.monday.columnHeader")}>
+                    <SelectValue placeholder={t("projectSettings.monday.pickColumnPlaceholder")} />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectGroup>
@@ -179,7 +182,7 @@ export function MondayMappingRows({
                   onValueChange={(value) => updateRow(i, { metric: value as MondayMetricKey })}
                   disabled={disabled}
                 >
-                  <SelectTrigger aria-label="Metric">
+                  <SelectTrigger aria-label={t("projectSettings.monday.metricHeader")}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -197,7 +200,7 @@ export function MondayMappingRows({
                 <Button
                   variant="ghost"
                   size="icon"
-                  aria-label="Remove mapping row"
+                  aria-label={t("projectSettings.monday.removeMappingRowAriaLabel")}
                   disabled={disabled}
                   onClick={() => onChange(rows.filter((_, j) => j !== i))}
                 >
@@ -215,7 +218,7 @@ export function MondayMappingRows({
           onChange([...rows, { columnId: "", columnType: "text", metric: "completion_pct" }])
         }
       >
-        <Plus data-icon="inline-start" /> Add row
+        <Plus data-icon="inline-start" /> {t("projectSettings.monday.addRowButton")}
       </Button>
     </div>
   )

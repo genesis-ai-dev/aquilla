@@ -1,9 +1,8 @@
 // Entitlement layer for TM governance (Matecat-parity run, C8).
 //
-// Aquilla has no billing system yet — BillingStub is the seam the real
-// billing integration will fill. Until then the stub grants every org the
-// paid features, so behavior is maximally respectful of user intent while
-// the gating logic (and its tests) are real.
+// Paid-feature seam for TM governance. Field Plan billing (word allowance)
+// lives in auth-worker org_billing; this stub still grants TM opt-out to
+// every org until that feature is wired to a plan.
 //
 // Storage conventions (existing "dumb store" blobs, no migrations needed, C6):
 //   - org_settings.settings.enterprise: true        → org is enterprise-flagged

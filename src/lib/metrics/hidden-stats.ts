@@ -12,6 +12,8 @@
  * globally simply means the user never wants to see it.
  */
 
+import type { MessageKey } from "@/lib/i18n/messages/en"
+
 /** Every customizable widget in the Progress card, keyed stably for storage. */
 export type StatKey =
   | "translated"
@@ -22,17 +24,22 @@ export type StatKey =
 
 export interface StatWidgetDef {
   key: StatKey
-  /** Human label shown in the Customize menu (matches the tile label). */
-  label: string
+  /**
+   * Catalog key for the human label shown in the Customize menu — reuses the
+   * exact same key as the matching Progress-card tile (`ProjectOverview.tsx`)
+   * so the two never drift. `src/lib/` can't call `useT()`, so callers
+   * resolve this with `t()` at render time.
+   */
+  labelKey: MessageKey
 }
 
 /** Canonical widget list — order matches how the tiles render in the card. */
 export const STAT_WIDGETS: readonly StatWidgetDef[] = [
-  { key: "translated", label: "Translated" },
-  { key: "ai-drafted", label: "AI Drafted" },
-  { key: "validated", label: "Validated" },
-  { key: "has-audio", label: "Has Audio" },
-  { key: "audio-validated", label: "Audio Validated" },
+  { key: "translated", labelKey: "org.orgHome.table.translatedHeaderLabel" },
+  { key: "ai-drafted", labelKey: "org.projectOverview.aiDrafted" },
+  { key: "validated", labelKey: "org.orgHome.table.validatedHeaderLabel" },
+  { key: "has-audio", labelKey: "org.orgHome.table.audioHeaderLabel" },
+  { key: "audio-validated", labelKey: "org.projectOverview.audioValidated" },
 ]
 
 const STAT_KEYS: ReadonlySet<StatKey> = new Set(STAT_WIDGETS.map((w) => w.key))

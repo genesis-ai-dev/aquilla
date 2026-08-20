@@ -17,6 +17,7 @@
 // settings, and is invalidated immediately on save.
 
 import type { Env } from "../types"
+import type { FieldPlanSettings } from "./billing/plans"
 
 /**
  * Champion/challenger experiment on the platform-default chat model. While
@@ -41,6 +42,14 @@ export interface PlatformSettings {
    *  to the agent model — the orchestrator can stay cheap while drafting
    *  quality comes from a stronger model). */
   agentDraftModel?: string
+  /** Autopilot FAST tier — summarize, the support check, passage detection.
+   *  These are the cheap-judgment nodes the tier split exists for, so this is
+   *  the single highest-leverage model setting on the platform. Unset means
+   *  the CONTEXTUAL_FAST_MODEL env var, then the product default. */
+  contextualFastModel?: string
+  /** Autopilot DEEP tier — the adversarial verifier stances. Unset means the
+   *  CONTEXTUAL_DEEP_MODEL env var, then the mid (drafting) model. */
+  contextualDeepModel?: string
   /** Allowlist of model IDs accepted by the AI guard (lib/ai-budget.ts). */
   allowedModels?: string[]
   /** Max AI requests per user per UTC day. */
@@ -51,6 +60,8 @@ export interface PlatformSettings {
   aiBudgetEnforce?: boolean
   /** Champion/challenger A/B experiment on the default chat model. */
   abTest?: AbTestConfig
+  /** Field Plan catalog overrides (amounts + Stripe price ids). */
+  fieldPlan?: FieldPlanSettings
 }
 
 export interface PlatformSettingsRecord {
@@ -83,6 +94,15 @@ function parseSettings(raw: string): PlatformSettings {
   const out: PlatformSettings = {}
   if (typeof obj.defaultLlmModel === "string") out.defaultLlmModel = obj.defaultLlmModel
   if (typeof obj.agentModel === "string") out.agentModel = obj.agentModel
+  if (typeof obj.agentDraftModel === "string") out.agentDraftModel = obj.agentDraftModel
+  // Empty strings are how the admin console CLEARS an optional tier; a stored
+  // "" would otherwise beat the env fallback and pin the tier to nothing.
+  if (typeof obj.contextualFastModel === "string" && obj.contextualFastModel) {
+    out.contextualFastModel = obj.contextualFastModel
+  }
+  if (typeof obj.contextualDeepModel === "string" && obj.contextualDeepModel) {
+    out.contextualDeepModel = obj.contextualDeepModel
+  }
   if (Array.isArray(obj.allowedModels)) {
     out.allowedModels = obj.allowedModels.filter((m): m is string => typeof m === "string")
   }
@@ -103,6 +123,27 @@ function parseSettings(raw: string): PlatformSettings {
         trafficPct: Math.min(100, Math.max(0, a.trafficPct)),
       }
     }
+  }
+  const fp = obj.fieldPlan
+  if (fp && typeof fp === "object" && !Array.isArray(fp)) {
+    const f = fp as Record<string, unknown>
+    const fieldPlan: FieldPlanSettings = {}
+    if (typeof f.priceCents === "number") fieldPlan.priceCents = f.priceCents
+    if (typeof f.includedWords === "number") fieldPlan.includedWords = f.includedWords
+    if (typeof f.addonWords === "number") fieldPlan.addonWords = f.addonWords
+    if (typeof f.addonPriceCents === "number") fieldPlan.addonPriceCents = f.addonPriceCents
+    if (typeof f.talkToUsWordsPerYear === "number") fieldPlan.talkToUsWordsPerYear = f.talkToUsWordsPerYear
+    if (typeof f.intervalDays === "number") fieldPlan.intervalDays = f.intervalDays
+    if (typeof f.stripePriceField === "string") fieldPlan.stripePriceField = f.stripePriceField
+    if (typeof f.stripePriceAddon === "string") fieldPlan.stripePriceAddon = f.stripePriceAddon
+    if (typeof f.wordsPerCredit === "number") fieldPlan.wordsPerCredit = f.wordsPerCredit
+    if (typeof f.exploreCreditsPerCycle === "number") fieldPlan.exploreCreditsPerCycle = f.exploreCreditsPerCycle
+    if (typeof f.fieldCreditsPerCycle === "number") fieldPlan.fieldCreditsPerCycle = f.fieldCreditsPerCycle
+    if (typeof f.addonCredits === "number") fieldPlan.addonCredits = f.addonCredits
+    if (typeof f.enterpriseCreditsPerLanguagePerYear === "number") {
+      fieldPlan.enterpriseCreditsPerLanguagePerYear = f.enterpriseCreditsPerLanguagePerYear
+    }
+    if (Object.keys(fieldPlan).length > 0) out.fieldPlan = fieldPlan
   }
   return out
 }
@@ -184,6 +225,13 @@ export async function savePlatformSettings(
   }
 
   const merged: PlatformSettings = { ...current.settings, ...patch }
+  // An empty string in the patch means CLEAR, not "store an empty value":
+  // optional keys (the contextual tiers) are unset by sending "", and leaving
+  // the empty string in the blob would keep a dead key in the row forever.
+  // Keys whose schema forbids "" are unaffected.
+  for (const [key, value] of Object.entries(merged)) {
+    if (value === "") delete merged[key as keyof PlatformSettings]
+  }
   const json = JSON.stringify(merged)
   const newVersion = current.version + 1
 

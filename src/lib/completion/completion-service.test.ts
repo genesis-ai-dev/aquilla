@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, collectValidatedPairs, buildRulesBlock, buildBriefBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens } from "./completion-service"
+import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, collectValidatedPairs, selectApprovedExamples, buildRulesBlock, buildBriefBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens } from "./completion-service"
 import type { CompletionSettings, TranslationRule } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -37,6 +37,18 @@ describe("normalizeCompletionMaxTokens", () => {
 })
 
 describe("buildPrompt", () => {
+  it("makes all observable example conventions authoritative", () => {
+    const [system] = buildPrompt({
+      sourceLanguage: "English",
+      targetLanguage: "Urdu",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      sourceText: "Prepare the way",
+      examples: [{ source: "The way", target: "Khudawand ka rasta" }],
+    })
+    expect(system.content).toContain("Treat every observable convention in them as binding")
+    expect(system.content).toContain("rather than substituting defaults associated with the Urdu label")
+  })
+
   it("builds a prompt with examples and source text", () => {
     const messages = buildPrompt({
       sourceLanguage: "English", targetLanguage: "French",
@@ -185,6 +197,19 @@ describe("buildBatchPrompt", () => {
     })
     expect(messages[1].content).toContain("<v1>Hello</v1>\n<v2>world</v2>")
     expect(messages[1].content).toContain("<v1>Bonjour</v1>\n<v2>monde</v2>")
+  })
+
+  it("renders preceding bilingual context after examples and before the live batch", () => {
+    const messages = buildBatchPrompt({
+      sourceLanguage: "English", targetLanguage: "French",
+      systemPrompt: DEFAULT_SYSTEM_PROMPT,
+      cells: [{ source: "live cell" }],
+      examples: [{ cells: [{ source: "example source", target: "example target" }] }],
+      precedingContext: [{ source: "previous source", target: "previous target" }],
+    })
+    const user = messages[1].content
+    expect(user.indexOf("example source")).toBeLessThan(user.indexOf("previous source"))
+    expect(user.indexOf("previous source")).toBeLessThan(user.indexOf("<v1>live cell</v1>"))
   })
 
   it("substitutes language placeholders in the user-supplied system prompt", () => {
@@ -642,6 +667,41 @@ describe("collectValidatedPairs", () => {
   })
 })
 
+describe("selectApprovedExamples", () => {
+  it("uses one total budget, preferring retrieval and filling from local approved cells", () => {
+    const selected = selectApprovedExamples(
+      [
+        { cellId: "r1", source: "retrieved one", target: "R1" },
+        { cellId: "r2", source: "retrieved two", target: "R2" },
+      ],
+      [
+        { cellId: "r2", source: "retrieved two", target: "duplicate" },
+        { cellId: "f1", source: "fallback one", target: "F1" },
+        { cellId: "f2", source: "fallback two", target: "F2" },
+      ],
+      3,
+    )
+
+    expect(selected.map((example) => example.cellId)).toEqual(["r1", "r2", "f1"])
+  })
+
+  it("excludes immediate context duplicates and preserves long sources in full", () => {
+    const longSource = `opening ${"complete source text ".repeat(30)}ending`
+    const selected = selectApprovedExamples(
+      [
+        { cellId: "context", source: "  Previous   Source ", target: "duplicate" },
+        { cellId: "long", source: longSource, target: "full target" },
+      ],
+      [],
+      DEFAULT_APPROVED_EXAMPLE_COUNT,
+      [{ source: "previous source" }],
+    )
+
+    expect(selected).toEqual([{ cellId: "long", source: longSource, target: "full target" }])
+    expect(selected[0].source.endsWith("ending")).toBe(true)
+  })
+})
+
 // ---------------------------------------------------------------------------
 // Living Memory: buildRulesBlock
 // ---------------------------------------------------------------------------
@@ -792,7 +852,7 @@ describe("buildBatchPrompt with rules and validatedPairs", () => {
 // ---------------------------------------------------------------------------
 
 describe("CompletionSettings v1 retrieval fields", () => {
-  it("FALLBACK_SETTINGS-style defaults: top_k=15, contextSize=medium, approved-only examples, main_chat_language empty", () => {
+  it("FALLBACK_SETTINGS-style defaults: top_k=10, contextSize=medium, approved-only examples, main_chat_language empty", () => {
     const settings: CompletionSettings = {
       endpoint: "",
       model: "",
@@ -800,12 +860,12 @@ describe("CompletionSettings v1 retrieval fields", () => {
       temperature: 0.3,
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
       // v1 defaults applied explicitly (mirrors FALLBACK_SETTINGS in useCompletion)
-      top_k: 15,
+      top_k: DEFAULT_APPROVED_EXAMPLE_COUNT,
       contextSize: "medium",
       useOnlyValidatedExamples: true,
       main_chat_language: "",
     }
-    expect(settings.top_k).toBe(15)
+    expect(settings.top_k).toBe(DEFAULT_APPROVED_EXAMPLE_COUNT)
     expect(settings.contextSize).toBe("medium")
     expect(settings.useOnlyValidatedExamples).toBe(true)
     expect(settings.main_chat_language).toBe("")

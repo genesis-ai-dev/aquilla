@@ -4,6 +4,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { OrgProvider } from "@/context/OrgContext"
 import { TeamDetail } from "./TeamDetail"
+import { fmtShortCalendarDate } from "@/lib/format-date"
 
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }) }))
 const listMyOrgs = vi.fn()
@@ -127,6 +128,21 @@ describe("TeamDetail project management", () => {
     await act(async () => { screen.getByRole("button", { name: /^save$/i }).click() })
     await waitFor(() => expect(changeProjectRole).toHaveBeenCalledWith("jwt", 1, 10, "pa", 100))
   })
+
+  it("shows when each project was added to the team", async () => {
+    const grantedAt = "2026-07-22T15:00:00.000Z"
+    getTeam.mockResolvedValue({
+      id: 10,
+      name: "WA",
+      members: [],
+      projects: [{ id: "pa", name: "Bambara", grantedRoleLevel: 400, grantedAt }],
+    })
+    renderDetail()
+    await openTeamTab(/^projects$/i)
+    await waitFor(() => expect(screen.getByText("Bambara")).toBeInTheDocument())
+    expect(screen.getByRole("columnheader", { name: /added/i })).toBeInTheDocument()
+    expect(screen.getByText(fmtShortCalendarDate(grantedAt))).toBeInTheDocument()
+  })
 })
 
 describe("TeamDetail admin management", () => {
@@ -203,6 +219,21 @@ describe("TeamDetail admin management", () => {
     await act(async () => { (await screen.findByRole("button", { name: /actions for anna/i })).click() })
     await act(async () => { (await screen.findByRole("menuitem", { name: /remove from team/i })).click() })
     await waitFor(() => expect(removeTeamMember).toHaveBeenCalledWith("jwt", 1, 10, 2))
+  })
+
+  it("shows when each member was added to the team", async () => {
+    const addedAt = "2026-07-20T09:00:00.000Z"
+    getTeam.mockResolvedValue({
+      id: 10,
+      name: "WA",
+      members: [{ userId: 2, username: "anna", roleLevel: 100, addedAt }],
+      projects: [],
+    })
+    renderDetail()
+    await openTeamTab(/^members$/i)
+    await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
+    expect(screen.getByRole("columnheader", { name: /added/i })).toBeInTheDocument()
+    expect(screen.getByText(fmtShortCalendarDate(addedAt))).toBeInTheDocument()
   })
 
   it("links admins to team settings", async () => {

@@ -511,6 +511,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "rendering. Different case AND different fixed vocabularies (rule-" +
     "enforcement mode vs term lifecycle status) that happen to share one " +
     "English word.",
+  "org.teamDetail.addedColumn":
+    "Nominal table-column heading (and DateTooltip hover prefix) for the timestamp " +
+    "a project or person was added to a team, sibling of Name/Role. onboarding." +
+    "checklist.invite.addedPrefix is the past-tense VERB that starts the invite-step " +
+    "confirmation sentence 'Added {name} as contributor.' A date-column heading " +
+    "and a sentence-initial verb take different forms in many languages " +
+    "(nominalized date label vs. finite verb), so one shared string would be " +
+    "wrong for one of the two roles.",
   "org.teamDetail.detachButton":
     "Routine, reversible action in TeamDetail: unlinks a project from a team's " +
     "access-grant list with a single click, no confirmation dialog — the " +

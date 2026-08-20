@@ -682,13 +682,24 @@ export async function listOrgGroups(
   }))
 }
 
+/** ISO-8601 for JSON; Hyperdrive may hand back a Date or a timestamp string. */
+function timestampIso(value: string | Date | null | undefined): string | null {
+  if (value == null) return null
+  if (value instanceof Date) {
+    const t = value.getTime()
+    return Number.isNaN(t) ? null : value.toISOString()
+  }
+  const parsed = Date.parse(value)
+  return Number.isNaN(parsed) ? null : new Date(parsed).toISOString()
+}
+
 export interface OrgGroupDetail {
   id: number
   name: string
   description: string | null
 
-  members: Array<{ userId: number; username: string; email: string | null; roleLevel: number | null }>
-  projects: Array<{ id: string; name: string; grantedRoleLevel: number }>
+  members: Array<{ userId: number; username: string; email: string | null; roleLevel: number | null; addedAt: string | null }>
+  projects: Array<{ id: string; name: string; grantedRoleLevel: number; grantedAt: string | null }>
 }
 
 /** Members + attached projects of a single group. Null if not in this org. */
@@ -705,7 +716,8 @@ export async function getOrgGroupDetail(
   if (!group) return null
 
   const members = await env.AQUILLA_PG.prepare(
-    `SELECT gm.user_id AS user_id, u.username AS username, u.email AS email, om.role_level AS role_level
+    `SELECT gm.user_id AS user_id, u.username AS username, u.email AS email, om.role_level AS role_level,
+            gm.added_at AS added_at
        FROM group_members gm
        JOIN users u ON u.id = gm.user_id
        LEFT JOIN org_members om ON om.org_id = ? AND om.user_id = gm.user_id
@@ -713,17 +725,18 @@ export async function getOrgGroupDetail(
       ORDER BY LOWER(u.username)`,
   )
     .bind(orgId, groupId)
-    .all<{ user_id: number; username: string; email: string | null; role_level: number | null }>()
+    .all<{ user_id: number; username: string; email: string | null; role_level: number | null; added_at: string | Date | null }>()
 
   const projects = await env.AQUILLA_PG.prepare(
-    `SELECT gpg.project_id AS id, p.name AS name, gpg.role_level AS granted
+    `SELECT gpg.project_id AS id, p.name AS name, gpg.role_level AS granted,
+            gpg.granted_at AS granted_at
        FROM group_project_grants gpg
        JOIN projects p ON p.id = gpg.project_id
       WHERE gpg.group_id = ? AND p.org_id = ?
       ORDER BY LOWER(p.name)`,
   )
     .bind(groupId, orgId)
-    .all<{ id: string; name: string; granted: number }>()
+    .all<{ id: string; name: string; granted: number; granted_at: string | Date | null }>()
 
   return {
     id: group.id,
@@ -734,8 +747,14 @@ export async function getOrgGroupDetail(
       username: m.username,
       email: m.email ?? null,
       roleLevel: m.role_level,
+      addedAt: timestampIso(m.added_at),
     })),
-    projects: (projects.results ?? []).map((p) => ({ id: p.id, name: p.name, grantedRoleLevel: p.granted })),
+    projects: (projects.results ?? []).map((p) => ({
+      id: p.id,
+      name: p.name,
+      grantedRoleLevel: p.granted,
+      grantedAt: timestampIso(p.granted_at),
+    })),
   }
 }
 

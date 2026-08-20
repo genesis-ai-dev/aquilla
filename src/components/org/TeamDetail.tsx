@@ -60,6 +60,7 @@ import {
   roleName,
 } from "@/lib/frontier/roles"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 
 type TeamTab = "overview" | "projects" | "members"
 type TeamMember = TeamDetailType["members"][number]
@@ -335,6 +336,25 @@ export function TeamDetail() {
         cell: ({ row }) => <RoleLabel name={row.original.grantedRoleLevel} />,
       },
       {
+        id: "added",
+        accessorFn: (p) => {
+          const ts = p.grantedAt != null ? Date.parse(p.grantedAt) : Number.NaN
+          return Number.isFinite(ts) ? ts : undefined
+        },
+        sortUndefined: SORT_MISSING_LAST,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title={t("org.teamDetail.addedColumn")} />
+        ),
+        meta: { className: "w-[7.5rem] whitespace-nowrap" },
+        cell: ({ row }) => (
+          <DateTooltip
+            value={row.original.grantedAt}
+            label={t("org.teamDetail.addedColumn")}
+            className="text-sm text-muted-foreground"
+          />
+        ),
+      },
+      {
         id: "actions",
         enableSorting: false,
         header: () => <span className="sr-only">{t("org.overviewLaneTable.actionsColumn")}</span>,
@@ -408,6 +428,25 @@ export function TeamDetail() {
             </AppTooltip>
           )
         },
+      },
+      {
+        id: "added",
+        accessorFn: (m) => {
+          const ts = m.addedAt != null ? Date.parse(m.addedAt) : Number.NaN
+          return Number.isFinite(ts) ? ts : undefined
+        },
+        sortUndefined: SORT_MISSING_LAST,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title={t("org.teamDetail.addedColumn")} />
+        ),
+        meta: { className: "w-[7.5rem] whitespace-nowrap" },
+        cell: ({ row }) => (
+          <DateTooltip
+            value={row.original.addedAt}
+            label={t("org.teamDetail.addedColumn")}
+            className="text-sm text-muted-foreground"
+          />
+        ),
       },
       {
         id: "actions",

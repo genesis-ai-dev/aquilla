@@ -1069,6 +1069,7 @@ export const org = defineNamespace({
     "org.teamDetail.sectionsAriaLabel": "Team sections",
     "org.teamDetail.projectsTabDescription":
       "Projects this team can access, and the role granted to members.",
+    "org.teamDetail.addedColumn": "Added",
     "org.teamDetail.attachProjectDialogTitle": "Attach project to '{name}'",
     "org.teamDetail.attachProjectDialogDescription": "Grant this team access at a chosen role.",
     "org.teamDetail.selectProjectPlaceholder": "Select a project…",
@@ -1989,6 +1990,11 @@ export const org = defineNamespace({
       },
       "org.teamDetail.sectionsAriaLabel": {
         description: "Accessible name for the Projects/Members/Overview tab list on TeamDetail.",
+      },
+      "org.teamDetail.addedColumn": {
+        description:
+          "Sortable column heading on TeamDetail's projects and members tables for when the project or person was added to the team. Also the DateTooltip hover prefix on that cell (short calendar date visible, labeled datetime on hover).",
+        maxLength: 16,
       },
     },
   },

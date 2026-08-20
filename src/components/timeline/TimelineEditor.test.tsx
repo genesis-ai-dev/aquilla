@@ -1133,6 +1133,13 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
   // Round 8: the VTT's own timing is not ours to nudge, but a line added into
   // a silence still moves. Both cards live in the SAME lane, so this is the
   // test that would catch a lane-wide freeze pretending to be a per-cell one.
+  //
+  // 2026-08-20: the freeze now comes from the project TIMING LOCK rather than
+  // from a film being linked. The old condition made unlocking a no-op on every
+  // episode in the dubbing workflow, since they all have a film; the lock does
+  // the same job without depending on that, and defaults to on. So this suite
+  // states the lock explicitly — its subject is the per-cell exemption, not
+  // where the freeze comes from.
   describe("imported cues are frozen, added lines are not", () => {
     // Scoped to the Subtitles track on purpose: it is the only row that may
     // retime anything, and other rows draw these same cells, so an unscoped
@@ -1146,6 +1153,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
       render(
         <TimelineEditor
           fileId="f1" coreMediaUrl={VIDEO} editable
+          timingLocked
           cells={[
             cell({ id: "imported", original: "One", medium: "text", startTime: 10, endTime: 20 }),
             cell({
@@ -1158,6 +1166,21 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
       )
       expect(gripsInSubtitleLane("imported")).toHaveLength(0)
       expect(gripsInSubtitleLane("added")).toHaveLength(2)
+    })
+
+    it("a linked film no longer freezes anything on its own", () => {
+      // The regression this pair exists for: with the film as a second freeze
+      // condition, unlocking could not thaw the one workflow that has films.
+      setVideoDurationSec(VIDEO, 120)
+      render(
+        <TimelineEditor
+          fileId="f1" coreMediaUrl={VIDEO} editable
+          timingLocked={false}
+          cells={[cell({ id: "imported", original: "One", medium: "text", startTime: 10, endTime: 20 })]}
+          onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(gripsInSubtitleLane("imported")).toHaveLength(2)
     })
 
     it("SUB-36's subtitle mirror keeps its grips", () => {
@@ -1948,6 +1971,33 @@ describe("the project timing lock", () => {
     expect(grips("s1")).toHaveLength(0)
   })
 
+  it("unlocking THAWS a file with a film linked — the case that made it a no-op", () => {
+    // Sam, 2026-08-20: "when timing is unlocked AND an audio vtt is present,
+    // timing is still locked." The real correlate was the LINKED FILM: the old
+    // footage guard froze the rows on its own, so the `||` meant unlocking
+    // could never defeat it — on every episode in the dubbing workflow, which
+    // all have a film. The lock is now the only gate.
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl="https://cdn/ep101.m3u8" editable
+        cells={[imported()]} onRetimeSubtitle={() => {}}
+        timingLocked={false}
+      />,
+    )
+    expect(grips("s1").length).toBeGreaterThan(0)
+  })
+
+  it("still freezes a film-linked file while it is LOCKED", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl="https://cdn/ep101.m3u8" editable
+        cells={[imported()]} onRetimeSubtitle={() => {}}
+        timingLocked
+      />,
+    )
+    expect(grips("s1")).toHaveLength(0)
+  })
+
   it("still lets someone move a line they added themselves", () => {
     render(
       <TimelineEditor
@@ -1982,5 +2032,90 @@ describe("the project timing lock", () => {
       />,
     )
     expect(screen.queryByTestId("tl-timing-unlocked")).not.toBeInTheDocument()
+  })
+})
+
+// ── Pairing asks first (AQU-646, Sam 2026-08-20) ─────────────────────────
+//
+// "When a link is broken or made, there should be a modal pop-up that asks are
+// you sure? I know that sounds super annoying, but for now better safe than
+// sorry."
+//
+// It is affordable because the bulk pairing happens at import — this mode
+// corrects the tail — and it earns its keep because a pairing decides which
+// recording is attributed to which line, and a mis-click says so silently.
+
+describe("confirming a pairing", () => {
+  const subs = [cell({ id: "s1", original: "Andrew, look.", medium: "text", startTime: 10, endTime: 20 })]
+  const cues = [cell({ id: "c1", original: "Andrew, look.", startTime: 10, endTime: 20 })]
+  const tracks = deriveTracksForFile(null, {
+    isSubtitleImport: true, hasMediaCells: false, hasAudioCues: true,
+  })
+
+  const renderLinking = (over: Record<string, unknown> = {}) => {
+    const onToggleCueLink = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={subs}
+        tracks={tracks} audioCues={cues} onRetimeSubtitle={() => {}}
+        onToggleCueLink={onToggleCueLink} {...over}
+      />,
+    )
+    armLinking()
+    return onToggleCueLink
+  }
+
+  /** Pick one side's chip, then click the other's — the click that pairs. */
+  const clickBothSides = () => {
+    const targets = screen.getAllByTestId("tl-link-target")
+    const s1 = targets.find((el) => el.getAttribute("data-cell-id") === "s1")!
+    const c1 = targets.find((el) => el.getAttribute("data-cell-id") === "c1")!
+    fireEvent.click(s1)
+    fireEvent.click(c1)
+  }
+
+  it("asks before pairing, and does not pair until you say yes", () => {
+    const onToggleCueLink = renderLinking()
+    clickBothSides()
+    expect(onToggleCueLink).not.toHaveBeenCalled()
+    expect(screen.getByTestId("cue-link-confirm")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("cue-link-confirm-go"))
+    expect(onToggleCueLink).toHaveBeenCalledWith("s1", "c1", true)
+  })
+
+  it("backing out leaves the pairing alone", () => {
+    const onToggleCueLink = renderLinking()
+    clickBothSides()
+    fireEvent.click(screen.getByTestId("cue-link-confirm-cancel"))
+    expect(onToggleCueLink).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("cue-link-confirm")).not.toBeInTheDocument()
+  })
+
+  it("asks before BREAKING one too, and says which way it is going", () => {
+    // Sam: "both directions deserve it." The pair already exists here, so the
+    // same click is an unpair — and the dialog has to say so, since the two
+    // acts are opposites reached by an identical gesture.
+    const onToggleCueLink = renderLinking({
+      cueLinks: {
+        cuesForText: new Map([["s1", ["c1"]]]),
+        textForCue: new Map([["c1", ["s1"]]]),
+      },
+    })
+    clickBothSides()
+    const dialog = screen.getByTestId("cue-link-confirm")
+    expect(dialog).toHaveTextContent(/Break this pairing\?/)
+    fireEvent.click(screen.getByTestId("cue-link-confirm-go"))
+    expect(onToggleCueLink).toHaveBeenCalledWith("s1", "c1", false)
+  })
+
+  it("names both lines, because the risk is that you clicked the wrong chip", () => {
+    renderLinking()
+    clickBothSides()
+    const dialog = screen.getByTestId("cue-link-confirm")
+    // Its time and the opening of its words, for each side.
+    expect(dialog).toHaveTextContent("Andrew, look.")
+    expect(dialog).toHaveTextContent("Heard")
+    expect(dialog).toHaveTextContent("Subtitle")
   })
 })

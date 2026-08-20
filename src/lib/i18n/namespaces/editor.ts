@@ -658,6 +658,19 @@ export const editor = defineNamespace({
     "editor.timeline.pairingFromThis": "Pairing from this one — click a line on the other row",
     "editor.timeline.pairedClickToUnpair": "Paired · click to unpair",
     "editor.timeline.clickToPair": "Click to pair with the selected chip",
+    // AQU-646: the confirmation before a pairing is made or broken.
+    "editor.timeline.linkConfirmTitle": "Pair these two lines?",
+    "editor.timeline.linkConfirmDescription":
+      "The heard line's recording will belong to this subtitle. Pairings decide which line a performance is attributed to, so it is worth checking you clicked the two you meant.",
+    "editor.timeline.unlinkConfirmTitle": "Break this pairing?",
+    "editor.timeline.unlinkConfirmDescription":
+      "These two stop being a pair. Any recording on the heard line stays where it is, but it will no longer be attributed to this subtitle.",
+    // No `linkConfirmSubtitleSide` — the row label reuses
+    // `editor.timeline.chipHeadingSubtitle`, which is already this same word for
+    // this same row. A twin would be a second thing to keep in step.
+    "editor.timeline.linkConfirmHeardSide": "Heard",
+    "editor.timeline.linkConfirmGo": "Pair them",
+    "editor.timeline.unlinkConfirmGo": "Break the pairing",
     "editor.timeline.noSpeechHere": "No speech here · {seconds}s",
     "editor.timeline.takeLoading": "Loading this clip's audio…",
     "editor.timeline.takeSaving": "Saving — kept safe on this device until it syncs",
@@ -692,7 +705,10 @@ export const editor = defineNamespace({
     "editor.timeline.neverPaired":
       'These cues have never been paired with the subtitles — re-import the audio VTT and tick "work out the subtitle pairings".',
     "editor.timeline.badgePairing": "pairing…",
-    "editor.timeline.badgeSaving": "saving…",
+    // No `badgeSaving` — the Sources row's spinner badge reuses `common.saving`.
+    // It differed only in case, and a case-only split is pure duplicate work:
+    // three of the four target locales have no letter case at all. The badge
+    // capitalises as a result, which is the cost of not having a twin.
     "editor.timeline.badgeLinked": "linked",
     "editor.timeline.badgeNotLinked": "not linked",
     "editor.timeline.badgeNotImported": "not imported",

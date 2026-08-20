@@ -43,6 +43,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { SourceRegionLane } from "./SourceRegionLane"
 import type { LaneLinkOverlay } from "./CueLinkOverlay"
+import { CueLinkConfirmDialog } from "./CueLinkConfirmDialog"
 import { EMPTY_CUE_LINK_INDEX, type CueLinkIndex } from "@/lib/sync/cell-links-read"
 import { chipOverlaps, MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { resolveCueCharacter, formatCueCharacter } from "@/lib/timeline/cue-character"
@@ -988,10 +989,27 @@ export function TimelineEditor({
   // can start on either row: from a heard line to find its subtitle, or from a
   // subtitle to find the lines that perform it.
   const [pickedLink, setPickedLink] = useState<{ id: string; side: "cue" | "text" } | null>(null)
+  /**
+   * A pairing waiting to be confirmed. (AQU-646, Sam 2026-08-20: "when a link
+   * is broken or made, there should be a modal pop-up that asks are you
+   * sure?… better safe than sorry.")
+   *
+   * Held HERE rather than in the overlay because both lanes' overlays funnel
+   * into one `toggleLink`, so one piece of state and one dialog cover both
+   * directions — and the picked chip stays picked while the question is up, so
+   * cancelling leaves you exactly where you were rather than making you
+   * re-pick.
+   */
+  const [pendingLink, setPendingLink] = useState<
+    { textCellId: string; cueCellId: string; linking: boolean } | null
+  >(null)
   const linkingAvailable = Boolean(onToggleCueLink && audioCues && editable && canCheck)
   // Leaving the mode must not strand a half-made pairing on screen.
   useEffect(() => {
-    if (!linkingMode) setPickedLink(null)
+    if (!linkingMode) {
+      setPickedLink(null)
+      setPendingLink(null)
+    }
   }, [linkingMode])
   // The drawer's close button reaches back in here. Nonce-keyed so closing,
   // reopening and closing again all land.
@@ -1098,7 +1116,7 @@ export function TimelineEditor({
         disabled: !canImportCharacters,
         badge: charactersWriting ? (
           <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-            <Spinner className="h-3 w-3" /> {t("editor.timeline.badgeSaving")}
+            <Spinner className="h-3 w-3" /> {t("common.saving")}
           </span>
         ) : (
           <span className="text-[11px] text-muted-foreground">
@@ -1168,10 +1186,21 @@ export function TimelineEditor({
         : new Set(subtitle.filter((c) => !links.cuesForText.has(c.id)).map((c) => c.id)),
     [subtitle, links, suppressUnlinkedMarks],
   )
-  /** Flip one pairing. `linked` is what it should BECOME. */
+  /**
+   * Flip one pairing — after asking. `linking` is what it should BECOME.
+   *
+   * THE SINGLE CHOKE POINT for both directions and both lanes, which is why
+   * the confirmation lives here rather than in either overlay: a click that
+   * makes a pairing and a click that breaks one arrive at the same function.
+   */
   const toggleLink = (textCellId: string, cueCellId: string) => {
     const already = (links.cuesForText.get(textCellId) ?? []).includes(cueCellId)
-    onToggleCueLink?.(textCellId, cueCellId, !already)
+    setPendingLink({ textCellId, cueCellId, linking: !already })
+  }
+  const commitPendingLink = () => {
+    if (!pendingLink) return
+    onToggleCueLink?.(pendingLink.textCellId, pendingLink.cueCellId, pendingLink.linking)
+    setPendingLink(null)
   }
   const cueLinkOverlay: LaneLinkOverlay | undefined = linkingMode
     ? {
@@ -1962,22 +1991,28 @@ export function TimelineEditor({
             cells={subtitle}
             variant="subtitle"
             retimable={!audioFirst}
-            // AQU-646 round 8: an imported VTT cue is frozen. Its timing is
-            // the file's, not ours to nudge — arguing for the VTT's integrity
-            // while letting anyone drag its cues is incoherent (Sam,
-            // 2026-08-11). A line someone added here still moves, bounded by
-            // its neighbours. Only this arrangement passes the predicate, so
-            // SUB-36's deliberately draggable subtitle mirror is untouched —
-            // and cannot collide with it anyway, since that mirror exists
-            // only when there ARE dialogue cells and this predicate needs
-            // there to be none.
-            // AQU-646 (2026-08-20): `subtitleFileWithFootage` required a LINKED
-            // FILM, so on a freshly imported VTT with nothing else in the
-            // project this predicate was `undefined` and every imported row
-            // was draggable — exactly what Sam hit ("the chips have
-            // handlebars and I can totally mess up the timings"). The lock
-            // freezes them whether or not a film is linked.
-            canRetimeCell={timingLocked || subtitleFileWithFootage ? isUserAddedLine : undefined}
+            // AQU-646: THE LOCK IS THE ONLY ANSWER to "may this move?".
+            //
+            // This used to read `subtitleFileWithFootage ? isUserAddedLine :
+            // undefined` — an imported VTT cue was frozen whenever a film was
+            // linked, on the grounds that "arguing for the VTT's integrity
+            // while letting anyone drag its cues is incoherent" (Sam,
+            // 2026-08-11). That was right while there was NO WAY TO SAY
+            // OTHERWISE. There is now: unlocking is a project-wide setting, a
+            // rank above project lead, that announces itself in this toolbar
+            // for as long as it is off.
+            //
+            // Keeping the old clause as an extra condition made unlocking a
+            // NO-OP on exactly the files this exists for — a subtitle VTT with
+            // a film linked, which is every episode in the dubbing workflow
+            // (Sam, 2026-08-20: "when timing is unlocked … timing is still
+            // locked"). The blanket freeze retires into the lock, which does
+            // its job better: it does not depend on whether a film happens to
+            // be linked, and it defaults to ON.
+            //
+            // A line someone added here still moves either way — it carries no
+            // imported timing to corrupt.
+            canRetimeCell={timingLocked ? isUserAddedLine : undefined}
             // ...and the line it may move within is the space its neighbours
             // leave it. Only here: SUB-36's media-subtitle card is meant to
             // sit wherever it likes, so this must never be on by default.
@@ -2639,6 +2674,31 @@ export function TimelineEditor({
       {chipStripSlot
         ? createPortal(<MediaTextHeader {...mediaTextHeaderProps} />, chipStripSlot)
         : <MediaTextHeader {...mediaTextHeaderProps} />}
+      {/* Both lanes' clicks arrive at one `toggleLink`, so one dialog covers
+          making and breaking alike. Rendered unconditionally and gated on its
+          own `open` — a dialog that unmounts mid-animation flickers. */}
+      <CueLinkConfirmDialog
+        open={pendingLink != null}
+        linking={pendingLink?.linking ?? false}
+        subtitle={
+          pendingLink
+            ? (() => {
+                const c = subtitle.find((x) => x.id === pendingLink.textCellId)
+                return c ? { startSec: c.startTime ?? 0, text: c.original ?? "" } : null
+              })()
+            : null
+        }
+        cue={
+          pendingLink
+            ? (() => {
+                const c = (audioCues ?? []).find((x) => x.id === pendingLink.cueCellId)
+                return c ? { startSec: c.startTime ?? 0, text: c.original ?? "" } : null
+              })()
+            : null
+        }
+        onConfirm={commitPendingLink}
+        onCancel={() => setPendingLink(null)}
+      />
     </div>
   )
 }

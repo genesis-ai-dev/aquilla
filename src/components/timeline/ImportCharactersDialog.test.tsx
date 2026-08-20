@@ -240,8 +240,10 @@ describe("the audio character sheet", () => {
       fireEvent.click(screen.getByTestId("import-characters-confirm"))
       const [plan] = onConfirmAudio.mock.calls[0]
       expect(plan.assignments).toEqual([
-        { cellId: "q1", castName: "LITTLE MARY MAGDALENE", cameraState: "on", rowNumber: 2 },
-        { cellId: "q2", castName: "LITTLE MARY MAGDALENE", cameraState: "on", rowNumber: 3 },
+        // `lineNumber` is her own `Line #` — column 0 of the audio sheet, which
+        // the fixture rows all set to "10", the number episode 101 starts at.
+        { cellId: "q1", castName: "LITTLE MARY MAGDALENE", cameraState: "on", rowNumber: 2, lineNumber: "10" },
+        { cellId: "q2", castName: "LITTLE MARY MAGDALENE", cameraState: "on", rowNumber: 3, lineNumber: "10" },
       ])
     })
   })

@@ -1,5 +1,6 @@
 import type { ImportMilestone, ImportSourceLocator } from "../../../shared/import-contract"
 import type { PersistedTrackOverrides } from "@/lib/timeline/tracks"
+import type { CameraState } from "@/lib/sync/cells-read-types"
 
 export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
 
@@ -334,7 +335,13 @@ export interface CharacterResolutionChoice<T> {
 
 export interface CharacterResolution {
   name?: CharacterResolutionChoice<string>
-  camera?: CharacterResolutionChoice<"on" | "mixed" | "off">
+  /**
+   * AQU-646: `group` joined the three values on 2026-08-20. Records written
+   * before that hold `"mixed"` where a fresh import now produces `"group"` —
+   * benign, because the self-healing rule in `character-agreement.ts` ignores
+   * a record whose rejected value no longer matches the cell.
+   */
+  camera?: CharacterResolutionChoice<CameraState>
   /** When it was settled, for ordering the resolved list. */
   at: number
 }
@@ -672,8 +679,17 @@ export function fileOrderedBy(file: Pick<FileReference, "orderedBy">): OrderedBy
  * across the app, because the hand-rolled `vtt || srt` check this replaces
  * (ProjectWorkspace) missed `sbv`, which imports to exactly the same timed cues
  * as the other two.
+ *
+ * Takes a plain `type` string rather than a `FileType`, because half the
+ * callers hold one: the export dialog carries `activeFileType?: string | null`
+ * and kept its own `vtt || srt` copy — missing `sbv` all over again — purely
+ * because this signature would not accept it (2026-08-20). A predicate that
+ * compares three literals has no business demanding a narrower input than the
+ * places that need to ask.
  */
-export function isSubtitleImportFile(file: Pick<FileReference, "type"> | null | undefined): boolean {
+export function isSubtitleImportFile(
+  file: { type?: string | null } | null | undefined,
+): boolean {
   return file?.type === "vtt" || file?.type === "srt" || file?.type === "sbv"
 }
 

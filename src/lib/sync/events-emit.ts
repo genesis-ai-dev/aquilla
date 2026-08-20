@@ -29,6 +29,7 @@ import posthog from "@/lib/posthog"
 import { FIRST_CELL_COMMIT, FIRST_CELL_VALIDATE } from "@/lib/event-names"
 import { noteAbDraftText, reportAbOutcome } from "@/lib/ab/feedback"
 import type { TrackKind } from "@/lib/timeline/tracks"
+import type { CameraState } from "@/lib/sync/cells-read-types"
 
 // Session-scoped flags — reset on page reload (true "first in session" semantics).
 let _firstCommitFired = false
@@ -1244,7 +1245,14 @@ export interface CastAssignInput {
    * also updates cells.camera_state so angle-embedded label strings (e.g.
    * "Mary Magdalene   (on)") can be fully split on import.
    */
-  cameraState?: "on" | "mixed" | "off" | null
+  cameraState?: CameraState | null
+  /**
+   * AQU-646: the client's own line number for this row, when her character
+   * sheet carried one. Stored beside `cast_name` in the cell's metadata so a
+   * corrected sheet can go back in HER numbering rather than a fresh 1..n
+   * count. A string because it identifies rather than counts.
+   */
+  lineNumber?: string | null
   author: string
   clientTs?: number
 }
@@ -1266,6 +1274,7 @@ export async function emitCastAssign(input: CastAssignInput): Promise<string> {
     payload: {
       castName: input.castName,
       ...(input.cameraState !== undefined ? { cameraState: input.cameraState } : {}),
+      ...(input.lineNumber !== undefined ? { lineNumber: input.lineNumber } : {}),
     },
     clientTs: input.clientTs,
   })

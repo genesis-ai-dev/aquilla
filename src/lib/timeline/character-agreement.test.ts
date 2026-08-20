@@ -12,7 +12,7 @@ import { buildCueLinkIndex, type CueLink } from "@/lib/sync/cell-links-read"
 const cell = (
   id: string,
   castName?: string,
-  cameraState?: "on" | "off" | "mixed",
+  cameraState?: "on" | "off" | "mixed" | "group",
   original = "",
 ): ComparableCell => ({
   id,
@@ -31,11 +31,16 @@ const edge = (textCellId: string, cueCellId: string): CueLink => ({
   confidence: 1,
 })
 
-const compare = (cue: ComparableCell, text: ComparableCell) =>
+const compare = (
+  cue: ComparableCell,
+  text: ComparableCell,
+  strictCamera?: { mixed?: boolean; group?: boolean },
+) =>
   compareCharacterSources({
     cues: [cue],
     textCells: [text],
     links: buildCueLinkIndex([edge(text.id, cue.id)]),
+    ...(strictCamera ? { strictCamera } : {}),
   }).open
 
 describe("what it stays quiet about", () => {
@@ -244,5 +249,69 @@ describe("what has already been settled", () => {
       },
     })
     expect(r.resolved.map((x) => x.cueCellId)).toEqual(["c2", "c1"])
+  })
+})
+
+
+// ── The two vague camera answers, and asking to see them (2026-08-20) ────────
+//
+// `mixed` and `group` both mean "several, or not one answer". Neither can
+// contradict anything by default: without that rule the real episode-101 pair
+// reports 189 camera disagreements, essentially all of them a coarse value on
+// the subtitle side against the precise one the audio sheet knows, burying the
+// six findings that matter. But the judgement belongs to whoever knows the
+// sheets, so it is offered rather than fixed (Sam, 2026-08-20).
+
+describe("whether mixed and group count as answers", () => {
+  it("stays quiet about mixed against on, as it always has", () => {
+    expect(compare(cell("c1", "JESUS", "on"), cell("s1", "JESUS", "mixed"))).toEqual([])
+  })
+
+  it("stays quiet about group against on", () => {
+    expect(compare(cell("c1", "JESUS", "on"), cell("s1", "JESUS", "group"))).toEqual([])
+  })
+
+  it("reports mixed against on once somebody asks it to", () => {
+    const open = compare(cell("c1", "JESUS", "on"), cell("s1", "JESUS", "mixed"), { mixed: true })
+    expect(open).toHaveLength(1)
+    expect(open[0].camera).toEqual({ subtitle: "mixed", audio: "on" })
+  })
+
+  it("reports group against on once somebody asks it to", () => {
+    const open = compare(cell("c1", "JESUS", "on"), cell("s1", "JESUS", "group"), { group: true })
+    expect(open).toHaveLength(1)
+    expect(open[0].camera).toEqual({ subtitle: "group", audio: "on" })
+  })
+
+  it("keeps the two switches independent", () => {
+    // Turning group on must not drag mixed along with it — the whole point is
+    // that they are different judgements about different labels.
+    expect(compare(cell("c1", "JESUS", "on"), cell("s1", "JESUS", "mixed"), { group: true }))
+      .toEqual([])
+    expect(compare(cell("c1", "JESUS", "on"), cell("s1", "JESUS", "group"), { mixed: true }))
+      .toEqual([])
+  })
+
+  it("reports mixed against group when both are switched on", () => {
+    const open = compare(cell("c1", "JESUS", "group"), cell("s1", "JESUS", "mixed"), {
+      mixed: true,
+      group: true,
+    })
+    expect(open).toHaveLength(1)
+  })
+
+  it("never reports a MISSING camera value, however strict the settings", () => {
+    // An absence is a gap in one sheet, not a disagreement between two — a
+    // sheet with no camera column would otherwise contradict every row of one
+    // that has it.
+    expect(
+      compare(cell("c1", "JESUS", "on"), cell("s1", "JESUS"), { mixed: true, group: true }),
+    ).toEqual([])
+  })
+
+  it("still says nothing when both sheets say the same vague thing", () => {
+    expect(
+      compare(cell("c1", "JESUS", "mixed"), cell("s1", "JESUS", "mixed"), { mixed: true }),
+    ).toEqual([])
   })
 })

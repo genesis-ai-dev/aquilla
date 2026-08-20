@@ -610,11 +610,27 @@ export interface EventPayloads {
      */
     castName: string | null
     /**
-     * AQU-439: Optional camera-angle override ("on" | "mixed" | "off").
+     * AQU-439: Optional camera-angle override.
      * When present, the projection also updates cells.camera_state.
      * Null clears the column; omitting this field (undefined) is a no-op.
+     *
+     * AQU-646 (2026-08-20): `group` joined the three original values. The
+     * client's character sheets have always distinguished a group shot from a
+     * mixed one; both importers used to fold it into `mixed`, so a corrected
+     * sheet could never say `Group` again. The column is plain TEXT with no
+     * constraint, so nothing here needed a migration.
      */
-    cameraState?: 'on' | 'mixed' | 'off' | null
+    cameraState?: 'on' | 'mixed' | 'off' | 'group' | null
+    /**
+     * AQU-646: the client's own line number for this row, out of her character
+     * sheet's `Line #` column. The projection merges it into cells.metadata as
+     * { line_number: value }, beside cast_name and under the same per-key
+     * discipline. A string: it identifies a line in her production's numbering
+     * rather than counting anything, and values need not be integers.
+     *
+     * Omitted when her sheet had no such column. Null clears it.
+     */
+    lineNumber?: string | null
   }
 
   // ── Timeline editor (non-chain-mutating) ────────────────────────────────

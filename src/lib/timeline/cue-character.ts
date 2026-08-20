@@ -30,9 +30,13 @@ export interface CueCharacter {
   /** Distinct cast names, in document order. Empty when nobody is named. */
   names: string[]
   /**
-   * The lip-sync constraint. `mixed` when the linked lines disagree — the same
-   * answer `splitCastName` gives a "(Group)" label, and for the same reason: a
-   * shot covering several people constrains none of them exactly.
+   * The lip-sync constraint. `mixed` when the linked lines disagree, because a
+   * cue covering two lines shot differently constrains neither exactly.
+   *
+   * A "(Group)" label used to land here as `mixed` too. It no longer does —
+   * `group` is its own state since 2026-08-20 (AQU-646) and survives all the
+   * way to the corrected sheets; only genuine DISAGREEMENT between linked
+   * lines still collapses to `mixed`.
    */
   cameraState: CameraState | undefined
 }
@@ -94,8 +98,18 @@ export function formatCueCharacter(names: readonly string[]): string | null {
   return names.length === 0 ? null : names.join(" / ")
 }
 
-/** Plain words rather than the stored token: a bare "on" reads as a toggle. */
+/**
+ * Plain words rather than the stored token: a bare "on" reads as a toggle.
+ *
+ * THE ONE PLACE camera states are put into words. The character-check drawer
+ * carried a second copy of this ternary until 2026-08-20, which is exactly the
+ * kind of duplicate that ends up one arm behind — as it would have when
+ * `group` arrived.
+ */
 export function cameraLabel(state: CameraState | undefined): string | null {
   if (!state) return null
-  return state === "on" ? "on camera" : state === "off" ? "off camera" : "mixed"
+  if (state === "on") return "on camera"
+  if (state === "off") return "off camera"
+  if (state === "group") return "group shot"
+  return "mixed"
 }

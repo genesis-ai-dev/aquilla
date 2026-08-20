@@ -29,8 +29,17 @@ describe("splitCastName", () => {
     expect(splitCastName("Peter (off)")).toEqual({ voice: "Peter", cameraState: "off" })
   })
 
-  it("maps group → mixed (synonym)", () => {
-    expect(splitCastName("Crowd (group)")).toEqual({ voice: "Crowd", cameraState: "mixed" })
+  it("keeps group as its own state rather than folding it into mixed", () => {
+    // It folded into `mixed` until 2026-08-20 (AQU-646). The client's sheets
+    // distinguish the two, and collapsing them here meant a corrected workbook
+    // could never write `Group` back out.
+    expect(splitCastName("Crowd (group)")).toEqual({ voice: "Crowd", cameraState: "group" })
+  })
+
+  it("still falls back to mixed for an angle nobody recognises", () => {
+    // Not verbatim passthrough: an arbitrary word in the camera column is a
+    // value nothing downstream can render or compare.
+    expect(splitCastName("Crowd (wide shot)")).toEqual({ voice: "Crowd", cameraState: "mixed" })
   })
 
   it("maps mixed → mixed", () => {
@@ -124,6 +133,11 @@ describe("parseXlsxToSheets", () => {
     // had not been wired — so "MARY MAGDALENE&apos;S FATHER" would have been
     // filed as a different person from the "MARY MAGDALENE'S FATHER" already
     // in the roster, quietly doubling the cast.
+    //
+    // The escaping below is SINGLE, matching the real workbook: it contains
+    // `&apos;` 148 times and `&amp;apos;` not once (counted 2026-08-20). This
+    // fixture double-escaped until then, and passed only because the decoder
+    // it was written against unwrapped entities twice — two bugs agreeing.
     const zip = new JSZip()
     zip.file("xl/workbook.xml", `
       <workbook xmlns:r="relationships"><sheets>
@@ -134,12 +148,53 @@ describe("parseXlsxToSheets", () => {
     zip.file("xl/worksheets/sheet1.xml", `
       <worksheet><sheetData>
         <row r="1"><c r="A1" t="str"><v>Character</v></c><c r="B1" t="str"><v>Translation</v></c></row>
-        <row r="2"><c r="A2" t="str"><v>MARY MAGDALENE&amp;apos;S FATHER</v></c><c r="B2" t="str"><v>I can&amp;apos;t sleep.</v></c></row>
+        <row r="2"><c r="A2" t="str"><v>MARY MAGDALENE&apos;S FATHER</v></c><c r="B2" t="str"><v>I can&apos;t sleep.</v></c></row>
       </sheetData></worksheet>`)
     const bytes = await zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" })
 
     const [sheet] = await parseXlsxToSheets(bytes)
     expect(sheet.rows[1]).toEqual(["MARY MAGDALENE'S FATHER", "I can't sleep."])
+  })
+
+  it("does not decode an entity twice, so text that IS an entity survives", async () => {
+    // The other side of the coin, and the bug this pair of tests now pins from
+    // both directions: `&amp;apos;` in the file means the cell's real text is
+    // the six characters `&apos;`. Decoding `&amp;` before the named entities
+    // turned that into an apostrophe — the reader rewriting the client's own
+    // words, with nothing to announce it.
+    const zip = new JSZip()
+    zip.file("xl/workbook.xml", `
+      <workbook xmlns:r="relationships"><sheets>
+        <sheet name="Notes" sheetId="1" r:id="rId1"/>
+      </sheets></workbook>`)
+    zip.file("xl/_rels/workbook.xml.rels", `
+      <Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>`)
+    zip.file("xl/worksheets/sheet1.xml", `
+      <worksheet><sheetData>
+        <row r="1"><c r="A1" t="str"><v>write &amp;apos; for an apostrophe</v></c></row>
+      </sheetData></worksheet>`)
+    const bytes = await zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" })
+    const [sheet] = await parseXlsxToSheets(bytes)
+    expect(sheet.rows[0]).toEqual(["write &apos; for an apostrophe"])
+  })
+
+  it("decodes a numeric character reference, which is how a CR survives", async () => {
+    // Our own writer emits `&#13;`, because a literal carriage return is
+    // normalised to a line feed by any conforming parser.
+    const zip = new JSZip()
+    zip.file("xl/workbook.xml", `
+      <workbook xmlns:r="relationships"><sheets>
+        <sheet name="Notes" sheetId="1" r:id="rId1"/>
+      </sheets></workbook>`)
+    zip.file("xl/_rels/workbook.xml.rels", `
+      <Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>`)
+    zip.file("xl/worksheets/sheet1.xml", `
+      <worksheet><sheetData>
+        <row r="1"><c r="A1" t="str"><v>first&#13;&#10;second</v></c><c r="B1" t="str"><v>&#x41;</v></c></row>
+      </sheetData></worksheet>`)
+    const bytes = await zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" })
+    const [sheet] = await parseXlsxToSheets(bytes)
+    expect(sheet.rows[0]).toEqual(["first\r\nsecond", "A"])
   })
 
   it("reads a <t> that carries attributes", async () => {

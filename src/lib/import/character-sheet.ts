@@ -28,9 +28,13 @@
 // by default. If that ever stops being true, this needs revisiting.
 
 import { splitCastName } from "@/lib/parsers/spreadsheet"
+import type { CameraState } from "@/lib/sync/cells-read-types"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
 
-export type CameraState = "on" | "mixed" | "off"
+// Re-exported rather than redeclared: this file used to carry its own copy of
+// the union, which meant widening it for `group` (2026-08-20) would have left
+// the import path three values behind the rest of the app.
+export type { CameraState }
 
 /**
  * How close a row's timestamp must be to a cell's start to be the same line.
@@ -57,6 +61,19 @@ export interface CharacterSheetColumns {
    *  matched to cues by wording instead of by timestamp — see
    *  `audio-character-sheet.ts`. Null on the subtitle sheet, which has none. */
   text: number | null
+  /**
+   * The client's OWN line numbering, when the sheet carries it.
+   *
+   * Her audio sheet does, under `Line #`, and it is production numbering
+   * rather than a row count: episode 101 runs 10 to 710 across 548 rows, with
+   * 86 gaps where lines were cut. Nothing about it is derivable, so an export
+   * that does not store it renumbers every line in the file — which is what
+   * Sam found in the first real corrected workbook (2026-08-20).
+   *
+   * Null on the subtitle sheet: its `ID` column is a contiguous 1..650, which
+   * a positional counter already reproduces exactly (measured).
+   */
+  lineNumber: number | null
 }
 
 const HEADER_PATTERNS: { key: keyof CharacterSheetColumns; test: RegExp }[] = [
@@ -65,6 +82,10 @@ const HEADER_PATTERNS: { key: keyof CharacterSheetColumns; test: RegExp }[] = [
   { key: "start", test: /^(start|start[_ ]?time|begin|in)$/i },
   { key: "range", test: /^(timestamp|time[_ ]?stamp|timecode|range|cue)$/i },
   { key: "text", test: /^(translation|text|line|dialogue|dialog|source)$/i },
+  // AFTER `text` on purpose. That pattern is anchored `^line$`, so the two
+  // cannot both match one header — but a sheet headed plainly `Line` should
+  // keep meaning the words, which is what it has always meant here.
+  { key: "lineNumber", test: /^(line\s*#|line\s*(no\.?|num(ber)?)|#)$/i },
 ]
 
 /**
@@ -91,6 +112,7 @@ export function guessCharacterColumns(header: readonly string[]): CharacterSheet
     start: found.start ?? null,
     range: found.range ?? null,
     text: found.text ?? null,
+    lineNumber: found.lineNumber ?? null,
   }
 }
 
@@ -98,9 +120,11 @@ const CAMERA_WORDS: Record<string, CameraState> = {
   on: "on",
   off: "off",
   mixed: "mixed",
-  // A group shot is a mixed lip-sync constraint — the same mapping
-  // `splitCastName` already makes for the embedded form.
-  group: "mixed",
+  // Its own state since 2026-08-20, not folded into `mixed` — the client's
+  // sheets distinguish a group shot from a mixed one, and collapsing them here
+  // meant a corrected workbook could never write `Group` back. Same change as
+  // `splitCastName` makes for the embedded form.
+  group: "group",
 }
 
 /** Seconds from `HH:MM:SS.mmm`, `MM:SS.mmm`, or a bare number. */
@@ -131,6 +155,17 @@ export interface CharacterRow {
   startSec: number | undefined
   /** The line's own words when the sheet carries them; "" when it does not. */
   text: string
+  /**
+   * The client's own line number for this row, verbatim and untrimmed of
+   * meaning — a string, because it is an identifier rather than a quantity and
+   * a value like `10a` must survive. Undefined when the sheet has no such
+   * column, or when this row's cell is blank.
+   *
+   * NOT `rowNumber`, which is this reader's own positional counter and exists
+   * to be cited in an error message. They are different numbers on every row
+   * of the real file.
+   */
+  lineNumber: string | undefined
 }
 
 /**
@@ -170,6 +205,8 @@ export function readCharacterRows(
       cameraDisagrees: Boolean(fromColumn && embedded && fromColumn !== embedded),
       startSec,
       text: cols.text == null ? "" : (row[cols.text] ?? "").trim(),
+      lineNumber:
+        cols.lineNumber == null ? undefined : (row[cols.lineNumber] ?? "").trim() || undefined,
     })
   })
   return out
@@ -188,6 +225,9 @@ export interface CharacterAssignment {
   castName: string
   cameraState: CameraState | undefined
   rowNumber: number
+  /** The client's own line number for this row, when her sheet had the column.
+   *  Stored on the cell so an export can hand her numbering back. */
+  lineNumber?: string
 }
 
 export interface CharacterAssignmentPlan {
@@ -268,6 +308,7 @@ export function planCharacterAssignments({
       castName: row.castName,
       cameraState: row.cameraState,
       rowNumber: row.rowNumber,
+      ...(row.lineNumber ? { lineNumber: row.lineNumber } : {}),
     })
   }
 
@@ -319,6 +360,7 @@ export function planCharacterAssignments({
         castName: row.castName,
         cameraState: row.cameraState,
         rowNumber,
+        ...(row.lineNumber ? { lineNumber: row.lineNumber } : {}),
       })
       filledByPosition++
     }

@@ -102,7 +102,7 @@ const castNameOf = (cell: ComparableCell | undefined): string =>
  */
 const normalizeName = (raw: string): string =>
   raw
-    .replace(/ /g, " ")
+    .replace(/\u00a0/g, " ")
     .replace(/\s+/g, " ")
     .trim()
     .replace(/\.+$/, "")
@@ -115,9 +115,40 @@ const normalizeName = (raw: string): string =>
 const nameFingerprint = (raw: string): string =>
   normalizeName(raw).replace(/[^A-Z0-9]/g, "")
 
-/** `on` or `off` — an answer that can contradict another answer. `mixed` and
- *  absence cannot. */
-const isSpecific = (s: CameraState | undefined): boolean => s === "on" || s === "off"
+/**
+ * Which camera values count as an ANSWER, i.e. something able to contradict
+ * another answer.
+ *
+ * `on` and `off` always do. `mixed` and `group` do not, by default: both mean
+ * "several, or not one answer", and a subtitle row spanning three heard lines
+ * is genuinely mixed while each of those lines is individually on or off.
+ * Absence never does — a sheet with no camera column would otherwise
+ * contradict every row of one that has it, which is a gap, not a finding.
+ *
+ * MEASURED. Without the `mixed` carve-out the real episode-101 pair reports
+ * 189 camera disagreements, essentially all of them a coarse `mixed` on the
+ * subtitle side against the precise state the audio sheet knows. Burying six
+ * real findings under those would have made the feature worthless on its first
+ * run.
+ *
+ * `strict` opens either carve-out back up (Sam, 2026-08-20), because the
+ * judgement is the client's rather than ours: her sheets may well have a run
+ * where `mixed` against `on` is a real error somebody should look at. It is
+ * offered as two switches in the drawer, both off, so the default view stays
+ * the six findings rather than the hundred and eighty-nine.
+ */
+export interface StrictCameraOptions {
+  /** Treat `mixed` as a real answer that can contradict `on`/`off`/`group`. */
+  mixed?: boolean
+  /** Treat `group` as one. */
+  group?: boolean
+}
+
+const isSpecific = (s: CameraState | undefined, strict?: StrictCameraOptions): boolean =>
+  s === "on" ||
+  s === "off" ||
+  (s === "mixed" && strict?.mixed === true) ||
+  (s === "group" && strict?.group === true)
 
 export interface CompareCharacterSourcesArgs {
   /** The audio-cue cells. */
@@ -127,6 +158,9 @@ export interface CompareCharacterSourcesArgs {
   links: CueLinkIndex
   /** What has already been decided, from the project settings blob. */
   resolutions?: Record<string, CharacterResolution>
+  /** Opt-in strictness for the two vague camera values. Default: both off, so
+   *  neither `mixed` nor `group` can contradict anything. */
+  strictCamera?: StrictCameraOptions
 }
 
 export interface CharacterAgreement {
@@ -160,6 +194,7 @@ export function compareCharacterSources({
   textCells,
   links,
   resolutions,
+  strictCamera,
 }: CompareCharacterSourcesArgs): CharacterAgreement {
   const textById = new Map(textCells.map((c) => [c.id, c]))
   const open: CharacterDisagreement[] = []
@@ -188,22 +223,11 @@ export function compareCharacterSources({
         : !sameName
           ? "naming"
           : null
-      const cameraDiffers = // Both sides must actually HAVE a state, and both must be SPECIFIC.
-            //
-            // A sheet with no camera column would otherwise contradict every
-            // row of one that has it — an absence, not a finding. And "mixed"
-            // means "several, or not one answer", which cannot contradict
-            // anything: a subtitle row spanning three heard lines is genuinely
-            // mixed while each of those lines is individually on or off.
-            //
-            // MEASURED. Without this the real episode-101 pair reports 189
-            // camera disagreements, essentially all of them a coarse "mixed"
-            // on the subtitle side against the precise state the audio sheet
-            // knows. That is the two sheets working correctly, and burying six
-            // real findings under it would have made the feature worthless on
-            // its first run.
-        isSpecific(cue.cameraState) &&
-        isSpecific(text?.cameraState) &&
+      // Both sides must actually HAVE a state, and both must count as an
+      // answer under the current strictness. See `isSpecific`.
+      const cameraDiffers =
+        isSpecific(cue.cameraState, strictCamera) &&
+        isSpecific(text?.cameraState, strictCamera) &&
         cue.cameraState !== text?.cameraState
 
       const key = resolutionKey(textCellId, cue.id)

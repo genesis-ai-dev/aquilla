@@ -1602,6 +1602,36 @@ case 'cell.audio.attach': {
             .bind(event.projectId, event.fileId, event.cellId),
         )
       }
+      // AQU-646: the client's own line number for this row, merged into the
+      // same JSONB bucket as cast_name. A SEPARATE statement rather than one
+      // combined jsonb_build_object, because the two fields arrive
+      // independently — an import that has a name but no line number must not
+      // write a null over an existing one, and per-key merges commute, so a
+      // concurrent cast.assign cannot clobber this either.
+      if (p.lineNumber !== undefined && p.lineNumber !== null) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells
+               SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('line_number', ?::text)
+               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+            )
+            .bind(p.lineNumber, event.projectId, event.fileId, event.cellId),
+        )
+      } else if (p.lineNumber === null) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells
+               SET metadata = CASE
+                 WHEN metadata IS NULL THEN NULL
+                 ELSE metadata - 'line_number'
+               END
+               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+            )
+            .bind(event.projectId, event.fileId, event.cellId),
+        )
+      }
       // AQU-439: optionally update camera_state when the payload carries it.
       // Null clears the column; undefined = not provided = no-op.
       if (p.cameraState !== undefined) {

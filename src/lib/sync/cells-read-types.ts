@@ -108,8 +108,21 @@ export interface CellRow {
 /** Primary content kind of a segment. */
 export type SegmentMedium = "text" | "media"
 
-/** Camera state for a media segment (Wendi's lip-sync constraint). */
-export type CameraState = "on" | "mixed" | "off"
+/**
+ * Camera state for a media segment (Wendi's lip-sync constraint).
+ *
+ * `group` is the fourth value and the newest (AQU-646, 2026-08-20). The client
+ * spreadsheets have always used it — a shot with several people in frame — and
+ * both importers used to fold it into `mixed` on the way in, which meant it
+ * could never come back out of an export. Sam, on seeing that in a real
+ * corrected workbook: "If those are separate camera labels, then they need to
+ * remain separate camera labels throughout the project."
+ *
+ * The column behind this is plain TEXT with no constraint, so widening the
+ * union needed no migration — the value was always storable, just never
+ * produced.
+ */
+export type CameraState = "on" | "mixed" | "off" | "group"
 
 /** Pagination response shape. */
 export interface CellsPage {

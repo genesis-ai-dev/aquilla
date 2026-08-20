@@ -27,7 +27,16 @@ import { parseXlsxToSheets } from "@/lib/parsers/spreadsheet"
 const HEADER = ["ID", "Source", "endTime", "startTime", "timeStamp", "Character Label", "VTT_closest", "Camera"]
 // `text` is null: the subtitle sheet carries no copy of the line. Only the
 // AUDIO sheet does, which is what lets that one match by wording.
-const COLS: CharacterSheetColumns = { character: 5, camera: 7, start: 3, range: 4, text: null }
+const COLS: CharacterSheetColumns = {
+  character: 5,
+  camera: 7,
+  start: 3,
+  range: 4,
+  text: null,
+  // Her subtitle sheet's `ID` is a contiguous 1..650 (measured), so a
+  // positional counter already reproduces it — nothing to store.
+  lineNumber: null,
+}
 
 const row = (start: string, character: string, camera = ""): string[] => [
   "1", "text", "", start, `${start} --> 00:00:00.000`, character, "", camera,
@@ -42,6 +51,10 @@ describe("guessCharacterColumns", () => {
     // matches on wording and needs it.
     expect(guessCharacterColumns(HEADER)).toEqual({
       character: 5, camera: 7, start: 3, range: 4, text: 1,
+      // Her subtitle sheet's first column is `ID`, not `Line #` — and it runs a
+      // contiguous 1..650 (measured), which our own counter reproduces exactly.
+      // Nothing to detect, nothing to store.
+      lineNumber: null,
     })
   })
 
@@ -51,7 +64,9 @@ describe("guessCharacterColumns", () => {
 
   it("tolerates the naming a different studio might use", () => {
     const g = guessCharacterColumns(["speaker", "in", "angle"])
-    expect(g).toEqual({ character: 0, camera: 2, start: 1, range: null, text: null })
+    expect(g).toEqual({
+      character: 0, camera: 2, start: 1, range: null, text: null, lineNumber: null,
+    })
   })
 })
 
@@ -73,9 +88,30 @@ describe("reading rows", () => {
     expect(r.cameraDisagrees).toBe(false)
   })
 
-  it("reads Group as mixed — a group shot is a mixed lip-sync constraint", () => {
+  it("keeps Group as Group rather than folding it into mixed", () => {
+    // It folded until 2026-08-20. Her sheets use four camera words and a
+    // corrected workbook has to be able to write all four back (AQU-646).
     const [r] = readCharacterRows([HEADER, row("00:00:22.940", "CROWD", "Group")], COLS)
-    expect(r.cameraState).toBe("mixed")
+    expect(r.cameraState).toBe("group")
+  })
+
+  it("reads her Line # column when the sheet has one", () => {
+    const withLine: CharacterSheetColumns = { ...COLS, lineNumber: 0 }
+    const r = row("00:00:22.940", "JESUS", "On")
+    r[0] = "10"
+    const [read] = readCharacterRows([HEADER, r], withLine)
+    // Her number, and NOT `rowNumber` — that one is this reader's own
+    // positional counter, cited in error messages. On the real file they
+    // differ on every row.
+    expect(read.lineNumber).toBe("10")
+    expect(read.rowNumber).toBe(2)
+  })
+
+  it("leaves the line number undefined when the cell is blank", () => {
+    const withLine: CharacterSheetColumns = { ...COLS, lineNumber: 0 }
+    const r = row("00:00:22.940", "JESUS", "On")
+    r[0] = "   "
+    expect(readCharacterRows([HEADER, r], withLine)[0].lineNumber).toBeUndefined()
   })
 
   it("keeps a blank character as blank rather than inventing a name", () => {
@@ -300,7 +336,9 @@ describe.skipIf(!haveSamples)("against The Chosen episode 101", () => {
     expect(sheet.rows).toHaveLength(651) // 650 data rows + header
 
     const cols = guessCharacterColumns(sheet.rows[0])!
-    expect(cols).toEqual({ character: 5, camera: 7, start: 3, range: 4, text: 1 })
+    expect(cols).toEqual({
+      character: 5, camera: 7, start: 3, range: 4, text: 1, lineNumber: null,
+    })
 
     const rows = readCharacterRows(sheet.rows, cols)
     expect(rows).toHaveLength(650)

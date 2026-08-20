@@ -38,6 +38,10 @@ export interface AudioCharacterAssignment {
   cameraState: CameraState | undefined
   /** The sheet row it came from — what an error message cites. */
   rowNumber: number
+  /** Her own `Line #` for this row, when the sheet carried the column. Stored
+   *  on the cue so a corrected sheet can go back in her numbering rather than
+   *  ours — see `CharacterSheetColumns.lineNumber`. */
+  lineNumber?: string
 }
 
 export interface AudioCharacterPlan {
@@ -152,6 +156,7 @@ export function planAudioCharacterAssignments({
       castName: row.castName,
       cameraState: row.cameraState,
       rowNumber: row.rowNumber,
+      ...(row.lineNumber ? { lineNumber: row.lineNumber } : {}),
     })
   }
 

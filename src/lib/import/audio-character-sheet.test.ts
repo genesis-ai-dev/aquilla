@@ -16,7 +16,14 @@ import { guessCharacterColumns, readCharacterRows, type CharacterSheetColumns } 
 import { parseXlsxToSheets } from "@/lib/parsers/spreadsheet"
 
 const HEADER = ["Line #", "startTime", "endTime", "Character", "Translation", "Camera"]
-const COLS: CharacterSheetColumns = { character: 3, camera: 5, start: 1, range: null, text: 4 }
+const COLS: CharacterSheetColumns = {
+  character: 3,
+  camera: 5,
+  start: 1,
+  range: null,
+  text: 4,
+  lineNumber: 0,
+}
 
 const row = (start: string, character: string, text: string, camera = ""): string[] =>
   ["10", start, "", character, text, camera]
@@ -39,11 +46,41 @@ describe("matching the sheet's rows to the heard lines", () => {
       ],
     })
     expect(p.assignments).toEqual([
-      { cellId: "c1", castName: "LITTLE MARY MAGDALENE", cameraState: "on", rowNumber: 2 },
-      { cellId: "c2", castName: "MARY MAGDALENE'S FATHER", cameraState: "on", rowNumber: 3 },
+      // `lineNumber` is HER `Line #`, carried from column 0 — the fixture rows
+      // all say "10", the number episode 101's audio sheet really starts at.
+      { cellId: "c1", castName: "LITTLE MARY MAGDALENE", cameraState: "on", rowNumber: 2, lineNumber: "10" },
+      { cellId: "c2", castName: "MARY MAGDALENE'S FATHER", cameraState: "on", rowNumber: 3, lineNumber: "10" },
     ])
     expect(p.unmatchedRows).toEqual([])
     expect(p.filledByPosition).toBe(0)
+  })
+
+  it("carries her own Line # through to the assignment", () => {
+    // The number her production uses, not a count of rows. Episode 101's runs
+    // 10 to 710 across 548 lines with 86 gaps in it, so nothing about it can
+    // be derived — an export that does not store it renumbers her whole file.
+    const p = planAudioCharacterAssignments({
+      rows: readCharacterRows(
+        [HEADER, ["47", "00:01:03.209", "", "JESUS (ON)", "Abba?", "ON"]],
+        COLS,
+      ),
+      cues: [cue("c1", 63.272, "Abba?")],
+    })
+    expect(p.assignments[0].lineNumber).toBe("47")
+  })
+
+  it("leaves the line number off entirely when her sheet has no such column", () => {
+    // The subtitle sheet. Undefined rather than a fabricated count, so the
+    // writer can tell "she gave us no number" from "her number is 1".
+    const noLineCol: CharacterSheetColumns = { ...COLS, lineNumber: null }
+    const p = planAudioCharacterAssignments({
+      rows: readCharacterRows(
+        [HEADER, ["47", "00:01:03.209", "", "JESUS (ON)", "Abba?", "ON"]],
+        noLineCol,
+      ),
+      cues: [cue("c1", 63.272, "Abba?")],
+    })
+    expect(p.assignments[0].lineNumber).toBeUndefined()
   })
 
   it("matches on the WORDS, not the clock", () => {
@@ -58,12 +95,12 @@ describe("matching the sheet's rows to the heard lines", () => {
     expect(p.assignments).toHaveLength(1)
   })
 
-  it("reads Group as mixed", () => {
+  it("keeps Group as Group — her fourth camera label, not a flavour of mixed", () => {
     const p = planAudioCharacterAssignments({
       rows: rows(row("00:10:52.626", "STUDENT #1    (Group)", "Rabbi.", "Group")),
       cues: [cue("c1", 653.3, "Rabbi.")],
     })
-    expect(p.assignments[0].cameraState).toBe("mixed")
+    expect(p.assignments[0].cameraState).toBe("group")
   })
 
   it("does not pair two identical lines by their order in the file alone", () => {
@@ -247,6 +284,52 @@ describe.skipIf(!haveSamples)("against The Chosen episode 101", () => {
     // then hold two spellings of one character.
     expect(plan.assignments.some((a) => a.castName.includes("&apos;"))).toBe(false)
     expect(plan.assignments.some((a) => a.castName.includes("'"))).toBe(true)
+  })
+
+  it("carries her real Line # column through, gaps and all", async () => {
+    // THE MEASUREMENT BEHIND THE WHOLE FEATURE. Her numbering runs 10 to 710
+    // across 548 rows, with 86 places where the next number is not the next
+    // one — lines cut somewhere in her production. None of it is derivable,
+    // which is why storing a starting number and counting up (the first idea)
+    // would drift off her file by the second gap.
+    const buf = fs.readFileSync(XLSX)
+    const sheets = await parseXlsxToSheets(
+      buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer,
+    )
+    const cols = guessCharacterColumns(sheets[0].rows[0])!
+    // Detected from her real header text, not from a fixture written to match.
+    expect(cols.lineNumber).toBe(0)
+
+    const rows = readCharacterRows(sheets[0].rows, cols)
+    const numbers = rows.map((r) => Number(r.lineNumber))
+    expect(numbers).toHaveLength(548)
+    expect(numbers[0]).toBe(10)
+    expect(numbers[numbers.length - 1]).toBe(710)
+    expect(numbers.some((n) => Number.isNaN(n))).toBe(false)
+    const gaps = numbers.filter((n, i) => i > 0 && n !== numbers[i - 1] + 1)
+    expect(gaps).toHaveLength(86)
+
+    // And it survives the matcher, which is what puts it on a cue.
+    const plan = planAudioCharacterAssignments({ rows, cues: readCues(VTT) })
+    expect(plan.assignments[0].lineNumber).toBe("10")
+    expect(plan.assignments.every((a) => a.lineNumber !== undefined)).toBe(true)
+  })
+
+  it("reads her Group rows as Group rather than folding them into mixed", async () => {
+    // 7 rows in this workbook, measured. They came back as `Mixed` in the
+    // first corrected sheet Sam exported, which is what started this round.
+    const buf = fs.readFileSync(XLSX)
+    const sheets = await parseXlsxToSheets(
+      buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer,
+    )
+    const cols = guessCharacterColumns(sheets[0].rows[0])!
+    const rows = readCharacterRows(sheets[0].rows, cols)
+    const group = rows.filter((r) => r.cameraState === "group")
+    expect(group).toHaveLength(7)
+    // All four of her camera words survive, and nothing became undefined.
+    expect(new Set(rows.map((r) => r.cameraState))).toEqual(
+      new Set(["on", "off", "mixed", "group"]),
+    )
   })
 
   it("refuses the same workbook against a different episode's cues", async () => {

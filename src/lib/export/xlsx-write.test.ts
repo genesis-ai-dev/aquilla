@@ -382,7 +382,10 @@ describe("text that cannot legally be put in an XML file", () => {
   })
 
   it("keeps the three whitespace controls XML does allow", () => {
-    expect(escapeXml("a\tb\nc\rd")).toBe("a\tb\nc\rd")
+    // Tab and line feed go through as themselves; the carriage return is kept
+    // too, but as a numeric reference — see the round-trip test below for why
+    // writing it literally is not the same as keeping it.
+    expect(escapeXml("a\tb\nc\rd")).toBe("a\tb\nc&#13;d")
   })
 
   it("drops a lone surrogate, which has no UTF-8 form at all", async () => {
@@ -454,5 +457,69 @@ describe("the package itself", () => {
     // A sheetless workbook is not a valid xlsx and our own reader throws on
     // one. Failing here says which side of the pair the mistake is on.
     await expect(buildXlsx([])).rejects.toThrow(/at least one sheet/)
+  })
+})
+
+
+// ── Text that survives being written and read back (2026-08-20) ─────────────
+//
+// Both of these were reported by Sam after the first corrected sheets went
+// out, and both are the same class of fault: the file we wrote was perfectly
+// valid, and the text still changed on the way back. A workbook that quietly
+// edits the client's own words is worse than one that fails to open, because
+// nothing announces it.
+
+describe("text that must come back exactly as it went in", () => {
+  it("keeps a carriage return instead of turning it into a line feed", async () => {
+    // A LITERAL CR is legal in XML content, and every conforming parser
+    // normalises it to a line feed while reading (XML 1.0 §2.11) — so writing
+    // one faithfully still loses it. It has to go out as `&#13;`.
+    const sheets = await roundTrip([
+      { name: "Cast", headers: ["note"], rows: [row("first\r\nsecond")] },
+    ])
+    expect(sheets[0].rows[1]).toEqual(["first\r\nsecond"])
+  })
+
+  it("keeps text that is itself an entity, rather than decoding it twice", async () => {
+    // `&lt;` as four literal characters is written `&amp;lt;`. A reader that
+    // decodes `&amp;` before the rest turns that back into `&lt;` and then
+    // into `<` — the text is now markup, and the cell says something the
+    // client never wrote.
+    const sheets = await roundTrip([
+      { name: "Cast", headers: ["note"], rows: [row("&lt; &amp; &#13; &quot;")] },
+    ])
+    expect(sheets[0].rows[1]).toEqual(["&lt; &amp; &#13; &quot;"])
+  })
+
+  it("keeps a bare ampersand, which is the ordinary case", async () => {
+    const sheets = await roundTrip([
+      { name: "Cast", headers: ["cast_name"], rows: [row("MARY & MARTHA")] },
+    ])
+    expect(sheets[0].rows[1]).toEqual(["MARY & MARTHA"])
+  })
+})
+
+describe("tab names Excel will not open", () => {
+  it("strips apostrophes that are wrapped in spaces", () => {
+    // The first cut stripped before trimming, so the anchors never saw the
+    // quotes and Excel refused the workbook.
+    expect(sanitizeSheetNames(["  'Cast'  "])).toEqual(["Cast"])
+    expect(sanitizeSheetNames(["' Cast '"])).toEqual(["Cast"])
+  })
+
+  it("does not let the length cap put a trailing apostrophe back", () => {
+    // Thirty-one characters lands exactly on the closing quote.
+    const name = `${"A".repeat(30)}'B`
+    const [out] = sanitizeSheetNames([name])
+    expect(out.endsWith("'")).toBe(false)
+    expect(out.length).toBeLessThanOrEqual(31)
+  })
+
+  it("keeps an apostrophe in the middle, which Excel is perfectly happy with", () => {
+    expect(sanitizeSheetNames(["Anna's sheet"])).toEqual(["Anna's sheet"])
+  })
+
+  it("still names a tab that was nothing but quotes and spaces", () => {
+    expect(sanitizeSheetNames(["  ''  "])).toEqual(["Sheet1"])
   })
 })

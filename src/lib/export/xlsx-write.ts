@@ -94,6 +94,25 @@ const FORBIDDEN_TAB_CHARS = /[:\\/?*[\]]/g
 /** Excel's cap. Anything longer is rejected on open, not truncated for you. */
 const MAX_TAB_NAME_LENGTH = 31
 
+/**
+ * Strip the surrounding whitespace and apostrophes Excel refuses on a tab.
+ *
+ * BOTH, REPEATEDLY, and in that order — the first cut stripped apostrophes
+ * before trimming, so ` 'Cast' ` kept both quotes: the anchors in `/^'+|'+$/`
+ * cannot see past the spaces, and by the time `.trim()` ran the strip was
+ * already spent. Alternating until it settles also handles `' Cast '`, where
+ * removing the quotes exposes fresh spaces and removing the spaces exposes
+ * fresh quotes.
+ */
+function tidyTabName(raw: string): string {
+  let out = raw
+  for (;;) {
+    const next = out.trim().replace(/^'+|'+$/g, "")
+    if (next === out) return next
+    out = next
+  }
+}
+
 // ─── Column letters ──────────────────────────────────────────────────────────
 
 /**
@@ -165,6 +184,18 @@ function stripInvalidXmlChars(text: string): string {
  * way back in, so escaping the extra two costs a couple of bytes and buys the
  * guarantee that a sheet tab named `Anna's "final"` cannot terminate the
  * attribute it is sitting in.
+ *
+ * AND A CARRIAGE RETURN, which is the one that does not look like escaping at
+ * all. A literal CR is legal in XML content — `stripInvalidXmlChars` keeps it
+ * deliberately — but XML 1.0 §2.11 requires every conforming parser to
+ * NORMALISE it to a line feed while reading. So a cell whose text contains
+ * `\r\n` was written faithfully and read back as `\n`: the file was right and
+ * the round trip was still lossy, which is the sort of bug that surfaces as
+ * "the line breaks changed" three exports later. Writing `&#13;` survives
+ * normalisation, and the reader decodes numeric references for exactly this.
+ *
+ * The ampersand is replaced FIRST, so the `&` it introduces cannot be
+ * re-escaped by a later pass.
  */
 export function escapeXml(text: string): string {
   return stripInvalidXmlChars(text)
@@ -173,6 +204,7 @@ export function escapeXml(text: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;")
+    .replace(/\r/g, "&#13;")
 }
 
 // ─── Sheet tab names ─────────────────────────────────────────────────────────
@@ -196,18 +228,19 @@ export function escapeXml(text: string): string {
 export function sanitizeSheetNames(names: string[]): string[] {
   const taken = new Set<string>()
   return names.map((raw, index) => {
-    let base = stripInvalidXmlChars(raw)
-      .replace(FORBIDDEN_TAB_CHARS, "_")
-      .replace(/^'+|'+$/g, "")
-      .trim()
+    let base = tidyTabName(stripInvalidXmlChars(raw).replace(FORBIDDEN_TAB_CHARS, "_"))
     if (!base) base = `Sheet${index + 1}`
-    base = base.slice(0, MAX_TAB_NAME_LENGTH).trimEnd()
+    // Trimmed AGAIN after the cap: truncating at thirty-one characters can put
+    // the cut right after an apostrophe and hand back the trailing quote the
+    // first pass removed.
+    base = tidyTabName(base.slice(0, MAX_TAB_NAME_LENGTH))
+    if (!base) base = `Sheet${index + 1}`
 
     let candidate = base
     let attempt = 2
     while (taken.has(candidate.toLowerCase())) {
       const suffix = ` (${attempt})`
-      candidate = `${base.slice(0, MAX_TAB_NAME_LENGTH - suffix.length).trimEnd()}${suffix}`
+      candidate = `${tidyTabName(base.slice(0, MAX_TAB_NAME_LENGTH - suffix.length))}${suffix}`
       attempt += 1
     }
     taken.add(candidate.toLowerCase())

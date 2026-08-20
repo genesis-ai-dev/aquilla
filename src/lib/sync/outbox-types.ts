@@ -15,6 +15,8 @@
  *    pin onto the source row's `event_id` as observed at commit time.
  */
 
+import type { CameraState } from "@/lib/sync/cells-read-types"
+
 // ── Kind union (must mirror sync-worker/src/events/types.ts) ──────────────
 
 export type OutboxEventKind =
@@ -421,7 +423,14 @@ export interface OutboxEventPayloads {
      * AQU-439: Optional camera-angle override. When present, the projection
      * also updates cells.camera_state. Omitted when no angle was supplied.
      */
-    cameraState?: "on" | "mixed" | "off" | null
+    cameraState?: CameraState | null
+    /**
+     * AQU-646: the client's own line number for this row, from her character
+     * sheet's `Line #` column. The projection merges it into cells.metadata as
+     * { line_number: value } beside cast_name. Omitted when her sheet had no
+     * such column.
+     */
+    lineNumber?: string | null
   }
 
   // Timeline editor: retime a cell (move/stretch). cellId is on the envelope.

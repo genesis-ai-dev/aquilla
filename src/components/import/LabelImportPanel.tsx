@@ -44,6 +44,7 @@ import {
 import { fetchAllFileCells } from "@/lib/sync/cells-read"
 import { generateLabelTemplate, parseCsvRows, splitCastName } from "@/lib/parsers/spreadsheet"
 import { emitCastAssign } from "@/lib/sync/events-emit"
+import type { CameraState } from "@/lib/sync/cells-read-types"
 import { decodeImportText, MAX_UNKNOWN_TEXT_BYTES } from "@/lib/import/ai-recipe"
 
 /** Outcome of an apply run, surfaced by the host as a result notice after the
@@ -92,7 +93,7 @@ export function LabelImportPanel({
     ref: string
     castName: string
     /** AQU-439: camera angle extracted from the cast_name string, or undefined */
-    cameraState: "on" | "mixed" | "off" | undefined
+    cameraState: CameraState | undefined
   }[] | null>(null)
   const [pendingFile, setPendingFile] = useState<File | null>(null)
 
@@ -180,7 +181,7 @@ export function LabelImportPanel({
       const castCol = lc.indexOf("cast_name") !== -1 ? lc.indexOf("cast_name") : 1
 
       const dataRows = hasHeader ? rows.slice(1) : rows
-      const entries: { ref: string; castName: string; cameraState: "on" | "mixed" | "off" | undefined }[] = []
+      const entries: { ref: string; castName: string; cameraState: CameraState | undefined }[] = []
       for (const row of dataRows) {
         const ref = (row[refCol] ?? "").trim()
         const rawCast = (row[castCol] ?? "").trim()

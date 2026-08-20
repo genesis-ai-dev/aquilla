@@ -20,7 +20,7 @@ import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
-import { Page, EmptyState, TableEmptyState } from "@/components/ui/page"
+import { Page, EmptyState, NotFoundIcon, TableEmptyState } from "@/components/ui/page"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -154,6 +154,8 @@ export function TeamDetail() {
     try {
       const t = await getTeam(jwt, activeOrgId, groupIdNum)
       setTeam(t)
+    } catch {
+      setTeam(null)
     } finally {
       setLoading(false)
     }
@@ -464,6 +466,7 @@ export function TeamDetail() {
               </>
             ) : team == null ? (
               <EmptyState
+                icon={NotFoundIcon}
                 title={t("org.teamDetail.notFoundTitle")}
                 description={t("org.teamDetail.notFoundDescription")}
               />

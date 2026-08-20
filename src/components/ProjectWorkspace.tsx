@@ -10,6 +10,7 @@ import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
 import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
 import { WorkspaceSkeleton } from "./WorkspaceSkeleton"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
+import { EmptyState, NotFoundIcon } from "@/components/ui/empty"
 import { TabStrip } from "./TabStrip"
 import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs"
 import { clearLastLocation, readLastLocation, writeLastLocation } from "@/lib/frontier/last-location-store"
@@ -5699,16 +5700,21 @@ export function ProjectWorkspace() {
   }
   if (status === "not-found" || !project) {
     return (
-      <div className="p-8 text-muted-foreground">
-        <RichMessage
-          k="workspace.status.notFound"
-          values={{
-            backLink: (
-              <button className="underline" onClick={goToProjects}>
-                {t("workspace.backToDashboard")}
-              </button>
-            ),
-          }}
+      <div className="p-8">
+        <EmptyState
+          icon={NotFoundIcon}
+          title={
+            <RichMessage
+              k="workspace.status.notFound"
+              values={{
+                backLink: (
+                  <button className="underline" onClick={goToProjects}>
+                    {t("workspace.backToDashboard")}
+                  </button>
+                ),
+              }}
+            />
+          }
         />
       </div>
     )

@@ -13,10 +13,12 @@
  */
 import type { ReactNode } from "react"
 import { Link, Navigate, Outlet, useLocation, useParams } from "react-router-dom"
+import { AlertTriangle } from "lucide-react"
 import { useActiveOrg } from "@/context/OrgContext"
 import { orgKeyFromParam, ALL_ORGS_PARAM, orgHomePath, orgProjectsPath, parseOrgPath } from "@/lib/navigation/org-paths"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { Button } from "@/components/ui/button"
+import { NotFoundIcon } from "@/components/ui/empty"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -90,6 +92,13 @@ function OrgAccessProblem({
   return (
     <OrgGateChrome>
       <div className="flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <div className="text-muted-foreground">
+          {reason === "error" ? (
+            <AlertTriangle className="h-10 w-10" aria-hidden />
+          ) : (
+            <NotFoundIcon className="h-10 w-10" aria-hidden />
+          )}
+        </div>
         <div className="space-y-2">
           <h1 className="text-lg font-medium">{title}</h1>
           <p className="max-w-md text-sm text-muted-foreground">{body}</p>

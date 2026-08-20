@@ -1,7 +1,15 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
+import { SearchX } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+
+/**
+ * Canonical Lucide glyph for resource/page not-found states (team, org, project,
+ * unmatched route). SearchX reads as "we looked; it isn't here" — distinct from
+ * Search (no matches) and AlertTriangle (something broke).
+ */
+const NotFoundIcon = SearchX
 
 const emptyStateVariants = cva("", {
   variants: {
@@ -185,5 +193,6 @@ export {
   EmptyContent,
   EmptyMedia,
   EmptyState,
+  NotFoundIcon,
   TableEmptyState,
 }

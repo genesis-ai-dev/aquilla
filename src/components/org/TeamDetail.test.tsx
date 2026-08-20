@@ -336,3 +336,12 @@ describe("TeamDetail member role editing (AQU-139)", () => {
     expect(screen.queryByRole("menuitem", { name: /change role/i })).toBeNull()
   })
 })
+
+describe("TeamDetail not found", () => {
+  it("shows the shared SearchX icon when the team cannot be loaded", async () => {
+    getTeam.mockRejectedValue(new Error("not found"))
+    renderDetail()
+    await waitFor(() => expect(screen.getByText("Team not found.")).toBeInTheDocument())
+    expect(document.querySelector("svg.lucide-search-x")).toBeTruthy()
+  })
+})

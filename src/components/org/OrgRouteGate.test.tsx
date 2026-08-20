@@ -98,6 +98,7 @@ describe("OrgRouteGate (AQU-790 guest orgs)", () => {
     orgContext.accessibleProjectsLoading = false
     renderGate("/orgs/999")
     expect(screen.getByText("Organization not found")).toBeInTheDocument()
+    expect(document.querySelector("svg.lucide-search-x")).toBeTruthy()
   })
 
   it("keeps the account switcher on not-found so a cross-tab account switch is visible (FRO-367)", () => {

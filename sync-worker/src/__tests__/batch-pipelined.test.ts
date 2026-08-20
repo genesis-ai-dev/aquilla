@@ -35,4 +35,34 @@ describe("batchPipelined", () => {
     const rows = await t.rows<{ id: number }>("_bp")
     expect(rows).toEqual([]) // neither row persisted
   })
+
+  // The pipelined dispatch runs first-of-signature statements alone and the
+  // rest in concurrent waves of ≤100 — this pins that statements still execute
+  // in exact array order ACROSS those boundaries, and that results[i] belongs
+  // to stmts[i]. Each step RETURNINGs the running value, so any reorder or
+  // index mixup changes an assertion, not just the final sum.
+  it("preserves order and result indexing across signature warm-ups and wave boundaries", async () => {
+    await t.db.exec("CREATE TABLE _bp_seq (id int primary key, v int)")
+    await t.db.exec("INSERT INTO _bp_seq (id, v) VALUES (1, 1)")
+
+    const add = "UPDATE _bp_seq SET v = v + ? WHERE id = ? RETURNING v"
+    // Modular so ~30 doublings can't overflow int4; still order-sensitive.
+    const mul = "UPDATE _bp_seq SET v = (v * ?) % 1000003 WHERE id = ? RETURNING v"
+    const stmts = []
+    const expected: number[] = []
+    let v = 1
+    for (let i = 0; i < 230; i++) {
+      // Sprinkle the second signature so waves break and resume mid-run.
+      const isMul = i % 7 === 3
+      stmts.push(t.db.prepare(isMul ? mul : add).bind(isMul ? 2 : 1, 1))
+      v = isMul ? (v * 2) % 1000003 : v + 1
+      expected.push(v)
+    }
+
+    const results = await t.db.batchPipelined!<{ v: number }>(stmts)
+    expect(results).toHaveLength(230)
+    expect(results.map((r) => Number(r.results[0].v))).toEqual(expected)
+    const rows = await t.rows<{ v: number }>("_bp_seq")
+    expect(Number(rows[0].v)).toBe(v)
+  })
 })

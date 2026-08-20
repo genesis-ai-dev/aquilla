@@ -94,6 +94,17 @@ export interface ProjectReportData {
   projectName: string
   files: ReportFileSection[]
   nameVariants: NameVariantGroup[]
+  /**
+   * Episodes the run could not open, and why.
+   *
+   * IN THE DOCUMENT, not only in the toast that appears while it downloads.
+   * The orchestrator has always collected these, but until 2026-08-20 the
+   * report itself never mentioned them — so a project where two episodes were
+   * unreadable produced a clean-looking certificate covering the other three,
+   * with nothing on the page to say the other two had been skipped. A file
+   * missing from a health report reads as a file with nothing wrong.
+   */
+  unreadable?: { fileName: string; reason: string }[]
 }
 
 // ─── One file ────────────────────────────────────────────────────────────────
@@ -364,8 +375,8 @@ function disagreementsHtml(characters: ReportFileSection["characters"]): string 
   }
   if (characters.sharedRows > 0) {
     notes.push(
-      `${plural(characters.sharedRows, "subtitle row serves", "subtitle rows serve")} several heard lines, ` +
-        "so one name cannot be right about all of them — counted here, not offered as work.",
+      `Nothing to fix on ${plural(characters.sharedRows, "pairing", "pairings")}: ` +
+        "the subtitle row covers several heard lines, so no single name can describe them all.",
     )
   }
   const note = notes.length > 0 ? `<p class="note">${esc(notes.join(" "))}</p>` : ""
@@ -542,6 +553,30 @@ function nameVariantsHtml(groups: readonly NameVariantGroup[]): string {
   )
 }
 
+/**
+ * The episodes this report could NOT look at.
+ *
+ * Directly under the summary and above the per-file sections, because it
+ * qualifies every number in the summary: "3 files checked" means something
+ * different when a fourth could not be opened. Absent entirely when the run
+ * read everything — a permanent "0 unreadable" line is noise, and this is a
+ * finding rather than a statistic.
+ */
+function unreadableHtml(unreadable: { fileName: string; reason: string }[]): string {
+  if (unreadable.length === 0) return ""
+  const rows = unreadable
+    .map((f) => `<tr><td>${esc(f.fileName)}</td><td>${esc(f.reason)}</td></tr>`)
+    .join("")
+  return (
+    `<section>` +
+    `<h2>Not checked</h2>` +
+    `<p class="flag">${plural(unreadable.length, "file could not be read", "files could not be read")}, ` +
+    `so nothing below covers ${unreadable.length === 1 ? "it" : "them"}.</p>` +
+    `<table><thead><tr><th>File</th><th>Reason</th></tr></thead><tbody>${rows}</tbody></table>` +
+    `</section>`
+  )
+}
+
 function summaryHtml(data: ProjectReportData): string {
   let open = 0
   let orphans = 0
@@ -652,6 +687,7 @@ export function renderProjectReport(data: ProjectReportData): string {
 <h1>${esc(data.projectName)}</h1>
 <p class="lede">Consistency report</p>
 ${summaryHtml(data)}
+${unreadableHtml(data.unreadable ?? [])}
 ${data.files.map(fileSectionHtml).join("\n")}
 ${nameVariantsHtml(data.nameVariants)}
 </main>

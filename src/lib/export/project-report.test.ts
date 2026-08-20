@@ -146,6 +146,41 @@ describe("what a file's section says about recording progress", () => {
     expect(section.progress).toMatchObject({ recorded: 1, missing: 1, untimed: 0 })
   })
 
+  it("does not report a character called Narrator for the lines nobody cast", () => {
+    // What Sam saw on the first real report. `resolveCastVoice` falls back to
+    // the project's built-in Narrator for any cell with no assignment, so every
+    // unlabeled line collected under a row reading "Narrator" — in a document
+    // about who says what, that is a casting decision nobody made.
+    const bare = (id: string): CellData =>
+      cell({ id, startTime: 1, endTime: 2, ...take(id) })
+    const section = buildFileSection(
+      input({ textCells: [], cueCells: [bare("c1"), bare("c2")] }),
+    )
+    const names = section.progress.characters.map((c) => c.name)
+    expect(names).not.toContain("Narrator")
+    expect(names).toContain("(no character assigned)")
+    // One row for all of them, and the counts still add up.
+    expect(section.progress.characters).toHaveLength(1)
+    expect(section.progress.recorded).toBe(2)
+  })
+
+  it("puts the uncast lines after the cast, not among them", () => {
+    const section = buildFileSection(
+      input({
+        textCells: [named("s1", "MARY")],
+        cueCells: [
+          cell({ id: "c0", startTime: 0, endTime: 1, ...take("c0") }),
+          named("c1", "MARY", { startTime: 2, ...take("c1") }),
+        ],
+        links: buildCueLinkIndex([edge("s1", "c1")]),
+      }),
+    )
+    expect(section.progress.characters.map((c) => c.name)).toEqual([
+      "MARY",
+      "(no character assigned)",
+    ])
+  })
+
   it("counts a recording with no start time as untimed, not as done", () => {
     // It exists and it cannot be placed, which is neither "recorded" nor
     // "missing" — and it is the state that silently loses audio in an export.
@@ -591,5 +626,97 @@ describe("the document itself", () => {
     // The agreed camera angle rides along: click the film, see who it is on.
     expect(html).toContain("on camera")
     expect(html).not.toContain("No open disagreements")
+  })
+})
+
+// ── The episodes the report could not open (Sam, 2026-08-20) ────────────────
+//
+// The orchestrator has always collected these, and until now the document
+// never mentioned them — the only trace was a status line in the export
+// dialog, gone the moment it closed. A project where two episodes failed to
+// load produced a clean-looking certificate covering the other three, with
+// nothing on the page to say so. A file missing from a health report reads as
+// a file with nothing wrong.
+
+describe("files the report could not read", () => {
+  const cleanSection = (): ReportFileSection => ({
+    fileId: "f1",
+    fileName: "Episode 101",
+    characters: { open: [], resolvedCount: 0, sharedRows: 0 },
+    progress: { characters: [], recorded: 0, missing: 0, untimed: 0 },
+    pairing: { cues: 0, paired: 0, orphans: [] },
+    timebase: { kind: "unknown", label: "No record of a timing check" },
+  })
+
+  it("names them, and says the rest of the document does not cover them", () => {
+    const html = renderProjectReport({
+      projectName: "The Chosen",
+      files: [cleanSection()],
+      nameVariants: [],
+      unreadable: [
+        { fileName: "episode-207.vtt", reason: "no access to this file" },
+        { fileName: "episode-306.vtt", reason: "network error" },
+      ],
+    })
+    expect(html).toContain("Not checked")
+    expect(html).toContain("episode-207.vtt")
+    expect(html).toContain("no access to this file")
+    expect(html).toContain("episode-306.vtt")
+    expect(html).toMatch(/2 files could not be read/)
+  })
+
+  it("reads as one file in the singular", () => {
+    const html = renderProjectReport({
+      projectName: "The Chosen",
+      files: [cleanSection()],
+      nameVariants: [],
+      unreadable: [{ fileName: "episode-207.vtt", reason: "no access to this file" }],
+    })
+    expect(html).toMatch(/1 file could not be read/)
+    expect(html).toContain("nothing below covers it")
+  })
+
+  it("says nothing at all when every file was read", () => {
+    // The one section that is NOT an always-print one: a permanent
+    // "0 unreadable" line is noise, and this is a finding rather than a
+    // statistic. Everything else in the report states its own all-clear.
+    const html = renderProjectReport({
+      projectName: "The Chosen",
+      files: [cleanSection()],
+      nameVariants: [],
+      unreadable: [],
+    })
+    expect(html).not.toContain("Not checked")
+  })
+
+  it("is absent, not broken, on a report built before the field existed", () => {
+    const html = renderProjectReport({
+      projectName: "The Chosen",
+      files: [cleanSection()],
+      nameVariants: [],
+    })
+    expect(html).not.toContain("Not checked")
+    expect(html.startsWith("<!DOCTYPE html>")).toBe(true)
+  })
+
+  it("escapes a filename rather than letting it reach the page as markup", () => {
+    const html = renderProjectReport({
+      projectName: "The Chosen",
+      files: [cleanSection()],
+      nameVariants: [],
+      unreadable: [{ fileName: "<script>bad</script>.vtt", reason: "gone" }],
+    })
+    expect(html).not.toMatch(/<script/i)
+    expect(html).toContain("&lt;script&gt;")
+  })
+
+  it("sits above the per-file sections, since it qualifies all of them", () => {
+    const html = renderProjectReport({
+      projectName: "The Chosen",
+      files: [cleanSection()],
+      nameVariants: [],
+      unreadable: [{ fileName: "episode-207.vtt", reason: "gone" }],
+    })
+    expect(html.indexOf("Not checked")).toBeLessThan(html.indexOf("Episode 101"))
   })
 })

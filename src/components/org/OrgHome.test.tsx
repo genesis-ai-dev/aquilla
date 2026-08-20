@@ -409,7 +409,9 @@ describe("OrgOverview / OrgProjects", () => {
       expect(document.querySelector('[data-slot="app-shell-header"]')).not.toBeNull()
       expect(screen.queryByTestId("loading-neutral-template")).not.toBeInTheDocument()
       await act(async () => { await Promise.resolve() })
-      expect(addedText.join("\n")).not.toContain("Your organization is ready")
+      // Description is unique to the resolved zero-projects empty state; the
+      // title ("No projects yet") is also the loading-table placeholder.
+      expect(addedText.join("\n")).not.toContain("Create a project to start translating.")
 
       // Keep subsequent refetches empty so the empty-state isn't replaced by default mock data.
       vi.mocked(getPortfolio).mockResolvedValue([])
@@ -417,7 +419,9 @@ describe("OrgOverview / OrgProjects", () => {
       await waitFor(() =>
         expect(screen.queryByRole("status", { name: "Loading projects" })).not.toBeInTheDocument(),
       )
-      expect(screen.getByText("Your organization is ready")).toBeInTheDocument()
+      expect(screen.getByText("No projects yet")).toBeInTheDocument()
+      expect(screen.getByText("Create a project to start translating.")).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "Invite your team" })).not.toBeInTheDocument()
       expect(screen.getByPlaceholderText("Search projects…")).toBeInTheDocument()
     } finally {
       observer.disconnect()

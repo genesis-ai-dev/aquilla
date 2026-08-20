@@ -97,6 +97,8 @@ export const org = defineNamespace({
     "org.orgHome.emptyTitle.attention": "No projects need attention.",
     "org.orgHome.emptyTitle.overdue": "No overdue projects.",
 
+    // Invite-cohort copy; the Projects table no longer uses these. Invite lives
+    // on Overview via OrgSetupChecklist.
     "org.orgHome.readyTitle": "Your organization is ready",
     "org.orgHome.readyDescription":
       "Start a translation project, or bring your team in first — Aquilla is built for people working together.",
@@ -1019,9 +1021,9 @@ export const org = defineNamespace({
     // "Projects" page title → nav.projects (identical text)
     "org.orgProjectsPage.pageDescription":
       "Open a project to edit, or start a new translation workspace.",
-    // "Your organization is ready" → org.orgHome.readyTitle (identical text)
-    // readyDescription → org.orgHome.readyDescription (identical text)
-    // "Invite your team" → org.orgHome.inviteYourTeam (identical text)
+    // Zero-projects empty title → org.orgHome.projectsPanel.emptyTitle
+    // Zero-projects empty description → org.overview.emptyDescription
+    // Invite-a-teammate lives on Overview (OrgSetupChecklist), not this table.
 
     // -- OrgSwitcher: sidebar org-switcher combobox dropdown --
     // "Organizations" group label → org.orgHome.organizations (identical text)

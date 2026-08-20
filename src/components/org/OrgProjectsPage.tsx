@@ -4,7 +4,6 @@ import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
-import { membersPath } from "@/lib/navigation/org-paths"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
@@ -17,7 +16,7 @@ import { useOrgSettings } from "@/hooks/useOrgSettings"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { partitionSharedProjects, toSharedPortfolioRow } from "@/lib/frontier/shared-projects"
 import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
-import { Button, buttonVariants } from "@/components/ui/button"
+import { buttonVariants } from "@/components/ui/button"
 import { Page, PageHeader } from "@/components/ui/page"
 import { cn } from "@/lib/utils"
 import { readProjectLens } from "./OrgHome"
@@ -176,7 +175,7 @@ export function OrgProjectsPage() {
                 noProjects
                   ? isGuestOrg
                     ? t("org.guestOrgHome.emptyTitle", { orgName: guestOrgName })
-                    : t("org.orgHome.readyTitle")
+                    : t("org.orgHome.projectsPanel.emptyTitle")
                   : statusFilter === "stalled"
                     ? t("org.orgHome.emptyTitle.stalled")
                     : statusFilter === "attention"
@@ -189,18 +188,8 @@ export function OrgProjectsPage() {
                 noProjects
                   ? isGuestOrg
                     ? t("org.guestOrgHome.emptyDescription")
-                    : t("org.orgHome.readyDescription")
+                    : t("org.overview.emptyDescription")
                   : undefined
-              }
-              emptyAction={
-                noProjects && !isGuestOrg && activeOrgId != null ? (
-                  <Button
-                    variant="outline"
-                    onClick={() => navigate(membersPath(activeOrgId))}
-                  >
-                    {t("org.orgHome.inviteYourTeam")}
-                  </Button>
-                ) : undefined
               }
             />
           )}

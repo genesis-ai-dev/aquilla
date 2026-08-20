@@ -251,11 +251,18 @@ export interface AnchorRepairArgs {
  * a logged repair the projection still disagrees with can also mean the repair
  * was UNDONE — a later poisoned run (a stale checkout mapping months-old
  * notebooks) re-anchored the cell somewhere broken, and the logged gen-1 id
- * suppresses every re-emission forever. The two are distinguishable: a human
- * reorder anchors to a LIVE cell, while damage leaves the stored anchor
- * pointing at a retracted/never-existing cell, or diverging from an anchor
- * this same pass is resurrecting. Only those provably-broken shapes escalate
- * (same generation scheme as AQU-933 retractions).
+ * suppresses every re-emission forever. The two are distinguishable, and only
+ * provably-damage shapes escalate (same generation scheme as AQU-933):
+ *   - the stored anchor points at a retracted/never-existing cell (no in-app
+ *     reorder can produce a dangling anchor);
+ *   - the intended anchor is a cell this same pass is resurrecting (the
+ *     follower belongs behind the row being restored);
+ *   - the stored anchor was WRITTEN BY THE MIGRATION itself: reanchor event
+ *     ids are deterministic in (cell, anchor), so if any generation of
+ *     `sourceCellReanchorEventId(…, storedAnchor)` is in the log, the stored
+ *     value came from a migration repair (possibly a poisoned run's), never
+ *     from a human — in-app reorders mint server-side ids. Re-aligning it to
+ *     today's chain re-fights nothing a person did.
  */
 export function mapAnchorRepairs(args: AnchorRepairArgs): IngestEvent[] {
   const {
@@ -286,15 +293,22 @@ export function mapAnchorRepairs(args: AnchorRepairArgs): IngestEvent[] {
       id = gen1
     } else {
       // Gen-1 logged yet the projection still disagrees. Escalate ONLY when
-      // the divergence is provably damage, never for a possible human reorder:
-      //  - the stored anchor points outside today's live set (dangling or
-      //    dead target — no in-app reorder can produce that), or
-      //  - the intended anchor is a cell this pass is resurrecting (the
-      //    follower belongs behind the row being restored).
+      // the divergence is provably damage, never for a possible human reorder
+      // (see the doc comment above for the three shapes).
       const storedAnchorDead =
         cell.sourceAnchorCellId != null && !(liveCellIds?.has(cell.sourceAnchorCellId) ?? true)
       const intendedResurrected = intended !== null && (resurrectedCellIds?.has(intended) ?? false)
-      if (!storedAnchorDead && !intendedResurrected) continue
+      const storedGen1 = sourceCellReanchorEventId(
+        projectId, fileId, cell.cellId, cell.sourceAnchorCellId ?? null,
+      )
+      let storedWrittenByMigration = false
+      for (let generation = 1; generation <= MAX_RETRACTION_GENERATION; generation++) {
+        if (existingEventIds.has(escalatedEventId(storedGen1, generation))) {
+          storedWrittenByMigration = true
+          break
+        }
+      }
+      if (!storedAnchorDead && !intendedResurrected && !storedWrittenByMigration) continue
       for (let generation = 2; generation <= MAX_RETRACTION_GENERATION; generation++) {
         const candidate = escalatedEventId(gen1, generation)
         if (!existingEventIds.has(candidate)) {

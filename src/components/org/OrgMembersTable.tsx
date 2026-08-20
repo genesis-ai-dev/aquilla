@@ -363,19 +363,20 @@ export function OrgMembersTable({
           }}
           toolbar={
             <>
-              <Button
-                type="button"
-                variant="outline"
-                className={isOwner ? undefined : "ml-auto shrink-0"}
-                onClick={onAddToProjects}
-                disabled={!canAddToProjects}
-              >
-                <UserPlus className="mr-1.5 size-4" />
-                {t("org.membersPage.orgPage.addToProjectsButton")}
-              </Button>
+              {canAddToProjects ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="ml-auto shrink-0"
+                  onClick={onAddToProjects}
+                >
+                  <UserPlus className="mr-1.5 size-4" />
+                  {t("org.membersPage.orgPage.addToProjectsButton")}
+                </Button>
+              ) : null}
               {isOwner ? (
                 <Button
-                  className="ml-auto shrink-0"
+                  className={canAddToProjects ? "shrink-0" : "ml-auto shrink-0"}
                   onClick={() => setAdding(true)}
                 >
                   {t("org.membersPage.orgTable.addMemberTitle")}

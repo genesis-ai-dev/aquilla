@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { buildCastAdditions, castLikeSpeakers } from "./cast-from-speakers"
+import { buildCastAdditions, buildCastRemovals, castLikeSpeakers } from "./cast-from-speakers"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 
 describe("buildCastAdditions", () => {
@@ -99,5 +99,64 @@ describe("castLikeSpeakers", () => {
     const result = buildCastAdditions(castLikeSpeakers(pairs), { voices: [] }, () => "x")
     expect(result.castAssignments).toEqual({})
     expect(result.voices.every((v) => v.builtIn)).toBe(true)
+  })
+})
+
+// ── Clearing a character sheet (AQU-646, Sam 2026-08-20) ─────────────────
+//
+// "Removing a character sheet would just clear all characters on subtitles or
+// all characters on audio." The cells are emptied by `cast.assign` events; this
+// is the other half — what the project SETTINGS must look like afterwards, and
+// the half that is easy to forget because nothing on screen points at it.
+
+describe("buildCastRemovals", () => {
+  const settings = (): ProjectTtsSettings => ({
+    voices: [
+      { id: "v-mary", name: "Mary", color: "#ec4899" },
+      { id: "v-john", name: "John", color: "#3b82f6" },
+    ],
+    castAssignments: { s1: "v-mary", s2: "v-john", other: "v-mary" },
+    characterResolutions: {
+      "s1 q1": { name: { chose: "subtitle", rejected: "JOHN" }, at: 1 },
+      "s2 q2": { camera: { chose: "audio", rejected: "off" }, at: 2 },
+      "other q9": { name: { chose: "audio", rejected: "MARY" }, at: 3 },
+    },
+  })
+
+  it("drops the cleared cells' voice assignments and leaves every other file's alone", () => {
+    const out = buildCastRemovals(["s1", "s2"], settings())
+    expect(out.castAssignments).toEqual({ other: "v-mary" })
+  })
+
+  it("keeps the cast list exactly as it was, so a re-import restores the same colours", () => {
+    // THE decision, and the reason for it: `buildCastAdditions` matches by name
+    // and reuses the entry it finds, so the roster surviving is what keeps Mary
+    // pink across a clear and a re-import.
+    const before = settings()
+    const out = buildCastRemovals(["s1", "s2", "other"], before) as unknown as Record<string, unknown>
+    expect(out.voices).toBeUndefined() // not ours to touch — saveTts must not receive it
+    expect(before.voices).toEqual([
+      { id: "v-mary", name: "Mary", color: "#ec4899" },
+      { id: "v-john", name: "John", color: "#3b82f6" },
+    ])
+  })
+
+  it("forgets a decision when either side of it was cleared", () => {
+    // The subtitle side of "s1 q1" and the CUE side of "s2 q2" — a resolution
+    // is about two cells disagreeing, so emptying either one ends the argument.
+    const out = buildCastRemovals(["s1", "q2"], settings())
+    expect(Object.keys(out.characterResolutions)).toEqual(["other q9"])
+  })
+
+  it("does not mutate the settings it was handed", () => {
+    const before = settings()
+    buildCastRemovals(["s1"], before)
+    expect(Object.keys(before.castAssignments!)).toEqual(["s1", "s2", "other"])
+    expect(Object.keys(before.characterResolutions!)).toHaveLength(3)
+  })
+
+  it("survives a project that has never had either", () => {
+    const out = buildCastRemovals(["s1"], undefined)
+    expect(out).toEqual({ castAssignments: {}, characterResolutions: {} })
   })
 })

@@ -1,4 +1,4 @@
-import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
+import type { CharacterResolution, ProjectTtsSettings, Voice } from "@/lib/parsers/types"
 import { VOICE_PALETTE, getVoiceLibrary } from "@/lib/audio/voices"
 
 export interface SpeakerAssignment {
@@ -94,4 +94,58 @@ export function buildCastAdditions(
     castAssignments[cellId] = voiceId
   }
   return { voices, castAssignments }
+}
+
+export interface CastRemovals {
+  /** cellId → voiceId, minus every cleared cell. */
+  castAssignments: Record<string, string>
+  /** The drawer's decisions, minus every one that named a cleared cell. */
+  characterResolutions: Record<string, CharacterResolution>
+}
+
+/**
+ * The mirror image of `buildCastAdditions`: what the project settings look like
+ * once a character sheet has been cleared off a file. (AQU-646, 2026-08-20)
+ *
+ * THE VOICE LIBRARY IS DELIBERATELY UNTOUCHED. Sam, choosing between the two
+ * readings of "clear": the roster of people survives, and only their lines lose
+ * their names. That is not just leniency — `buildCastAdditions` matches by name
+ * and reuses the entry it finds, so keeping the roster is what makes clearing a
+ * sheet and re-importing it give every character back the SAME COLOUR. Pruning
+ * the library would repaint the whole cast on every correction round, and would
+ * also throw away voice settings someone had configured against a character.
+ * The cost is cosmetic and momentary: right after a clear the cast list shows
+ * people who currently have no lines.
+ *
+ * The assignments, by contrast, MUST go. `characterIdentity` resolves a cell's
+ * character from `castAssignments` independently of `metadata.cast_name`, so
+ * clearing only the cells would leave both audio exports still grouping lines
+ * under a character whose name is gone from the file — a name that then appears
+ * in a deliverable and nowhere in the app.
+ *
+ * Pure; no I/O.
+ */
+export function buildCastRemovals(
+  cellIds: Iterable<string>,
+  settings: ProjectTtsSettings | undefined,
+): CastRemovals {
+  const cleared = new Set(cellIds)
+
+  const castAssignments: Record<string, string> = {}
+  for (const [cellId, voiceId] of Object.entries(settings?.castAssignments ?? {})) {
+    // Keyed by cell, project-wide: another file's cast must survive this.
+    if (!cleared.has(cellId)) castAssignments[cellId] = voiceId
+  }
+
+  const characterResolutions: Record<string, CharacterResolution> = {}
+  for (const [key, record] of Object.entries(settings?.characterResolutions ?? {})) {
+    // `"<textCellId> <cueCellId>"` — a decision about which of two sheets to
+    // believe means nothing once either side has been emptied, and leaving it
+    // would re-apply a rejected value to a re-import.
+    const [textCellId, cueCellId] = key.split(" ")
+    if (cleared.has(textCellId) || cleared.has(cueCellId)) continue
+    characterResolutions[key] = record
+  }
+
+  return { castAssignments, characterResolutions }
 }

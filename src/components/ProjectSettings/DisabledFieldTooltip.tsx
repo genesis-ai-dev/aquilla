@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 import { ArrowRight, ArrowUpRight } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import {
   Tooltip,
   TooltipContent,
@@ -24,18 +25,24 @@ export function PermissionLockHint({
   href?: string
   linkLabel: string
 }) {
-  const linkClass =
-    "inline-flex items-center gap-0.5 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+  const actionClassName =
+    "-mx-1.5 h-auto px-1.5 py-0.5 has-data-[icon=inline-end]:pe-1.5"
   const link = onView ? (
-    <button type="button" className={linkClass} onClick={onView}>
+    <Button type="button" variant="ghost" size="xs" className={actionClassName} onClick={onView}>
       {linkLabel}
-      <ArrowRight className="size-3" aria-hidden />
-    </button>
+      <ArrowRight data-icon="inline-end" aria-hidden />
+    </Button>
   ) : href ? (
-    <a href={href} target="_blank" rel="noopener noreferrer" className={linkClass}>
+    <Button
+      variant="ghost"
+      size="xs"
+      className={actionClassName}
+      nativeButton={false}
+      render={<a href={href} target="_blank" rel="noopener noreferrer" />}
+    >
       {linkLabel}
-      <ArrowUpRight className="size-3" aria-hidden />
-    </a>
+      <ArrowUpRight data-icon="inline-end" aria-hidden />
+    </Button>
   ) : null
 
   return (
@@ -73,10 +80,10 @@ export function DisabledFieldTooltip({
       </TooltipTrigger>
       <TooltipContent
         side="bottom"
-        align="start"
+        align="center"
         className={cn(
           rich &&
-            "inline-flex max-w-64 flex-col items-start gap-1 px-3 py-2 text-sm",
+            "inline-flex max-w-64 flex-col items-start gap-1 pt-2",
         )}
       >
         {tooltip}

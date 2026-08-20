@@ -36,9 +36,19 @@ describe("DisabledFieldTooltip", () => {
     const trigger = screen.getByRole("button", { name: "Edit" })
     expect(trigger).toBeDisabled()
     await expectTooltip(trigger, /Only Maintainers can modify/)
-    const link = screen.getByRole("link", { name: /learn about permission levels/i })
-    expect(link).toHaveAttribute("href", "https://help.aquilla.app/permissions")
-    expect(link).toHaveAttribute("target", "_blank")
+    const docs = screen.getByRole("button", { name: /learn about permission levels/i })
+    expect(docs).toHaveAttribute("href", "https://help.aquilla.app/permissions")
+    expect(docs).toHaveAttribute("target", "_blank")
+    expect(docs).toHaveAttribute("data-variant", "ghost")
+    expect(docs).toHaveClass("text-xs", "-mx-1.5", "px-1.5")
+    expect(screen.getByRole("tooltip")).toHaveClass("text-xs", "p-2")
+    expect(screen.getByText("Only Maintainers can modify").parentElement).toHaveClass(
+      "items-start",
+    )
+    expect(screen.getByRole("tooltip").closest("[data-align]")).toHaveAttribute(
+      "data-align",
+      "center",
+    )
   })
 
   it("opens the privileged-members modal from View Maintainers, without navigating", async () => {
@@ -59,7 +69,8 @@ describe("DisabledFieldTooltip", () => {
     )
     await expectTooltip(screen.getByRole("button", { name: "Edit" }), /Only Maintainers can modify/)
     const action = screen.getByRole("button", { name: /view maintainers/i })
-    expect(action.tagName).toBe("BUTTON")
+    expect(action).toHaveAttribute("data-variant", "ghost")
+    expect(action).toHaveClass("text-xs", "-mx-1.5", "px-1.5")
     await userEvent.click(action)
     expect(onView).toHaveBeenCalledOnce()
   })

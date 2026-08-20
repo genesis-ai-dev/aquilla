@@ -6,15 +6,17 @@
 // pane's picker whose "Apply to all «name» lines" footer this inherits.
 //
 // Explicit casting renders solid; a line merely falling back to the default/
-// narrator voice renders heavily faded inside a dotted ring so "nobody chose
-// this" is obvious at a glance (Sam, 2026-08-07). A VTT import with speakers
-// writes castAssignments, so imported cues correctly read as explicit.
+// narrator voice renders as an EMPTY dashed ring marked "NC" (Sam, 2026-08-20,
+// replacing the faded-orb-in-a-dotted-ring of 2026-08-07 — showing the
+// fallback voice's face made "nobody chose this" look like a weak choice).
+// A VTT import with speakers writes castAssignments, so imported cues
+// correctly read as explicit.
 
 import { useState } from "react"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { VoiceAvatar } from "./VoiceAvatar"
+import { NoCharacterAvatar, VoiceAvatar } from "./VoiceAvatar"
 import { VoicePickerContent } from "./VoiceCombobox"
 import type { Voice } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -45,14 +47,11 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
       : voice.name
     : t("audio.castGutter.defaultTooltip", { voiceName: voice.name })
   const trigger = (
-    <span
-      className={cn(
-        "grid place-items-center rounded-full",
-        // Fallback: unmistakably "not chosen" — heavy fade + dotted ring.
-        !explicit && "opacity-35 outline-dotted outline-1 outline-offset-1 outline-muted-foreground/60",
-      )}
-    >
-      <VoiceAvatar voice={voice} size={32} />
+    <span className={cn("grid place-items-center rounded-full")}>
+      {/* Nothing is drawn for a line nobody cast — no face, no colour, no
+          initial. The empty dashed ring IS the state; a faded orb read as a
+          weak assignment rather than as none. */}
+      {explicit ? <VoiceAvatar voice={voice} size={32} /> : <NoCharacterAvatar size={32} />}
     </span>
   )
   if (!editable) {

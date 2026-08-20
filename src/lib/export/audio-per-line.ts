@@ -32,10 +32,14 @@ import JSZip from "jszip"
 
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
-import { resolveCastVoice } from "@/lib/audio/voices"
 import { parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { withBwfTimestamp } from "./audio-bwf"
-import { characterKey, type ResolveCharacterName } from "./audio-by-character"
+import {
+  characterFileKey,
+  characterIdentity,
+  characterKey,
+  type ResolveCharacterName,
+} from "./audio-by-character"
 
 /** Sample rate the BWF timestamp is expressed in. The stored WAVs are written
  *  at this rate by the recorder and the offline encoder alike. */
@@ -75,14 +79,15 @@ export function collectPerLineClips(
     if (!audioId) continue
     const url = cell.attachments?.[audioId]?.url
     if (!url) continue
-    const voice = resolveCastVoice(settings, cell.id, cell.ttsSettings?.voiceId)
-    const named = resolveName?.(cell)?.trim() || null
+    // Same identity rule as the per-character export, so the two deliverables
+    // and the preview cannot name the same line three different ways.
+    const identity = characterIdentity(cell, settings, resolveName)
     clips.push({
       cellId: cell.id,
       audioId,
       url,
       lineNumber: line,
-      character: named ?? voice.name,
+      character: identity.name,
       startSec: cell.startTime ?? null,
       endSec: cell.endTime ?? null,
     })
@@ -99,7 +104,7 @@ export function perLineFileName(
 ): string {
   const stem = opts.fileBase ? `${characterKey(opts.fileBase)}_` : ""
   const line = String(clip.lineNumber).padStart(4, "0")
-  return `${stem}${opts.langCode}_L${line}_${characterKey(clip.character)}.${ext}`
+  return `${stem}${opts.langCode}_L${line}_${characterFileKey(clip.character)}.${ext}`
 }
 
 function csvCell(value: string | number | null): string {
@@ -200,7 +205,10 @@ export async function exportAudioPerLine(
         // Untouched audio, one chunk richer. A non-WAV comes back unchanged
         // and travels on the manifest alone.
         bytes = withBwfTimestamp(bytes, {
-          description: `${clip.character} — line ${clip.lineNumber}`,
+          // A hyphen, not an em dash: the bext fields are Latin-1 and the
+          // writer turns anything above 0xFF into "?", so the pretty dash came
+          // out as "NICODEMUS ? line 117" in the delivered files.
+          description: `${clip.character} - line ${clip.lineNumber}`,
           originator: "Aquilla",
           originatorRef: clip.cellId,
           timeReferenceSamples: clip.startSec * BWF_RATE,

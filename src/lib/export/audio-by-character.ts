@@ -27,7 +27,7 @@
 import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
-import { resolveCastVoice } from "@/lib/audio/voices"
+import { assignedCastVoiceId, resolveCastVoice } from "@/lib/audio/voices"
 import { encodeWavPcm16Chunks, quantisePcm16, type Pcm16Chunk } from "@/lib/audio/wav-encode"
 import { parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { TARGET_RATE } from "@/lib/audio/decode-mono"
@@ -83,6 +83,50 @@ function bestAudioId(cell: CellData): string | null {
 }
 
 /**
+ * What to call a line that nobody has cast. (AQU-646, 2026-08-20)
+ *
+ * `resolveCastVoice` falls back to the project's built-in Narrator for any
+ * cell with no assignment, so every unlabeled line used to collect under a
+ * character called **Narrator** — in the export preview, in the project report
+ * Anna files per episode, and in a delivered track named `..._NARRATOR.wav`.
+ * In a document about who says what, that reads as a character somebody cast,
+ * and Sam flagged it on the first real report: there is no Narrator in this
+ * episode.
+ *
+ * The label and the file-name key are separate on purpose. `characterKey()`
+ * would turn the display label into `no_character_assigned`, which is a
+ * mouthful in a folder of forty tracks; `NO_CHARACTER` sorts and reads better
+ * beside `JESUS` and `NICODEMUS`.
+ */
+export const UNNAMED_CHARACTER_LABEL = "(no character assigned)"
+export const UNNAMED_CHARACTER_KEY = "NO_CHARACTER"
+
+/**
+ * The character this line belongs to, and the key that groups it.
+ *
+ * "Nobody has cast this" is decided by the absence of an EXPLICIT assignment,
+ * never by the resolved voice being the Narrator. The Narrator is editable in
+ * place — a project that renames it and genuinely uses it as a character would
+ * otherwise have every one of its lines filed under "no character assigned",
+ * which is the same class of lie in the opposite direction.
+ */
+export function characterIdentity(
+  cell: CellData,
+  settings: ProjectTtsSettings | undefined,
+  resolveName?: ResolveCharacterName,
+): { key: string; name: string; color?: string } {
+  const named = resolveName?.(cell)?.trim() || null
+  if (named) {
+    const voice = resolveCastVoice(settings, cell.id, cell.ttsSettings?.voiceId)
+    return { key: named, name: named, ...(voice.color ? { color: voice.color } : {}) }
+  }
+  const explicit = assignedCastVoiceId(settings, cell.id) ?? cell.ttsSettings?.voiceId
+  if (!explicit) return { key: UNNAMED_CHARACTER_KEY, name: UNNAMED_CHARACTER_LABEL }
+  const voice = resolveCastVoice(settings, cell.id, cell.ttsSettings?.voiceId)
+  return { key: voice.id, name: voice.name, ...(voice.color ? { color: voice.color } : {}) }
+}
+
+/**
  * Who a clip belongs to, named the way the rest of the app names them.
  *
  * WHY THIS IS A PARAMETER. Grouping used to go straight to `resolveCastVoice`,
@@ -109,14 +153,14 @@ export function groupAudioByCharacter(
     if (!audioId) continue
     const attachment = cell.attachments?.[audioId]
     if (!attachment?.url) continue
-    const voice = resolveCastVoice(settings, cell.id, cell.ttsSettings?.voiceId)
-    const named = resolveName?.(cell)?.trim() || null
     // The NAME is the identity when we have one: two cells sharing a character
-    // belong together even if they resolved to different voices.
-    const key = named ?? voice.id
+    // belong together even if they resolved to different voices. A line nobody
+    // cast is its own group — see `characterIdentity`.
+    const identity = characterIdentity(cell, settings, resolveName)
+    const key = identity.key
     let group = byKey.get(key)
     if (!group) {
-      group = { key, name: named ?? voice.name, ...(voice.color ? { color: voice.color } : {}), clips: [] }
+      group = { key, name: identity.name, ...(identity.color ? { color: identity.color } : {}), clips: [] }
       byKey.set(key, group)
       order.push(key)
     }
@@ -165,15 +209,14 @@ export function previewAudioByCharacter(
   const countedClips = new Map<string, Set<string>>()
 
   for (const cell of cells) {
-    const voice = resolveCastVoice(settings, cell.id, cell.ttsSettings?.voiceId)
-    const named = resolveName?.(cell)?.trim() || null
-    const key = named ?? voice.id
+    const identity = characterIdentity(cell, settings, resolveName)
+    const key = identity.key
     let row = byKey.get(key)
     if (!row) {
       row = {
         key,
-        name: named ?? voice.name,
-        ...(voice.color ? { color: voice.color } : {}),
+        name: identity.name,
+        ...(identity.color ? { color: identity.color } : {}),
         clipCount: 0,
         missingCount: 0,
         untimedCount: 0,
@@ -205,7 +248,14 @@ export function previewAudioByCharacter(
     else if (row.totalDurationMs != null) row.totalDurationMs += dur
   }
 
-  return order.map((k) => {
+  // The uncast lines go LAST. They are not a character, so they do not belong
+  // in the middle of a cast list sorted by first appearance — and a reader
+  // scanning for a name should not have to step over them.
+  const ordered = [
+    ...order.filter((k) => k !== UNNAMED_CHARACTER_KEY),
+    ...order.filter((k) => k === UNNAMED_CHARACTER_KEY),
+  ]
+  return ordered.map((k) => {
     const row = byKey.get(k)!
     return { ...row, totalDurationMs: durationsKnown.get(k) ? row.totalDurationMs : null }
   })
@@ -287,6 +337,17 @@ export function placeClips(
 /** Filesystem-safe character key (mirrors codex-editor's sanitization). */
 export function characterKey(name: string): string {
   return name.replace(/[^\w.-]+/g, "_").replace(/^_+|_+$/g, "") || "unnamed"
+}
+
+/**
+ * The file-name segment for a character, given the name shown on screen.
+ *
+ * Only differs from `characterKey` for the uncast lines, whose display label
+ * would otherwise sanitise into `_no_character_assigned_` → a long, ugly
+ * mouthful in a folder of forty tracks. `NO_CHARACTER` reads beside `JESUS`.
+ */
+export function characterFileKey(name: string): string {
+  return name === UNNAMED_CHARACTER_LABEL ? UNNAMED_CHARACTER_KEY : characterKey(name)
 }
 
 export interface ExportAudioArgs {
@@ -383,7 +444,7 @@ export async function exportAudioByCharacter(
     const wav = encodeWavPcm16Chunks([track], TARGET_RATE)
     // codex-editor's naming, plus its disambiguator for same-named cast.
     const stem = args.fileBase ? `${characterKey(args.fileBase)}_` : ""
-    const base = `${stem}${args.langCode}_${characterKey(group.name)}`
+    const base = `${stem}${args.langCode}_${characterFileKey(group.name)}`
     const seen = usedNames.get(base) ?? 0
     usedNames.set(base, seen + 1)
     const name = seen === 0 ? `${base}.wav` : `${base}_${seen + 1}.wav`

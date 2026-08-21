@@ -39,6 +39,7 @@ import {
 } from "@/lib/timeline/lane-timing"
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
+import { DragTimeChip } from "./DragTimeChip"
 import type { TimelineLayout } from "@/lib/timeline/layout"
 import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -467,7 +468,11 @@ function TargetAudioChip({
         zIndex: (drag ? 2000 : selected || hovered ? 1000 : 0) + paintOrder,
       }}
       className={cn(
-        "group/chip absolute flex touch-none select-none items-center justify-center overflow-hidden border",
+        "group/chip absolute flex touch-none select-none items-center justify-center border",
+        // Matt's QA (2026-08-21): the drag readout renders above the chip's
+        // bounds, so overflow can't be hidden mid-drag — same trade the
+        // timeline cards make; the glyphs inside are small enough to hold.
+        drag ? "overflow-visible" : "overflow-hidden",
         // The row's live geometry, or 10-46-10 outside a timeline.
         TL_CHIP_BOX_CLASS,
         chip.item.kind === "take"
@@ -487,6 +492,18 @@ function TargetAudioChip({
         selected && "ring-2 ring-sky-500",
       )}
     >
+      {drag && (
+        // Matt's QA (2026-08-21): a dub-take drag used to show NOTHING — the
+        // tooltip is disabled mid-drag and there was no readout at all. Same
+        // bubble as the timeline cards: a move reads the whole span (sliding
+        // a clip keeps its length), a trim reads the edge being pulled.
+        <DragTimeChip
+          mode={drag.mode}
+          startSec={span.start}
+          endSec={span.end}
+          deltaSec={drag.mode === "resize-r" ? span.end - geom.end : span.start - geom.start}
+        />
+      )}
       {canResize && (
         <span
           aria-hidden

@@ -24,7 +24,7 @@ describe("TimelineTimingRow", () => {
         }}
       />,
     )
-    expect(screen.getByText(/Source: 0:10\.0–0:15\.0 · 5\.0s/)).toBeInTheDocument()
+    expect(screen.getByText(/Source: 0:10\.0–0:15\.0 \| 5\.0s/)).toBeInTheDocument()
     expect(screen.getByTestId("tl-detail-dub-range")).toHaveTextContent("Target: 0:10.0–0:14.3")
     expect(screen.getByTestId("tl-detail-duration")).toHaveTextContent("4.3s")
     expect(screen.getByTestId("tl-detail-diff")).toHaveTextContent("Diff: +0.7s")

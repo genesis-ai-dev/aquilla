@@ -25,8 +25,8 @@ import { useRowMetrics } from "./useRowMetrics"
 import { subtitleMirrorText } from "@/lib/timeline/lanes"
 import { subtitleSpanSec } from "@/lib/timeline/lane-timing"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
-import { fmtClock } from "./format"
-import { formatVttTime } from "@/lib/video/vtt-generator"
+import { fmtClock, fmtDragTime } from "./format"
+import { DragTimeChip } from "./DragTimeChip"
 import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -81,13 +81,6 @@ const ACCENT_BAR_PX = 3
 const MIN_CARD_GRIP_PX = 28
 
 type DragMode = "move" | "resize-l" | "resize-r"
-
-/** SUB-11: millisecond clock for the live drag readout — `formatVttTime`
- * (HH:MM:SS.mmm) with a zero hours field trimmed for width. */
-function fmtDragTime(sec: number): string {
-  const t = formatVttTime(Math.max(0, sec))
-  return t.startsWith("00:") ? t.slice(3) : t
-}
 
 export interface TimelineCardProps {
   cell: CellData
@@ -350,18 +343,7 @@ export function TimelineCard({
       {drag && (
         // SUB-11: live millisecond readout while dragging — anchored to the
         // edge being manipulated; shows the exact value release would commit.
-        <span
-          data-testid="tl-drag-chip"
-          className={cn(
-            "pointer-events-none absolute -top-6 z-30 rounded bg-foreground px-1.5 py-0.5 font-mono text-[10px] tabular-nums whitespace-nowrap text-background shadow",
-            drag.mode === "resize-r" ? "right-0" : "left-0",
-          )}
-        >
-          {drag.mode === "move"
-            ? `${fmtDragTime(previewStart)}–${fmtDragTime(previewEnd)}`
-            : fmtDragTime(drag.mode === "resize-l" ? previewStart : previewEnd)}
-          {" "}({dragDeltaSec >= 0 ? "+" : "−"}{Math.abs(dragDeltaSec).toFixed(2)}s)
-        </span>
+        <DragTimeChip mode={drag.mode} startSec={previewStart} endSec={previewEnd} deltaSec={dragDeltaSec} />
       )}
       <span
         className={cn(

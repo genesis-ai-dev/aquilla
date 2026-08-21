@@ -157,7 +157,10 @@ export function TimelineTimingRow({ cell, chipStats, audioMissing }: TimelineChi
             <span className="font-mono tabular-nums">
               {chipStats ? `${t("workspace.chipStrip.sourceLabel")} ` : ""}
               {fmtClock(start, true)}–{fmtClock(end, true)}
-              {" · "}
+              {/* A pipe, not a middot: the range already contains a dash, and
+                  at this size the dot read as part of the numbers (Sam,
+                  2026-08-21). */}
+              {" | "}
               {(end - start).toFixed(1)}s
             </span>
           </Pill>
@@ -168,7 +171,7 @@ export function TimelineTimingRow({ cell, chipStats, audioMissing }: TimelineChi
           <Pill>
             <span data-testid="tl-detail-dub-range" className="font-mono tabular-nums">
               {t("workspace.chipStrip.targetLabel")} {fmtClock(chipStats.startSec, true)}–{fmtClock(chipStats.endSec, true)}
-              {" · "}
+              {" | "}
               <span data-testid="tl-detail-duration">{chipStats.durationSec.toFixed(1)}s</span>
             </span>
           </Pill>

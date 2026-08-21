@@ -163,6 +163,42 @@ describe("TargetAudioLane — overflow warnings", () => {
   })
 })
 
+describe("TargetAudioLane — the drag readout (Matt's QA, 2026-08-21)", () => {
+  // A dub-take drag used to show nothing at all: the tooltip is disabled
+  // mid-drag and the lane never had the timeline cards' readout bubble.
+
+  it("shows nothing at rest", () => {
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onRetimeTarget={vi.fn()} />)
+    expect(screen.queryByTestId("tl-drag-chip")).not.toBeInTheDocument()
+  })
+
+  it("a move reads out the live span and the distance travelled, then goes away", () => {
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onRetimeTarget={vi.fn()} />)
+    const chipEl = screen.getByTestId("tl-target-c1")
+    fireEvent.pointerDown(chipEl, { clientX: 400, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 320 }) // −2s → span [8, 12]
+    const readout = screen.getByTestId("tl-drag-chip")
+    expect(readout.textContent).toContain("00:08.000")
+    expect(readout.textContent).toContain("00:12.000")
+    expect(readout.textContent).toContain("(−2.00s)")
+    fireEvent.pointerUp(window, { clientX: 320 })
+    expect(screen.queryByTestId("tl-drag-chip")).not.toBeInTheDocument()
+  })
+
+  it("a trim reads out only the edge being pulled", () => {
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onTrimTarget={vi.fn()} />)
+    const handle = screen.getByTestId("tl-target-c1-handle-l")
+    fireEvent.pointerDown(handle, { clientX: 400, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 440 }) // +1s → start 11, end still 14
+    const readout = screen.getByTestId("tl-drag-chip")
+    expect(readout.textContent).toContain("00:11.000")
+    expect(readout.textContent).toContain("(+1.00s)")
+    // The still edge is noise on a trim — only the moving one is read out.
+    expect(readout.textContent).not.toContain("00:14.000")
+    fireEvent.pointerUp(window, { clientX: 440 })
+  })
+})
+
 describe("TargetAudioLane — trimmed geometry (round 7)", () => {
   it("a head-trimmed chip draws from anchor + trimStart at the trimmed length", () => {
     render(<TargetAudioLane {...base} items={[item({}, 4000, "c1", { trimStartMs: 1000 })]} />)

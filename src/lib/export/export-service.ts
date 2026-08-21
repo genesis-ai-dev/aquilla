@@ -1,6 +1,6 @@
 // Phase 2c-γ: Export was driven by the per-file Y.Doc cache (collectExportCells)
 // and per-file blob lookups (project-index). Both went away with the Y.Doc rip.
-// Re-implementing export on the D1 cells projection + R2 source blobs is its
+// Re-implementing export on the Postgres cells projection + R2 source blobs is its
 // own event-grammar exercise, deferred to v1.x. The export buttons in the UI
 // still wire to this function; calling it now fails loudly so we don't silently
 // produce empty files.

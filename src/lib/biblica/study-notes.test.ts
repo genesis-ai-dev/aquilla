@@ -20,7 +20,9 @@ import {
   noteWithTrailingVerseMarker,
   openVerse,
   paragraph,
+  psalmsVerse,
   run,
+  scriptureHeading,
   verseMarkerOnlyNote,
 } from "./__fixtures__/biblica-idml"
 
@@ -319,12 +321,82 @@ describe("Biblica study-note selection", () => {
     expect(selection.verseUnitCount).toBe(0)
   })
 
-  it("tracks Psalms-style meta:c chapter markers", () => {
+  it("imports the Psalter's layout headings and leaves the verse lines out", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "PSA")),
+      note("p-title", "Psalms", "intro%3aimt1"),
+      scriptureHeading("p-ms", SAMPLE_NOTES.psalmBookHeading, "head%3ams"),
+      scriptureHeading("p-mr", SAMPLE_NOTES.psalmBookRange, "head%3amr_h"),
+      scriptureHeading("p-cl1", "Psalm 1"),
+      psalmsVerse("p-v1", "1", "1", "Blessed is the person who obeys the law of the LORD."),
+      scriptureHeading("p-cl3", "Psalm 3"),
+      scriptureHeading("p-d", SAMPLE_NOTES.psalmSuperscription, "head%3ad_h"),
+      paragraph("p-q", "text%3aq1", run("$ID/[No character style]", "Lord, I have so many enemies!")),
+      closedVerse("p-v3", "1", "Lord, I have so many enemies!"),
+      note("p-n", "3:1-8 A cry for help when enemies close in.", "intro%3aimi"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [
+      entry.unit.sourceText,
+      entry.chapterLabel,
+      entry.bookCode,
+    ])).toEqual([
+      ["Psalms", "Preface", "PSA"],
+      [SAMPLE_NOTES.psalmBookHeading, "Preface", "PSA"],
+      [SAMPLE_NOTES.psalmBookRange, "Preface", "PSA"],
+      ["Psalm 1", "1", "PSA"],
+      ["Psalm 3", "3", "PSA"],
+      [SAMPLE_NOTES.psalmSuperscription, "3", "PSA"],
+      ["3:1-8 A cry for help when enemies close in.", "3", "PSA"],
+    ])
+    expect(selection.notes.map((entry) => entry.unit.sourceText).join("\n"))
+      .not.toContain("Blessed is the person")
+    expect(selection.notes.map((entry) => entry.unit.sourceText).join("\n"))
+      .not.toContain("Lord, I have so many enemies!")
+  })
+
+  it("imports speaker lines and Psalm 119 acrostic letters", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "PSA")),
+      scriptureHeading("p-cl", "Psalm 119"),
+      scriptureHeading("p-qa", "Aleph", "head%3aqa"),
+      closedVerse("p-v", "1", "Blessed are those whose ways are blameless."),
+      paragraph("p-sng", "meta%3abk", run("$ID/[No character style]", "SNG")),
+      scriptureHeading("p-sp", "She says", "head%3asp"),
+      closedVerse("p-v2", "2", "Let him kiss me with the kisses of his mouth.", "1"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [entry.unit.sourceText, entry.bookCode])).toEqual([
+      ["Psalm 119", "PSA"],
+      ["Aleph", "PSA"],
+      ["She says", "SNG"],
+    ])
+  })
+
+  it("does not swallow a Psalm heading as the continuation of an unclosed verse", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "PSA")),
+      openVerse("p-v", "6", "I lie down and sleep;", "3"),
+      scriptureHeading("p-cl", "Psalm 4"),
+      note("p-n", "A night prayer that follows the cry of Psalm 3."),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [entry.unit.sourceText, entry.chapterLabel])).toEqual([
+      ["Psalm 4", "4"],
+      ["A night prayer that follows the cry of Psalm 3.", "4"],
+    ])
+  })
+
+  it("tracks Psalms-style meta:c chapter markers even when they follow the verse number", () => {
     const units = [
       syntheticUnit("ParagraphStyle/meta%3abk", [["PSA", PLAIN]], 0),
-      syntheticUnit("ParagraphStyle/cv%3ap", [
+      // JOB-SNG order: cv:v, then meta:c "23:", then the verse body.
+      syntheticUnit("ParagraphStyle/text%3aq1", [
+        ["1", "CharacterStyle/cv%3av"],
         ["23:", "CharacterStyle/meta%3ac"],
-        ["1", "CharacterStyle/cv%3av1"],
         ["1", "CharacterStyle/meta%3av"],
         ["The LORD is my shepherd.", PLAIN],
         ["1", "CharacterStyle/meta%3av"],
@@ -335,6 +407,35 @@ describe("Biblica study-note selection", () => {
     const selection = selectBiblicaStudyNotes(units)
 
     expect(selection.notes[0].chapterLabel).toBe("23")
+  })
+
+  it("does not label Psalm 1 notes with Job's last chapter after 42:17 is flushed into intro:ie", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-job", "meta%3abk", run("$ID/[No character style]", "JOB")),
+      closedVerse("p-job-v", "17", "And so Job died. He had lived for a very long time.", "42"),
+      note("p-job-n", "Job passed the test that Satan had suggested."),
+      paragraph("p-psa", "meta%3abk", run("$ID/[No character style]", "PSA")),
+      note("p-pref", "Psalms is a book of Israel's prayers and songs."),
+      // Job's closing 42:17, flushed into Psalms' intro:ie — the JOB-SNG shape.
+      verseMarkerOnlyNote("p-ie", "42", "17"),
+      scriptureHeading("p-cl", "Psalm 1"),
+      psalmsVerse("p-v1", "1", "1", "Blessed is the person who obeys the law of the LORD."),
+      note("p-n1", "Psalm 1 is a wisdom psalm about two ways to live.", "intro%3aipi"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [
+      entry.unit.sourceText,
+      entry.chapterLabel,
+      entry.bookCode,
+    ])).toEqual([
+      ["Job passed the test that Satan had suggested.", "42", "JOB"],
+      ["Psalms is a book of Israel's prayers and songs.", "Preface", "PSA"],
+      ["Psalm 1", "1", "PSA"],
+      ["Psalm 1 is a wisdom psalm about two ways to live.", "1", "PSA"],
+    ])
+    expect(selection.notes.map((entry) => entry.chapterLabel).join(","))
+      .not.toMatch(/42-1|42–1/)
   })
 
   it("imports no cell for a preface paragraph that is only the previous book's markers", async () => {

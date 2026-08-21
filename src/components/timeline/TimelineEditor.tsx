@@ -123,6 +123,12 @@ export interface TimelineEditorProps {
   timingLocked?: boolean
   /** Round 6/7: move a section's dub chip — its clip-zero anchor (file sec). */
   onRetimeTarget?(cellId: string, anchorSec: number): void
+  /** Matt's QA (2026-08-21): a drag on an AUDIO-CUE chip, final bounds in
+   *  seconds, fired once on pointer-up. The workspace commits it as
+   *  `cell.retime` against the hidden sibling — the same event a re-import's
+   *  reconcile emits. Offered only while the project's timings are unlocked;
+   *  absent leaves the Source-audio row frozen exactly as it always was. */
+  onRetimeCue?(cellId: string, startSec: number, endSec: number): void
   /** Round 7: trim a dub chip — complete trim state (undefined clears). */
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
   /** Round 7 (SUB-44): Space — toggle queue playback (playing→pause,
@@ -566,6 +572,7 @@ export function TimelineEditor({
   fileId,
   onRetimeSubtitle,
   onRetimeTarget,
+  onRetimeCue,
   timingLocked = false,
   onTrimTarget,
   onTogglePlay,
@@ -954,26 +961,27 @@ export function TimelineEditor({
   // fill a stretch you cannot see. Both the pencil and the mic read this array,
   // so one filter covers both surfaces.
   //
-  // STAGE 4 TURNS ALL OF IT OFF (Sam, 2026-08-14). Once an episode's audio VTT
-  // is imported, the timeline is describing a FINISHED FILM against two cue
-  // lists that already exist — the subtitles and the transcript of what is
-  // heard. Inventing a line into a silence has no meaning there: a stretch with
-  // no subtitle is either a line nobody wrote or a moment nobody speaks in, and
-  // neither is fixed by minting an empty cell. Worse on the Target row, where
-  // the mic over a silence would create a subtitle line and record against it —
-  // producing a take that corresponds to NO audio cue, which is precisely the
-  // thing this stage exists to make impossible. Emptying this one array closes
-  // all three surfaces at once (both subtitle pencils and the empty-stretch
-  // mic); the mic over a real cue with no take yet is a different affordance,
-  // comes from `emptyCells`, and stays.
+  // THE SETTING IS THE SINGLE AUTHORITY (Sam, 2026-08-21). Stage 4 used to
+  // hard-off all of this the moment an audio VTT was imported — on the
+  // grounds that inventing a line against a finished film's cue lists means
+  // nothing, and that the mic over a silence could mint a take matching NO
+  // audio cue. That rule predates the project setting; once the setting
+  // existed (default OFF, flippable only at maintainer), keeping the hard-off
+  // underneath it made the toggle a visible no-op on every dubbing episode —
+  // which is how Matt's QA found it. The stage-4 protection now lives where
+  // it belongs: in the default being OFF. Turning it on is the "very active
+  // decision" this project reserves for dangerous things, and ON means on.
+  // Emptying this one array still closes all three surfaces at once (both
+  // subtitle pencils and the empty-stretch mic); the mic over a real cue with
+  // no take yet is a different affordance, comes from `emptyCells`, and stays.
   const addableSpans = useMemo(
     () =>
-      hasAudioCueTrack || !allowLineCreation || !canAddLine
+      !allowLineCreation || !canAddLine
         ? []
         : sourceRegions.regions
             .filter((r) => r.kind === "gap" && r.endSec - r.startSec >= MIN_ADDABLE_SPAN_SEC)
             .map((r) => ({ startSec: r.startSec, endSec: r.endSec })),
-    [sourceRegions, hasAudioCueTrack, allowLineCreation, canAddLine],
+    [sourceRegions, allowLineCreation, canAddLine],
   )
   // Round 5: the Target-audio track's chips — one per section with dub audio.
   // AQU-646: in the VTT-plus-footage arrangement the takes hang off TEXT cells
@@ -2044,8 +2052,10 @@ export function TimelineEditor({
       case "source-audio":
         // Two tenants, and which one shows up is decided by the CELLS, never by
         // whether a video is linked. An imported recording's dialogue lane,
-        // whose source split is FROZEN at import and never retimable (round 6);
-        // or, when there are no media cells at all, the audio VTT's cues —
+        // whose source split is FROZEN at import and never retimable (round 6 —
+        // that split is the recording's own segmentation, not imported timing,
+        // so the timing lock has no claim on it); or, when there are no media
+        // cells at all, the audio VTT's cues — which the lock DOES govern —
         // transcript chips over the film's own speech, with a dashed empty chip
         // across each stretch where nobody talks.
         return dialogue.length > 0 ? (
@@ -2071,6 +2081,13 @@ export function TimelineEditor({
             onSeek={seekAudioCue}
             onSeekSec={seekTo}
             linkOverlay={cueLinkOverlay}
+            // Matt's QA (2026-08-21): THE LOCK COVERS THE AUDIO CHIPS TOO —
+            // Sam's original ruling on the timing lock, which this row never
+            // received. No user-inserted exemption here: nobody hand-adds a
+            // heard line, so locked means frozen, full stop.
+            retimable={!timingLocked}
+            onRetime={onRetimeCue}
+            snapEnabled={snapOn}
           />
         )
       case "target-subtitles":

@@ -5,8 +5,9 @@
 // text timestamps. Stage 2 killed that: the film's soundtrack gets no timeline
 // row, ever (it is heard from the video pane whatever the timeline shows), and
 // what this row draws instead is real DATA — a near-verbatim transcript of the
-// film's speech, imported as a hidden sibling file and frozen. Where there is
-// no cue, nobody spoke.
+// film's speech, imported as a hidden sibling file. Frozen while the project's
+// timings are locked (the normal state); the unlock frees these chips the same
+// way it frees the subtitle rows. Where there is no cue, nobody spoke.
 //
 // Same chips as an imported recording's source row — literally the same
 // component, TimelineCard in its dialogue variant, which reads
@@ -69,6 +70,20 @@ export interface SourceRegionLaneProps {
   /** Stage 4: linking mode is ON. Absent — the normal case — means no overlay
    *  is rendered at all and a click cannot mean anything new. */
   linkOverlay?: LaneLinkOverlay
+  /**
+   * Matt's QA (2026-08-21): may these cues be dragged? The row shipped frozen
+   * — "the split is the VTT's" — but that ruling predates the project-wide
+   * timing lock, which was always meant to cover the audio chips too (Sam's
+   * original decision). The editor passes `!timingLocked`, so unlocking frees
+   * this row exactly as it frees the subtitle rows.
+   */
+  retimable?: boolean
+  /** Final bounds in seconds, fired once on pointer-up — same contract as the
+   *  subtitle lane. Committed as `cell.retime` against the hidden sibling,
+   *  the identical event a re-import's reconcile emits. */
+  onRetime?(cellId: string, startSec: number, endSec: number): void
+  /** Edge snapping while dragging, from the timeline's global toggle. */
+  snapEnabled?: boolean
 }
 
 function SourceRegionLaneImpl({
@@ -83,6 +98,9 @@ function SourceRegionLaneImpl({
   onSeek,
   onSeekSec,
   linkOverlay,
+  retimable = false,
+  onRetime,
+  snapEnabled = false,
 }: SourceRegionLaneProps) {
   const t = useT()
   const spanOf = (c: CellData): { start: number; end: number } => {
@@ -93,6 +111,25 @@ function SourceRegionLaneImpl({
     const s = spanOf(c)
     return isVisible(s.start, s.end, viewStartSec, viewEndSec)
   })
+  // Neighbour walls + snap targets, from the FULL cue list — a cue's
+  // neighbour may be scrolled out of view. Cues are a transcript: they may
+  // touch but never overlap or leapfrog, so a drag stops at the neighbouring
+  // cue's edge — the same rule the subtitle row enforces on its own cells.
+  const cueWalls = new Map<string, { minStartSec: number; maxEndSec: number; candidates: number[] }>()
+  if (retimable && onRetime) {
+    for (let i = 0; i < cells.length; i += 1) {
+      const prevEnd = i > 0 ? cells[i - 1].endTime : undefined
+      const nextStart = i < cells.length - 1 ? cells[i + 1].startTime : undefined
+      cueWalls.set(cells[i].id, {
+        minStartSec: prevEnd ?? 0,
+        maxEndSec: nextStart ?? Number.POSITIVE_INFINITY,
+        candidates: [
+          ...(prevEnd != null ? [prevEnd] : []),
+          ...(nextStart != null ? [nextStart] : []),
+        ],
+      })
+    }
+  }
   const { chipH } = useRowMetrics()
   const visibleGaps = map.regions.filter(
     (r) =>
@@ -158,12 +195,20 @@ function SourceRegionLaneImpl({
           variant="dialogue"
           selected={selectedId === c.id}
           editable={editable}
-          // The split is the VTT's; this row does not edit it. Same rule as an
-          // imported recording's source row (frozen at import).
-          retimable={false}
+          // Frozen by default — the split is the VTT's — and freed by the
+          // project-wide unlock, exactly like the subtitle rows above. The
+          // grips, walls, snapping and drag readout are all TimelineCard's
+          // own machinery; this row only had to stop refusing it.
+          retimable={Boolean(retimable && onRetime)}
+          bounds={retimable ? cueWalls.get(c.id) : undefined}
+          snap={
+            retimable && snapEnabled
+              ? { enabled: true, candidates: cueWalls.get(c.id)?.candidates ?? [] }
+              : undefined
+          }
           span={spanOf(c)}
           onSelect={onSelect}
-          onRetime={() => {}}
+          onRetime={onRetime ?? (() => {})}
           onSeek={onSeek}
         />
       ))}

@@ -1332,13 +1332,12 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
       expect(screen.queryByTestId(/^tl-target-add-20/)).not.toBeInTheDocument()
     })
 
-    // STAGE 4 (Sam, 2026-08-14): once an episode's audio VTT is in, the
-    // timeline is describing a finished film against two cue lists that already
-    // exist, and inventing a line into a silence means nothing. The mic over a
-    // silence is the worse half — it would mint a subtitle line and record
-    // against it, producing a take that matches NO audio cue, which is exactly
-    // what this stage exists to make impossible.
-    it("withdraws BOTH ways in once the file has an audio-cue track", () => {
+    // THE SETTING IS THE SINGLE AUTHORITY (Sam, 2026-08-21). Stage 4 used to
+    // withdraw both ways in the moment an audio-cue track existed, which made
+    // the project setting a visible no-op on every dubbing episode — Matt's
+    // QA found the toggle dead. The stage-4 protection lives in the default
+    // being OFF; an explicit ON means on, cue track or no cue track.
+    it("keeps offering the ways in on a file with an audio-cue track — the setting decides", () => {
       setVideoDurationSec(VIDEO, 120)
       localStorage.setItem("codex:timelineZoom:fzoom", String(ZOOM_MAX))
       render(
@@ -1353,8 +1352,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
         />,
       )
       // The same silence the test above offers both over.
-      expect(screen.queryByTestId("tl-add-line-20")).not.toBeInTheDocument()
-      expect(screen.queryByTestId(/^tl-target-add-20/)).not.toBeInTheDocument()
+      expect(screen.getByTestId("tl-add-line-20")).toBeInTheDocument()
     })
   })
 })

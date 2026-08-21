@@ -42,6 +42,14 @@ export interface UseAudioCueCellsResult {
    * replace mints a new file id, and the id change alone re-runs the fetch.
    */
   refresh(): void
+  /**
+   * Optimistically re-time one cue in place — a retime drag's local echo, so
+   * the chip holds its new span while the emit and the `refresh()` re-read
+   * round-trip. The refresh that follows replaces the list wholesale with the
+   * server's answer, so this can never drift from the projection for longer
+   * than one read.
+   */
+  patchTiming(cellId: string, startSec: number, endSec: number): void
 }
 
 export function useAudioCueCells({
@@ -108,5 +116,13 @@ export function useAudioCueCells({
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), [])
 
-  return { audioCues, isLoading, error, refresh }
+  const patchTiming = useCallback((cellId: string, startSec: number, endSec: number) => {
+    setAudioCues((prev) =>
+      prev
+        ? prev.map((c) => (c.id === cellId ? { ...c, startTime: startSec, endTime: endSec } : c))
+        : prev,
+    )
+  }, [])
+
+  return { audioCues, isLoading, error, refresh, patchTiming }
 }

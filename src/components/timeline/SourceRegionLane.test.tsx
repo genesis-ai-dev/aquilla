@@ -138,6 +138,45 @@ describe("SourceRegionLane", () => {
     expect(screen.queryByTestId("tl-source-gap")).not.toBeInTheDocument()
   })
 
+  // Matt's QA (2026-08-21): the timing lock was always meant to cover the
+  // audio chips too, and this row never received it — unlocking freed the
+  // subtitle rows while these stayed frozen. The drag machinery is
+  // TimelineCard's own; what these pin is the gate and the walls.
+  describe("retiming the cues, behind the project-wide unlock", () => {
+    it("stays frozen while the lock is on (the default)", () => {
+      const onRetime = vi.fn()
+      renderLane({ onRetime }) // no `retimable` — locked
+      const card = screen.getByTestId("tl-card-a")
+      fireEvent.pointerDown(card, { clientX: 100, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 150 })
+      expect(screen.queryByTestId("tl-drag-chip")).not.toBeInTheDocument()
+      fireEvent.pointerUp(window, { clientX: 150 })
+      expect(onRetime).not.toHaveBeenCalled()
+    })
+
+    it("unlocked, a cue slides and commits its new bounds — with the readout up while it moves", () => {
+      const onRetime = vi.fn()
+      renderLane({ retimable: true, onRetime })
+      const card = screen.getByTestId("tl-card-a")
+      fireEvent.pointerDown(card, { clientX: 100, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 150 }) // +5s at 10px/s
+      expect(screen.getByTestId("tl-drag-chip")).toBeInTheDocument()
+      fireEvent.pointerUp(window, { clientX: 150 })
+      expect(onRetime).toHaveBeenCalledWith("a", 15, 17)
+    })
+
+    it("a drag stops at the neighbouring cue's edge — cues may touch, never overlap", () => {
+      const onRetime = vi.fn()
+      renderLane({ retimable: true, onRetime })
+      const card = screen.getByTestId("tl-card-a")
+      fireEvent.pointerDown(card, { clientX: 100, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 1000 }) // +90s — way past "b"
+      fireEvent.pointerUp(window, { clientX: 1000 })
+      // "b" starts at 20; "a" is 2s long, so it parks flush against it.
+      expect(onRetime).toHaveBeenCalledWith("a", 18, 20)
+    })
+  })
+
   // Round 9: the gap's time range is absolutely positioned with NO right
   // anchor, so at a narrow width it shrink-to-fits, wraps onto several lines,
   // and `bottom-1` pushes them up out of the 46px chip where overflow-hidden

@@ -20,7 +20,7 @@
 // Auth: Bearer ${SYNC_SECRET_KEY}, same as /admin/files/* and the other
 // project-scoped admin hooks.
 
-import { secureCompare } from "./lib/secure-compare"
+import { serviceBearerMatches } from "./lib/service-auth"
 
 export interface MemberRoleChangedEnv {
   ProjectSync?: DurableObjectNamespace
@@ -94,9 +94,7 @@ export async function handleMemberRoleChangedRequest(
     return new Response("method not allowed", { status: 405 })
   }
 
-  const auth = request.headers.get("Authorization") ?? ""
-  const expected = env.SYNC_SECRET_KEY ? `Bearer ${env.SYNC_SECRET_KEY}` : null
-  if (!expected || !secureCompare(auth, expected)) {
+  if (!serviceBearerMatches(request.headers.get("Authorization"), env)) {
     return new Response("unauthorized", { status: 401 })
   }
 

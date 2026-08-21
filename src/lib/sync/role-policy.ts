@@ -24,10 +24,21 @@ export const ROLE = {
 
 /** Minimum role level required to emit each event kind. Mirrors the server. */
 const REQUIRED_ROLE: Record<string, number> = {
-  "source.cell.create": ROLE.PROJECT_LEAD,
+  // Sam, 2026-08-21: create/delete/reorder sit at CONTRIBUTOR so the "let
+  // people add new lines" project setting can admit contributors. Reorder is
+  // in the set because it is the chain bookkeeping RIDING every add and
+  // remove (handleAddLine/handleRemoveLine batch it in), and a floor that
+  // refused it silently killed the whole batch. This static floor is the
+  // LOWEST reachable one; the server conditionally re-imposes PROJECT_LEAD —
+  // all three refused below lead unless the project opted in, deletes
+  // additionally only for a cell a person added by hand (sync-worker
+  // authorize.ts + line-creation-authority.ts). The client gate's own rule
+  // applies: only block what is PROVABLY insufficient, and with the
+  // carve-out a contributor no longer is.
+  "source.cell.create": ROLE.CONTRIBUTOR,
   "source.cell.commit": ROLE.PROJECT_LEAD,
-  "source.cell.delete": ROLE.PROJECT_LEAD,
-  "source.cell.reorder": ROLE.PROJECT_LEAD,
+  "source.cell.delete": ROLE.CONTRIBUTOR,
+  "source.cell.reorder": ROLE.CONTRIBUTOR,
 
   "target.cell.create": ROLE.CONTRIBUTOR,
   "target.cell.commit": ROLE.CONTRIBUTOR,

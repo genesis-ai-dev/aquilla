@@ -8,6 +8,7 @@ import { requiredRoleFor, ROLE } from './role-policy'
 import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from '../auth'
 import { resolveAllowSelfAssignment } from './assignment-authority'
 import { isLockedTimingEvent, isUserInsertedCell, resolveTimingLocked } from './timing-authority'
+import { resolveAllowLineCreation } from './line-creation-authority'
 import { laneOfEvent } from './event-projection'
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
@@ -262,6 +263,44 @@ export async function authorize<K extends EventKind>(
           ok: false,
           status: 403,
           reason: `timing is locked for this project (${raw.kind})`,
+        }
+      }
+    }
+  }
+
+  // Sam, 2026-08-21: `source.cell.create` / `source.cell.delete` /
+  // `source.cell.reorder` dropped from their old static PROJECT_LEAD floor to
+  // CONTRIBUTOR so the "let people add new lines" project setting can mean
+  // what it says — reorder included because every add and remove BATCHES one
+  // in to keep the anchor chain matching the clock, and a floor that refused
+  // the companion killed the whole batch. The PROJECT_LEAD floor is
+  // re-imposed HERE for whoever is below it: all three pass only while the
+  // project has opted in ("that setting is enabling lines being added or
+  // removed" — the package travels together), and a delete additionally only
+  // for a line a person added by hand — an imported subtitle line stays
+  // lead-only to remove whatever the setting says. Leads and above never
+  // reach these checks; an absent `db` skips them, matching the carve-outs
+  // above.
+  if (
+    db != null &&
+    tokenClaims.role < ROLE.PROJECT_LEAD &&
+    (raw.kind === 'source.cell.create' ||
+      raw.kind === 'source.cell.delete' ||
+      raw.kind === 'source.cell.reorder')
+  ) {
+    if (!(await resolveAllowLineCreation(db, raw.projectId))) {
+      return { ok: false, status: 403, reason: 'adding lines is not enabled for this project' }
+    }
+    if (raw.kind === 'source.cell.delete') {
+      const userInserted =
+        raw.fileId != null &&
+        raw.cellId != null &&
+        (await isUserInsertedCell(db, raw.projectId, raw.fileId, raw.cellId))
+      if (!userInserted) {
+        return {
+          ok: false,
+          status: 403,
+          reason: 'only a line someone added by hand can be removed at this clearance',
         }
       }
     }

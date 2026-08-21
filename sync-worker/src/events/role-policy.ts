@@ -35,10 +35,18 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // Source-side: importer (owner / admin path), or PROJECT_LEAD+ for
   // direct re-imports. The import-bot service account is provisioned at
   // OWNER level out of band.
-  'source.cell.create': ROLE.PROJECT_LEAD,
+  //
+  // Sam, 2026-08-21: create/delete/reorder dropped to CONTRIBUTOR so the
+  // `allowLineCreation` project setting can admit contributors — reorder
+  // included because it is the chain bookkeeping riding every add and remove
+  // batch. This is the LOWEST reachable floor; authorize.ts conditionally
+  // re-imposes PROJECT_LEAD — all three refused below lead unless the
+  // project opted in, deletes additionally only for a cell a person added by
+  // hand (line-creation-authority.ts).
+  'source.cell.create': ROLE.CONTRIBUTOR,
   'source.cell.commit': ROLE.PROJECT_LEAD,
-  'source.cell.delete': ROLE.PROJECT_LEAD,
-  'source.cell.reorder': ROLE.PROJECT_LEAD,
+  'source.cell.delete': ROLE.CONTRIBUTOR,
+  'source.cell.reorder': ROLE.CONTRIBUTOR,
   'source.cell.metadata.patch': ROLE.PROJECT_LEAD,
   'source.cell.reanchor': ROLE.PROJECT_LEAD,
 

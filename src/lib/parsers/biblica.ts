@@ -39,9 +39,10 @@ export interface BiblicaStudyNotesParseResult {
  * Parse a Biblica study-Bible IDML package into study-note cells.
  *
  * The package is parsed with the shared `generic` profile so nothing is lost or
- * reinterpreted, then filtered to the note paragraphs. Scripture is deliberately
- * left out: it is set from the publisher's Bible files, not translated here.
- * Verse runs still drive each note's book and chapter-range label.
+ * reinterpreted, then filtered to the note paragraphs and the `head:*` headings
+ * the layout sets around the verses. Scripture is deliberately left out: it is
+ * set from the publisher's Bible files, not translated here. Verse runs still
+ * drive each note's book and chapter-range label.
  *
  * The study Bible's front and back matter ships as separate volumes with no
  * scripture in them at all, which is how they are recognized. They set their

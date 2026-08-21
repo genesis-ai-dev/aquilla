@@ -58,6 +58,7 @@ import {
   loadProjectSettings,
   updateProjectSettingsShared,
 } from '../../../db/shared/projects'
+import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 
 /** Provenance channel for a PAT commit request. MCP-originated commits arrive
  *  via a synthetic in-process Request carrying `x-aquilla-channel: mcp`
@@ -83,6 +84,12 @@ export interface CommitCaller {
   channel: ProvenanceChannel
 }
 
+// [Pen test] API security & data exposure (2026-08-20): unlimited like
+// prepare — a leaked/malicious PAT could otherwise commit changesets
+// (real writes) without bound. Kept generous per credential/15min so a
+// legitimate agent applying a plan every few seconds never trips it.
+const COMMIT_MAX_PER_CREDENTIAL = 300
+
 /** PAT-authenticated entrypoint (REST + the MCP adapter's synthetic request). */
 export async function handleCommit(
   request: Request,
@@ -96,6 +103,13 @@ export async function handleCommit(
 
   const cred = await validateApiCredential(db, bearer(request) ?? "")
   if (!cred) return errorResponse('permission_denied', 'invalid or missing API credential')
+
+  const identifier = `credential:${cred.credentialId}`
+  const recent = await countRecentRateLimitEvents(db, 'external_commit', identifier)
+  if (recent >= COMMIT_MAX_PER_CREDENTIAL) {
+    return errorResponse('rate_limited', 'changeset commit rate limit exceeded, slow down')
+  }
+  await recordRateLimitEvent(db, 'external_commit', identifier)
 
   return commitChangesetCore(
     request,

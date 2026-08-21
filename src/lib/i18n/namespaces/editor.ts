@@ -758,45 +758,10 @@ export const editor = defineNamespace({
     "editor.timeline.audioVttChoose": "Choose audio VTT",
     "editor.timeline.audioVttPickHint":
       "The episode's audio VTT — usually the one marked AUDIO_ONLY.",
-    "editor.timeline.audioVttFramesPerSecond": "{rate} frames per second",
-    "editor.timeline.audioVttTimebaseNamed":
-      "These cues are timed at {rate}, but \"{fileName}\" is at {other}.",
-    "editor.timeline.audioVttPercentFast": "{percent}% fast",
-    "editor.timeline.audioVttPercentSlow": "{percent}% slow",
-    "editor.timeline.audioVttTimebaseAmbiguous":
-      "These cues run {rate} against \"{fileName}\" — the usual frame-rate mistake. " +
-      "Several pairs of rates produce exactly this, so which one it is cannot be " +
-      "told from the files; the correction is the same either way.",
-    "editor.timeline.audioVttTimebaseUnrecognised":
-      "These cues run at a different speed from \"{fileName}\" — by a ratio that " +
-      "matches no frame-rate mistake we recognise, so it may be a different cut of " +
-      "the episode rather than a timing error.",
-    "editor.timeline.audioVttSecondsEarly": "{seconds} seconds early",
-    "editor.timeline.audioVttSecondsLate": "{seconds} seconds late",
-    "editor.timeline.audioVttDriftTail":
-      "Left alone they run about {drift} by the end of the file. The error starts " +
-      "at nothing and grows, so the opening minutes look right even when the rest " +
-      "has drifted.",
-    "editor.timeline.audioVttMeasured":
-      "Measured on {count} lines worded the same in both files.",
-    "editor.timeline.audioVttDisputed":
-      "The files' own timing grids suggest something different — worth a look at " +
-      "the numbers below before accepting.",
-    "editor.timeline.audioVttCoverageFound":
-      "{percent}% of the heard lines find a subtitle",
-    "editor.timeline.audioVttCoverageCompare":
-      "Lined up, {found}; left as delivered, {rawPercent}%.",
-    "editor.timeline.audioVttTimebaseApply": "Line them up with \"{fileName}\" on import",
-    "editor.timeline.audioVttTimebaseAligned":
-      "These cues and \"{fileName}\" keep the same time — no correction needed.",
-    "editor.timeline.audioVttCoverageFoundSentence":
-      "{percent}% of the heard lines find a subtitle.",
-    "editor.timeline.audioVttUnmeasurableLead":
-      "Couldn't check these cues against \"{fileName}\"",
-    "editor.timeline.audioVttUnmeasurable":
-      "{lead} — {reason}. They will be imported exactly as delivered. If the " +
-      "pairings look wrong afterwards, this is the first thing to check.",
-    "editor.timeline.audioVttCoverageAsDelivered": "As delivered, {found}.",
+    "editor.timeline.audioVttTimebaseFyi":
+      "The timings will be adjusted slightly to line up with \"{fileName}\".",
+    "editor.timeline.audioVttUnmeasurableFyi":
+      "The timings couldn't be checked against the subtitles — importing the file as delivered.",
     "editor.timeline.audioVttReconcileNoop":
       "These are the {count} cues this file already has, on the same timings — " +
       "there is nothing to update.",
@@ -4836,144 +4801,13 @@ export const editor = defineNamespace({
           "they were left out.",
         placeholders: { count: "Number of cues skipped for having no text." },
       },
-      "editor.timeline.audioVttFramesPerSecond": {
+      "editor.timeline.audioVttTimebaseFyi": {
         description:
-          "A frame rate written out as a phrase, shown in bold inside the timing " +
-          "warning. 'Frames per second' is the film-industry unit; keep the number " +
-          "and the unit together.",
-        placeholders: { rate: "The frame rate as a number, e.g. '24' or '23.976'." },
-      },
-      "editor.timeline.audioVttTimebaseNamed": {
-        description:
-          "First sentence of the timing warning when both frame rates could be " +
-          "named. States the mismatch as a plain fact about the two files.",
+          "Quiet one-line note in the import dialog when a timing correction was " +
+          "detected and will be applied automatically. Informational only — there " +
+          "is no choice to make and no technical detail to convey.",
         placeholders: {
-          rate: "The cue file's frame rate, already phrased as '24 frames per second' and shown in bold.",
-          fileName: "Name of the text file being compared against. Content — never translate it.",
-          other: "The text file's frame rate as a bare number, shown in bold.",
-        },
-      },
-      "editor.timeline.audioVttPercentFast": {
-        description:
-          "The size of a timing error, shown in bold, when the cues run FASTER " +
-          "than the text file. A percentage and a direction word, nothing more.",
-        placeholders: { percent: "The difference as a percentage, already rounded to one decimal place." },
-      },
-      "editor.timeline.audioVttPercentSlow": {
-        description:
-          "The size of a timing error, shown in bold, when the cues run SLOWER " +
-          "than the text file. A percentage and a direction word, nothing more.",
-        placeholders: { percent: "The difference as a percentage, already rounded to one decimal place." },
-      },
-      "editor.timeline.audioVttTimebaseAmbiguous": {
-        description:
-          "First sentence of the timing warning when the error is measurable but " +
-          "several pairs of frame rates would produce it, so naming one would be a " +
-          "guess. Reassures that the fix is the same whichever it is.",
-        placeholders: {
-          rate: "The error, already phrased as '0.1% fast' or '0.1% slow' and shown in bold.",
-          fileName: "Name of the text file being compared against. Content — never translate it.",
-        },
-      },
-      "editor.timeline.audioVttTimebaseUnrecognised": {
-        description:
-          "First sentence of the timing warning when the two files run at " +
-          "different speeds but the ratio matches no known frame-rate mistake — so " +
-          "it may be a different edit of the episode rather than a timing error.",
-        placeholders: {
-          fileName: "Name of the text file being compared against. Content — never translate it.",
-        },
-      },
-      "editor.timeline.audioVttSecondsEarly": {
-        description:
-          "How far out the cues end up, shown in bold, when they run AHEAD of the " +
-          "picture. A number of seconds and a direction word.",
-        placeholders: { seconds: "How many seconds out, already rounded to one decimal place." },
-      },
-      "editor.timeline.audioVttSecondsLate": {
-        description:
-          "How far out the cues end up, shown in bold, when they run BEHIND the " +
-          "picture. A number of seconds and a direction word.",
-        placeholders: { seconds: "How many seconds out, already rounded to one decimal place." },
-      },
-      "editor.timeline.audioVttDriftTail": {
-        description:
-          "Second half of the timing warning, appended to whichever first " +
-          "sentence was shown. Explains that the error is not constant: it starts " +
-          "at nothing and builds, so the opening of the episode looks fine.",
-        placeholders: {
-          drift: "How far out the cues end up, already phrased as '3.0 seconds early' or '3.0 seconds late' and shown in bold.",
-        },
-      },
-      "editor.timeline.audioVttMeasured": {
-        description:
-          "Small print under the timing warning saying what the measurement rests " +
-          "on: lines whose words match in both files, which is stronger evidence " +
-          "than the timestamps alone.",
-        placeholders: { count: "Number of lines that matched by wording in both files." },
-      },
-      "editor.timeline.audioVttCoverageFound": {
-        description:
-          "Bold clause naming how much of the film's speech would find a matching " +
-          "subtitle. A clause, not a sentence — it is embedded in a longer " +
-          "sentence and gets its punctuation from there.",
-        placeholders: { percent: "Share of heard lines that would be paired, as a whole-number percentage." },
-      },
-      "editor.timeline.audioVttCoverageCompare": {
-        description:
-          "The line that makes the timing correction checkable: what it buys, " +
-          "against what happens without it. Both numbers matter, so keep both.",
-        placeholders: {
-          found: "The corrected result, already phrased as '96% of the heard lines find a subtitle' and shown in bold.",
-          rawPercent: "The same share WITHOUT the correction, as a whole number; the '%' sign follows it in this string.",
-        },
-      },
-      "editor.timeline.audioVttTimebaseApply": {
-        description:
-          "Label of the tick box that decides whether the timing correction is " +
-          "applied on import. Ticked by default. Names the file being lined up with.",
-        placeholders: {
-          fileName: "Name of the text file the cues would be lined up with. Content — never translate it.",
-        },
-      },
-      "editor.timeline.audioVttTimebaseAligned": {
-        description:
-          "The all-clear: the cue file and the text file already keep the same " +
-          "time, so there is nothing to correct.",
-        placeholders: {
-          fileName: "Name of the text file being compared against. Content — never translate it.",
-        },
-      },
-      "editor.timeline.audioVttCoverageFoundSentence": {
-        description:
-          "The coverage figure as a bold, full sentence, used where it stands on " +
-          "its own after the all-clear rather than inside a longer sentence.",
-        placeholders: { percent: "Share of heard lines that would be paired, as a whole-number percentage." },
-      },
-      "editor.timeline.audioVttUnmeasurableLead": {
-        description:
-          "Bold opening of the 'could not tell' notice: the timing could not be " +
-          "checked at all. Not a sentence — the reason follows it after a dash.",
-        placeholders: {
-          fileName: "Name of the text file that could not be compared against. Content — never translate it.",
-        },
-      },
-      "editor.timeline.audioVttUnmeasurable": {
-        description:
-          "The 'could not tell' notice in full. Deliberately never silent: a " +
-          "refusal to guess is fine, an invisible one is not, so this says the " +
-          "check did not happen and what to look at if the result looks wrong.",
-        placeholders: {
-          lead: "The bold opening clause, 'Couldn't check these cues against \"ep101.vtt\"'.",
-          reason: "Why the check could not be made, supplied by the timing checker as a short lower-case phrase.",
-        },
-      },
-      "editor.timeline.audioVttCoverageAsDelivered": {
-        description:
-          "The coverage figure for cues imported exactly as they arrived, with no " +
-          "correction applied.",
-        placeholders: {
-          found: "The result, already phrased as '96% of the heard lines find a subtitle' and shown in bold.",
+          fileName: "Name of the text file the cues will be lined up with. Content — never translate it.",
         },
       },
       "editor.timeline.audioVttReconcileNoop": {

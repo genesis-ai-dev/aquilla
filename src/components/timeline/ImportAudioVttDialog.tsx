@@ -16,7 +16,6 @@ import { useEffect, useMemo, useState } from "react"
 import { v7 as uuidv7 } from "uuid"
 
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -40,7 +39,6 @@ import { decodeImportText, MAX_UNKNOWN_TEXT_BYTES } from "@/lib/import/ai-recipe
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { fmtClock } from "./format"
-import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 
 interface Props {
   open: boolean
@@ -104,11 +102,6 @@ export function ImportAudioVttDialog({
   const t = useT()
   const [picked, setPicked] = useState<{ parsed: ParsedAudioVtt; fileName: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
-  /** Default ON: a detected mismatch is a defect in the file, and the whole
-   *  point of detecting it is that nobody should have to know about frame
-   *  rates to get a usable track. The opt-out exists because the evidence is
-   *  statistical, not because declining is the ordinary choice. */
-  const [correctTimebase, setCorrectTimebase] = useState(true)
   /** Removal asks twice, in place. It takes a whole track away and — when
    *  takes hang off the cues — puts recordings out of reach, so it does not
    *  get to be a single click sitting next to Cancel. */
@@ -118,7 +111,6 @@ export function ImportAudioVttDialog({
     if (open) {
       setPicked(null)
       setError(null)
-      setCorrectTimebase(true)
       setConfirmingRemove(false)
     }
   }, [open])
@@ -160,56 +152,16 @@ export function ImportAudioVttDialog({
         }
       : null
 
-  /** The cues as they would actually be STORED — timebase applied if the user
-   *  has left the correction on. Everything downstream compares against these,
-   *  because comparing the raw file against corrected cues would report a
-   *  three-second shift that the import was about to undo anyway. */
+  /** The cues as they would actually be STORED — a detected correction is
+   *  simply applied (Matt's QA, 2026-08-21: nobody importing a cue sheet can
+   *  evaluate a frame-rate claim, so asking was friction, not consent).
+   *  Everything downstream compares against these, because comparing the raw
+   *  file against corrected cues would report a three-second shift that the
+   *  import was about to undo anyway. */
   const incomingCues = useMemo(() => {
     if (!picked) return []
-    return timebase && correctTimebase
-      ? scaleCueTimes(picked.parsed.cues, timebase.scale)
-      : picked.parsed.cues
-  }, [picked, timebase, correctTimebase])
-
-  /**
-   * How well the two files will actually line up — run BOTH ways when a
-   * correction is on offer.
-   *
-   * The timebase question is otherwise a statistical claim a person has no way
-   * to check. This turns it into one they can: "96% of the heard lines find a
-   * subtitle with the correction, 61% without" is the same fact stated as the
-   * thing they actually care about. Episode 306 imported wrong and stayed wrong
-   * for days; those two numbers side by side would have made it obvious at the
-   * moment of import.
-   */
-  const coverage = useMemo(() => {
-    if (!picked || !referenceLines?.length) return null
-    const textCells = referenceLines.map((l, i) => ({
-      id: `r${i}`,
-      startTime: l.startTime,
-      endTime: l.endTime,
-      original: l.original,
-    }))
-    const linkedFraction = (cues: readonly { start?: number; end?: number; original?: string }[]) => {
-      const audioCues = cues.map((c, i) => ({
-        id: `c${i}`,
-        startTime: c.start,
-        endTime: c.end,
-        original: c.original,
-      }))
-      const paired = new Set(
-        autoLinkable(planCueLinks({ textCells, audioCues })).map((p) => p.cueCellId),
-      )
-      return audioCues.length === 0 ? 0 : paired.size / audioCues.length
-    }
-    const applied = linkedFraction(incomingCues)
-    return {
-      applied,
-      // Only worth computing — and only meaningful — when a correction is
-      // actually on the table.
-      raw: timebase ? linkedFraction(picked.parsed.cues) : null,
-    }
-  }, [picked, referenceLines, incomingCues, timebase])
+    return timebase ? scaleCueTimes(picked.parsed.cues, timebase.scale) : picked.parsed.cues
+  }, [picked, timebase])
 
   /**
    * Same cues, different timings? Then this is not a replacement.
@@ -333,167 +285,35 @@ export function ImportAudioVttDialog({
           </div>
         )}
 
-        {/* THE TIMING VERDICT, ALWAYS. Rendered in every state — corrected,
-            already aligned, and couldn't tell — because the state that cost us
-            a whole episode was the one that said nothing at all. Episode 306's
-            subtitles were cut fine enough that their frame grid could not be
-            read, so no correction was planned and no word of it appeared here;
-            it imported drifting and only 61% of its lines ever found a partner.
-            A refusal to guess is fine. An invisible refusal is not.
+        {/* THE TIMING NOTE (Sam, 2026-08-21: this was a five-paragraph amber
+            panel with a consent checkbox — "way too much information"). A
+            detected correction now simply applies, and the whole subject gets
+            one quiet line. The frame-rate evidence, the drift, and the applied
+            scale all still land in the import manifest for whoever debugs.
 
-            The drift is stated in seconds, not in frame rates: the rates are
-            the evidence, but "three seconds late by the end" is the thing
-            anyone can check against the picture. */}
+            Two states still speak, because the one that cost us an episode was
+            the one that said NOTHING: episode 306's grid was unreadable, the
+            check declined silently, and the file imported drifting. So
+            "couldn't check" keeps a line too. Only "already aligned" is
+            allowed to be silent — nothing happened, nothing to announce. */}
         {/* i18n-exempt "correct" is a TimebaseVerdict tag, not copy */}
         {picked && verdict?.kind === "correct" && (
-          <div
+          <p
             data-testid="import-audio-vtt-timebase"
-            className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs"
-          >
-            <p>
-              {verdict.namedRatio ? (
-                <RichMessage
-                  k="editor.timeline.audioVttTimebaseNamed"
-                  values={{
-                    rate: (
-                      <span className="font-medium">
-                        {t("editor.timeline.audioVttFramesPerSecond", {
-                          rate: verdict.cue.label,
-                        })}
-                      </span>
-                    ),
-                    fileName: textFileName,
-                    other: <span className="font-medium">{verdict.reference.label}</span>,
-                  }}
-                />
-              ) : verdict.ambiguousRates ? (
-                <RichMessage
-                  k="editor.timeline.audioVttTimebaseAmbiguous"
-                  values={{
-                    rate: (
-                      <span className="font-medium">
-                        {t(
-                          verdict.scale > 1
-                            ? "editor.timeline.audioVttPercentFast"
-                            : "editor.timeline.audioVttPercentSlow",
-                          { percent: Math.abs((verdict.scale - 1) * 100).toFixed(1) },
-                        )}
-                      </span>
-                    ),
-                    fileName: textFileName,
-                  }}
-                />
-              ) : (
-                t("editor.timeline.audioVttTimebaseUnrecognised", { fileName: textFileName })
-              )}{" "}
-              <RichMessage
-                k="editor.timeline.audioVttDriftTail"
-                values={{
-                  drift: (
-                    <span className="font-medium">
-                      {t(
-                        verdict.driftAtEndSec > 0
-                          ? "editor.timeline.audioVttSecondsEarly"
-                          : "editor.timeline.audioVttSecondsLate",
-                        { seconds: Math.abs(verdict.driftAtEndSec).toFixed(1) },
-                      )}
-                    </span>
-                  ),
-                }}
-              />
-            </p>
-            {verdict.measured && (
-              <p className="text-muted-foreground">
-                {t("editor.timeline.audioVttMeasured", { count: verdict.measured.anchors })}
-                {verdict.disputed && <> {t("editor.timeline.audioVttDisputed")}</>}
-              </p>
-            )}
-            {coverage && coverage.raw != null && (
-              <p data-testid="import-audio-vtt-coverage">
-                <RichMessage
-                  k="editor.timeline.audioVttCoverageCompare"
-                  values={{
-                    found: (
-                      <span className="font-medium">
-                        {t("editor.timeline.audioVttCoverageFound", {
-                          percent: Math.round(coverage.applied * 100),
-                        })}
-                      </span>
-                    ),
-                    rawPercent: Math.round(coverage.raw * 100),
-                  }}
-                />
-              </p>
-            )}
-            <label className="flex items-center gap-2">
-              <Checkbox
-                data-testid="import-audio-vtt-timebase-toggle"
-                checked={correctTimebase}
-                onCheckedChange={(checked) => setCorrectTimebase(checked)}
-              />
-              {t("editor.timeline.audioVttTimebaseApply", { fileName: textFileName })}
-            </label>
-          </div>
-        )}
-
-        {/* i18n-exempt "aligned" is a TimebaseVerdict tag, not copy */}
-        {picked && verdict?.kind === "aligned" && (
-          <div
-            data-testid="import-audio-vtt-timebase-aligned"
             className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground"
           >
-            {t("editor.timeline.audioVttTimebaseAligned", { fileName: textFileName })}
-            {coverage && (
-              <>
-                {" "}
-                <span className="font-medium text-foreground">
-                  {t("editor.timeline.audioVttCoverageFoundSentence", {
-                    percent: Math.round(coverage.applied * 100),
-                  })}
-                </span>
-              </>
-            )}
-          </div>
+            {t("editor.timeline.audioVttTimebaseFyi", { fileName: textFileName })}
+          </p>
         )}
 
         {/* i18n-exempt "unmeasurable" is a TimebaseVerdict tag, not copy */}
         {picked && verdict?.kind === "unmeasurable" && (
-          <div
+          <p
             data-testid="import-audio-vtt-timebase-unknown"
-            className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs"
+            className="rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground"
           >
-            <p>
-              <RichMessage
-                k="editor.timeline.audioVttUnmeasurable"
-                values={{
-                  lead: (
-                    <span className="font-medium">
-                      {t("editor.timeline.audioVttUnmeasurableLead", {
-                        fileName: textFileName,
-                      })}
-                    </span>
-                  ),
-                  reason: verdict.reason,
-                }}
-              />
-            </p>
-            {coverage && (
-              <p data-testid="import-audio-vtt-coverage">
-                <RichMessage
-                  k="editor.timeline.audioVttCoverageAsDelivered"
-                  values={{
-                    found: (
-                      <span className="font-medium">
-                        {t("editor.timeline.audioVttCoverageFound", {
-                          percent: Math.round(coverage.applied * 100),
-                        })}
-                      </span>
-                    ),
-                  }}
-                />
-              </p>
-            )}
-          </div>
+            {t("editor.timeline.audioVttUnmeasurableFyi")}
+          </p>
         )}
 
         {/* What this import will actually DO to the cues already there. Stated
@@ -680,7 +500,7 @@ export function ImportAudioVttDialog({
                 onReconcile(plan)
                 return
               }
-              onConfirm(picked.parsed, picked.fileName, correctTimebase ? timebase : null)
+              onConfirm(picked.parsed, picked.fileName, timebase)
             }}
           >
             {!picked

@@ -2139,6 +2139,7 @@ export function ProjectWorkspace() {
     [],
   )
 
+
   // Round 6: move a section's dub chip. Round 7: applied optimistically first.
   // Round 8: stored RELATIVE to the cell (target_offset_ms) so the take travels
   // with its line — the callers still hand an absolute anchor, and this is the
@@ -2282,11 +2283,43 @@ export function ProjectWorkspace() {
       })
   }, [hydratedProject?.files])
 
-  const { audioCues, refresh: refreshAudioCues } = useAudioCueCells({
+  const { audioCues, refresh: refreshAudioCues, patchTiming: patchAudioCueTiming } = useAudioCueCells({
     projectId: project?.id ?? null,
     siblingFileId: audioCueSibling?.id ?? null,
     getToken: getTokenForFile,
   })
+  // Matt's QA (2026-08-21): unlocking the timings must free the AUDIO VTT's
+  // chips too, not only the subtitle rows — Sam's original ruling on the lock.
+  // Same event the re-import reconcile emits (`cell.retime` against the hidden
+  // sibling), so the server cannot tell a drag from a re-import and the lock's
+  // enforcement covers both identically. The cue list is patched locally first
+  // so the chip holds its new span while the write and the re-read round-trip.
+  const handleRetimeAudioCue = useCallback(
+    async (cellId: string, startSec: number, endSec: number) => {
+      const cueFileId = audioCueSibling?.id
+      if (!project?.id || !cueFileId) return
+      patchAudioCueTiming(cellId, startSec, endSec)
+      try {
+        await emitCellRetime({
+          projectId: project.id,
+          fileId: cueFileId,
+          cellId,
+          startMs: Math.round(startSec * 1000),
+          endMs: Math.round(endSec * 1000),
+          author: currentUsername,
+        })
+        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      } catch (e) {
+        toast.add({ type: "error", title: e instanceof Error ? e.message : "Couldn't move that cue." })
+      } finally {
+        // Converge on the projection either way — on failure this is also what
+        // snaps the optimistic patch back to the truth.
+        refreshAudioCues()
+      }
+    },
+    [audioCueSibling?.id, project?.id, currentUsername, getTokenForProjectFile, patchAudioCueTiming, refreshAudioCues],
+  )
+
   // Stage 4: which subtitle line each heard line performs. Read against the
   // SUBTITLE file — the route returns edges from both sides, so this single
   // request covers the cue sibling too and no second read is needed.
@@ -2455,10 +2488,19 @@ export function ProjectWorkspace() {
   /** Report progress every tenth item and on the last. The loops `await` per
    *  item, so each iteration breaks React's batching — setting state 150 times
    *  would re-render this very large component 150 times and make the thing it
-   *  is reporting on slower. */
-  const reportCharacterWrite = useCallback((done: number, total: number) => {
-    if (done % 10 === 0 || done === total) setCharacterWrite({ done, total, phase: "writing" })
-  }, [])
+   *  is reporting on slower. The caller's toast rides the same throttle: the
+   *  drawer that draws `characterWrite` may be closed for the whole run, so the
+   *  toast is the one progress surface that is always on screen. */
+  const reportCharacterWrite = useCallback(
+    (done: number, total: number, progressToast?: { id: string; verb: string } | null) => {
+      if (done % 10 !== 0 && done !== total) return
+      setCharacterWrite({ done, total, phase: "writing" })
+      if (progressToast) {
+        toast.update(progressToast.id, { type: "loading", title: `${progressToast.verb} — ${done} of ${total}…` })
+      }
+    },
+    [],
+  )
   /** …and the same for the CUES, which the audio sheet writes to. Separate
    *  counts because they are separate sheets: replacing one must not claim to
    *  be replacing the other. */
@@ -2530,6 +2572,112 @@ export function ProjectWorkspace() {
     ],
   )
   const bothCharacterSheets = audioCharacterCount > 0 && characterCount > 0
+
+  // Matt's QA (2026-08-21): the picker's inverse — take the character OFF a
+  // line without putting another in its place. Two halves behind one visible
+  // outcome (the NC ring): the voice-map entry goes — along with any
+  // check-drawer resolution built on this cell, which would otherwise record
+  // a decision about a name the line no longer carries — and the cast NAME
+  // comes off the cell so the exports stop grouping the line under it. The
+  // camera angle and the client's line number are SHEET data, not casting,
+  // and deliberately survive; taking those off is what the sheet-level clear
+  // is for.
+  const handleTimelineClearVoice = useCallback(
+    async (cell: CellData, opts?: { applyToSpeaker?: boolean }) => {
+      const castName =
+        cell.metadata && typeof cell.metadata.cast_name === "string" ? cell.metadata.cast_name : ""
+      // The name lives in the shared projection behind the maintainer floor
+      // (`cast.assign`), so check BEFORE touching anything: pruning the voice
+      // map and then being refused the name would leave a half-cleared line
+      // wearing an NC ring over a name the exports still see.
+      if (castName !== "") {
+        const level = project?.syncRole?.level ?? null
+        if (!canPerform("cast.assign", level)) {
+          toast.add({ type: "error", title: denialMessage(t, ROLE.MAINTAINER, level) })
+          return
+        }
+      }
+
+      // "Apply to all «name» lines", honoured for the clear too (Sam,
+      // 2026-08-21: the checkbox sat right there and only the PICK read it).
+      // Same target set as the assign side — every line in this file sharing
+      // the diarized name — and the same per-line treatment as the single
+      // clear: name off, voice-map entry pruned, camera angle and line number
+      // untouched. Shares the character write lock and progress machinery
+      // with the other bulk writers; a main character is hundreds of lines.
+      if (opts?.applyToSpeaker && castName !== "") {
+        if (!project?.id || !activeFileId) return
+        if (characterWriteBusy.current) return
+        if (!navigator.onLine) {
+          toast.add({ type: "error", title: "Characters can't be changed while offline." })
+          return
+        }
+        const cells = getActiveCells().filter(
+          (c) => c.metadata && (c.metadata.cast_name as unknown) === castName,
+        )
+        if (cells.length === 0) return
+        const toastId = toast.add({ type: "loading", title: `Removing "${castName}" from ${cells.length} lines…`, timeout: 0 })
+        characterWriteBusy.current = true
+        frozenAgreement.current = characterAgreement
+        setCharacterWrite({ done: 0, total: cells.length, phase: "writing" })
+        let done = 0
+        try {
+          for (const c of cells) {
+            await emitCastAssign({
+              projectId: project.id,
+              fileId: activeFileId,
+              cellId: c.id,
+              castName: null,
+              author: currentUsername,
+            })
+            reportCharacterWrite(++done, cells.length, { id: toastId, verb: `Removing "${castName}"` })
+          }
+          setCharacterWrite({ done: cells.length, total: cells.length, phase: "syncing" })
+          toast.update(toastId, { type: "loading", title: `"${castName}" removed — saving to the server…` })
+          await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        } catch (e) {
+          toast.update(toastId, { type: "error", title: e instanceof Error ? `Couldn't remove the character: ${e.message}` : "Couldn't remove the character." })
+          characterWriteBusy.current = false
+          setCharacterWrite(null)
+          return
+        }
+        try {
+          await tts.saveTts(buildCastRemovals(cells.map((c) => c.id), tts.settings))
+        } catch (e) {
+          console.warn("[characters] pruning the voice map failed", e)
+          toast.add({ type: "warning", title: "Character removed, but the cast assignments could not be updated." })
+        }
+        characterWriteBusy.current = false
+        setCharacterWrite(null)
+        revalidateCells()
+        toast.update(toastId, { type: "success", title: `Removed "${castName}" from ${cells.length} lines.` })
+        return
+      }
+
+      await tts.saveTts(buildCastRemovals([cell.id], tts.settings))
+      if (castName === "" || !project?.id || !activeFileId) return
+      try {
+        await emitCastAssign({
+          projectId: project.id,
+          fileId: activeFileId,
+          cellId: cell.id,
+          castName: null,
+          author: currentUsername,
+        })
+        await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        revalidateCells()
+      } catch (e) {
+        toast.add({ type: "error", title: e instanceof Error ? e.message : "Couldn't clear the character." })
+      }
+    },
+    [tts, project, activeFileId, currentUsername, getTokenForProjectFile, revalidateCells, t, getActiveCells, characterAgreement, reportCharacterWrite],
+  )
+  const timelineClearVoiceRef = useRef(handleTimelineClearVoice)
+  timelineClearVoiceRef.current = handleTimelineClearVoice
+  const handleClearCastVoice = useCallback(
+    (cell: CellData, opts?: { applyToSpeaker?: boolean }) => void timelineClearVoiceRef.current(cell, opts),
+    [],
+  )
 
   /**
    * Settle one axis of one disagreement.
@@ -2604,7 +2752,7 @@ export function ProjectWorkspace() {
             [choice.axis]: { chose: choice.side, rejected: choice.rejected },
             at: Date.now(),
           } as (typeof records)[string]
-          reportCharacterWrite(++done, choices.length)
+          reportCharacterWrite(++done, choices.length, toastId != null ? { id: toastId, verb: "Saving decisions" } : null)
         }
         setCharacterWrite({ done: choices.length, total: choices.length, phase: "syncing" })
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
@@ -2700,7 +2848,7 @@ export function ProjectWorkspace() {
             author: currentUsername,
           })
         }
-        reportCharacterWrite(++done, entries.length)
+        reportCharacterWrite(++done, entries.length, { id: toastId, verb: "Undoing decisions" })
       }
       setCharacterWrite({ done: entries.length, total: entries.length, phase: "syncing" })
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
@@ -2780,13 +2928,14 @@ export function ProjectWorkspace() {
             ...(a.lineNumber !== undefined ? { lineNumber: a.lineNumber } : {}),
             author: currentUsername,
           })
-          reportCharacterWrite(++done, plan.assignments.length)
+          reportCharacterWrite(++done, plan.assignments.length, { id: toastId, verb: "Assigning characters" })
         }
         setCharacterWrite({
           done: plan.assignments.length,
           total: plan.assignments.length,
           phase: "syncing",
         })
+        toast.update(toastId, { type: "loading", title: `All ${plan.assignments.length} characters assigned — saving to the server…` })
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       } catch (e) {
         toast.update(toastId, { type: "error", title: e instanceof Error ? `Couldn't import the characters: ${e.message}` : "Couldn't import the characters." })
@@ -2877,13 +3026,14 @@ export function ProjectWorkspace() {
             ...(a.lineNumber !== undefined ? { lineNumber: a.lineNumber } : {}),
             author: currentUsername,
           })
-          reportCharacterWrite(++done, plan.assignments.length)
+          reportCharacterWrite(++done, plan.assignments.length, { id: toastId, verb: "Assigning characters" })
         }
         setCharacterWrite({
           done: plan.assignments.length,
           total: plan.assignments.length,
           phase: "syncing",
         })
+        toast.update(toastId, { type: "loading", title: `All ${plan.assignments.length} characters assigned — saving to the server…` })
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       } catch (e) {
         toast.update(toastId, { type: "error", title: e instanceof Error ? `Couldn't import the characters: ${e.message}` : "Couldn't import the characters." })
@@ -2998,9 +3148,10 @@ export function ProjectWorkspace() {
             lineNumber: null,
             author: currentUsername,
           })
-          reportCharacterWrite(++done, dirty.length)
+          reportCharacterWrite(++done, dirty.length, { id: toastId, verb: `Clearing ${args.noun}` })
         }
         setCharacterWrite({ done: dirty.length, total: dirty.length, phase: "syncing" })
+        toast.update(toastId, { type: "loading", title: `All ${dirty.length} ${args.noun} cleared — saving to the server…` })
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       } catch (e) {
         toast.update(toastId, { type: "error", title: e instanceof Error ? `Couldn't clear the characters: ${e.message}` : "Couldn't clear the characters." })
@@ -3168,6 +3319,7 @@ export function ProjectWorkspace() {
       let linkCount = 0
       setCueLinksPending(true)
       try {
+        toast.update(importToastId, { type: "loading", title: `Imported ${uploaded.cellCount} audio cues — pairing them with the subtitles…` })
         const plans = autoLinkable(planCueLinks({
           textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
           audioCues: uploaded.cues,
@@ -3184,12 +3336,20 @@ export function ProjectWorkspace() {
             confidence: plan.confidence,
             author: currentUsername,
           })
+          linkCount++
+          // Same throttle as reportCharacterWrite, same reason: the loop
+          // `await`s per link, so every update is its own render.
+          if (linkCount % 10 === 0 || linkCount === plans.length) {
+            toast.update(importToastId, { type: "loading", title: `Pairing heard lines with subtitles — ${linkCount} of ${plans.length}…` })
+          }
         }
-        linkCount = plans.length
         // ~650 events for a full episode, and MAX_BATCH is 100 — so this is
         // several round trips. Awaited before the success toast so the message
         // is not claiming work the queue has not done yet.
-        if (linkCount > 0) await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        if (linkCount > 0) {
+          toast.update(importToastId, { type: "loading", title: `Paired ${linkCount} heard lines — saving to the server…` })
+          await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+        }
         refreshCueLinks()
       } catch (e) {
         console.warn("[audio-cues] auto-linking failed", e)
@@ -3198,12 +3358,12 @@ export function ProjectWorkspace() {
         setCueLinksPending(false)
       }
 
-      const retimed = timebase
-        ? `, retimed from ${timebase.cue.label} to ${timebase.reference.label} fps`
-        : ""
+      // Sam, 2026-08-21: no frame-rate talk anywhere a user reads. The dialog's
+      // FYI line already said the timings would be adjusted; the manifest keeps
+      // the details for whoever debugs.
       toast.update(importToastId, { type: "success", title: linkCount > 0
-          ? `Imported ${uploaded.cellCount} audio cues${retimed}, and paired ${linkCount} of them with subtitle lines.`
-          : `Imported ${uploaded.cellCount} audio cues${retimed}.` })
+          ? `Imported ${uploaded.cellCount} audio cues, and paired ${linkCount} of them with subtitle lines.`
+          : `Imported ${uploaded.cellCount} audio cues.` })
     },
     [project?.id, activeFile, audioCueSiblings, currentUsername, getTokenForFile, getTokenForProjectFile, refresh, refreshCueLinks, cellStore, cellStoreVersion],
   )
@@ -3238,6 +3398,21 @@ export function ProjectWorkspace() {
         return
       }
       const siblingId = audioCueSibling.id
+      // A re-import of a full episode edits hundreds of cues and then re-pairs
+      // the new ones — silence for all of it read as a dead button (Matt's QA).
+      // Nothing-to-do skips the toast so "Nothing needed changing." doesn't
+      // arrive behind a spinner that never counted.
+      const totalEdits = plan.creates.length + plan.retimes.length + plan.deletes.length
+      const editToastId = totalEdits > 0
+        ? toast.add({ type: "loading", title: `Updating ${totalEdits} audio cues…`, timeout: 0 })
+        : null
+      let edited = 0
+      const reportEdit = () => {
+        edited++
+        if (editToastId != null && (edited % 10 === 0 || edited === totalEdits)) {
+          toast.update(editToastId, { type: "loading", title: `Updating audio cues — ${edited} of ${totalEdits}…` })
+        }
+      }
       try {
         // Creates first, so there is never a moment where a stretch of the film
         // has lost its old cue and not yet gained the new one.
@@ -3261,6 +3436,7 @@ export function ProjectWorkspace() {
               },
             },
           ])
+          reportEdit()
         }
         for (const move of plan.retimes) {
           await emitCellRetime({
@@ -3271,26 +3447,35 @@ export function ProjectWorkspace() {
             endMs: move.endMs,
             author: currentUsername,
           })
+          reportEdit()
         }
         for (const d of plan.deletes) {
           // A delete is chain-mutating and cannot be arbitrated without its
-          // chain head. Skipping beats sending one that can only be rejected.
-          if (!d.sourceEventId) continue
-          await enqueueEvents([
-            {
-              kind: "source.cell.delete" as const,
-              projectId: project.id,
-              fileId: siblingId,
-              cellId: d.cellId,
-              parentId: d.sourceEventId,
-              author: currentUsername,
-              payload: {},
-            },
-          ])
+          // chain head. Skipping beats sending one that can only be rejected —
+          // but it still counts as handled, so the toast reaches its total.
+          if (d.sourceEventId) {
+            await enqueueEvents([
+              {
+                kind: "source.cell.delete" as const,
+                projectId: project.id,
+                fileId: siblingId,
+                cellId: d.cellId,
+                parentId: d.sourceEventId,
+                author: currentUsername,
+                payload: {},
+              },
+            ])
+          }
+          reportEdit()
+        }
+        if (editToastId != null) {
+          toast.update(editToastId, { type: "loading", title: `All ${totalEdits} cue edits made — saving to the server…` })
         }
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       } catch (e) {
-        toast.add({ type: "error", title: e instanceof Error ? `Couldn't update the cues: ${e.message}` : "Couldn't update the cues." })
+        const title = e instanceof Error ? `Couldn't update the cues: ${e.message}` : "Couldn't update the cues."
+        if (editToastId != null) toast.update(editToastId, { type: "error", title })
+        else toast.add({ type: "error", title })
         return
       }
 
@@ -3335,10 +3520,11 @@ export function ProjectWorkspace() {
             ),
             onlyCues: newCueIds,
           })
-          for (const e of [
+          const linkEdits = [
             ...diff.link.map((l) => ({ ...l, linked: true })),
             ...diff.unlink.map((l) => ({ ...l, linked: false })),
-          ]) {
+          ]
+          for (const e of linkEdits) {
             await emitCellLinkSet({
               projectId: project.id,
               fileId: activeFile.id,
@@ -3351,6 +3537,9 @@ export function ProjectWorkspace() {
               author: currentUsername,
             })
             changedLinks++
+            if (editToastId != null && (changedLinks % 10 === 0 || changedLinks === linkEdits.length)) {
+              toast.update(editToastId, { type: "loading", title: `Pairing the new cues — ${changedLinks} of ${linkEdits.length}…` })
+            }
           }
           if (changedLinks > 0) await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
           refreshCueLinks()
@@ -3370,7 +3559,9 @@ export function ProjectWorkspace() {
       if (plan.creates.length > 0) parts.push(`added ${plan.creates.length}`)
       if (plan.deletes.length > 0) parts.push(`removed ${plan.deletes.length}`)
       if (changedLinks > 0) parts.push(`changed ${changedLinks} pairings`)
-      toast.add({ type: "success", title: parts.length === 0
+      const finish = (options: { type: "success"; title: string }) =>
+        editToastId != null ? toast.update(editToastId, options) : toast.add(options)
+      finish({ type: "success", title: parts.length === 0
           ? "Nothing needed changing."
           : `Audio cues updated — ${parts.join(", ")}.` +
               (plan.orphanedTakes > 0
@@ -5638,10 +5829,12 @@ export function ProjectWorkspace() {
       const successor = before && after ? after : null
       // ONE batch, create first, so there is never a tick where the row exists
       // at the tail. The two chain-mutating events sit on different cells, so
-      // neither waits on the other's head. source.cell.reorder carries the same
-      // PROJECT_LEAD floor as source.cell.create, so the caller's permission
-      // check already covers it — and enqueueEvents re-checks per input and
-      // throws before writing anything.
+      // neither waits on the other's head. source.cell.reorder carries the
+      // same CONTRIBUTOR floor as source.cell.create and rides the same
+      // `allowLineCreation` carve-out on the server (Sam, 2026-08-21 — the
+      // day this batch silently died for a contributor because the reorder
+      // still floored at PROJECT_LEAD and enqueueEvents throws per input,
+      // before writing anything).
       await enqueueEvents([
         {
           kind: "source.cell.create" as const,
@@ -5752,9 +5945,10 @@ export function ProjectWorkspace() {
     onOpenRecording: handleOpenRecording,
     onMediaRowActivate: handleMediaRowActivate, // 2026-08-07: row click → timeline (stacked lens only)
     onAssignCastVoice: handleAssignCastVoice, // 2026-08-07: gutter picker (pure assignment)
+    onClearCastVoice: handleClearCastVoice, // Matt's QA 2026-08-21: unassign without replacing
     onTakeSaved: handleTakeSaved, // AQU-646: a take gives a text-less line a target row
     myScopes, // AQU-633: per-cell validate scope gate
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleTakeSaved, myScopes])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, myScopes])
 
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
@@ -6868,6 +7062,14 @@ export function ProjectWorkspace() {
       const cells = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
       const fileId = activeFileId
       void (async () => {
+        // Same lazy toast as the mp3 auto-transcribe: created on the first
+        // progress call, so a run with nothing to transcribe never leaves a
+        // spinner hanging. The banner still tracks per-cell state; the toast
+        // is the count that survives scrolling away from the table.
+        let toastId: string | null = null
+        let lastDone = 0
+        let lastTotal = 0
+        const plural = (n: number) => (n === 1 ? "" : "s")
         await runBatchTranscribeAll({
           cells,
           projectId: project.id,
@@ -6876,6 +7078,18 @@ export function ProjectWorkspace() {
           // speech, recorded takes voice the target text (per-cell in the batch).
           sourceLanguage: project.sourceLanguage,
           targetLanguage: project.targetLanguage,
+          onProgress: (done, total) => {
+            lastDone = done
+            lastTotal = total
+            // The zeroth call lands BEFORE the Whisper model is fetched — on a
+            // cold run that is most of the wait, so say what is happening
+            // rather than counting from nothing.
+            const title = done === 0
+              ? `Transcribing ${total} recording${plural(total)}…`
+              : `Transcribing — ${done} of ${total} done…`
+            if (toastId === null) toastId = toast.add({ type: "loading", title, timeout: 0 })
+            else toast.update(toastId, { type: "loading", title })
+          },
         })
         // AQU-783: the batch enqueues one cell.audio.attach per cell but never
         // revalidated, so the transcripts only surfaced after a manual reload.
@@ -6885,6 +7099,13 @@ export function ProjectWorkspace() {
         await refreshOutboxPending()
         revalidateCells()
         notifyAudioAttachmentsChanged(fileId)
+        // Only if something was actually reported — see the lazy toast above.
+        // A short count means the banner's Cancel was pressed mid-run.
+        if (toastId !== null) {
+          toast.update(toastId, lastDone < lastTotal
+            ? { type: "info", title: `Transcription stopped — ${lastDone} of ${lastTotal} done.` }
+            : { type: "success", title: `Transcribed ${lastTotal} recording${plural(lastTotal)}.` })
+        }
       })()
     },
     runSynthAll: () => {
@@ -7220,21 +7441,39 @@ export function ProjectWorkspace() {
   // lens that array is empty by design, and forcing it would cost a full
   // thousand-object rebuild on every store bump for a surface nobody is looking
   // at. This is why the controls are a media-lens affordance.
+  //
+  // Sam, 2026-08-21: who may edit lines at all. Leads and above always could
+  // and still can; a contributor qualifies only while the project has opted
+  // into `allowLineCreation` — "that setting is enabling lines being added or
+  // removed", the package travels together, and the server enforces the same
+  // split per event. The static canPerform floor is CONTRIBUTOR now, so the
+  // settings term is what keeps a contributor's buttons from being offers the
+  // server would refuse.
+  const canEditLines =
+    (project?.syncRole?.level ?? 0) >= ROLE.PROJECT_LEAD ||
+    ((project?.allowLineCreation ?? false) &&
+      canPerform("source.cell.create", project?.syncRole?.level ?? null))
   const addLineCells = activeFile?.coreMediaUrl && legacyCellsNeeded
     && !audioMergedCells.some((c) => (c.medium ?? "text") === "media")
-    && canPerform("source.cell.create", project?.syncRole?.level ?? null)
+    && canEditLines
     ? audioMergedCells
     : null
   const videoDurationForTable = useVideoDurationSec(activeFile?.coreMediaUrl ?? null)
+  // Matt's QA (2026-08-21): the table's "Add line below" strip ignored the
+  // `allowLineCreation` setting entirely — the timeline's pencil obeyed it
+  // while this second door stood open. The setting gates the INSERT slots
+  // only, not `addLineCells` itself: removal rides `sourceLineEditing` too,
+  // and taking a line back is never gated on policy — switching the setting
+  // off must not strand a line somebody already made.
   const insertSlots = useMemo(
     () =>
-      addLineCells
+      addLineCells && (project?.allowLineCreation ?? false)
         ? insertSlotsByCell(
             deriveSourceRegions(addLineCells, videoDurationForTable),
             MIN_ADDABLE_SPAN_SEC,
           )
         : EMPTY_INSERT_SLOTS,
-    [addLineCells, videoDurationForTable],
+    [addLineCells, project?.allowLineCreation, videoDurationForTable],
   )
   const sourceLineEditing = useMemo(
     () =>
@@ -9149,6 +9388,7 @@ export function ProjectWorkspace() {
                     // retimes are not caught by the lock.
                     timingLocked={timingLocked}
                     onRetimeTarget={handleRetimeTarget}
+                    onRetimeCue={handleRetimeAudioCue}
                     onTrimTarget={handleTrimTarget}
                     onTogglePlay={handleTimelineTogglePlay}
                     onRequestLinkVideo={() => setLinkVideoOpen(true)}
@@ -9157,7 +9397,7 @@ export function ProjectWorkspace() {
                     // Creating a cell is a source.* write, PROJECT_LEAD+ on the
                     // server. Offering the button below that bar would mint a
                     // guaranteed 403 and wedge the outbox.
-                    canAddLine={canPerform("source.cell.create", project?.syncRole?.level ?? null)}
+                    canAddLine={canEditLines}
                     // Off unless this project has turned it on. Clearance and
                     // policy stay separate props so switching this off still
                     // leaves an already-added empty line deletable.

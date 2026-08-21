@@ -104,6 +104,11 @@ function nativeAudioTracks(video: HTMLVideoElement | null): NativeAudioTrackList
   return list && typeof list.length === "number" ? list : null
 }
 
+/** `video.textTracks`, guarded: happy-dom and older engines may not populate it. */
+function embeddedTextTracks(video: HTMLVideoElement | null): TextTrackList | null {
+  return video?.textTracks ?? null
+}
+
 function readNativeTracks(list: NativeAudioTrackList): FilmAudioTrack[] {
   const out: FilmAudioTrack[] = []
   for (let i = 0; i < list.length; i += 1) {
@@ -303,6 +308,15 @@ export function useHlsVideo(
       instance.on(Ctor.Events.AUDIO_TRACK_SWITCHED, publishTracks)
       instance.on(Ctor.Events.MANIFEST_PARSED, publishTracks)
 
+      instance.on(Ctor.Events.SUBTITLE_TRACKS_UPDATED, () => {
+        const hls = hlsRef.current
+        if (!hls) return
+        // `subtitleDisplay = false` above stops the RENDERING, but a track the
+        // manifest flags DEFAULT/AUTOSELECT still gets SELECTED, and a selected
+        // track has its cue playlists fetched for nothing. -1 is "none".
+        if (hls.subtitleTrack !== -1) hls.subtitleTrack = -1
+      })
+
       instance.on(Ctor.Events.ERROR, (_event, data) => {
         if (!data.fatal) return
         const hls = hlsRef.current
@@ -365,6 +379,42 @@ export function useHlsVideo(
       setAudioTracks([])
     }
   }, [pipeline, src, attachKey, videoRef])
+
+  /**
+   * The film's own captions are never shown, on EITHER pipeline.
+   *
+   * The streaming player is told above not to render them, but the native path
+   * has no such switch: Safari plays these playlists itself, honours a DEFAULT
+   * flag in the manifest, and turns the track on — which is how a freshly
+   * linked film came up with the CDN's captions over ours. We draw the
+   * subtitles from the file being translated, so every embedded track is
+   * forced to "disabled" — and KEPT there, as an event handler rather than a
+   * one-time write, because tracks can arrive after metadata and the player
+   * can flip a mode back.
+   */
+  useEffect(() => {
+    if (!src) return
+    const video = videoRef.current
+    const tracks = embeddedTextTracks(video)
+    if (!video || !tracks) return
+    const silence = () => {
+      for (let i = 0; i < tracks.length; i += 1) {
+        const track = tracks[i]
+        // The mode check is the loop-breaker: writing `mode` fires "change",
+        // which lands back here, and must find nothing left to write.
+        if (track && track.mode !== "disabled") track.mode = "disabled"
+      }
+    }
+    silence()
+    video.addEventListener("loadedmetadata", silence)
+    tracks.addEventListener("addtrack", silence)
+    tracks.addEventListener("change", silence)
+    return () => {
+      video.removeEventListener("loadedmetadata", silence)
+      tracks.removeEventListener("addtrack", silence)
+      tracks.removeEventListener("change", silence)
+    }
+  }, [src, attachKey, pipeline, videoRef])
 
   /**
    * Make the film speak the chosen language, on whichever player is driving.

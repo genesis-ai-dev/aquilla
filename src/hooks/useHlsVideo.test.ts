@@ -49,6 +49,7 @@ function makeFakeHls(o: { supported?: boolean } = {}) {
       ERROR: "hlsError",
       AUDIO_TRACKS_UPDATED: "hlsAudioTracksUpdated",
       AUDIO_TRACK_SWITCHED: "hlsAudioTrackSwitched",
+      SUBTITLE_TRACKS_UPDATED: "hlsSubtitleTracksUpdated",
     } as const
     static ErrorTypes = { NETWORK_ERROR: "networkError", MEDIA_ERROR: "mediaError", OTHER_ERROR: "otherError" } as const
     static isSupported = () => o.supported ?? true
@@ -57,6 +58,8 @@ function makeFakeHls(o: { supported?: boolean } = {}) {
     levels = LEVELS
     audioTracks = AUDIO_TRACKS
     audioTrack = -1
+    /** As the library leaves it after autoselecting a DEFAULT-flagged track. */
+    subtitleTrack = 0
     currentLevel = 4
     autoLevelCapping = -1
     subtitleDisplay = true
@@ -176,6 +179,82 @@ describe("how large a picture it is willing to decode", () => {
     renderHook(() => useHlsVideo(ref, HLS_SRC, { loader }))
     await waitFor(() => expect(instances).toHaveLength(1))
     expect(instances[0]!.subtitleDisplay).toBe(false)
+  })
+
+  it("deselects a subtitle track the manifest turned on by itself", async () => {
+    // Not rendering is not enough: a selected track still fetches its cue
+    // playlists, and the selection is what a DEFAULT flag buys itself.
+    const { ref } = elementRef()
+    const { loader, instances } = makeFakeHls()
+    renderHook(() => useHlsVideo(ref, HLS_SRC, { loader }))
+    await waitFor(() => expect(instances).toHaveLength(1))
+    expect(instances[0]!.subtitleTrack).toBe(0)
+    instances[0]!.emit("hlsSubtitleTracksUpdated")
+    expect(instances[0]!.subtitleTrack).toBe(-1)
+  })
+})
+
+// ── The film's own captions (Matt's QA, 2026-08-21) ─────────────────────────
+//
+// A freshly linked film came up with the CDN's captions over ours. The
+// streaming player was already told not to render them — the native path
+// (Safari's own HLS, and every film the stall ladder hands back) had no such
+// switch, and Safari honours a manifest's DEFAULT flag.
+
+describe("silencing the film's own captions", () => {
+  /** A stand-in for `video.textTracks`, with the events the clamp listens on. */
+  function fakeTextTracks(video: HTMLVideoElement, modes: string[]) {
+    const handlers: Record<string, (() => void)[]> = {}
+    const tracks = modes.map((mode) => ({ mode }))
+    const list = Object.assign(tracks, {
+      addEventListener: (type: string, fn: () => void) => {
+        ;(handlers[type] ??= []).push(fn)
+      },
+      removeEventListener: (type: string, fn: () => void) => {
+        handlers[type] = (handlers[type] ?? []).filter((f) => f !== fn)
+      },
+    })
+    Object.defineProperty(video, "textTracks", { configurable: true, value: list })
+    const emit = (type: string) => {
+      for (const fn of handlers[type] ?? []) fn()
+    }
+    return { tracks, emit }
+  }
+
+  it("disables every embedded track on the native path", async () => {
+    const { video, ref } = elementRef()
+    const { tracks } = fakeTextTracks(video, ["showing", "hidden"])
+    const { loader } = makeFakeHls({ supported: false })
+    const { result } = renderHook(() => useHlsVideo(ref, HLS_SRC, { loader }))
+    await waitFor(() => expect(result.current.pipeline).toBe("native"))
+    expect(tracks.map((t) => t.mode)).toEqual(["disabled", "disabled"])
+  })
+
+  it("disables a track that arrives late, and one the player turns back on", async () => {
+    // Subtitle renditions can land after metadata, and Safari can flip a mode
+    // on its own — the clamp is a standing rule, not a one-time write.
+    const { video, ref } = elementRef()
+    const { tracks, emit } = fakeTextTracks(video, ["disabled"])
+    const { loader } = makeFakeHls({ supported: false })
+    const { result } = renderHook(() => useHlsVideo(ref, HLS_SRC, { loader }))
+    await waitFor(() => expect(result.current.pipeline).toBe("native"))
+    tracks.push({ mode: "showing" })
+    emit("addtrack")
+    expect(tracks[1]!.mode).toBe("disabled")
+    tracks[0]!.mode = "showing"
+    emit("change")
+    expect(tracks[0]!.mode).toBe("disabled")
+  })
+
+  it("disables the tracks the streaming player creates too", async () => {
+    // Belt and braces on the hls path: the library renders subtitles through
+    // native TextTracks, so the same clamp holds there.
+    const { video, ref } = elementRef()
+    const { tracks } = fakeTextTracks(video, ["hidden"])
+    const { loader, instances } = makeFakeHls()
+    renderHook(() => useHlsVideo(ref, HLS_SRC, { loader }))
+    await waitFor(() => expect(instances).toHaveLength(1))
+    expect(tracks[0]!.mode).toBe("disabled")
   })
 })
 

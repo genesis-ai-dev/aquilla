@@ -760,6 +760,59 @@ export async function sendContextualSteering(runId: string, text: string): Promi
   if (!res.ok) return throwFromResponse(res, "send steering failed")
 }
 
+// ── Contextual decisions (human-in-the-loop question channel) ──────────────
+
+export interface ContextualDecisionView {
+  id: string
+  fileId: string
+  cellIds: string[]
+  reason: string
+  readinessItem: "terminology" | "brief" | "examples" | "rules" | "languages" | null
+  blastRadius: number
+  status: "open" | "researching" | "resolved" | "dismissed" | "superseded" | "expired"
+  assignedUserId: number | null
+}
+
+export interface ContextualDecisionsPage {
+  decisions: ContextualDecisionView[]
+  /** True number of open decisions — may exceed `decisions.length`, because
+   *  surplus is HELD rather than shown (§4.6). */
+  openCount: number
+  cap: number
+}
+
+const EMPTY_DECISIONS: ContextualDecisionsPage = { decisions: [], openCount: 0, cap: 0 }
+
+/** Reports an empty page rather than throwing when the backend predates this
+ *  endpoint, so the inspector still renders without it. */
+export async function fetchContextualDecisions(
+  projectId: string,
+): Promise<ContextualDecisionsPage> {
+  const jwt = await requireJwt()
+  const res = await fetchWithTimeout(
+    `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/contextual/decisions`,
+    { headers: authHeaders(jwt) },
+  )
+  if (res.status === 404 || res.status === 501) return EMPTY_DECISIONS
+  if (!res.ok) return throwFromResponse(res, "fetch decisions failed")
+  const body = (await res.json()) as Partial<ContextualDecisionsPage>
+  return { ...EMPTY_DECISIONS, ...body }
+}
+
+export async function actOnContextualDecision(
+  projectId: string,
+  decisionId: string,
+  action: "answer" | "dismiss" | "assign",
+  payload: Record<string, unknown> = {},
+): Promise<void> {
+  const jwt = await requireJwt()
+  const res = await fetchWithTimeout(
+    `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/contextual/decisions/${encodeURIComponent(decisionId)}/${action}`,
+    { method: "POST", headers: authHeaders(jwt), body: JSON.stringify(payload) },
+  )
+  if (!res.ok) return throwFromResponse(res, `decision ${action} failed`)
+}
+
 let _installed = false
 
 /** Wire the real transport into the run-store. Idempotent — the pill mount

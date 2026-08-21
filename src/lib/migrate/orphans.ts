@@ -27,6 +27,7 @@
 //      agent, a contributor) carry no such event and are left alone.
 
 import {
+  escalatedEventId,
   sourceCellCreateEventId,
   sourceCellDeleteEventId,
   sourceCellReanchorEventId,
@@ -214,6 +215,15 @@ export interface AnchorRepairArgs {
   /** Event ids already in the project's log — provenance proof plus no-op
    *  suppression for repairs a prior run landed. */
   existingEventIds: ReadonlySet<string>
+  /** Cells whose source row this same pass is resurrecting (see
+   *  `mapCellResurrections`). A follower whose intended anchor is being
+   *  resurrected has a provably damage-correlated divergence, so its
+   *  suppressed repair escalates instead of being preserved as human intent. */
+  resurrectedCellIds?: ReadonlySet<string>
+  /** Today's live cell ids for this file. A stored anchor pointing OUTSIDE
+   *  this set is provably broken (its target is retracted or never existed) —
+   *  no in-app reorder can produce it, so a suppressed repair escalates. */
+  liveCellIds?: ReadonlySet<string>
   fallbackAuthor: string
   fallbackTs: number
 }
@@ -235,8 +245,24 @@ export interface AnchorRepairArgs {
  *   1. FILE SCOPE — the caller reconciles only files this pass produced.
  *   2. MIGRATION PROVENANCE — only cells the migration itself created are
  *      re-anchored; cells authored inside Aquilla keep their author's anchor.
- * A repair whose deterministic id is already in the log is skipped — so a
- * deliberate later reorder inside Aquilla is not endlessly re-fought.
+ *
+ * A repair whose deterministic id is already in the log is normally skipped —
+ * so a deliberate later reorder inside Aquilla is not endlessly re-fought. But
+ * a logged repair the projection still disagrees with can also mean the repair
+ * was UNDONE — a later poisoned run (a stale checkout mapping months-old
+ * notebooks) re-anchored the cell somewhere broken, and the logged gen-1 id
+ * suppresses every re-emission forever. The two are distinguishable, and only
+ * provably-damage shapes escalate (same generation scheme as AQU-933):
+ *   - the stored anchor points at a retracted/never-existing cell (no in-app
+ *     reorder can produce a dangling anchor);
+ *   - the intended anchor is a cell this same pass is resurrecting (the
+ *     follower belongs behind the row being restored);
+ *   - the stored anchor was WRITTEN BY THE MIGRATION itself: reanchor event
+ *     ids are deterministic in (cell, anchor), so if any generation of
+ *     `sourceCellReanchorEventId(…, storedAnchor)` is in the log, the stored
+ *     value came from a migration repair (possibly a poisoned run's), never
+ *     from a human — in-app reorders mint server-side ids. Re-aligning it to
+ *     today's chain re-fights nothing a person did.
  */
 export function mapAnchorRepairs(args: AnchorRepairArgs): IngestEvent[] {
   const {
@@ -245,6 +271,8 @@ export function mapAnchorRepairs(args: AnchorRepairArgs): IngestEvent[] {
     intendedAnchors,
     projectionCells,
     existingEventIds,
+    resurrectedCellIds,
+    liveCellIds,
     fallbackAuthor,
     fallbackTs,
   } = args
@@ -259,8 +287,37 @@ export function mapAnchorRepairs(args: AnchorRepairArgs): IngestEvent[] {
     // Guard 2: only ever repair what the migration itself created.
     if (!existingEventIds.has(sourceCellCreateEventId(projectId, fileId, cell.cellId))) continue
     if ((cell.sourceAnchorCellId ?? null) === intended) continue
-    const id = sourceCellReanchorEventId(projectId, fileId, cell.cellId, intended)
-    if (existingEventIds.has(id)) continue
+    const gen1 = sourceCellReanchorEventId(projectId, fileId, cell.cellId, intended)
+    let id: string | null = null
+    if (!existingEventIds.has(gen1)) {
+      id = gen1
+    } else {
+      // Gen-1 logged yet the projection still disagrees. Escalate ONLY when
+      // the divergence is provably damage, never for a possible human reorder
+      // (see the doc comment above for the three shapes).
+      const storedAnchorDead =
+        cell.sourceAnchorCellId != null && !(liveCellIds?.has(cell.sourceAnchorCellId) ?? true)
+      const intendedResurrected = intended !== null && (resurrectedCellIds?.has(intended) ?? false)
+      const storedGen1 = sourceCellReanchorEventId(
+        projectId, fileId, cell.cellId, cell.sourceAnchorCellId ?? null,
+      )
+      let storedWrittenByMigration = false
+      for (let generation = 1; generation <= MAX_RETRACTION_GENERATION; generation++) {
+        if (existingEventIds.has(escalatedEventId(storedGen1, generation))) {
+          storedWrittenByMigration = true
+          break
+        }
+      }
+      if (!storedAnchorDead && !intendedResurrected && !storedWrittenByMigration) continue
+      for (let generation = 2; generation <= MAX_RETRACTION_GENERATION; generation++) {
+        const candidate = escalatedEventId(gen1, generation)
+        if (!existingEventIds.has(candidate)) {
+          id = candidate
+          break
+        }
+      }
+    }
+    if (!id) continue
     events.push({
       id,
       kind: "source.cell.reanchor",
@@ -274,4 +331,144 @@ export function mapAnchorRepairs(args: AnchorRepairArgs): IngestEvent[] {
   }
 
   return events
+}
+
+export interface CellResurrectionArgs {
+  /** The migrated file being reconciled — resurrections never cross a file. */
+  fileId: string
+  /** Today's mapped event stream for THIS file, in mapper order. */
+  events: readonly IngestEvent[]
+  /** The projection's current cells for this file. */
+  projectionCells: Iterable<ProjectionCell>
+  /** Event ids already in the project's log. */
+  existingEventIds: ReadonlySet<string>
+}
+
+export interface CellResurrections {
+  /** Re-emissions to ingest, in mapper order (create before its commits). */
+  events: IngestEvent[]
+  /** The cells being resurrected — feeds mapAnchorRepairs' escalation. */
+  cellIds: ReadonlySet<string>
+}
+
+/**
+ * Resurrections for live cells a previous run wrongly deleted.
+ *
+ * The mirror image of the AQU-933 zombie: a cell that is LIVE in today's
+ * Codex parse, whose deterministic `source.cell.create` is already in the
+ * event log, but whose projection row is GONE — a later retraction (a
+ * poisoned run mapping a stale checkout, a pre-fix logic bug) deleted it,
+ * and because creates/commits delta-filter on their logged ids, no re-run
+ * can ever re-materialize the row. The translated, validated content sits
+ * invisible in the append-only log forever.
+ *
+ * The fix re-emits the mapper's own events for the damaged cell under
+ * escalated deterministic ids (`escalatedEventId`, generation ≥ 2), with
+ * every intra-cell reference rewritten to the same generation: the commits'
+ * `parentId` chain and `sourceEventId` pin follow the resurrected create,
+ * and each validation's `editEventId` follows its rewritten head commit —
+ * so the projected row converges to exactly what a fresh migration would
+ * produce. Guards mirror the retraction pass (file scope via the caller;
+ * migration provenance via the logged gen-1 create). A generation already
+ * in the log did not stick — escalate past it, capped like retractions.
+ *
+ * Rebuild note: `source.cell.create` is genesis-arbitrated on projection
+ * rebuild (first-in-seq wins), so a rebuild replays the ORIGINAL create,
+ * then the deletes, and skips the escalated create — reverting the row.
+ * The next migration sweep detects the regression (row gone, escalated id
+ * logged) and mints the next generation, so the projection self-heals on
+ * the same cadence as every other reconciliation here.
+ *
+ * When only the SOURCE row was deleted (target row still live), the target
+ * side is left completely untouched — no commit replay, no validation churn.
+ * The live target keeps its original `source_event_id` pin, which then
+ * differs from the resurrected source head; that can surface as a staleness
+ * flag in the editor, which is honest (the pin genuinely predates the
+ * restored head) and self-clears on the next human commit.
+ */
+export function mapCellResurrections(args: CellResurrectionArgs): CellResurrections {
+  const { fileId, events, projectionCells, existingEventIds } = args
+
+  const projByCell = new Map<string, ProjectionCell>()
+  for (const cell of projectionCells) projByCell.set(cell.cellId, cell)
+
+  // Per-cell slices of the mapped stream, in emission order — scoped to this
+  // file (Guard 1) even if the caller hands the full stream. Only the kinds
+  // that materialize the cell's rows participate; retractions/reanchors are
+  // other passes' business.
+  interface Slice { create?: IngestEvent; commits: IngestEvent[]; validates: IngestEvent[] }
+  const slices = new Map<string, Slice>()
+  const sliceOf = (cellId: string): Slice => {
+    let s = slices.get(cellId)
+    if (!s) {
+      s = { commits: [], validates: [] }
+      slices.set(cellId, s)
+    }
+    return s
+  }
+  for (const e of events) {
+    if (e.fileId !== fileId) continue
+    if (e.kind === "source.cell.create") {
+      const cellId = (e.payload.cellId as string | undefined) ?? e.cellId
+      if (typeof cellId === "string") sliceOf(cellId).create = e
+    } else if (e.kind === "target.cell.commit" && typeof e.cellId === "string") {
+      sliceOf(e.cellId).commits.push(e)
+    } else if (e.kind === "cell.validate" && typeof e.cellId === "string") {
+      sliceOf(e.cellId).validates.push(e)
+    }
+  }
+
+  const out: IngestEvent[] = []
+  const cellIds = new Set<string>()
+  for (const [cellId, slice] of slices) {
+    const create = slice.create
+    if (!create) continue // no live create → retraction/repair territory
+    // Guard 2: only resurrect what the migration itself created. A brand-new
+    // cell's create is not in the log yet — it lands normally this run.
+    if (!existingEventIds.has(create.id)) continue
+    const proj = projByCell.get(cellId)
+    if (proj?.hasSource) continue // row exists — anchors are mapAnchorRepairs' job
+
+    let generation = 0
+    for (let g = 2; g <= MAX_RETRACTION_GENERATION; g++) {
+      if (!existingEventIds.has(escalatedEventId(create.id, g))) {
+        generation = g
+        break
+      }
+    }
+    if (generation === 0) continue // cap exhausted — same policy as retractions
+
+    // Replay the target side only when its row is gone too. A live target row
+    // must not be churned (its head, validators, and counters are all sound).
+    const replayTarget = !(proj?.hasTarget ?? false)
+
+    const idMap = new Map<string, string>()
+    idMap.set(create.id, escalatedEventId(create.id, generation))
+    if (replayTarget) {
+      for (const c of slice.commits) idMap.set(c.id, escalatedEventId(c.id, generation))
+    }
+    const remap = (id: string | null | undefined): string | null | undefined =>
+      typeof id === "string" ? idMap.get(id) ?? id : id
+
+    cellIds.add(cellId)
+    out.push({ ...create, id: idMap.get(create.id)! })
+    if (!replayTarget) continue
+    for (const c of slice.commits) {
+      out.push({
+        ...c,
+        id: idMap.get(c.id)!,
+        parentId: remap(c.parentId),
+        payload: { ...c.payload, sourceEventId: remap(c.payload.sourceEventId as string | undefined) },
+      })
+    }
+    for (const v of slice.validates) {
+      out.push({
+        ...v,
+        id: escalatedEventId(v.id, generation),
+        payload: { ...v.payload, editEventId: remap(v.payload.editEventId as string | undefined) },
+      })
+    }
+  }
+
+  return { events: out, cellIds }
 }

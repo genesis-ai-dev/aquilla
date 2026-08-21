@@ -2,10 +2,12 @@
  * Select the study-note paragraphs from a fully parsed Biblica IDML package.
  *
  * The shared IDML engine parses every literal location in the document
- * losslessly, scripture included. A Biblica study-Bible import wants only the
- * `intro:*` note paragraphs: the Bible text itself is set from the publisher's
- * scripture files, not translated here. Verse runs are still walked, because
- * they are what tells us which book and chapter each note section belongs to.
+ * losslessly, scripture included. A Biblica study-Bible import wants the
+ * `intro:*` note paragraphs and the `head:*` headings the layout sets around
+ * the verses (Psalm labels, superscriptions, speaker lines): the Bible text
+ * itself is set from the publisher's scripture files, not translated here.
+ * Verse runs are still walked, because they are what tells us which book and
+ * chapter each note section belongs to.
  *
  * Biblica also ships the study Bible's front and back matter — title pages and
  * contents, "how to use", the Bible Dictionary, the timelines, the maps, the
@@ -56,6 +58,7 @@ import {
   isBiblicaMetaStyle,
   isBiblicaNoteSectionStyle,
   isBiblicaRunningHeadStyle,
+  isBiblicaScriptureHeadingStyle,
   isBiblicaVerseMarkerCharacterStyle,
   isBiblicaStudyTemplateStyle,
   isBiblicaVolumeSectionHeadingStyle,
@@ -152,9 +155,30 @@ function bookMarkerCode(unit: IdmlTranslationUnit): string | undefined {
   return abbreviation.length >= 2 && abbreviation.length <= 4 ? abbreviation : undefined
 }
 
+function chapterFromAnchors(unit: IdmlTranslationUnit, chapterAtStart: string): string {
+  let chapter = chapterAtStart
+  for (const slot of unit.slots) {
+    const style = slot.characterStyleId
+    const text = slot.text.trim()
+    // Drop-cap chapter numbers ("1", "2", …) and Psalms-style chapter meta
+    // markers ("1:") both re-anchor the chapter. Psalms puts `meta:c` *after*
+    // the verse number in the same paragraph, so this pass has to finish
+    // before any verse is recorded — otherwise Job 42 leaks into Psalm 1.
+    if (isChapterNumberCharacterStyle(style)) {
+      if (/^\d+$/.test(text)) chapter = text
+      continue
+    }
+    if (isMetaChapterCharacterStyle(style)) {
+      const match = text.match(/^(\d+)/)
+      if (match) chapter = match[1]
+    }
+  }
+  return chapter
+}
+
 function scanUnit(unit: IdmlTranslationUnit, chapterAtStart: string): UnitScan {
   const paragraphStyle = unit.paragraphStyleId ?? ""
-  let chapter = chapterAtStart
+  const chapter = chapterFromAnchors(unit, chapterAtStart)
   const verses: { chapter: string; verse: string }[] = []
   const metaVerseCounts = new Map<string, number>()
   let closesEarlierVerse = false
@@ -163,17 +187,6 @@ function scanUnit(unit: IdmlTranslationUnit, chapterAtStart: string): UnitScan {
     const style = slot.characterStyleId
     const text = slot.text.trim()
 
-    // Drop-cap chapter numbers ("1", "2", …) and Psalms-style chapter meta
-    // markers ("1:") both re-anchor the chapter mid-paragraph.
-    if (isChapterNumberCharacterStyle(style)) {
-      if (/^\d+$/.test(text)) chapter = text
-      continue
-    }
-    if (isMetaChapterCharacterStyle(style)) {
-      const match = text.match(/^(\d+)/)
-      if (match) chapter = match[1]
-      continue
-    }
     if (isMetaVerseCharacterStyle(style)) {
       const match = text.match(/^(\d+)/)
       if (!match) continue
@@ -365,14 +378,17 @@ export function selectBiblicaStudyNotes(
   for (const unit of units) {
     const paragraphStyle = unit.paragraphStyleId ?? ""
 
-    // A note section or a new book ends any verse that was still open, so those
-    // paragraphs are never treated as scripture continuations.
-    if (isBiblicaNoteSectionStyle(paragraphStyle) || isBiblicaBookMarkerStyle(paragraphStyle)) {
+    // A note, a scripture heading, or a new book ends any verse that was still
+    // open, so those paragraphs are never treated as scripture continuations.
+    if (
+      isBiblicaNoteSectionStyle(paragraphStyle)
+      || isBiblicaScriptureHeadingStyle(paragraphStyle)
+      || isBiblicaBookMarkerStyle(paragraphStyle)
+    ) {
       openSpanningVerse = null
     }
 
     const scan = scanUnit(unit, currentChapter)
-    currentChapter = scan.chapter
 
     if (scan.bookCode && scan.bookCode !== currentBook) {
       currentBook = scan.bookCode
@@ -382,6 +398,11 @@ export function selectBiblicaStudyNotes(
       lastChapterInRange = null
       currentLabel = null
       currentSection = null
+    } else if (scan.verses.length > 0) {
+      // Chapter anchors in note paragraphs are often the previous book's
+      // closing markers flushed into `intro:ie` (Job 42:17 into Psalms).
+      // Only scripture verses may move the running chapter.
+      currentChapter = scan.chapter
     }
 
     // Some packages omit meta:bk and name the book in a structural running
@@ -417,14 +438,16 @@ export function selectBiblicaStudyNotes(
       continue
     }
 
-    // In a book volume only intro/* note styles become editable cells; running
-    // headers, tables of contents and other furniture stay in the package
-    // untouched. A front/back volume sets its text in layout styles instead, so
-    // there every paragraph is a cell except the running heads InDesign
-    // regenerates from the layout.
+    // In a book volume only intro/* notes and head/* scripture headings become
+    // editable cells; running headers, tables of contents and the poetry/prose
+    // the Bible text itself supplies stay in the package untouched. A
+    // front/back volume sets its text in layout styles instead, so there every
+    // paragraph is a cell except the running heads InDesign regenerates from
+    // the layout.
     const isFurniture = frontBackMatter
       ? isBiblicaRunningHeadStyle(paragraphStyle)
       : !isBiblicaNoteSectionStyle(paragraphStyle)
+        && !isBiblicaScriptureHeadingStyle(paragraphStyle)
     if (isFurniture) {
       otherUnitCount += 1
       continue
@@ -466,6 +489,7 @@ export function selectBiblicaStudyNotes(
       const headingChapter = unit.sourceText.replace(/\s+/g, " ").trim().match(/(\d+)\s*$/)
       if (headingChapter) {
         currentSection = null
+        currentChapter = headingChapter[1]
         currentLabel = headingChapter[1]
         firstChapterInRange = null
         lastChapterInRange = null

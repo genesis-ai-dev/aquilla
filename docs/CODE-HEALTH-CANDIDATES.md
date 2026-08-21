@@ -9,26 +9,33 @@ a later run completes.
 - **Status**: `src/hooks/` and `src/components/` slice done in the 2026-08-11 run (7 files:
   `useCellsAuditStatsWithOverlay.ts`, `useRules.ts`, `HistoryDrawer.tsx`, `EditorTable.tsx`,
   `TerminologyTermDetail.tsx`, `ProjectWorkspace.tsx`, `RuleSuggestFromEditsDialog.tsx`) —
-  comment-only, reworded to "Postgres"/"server" instead of "D1".
-- **Remaining files**: `src/lib/` still has real hits describing D1 as the live datastore —
-  `src/lib/sync/audit-stats-overlay.ts:2,4` ("D1-backed audit stats" / "D1 is the source of
-  truth"), `src/lib/sync/project-settings.ts:50` ("Synced to D1"), `src/lib/sync/
-  file-projection.ts:18` ("the D1 rows remain"), `src/lib/sync/events-emit.ts:62`
-  ("round-tripped to D1"), `src/lib/audio/transcribe.ts:3,204,295` ("D1 event log" /
-  "Persist ... durably via D1"), `src/lib/audio/timings.ts:3`, `src/lib/rules/edit-miner.ts:
-  7,32`, `src/lib/export/export-service.ts:3`, `src/lib/frontier/members.ts:20`,
-  `src/lib/global-tm/index.ts:17`, `src/lib/migrate/group-sync.ts:5` (this last one already
-  frames it as historical — "completing the D1→Neon cutover" — verify before touching, it
-  may already be correct).
+  comment-only, reworded to "Postgres"/"server" instead of "D1". The 2026-08-21 run did the
+  8 remaining live hits in `src/lib/`: `src/lib/sync/audit-stats-overlay.ts:2,4`,
+  `src/lib/sync/project-settings.ts:51`, `src/lib/sync/file-projection.ts:18`,
+  `src/lib/sync/events-emit.ts:62`, `src/lib/audio/transcribe.ts:3,276,367`,
+  `src/lib/audio/timings.ts:3`, `src/lib/rules/edit-miner.ts:7,39`,
+  `src/lib/export/export-service.ts:3` — all reworded "D1" → "Postgres" in place, no
+  wording beyond the datastore name changed.
+- **Remaining files**: `src/lib/frontier/members.ts:20` ("The D1 schema has no
+  gitlab_project_id column and auth-worker never returns it" — should read "The Postgres
+  schema...") and `src/lib/global-tm/index.ts:17` ("back it with D1/PG" — D1 is no longer a
+  real backing option post-cutover, should read "Postgres" alone or similar). Deferred from
+  the 2026-08-21 run purely to stay inside the ≤8-file budget already spent on the
+  `src/lib/` batch above.
+- **Already correct, not a candidate**: `src/lib/migrate/group-sync.ts:5` frames D1 as
+  historical ("completing the D1→Neon cutover") — confirmed correct as-is in the 2026-08-21
+  run, do not touch.
 - **False positives to skip** (not database D1 — a paragraph-model spec-section tag, see
   `docs/superpowers/specs/2026-06-18-paragraph-drafting-retrieval-context-design.md`):
   `src/hooks/useCells.ts:123,309`, `src/lib/parsers/paragraphs.ts`, `src/lib/parsers/types.ts:
   52`, `src/lib/sync/bulk-import.ts:67`, `src/lib/parsers/usfm-lossless.ts:31`,
-  `src/lib/parsers/text-splitter.ts:6`. Also skip `AD-2 chain pointer... entry came from D1`
-  at `src/lib/parsers/types.ts:723` only after re-reading in context (mixed usage nearby).
-- **Why deferred further**: `src/lib/` is ~50 subsystems; doing it in the same pass as
-  `src/hooks/`+`src/components/` would have exceeded the ≤8-file budget. Good candidate for
-  the next comment-drift-themed run.
+  `src/lib/parsers/text-splitter.ts:6`, `src/lib/sync/project-settings.ts:65` ("D10" spec tag
+  — confirmed a false positive in the 2026-08-21 run, do not touch). Also skip `AD-2 chain
+  pointer... entry came from D1` at `src/lib/parsers/types.ts:723` only after re-reading in
+  context (mixed usage nearby).
+- **Why the last 2 are deferred**: purely budget — the 2026-08-21 run already spent its
+  8-file allowance on the larger `src/lib/` batch above. `members.ts` and
+  `global-tm/index.ts` are a trivial 2-file, 2-line fixup for a future comment-drift run.
 - **Proof needed**: comment-only edits; verify each hit is genuinely describing D1 as live
   (not historical "migrated from D1" framing, not the paragraph-model tag above) before
   touching it.

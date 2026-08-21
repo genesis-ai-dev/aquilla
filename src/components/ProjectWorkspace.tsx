@@ -9448,57 +9448,6 @@ export function ProjectWorkspace() {
                   }}
                 />
               )}
-              {checkOpen && (
-                <CheckFindingsDrawer
-                  result={checkResult}
-                  running={checkRunning}
-                  cells={legacyCells}
-                  onClose={() => setCheckOpen(false)}
-                  onNavigateToCell={jumpToCellId}
-                  onOpenComments={(cellId) => {
-                    // Reuse the existing comments drawer; one aside at a time.
-                    setCheckOpen(false)
-                    setCommentsCellId(cellId)
-                  }}
-                />
-              )}
-              {drawerRuleId && (
-                <RuleDrawer
-                  rule={drawerRule}
-                  infractions={drawerInfractions}
-                  cells={legacyCells}
-                  onClose={() => setDrawerRuleId(null)}
-                  onNavigateToCell={() => {}}
-                  project={project}
-                  username={currentUsername}
-                  refresh={refresh}
-                  cellsByFile={drawerCellsByFile}
-                />
-              )}
-              {commentsCell && (
-                <CommentsDrawer
-                  project={project} cell={commentsCell}
-                  liveComments={allProjectComments.filter(
-                    (c) => c.cellId === commentsCell.id && c.deletedAt === null
-                  )}
-                  onClose={() => setCommentsCellId(null)}
-                  onNewThread={(text) => addThread(commentsCell.id, text)}
-                  onReply={(threadId, text) => addMessage(commentsCell.id, threadId, text)}
-                  onResolve={(threadId, msg) => resolveThread(commentsCell.id, threadId, msg)}
-                  onReopen={(threadId) => reopenThread(commentsCell.id, threadId)}
-                />
-              )}
-              {historyCell && (
-                <HistoryDrawer
-                  cell={historyCell}
-                  onClose={() => setHistoryCellId(null)}
-                  projectId={project?.id ?? null}
-                  fileId={activeFileId}
-                  getTokenForFile={getTokenForFile}
-                  isSynced={!!project?.syncRole}
-                  onPromote={handlePromoteToCurrentCell}
-                />
-              )}
             {/* Sits in the SAME slot as the file-check drawer, inside the
                 content box — the file tabs, breadcrumbs and import button live
                 above it and a drawer has no business covering them. */}

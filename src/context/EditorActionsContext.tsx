@@ -42,6 +42,18 @@ export interface EditorActionsContextValue {
     opts?: { applyToSpeaker?: boolean },
   ) => void
   /**
+   * Matt's QA (2026-08-21): the inverse — take the character OFF a line
+   * without putting another in its place. Returns the row to the NC ring.
+   * Clears the voice-map entry and the line's cast NAME only; the camera
+   * angle and the client's line number are sheet data and survive.
+   * `applyToSpeaker` mirrors the assign side's checkbox: every line in the
+   * file sharing this cell's cast name goes back to NC together.
+   */
+  onClearCastVoice?: (
+    cell: import("@/hooks/useCells").CellData,
+    opts?: { applyToSpeaker?: boolean },
+  ) => void
+  /**
    * AQU-633: the current user's own lane/file scopes (empty/undefined =
    * unscoped). Rows gate the per-cell Validate affordance on this so a scoped
    * member isn't offered a guaranteed-403 validate on an out-of-scope cell.

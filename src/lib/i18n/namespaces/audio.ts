@@ -285,6 +285,7 @@ export const audio = defineNamespace({
     "audio.castGutter.namedTooltip": "{castName} — voiced by {voiceName}",
     "audio.castGutter.defaultTooltip": "{voiceName} — default (no one cast yet)",
     "audio.castGutter.chooseCharacterAriaLabel": "{tooltip}. Choose a character",
+    "audio.castGutter.noCharacter": "No character",
 
     // useCellAudio — errors surfaced while loading/streaming a cell's audio.
     "audio.error.noAttachment": "No audio attachment on this cell",

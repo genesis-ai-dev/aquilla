@@ -4152,7 +4152,7 @@ function EditorRow({
   // keeps them out of MemoizedRow's React.memo compare surface.
   const {
     onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording,
-    onMediaRowActivate, onAssignCastVoice, onTakeSaved, myScopes,
+    onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, myScopes,
   } = useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
   // Combine the role capability with the per-cell scope check so an out-of-scope
@@ -5736,6 +5736,7 @@ function EditorRow({
                     editable={editable && Boolean(onAssignCastVoice)}
                     voices={gutterVoices}
                     onPick={(voiceId, opts) => onAssignCastVoice?.(cell, voiceId, opts)}
+                    onClear={onClearCastVoice ? (opts) => onClearCastVoice(cell, opts) : undefined}
                   />
                 )}
               </span>

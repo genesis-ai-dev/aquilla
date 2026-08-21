@@ -70,6 +70,7 @@ import { exportMetadataCsv } from "@/lib/export/exporters/metadata-csv"
 import { injectSdbhXml } from "@/lib/parsers/sdbh"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import {
+  hasExportMemory,
   readExportMemory,
   writeExportMemory,
   type ExportSection,
@@ -434,6 +435,7 @@ export function ExportDialog({
   const prevOpenRef = useRef(false)
   /** Set once this opening has restored, so the save effect below cannot run
    *  before it. See there for what goes wrong without it. */
+  const isDubbingFile = isSubtitleImportFile({ type: activeFileType })
   const restoredRef = useRef(false)
   useEffect(() => {
     if (!open) restoredRef.current = false
@@ -445,7 +447,20 @@ export function ExportDialog({
       // restoration would only ever run once per session and the second
       // opening would show stale state.
       const remembered = readExportMemory(currentUsername, projectId)
-      setOpenSection(remembered.section)
+      // FIRST-EVER OPEN defaults the native-format section open, because the
+      // primary "Download <name>.<ext>" button lives inside it and a dialog
+      // showing nothing buried the one-click journey (caught by the
+      // subtitle-voice-roundtrip e2e). This supersedes the earlier
+      // "resting state is all-collapsed" rule for the first open ONLY — the
+      // one-section-at-a-time rule and the per-user memory are untouched, and
+      // a user who deliberately collapses everything is remembered as such,
+      // which is why "no memory yet" and "remembered null" are distinguished.
+      const firstEverOpen = !hasExportMemory(currentUsername, projectId)
+      setOpenSection(
+        firstEverOpen && isDubbingFile && nativeFormatId != null
+          ? "subtitle"
+          : remembered.section,
+      )
       setAudioMode(remembered.audioMode)
       setSubtitleTarget(remembered.subtitleTarget)
       setVttCueSplitting(remembered.cueSplitting)
@@ -464,7 +479,7 @@ export function ExportDialog({
       restoredRef.current = true
     }
     prevOpenRef.current = open
-  }, [open, nativeFormatId, currentUsername, projectId])
+  }, [open, nativeFormatId, currentUsername, projectId, isDubbingFile])
   const [dumpIncludeRefs, setDumpIncludeRefs] = useState(false)
 
   // AQU-437: Filename control state. Default changes with scope/format.
@@ -540,7 +555,7 @@ export function ExportDialog({
    * are its audio and its subtitles — not a TSV — so those get the top of the
    * dialog and everything else keeps its place in the fold.
    */
-  const isDubbingFile = isSubtitleImportFile({ type: activeFileType })
+  // (`isDubbingFile` is declared above the restore effect, which needs it.)
 
   /** Who is in this file and what is recorded. Computed once: the Audio card
    *  reads the totals to decide whether it can export at all, and the preview

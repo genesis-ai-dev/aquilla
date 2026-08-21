@@ -127,6 +127,21 @@ export function readExportMemory(userId: string, projectId: string): ExportDialo
   return found ? normalizeExportMemory(found.state) : DEFAULT_EXPORT_MEMORY
 }
 
+/**
+ * Whether this user has EVER had the dialog remembered in this project.
+ *
+ * Needed because `section: null` is ambiguous on its own — it is both the
+ * default for a first-ever open and a faithful record of a user who collapsed
+ * everything before closing. The two deserve different treatment: a first open
+ * defaults the native-format section open (the primary "Download <name>.<ext>"
+ * journey lives inside it, and an all-collapsed dialog buried the one-click
+ * path e2e treats as THE export journey — subtitle-voice-roundtrip caught
+ * this); a deliberate all-collapsed is the user's own arrangement and is kept.
+ */
+export function hasExportMemory(userId: string, projectId: string): boolean {
+  return readAll().some((e) => e.userId === userId && e.projectId === projectId)
+}
+
 /** Remember this user's choices in this project, promoted to the front of the
  *  LRU list. */
 export function writeExportMemory(

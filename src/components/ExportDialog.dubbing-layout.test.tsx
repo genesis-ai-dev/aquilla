@@ -274,11 +274,23 @@ describe("the three sections open one at a time", () => {
   const isOpen = (testId: string) =>
     (screen.getByTestId(testId) as HTMLDetailsElement).open
 
-  it("starts with all three collapsed", () => {
+  it("starts with the file's own format open, the other two collapsed", () => {
+    // Changed 2026-08-20, superseding "resting state is all-collapsed" for the
+    // FIRST open only: the primary "Download <name>.vtt" button lives inside
+    // this section, and an all-collapsed dialog buried the one-click journey
+    // (the subtitle-voice-roundtrip e2e is what caught it). One-at-a-time and
+    // the per-user memory are untouched — a user who deliberately collapses
+    // everything is remembered as such, which the reopen tests below pin.
     dubbing()
+    expect(isOpen("export-subtitle-card")).toBe(true)
     expect(isOpen("export-audio-card")).toBe(false)
-    expect(isOpen("export-subtitle-card")).toBe(false)
     expect(isOpen("export-fold")).toBe(false)
+  })
+
+  it("puts the one-click download on screen from the very first open", () => {
+    // The journey itself, not just the section: the button the e2e clicks.
+    dubbing()
+    expect(screen.getByRole("button", { name: /^Download .+\.vtt$/ })).toBeVisible()
   })
 
   it("opens the one that was clicked", () => {
@@ -463,7 +475,9 @@ describe("what the dialog remembers", () => {
 
   it("carries the inner choices across a close and reopen", () => {
     const { reopen } = mounted()
-    openSection("VTT export")
+    // The VTT section now STARTS open on a first-ever open (2026-08-20), so
+    // clicking its summary here would toggle it CLOSED — the checkbox is
+    // already on screen.
     fireEvent.click(screen.getByText("Leave out character names"))
     reopen()
     expect(isOpen("export-subtitle-card")).toBe(true)

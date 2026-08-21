@@ -123,7 +123,7 @@ import { emitCastAssign, emitTargetCellCommit, emitCellBacktranslationSet, emitF
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveTimingLocked } from "@/lib/sync/project-settings"
-import { buildCastAdditions, buildCastRemovals } from "@/lib/import/cast-from-speakers"
+import { buildCastAdditions, buildCastRemovals, carriesCharacterSheetData } from "@/lib/import/cast-from-speakers"
 import { ImportCharactersDialog } from "./timeline/ImportCharactersDialog"
 import { CharacterCheckDrawer, type ResolveChoice } from "./timeline/CharacterCheckDrawer"
 import type { CueReconcilePlan } from "@/lib/import/cue-reconcile"
@@ -2417,6 +2417,21 @@ export function ProjectWorkspace() {
     [cellStore, cellStoreVersion],
   )
   const characterCount = castByCellId.size
+  /**
+   * …and how many a CLEAR would touch, which is a wider set: the drawer can
+   * leave a camera angle on a line with no name. `characterCount` above answers
+   * "how many carry a character" (the dialog's opening sentence); this answers
+   * "how many would change" (its confirmation). They are equal on every file
+   * imported straight from a sheet, and only diverge once somebody has resolved
+   * an angle onto an unnamed line.
+   */
+  const clearableCount = useMemo(
+    () =>
+      readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews()).filter(
+        carriesCharacterSheetData,
+      ).length,
+    [cellStore, cellStoreVersion],
+  )
 
   /**
    * ONE CHARACTER WRITE AT A TIME. (Sam, 2026-08-18: clicking during a bulk
@@ -2452,6 +2467,11 @@ export function ProjectWorkspace() {
       (audioCues ?? []).filter(
         (c) => typeof c.metadata?.cast_name === "string" && c.metadata.cast_name !== "",
       ).length,
+    [audioCues],
+  )
+  /** The heard side's clearable count — see `clearableCount` above. */
+  const clearableAudioCount = useMemo(
+    () => (audioCues ?? []).filter(carriesCharacterSheetData).length,
     [audioCues],
   )
 
@@ -2950,16 +2970,10 @@ export function ProjectWorkspace() {
         toast.add({ type: "error", title: "Characters can't be cleared while offline." })
         return
       }
-      // EVERY cell the sheet could have touched, not only the named ones. The
-      // drawer's resolve path writes a camera angle on its own, so a line can
-      // carry an angle with no name — and a clear that steps over those is not
-      // a clear. Reading `castByCellId` here would miss exactly them.
-      const dirty = args.cells.filter(
-        (c) =>
-          (typeof c.metadata?.cast_name === "string" && c.metadata.cast_name !== "") ||
-          (typeof c.metadata?.line_number === "string" && c.metadata.line_number !== "") ||
-          c.cameraState !== undefined,
-      )
+      // EVERY cell the sheet could have touched, not only the named ones —
+      // through the SAME predicate the confirmation counts with, so the number
+      // it promised is the number that changes. See `carriesCharacterSheetData`.
+      const dirty = args.cells.filter(carriesCharacterSheetData)
       // Can only happen if the counts and the cells have drifted apart, but a
       // confirmed destructive click that produces NO feedback at all is the
       // worst shape this could fail in — it reads as a broken button.
@@ -10068,6 +10082,8 @@ export function ProjectWorkspace() {
           audioCues={audioCues ?? undefined}
           existingCount={characterCount}
           existingAudioCount={audioCharacterCount}
+          clearableCount={clearableCount}
+          clearableAudioCount={clearableAudioCount}
           onCancel={() => setImportCharactersOpen(false)}
           onConfirm={(plan) => {
             // Close FIRST: the import runs for a few seconds over hundreds of

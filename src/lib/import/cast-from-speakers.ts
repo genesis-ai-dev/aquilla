@@ -96,6 +96,31 @@ export function buildCastAdditions(
   return { voices, castAssignments }
 }
 
+/**
+ * Does this cell carry anything a character sheet put there?
+ *
+ * THE PREDICATE A CLEAR IS DEFINED BY, and the reason it is shared rather than
+ * written twice: the confirmation has to promise exactly what the clear will
+ * do. It quoted the NAMED count while the clear collected this wider set, so on
+ * a file where somebody had resolved a camera angle onto an unnamed line the
+ * dialog would have promised fewer lines than it touched — understating a
+ * warning whose whole job is to be believed.
+ *
+ * Wider than "has a name" on purpose. The character-check drawer's resolve path
+ * writes a camera angle on its own, so a line can carry an angle with no name,
+ * and a clear that stepped over those would leave stray angles behind for a
+ * corrected sheet to export against lines nobody speaks.
+ */
+export function carriesCharacterSheetData(cell: {
+  metadata?: Record<string, unknown> | null
+  cameraState?: unknown
+}): boolean {
+  const meta = cell.metadata
+  if (meta && typeof meta.cast_name === "string" && meta.cast_name !== "") return true
+  if (meta && typeof meta.line_number === "string" && meta.line_number !== "") return true
+  return cell.cameraState !== undefined
+}
+
 export interface CastRemovals {
   /** cellId → voiceId, minus every cleared cell. */
   castAssignments: Record<string, string>

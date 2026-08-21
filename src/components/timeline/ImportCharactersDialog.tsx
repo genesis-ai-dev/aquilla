@@ -68,6 +68,19 @@ interface Props {
   existingAudioCount?: number
   onConfirm(plan: CharacterAssignmentPlan): void
   onConfirmAudio?(plan: AudioCharacterPlan): void
+  /**
+   * How many lines a CLEAR would actually touch, per side — a wider set than
+   * `existingCount`, which counts only the named ones. The drawer can leave a
+   * camera angle on a line with no name, and a clear takes those too.
+   *
+   * SEPARATE FROM `existingCount` ON PURPOSE, rather than replacing it: the two
+   * numbers answer different questions. The dialog opens by saying how many
+   * lines CARRY a character; the confirmation says how many WILL CHANGE. Fold
+   * them together and one of the two sentences starts lying. Absent falls back
+   * to the named count, which is right for every file imported from a sheet.
+   */
+  clearableCount?: number
+  clearableAudioCount?: number
   /** Take a sheet back off, per side. Absent => not offered, either because
    *  there is nothing there or because this user is not a project lead — the
    *  same convention the audio-VTT dialog uses for its own removal. */
@@ -91,6 +104,8 @@ export function ImportCharactersDialog({
   audioCues,
   existingCount,
   existingAudioCount = 0,
+  clearableCount,
+  clearableAudioCount,
   onConfirm,
   onConfirmAudio,
   onClearSubtitles,
@@ -114,6 +129,11 @@ export function ImportCharactersDialog({
   }, [open])
 
   const anyImported = existingCount > 0 || existingAudioCount > 0
+  // What the confirmations promise, and what decides whether a clear is offered
+  // at all: a side holding nothing but stray camera angles still has something
+  // to clear, even though nothing on it "carries a character".
+  const clearableSubtitles = clearableCount ?? existingCount
+  const clearableAudio = clearableAudioCount ?? existingAudioCount
   /** "637 subtitle lines and 548 heard lines" — only the sides that have one,
    *  because claiming a side that was never imported reads as a bug. The
    *  conjunction is its own catalog string rather than a hardcoded " and ", so
@@ -431,7 +451,7 @@ export function ImportCharactersDialog({
           >
             <p className="font-medium">{t("editor.timeline.charactersClearSubtitleTitle")}</p>
             <p>
-              {t("editor.timeline.charactersClearSubtitleBody", { count: existingCount })}
+              {t("editor.timeline.charactersClearSubtitleBody", { count: clearableSubtitles })}
               {/* The links only carry names ONE WAY — a cue reads off the
                   subtitles, never the reverse — so emptying this side empties
                   the heard lines with it unless they have names of their own. */}
@@ -468,7 +488,7 @@ export function ImportCharactersDialog({
           >
             <p className="font-medium">{t("editor.timeline.charactersClearAudioTitle")}</p>
             <p>
-              {t("editor.timeline.charactersClearAudioBody", { count: existingAudioCount })}{" "}
+              {t("editor.timeline.charactersClearAudioBody", { count: clearableAudio })}{" "}
               {existingCount > 0
                 ? t("editor.timeline.charactersClearAudioToSubtitles")
                 : t("editor.timeline.charactersClearAudioNone")}
@@ -500,7 +520,7 @@ export function ImportCharactersDialog({
               screen is the only one being asked. */}
           {!clearing && (onClearSubtitles || onClearAudio) && (
             <div className="mr-auto flex gap-1">
-              {onClearSubtitles && existingCount > 0 && (
+              {onClearSubtitles && clearableSubtitles > 0 && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -511,7 +531,7 @@ export function ImportCharactersDialog({
                   {t("editor.timeline.charactersClearSubtitles")}
                 </Button>
               )}
-              {onClearAudio && existingAudioCount > 0 && (
+              {onClearAudio && clearableAudio > 0 && (
                 <Button
                   variant="ghost"
                   size="sm"

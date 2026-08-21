@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { buildCastAdditions, buildCastRemovals, castLikeSpeakers } from "./cast-from-speakers"
+import { buildCastAdditions, buildCastRemovals, carriesCharacterSheetData, castLikeSpeakers } from "./cast-from-speakers"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 
 describe("buildCastAdditions", () => {
@@ -158,5 +158,41 @@ describe("buildCastRemovals", () => {
   it("survives a project that has never had either", () => {
     const out = buildCastRemovals(["s1"], undefined)
     expect(out).toEqual({ castAssignments: {}, characterResolutions: {} })
+  })
+})
+
+// ── What a clear is defined by (AQU-646, 2026-08-20) ─────────────────────
+//
+// The confirmation used to quote the NAMED count while the clear collected a
+// wider set, so on a file where somebody had resolved a camera angle onto an
+// unnamed line the dialog promised fewer lines than it touched. Both sides now
+// count through this predicate, which is the only way they cannot drift again.
+
+describe("carriesCharacterSheetData", () => {
+  it("counts a named line", () => {
+    expect(carriesCharacterSheetData({ metadata: { cast_name: "JESUS" } })).toBe(true)
+  })
+
+  it("counts a line carrying ONLY a camera angle — the case that diverged", () => {
+    // The drawer's resolve path writes an angle on its own. A clear that
+    // stepped over these would leave stray angles for a corrected sheet to
+    // export against lines nobody speaks.
+    expect(carriesCharacterSheetData({ metadata: null, cameraState: "group" })).toBe(true)
+  })
+
+  it("counts a line carrying only her line number", () => {
+    expect(carriesCharacterSheetData({ metadata: { line_number: "310" } })).toBe(true)
+  })
+
+  it("ignores a line the sheet never touched", () => {
+    expect(carriesCharacterSheetData({ metadata: null })).toBe(false)
+    expect(carriesCharacterSheetData({ metadata: {} })).toBe(false)
+    expect(carriesCharacterSheetData({ metadata: { aquillaOrigin: { kind: "user-insert" } } })).toBe(false)
+  })
+
+  it("treats an empty string as nothing, not as something", () => {
+    // An empty name is what a cleared cell looks like mid-flight; counting it
+    // would make a second clear promise lines it would not change.
+    expect(carriesCharacterSheetData({ metadata: { cast_name: "", line_number: "" } })).toBe(false)
   })
 })

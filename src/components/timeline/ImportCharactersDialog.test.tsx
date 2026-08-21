@@ -340,6 +340,45 @@ describe("clearing a sheet", () => {
     expect(onClearSubtitles).toHaveBeenCalledTimes(1)
   })
 
+  it("promises the number that will actually change, not the number named", () => {
+    // The divergence: the clear touches any line carrying a name OR an angle OR
+    // a line number, but the confirmation used to quote the named count. On a
+    // file where someone resolved an angle onto an unnamed line, it understated
+    // the very warning whose job is to be believed.
+    render(
+      <ImportCharactersDialog
+        {...both} existingCount={637} clearableCount={640} onClearSubtitles={vi.fn()}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("import-characters-clear-subtitle"))
+    const box = screen.getByTestId("import-characters-clear-subtitle-confirm")
+    expect(box).toHaveTextContent(/640 lines lose their character name/)
+    // …while the dialog's opening sentence still answers its own question —
+    // how many CARRY a character — which is the smaller number.
+    expect(screen.getByText(/637 subtitle lines carry a character/)).toBeInTheDocument()
+  })
+
+  it("offers a clear on a side holding nothing but stray camera angles", () => {
+    // Nothing there "carries a character", so the old gate hid the clear and
+    // left the angles stranded with no way to remove them.
+    render(
+      <ImportCharactersDialog
+        {...both} existingCount={0} clearableCount={3} onClearSubtitles={vi.fn()}
+      />,
+    )
+    expect(screen.getByTestId("import-characters-clear-subtitle")).toBeInTheDocument()
+  })
+
+  it("falls back to the named count when nothing wider is supplied", () => {
+    // Every file imported straight from a sheet has the two counts equal, and
+    // callers that predate the prop must keep working.
+    render(<ImportCharactersDialog {...both} existingCount={637} onClearSubtitles={vi.fn()} />)
+    fireEvent.click(screen.getByTestId("import-characters-clear-subtitle"))
+    expect(screen.getByTestId("import-characters-clear-subtitle-confirm")).toHaveTextContent(
+      /637 lines lose their character name/,
+    )
+  })
+
   it("says how many lines and that hand corrections go too", () => {
     render(
       <ImportCharactersDialog {...both} existingCount={637} onClearSubtitles={vi.fn()} />,

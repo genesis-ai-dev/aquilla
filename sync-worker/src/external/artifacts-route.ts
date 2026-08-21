@@ -28,6 +28,7 @@ import { ROLE } from '../events/role-policy'
 import type { ExternalEnv } from './types'
 import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
+import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 
 /** Max artifact size — 25 MB. Published in get_capabilities (operational
  *  contract §4); surfaced in the oversize error so an agent can self-correct. */
@@ -153,6 +154,12 @@ export async function loadArtifact(
 
 // ── POST (upload) ────────────────────────────────────────────────────────────
 
+// [Pen test] API security & data exposure (2026-08-20): uploads (up to
+// MAX_ARTIFACT_BYTES = 25 MB each) had no per-credential throttle, unlike
+// /search — a leaked/malicious PAT could hammer R2 storage and DB inserts.
+// Capped well below what a legitimate import batch needs.
+const UPLOAD_MAX_PER_CREDENTIAL = 120
+
 async function handleUpload(
   request: Request,
   env: ExternalEnv,
@@ -162,6 +169,13 @@ async function handleUpload(
   const authed = await authArtifact(request, env, projectId, ROLE.CONTRIBUTOR)
   if (!authed.ok) return authed.response
   const db = env.AQUILLA_PG as AquillaDb
+
+  const identifier = `credential:${authed.cred.credentialId}`
+  const recent = await countRecentRateLimitEvents(db, 'external_artifact_upload', identifier)
+  if (recent >= UPLOAD_MAX_PER_CREDENTIAL) {
+    return errorResponse('rate_limited', 'artifact upload rate limit exceeded, slow down')
+  }
+  await recordRateLimitEvent(db, 'external_artifact_upload', identifier)
 
   const name = request.headers.get('x-artifact-name')
   if (!name || name.trim() === '') {
@@ -289,6 +303,38 @@ async function handleGetMeta(
   return Response.json({ artifact: rowToMeta(row) })
 }
 
+// [Pen test] API security & data exposure (2026-08-20): unlike the knowledge
+// base (which derives its stored content type from a validated extension —
+// see OPS-8), source artifacts stored whatever `content-type` the uploading
+// client sent and served it back verbatim with no `Content-Disposition`. A
+// CONTRIBUTOR-scoped PAT could upload a "source" artifact declared
+// `text/html` and have it render as active content on the worker origin for
+// any caller that opens the content URL directly in a browser. No such
+// browser sink exists in the SPA today, but the primitive itself is closed
+// here rather than left for whatever consumes this URL next — mirroring the
+// fix already applied to the knowledge base.
+const BROWSER_RENDERABLE_CONTENT_TYPES = new Set([
+  'text/html',
+  'application/xhtml+xml',
+  'image/svg+xml',
+  'application/xml',
+  'text/xml',
+  'application/javascript',
+  'text/javascript',
+  'application/x-javascript',
+])
+
+/** Content-Type safe to echo back to a browser without risking it being
+ *  rendered as active content. Falls back to a generic, non-executable type
+ *  for anything on the deny-list above or anything we can't otherwise trust. */
+function safeContentTypeFor(stored: string | null): string {
+  const normalized = (stored ?? '').split(';')[0].trim().toLowerCase()
+  if (!normalized || BROWSER_RENDERABLE_CONTENT_TYPES.has(normalized)) {
+    return 'application/octet-stream'
+  }
+  return stored as string
+}
+
 async function handleGetContent(
   request: Request,
   env: ExternalEnv,
@@ -307,10 +353,20 @@ async function handleGetContent(
   return new Response(buf, {
     status: 200,
     headers: {
-      'Content-Type': row.content_type || 'application/octet-stream',
+      'Content-Type': safeContentTypeFor(row.content_type),
       'Content-Length': String(buf.byteLength),
+      'Content-Disposition': `attachment; filename="${sanitizeFilename(row.name)}"`,
+      'X-Content-Type-Options': 'nosniff',
     },
   })
+}
+
+/** Strip characters that would break the Content-Disposition header value or
+ *  let the artifact's client-chosen name inject additional header
+ *  parameters; the artifact id (not this name) is what identifies the row. */
+function sanitizeFilename(name: string): string {
+  const cleaned = name.replace(/[\r\n"]/g, '_')
+  return cleaned.length > 0 ? cleaned : 'artifact'
 }
 
 // ── GET inspect (lightweight format detection) ──────────────────────────────

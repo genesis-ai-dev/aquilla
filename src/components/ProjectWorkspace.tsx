@@ -141,6 +141,7 @@ import { sequenceBetween } from "@/lib/timeline/derive"
 import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
 import { MIN_ADDABLE_SPAN_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
 import { audioIdSeededWith } from "@/lib/audio/upload"
+import { buildLinkedTakes } from "@/lib/audio/linked-takes"
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
@@ -7210,6 +7211,30 @@ export function ProjectWorkspace() {
   }
 
   /**
+   * Each subtitle row's takes, which are not ON that row (review feedback,
+   * 2026-08-22).
+   *
+   * A take hangs off the HEARD LINE that performs a subtitle, in the hidden cue
+   * sibling — so the expanded row's Recording tab, which reads only the active
+   * file's attachments, showed "No audio yet" over lines that plainly had
+   * recordings on the timeline. Everything else already resolves through the
+   * links (the recorder, read-aloud, the character check, the exports); this is
+   * the last surface to learn it.
+   *
+   * Empty whenever there is no cue sibling, so every other arrangement — an mp3
+   * import, a plain subtitle file, scripture — is untouched.
+   */
+  const linkedTakesByCell = useMemo(
+    () =>
+      buildLinkedTakes({
+        cueCells: audioCueCells,
+        cuesForText: cueLinks.cuesForText,
+        textForCue: cueLinks.textForCue,
+      }),
+    [audioCueCells, cueLinks],
+  )
+
+  /**
    * What the performer reads when recording an audio cue.
    *
    * The cue itself carries only a transcript of the English soundtrack; the
@@ -9566,6 +9591,7 @@ export function ProjectWorkspace() {
             backtranslating={backtranslating}
             backtranslationErrors={backtranslationErrors}
             backtranslationByCellId={backtranslationCache}
+            linkedTakesByCell={linkedTakesByCell}
             cellOpenCommentCount={liveCellOpenCommentCount}
             getTokenForFile={getTokenForFile}
             getAlignmentModel={getAlignmentModel}
@@ -9731,6 +9757,16 @@ export function ProjectWorkspace() {
                 strictCamera={strictCamera}
                 onStrictCameraChange={setStrictCamera}
                 pending={characterWrite}
+                // Review suggestion (2026-08-22): the empty drawer offers the
+                // way out of being empty. Gated on MAINTAINER rather than on
+                // the drawer's own PROJECT_LEAD visibility — a lead can open
+                // this drawer but cannot import, and a button that opens a
+                // dialog you may not act in is the shape this branch has been
+                // removing all week. The drawer stays open behind the modal,
+                // so a finished import fills it in where the user is standing.
+                onImportSheets={
+                  canManageSources ? () => setImportCharactersOpen(true) : undefined
+                }
               />
             )}
             {checkOpen && (

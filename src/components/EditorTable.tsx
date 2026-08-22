@@ -49,7 +49,7 @@ import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform, canSwitchLanes } from "@/lib/sync/role-policy"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
-import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive, emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
@@ -64,21 +64,15 @@ import {
   type HealthRibbonStage,
 } from "@/lib/health/health-ribbon"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
-import { CellWaveform } from "./CellWaveform"
-import { CellAudioButton } from "./CellAudioButton"
-import { DenoiseButton } from "./audio/DenoiseButton"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
-import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { BacktranslationPanel } from "./BacktranslationPanel"
 import {
   overlayBacktranslation,
   type BacktranslationActionSource,
   type BacktranslationRecord,
 } from "@/lib/completion/bt-record"
-import { remapTranscriptTimings } from "@/lib/audio/correct-transcript"
 import { ContextualDraftCard } from "./contextual/ContextualDraftCard"
-import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useUiSlot } from "@/lib/ui-slots"
@@ -99,9 +93,6 @@ import { tokenizeWords, activeWordRange } from "@/lib/audio/timings"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { useCellAudio } from "@/hooks/useCellAudio"
-import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
-import { transcribeCell } from "@/lib/audio/transcribe"
-import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
@@ -149,6 +140,9 @@ import { getUnsupportedReason } from "./CellAudioRecordButton"
 // AQU-513: plain file-picker upload next to the mic — works on mobile too.
 import { CellAudioUploadButton } from "./CellAudioUploadButton"
 import { resolveTargetAudio } from "@/lib/audio/track-audio"
+import { CellTakeBlock } from "./CellTakeBlock"
+import { fmtClock } from "./timeline/format"
+import type { LinkedTake } from "@/lib/audio/linked-takes"
 import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice, getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
 import { useLocation, useNavigate } from "react-router-dom"
@@ -734,6 +728,17 @@ interface EditorTableProps {
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
   backtranslationByCellId?: ReadonlyMap<string, BacktranslationRecord>
+  /**
+   * A row's takes that live on ANOTHER cell (review feedback, 2026-08-22):
+   * subtitle cell id → the audio cues performing it that hold a recording, in
+   * film order, already merged with the cue sibling's attachments.
+   *
+   * This table reads exactly one file (`cellStore.getFileId()`), which is why
+   * the Recording tab used to show "No audio yet" over a line whose take was
+   * plainly on the timeline. Absent/empty ⇒ every non-dubbing arrangement
+   * behaves exactly as before.
+   */
+  linkedTakesByCell?: ReadonlyMap<string, LinkedTake[]>
   /** Called when user saves a BT edit. Parent emits `cell.backtranslation.set`. */
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   /** On-demand statistical gloss (corpus-derived, never persisted) for the BT
@@ -853,6 +858,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   infractions = new Map(), rules = [],
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
   backtranslationByCellId,
+  linkedTakesByCell,
   onSaveBacktranslation, getStatisticalBt,
   cellOpenCommentCount,
   onSeekToCue,
@@ -2098,6 +2104,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const renderListItem = useCallback(({ item: cellId, index }: LegendListRenderItemProps<string>) => {
     const audioEntry = audioByCellId.get(cellId)
     const backtranslation = backtranslationByCellId?.get(cellId)
+    const linkedTakes = linkedTakesByCell?.get(cellId)
     return (
       <CellStoreRow
         cellId={cellId}
@@ -2191,6 +2198,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           key={cell.id}
           project={project}
           cell={cell}
+          linkedTakes={linkedTakes}
           isEditorActive={activeEditorCellId === cell.id}
           isRowFocused={isRailFocusPinned(focusedRailCellId, cell.id)}
           onRowFocusPin={handleRowFocusPin}
@@ -2307,6 +2315,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     castGutter,
     ttsSettings,
     backtranslationByCellId,
+    linkedTakesByCell,
     backtranslating,
     backtranslationErrors,
     canEdit,
@@ -2747,11 +2756,13 @@ function RowStructureCorner({
   onRemove?: () => void
   removeTestId?: string
 }) {
+  // Above the early return: a hook after one runs in a different order on the
+  // renders that bail out, which is the rules-of-hooks error this was.
+  const t = useT()
   if (!insertBelow && !insertAbove && !onRemove) return null
   // Both directions available (only ever the first row, and only while the
   // file still opens on a silence) — the button has to ask which. One
   // direction available: just do it. A one-item menu is a click for nothing.
-  const t = useT()
   const needsMenu = Boolean(insertAbove && insertBelow)
   const square =
     "flex h-6 w-6 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
@@ -2876,6 +2887,9 @@ function CellStoreRow({
 interface MemoizedRowProps {
   project: ProjectRecord
   cell: CellData
+  /** The heard lines performing this row that hold a recording — see
+   *  `linkedTakesByCell` on the table's props. */
+  linkedTakes?: LinkedTake[]
   isEditorActive: boolean
   /** AQU-669: this cell is the single exclusive focus-pin owner (its id equals
    *  the table's `focusedRailCellId`). Drives the rail's focus pin so a stale
@@ -3024,7 +3038,7 @@ interface MemoizedRowProps {
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
-    cell, examples, completing, errors, previews, healthRibbonPoint, infractions,
+    cell, linkedTakes, examples, completing, errors, previews, healthRibbonPoint, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
     rowIndex, contentNumber, gridCols, castGutter, ttsSettings,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
@@ -3151,6 +3165,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
       <EditorRow
         project={project}
         cell={cell}
+        linkedTakes={linkedTakes}
         isEditorActive={isEditorActive}
         isRowFocused={isRowFocused}
         onRowFocusPin={onRowFocusPin}
@@ -3253,6 +3268,9 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
 interface EditorRowProps {
   project: ProjectRecord
   cell: CellData
+  /** The heard lines performing this row that hold a recording, in film order
+   *  — see `linkedTakesByCell` on the table's props. */
+  linkedTakes?: LinkedTake[]
   isEditorActive: boolean
   /** AQU-669: this row is the single exclusive focus-pin owner. */
   isRowFocused: boolean
@@ -4112,7 +4130,7 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
 }
 
 function EditorRow({
-  project, cell, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
+  project, cell, linkedTakes, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, highlights, error, healthRibbonPoint,
@@ -5183,52 +5201,10 @@ function EditorRow({
       }
     }
   }, [audioController.isPlaying, generatedVoiceController.isPlaying])
-  const transcribeStatus = useTranscribeStatus(cell.selectedAudioId)
-  const isTranscribing = transcribeStatus.kind === "loading" || transcribeStatus.kind === "transcribing"
-  const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
+  // The transcribe / correct-transcript handlers moved into CellTakeBlock
+  // (2026-08-22) so they can be scoped to whichever cell OWNS the recording —
+  // a linked heard line's take must write to the cue sibling, not to this row.
   const { session: rowSession } = useFrontierSession()
-
-  const handleTranscribe = useCallback(async () => {
-    if (!cell.selectedAudioId) return
-    // AQU-646: the ASR language must match the AUDIO. Imported media segments
-    // are SOURCE speech (→ sourceLanguage); recorded takes voice the TARGET
-    // text (→ targetLanguage). Mapping to a Whisper tag happens downstream.
-    const language = isSourceSegmentSelected(cell) ? project.sourceLanguage : project.targetLanguage
-    await transcribeCell({ cell, session: rowSession, projectId: project.id, language })
-    // AQU-783: transcription persists a cell.audio.attach (source transcript on
-    // cells.transcription + karaoke timings) through the outbox but, unlike an
-    // editor commit, fired no completion callback — so the result only landed
-    // in the local projection after a manual page refresh. Reuse the commit
-    // callback (flush outbox + revalidate the cell row → picks up the new
-    // transcription) and poke the per-file audio read (timings) so the result
-    // appears immediately in both the text and media sections.
-    await onCellCommitted?.(cell.id)
-    notifyAudioAttachmentsChanged(cell.fileId)
-  }, [cell, rowSession, project.id, project.sourceLanguage, project.targetLanguage, onCellCommitted])
-
-  const handleCorrectTranscript = useCallback((corrected: string) => {
-    if (!cell.selectedAudioId || !cellAudioTimings || cellAudioTimings.length === 0) return
-    const nextTimings = remapTranscriptTimings(cellAudioTimings, corrected)
-    if (nextTimings.length === 0) return
-    const attachment = cell.attachments?.[cell.selectedAudioId]
-    if (!attachment?.url) return
-    void emitCellAudioAttach({
-      projectId: project.id,
-      fileId: cell.fileId,
-      cellId: cell.id,
-      audioId: cell.selectedAudioId,
-      url: attachment.url,
-      slot: cell.selectedAudioId === cell.selectedGeneratedVoiceAudioId ? "generatedVoice" : "recording",
-      timings: nextTimings,
-      ...(attachment.durationMs != null ? { durationMs: attachment.durationMs } : {}),
-      ...(attachment.voiceId ? { voiceId: attachment.voiceId } : {}),
-      ...(attachment.referenceAudioId ? { referenceAudioId: attachment.referenceAudioId } : {}),
-      ...(isSourceSegmentSelected(cell) ? { transcription: corrected } : {}),
-      author: username,
-    }).catch((err) => {
-      console.warn("[transcript] correct emit failed:", err)
-    })
-  }, [cell, cellAudioTimings, project.id, username])
 
   // AQU-646: a recorded take IS target content. A line added into a silence may
   // never get text — the dub is the deliverable — and it still has to be
@@ -6710,7 +6686,7 @@ function EditorRow({
               label: t("editor.expansion.recording"),
               attentionDot: transcriptNeedsAttention
                 ? "amber"
-                : (hasAudio || hasGeneratedVoice)
+                : (hasAudio || hasGeneratedVoice || (linkedTakes?.length ?? 0) > 0)
                   ? "emerald"
                   : undefined,
               renderContent: () => (
@@ -6745,133 +6721,82 @@ function EditorRow({
                       })()}
                     </div>
                   )}
-                  {hasAudio ? (
-                    <>
-                      <div className="flex items-center gap-2">
-                        <CellAudioButton controller={audioController} />
-                        <div className="flex-1">
-                          <CellWaveform
-                            controller={audioController}
-                            height={36}
-                            strategy={project.audioMediaStrategy ?? "lazy"}
-                          />
+                  {/* BOTH/AND, not either/or (Sam, 2026-08-22): this row's own
+                      audio first, then every take that lives on a heard line
+                      performing it. A line can have both, and a reader who
+                      opened this panel wants to see everything that sounds for
+                      this line, not whichever one we ranked highest. */}
+                  {hasAudio && (
+                    <CellTakeBlock
+                      project={project}
+                      owner={cell}
+                      timings={cellAudioTimings}
+                      cellText={visibleTranslated}
+                      editable={editable}
+                      username={username}
+                      session={rowSession}
+                      onOpenRecording={onOpenRecording}
+                      onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
+                      onCommitted={onCellCommitted}
+                    />
+                  )}
+                  {hasGeneratedVoice && (
+                    // A synthesized voice is nobody's performance: it can be
+                    // recorded over, but not transcribed or cleaned up.
+                    <CellTakeBlock
+                      project={project}
+                      owner={cell}
+                      audioId={cell.selectedGeneratedVoiceAudioId}
+                      timings={generatedVoiceTimings}
+                      cellText={visibleTranslated}
+                      editable={editable}
+                      username={username}
+                      session={rowSession}
+                      onOpenRecording={onOpenRecording}
+                      onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
+                      recordLabel={t("editor.audio.recordOver")}
+                      readOnlyTranscript
+                      header={
+                        <span className="text-[11px] text-muted-foreground">
+                          {t("editor.voice.aiGeneratedHint")}
+                        </span>
+                      }
+                    />
+                  )}
+                  {linkedTakes?.map(({ cell: take, sharedWith }) => (
+                    <CellTakeBlock
+                      key={take.id}
+                      project={project}
+                      owner={take}
+                      timings={take.selectedAudioId ? take.audioTimings?.[take.selectedAudioId] : undefined}
+                      cellText={visibleTranslated}
+                      editable={editable}
+                      username={username}
+                      session={rowSession}
+                      onOpenRecording={onOpenRecording}
+                      onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
+                      onCommitted={onCellCommitted}
+                      header={
+                        <div data-testid="cell-linked-take" className="flex flex-col gap-0.5 border-t border-border pt-2">
+                          <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+                            {t("editor.audio.heardLineAt", {
+                              range: `${fmtClock(take.startTime ?? 0, true)}–${fmtClock(take.endTime ?? take.startTime ?? 0, true)}`,
+                            })}
+                          </span>
+                          {sharedWith > 1 && (
+                            // One heard line can perform several subtitle lines
+                            // — real in this data, up to seven. Re-recording it
+                            // changes all of them, and that should not be a
+                            // surprise discovered afterwards.
+                            <span className="text-[10px] text-muted-foreground">
+                              {t("editor.audio.heardLineShared", { count: sharedWith - 1 })}
+                            </span>
+                          )}
                         </div>
-                      </div>
-                      {cellAudioTimings && cellAudioTimings.length > 0 && (
-                        <CellTranscriptPreview
-                          ref={transcriptPreviewRef}
-                          timings={cellAudioTimings}
-                          cellText={visibleTranslated}
-                          cellId={cell.id}
-                          alignedToCellText={
-                            tokenizeWords(visibleTranslated).length === cellAudioTimings.length
-                          }
-                          editable={editable}
-                          onRetranscribe={handleTranscribe}
-                          onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
-                          onCorrectTranscript={handleCorrectTranscript}
-                        />
-                      )}
-                      <div className="flex flex-wrap gap-1.5">
-                        <Button
-                          type="button"
-                          size="xs"
-                          variant="outline"
-                          onClick={() => onOpenRecording?.(cell.id)}
-                          disabled={!editable || !onOpenRecording}
-                        >
-                          <Mic className="h-3 w-3" />
-                          {t("editor.audio.reRecordShort")}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="xs"
-                          variant="outline"
-                          onClick={handleTranscribe}
-                          disabled={!editable || isTranscribing}
-                        >
-                          <Sparkles
-                            className={cn(
-                              "h-3 w-3",
-                              isTranscribing && "animate-pulse",
-                            )}
-                          />
-                          {isTranscribing ? t("common.transcribing") : t("editor.cell.transcribeShort")}
-                        </Button>
-                        {/* Surfaces model-download %, failures (click-to-expand
-                            with Retry), and a success flash. Errors previously
-                            existed in transcribe-status but were rendered
-                            nowhere — the button just reverted to "Transcribe". */}
-                        <CellTranscribeBadge
-                          audioId={cell.selectedAudioId}
-                          hasTimings={(cellAudioTimings?.length ?? 0) > 0}
-                          onJumpToTranscript={() => transcriptPreviewRef.current?.scrollIntoView({ block: "nearest" })}
-                          onRetry={handleTranscribe}
-                        />
-                        {cell.selectedAudioId && selectedAudio && (
-                          <DenoiseButton
-                            projectId={project.id}
-                            fileId={cell.fileId}
-                            cellId={cell.id}
-                            selectedAudioId={cell.selectedAudioId}
-                            selectedUrl={selectedAudio.url}
-                            referenceAudioId={selectedAudio.referenceAudioId ?? null}
-                            originalUrl={
-                              selectedAudio.referenceAudioId
-                                ? cell.attachments?.[selectedAudio.referenceAudioId]?.url ?? null
-                                : null
-                            }
-                            originalDurationMs={
-                              selectedAudio.referenceAudioId
-                                ? cell.attachments?.[selectedAudio.referenceAudioId]?.durationMs ?? null
-                                : null
-                            }
-                            author={username}
-                            session={rowSession}
-                            editable={editable}
-                          />
-                        )}
-                      </div>
-                    </>
-                  ) : hasGeneratedVoice ? (
-                    <>
-                      <div className="flex items-center gap-2">
-                        <CellAudioButton controller={generatedVoiceController} />
-                        <div className="flex-1">
-                          <CellWaveform
-                            controller={generatedVoiceController}
-                            height={36}
-                            strategy={project.audioMediaStrategy ?? "lazy"}
-                          />
-                        </div>
-                      </div>
-                      {generatedVoiceTimings && generatedVoiceTimings.length > 0 && (
-                        <CellTranscriptPreview
-                          timings={generatedVoiceTimings}
-                          cellText={visibleTranslated}
-                          cellId={cell.id}
-                          alignedToCellText={
-                            tokenizeWords(visibleTranslated).length === generatedVoiceTimings.length
-                          }
-                          editable={editable}
-                          onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
-                        />
-                      )}
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-[11px] text-muted-foreground">{t("editor.voice.aiGeneratedHint")}</span>
-                        <Button
-                          type="button"
-                          size="xs"
-                          variant="outline"
-                          onClick={() => onOpenRecording?.(cell.id)}
-                          disabled={!editable || !onOpenRecording}
-                        >
-                          <Mic className="h-3 w-3" />
-                          {t("editor.audio.recordOver")}
-                        </Button>
-                      </div>
-                    </>
-                  ) : (
+                      }
+                    />
+                  ))}
+                  {!hasAudio && !hasGeneratedVoice && !linkedTakes?.length && (
                     <div className="flex flex-col items-center gap-3 py-4 text-center">
                       <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-muted/40 text-muted-foreground/50">
                         <Mic className="h-5 w-5" />

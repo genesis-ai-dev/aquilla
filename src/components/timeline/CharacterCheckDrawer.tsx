@@ -90,6 +90,17 @@ interface Props {
    * list is frozen upstream; this is what says so and stops the buttons.
    */
   pending?: { done: number; total: number; phase: "writing" | "syncing" } | null
+  /**
+   * Open the character-sheet import dialog from the empty state (review
+   * suggestion, 2026-08-22) — an empty drawer explains that both sheets are
+   * needed and should also offer the way to get them.
+   *
+   * ABSENT MEANS NO BUTTON, and that is load-bearing: this drawer opens at
+   * PROJECT_LEAD while importing needs MAINTAINER, so the caller passes it
+   * only to people who can actually import. Same convention as
+   * ImportCharactersDialog's clear handlers.
+   */
+  onImportSheets?(): void
 }
 
 /**
@@ -382,6 +393,7 @@ export function CharacterCheckDrawer({
   strictCamera,
   onStrictCameraChange,
   pending,
+  onImportSheets,
 }: Props) {
   const t = useT()
   const [showResolved, setShowResolved] = useState(false)
@@ -478,10 +490,29 @@ export function CharacterCheckDrawer({
         <div className={cn("flex flex-col gap-4", pending && "opacity-50")}>
         {!bothSheetsImported ? (
           // An explanation, not a disabled menu item — a greyed-out control
-          // says nothing about why.
-          <p data-testid="character-check-one-sheet" className="text-xs text-muted-foreground">
-            {t("editor.timeline.characterCheckOneSheet")}
-          </p>
+          // says nothing about why. And, for whoever can act on it, the way
+          // out: an empty drawer that only explains is a dead end (review
+          // suggestion, 2026-08-22). One button covers "no sheets at all" and
+          // "only one so far" alike, because the dialog it opens leads with
+          // whatever is already imported and offers each side separately.
+          <div className="flex flex-col items-start gap-3">
+            <p data-testid="character-check-one-sheet" className="text-xs text-muted-foreground">
+              {t("editor.timeline.characterCheckOneSheet")}
+            </p>
+            {onImportSheets && (
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                data-testid="character-check-import"
+                onClick={onImportSheets}
+                disabled={Boolean(pending)}
+              >
+                <Users className="h-3 w-3" />
+                {t("editor.timeline.characterCheckImportSheets")}
+              </Button>
+            )}
+          </div>
         ) : (
           <>
             {nameRows.length > 0 && (

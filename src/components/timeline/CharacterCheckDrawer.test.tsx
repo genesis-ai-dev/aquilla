@@ -391,6 +391,31 @@ describe("with only one sheet", () => {
     )
     expect(screen.queryByTestId("character-check-row")).not.toBeInTheDocument()
   })
+
+  // Review suggestion (2026-08-22): explaining the emptiness is not enough —
+  // whoever can fix it should be offered the way.
+  it("offers the way out of being empty, and fires it", () => {
+    const onImportSheets = vi.fn()
+    draw(agreement(), { bothSheetsImported: false, agreement: null, onImportSheets })
+    fireEvent.click(screen.getByTestId("character-check-import"))
+    expect(onImportSheets).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers nothing to someone who could not import anyway", () => {
+    // The drawer opens at PROJECT_LEAD, importing needs MAINTAINER — so the
+    // caller withholds the handler and the button must simply not be there,
+    // rather than being a door onto a dialog they cannot act in.
+    draw(agreement(), { bothSheetsImported: false, agreement: null })
+    expect(screen.getByTestId("character-check-one-sheet")).toBeInTheDocument()
+    expect(screen.queryByTestId("character-check-import")).not.toBeInTheDocument()
+  })
+
+  it("does not offer it once both sheets are in and everything agrees", () => {
+    // The happy ending is not a dead end.
+    draw(agreement(), { onImportSheets: () => {} })
+    expect(screen.getByTestId("character-check-clear")).toBeInTheDocument()
+    expect(screen.queryByTestId("character-check-import")).not.toBeInTheDocument()
+  })
 })
 
 describe("the header", () => {

@@ -910,6 +910,7 @@ export const editor = defineNamespace({
       "check. Each is keyed to one side of the script — one row per subtitle line, " +
       "one per heard line — and comparing them is what turns up a wrong pairing or " +
       "a wrong sheet.",
+    "editor.timeline.characterCheckImportSheets": "Import character sheets",
     "editor.timeline.characterCheckNamesTitle": "Who says it · {count}",
     "editor.timeline.characterCheckNamesHint":
       "The sheets name different people. Either the pairing is wrong or one sheet is.",
@@ -1195,6 +1196,8 @@ export const editor = defineNamespace({
       "No audio yet. Record below, or drag a voice onto this cell from the " +
       "toolbar above.",
     "editor.audio.recordShort": "Record",
+    "editor.audio.heardLineAt": "Heard line · {range}",
+    "editor.audio.heardLineShared": "Also performs {count} other subtitle lines — re-recording changes those too.",
 
     // — Expansion tabs: issues and metadata ————————————————————————
     "editor.expansion.issues": "Issues",
@@ -4520,6 +4523,25 @@ export const editor = defineNamespace({
           "Primary button in the recording tab's empty state; it opens the " +
           "recording modal. Imperative, one word.",
         maxLength: 14,
+      },
+      "editor.audio.heardLineAt": {
+        description:
+          "Heading over one recording in the Recording tab that belongs to a " +
+          "HEARD LINE — the performance of this subtitle, which is a separate " +
+          "cue with its own place on the film. The timecode range says which " +
+          "one, since a subtitle can be performed by more than one.",
+        placeholders: {
+          range: "The heard line's start and end times, e.g. '1:03.4–1:05.9'. Already formatted.",
+        },
+      },
+      "editor.audio.heardLineShared": {
+        description:
+          "Warning under a heard line's recording when that one performance " +
+          "also covers other subtitle lines, so re-recording it changes them " +
+          "as well. Only shown when the count is at least one.",
+        placeholders: {
+          count: "How many OTHER subtitle lines this heard line performs (never zero).",
+        },
       },
       "editor.expansion.issues": {
         description:

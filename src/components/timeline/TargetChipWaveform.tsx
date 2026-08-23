@@ -32,15 +32,17 @@ export interface TargetChipWaveformProps {
   /** Visible window in BIN coordinates, from `chipWaveformWindow`. */
   x0: number
   x1: number
-  /** Bins per drawn bar, from `waveformStride`. */
-  stride: number
   /** The chip's height in CSS px — also the viewBox's height, so the path's y
    *  units are pixels and the 1px floor on a silent bin is exact. */
   chipH: number
 }
 
-function TargetChipWaveformImpl({ peaks, x0, x1, stride, chipH }: TargetChipWaveformProps) {
-  const d = useMemo(() => waveformPathD(peaks, stride, chipH), [peaks, stride, chipH])
+function TargetChipWaveformImpl({ peaks, x0, x1, chipH }: TargetChipWaveformProps) {
+  // No zoom term in these deps, and that is the envelope's whole advantage over
+  // the bars it replaced: the shape is stretched by the viewBox, so it is
+  // rebuilt only when the audio or the row height changes — never during a
+  // zoom glide.
+  const d = useMemo(() => waveformPathD(peaks, chipH), [peaks, chipH])
   const width = x1 - x0
   if (!d || !(width > 0) || !(chipH > 0)) return null
 

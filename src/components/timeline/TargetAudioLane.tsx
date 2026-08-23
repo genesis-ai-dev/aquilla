@@ -42,7 +42,7 @@ import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
 import { DragTimeChip } from "./DragTimeChip"
 import { TargetChipWaveform } from "./TargetChipWaveform"
 import { useTargetChipPeaks } from "./useTargetChipPeaks"
-import { chipWaveformWindow, waveformStride } from "@/lib/timeline/chip-waveform"
+import { chipWaveformWindow } from "@/lib/timeline/chip-waveform"
 import { WAVEFORM_BINS } from "@/lib/audio/peaks-loader"
 import type { PeaksTarget } from "@/lib/audio/peaks-loader"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -374,10 +374,7 @@ function TargetAudioChip({
           bins: peaks.length,
         })
       : null
-  const waveform =
-    peaks && waveWindow
-      ? { peaks, ...waveWindow, stride: waveformStride(waveWindow.x1 - waveWindow.x0, paintedPx) }
-      : null
+  const waveform = peaks && waveWindow ? { peaks, ...waveWindow } : null
   // The top-left corner is a single PRIORITY slot — one glyph at a time:
   // missing (permanent, actionable) beats loading (transient seconds) beats
   // saving (informational). Same width discipline as before: the glyph needs
@@ -561,7 +558,6 @@ function TargetAudioChip({
           peaks={waveform.peaks}
           x0={waveform.x0}
           x1={waveform.x1}
-          stride={waveform.stride}
           chipH={chipH}
         />
       )}
@@ -570,9 +566,9 @@ function TargetAudioChip({
           aria-hidden
           data-testid={`tl-target-${cell.id}-handle-l`}
           onPointerDown={(e) => beginDrag("resize-l", e)}
-          className="absolute inset-y-0 left-0 flex w-[7px] cursor-col-resize items-center justify-center opacity-0 transition-opacity group-hover/chip:opacity-100"
+          className="absolute inset-y-0 left-0 flex w-[7px] cursor-col-resize items-center justify-center opacity-0 transition-opacity group-hover/chip:opacity-100 bg-background/70"
         >
-          <span className="h-4 w-0.5 rounded bg-current/50" />
+          <span className="h-4 w-0.5 rounded bg-current" />
         </span>
       )}
       <Icon className="h-3.5 w-3.5 shrink-0" />
@@ -680,9 +676,9 @@ function TargetAudioChip({
           aria-hidden
           data-testid={`tl-target-${cell.id}-handle-r`}
           onPointerDown={(e) => beginDrag("resize-r", e)}
-          className="absolute inset-y-0 right-0 flex w-[7px] cursor-col-resize items-center justify-center opacity-0 transition-opacity group-hover/chip:opacity-100"
+          className="absolute inset-y-0 right-0 flex w-[7px] cursor-col-resize items-center justify-center opacity-0 transition-opacity group-hover/chip:opacity-100 bg-background/70"
         >
-          <span className="h-4 w-0.5 rounded bg-current/50" />
+          <span className="h-4 w-0.5 rounded bg-current" />
         </span>
       )}
     </button>

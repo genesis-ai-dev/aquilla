@@ -7,7 +7,7 @@
 // neighbour is deliberately painted short until hovered.
 
 import { describe, expect, it } from "vitest"
-import { chipWaveformWindow, waveformStride, waveformPathD } from "./chip-waveform"
+import { chipWaveformWindow, waveformPathD } from "./chip-waveform"
 import type { TargetChipGeom } from "./lane-timing"
 
 const BINS = 320
@@ -133,68 +133,58 @@ describe("chipWaveformWindow — when it must refuse to draw", () => {
   })
 })
 
-describe("waveformStride — bars per chip width", () => {
-  it("draws every bin when the chip is wide enough to show them", () => {
-    expect(waveformStride(320, 2000)).toBe(1)
+describe("waveformPathD — a filled envelope, not bars", () => {
+  it("traces the top edge out and the bottom edge back, closed so it fills", () => {
+    const d = waveformPathD(new Float32Array([1, 1]), 40)
+    // Two bins, full scale: usable height 38, so each half is 19 either side of
+    // the midline at 20 — the top edge at 1, the bottom at 39. Points sit at
+    // BIN CENTRES (0.5, 1.5).
+    expect(d).toBe("M0.5 1L1.5 1L1.5 39L0.5 39Z")
   })
 
-  it("groups hard on a narrow chip rather than drawing sub-pixel fuzz", () => {
-    // 20px wants ~7 bars out of 290 bins.
-    const stride = waveformStride(290, 20)
-    expect(stride).toBeGreaterThanOrEqual(32)
-    expect(Math.log2(stride) % 1).toBe(0)
+  it("puts points at bin CENTRES, not bin starts", () => {
+    // The half-bin offset is why the envelope replaced bars cleanly: bars were
+    // anchored at the bin's start, which made audio read early on screen.
+    const d = waveformPathD(new Float32Array([1]), 40)
+    expect(d).toContain("0")
+    expect(waveformPathD(new Float32Array([1, 1]), 40).startsWith("M0.5 ")).toBe(true)
   })
 
-  it("always answers a power of two, so a zoom glide rebuilds a handful of times", () => {
-    for (let px = 10; px <= 2000; px += 7) {
-      const s = waveformStride(320, px)
-      expect(Math.log2(s) % 1).toBe(0)
-      expect(s).toBeLessThanOrEqual(64)
-    }
+  it("gives a silent bin a visible hairline rather than a gap", () => {
+    // Silence inside a take is information — the gap between words. Drawing
+    // nothing there would read as the take having stopped.
+    const d = waveformPathD(new Float32Array([0, 0]), 40)
+    expect(d).toBe("M0.5 19.5L1.5 19.5L1.5 20.5L0.5 20.5Z")
   })
 
-  it("changes only at octaves across a whole zoom sweep", () => {
-    const seen = new Set<number>()
-    for (let px = 10; px <= 2000; px += 1) seen.add(waveformStride(320, px))
-    // A handful of distinct strides over the entire zoom range is the property
-    // that keeps the path from being rebuilt on every animation frame.
-    expect(seen.size).toBeLessThanOrEqual(8)
-  })
-
-  it("is total on nonsense input", () => {
-    expect(waveformStride(0, 100)).toBe(1)
-    expect(waveformStride(320, 0)).toBe(64)
-    expect(waveformStride(Number.NaN, 100)).toBe(1)
-  })
-})
-
-describe("waveformPathD", () => {
-  it("draws one bar per group, centred on the midline", () => {
-    const d = waveformPathD(new Float32Array([1, 1, 1, 1]), 4, 40)
-    // One group of four bins: full-scale, so height 38 (40 less the 2px inset),
-    // centred on 20 — i.e. spanning 1..39.
-    expect(d).toBe("M0 1h3.2v38h-3.2z")
-  })
-
-  it("gives a silent bin a visible hairline instead of nothing", () => {
-    const d = waveformPathD(new Float32Array([0, 0]), 2, 40)
-    expect(d).toContain("v1")
-  })
-
-  it("takes the MAX of a group, so a peak survives being grouped", () => {
-    const loud = waveformPathD(new Float32Array([0, 0, 0, 1]), 4, 40)
-    const quiet = waveformPathD(new Float32Array([0, 0, 0, 0]), 4, 40)
+  it("keeps a loud bin distinguishable from a quiet one", () => {
+    const loud = waveformPathD(new Float32Array([0, 0, 1]), 40)
+    const quiet = waveformPathD(new Float32Array([0, 0, 0]), 40)
     expect(loud).not.toBe(quiet)
-    expect(loud).toContain("v38")
   })
 
-  it("covers the whole clip regardless of the window, so the viewBox can pan", () => {
-    const peaks = new Float32Array(320).fill(0.5)
-    const d = waveformPathD(peaks, 32, 40)
-    expect(d.match(/M/g)).toHaveLength(10) // 320 / 32
+  it("covers the whole clip, so the viewBox can window it without a rebuild", () => {
+    const d = waveformPathD(new Float32Array(320).fill(0.5), 40)
+    // One M, 639 Ls (319 out + 320 back), one Z.
+    expect((d.match(/L/g) ?? []).length).toBe(639)
+    expect(d.endsWith("Z")).toBe(true)
   })
 
-  it("is total on an empty peaks array", () => {
-    expect(waveformPathD(new Float32Array(0), 4, 40)).toBe("")
+  it("does not depend on zoom at all — that is the point of the envelope", () => {
+    // Bars needed a stride that changed with pixel width; this signature has no
+    // width term, so a zoom glide cannot rebuild the path.
+    expect(waveformPathD.length).toBe(2)
+  })
+
+  it("scales to the row height", () => {
+    const tall = waveformPathD(new Float32Array([1]), 40)
+    const short = waveformPathD(new Float32Array([1]), 18)
+    expect(tall).not.toBe(short)
+  })
+
+  it("is total on empty peaks and nonsense heights", () => {
+    expect(waveformPathD(new Float32Array(0), 40)).toBe("")
+    expect(waveformPathD(new Float32Array([1]), 0)).toBe("")
+    expect(waveformPathD(new Float32Array([1]), Number.NaN)).toBe("")
   })
 })

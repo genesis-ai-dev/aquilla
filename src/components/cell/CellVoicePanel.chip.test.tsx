@@ -33,7 +33,7 @@ const cell = {
 const settings = { voices, defaultVoiceId: "v-mary" } as ProjectTtsSettings
 const project = { id: "proj-1", name: "P", ttsSettings: settings } as unknown as ProjectRecord
 
-describe("CellVoicePanel overlay chip", () => {
+describe("CellVoicePanel take tools", () => {
   function renderChip() {
     return renderWithTooltips(
       <CellVoicePanel
@@ -51,13 +51,34 @@ describe("CellVoicePanel overlay chip", () => {
     )
   }
 
-  it("stays visible while a volume popover is open", async () => {
-    const user = userEvent.setup()
+  it("sits beside the voice picker, not over the waveform", () => {
     renderChip()
 
-    const chip = document.querySelector("[data-slot=voice-overlay-chip]")
-    expect(chip).toBeTruthy()
-    expect(chip).toHaveClass("has-aria-expanded:opacity-100")
+    const tools = document.querySelector("[data-slot=voice-take-tools]")
+    expect(tools).toBeTruthy()
+    expect(tools).not.toHaveClass("absolute")
+    expect(tools?.className).not.toMatch(/bg-\[/)
+
+    const seek = screen.getByRole("slider", { name: "Seek" })
+    expect(tools?.compareDocumentPosition(seek) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+  })
+
+  it("keeps crop, volume, and clone visible without hover", () => {
+    renderChip()
+    expect(screen.getByRole("button", { name: "Crop audio" })).toBeVisible()
+    expect(screen.getByRole("button", { name: "Volume" })).toBeVisible()
+    expect(screen.getByRole("button", { name: /clone/i })).toBeVisible()
+  })
+
+  it("makes the narrator select as tall as the take-tool buttons", () => {
+    renderChip()
+    expect(screen.getByRole("button", { name: /Voice: Mary/ })).toHaveClass("h-7")
+    expect(screen.getByRole("button", { name: "Volume" })).toHaveClass("size-7")
+  })
+
+  it("opens the volume popover from the take-tools row", async () => {
+    const user = userEvent.setup()
+    renderChip()
 
     const volume = screen.getByRole("button", { name: "Volume" })
     await user.click(volume)

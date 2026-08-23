@@ -106,7 +106,7 @@ export function VoiceCombobox({
           render={
             <Button
               type="button"
-              size="xs"
+              size="sm"
               variant="outline"
               disabled={busy}
               aria-label={t("editor.voice.activeVoice", { name: active.name })}

@@ -2438,6 +2438,7 @@ export const ar: Catalog = {
   "onboarding.preferences.hint.personal": "شخصي",
   "onboarding.preferences.hint.onDevice": "على الجهاز",
   "onboarding.preferences.pageDescription": "تفضيلات شخصية تنطبق عليك في جميع المشاريع على هذا الجهاز.",
+  "onboarding.preferences.dialogDescription": "تفضيلات شخصية تنطبق على جميع المشاريع.",
   "onboarding.apiTokens.expiry.90d": "90 يومًا",
   "onboarding.apiTokens.scope.projectFallback": "المشروع {id}",
   "onboarding.apiTokens.scope.orgFallback": "المؤسسة {id}",

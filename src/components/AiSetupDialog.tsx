@@ -1,5 +1,5 @@
 import { Sparkles } from "lucide-react"
-import { useNavigate, useParams } from "react-router-dom"
+import { useLocation, useNavigate, useParams } from "react-router-dom"
 import {
   Dialog,
   DialogContent,
@@ -21,6 +21,7 @@ interface AiSetupDialogProps {
 export function AiSetupDialog({ open, onOpenChange, project, onUpdated }: AiSetupDialogProps) {
   const t = useT()
   const navigate = useNavigate()
+  const location = useLocation()
   const { id } = useParams<{ id: string }>()
 
   return (
@@ -49,7 +50,9 @@ export function AiSetupDialog({ open, onOpenChange, project, onUpdated }: AiSetu
             className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
             onClick={() => {
               onOpenChange(false)
-              navigate(`/project/${id}/settings`)
+              navigate(`/project/${id}/settings`, {
+                state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+              })
             }}
           >
             {t("workspace.aiSetup.fullSettingsLink")}

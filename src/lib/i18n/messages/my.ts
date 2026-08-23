@@ -2439,6 +2439,7 @@ export const my: Catalog = {
   "onboarding.preferences.hint.personal": "ကိုယ်ပိုင်",
   "onboarding.preferences.hint.onDevice": "စက်ပေါ်တွင်",
   "onboarding.preferences.pageDescription": "ဒီစက်ပစ္စည်းပေါ်ရှိ ပရောဂျက်အားလုံးတွင် သင့်အတွက် သက်ရောက်သော ကိုယ်ပိုင်နှစ်သက်ရာများ။",
+  "onboarding.preferences.dialogDescription": "ပရောဂျက်များတစ်လျှောက် သက်ရောက်သော ကိုယ်ပိုင်နှစ်သက်ရာများ။",
   "onboarding.apiTokens.expiry.90d": "၉၀ ရက်",
   "onboarding.apiTokens.scope.projectFallback": "ပရောဂျက် {id}",
   "onboarding.apiTokens.scope.orgFallback": "အဖွဲ့အစည်း {id}",

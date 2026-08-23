@@ -911,8 +911,10 @@ export function ProjectWorkspace() {
   // card — the Gemini/TTS key entry is then visible without scrolling to find it.
   const openAudioSetup = useCallback(() => {
     if (!projectId) return
-    navigate(`/project/${projectId}/settings?q=gemini`)
-  }, [navigate, projectId])
+    navigate(`/project/${projectId}/settings?q=gemini`, {
+      state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+    })
+  }, [location, navigate, projectId])
   const editorRef = useRef<EditorTableHandle>(null)
   // The section highlighted on the Dialogue timeline. Lifted here so the bottom
   // playback bar (a sibling of the timeline) can start playback from it (AQU-666).
@@ -4769,11 +4771,18 @@ export function ProjectWorkspace() {
         projectId,
         returnTo: workspaceReturnPath(projectId, activeFileId),
       }),
+      {
+        state: {
+          backgroundLocation: location,
+          projectSettingsModalDepth: 1,
+          projectSnapshot: project,
+        },
+      },
     )
-  }, [projectId, activeFileId, navigate])
+  }, [projectId, activeFileId, location, navigate, project])
 
   // Project Settings is a large route chunk. Warm it after the editor mounts
-  // so opening settings never suspends behind the first module download.
+  // so opening the modal never suspends behind the first module download.
   useEffect(() => {
     void import("./ProjectSettings")
   }, [])
@@ -6593,7 +6602,9 @@ export function ProjectWorkspace() {
             // Project Info + Languages sections (both carry the "target language"
             // keyword), where the field is edited (server enforces the role floor).
             onEditTargetLanguage={() =>
-              navigate(`/project/${projectId}/settings?q=${encodeURIComponent("target language")}`)
+              navigate(`/project/${projectId}/settings?q=${encodeURIComponent("target language")}`, {
+                state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+              })
             }
             isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}

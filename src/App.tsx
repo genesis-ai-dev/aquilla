@@ -1,5 +1,5 @@
 import { Suspense, lazy, type ReactNode } from "react"
-import { Navigate, Routes, Route, useParams, useLocation } from "react-router-dom"
+import { Navigate, Routes, Route, useParams, useLocation, type Location } from "react-router-dom"
 import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { OrgHome } from "@/components/org/OrgHome"
 import { OrgHomeRoute } from "@/components/org/OrgHomeRoute"
@@ -24,7 +24,7 @@ import { NotFound } from "@/pages/NotFound"
 import { DevLoginRoute } from "@/components/DevLoginRoute"
 import { DevLogoutRoute } from "@/components/DevLogoutRoute"
 import { MarketingLoginRoute } from "@/components/MarketingLoginRoute"
-import { Preferences } from "@/pages/Preferences"
+import { Preferences, PreferencesDialog } from "@/pages/Preferences"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
 import { OrgProvider } from "@/context/OrgContext"
 import { OutboxProvider } from "@/context/OutboxContext"
@@ -51,6 +51,9 @@ const ProjectWorkspace = lazy(() =>
 )
 const ProjectSettings = lazy(() =>
   import("@/components/ProjectSettings").then((m) => ({ default: m.ProjectSettings })),
+)
+const ProjectSettingsDialog = lazy(() =>
+  import("@/components/ProjectSettings").then((m) => ({ default: m.ProjectSettingsDialog })),
 )
 // AQU-254: CommentsPage / LivingMemoryPage / TerminologyPage are now rendered
 // inside ProjectWorkspace shell (lazy-imported there). The routes below all
@@ -209,13 +212,17 @@ export default function App() {
 }
 
 function AppRoutes() {
-  // Workspace routes intentionally suspend to this outer boundary: when
-  // entered through useOpenWorkspace's transition, React keeps the source
-  // project overview mounted so its blocking "Opening project" overlay
-  // remains observable. Org lazy routes catch suspension locally below.
+  const location = useLocation()
+  const backgroundLocation = (location.state as { backgroundLocation?: Location } | null)?.backgroundLocation
+
   return (
-    <Suspense fallback={<RouteLoadingFallback />}>
-      <Routes>
+    <>
+      {/* Workspace routes intentionally suspend to this outer boundary: when
+          entered through useOpenWorkspace's transition, React keeps the source
+          project overview mounted so its blocking "Opening project" overlay
+          remains observable. Org lazy routes catch suspension locally below. */}
+      <Suspense fallback={<RouteLoadingFallback />}>
+        <Routes location={backgroundLocation ?? location}>
         {/* Eager — needed for first paint / sign-in flow */}
         <Route path="/" element={<AppEntry />} />
         {/* The workspace entry. `/` is marketing at the edge, so this is the
@@ -312,7 +319,16 @@ function AppRoutes() {
 
         {/* AQU-270: catch-all 404 — must be last (audit finding F-IA3) */}
         <Route path="*" element={<NotFound />} />
-      </Routes>
-    </Suspense>
+        </Routes>
+      </Suspense>
+      {backgroundLocation ? (
+        <Routes>
+          <Route path="/preferences" element={<PreferencesDialog />} />
+          <Route path="/preferences/:section" element={<PreferencesDialog />} />
+          <Route path="/project/:id/settings" element={<LazyRoute><ProjectSettingsDialog /></LazyRoute>} />
+          <Route path="/project/:id/settings/:section" element={<LazyRoute><ProjectSettingsDialog /></LazyRoute>} />
+        </Routes>
+      ) : null}
+    </>
   )
 }

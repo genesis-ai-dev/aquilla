@@ -2434,6 +2434,7 @@ export const mfa: Catalog = {
   "onboarding.preferences.hint.personal": "Peribadi",
   "onboarding.preferences.hint.onDevice": "Pada peranti",
   "onboarding.preferences.pageDescription": "Keutamaan peribadi yang terpakai kepada anda merentasi semua projek pada peranti ini.",
+  "onboarding.preferences.dialogDescription": "Keutamaan peribadi yang terpakai merentasi projek.",
   "onboarding.apiTokens.expiry.90d": "90 hari",
   "onboarding.apiTokens.scope.projectFallback": "Projek {id}",
   "onboarding.apiTokens.scope.orgFallback": "Organisasi {id}",

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
-import { useParams, useNavigate, Link } from "react-router-dom"
+import { useParams, useNavigate, useLocation, Link } from "react-router-dom"
 import { MoreHorizontal, ChevronRight, Copy, Check, Download, Search, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -556,6 +556,7 @@ export function ProjectOverview() {
   const t = useT()
   const { id = "" } = useParams()
   const navigate = useNavigate()
+  const location = useLocation()
   // AQU-737: the workspace is a lazy route; surface the load on the Open project
   // button so it spins + disables instead of sitting idle and re-clickable.
   // `openingOverlay` blocks the rest of the page while the open is in flight.
@@ -1071,6 +1072,7 @@ export function ProjectOverview() {
                     {id && (
                       <Link
                         to={projectSettingsPath(id)}
+                        state={{ backgroundLocation: location, projectSettingsModalDepth: 1 }}
                         aria-label={t("editor.navTitle.projectSettings")}
                         data-testid="overview-project-settings"
                         className={cn(buttonVariants({ variant: "outline", size: "icon-sm" }), "shrink-0")}

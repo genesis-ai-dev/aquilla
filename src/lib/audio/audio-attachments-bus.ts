@@ -61,7 +61,22 @@ export function notifyAudioAttachmentsChanged(fileId: string): void {
 //              Lives SETTLED_GRACE_MS longer to cover the projection/read lag,
 //              then yields to server truth.
 
-export type AudioSlot = "recording" | "generatedVoice"
+/**
+ * Which slot of a cell a clip occupies. At most one clip per (cell, slot) is
+ * selected, enforced by the projection's sibling-deselect.
+ *
+ * AQU-646: an OPEN string, not a two-value union. `cell_audio.slot` is
+ * unconstrained TEXT and always has been, and extra target-audio tracks address
+ * their takes by using the track's own id as the slot — so the set of legal
+ * values is no longer knowable at compile time. The two well-known values are
+ * `"recording"` (mic/upload takes, and the imported source clip, which are told
+ * apart by the audioId seeding convention instead) and `"generatedVoice"`.
+ *
+ * Because this is now a plain string, the compiler no longer catches a
+ * hard-coded `"recording"` written where a variable slot belongs. Read the
+ * clip's own slot, or take it as an argument; never infer it.
+ */
+export type AudioSlot = string
 
 export type ShadowPhase = "binding" | "queued" | "settled"
 

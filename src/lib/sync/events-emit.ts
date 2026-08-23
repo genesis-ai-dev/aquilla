@@ -423,7 +423,8 @@ export interface CellAudioAttachInput {
   cellId: string
   audioId: string
   url: string
-  slot: "recording" | "generatedVoice"
+  /** Open string (AQU-646): a track id addresses an extra target track. */
+  slot: string
   mimeType?: string
   voiceId?: string
   referenceAudioId?: string
@@ -625,7 +626,8 @@ export interface CellAudioSelectInput {
   fileId: string
   cellId: string
   audioId: string
-  slot: "recording" | "generatedVoice"
+  /** Open string (AQU-646): a track id addresses an extra target track. */
+  slot: string
   author: string
   clientTs?: number
 }

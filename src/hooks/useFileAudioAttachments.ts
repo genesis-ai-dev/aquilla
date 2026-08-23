@@ -376,6 +376,9 @@ export function mergeCellsWithAudio(
       attachments[audioId] = {
         url: a.url,
         type: "audio",
+        // AQU-646: carry the slot so consumers read it rather than inferring it
+        // from the selection pointers. The inference cannot see a third slot.
+        ...(a.slot ? { slot: a.slot } : {}),
         ...(a.voiceId ? { voiceId: a.voiceId } : {}),
         ...(a.referenceAudioId ? { referenceAudioId: a.referenceAudioId } : {}),
         ...(a.durationMs != null ? { durationMs: a.durationMs } : {}),

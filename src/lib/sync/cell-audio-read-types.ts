@@ -4,7 +4,11 @@
 export interface AudioAttachmentOut {
   audioId: string
   url: string
-  slot: "recording" | "generatedVoice"
+  /** AQU-646: an OPEN string, matching the server's own type for this field.
+   *  `cell_audio.slot` is unconstrained TEXT; an extra target-audio track
+   *  addresses its takes by its own track id. Well-known: "recording",
+   *  "generatedVoice". */
+  slot: string
   mimeType: string | null
   voiceId: string | null
   referenceAudioId: string | null

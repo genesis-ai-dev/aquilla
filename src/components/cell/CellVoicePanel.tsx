@@ -308,7 +308,9 @@ export function CellVoicePanel({
     if (isSourceClip) return
     const att = cell.attachments?.[playableId]
     if (!att) return
-    const slot = playableId === cell.selectedAudioId ? "recording" : "generatedVoice"
+    // AQU-646: the clip's own slot; the comparison is only a fallback for a
+    // clip that reached us without one.
+    const slot = att.slot ?? (playableId === cell.selectedAudioId ? "recording" : "generatedVoice")
     // Round 7: overlay the new trims onto the merged cells instantly so the
     // timeline chip resizes without waiting on flush + refetch. SUB-48: the
     // overlay rides the emit promise so it lives exactly as long as the event.

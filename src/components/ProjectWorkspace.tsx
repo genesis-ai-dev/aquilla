@@ -1964,7 +1964,10 @@ export function ProjectWorkspace() {
       const att = cell?.attachments?.[audioId]
       if (!owner || !cell || !att) return
       const takeFileId = owner.fileId
-      const slot = audioId === cell.selectedAudioId ? "recording" : "generatedVoice"
+      // AQU-646: read the clip's slot; infer only when it is absent. Drives the
+      // optimistic overlay's "newest shadow per slot" bookkeeping, which puts
+      // the shadow in the wrong slot if this guesses.
+      const slot = att.slot ?? (audioId === cell.selectedAudioId ? "recording" : "generatedVoice")
       // 2026-08-14: a trim is its own event now, not a re-attach echoing back
       // every field it isn't changing. That echo was where trims got lost —
       // absence meant both "clear it" and "not my business" — and it also

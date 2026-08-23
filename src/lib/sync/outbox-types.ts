@@ -269,7 +269,10 @@ export interface OutboxEventPayloads {
   "cell.audio.attach": {
     audioId: string
     url: string
-    slot: "recording" | "generatedVoice"
+    /** AQU-646: an OPEN string. `cell_audio.slot` is unconstrained TEXT, and an
+     *  extra target-audio track addresses its takes by its own track id. The
+     *  two well-known values are "recording" and "generatedVoice". */
+    slot: string
     mimeType?: string
     voiceId?: string
     referenceAudioId?: string
@@ -286,7 +289,9 @@ export interface OutboxEventPayloads {
   }
   "cell.audio.select": {
     audioId: string
-    slot: "recording" | "generatedVoice"
+    /** Scopes the sibling-deselect only; it is never written onto the row, so
+     *  select cannot move a clip between slots. Open string — see attach. */
+    slot: string
   }
   "cell.audio.remove": {
     audioId: string

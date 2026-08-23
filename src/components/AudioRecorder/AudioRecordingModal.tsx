@@ -384,7 +384,11 @@ export function AudioRecordingModal({
         if (durationMs == null) return
         const healEventId = await emitCellAudioAttach({
           projectId: project.id, fileId: cell.fileId, cellId: cell.id,
-          audioId: take.audioId, url: take.url, slot: "recording",
+          // AQU-646: the take's own slot. Provably "recording" today (the find
+          // above filters on it), but this re-attach assigns slot outright, so
+          // it must not be the one place still naming it by hand once
+          // `recordingTakes` is scoped to a target track.
+          audioId: take.audioId, url: take.url, slot: take.slot,
           mimeType: take.mimeType ?? undefined,
           durationMs: Math.round(durationMs),
           label: take.label ?? undefined,
@@ -867,6 +871,13 @@ export function AudioRecordingModal({
         session,
         projectId: project.id,
         language: project.targetLanguage,
+        // AQU-646: state the slot rather than letting transcription infer it
+        // from the stub above. The stub carries `selectedAudioId` and no slot,
+        // so the inference reads every take as "recording" — which is right
+        // today and becomes a data-mover the moment a take can belong to a
+        // second target track (the re-attach assigns slot outright and its
+        // sibling-deselect would drop that track's real take).
+        slot: "recording",
       })
       scheduleAutoAdvance()
     } catch (e) {

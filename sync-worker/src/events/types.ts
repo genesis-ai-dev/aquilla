@@ -370,7 +370,8 @@ export interface EventPayloads {
   'cell.audio.attach': {
     audioId: string
     url: string
-    slot: 'recording' | 'generatedVoice'
+    /** Open string (AQU-646): extra target tracks use the track id as the slot. */
+    slot: string
     mimeType?: string
     voiceId?: string
     referenceAudioId?: string
@@ -401,7 +402,8 @@ export interface EventPayloads {
   }
   'cell.audio.select': {
     audioId: string
-    slot: 'recording' | 'generatedVoice'
+    /** Open string (AQU-646): extra target tracks use the track id as the slot. */
+    slot: string
   }
   // AQU-646 round 8: rename a take — label only, deliberately NOT a
   // re-attach (which would also re-select the clip). null clears.

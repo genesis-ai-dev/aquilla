@@ -66,6 +66,21 @@ export interface CodexCellAttachment {
   updatedAt?: number;
   isDeleted?: boolean;
   isMissing?: boolean;
+  /**
+   * Which slot of the cell this clip occupies — "recording", "generatedVoice",
+   * or (AQU-646) an extra target track's id.
+   *
+   * Carried so a consumer can READ the slot instead of inferring it from which
+   * of the cell's selection pointers happens to equal this clip's id. That
+   * inference is only ever able to tell apart the slots that existed when it
+   * was written, and a re-attach naming the wrong slot MOVES the clip and
+   * deselects whatever was in the slot it lands in.
+   *
+   * Optional because a hand-built cell stub (the recording modal's, notably)
+   * has no server row to copy it from. A caller that might be looking at a stub
+   * must be told the slot explicitly rather than reading it here.
+   */
+  slot?: string;
   /** Voice metadata, carried so a trim re-attach preserves it (doesn't null it). */
   voiceId?: string;
   referenceAudioId?: string;

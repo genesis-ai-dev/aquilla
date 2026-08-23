@@ -14,6 +14,12 @@ import { ZOOM_DEFAULT, ZOOM_MAX } from "@/lib/timeline/scale"
 // AQU-646: the editor subscribes to the play-queue (read-only) for playhead
 // tracking. Mock the two hooks with mutable stubs so tests can simulate
 // playback without any Audio element.
+// AQU-646: the output latency the editor sees. Zero by default, so every test
+// in this file behaves exactly as it did before compensation existed; the
+// compensation block below dials it up to prove the shift actually applies.
+let mockOutputLatencySec = 0
+vi.mock("./useOutputLatency", () => ({ useOutputLatency: () => mockOutputLatencySec }))
+
 let mockQueueState: QueueState = { kind: "idle" }
 let mockProgress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
 // Round 5: the speaker buttons push audibility straight into the queue.
@@ -303,6 +309,83 @@ describe("TimelineEditor", () => {
     withClip({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 }),
     withClip({ id: "m2", original: "Two", medium: "media", startTime: 10, endTime: 20 }),
   ]
+
+  // AQU-646. The playhead is drawn where the SOUND is, not where the clock is:
+  // a media element's currentTime is what has been handed to the audio
+  // pipeline, and on Bluetooth the speaker is up to ~200ms behind that. These
+  // pin the rule that decides WHEN that shift applies, which is the part that
+  // went wrong in the first design.
+  describe("output-latency compensation", () => {
+    const playheadPx = () => parseFloat(screen.getByTestId("tl-playhead").style.left)
+
+    function playing(at: number) {
+      mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }
+      mockProgress = { currentTime: at, duration: 20, rate: 1, volume: 1 }
+    }
+    function coldGate(at: number) {
+      // A verse whose audio has not arrived yet. `transportPlaying` goes FALSE
+      // here even though the transport has not stopped — which is exactly the
+      // trap: gating compensation on that flag would switch it off mid-run.
+      mockQueueState = { kind: "loading", cellIndex: 1, cellId: "m2" }
+      mockProgress = { currentTime: at, duration: 20, rate: 1, volume: 1 }
+    }
+    const reset = () => {
+      mockQueueState = { kind: "idle" }
+      mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+      mockOutputLatencySec = 0
+    }
+
+    it("does not flicker across a cold verse gate", () => {
+      // THE REGRESSION TEST FOR THE FLAW THE PLAN HAD. Compensation is a latch
+      // armed when playback starts, not a gate on the sounding flag, so a gate
+      // must not move the head at all. If someone re-gates it on
+      // `transportPlaying`, the head jumps forward into the gate and this fails.
+      mockOutputLatencySec = 0.178 // a Bluetooth-sized delay
+      playing(12)
+      try {
+        const { rerender } = render(
+          <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+        )
+        const before = playheadPx()
+
+        coldGate(12)
+        rerender(
+          <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+        )
+        const during = playheadPx()
+
+        playing(12)
+        rerender(
+          <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+        )
+        const after = playheadPx()
+
+        // The shift really is applied — otherwise this test would pass on a
+        // build that compensates by nothing at all, and prove nothing.
+        expect(before).toBeCloseTo((12 - 0.178) * 38, 0)
+        expect(during).toBeCloseTo(before, 1)
+        expect(after).toBeCloseTo(before, 1)
+      } finally {
+        reset()
+      }
+    })
+
+    it("compensates by nothing when the platform cannot measure the latency", () => {
+      // happy-dom has no AudioContext, so the store reads 0 and the head sits
+      // exactly on the clock. This is also WHY the exact-pixel test below can
+      // assert 12 * 38 while playing — see output-latency.test.ts, which pins
+      // the same invariant from the other side.
+      playing(12)
+      try {
+        render(
+          <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
+        )
+        expect(playheadPx()).toBeCloseTo(12 * 38, 0)
+      } finally {
+        reset()
+      }
+    })
+  })
 
   it("the playhead tracks queue progress for THIS file's cells", () => {
     mockQueueState = { kind: "playing", cellIndex: 1, cellId: "m2" }

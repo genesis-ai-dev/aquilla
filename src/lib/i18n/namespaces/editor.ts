@@ -621,6 +621,9 @@ export const editor = defineNamespace({
     "editor.timeline.snapOffTooltip": "Snapping off",
     "editor.timeline.videoHiddenNote":
       "The linked video is hidden here — it plays on the original recording's timing, which this view no longer follows.",
+    "editor.timeline.outputLatencyNote":
+      "Bluetooth audio arrives a moment after the app sends it. The playhead is adjusted for the delay it can measure, but a little is unmeasurable — trust your ears over the line for fine timing.",
+    "editor.timeline.outputDeviceChangedToast": "Playback paused — the audio output changed.",
     "editor.timeline.measureNote": plural({
       one: "{count} recording has no measured length — its chip is drawn at a guessed width.",
       other:
@@ -3542,6 +3545,20 @@ export const editor = defineNamespace({
           "mode. The video can only play on the original recording's clock, and this " +
           "view no longer lays clips out on that clock, so showing it would drift " +
           "against the audio. Explains an absence — not an error.",
+      },
+      "editor.timeline.outputLatencyNote": {
+        description:
+          "Quiet line in the timeline chrome, shown only while the audio output " +
+          "looks like Bluetooth. The app already shifts the playhead by the delay " +
+          "the browser reports; this says the REMAINDER cannot be measured, so the " +
+          "line may still sit slightly ahead of what is heard. Not a warning and " +
+          "not an error — the person can do nothing about it, and nothing is broken.",
+      },
+      "editor.timeline.outputDeviceChangedToast": {
+        description:
+          "Toast shown when playback was stopped because the audio output device " +
+          "changed mid-playback — headphones connected or unplugged. States what " +
+          "happened and why; the person simply presses play again.",
       },
       "editor.timeline.measureNote": {
         description:

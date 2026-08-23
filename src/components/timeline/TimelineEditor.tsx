@@ -92,6 +92,8 @@ import { MediaTextHeader, TimelineTimingRow } from "./TimelineChipStrip"
 import { TimelineTranscribeBar } from "./TimelineTranscribeBar"
 import { applySelect, selectedIdsInOrder, type SelectMods } from "./selection"
 import { useTimelineClock } from "./useTimelineClock"
+import { armOutputLatency, displaySec, HIGH_LATENCY_SEC } from "@/lib/audio/output-latency"
+import { useOutputLatency } from "./useOutputLatency"
 import { resolveEntryAudio, useClipAudioMissing } from "./useClipAudioMissing"
 import type { CellData } from "@/hooks/useCells"
 import { type AudioTimingMode, type ProjectRecord } from "@/lib/parsers/types"
@@ -753,6 +755,38 @@ export function TimelineEditor({
   // position nobody updates draws steady, confident, wrong motion.
   const transportPlaying = queueActive ? queuePlaying && queueClockIsFile : videoPlaying
   const transportRate = queueActive ? queueProgress.rate : 1
+  // AQU-646: how far behind the clock your EARS are, and whether to draw the
+  // playhead there.
+  //
+  // COMPENSATION IS A LATCH, NOT A GATE ON `transportPlaying`. That flag is
+  // deliberately strict — it dips false at every COLD VERSE GATE (see the
+  // comment above it) — so applying the shift only while it is true would
+  // switch compensation off and on at every verse: a forward jump into the
+  // gate, then a hold coming out of it as the never-move-backward rule
+  // swallowed the re-application. That is precisely the bounce this timeline
+  // spent a round eliminating, arriving again by another route.
+  //
+  // So: arm on the rising edge of playing, disarm when the transport goes
+  // genuinely idle, and disarm on an explicit seek (in `seekTo` below). A cold
+  // gate touches none of those, so it changes nothing.
+  const outputLatencySec = useOutputLatency()
+  const transportActive = queueActive || videoClockSec != null
+  const [compensating, setCompensating] = useState(false)
+  const wasPlayingRef = useRef(false)
+  useEffect(() => {
+    if (transportPlaying && !wasPlayingRef.current) {
+      armOutputLatency()
+      setCompensating(true)
+    }
+    wasPlayingRef.current = transportPlaying
+  }, [transportPlaying])
+  useEffect(() => {
+    if (!transportActive) setCompensating(false)
+  }, [transportActive])
+  // Where the head is DRAWN. Raw `clock.currentSec` still drives everything
+  // that seeks or writes; this drives everything that renders or scrolls TO the
+  // head, so the page-flip cannot fire several pixels from where the line is.
+  const displayCurrentSec = displaySec(clock.currentSec, outputLatencySec, compensating)
   useEffect(() => {
     if (transportPlaying) clock.play()
     else clock.pause()
@@ -1482,7 +1516,7 @@ export function TimelineEditor({
       // Round 5: a video-driven follow keeps its anchor too — zooming used to
       // recentre on the viewport middle instead of the playhead.
       const followAnchor = follow && (queueActive || videoPlaying)
-      const anchorSec = followAnchor ? clock.currentSec : pxToSec(scrollLeft + viewportPx / 2, pxPerSec)
+      const anchorSec = followAnchor ? displayCurrentSec : pxToSec(scrollLeft + viewportPx / 2, pxPerSec)
       const target = Math.max(0, secToPx(anchorSec, z) - (followAnchor ? viewportPx * 0.1 : viewportPx / 2))
       setPxPerSec(z)
       // Apply after React paints the new track width, or the browser clamps
@@ -1866,6 +1900,9 @@ export function TimelineEditor({
   }, [pxPerSec])
 
   function seekTo(sec: number) {
+    // A deliberate seek must land exactly where it was aimed: the timeline is
+    // an editor, and at rest the head has to agree with the chip edge under it.
+    setCompensating(false)
     clock.seekTo(sec)
     // AQU-646: explicit seeks drive the audio queue too, and re-engage follow.
     // The linked video rides along on this same call — the workspace stamps a
@@ -1945,13 +1982,13 @@ export function TimelineEditor({
     const el = scrollRef.current
     if (!el) return
     const target = computeFollowScroll(
-      secToPx(clock.currentSec, pxPerSec),
+      secToPx(displayCurrentSec, pxPerSec),
       el.scrollLeft,
       viewportPx,
       trackWidthPx,
     )
     if (target != null) scrollTrackTo(target)
-  }, [follow, transportPlaying, clock.currentSec, pxPerSec, viewportPx, trackWidthPx])
+  }, [follow, transportPlaying, displayCurrentSec, pxPerSec, viewportPx, trackWidthPx])
 
   // 2026-08-07 (wire a): USER chip selection — as opposed to programmatic
   // selection from a row click — also notifies the workspace so the text
@@ -2334,7 +2371,7 @@ export function TimelineEditor({
                   const el = scrollRef.current
                   if (el) {
                     const target = computeFollowScroll(
-                      secToPx(clock.currentSec, pxPerSec), el.scrollLeft, viewportPx, trackWidthPx,
+                      secToPx(displayCurrentSec, pxPerSec), el.scrollLeft, viewportPx, trackWidthPx,
                     )
                     if (target != null) scrollTrackTo(target)
                   }
@@ -2498,6 +2535,21 @@ export function TimelineEditor({
           className="shrink-0 border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground"
         >
           {t("editor.timeline.videoHiddenNote")}
+        </div>
+      )}
+
+      {/* AQU-646: the playhead is already shifted back by the delay the browser
+          reports, so this does NOT say "there is latency" — it says the part we
+          cannot measure is still there. Shown only on a path slow enough that
+          the reading is untrustworthy, which in practice means Bluetooth. Same
+          quiet treatment as the note above: nothing is broken and there is
+          nothing to do about it. */}
+      {outputLatencySec >= HIGH_LATENCY_SEC && (
+        <div
+          data-testid="tl-output-latency-note"
+          className="shrink-0 border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground"
+        >
+          {t("editor.timeline.outputLatencyNote")}
         </div>
       )}
 
@@ -2700,7 +2752,7 @@ export function TimelineEditor({
                 </div>
               )}
               <TimelinePlayhead
-                currentSec={clock.currentSec}
+                currentSec={displayCurrentSec}
                 pxPerSec={pxPerSec}
                 playing={transportPlaying}
                 rate={transportRate}

@@ -181,6 +181,8 @@ import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOve
 import { useComments } from "@/hooks/useComments"
 import { Film, Bot, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical } from "lucide-react"
 import { toast } from "@/components/ui/toast"
+import { setMicHeld } from "@/lib/audio/mic-hold"
+import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { AgentWorkbench } from "./agent/AgentWorkbench"
 import type { ContextChip } from "@/lib/agent/context-chip"
@@ -232,6 +234,7 @@ import {
   TIMELINE_PANE_MIN_HEIGHT,
 } from "./timeline/timeline-pane-layout"
 import {
+  getVideoClockPlaying,
   setVideoClockSec,
   setVideoClockPlaying,
   useVideoClockPlaying,
@@ -7558,6 +7561,27 @@ export function ProjectWorkspace() {
    * same round, because one half of "remembered per file" behaving differently
    * from the other is what reads as a bug rather than as a limitation.
    */
+  // AQU-646: tell the audio layer the recorder is open, so nothing goes and
+  // touches the output device while a take is possible. Mirrors the same
+  // `recordingCellId !== null` that suspends the film below — deliberately the
+  // recorder's whole open span, not just a running take, because `holdMic`
+  // keeps the mic and its capture graph alive between takes.
+  useEffect(() => {
+    setMicHeld(recordingCellId !== null)
+  }, [recordingCellId])
+
+  // AQU-646: stop playback when the audio output device changes under it —
+  // headphones in or out. The watcher decides for itself whether the OUTPUT
+  // actually changed (the browser event also fires for microphones and
+  // webcams), and stays silent when it cannot tell.
+  useEffect(() => {
+    return startOutputDeviceWatch({
+      isPlaying: () => getQueueState().kind === "playing" || getVideoClockPlaying(),
+      onPaused: () =>
+        toast.add({ type: "info", title: t("editor.timeline.outputDeviceChangedToast") }),
+    })
+  }, [t])
+
   const timelinePanelRef = usePanelRef()
   useEffect(() => {
     if (!activeFileId) return

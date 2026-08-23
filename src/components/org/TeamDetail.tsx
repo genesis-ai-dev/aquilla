@@ -472,8 +472,15 @@ export function TeamDetail() {
       header={<OrgBreadcrumb parent={{ label: "Teams", to: activeOrgId != null ? orgPath(activeOrgId, "/teams") : "/orgs/all" }} section={team?.name ?? "Team"} />}
       statusBar={null}
       main={
-        <Page size="wide">
-          <div className="space-y-6">
+        <Page size="full" className="@container/team-detail">
+          {/* Below the max-w-6xl column: same well as other org pages, logo
+              inline with the title, no extra body indent. At/above that width
+              (@6xl = 72rem container): well grows by the avatar gutter so the
+              title stays on the shared column, and tabs/tables pad to it. */}
+          <div
+            data-testid="team-detail-well"
+            className="mx-auto w-full max-w-6xl space-y-6 @6xl/team-detail:ml-[max(0px,calc((100%-72rem)/2-2.75rem))] @6xl/team-detail:w-[min(100%,calc(72rem+2.75rem))] @6xl/team-detail:max-w-[calc(72rem+2.75rem)]"
+          >
             {loading ? (
               <>
                 <div className="h-10 w-64 animate-pulse rounded-lg border bg-card" />
@@ -581,50 +588,52 @@ export function TeamDetail() {
                 </Dialog>
               )}
 
-              {/* Avatar bleeds left of the max-w-6xl well so title/tabs/tables keep the same
-                  content width as the teams list. Out of flow — do not pad the Page well. */}
               <div className="space-y-3">
               <div
                 className={cn(
-                  "relative flex justify-between gap-4",
+                  "flex gap-3",
                   teamDescription ? "items-start" : "items-center",
                 )}
               >
                 <span
                   aria-hidden
                   data-testid="team-detail-avatar"
-                  className={cn(
-                    "absolute right-full mr-3",
-                    teamDescription ? "top-0 mt-0.5" : "top-1/2 -translate-y-1/2",
-                  )}
+                  className={cn("shrink-0", teamDescription && "mt-0.5")}
                 >
                   <InitialsAvatar name={team.name} size="default" />
                 </span>
-                <div className={cn("min-w-0", teamDescription && "space-y-1")}>
-                  <h1 className="font-heading text-xl font-semibold tracking-tight text-foreground">
-                    {team.name}
-                  </h1>
-                  {teamDescription ? (
-                    <p className="max-w-prose text-sm text-muted-foreground whitespace-pre-wrap">
-                      {teamDescription}
-                    </p>
+                <div
+                  className={cn(
+                    "flex min-w-0 flex-1 justify-between gap-4",
+                    teamDescription ? "items-start" : "items-center",
+                  )}
+                >
+                  <div className={cn("min-w-0", teamDescription && "space-y-1")}>
+                    <h1 className="font-heading text-xl font-semibold tracking-tight text-foreground">
+                      {team.name}
+                    </h1>
+                    {teamDescription ? (
+                      <p className="max-w-prose text-sm text-muted-foreground whitespace-pre-wrap">
+                        {teamDescription}
+                      </p>
+                    ) : null}
+                  </div>
+                  {isAdmin && activeOrgId != null && groupIdNum != null ? (
+                    <Link
+                      to={teamSettingsPath(activeOrgId, groupIdNum)}
+                      aria-label={t("org.teamDetail.teamSettingsAriaLabel")}
+                      className={cn(buttonVariants({ variant: "outline", size: "icon" }), "shrink-0")}
+                    >
+                      <Settings />
+                    </Link>
                   ) : null}
                 </div>
-                {isAdmin && activeOrgId != null && groupIdNum != null ? (
-                  <Link
-                    to={teamSettingsPath(activeOrgId, groupIdNum)}
-                    aria-label={t("org.teamDetail.teamSettingsAriaLabel")}
-                    className={cn(buttonVariants({ variant: "outline", size: "icon" }), "shrink-0")}
-                  >
-                    <Settings />
-                  </Link>
-                ) : null}
               </div>
 
               <Tabs
                 value={tab}
                 onValueChange={(v) => setTab((v as TeamTab) ?? "projects")}
-                className="gap-4"
+                className="gap-4 @6xl/team-detail:pl-11"
               >
                 <TabsList aria-label={t("org.teamDetail.sectionsAriaLabel")}>
                   <TabsTrigger value="projects">{t("nav.projects")}</TabsTrigger>

@@ -270,16 +270,21 @@ describe("TeamDetail admin management", () => {
     expect(screen.getByText("West Africa translation")).toBeInTheDocument()
   })
 
-  it("bleeds the avatar outside the wide well instead of padding max-w-6xl", async () => {
+  it("keeps the avatar in flow and pads body content to the title on wide screens", async () => {
     renderDetail()
     await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
-    const well = screen.getByRole("heading", { name: "WA" }).closest(".max-w-6xl")
-    expect(well).toBeTruthy()
-    expect(well).not.toHaveClass("pl-14")
-    expect(well).not.toHaveClass("sm:pl-16")
+    const title = screen.getByRole("heading", { name: "WA" })
+    const well = screen.getByTestId("team-detail-well")
+    expect(well).toHaveClass("max-w-6xl")
+    expect(well.className).toContain("@6xl/team-detail:max-w-[calc(72rem+2.75rem)]")
     const avatar = screen.getByTestId("team-detail-avatar")
-    expect(avatar).toHaveClass("absolute", "right-full")
-    expect(well?.contains(avatar)).toBe(true)
+    expect(avatar).not.toHaveClass("absolute")
+    expect(avatar).not.toHaveClass("right-full")
+    expect(avatar.nextElementSibling).toContainElement(title)
+    const tabs = screen.getByRole("tablist", { name: /team sections/i })
+    expect(tabs.parentElement).toHaveClass("@6xl/team-detail:pl-11")
+    expect(tabs.parentElement).not.toHaveClass("pl-11")
+    expect(well).toContainElement(tabs)
   })
 })
 

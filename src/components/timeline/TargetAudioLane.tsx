@@ -40,6 +40,12 @@ import {
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
 import { DragTimeChip } from "./DragTimeChip"
+import { TargetChipWaveform } from "./TargetChipWaveform"
+import { useTargetChipPeaks } from "./useTargetChipPeaks"
+import { chipWaveformWindow, waveformStride } from "@/lib/timeline/chip-waveform"
+import { WAVEFORM_BINS } from "@/lib/audio/peaks-loader"
+import type { PeaksTarget } from "@/lib/audio/peaks-loader"
+import type { FrontierSession } from "@/lib/frontier/types"
 import type { TimelineLayout } from "@/lib/timeline/layout"
 import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -91,6 +97,14 @@ export interface TargetAudioLaneProps {
    *  blank line first and then opens the recorder. */
   emptySpans?: readonly { startSec: number; endSec: number }[]
   onAddLineAndRecord?(startSec: number, endSec: number): void
+  /** AQU-646: what the waveform loader needs to fetch take bytes. All three
+   *  absent = no waveforms, which is what this lane's own tests get. */
+  projectId?: string | null
+  fileId?: string | null
+  session?: FrontierSession | null
+  /** Test/story seam: supplied peaks bypass the loader entirely, so a test can
+   *  assert the drawing without mocking OPFS, the network or AudioContext. */
+  peaksByAudioId?: ReadonlyMap<string, Float32Array>
 }
 
 type ChipDragMode = "move" | "resize-l" | "resize-r"
@@ -125,8 +139,12 @@ function TargetAudioChip({
   onRetimeTarget,
   onTrimTarget,
   onOpenRecording,
+  peaks,
 }: {
   chip: ChipGeometry
+  /** AQU-646: this clip's whole-clip peaks, once they have arrived. Absent
+   *  means the chip draws as it always did. */
+  peaks?: Float32Array
   /** The PREVIOUS chip's span — a chip can begin before its own section
    *  (end-based drag bounds), so its head can lie under this neighbour. */
   prevChip: { start: number; end: number; usingFallback: boolean } | null
@@ -332,6 +350,34 @@ function TargetAudioChip({
   const overflowSec = span.end - section.end
   const paintedPx = Math.max(10, secToPx(paintedEnd - paintedStart, pxPerSec))
   const fullPx = secToPx(geom.end - geom.start, pxPerSec)
+  // AQU-646: the waveform's window into this clip. Computed from the PAINTED
+  // edges, so a chip cut short by the at-fault rule shows exactly the audio it
+  // is drawn over — and hovering, which restores the true edges, widens the
+  // window in place without moving a single bar that was already visible.
+  // Null whenever the clip's length was never measured: there is no honest
+  // mapping from bins to seconds, and a waveform scaled to a guessed width
+  // would make a guess look measured.
+  //
+  // Computed inline rather than in a `useMemo`: this project runs the React
+  // Compiler, and a manual memo here made it give up on the whole component
+  // ("existing memoization could not be preserved"), which costs far more than
+  // the handful of arithmetic ops it was saving. The expensive part — building
+  // the path string — is memoised inside TargetChipWaveform, where the inputs
+  // are primitives and one stable array.
+  const waveWindow =
+    peaks && peaks.length > 0
+      ? chipWaveformWindow({
+          geom,
+          paintedStart,
+          paintedEnd,
+          drag: drag ? { mode: drag.mode, spanStart: span.start } : null,
+          bins: peaks.length,
+        })
+      : null
+  const waveform =
+    peaks && waveWindow
+      ? { peaks, ...waveWindow, stride: waveformStride(waveWindow.x1 - waveWindow.x0, paintedPx) }
+      : null
   // The top-left corner is a single PRIORITY slot — one glyph at a time:
   // missing (permanent, actionable) beats loading (transient seconds) beats
   // saving (informational). Same width discipline as before: the glyph needs
@@ -504,6 +550,21 @@ function TargetAudioChip({
           deltaSec={drag.mode === "resize-r" ? span.end - geom.end : span.start - geom.start}
         />
       )}
+      {waveform && (
+        // FIRST, so it paints under the handles, the kind icon, the badges and
+        // the truncation chevrons — it is the chip's background, not content.
+        // It reads `fill-current`, so it inherits whatever colour the body
+        // classes above already resolved: emerald or violet by kind, red when
+        // this chip is the one at fault in an overlap, and the dark-mode
+        // variant of each. No colour logic here at all.
+        <TargetChipWaveform
+          peaks={waveform.peaks}
+          x0={waveform.x0}
+          x1={waveform.x1}
+          stride={waveform.stride}
+          chipH={chipH}
+        />
+      )}
       {canResize && (
         <span
           aria-hidden
@@ -649,6 +710,10 @@ export function TargetAudioLane({
   emptyCells,
   emptySpans,
   onAddLineAndRecord,
+  projectId,
+  fileId,
+  session,
+  peaksByAudioId,
 }: TargetAudioLaneProps) {
   const t = useT()
   const audioFirst = layout?.mode === "audioFirst"
@@ -688,6 +753,36 @@ export function TargetAudioLane({
           : null,
     })
   }
+
+  // AQU-646: peaks for the chips actually on screen AND actually drawable.
+  //
+  // Both filters matter. Visibility keeps a 70-minute episode from decoding
+  // eight hundred takes to paint the dozen you can see; the duration check
+  // keeps us from fetching a clip whose bins could never be mapped to seconds
+  // anyway. Built here rather than in the editor because this loop is the only
+  // place that has already resolved geometry.
+  const peakTargets: PeaksTarget[] = []
+  for (const chip of chips) {
+    if (chip.geom.durationSec == null) continue
+    if (!isVisible(chip.geom.start, chip.geom.end, viewStartSec, viewEndSec)) continue
+    const url = chip.item.cell.attachments?.[chip.item.audioId]?.url
+    if (!url) continue
+    peakTargets.push({
+      attachmentKey: chip.item.audioId,
+      url,
+      // The take's OWN file: a take on an audio cue lives in the hidden
+      // sibling, and its bytes are stored under that file's path.
+      fileId: chip.item.cell.fileId,
+    })
+  }
+  const loadedPeaks = useTargetChipPeaks({
+    targets: peakTargets,
+    projectId: projectId ?? null,
+    fileId: fileId ?? null,
+    session: session ?? null,
+    bins: WAVEFORM_BINS,
+  })
+  const peaksFor = peaksByAudioId ?? loadedPeaks
 
   const candidatesFor = (cellId: string, section: { start: number; end: number }): number[] => {
     if (!snapEnabled) return []
@@ -837,6 +932,7 @@ export function TargetAudioLane({
             onRetimeTarget={onRetimeTarget}
             onTrimTarget={onTrimTarget}
             onOpenRecording={onOpenRecording}
+            peaks={peaksFor.get(chip.item.audioId)}
           />
         ) : null,
       )}

@@ -2186,6 +2186,12 @@ export function TimelineEditor({
             onAddLineAndRecord={
               canAddLine && onAddLine ? (s, e) => void onAddLine(s, e, { thenRecord: true }) : undefined
             }
+            // AQU-646: what the lane's waveform loader needs. Same three the
+            // detail pane already hands useClipAudioMissing; without them the
+            // lane simply draws no waveforms, which is what its own tests get.
+            projectId={project?.id ?? null}
+            fileId={fileId}
+            session={session ?? null}
           />
         )
     }

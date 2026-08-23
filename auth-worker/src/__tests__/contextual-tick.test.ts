@@ -26,6 +26,11 @@ import {
   recordWaveOutcome,
 } from "../../../db/shared/contextual-runs"
 import {
+  getDecision,
+  listOpenDecisions,
+} from "../../../db/shared/contextual-decisions"
+import { resolveBlockingDecision } from "../../../db/shared/contextual-decision-lifecycle"
+import {
   listSceneBriefs,
   getSceneBrief,
   proposeSceneBrief,
@@ -395,6 +400,110 @@ describe("runOneTick", () => {
       "c4",
       "c5",
     ])
+  })
+
+  it("turns an unsafe passage into one decision, waits without losing it, then retries it with the human answer", async () => {
+    await seedFile()
+    const run = await startRun()
+
+    const blocked = await runOneTick({
+      db,
+      runId: run.id,
+      concurrency: 1,
+      // No parseable construal in any round: this is the real pipeline
+      // producer for an unsafe-to-draft passage, not a synthetic report.
+      llm: async (request) => request.label === "construe" ? "not-json" : llm()(request),
+    })
+
+    expect(blocked).toMatchObject({ continueRun: false, status: "waiting" })
+    const waiting = await getRun(db, run.id)
+    expect(waiting?.failedSpans).toBe(0)
+    expect(waiting?.doneSpans).toBe(0)
+    expect(waiting?.spanCursor?.nextIndex).toBe(0)
+    expect(waiting?.spanCursor?.seeds).toHaveLength(2)
+    expect(waiting?.spanCursor?.seeds[waiting.spanCursor.nextIndex].id).toBe(
+      waiting?.spanCursor?.seeds[0].id,
+    )
+
+    const decisions = await listOpenDecisions(db, PROJECT)
+    expect(decisions).toHaveLength(1)
+    expect(decisions[0]).toMatchObject({
+      runId: run.id,
+      fileId: FILE,
+      spanId: waiting?.spanCursor?.seeds[0].id,
+      cellIds: ["c2", "c3"],
+      status: "open",
+    })
+
+    // A replay/stray driver observes waiting and cannot duplicate the card.
+    await runOneTick({ db, runId: run.id, llm: llm(), concurrency: 1 })
+    expect(await listOpenDecisions(db, PROJECT)).toHaveLength(1)
+
+    const resolved = await resolveBlockingDecision(db, {
+      decisionId: decisions[0].id,
+      action: "answer",
+      answer: "The narrator is speaking; keep the register formal.",
+      byUserId: 7,
+      byUsername: "reviewer",
+    })
+    expect(resolved.status).toBe("ok")
+    if (resolved.status !== "ok") throw new Error("decision did not resolve")
+    expect(resolved.run?.status).toBe("running")
+    expect((await getDecision(db, decisions[0].id))?.status).toBe("resolved")
+
+    const steering = await readUnconsumedSteering(db, {
+      projectId: PROJECT,
+      fileId: FILE,
+      runId: run.id,
+    })
+    expect(steering).toHaveLength(1)
+    expect(steering[0].body).toContain("The narrator is speaking")
+
+    const retried = await runOneTick({ db, runId: run.id, llm: llm(), concurrency: 1 })
+    expect(retried).toMatchObject({ continueRun: true, status: "running" })
+    expect(retried.report?.spanId).toBe(decisions[0].spanId)
+    expect((await listDrafts(db, PROJECT, FILE, "proposed")).map((d) => d.cellId).sort()).toEqual([
+      "c2",
+      "c3",
+    ])
+    expect(await readUnconsumedSteering(db, {
+      projectId: PROJECT,
+      fileId: FILE,
+      runId: run.id,
+    })).toHaveLength(0)
+  })
+
+  it("dismisses a blocking decision by dropping only its queued retry and continuing", async () => {
+    await seedFile()
+    const run = await startRun()
+    await runOneTick({
+      db,
+      runId: run.id,
+      concurrency: 1,
+      llm: async (request) => request.label === "construe" ? "not-json" : llm()(request),
+    })
+    const [decision] = await listOpenDecisions(db, PROJECT)
+
+    const dismissed = await resolveBlockingDecision(db, {
+      decisionId: decision.id,
+      action: "dismiss",
+      byUsername: "reviewer",
+    })
+    expect(dismissed.status).toBe("ok")
+    if (dismissed.status !== "ok") throw new Error("decision did not dismiss")
+    expect(dismissed.run?.status).toBe("running")
+
+    const afterDismiss = await getRun(db, run.id)
+    expect(afterDismiss?.spanCursor?.seeds).toHaveLength(1)
+    expect(afterDismiss?.spanCursor?.seeds[afterDismiss.spanCursor.nextIndex].startCellId).toBe("c4")
+
+    const continued = await runOneTick({ db, runId: run.id, llm: llm(), concurrency: 1 })
+    expect(continued.status).toBe("parked")
+    expect((await listDrafts(db, PROJECT, FILE, "proposed")).map((d) => d.cellId).sort()).toEqual([
+      "c4",
+      "c5",
+    ])
+    expect((await getDecision(db, decision.id))?.status).toBe("dismissed")
   })
 
   it("never publishes cropped draft text as a complete live suggestion", async () => {

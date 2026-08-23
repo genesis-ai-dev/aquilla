@@ -8,6 +8,14 @@ import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
 import { raiseDecision, getDecision } from "../../../db/shared/contextual-decisions"
+import {
+  blockRunOnDecision,
+  createRun,
+  getRun,
+  readUnconsumedSteering,
+  setSpanCursor,
+} from "../../../db/shared/contextual-runs"
+import { _test as contextualRouteTest } from "../routes/contextual"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 
 const db = env.AQUILLA_PG
@@ -100,7 +108,11 @@ describe("GET /contextual/decisions", () => {
 
     const res = await request(`/api/v2/projects/${project}/contextual/decisions`, jwt)
     expect(res.status).toBe(200)
-    const body = await res.json()
+    const body = await res.json() as {
+      cap: number
+      openCount: number
+      decisions: Array<{ blastRadius: number }>
+    }
 
     expect(body.cap).toBe(3)
     expect(body.openCount).toBe(5) // the held ones are still open
@@ -134,8 +146,44 @@ describe("POST /contextual/decisions/:id/:action", () => {
       { method: "POST", body: JSON.stringify({ answer: "council" }) },
     )
     expect(res.status).toBe(200)
-    const body = await res.json()
+    const body = await res.json() as { decision: { status: string } }
     expect(body.decision.status).toBe("resolved")
+  })
+
+  it("answers the decision blocking a run, queues steering, and kicks the driver", async () => {
+    const project = `proj-answer-run-${Date.now()}`
+    const jwt = await seedProjectMember(project)
+    const created = await createRun(db, { projectId: project, fileId: "f1", targetLang: "" })
+    if (created.status !== "ok") throw new Error("run not created")
+    await setSpanCursor(db, created.run.id, { seeds: [], nextIndex: 0 })
+    const decision = await raiseDecision(db, {
+      projectId: project,
+      runId: created.run.id,
+      fileId: "f1",
+      spanId: "span-1",
+      cellIds: ["c1"],
+      reason: "Who is speaking?",
+    })
+    await blockRunOnDecision(db, created.run.id, decision.id)
+
+    const res = await request(
+      `/api/v2/projects/${project}/contextual/decisions/${decision.id}/answer`,
+      jwt,
+      { method: "POST", body: JSON.stringify({ answer: "The narrator." }) },
+    )
+    expect(res.status).toBe(200)
+    const body = await res.json() as { wokeRunId?: string }
+    expect(body.wokeRunId).toBe(created.run.id)
+    await contextualRouteTest.lastLoop
+
+    expect((await getRun(db, created.run.id))?.status).toBe("parked")
+    const steering = await readUnconsumedSteering(db, {
+      projectId: project,
+      fileId: "f1",
+      runId: created.run.id,
+    })
+    expect(steering).toHaveLength(1)
+    expect(steering[0].body).toContain("The narrator")
   })
 
   it("returns 409 when answering an already-closed decision", async () => {

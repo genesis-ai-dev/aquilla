@@ -3,6 +3,7 @@ import { useParams, useNavigate, useLocation, Link } from "react-router-dom"
 import { MoreHorizontal, ChevronRight, Copy, Check, Download, Search, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import { ExpandableName } from "@/components/ui/expandable-name"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
@@ -1176,7 +1177,11 @@ export function ProjectOverview() {
                     <div className="flex flex-wrap items-center gap-2 text-sm">
                       {audio?.deadlineAt ? (
                         <span className="flex items-center gap-2 font-medium">
-                          {audio.deadlineAt}
+                          <DateTooltip
+                            value={audio.deadlineAt}
+                            label={t("org.assignedToMe.dueColumnLabel")}
+                            variant="deadline"
+                          />
                           <DeadlineChip status={dstatus} />
                         </span>
                       ) : (

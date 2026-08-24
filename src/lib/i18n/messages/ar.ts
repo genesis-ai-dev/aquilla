@@ -1541,7 +1541,7 @@ export const ar: Catalog = {
   "autopilot.inspector.event.draftApplied": "تم تطبيق المسودة",
   "autopilot.inspector.event.draftSuperseded": "تم استبدال المسودة",
   "autopilot.inspector.event.draftRejected": "تم رفض المسودة",
-  "autopilot.inspector.review.draftTitle": "مسودة",
+  "autopilot.graph.node.draft": "مسودة",
   "autopilot.inspector.review.noProvenance": "لم تُسجَّل بيانات مصدر",
   "autopilot.inspector.review.inEditor": "المراجعة في المحرِّر",
   "autopilot.inspector.review.inEditorCell": "المراجعة في المحرِّر: الخلية {cellId}",

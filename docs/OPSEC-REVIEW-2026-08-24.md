@@ -20,6 +20,23 @@ Every finding is labelled **FACT** (verified against a file:line or a test run
 at this commit) or **JUDGMENT** (reasoned inference). All three findings below
 are fixed in this change.
 
+> **A second auth/session pass ran in parallel on the same day and reached
+> `dev` first** — commit `76296880` "[Pen test] Authentication & session
+> management security review" (its full findings live in a Linear ticket, not
+> in this repo). **It does not overlap this document**: it fixed a
+> `ProjectSync` DO connection caching its handshake role for the socket's
+> lifetime (`sync-worker/src/project-do.ts`, now closed at the token's own
+> expiry with `TOKEN_EXPIRED_CLOSE_CODE`) and a credential-existence oracle on
+> `DELETE /api/v2/credentials/:id` (403-vs-404 collapsed to 404).
+>
+> Worth noting *why* the two converged without colliding: that pass's
+> auth-worker finding and this document's OPS-18/OPS-19 are the same bug class
+> — a response that differs depending on whether something exists. Two
+> independent reviews landing on existence oracles on the same day is a
+> reasonable signal that this theme's remaining weak spot is disclosure, not
+> credential guessing. The invite-token question in the follow-ups below is the
+> next instance of it.
+
 **What this pass turned up.** The credential-guessing side of this surface has
 been worked over repeatedly (five prior `[Pen test] Auth & session mgmt`
 windows are commented inline) and it holds up: every unauthenticated endpoint
@@ -235,13 +252,14 @@ than absorbed:
 - **The 399 `i18n/no-unkeyed-string` errors** are the blocker and belong to
   whoever owns the i18n gate. They need either the strings keyed or the rule's
   scope revisited — a decision, not a mechanical fix.
-- **`auth-worker` `type-check` is separately red on `dev`**: 5 × `TS18046
+- ~~**`auth-worker` `type-check` is separately red on `dev`**: 5 × `TS18046
   'body' is of type 'unknown'` in
-  `src/__tests__/contextual-decisions-routes.test.ts` (lines 105-108, 138),
-  reproduced against `origin/dev`'s sources with CI's own dependency set. Fix
-  is two annotations — `const body = (await res.json()) as { … }` at the two
-  `await res.json()` sites — matching how every sibling test in that file
-  already types its body. Left to the owner of that file for the same reason.
+  `src/__tests__/contextual-decisions-routes.test.ts` (lines 105-108, 138).~~
+  **Resolved on `dev` later the same day** — the AQU-974 contextual-decisions
+  work rewrote that file and typed its bodies. Re-verified after merging `dev`
+  in: `pnpm --dir auth-worker run type-check` exits 0. The i18n blocker above
+  is therefore the *only* thing still holding this gate, and clearing it should
+  let the IDENTITY lane run for the first time in this window.
 
 **Measurement note, correcting this document's own first draft:** the
 "15 pre-existing type errors" figure originally reported here was measured with
@@ -280,12 +298,11 @@ Every one has a test:
 to fail with the fix reverted), `password-reset.test.ts` (OPS-19's
 induced-failure test, OPS-20's digest and rollover tests),
 `email-verification.test.ts` (OPS-20 digest + rollover). Full auth-worker suite
-green: **146 files, 1496 tests**. Under CI's own dependency set
-(`pnpm --frozen-lockfile`), `tsc --noEmit` reports the same **5** pre-existing
-errors before and after this change — all in
-`contextual-decisions-routes.test.ts`, none in any file touched here; see
-OPS-21 for that figure's correction and for why CI itself never reaches this
-step. `pnpm lint` reports zero errors and zero warnings in the files this
+green: **146 files, 1500 tests**, re-run after merging `dev` in (the count rose
+from 1496 as `dev`'s own work landed; all three fixes still hold against it).
+Under CI's own dependency set (`pnpm --frozen-lockfile`), `tsc --noEmit` now
+exits **0** — see OPS-21 for the earlier figure's correction and for what
+changed. `pnpm lint` reports zero errors and zero warnings in the files this
 change touches.
 
 ## Reviewed, no finding
@@ -330,10 +347,9 @@ change touches.
   lookups and then the `token` columns, once 24h (resets) / 7d (verification)
   have elapsed since deploy. Steps are in the migration header; the two
   rollover tests are commented for deletion at the same time.
-- **OPS-21's two blockers** — the 399 `i18n/no-unkeyed-string` errors gating
-  every PR, and the 5 `TS18046` errors in `contextual-decisions-routes.test.ts`
-  that keep `auth-worker`'s own suite from running once the gate gets that far.
-  Patches described in the finding; both belong to the owners of those files.
+- **OPS-21's remaining blocker** — the 399 `i18n/no-unkeyed-string` errors
+  gating every PR. Now the *only* one: the `TS18046` half cleared on `dev`
+  (see the finding). Belongs to whoever owns the i18n gate.
 - **`auth-worker` carries two lockfiles** (`package-lock.json` and
   `pnpm-lock.yaml`) that resolve different `@cloudflare/workers-types`
   versions, so a local `npm ci` and CI's `pnpm --frozen-lockfile` type-check

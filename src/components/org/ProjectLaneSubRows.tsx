@@ -1,7 +1,7 @@
 // AQU-538 §3.2 — expanded per-lane detail for an OrgHome project row.
 //
 // One sub-row per lane: lane label | translated % (bar) | validated % | last
-// activity (relative) | actions. Actions:
+// activity (short calendar date, datetime on hover) | actions. Actions:
 //   Open   → the workspace at that lane (/project/:id/editor?lane=<tag>)
 //   Assign → AssignModal pre-scoped to the lane (via OrgLaneAssignModal)
 //   Staff  → StaffLanePopover (add-person-to-lane in one gesture)
@@ -19,9 +19,9 @@ import {
   laneValidatedPct,
   type PortfolioLane,
 } from "@/lib/frontier/portfolio"
-import { formatRelativeTime } from "@/lib/time/relative"
 import { laneChipLabel, safePct } from "./project-lanes"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 
 export interface ProjectLaneSubRowsProps {
   projectId: string
@@ -62,10 +62,7 @@ export function ProjectLaneSubRows({
             const label = laneChipLabel(lane.lane, defaultLaneLabel)
             const tpct = safePct(laneTranslatedPct(lane))
             const vpct = safePct(laneValidatedPct(lane))
-            const relative =
-              lane.lastEditAt != null
-                ? formatRelativeTime(new Date(lane.lastEditAt).toISOString())
-                : null
+            const lastEdit = lane.lastEditAt
             return (
               <div
                 key={lane.lane || "__default__"}
@@ -88,7 +85,9 @@ export function ProjectLaneSubRows({
                 </span>
 
                 <span className="min-w-[6rem] text-xs text-muted-foreground">
-                  {relative ?? t("org.projectLaneSubRows.noActivity")}
+                  {lastEdit != null
+                    ? <DateTooltip value={lastEdit} label={t("org.overviewLaneTable.lastActivityColumn")} />
+                    : t("org.projectLaneSubRows.noActivity")}
                 </span>
 
                 <span className="ms-auto flex items-center gap-1.5">

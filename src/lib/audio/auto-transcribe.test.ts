@@ -116,3 +116,43 @@ describe("autoTranscribeImportedMedia", () => {
     ).resolves.toBeUndefined()
   })
 })
+
+// ── The "it's working, wait" toast (Sam, 2026-08-18) ─────────────────────
+//
+// "There should be a toast that shows that it's loading." The toast itself
+// lives in the workspace; what has to be true HERE is that the progress
+// reaches it — and, just as important, that it stays quiet for the two runs
+// that never happen, so nothing leaves a spinner up over no work at all.
+
+describe("reporting progress to whoever is showing it", () => {
+  const seed = { fileId: "f1", cells: [] }
+
+  it("passes the reporter through to the batch", async () => {
+    const onProgress = vi.fn()
+    await autoTranscribeImportedMedia({ seed, projectId: "p1", session: null, onProgress })
+    expect(runTranscribeAll).toHaveBeenCalledWith(expect.objectContaining({ onProgress }))
+  })
+
+  it("says nothing when consent is refused", async () => {
+    // The toast is created lazily on the first report, so silence here is what
+    // keeps a denied run from leaving a spinner on screen forever.
+    requestAiModelConsent.mockResolvedValue(false)
+    const onProgress = vi.fn()
+    const onFailed = vi.fn()
+    await autoTranscribeImportedMedia({ seed, projectId: "p1", session: null, onProgress, onFailed })
+    expect(onProgress).not.toHaveBeenCalled()
+    expect(onFailed).not.toHaveBeenCalled()
+    expect(runTranscribeAll).not.toHaveBeenCalled()
+  })
+
+  it("reports a failure so the spinner can be taken back down", async () => {
+    runTranscribeAll.mockRejectedValueOnce(new Error("model fetch failed"))
+    const onFailed = vi.fn()
+    const onDone = vi.fn()
+    await autoTranscribeImportedMedia({ seed, projectId: "p1", session: null, onFailed, onDone })
+    expect(onFailed).toHaveBeenCalledWith("model fetch failed")
+    // Still never throws — a failed transcribe leaves the file exactly as a
+    // manual-transcribe user would find it.
+    expect(onDone).not.toHaveBeenCalled()
+  })
+})

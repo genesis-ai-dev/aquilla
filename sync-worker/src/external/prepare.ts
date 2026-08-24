@@ -14,43 +14,46 @@ import {
   PLAN_IMPORT_MAX_CELLS,
   type Command,
   type CreateProjectCommand,
+  type EmitEventsCommand,
   type LinkMediaCommand,
+  type PatchSettingsCommand,
   type PlanImportCommand,
   type SetTranslationCommand,
   type UpdateProjectSettingsCommand,
 } from './commands'
+import { changedPolicyKeys, preparePatchSettings, previewSettingValue } from './commands-patch-settings'
+import { prepareEmitEvents } from './emit-events-engine'
 import { resolveCellStates, type CellPrecondition } from './preconditions'
-import { computeDigest } from './canonical'
 import { uuidv7 } from './uuid'
-import { loadChangeset, changesetToResponse } from './store'
+import { stageAndRespond } from './stage'
 import { assertCredentialScope } from './token-bridge'
 import type { ChangesetSummary, ChangesetWarning, ExternalEnv, PlannedEventIds } from './types'
 import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings } from '../../../db/shared/projects'
+import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 import { ROLE } from '../events/role-policy'
 
-/** Staged changesets live for one hour before they expire. Exported so the MCP
- *  adapter's get_capabilities can publish the real value (never invent limits). */
-export const CHANGESET_TTL_MS = 60 * 60 * 1000
-
-/** Fallback SPA host for the ask-mode approval deep link. BASE_URL (wrangler
- *  vars) names the environment's app host; when it is unset or empty the
- *  production host keeps the link ABSOLUTE — an agent handed a relative
- *  "/approve/:id" cannot open it and (observed in the field) tells the human
- *  to reconstruct the host themselves. */
-const DEFAULT_APP_BASE_URL = 'https://aquilla.app'
-
-/** Absolute approval-page deep link for a changeset. */
-export function approvalUrlFor(env: Pick<ExternalEnv, 'BASE_URL'>, changesetId: string): string {
-  return `${env.BASE_URL || DEFAULT_APP_BASE_URL}/approve/${changesetId}`
-}
+// Staging primitives moved to stage.ts (AQU-926) so the new command modules
+// share them without an import cycle; re-exported here for existing importers
+// (mcp-handlers, changesets-route, tests).
+export { approvalUrlFor, CHANGESET_TTL_MS } from './stage'
 
 function bearer(request: Request): string | null {
   const h = request.headers.get('Authorization') ?? ''
   return h.startsWith('Bearer ') ? h.slice(7) : null
 }
 
+// [Pen test] API security & data exposure (2026-08-20): the external Agent
+// API's only throttle was on /search (2026-07-30 pen test) — every mutating
+// route, including this one, was unlimited. A leaked or malicious PAT could
+// stage unbounded changesets. Wide enough that a real agent loop staging a
+// plan every few seconds never trips it.
+const PREPARE_MAX_PER_CREDENTIAL = 300
+
+/** PAT-authenticated entrypoint (REST + the MCP adapter's synthetic request):
+ *  resolves the credential, parses the body, and hands off to the shared core
+ *  the session-token routes also use. */
 export async function handlePrepare(
   request: Request,
   env: ExternalEnv,
@@ -62,10 +65,13 @@ export async function handlePrepare(
   const cred = await validateApiCredential(db, bearer(request) ?? "")
   if (!cred) return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
 
-  // Parse + validate the batch BEFORE the project-existence scope check: a
-  // receipt-only CreateProject (W2-A) files its changeset under a
-  // not-yet-existing project id and so takes its own path that must skip
-  // assertCredentialScope (which would 404 the absent project).
+  const identifier = `credential:${cred.credentialId}`
+  const recent = await countRecentRateLimitEvents(db, 'external_prepare', identifier)
+  if (recent >= PREPARE_MAX_PER_CREDENTIAL) {
+    return errorResponse('rate_limited', 'changeset staging rate limit exceeded, slow down')
+  }
+  await recordRateLimitEvent(db, 'external_prepare', identifier)
+
   let body: unknown
   try {
     body = await request.json()
@@ -74,6 +80,28 @@ export async function handlePrepare(
   }
   const raw = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>
 
+  return prepareChangesetCore(db, env, cred, projectId, raw)
+}
+
+/**
+ * Post-auth prepare core, shared by the PAT entrypoint above and the
+ * session-token routes (session-routes.ts). `cred` is either a validated API
+ * credential or the session principal ({ credentialId: 'session', mode: 'ask',
+ * orgId/projectId: null }) — the session's 'ask' mode makes the effective-
+ * autonomy formula below force ask, and its null scopes make
+ * assertCredentialScope a pure project-existence check.
+ */
+export async function prepareChangesetCore(
+  db: AquillaDb,
+  env: ExternalEnv,
+  cred: ApiCredentialContext,
+  projectId: string,
+  raw: Record<string, unknown>,
+): Promise<Response> {
+  // Validate the batch BEFORE the project-existence scope check: a
+  // receipt-only CreateProject (W2-A) files its changeset under a
+  // not-yet-existing project id and so takes its own path that must skip
+  // assertCredentialScope (which would 404 the absent project).
   const validated = validateCommands(raw.commands)
   if (!validated.ok) {
     return errorResponse('validation_failed', 'invalid commands', validated.issues)
@@ -121,6 +149,19 @@ export async function handlePrepare(
     return prepareUpdateProjectSettings(db, cred, projectId, id, autonomyMode, updateSettings, env)
   }
 
+  // PatchSettings (AQU-926 §2): sole command; per-key floors (incl. the org
+  // termbase floor), the policy-key denial, and the version pin live in its
+  // module — like UpdateProjectSettings it skips the generic role gate below.
+  const patchSettings = validated.commands.find(
+    (c): c is PatchSettingsCommand => c.kind === 'PatchSettings',
+  )
+  if (patchSettings) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', 'PatchSettings must be the only command in a changeset')
+    }
+    return preparePatchSettings(db, cred, projectId, id, autonomyMode, patchSettings, env)
+  }
+
   // Live role/membership gate (§2 — resolve the caller's CURRENT role on every
   // call, never a role baked into the credential). Scope alone (checked above)
   // does not imply membership: a non-member with a project-scoped credential
@@ -132,6 +173,19 @@ export async function handlePrepare(
   const resolvedRole = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
   if (!resolvedRole || resolvedRole.level < requiredRole) {
     return errorResponse('permission_denied', 'insufficient project role to stage this changeset')
+  }
+
+  // EmitEvents (AQU-926 §2): sole command (one command already batches many
+  // events). The static max-floor gate just ran; its engine adds the dynamic
+  // maintainer bumps + live existence/pin resolution.
+  const emitEvents = validated.commands.find(
+    (c): c is EmitEventsCommand => c.kind === 'EmitEvents',
+  )
+  if (emitEvents) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', 'EmitEvents must be the only command in a changeset')
+    }
+    return prepareEmitEvents(db, cred, projectId, id, autonomyMode, emitEvents, env, resolvedRole.level)
   }
 
   // PlanImport is a whole-file operation, not a per-cell batch — it takes its
@@ -242,13 +296,11 @@ export async function handlePrepare(
   }
 
   const summary: ChangesetSummary = { translationsAdded, translationsModified, warnings }
-  const digest = await computeDigest(commands, preconditions)
-  const expiresAt = new Date(Date.now() + CHANGESET_TTL_MS).toISOString()
 
   // W1-B (§4): mint the compiled target.cell.commit event id for every resolved
   // precondition NOW and store it in the plan, so a crash-and-retry commit
   // re-posts the same ids (the /events layer dedupes) rather than minting fresh
-  // ones. Digest is computed above over commands + preconditions only, so these
+  // ones. The digest (stage.ts) covers commands + preconditions only, so these
   // ids never perturb it (two prepares of the same plan still match).
   const plannedIds: PlannedEventIds = {
     setTranslation: preconditions.map((p) => ({
@@ -259,41 +311,16 @@ export async function handlePrepare(
     })),
   }
 
-  // Idempotent insert on the client-supplied id. The planned-id ledger rides in
-  // the summary JSONB column (no new column — split back out on load).
-  await db
-    .prepare(
-      `INSERT INTO changesets (
-         id, project_id, created_by_user_id, credential_id, autonomy_mode,
-         status, commands, preconditions, summary, digest, expires_at
-       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::text::jsonb, ?::text::jsonb, ?::text::jsonb, ?, ?)
-       ON CONFLICT (id) DO NOTHING`,
-    )
-    .bind(
-      id,
-      projectId,
-      String(cred.userId),
-      cred.credentialId,
-      autonomyMode,
-      JSON.stringify(commands),
-      JSON.stringify(preconditions),
-      JSON.stringify({ ...summary, plannedIds }),
-      digest,
-      expiresAt,
-    )
-    .run()
-
-  // Re-load to return the canonical persisted row (existing one on id-replay).
-  const stored = await loadChangeset(db, projectId, id)
-  if (!stored) return errorResponse('job_failed', 'changeset insert did not persist')
-
-  const approvalUrl = approvalUrlFor(env, stored.id)
-
-  return Response.json({
-    changeset: changesetToResponse(stored),
-    summary: stored.summary,
-    digest: stored.digest,
-    approvalUrl,
+  return stageAndRespond(db, env, {
+    id,
+    projectId,
+    createdByUserId: String(cred.userId),
+    credentialId: cred.credentialId,
+    autonomyMode,
+    commands,
+    preconditions,
+    summary,
+    plannedIds,
   })
 }
 
@@ -436,10 +463,6 @@ async function preparePlanImport(
     ...(cmd.artifactId ? { artifactLinked: cmd.artifactId } : {}),
     warnings,
   }
-  const commands: Command[] = [cmd]
-  const preconditions: CellPrecondition[] = []
-  const digest = await computeDigest(commands, preconditions)
-  const expiresAt = new Date(Date.now() + CHANGESET_TTL_MS).toISOString()
 
   // W1-B (§4): mint the file id, its file.create event id, and per-cell
   // {cellId, eventId} NOW (cellId minted here when the plan cell omits its own).
@@ -464,37 +487,16 @@ async function preparePlanImport(
     },
   }
 
-  await db
-    .prepare(
-      `INSERT INTO changesets (
-         id, project_id, created_by_user_id, credential_id, autonomy_mode,
-         status, commands, preconditions, summary, digest, expires_at
-       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::text::jsonb, ?::text::jsonb, ?::text::jsonb, ?, ?)
-       ON CONFLICT (id) DO NOTHING`,
-    )
-    .bind(
-      id,
-      projectId,
-      String(cred.userId),
-      cred.credentialId,
-      autonomyMode,
-      JSON.stringify(commands),
-      JSON.stringify(preconditions),
-      JSON.stringify({ ...summary, plannedIds }),
-      digest,
-      expiresAt,
-    )
-    .run()
-
-  const stored = await loadChangeset(db, projectId, id)
-  if (!stored) return errorResponse('job_failed', 'changeset insert did not persist')
-
-  const approvalUrl = approvalUrlFor(env, stored.id)
-  return Response.json({
-    changeset: changesetToResponse(stored),
-    summary: stored.summary,
-    digest: stored.digest,
-    approvalUrl,
+  return stageAndRespond(db, env, {
+    id,
+    projectId,
+    createdByUserId: String(cred.userId),
+    credentialId: cred.credentialId,
+    autonomyMode,
+    commands: [cmd],
+    preconditions: [],
+    summary,
+    plannedIds,
   })
 }
 
@@ -521,8 +523,7 @@ async function resolveOrgRoleLevel(
  *  UpdateProjectSettings): no per-cell preconditions, a caller-built effect
  *  summary (the command's renderable fields, so /approve/:id shows what's being
  *  applied rather than "No changes summarized."), and a plan carrying only its
- *  pinned ids (definitive project id / settings version). Mirrors
- *  preparePlanImport's insert + response. */
+ *  pinned ids (definitive project id / settings version). */
 async function stageReceiptOnlyChangeset(
   db: AquillaDb,
   cred: ApiCredentialContext,
@@ -534,42 +535,16 @@ async function stageReceiptOnlyChangeset(
   summary: ChangesetSummary,
   env: ExternalEnv,
 ): Promise<Response> {
-  const commands: Command[] = [cmd]
-  const preconditions: CellPrecondition[] = []
-  const digest = await computeDigest(commands, preconditions)
-  const expiresAt = new Date(Date.now() + CHANGESET_TTL_MS).toISOString()
-
-  await db
-    .prepare(
-      `INSERT INTO changesets (
-         id, project_id, created_by_user_id, credential_id, autonomy_mode,
-         status, commands, preconditions, summary, digest, expires_at
-       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::text::jsonb, ?::text::jsonb, ?::text::jsonb, ?, ?)
-       ON CONFLICT (id) DO NOTHING`,
-    )
-    .bind(
-      id,
-      changesetProjectId,
-      String(cred.userId),
-      cred.credentialId,
-      autonomyMode,
-      JSON.stringify(commands),
-      JSON.stringify(preconditions),
-      JSON.stringify({ ...summary, plannedIds }),
-      digest,
-      expiresAt,
-    )
-    .run()
-
-  const stored = await loadChangeset(db, changesetProjectId, id)
-  if (!stored) return errorResponse('job_failed', 'changeset insert did not persist')
-
-  const approvalUrl = approvalUrlFor(env, stored.id)
-  return Response.json({
-    changeset: changesetToResponse(stored),
-    summary: stored.summary,
-    digest: stored.digest,
-    approvalUrl,
+  return stageAndRespond(db, env, {
+    id,
+    projectId: changesetProjectId,
+    createdByUserId: String(cred.userId),
+    credentialId: cred.credentialId,
+    autonomyMode,
+    commands: [cmd],
+    preconditions: [],
+    summary,
+    plannedIds,
   })
 }
 
@@ -627,43 +602,18 @@ async function prepareLinkMedia(
   }
 
   const summary: ChangesetSummary = { mediaLinked: cmds.length, warnings: [] }
-  const commands: Command[] = [...cmds]
-  const preconditions: CellPrecondition[] = []
-  const digest = await computeDigest(commands, preconditions)
-  const expiresAt = new Date(Date.now() + CHANGESET_TTL_MS).toISOString()
   const plannedIds: PlannedEventIds = { linkMedia: plannedLinkMedia }
 
-  await db
-    .prepare(
-      `INSERT INTO changesets (
-         id, project_id, created_by_user_id, credential_id, autonomy_mode,
-         status, commands, preconditions, summary, digest, expires_at
-       ) VALUES (?, ?, ?, ?, ?, 'staged', ?::text::jsonb, ?::text::jsonb, ?::text::jsonb, ?, ?)
-       ON CONFLICT (id) DO NOTHING`,
-    )
-    .bind(
-      id,
-      projectId,
-      String(cred.userId),
-      cred.credentialId,
-      autonomyMode,
-      JSON.stringify(commands),
-      JSON.stringify(preconditions),
-      JSON.stringify({ ...summary, plannedIds }),
-      digest,
-      expiresAt,
-    )
-    .run()
-
-  const stored = await loadChangeset(db, projectId, id)
-  if (!stored) return errorResponse('job_failed', 'changeset insert did not persist')
-
-  const approvalUrl = approvalUrlFor(env, stored.id)
-  return Response.json({
-    changeset: changesetToResponse(stored),
-    summary: stored.summary,
-    digest: stored.digest,
-    approvalUrl,
+  return stageAndRespond(db, env, {
+    id,
+    projectId,
+    createdByUserId: String(cred.userId),
+    credentialId: cred.credentialId,
+    autonomyMode,
+    commands: [...cmds],
+    preconditions: [],
+    summary,
+    plannedIds,
   })
 }
 
@@ -785,6 +735,18 @@ async function prepareUpdateProjectSettings(
     })
   }
 
+  // AQU-926 policy guard: the whole-blob replace may not CHANGE any policy
+  // key's stored value (deep-equal pass-through stays valid, so read-modify-
+  // write callers keep working). Re-checked at commit against the live blob.
+  const changedPolicy = changedPolicyKeys(cmd.settings, current.settings)
+  if (changedPolicy.length > 0) {
+    return errorResponse(
+      'permission_denied',
+      'policy settings keys are never writable through the agent surface',
+      { policyKeys: changedPolicy },
+    )
+  }
+
   const plannedIds: PlannedEventIds = {
     updateProjectSettings: { version: cmd.ifMatchVersion },
   }
@@ -804,17 +766,4 @@ async function prepareUpdateProjectSettings(
     warnings: [],
   }
   return stageReceiptOnlyChangeset(db, cred, urlProjectId, id, autonomyMode, cmd, plannedIds, summary, env)
-}
-
-/** Compact, truncated preview of a single settings value for the approval page.
- *  Objects/arrays are JSON-stringified; everything is capped so a large nested
- *  blob renders as a short, human-scannable snippet rather than a wall of text. */
-const SETTING_PREVIEW_MAX = 80
-function previewSettingValue(value: unknown): string {
-  let s: string
-  if (value === null) s = 'null'
-  else if (value === undefined) s = 'undefined'
-  else if (typeof value === 'object') s = JSON.stringify(value)
-  else s = String(value)
-  return s.length > SETTING_PREVIEW_MAX ? `${s.slice(0, SETTING_PREVIEW_MAX - 1)}…` : s
 }

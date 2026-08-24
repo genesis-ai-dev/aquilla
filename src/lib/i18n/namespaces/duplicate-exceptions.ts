@@ -36,6 +36,20 @@
  * longer collides). The 10 that remain are genuine meaning splits.
  */
 export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
+  "importExport.dialog.characterPreviewHeading":
+    "Noun heading over the list of characters an audio export will produce — " +
+    "'the preview', a thing on screen. common.preview is the imperative button " +
+    "that plays a clip back and swaps to common.pause while it runs. A heading " +
+    "and a command are different parts of speech and most target languages " +
+    "write them differently; folding them together would make one of the two " +
+    "wrong wherever they diverge.",
+  "importExport.dialog.audioSectionTitle":
+    "Title of the export dialog's .zip card, naming a KIND OF DELIVERABLE the " +
+    "user is about to download. nav.lens.audio names the editor's Audio lens — " +
+    "a mode you switch into — and its own context pins it as shared by every " +
+    "entry point that toggles that lens so the name can never drift. Reusing it " +
+    "here would tie a file-format label to a UI mode's name, and a later edit " +
+    "for one would silently change the other.",
   "nav.sidebarSection.more":
     "Expands a collapsed sidebar section. common.moreBreadcrumbs is screen-reader " +
     "text for a truncated breadcrumb path — 'more of this path' vs 'expand this " +
@@ -511,6 +525,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "rendering. Different case AND different fixed vocabularies (rule-" +
     "enforcement mode vs term lifecycle status) that happen to share one " +
     "English word.",
+  "org.teamDetail.addedColumn":
+    "Nominal table-column heading (and DateTooltip hover prefix) for the timestamp " +
+    "a project or person was added to a team, sibling of Name/Role. onboarding." +
+    "checklist.invite.addedPrefix is the past-tense VERB that starts the invite-step " +
+    "confirmation sentence 'Added {name} as contributor.' A date-column heading " +
+    "and a sentence-initial verb take different forms in many languages " +
+    "(nominalized date label vs. finite verb), so one shared string would be " +
+    "wrong for one of the two roles.",
   "org.teamDetail.detachButton":
     "Routine, reversible action in TeamDetail: unlinks a project from a team's " +
     "access-grant list with a single click, no confirmation dialog — the " +
@@ -791,4 +813,39 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "has already arrived at. Same English words, different grammatical role — " +
     "the same navigate-vs-heading split already documented for the language " +
     "switcher in namespaces/language.ts.",
+  "terminology.livingMemory.section.brief.title":
+    "Index-row title naming the translation brief — the skopos document, a " +
+    "translation-studies term of art that several languages render with a " +
+    "loanword or fixed phrase. autopilot.graph.node.summarize shows 'Brief' as " +
+    "the caption of the summarize STAGE in the autopilot pipeline graph — a " +
+    "process-step label, not the document, and free to translate as 'summary'.",
+  "terminology.livingMemory.section.brief.statusNone":
+    "Hint on the Living Memory index saying the brief document has not been " +
+    "begun — an authoring state of a document. autopilot.status.notStarted is a " +
+    "value of the run-status enum for a background PROCESS that has not run " +
+    "yet; document-authoring and process-lifecycle states often take different " +
+    "verbs or participles.",
+  "terminology.livingMemory.section.brief.statusDraft":
+    "Hint on the Living Memory index saying the brief document is partially " +
+    "filled in — a document maturity state ('a draft'). " +
+    "autopilot.inspector.review.draftTitle and autopilot.graph.node.draft label " +
+    "the autopilot DRAFTING step and its produced draft translations — the " +
+    "activity of machine-drafting text, a different sense languages split from " +
+    "'unfinished document'.",
+  "terminology.livingMemory.section.brief.statusComplete":
+    "Hint on the Living Memory index saying every brief field is filled in — " +
+    "'complete' as document completeness. autopilot.status.complete is the " +
+    "terminal value of the run-status enum — a PROCESS that finished; " +
+    "'filled-in' vs 'finished' are commonly different words outside English.",
+  "terminology.livingMemory.prompt.defaultBadge":
+    "Badge on the prediction-prompt block stating the prompt is the unmodified " +
+    "built-in one — 'default' as a setting state, paired with the sibling " +
+    "Custom badge. org.projectOverview.laneDefaultFallback names the unnamed " +
+    "target LANE shown when a project has no named lanes — a placeholder noun " +
+    "('the default one'), a different grammatical role.",
+  "terminology.livingMemory.section.examples.title":
+    "Index-row title for the validated-example-pairs section of Living Memory " +
+    "— a plain plural noun heading. agent.run.tool.examples is the display " +
+    "name of the agent's retrieve-examples TOOL call in the run log — an " +
+    "operation name that several languages render verbal ('fetch examples').",
 }

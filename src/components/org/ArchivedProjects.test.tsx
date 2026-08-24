@@ -55,6 +55,7 @@ describe("ArchivedProjects", () => {
     expect(
       await screen.findByRole("status", { name: "Loading archived projects" }),
     ).toHaveAttribute("aria-busy", "true")
+    expect(screen.getByPlaceholderText("Search archived projects…")).toBeInTheDocument()
   })
 
   it("lists archived projects in a table and restores on click", async () => {

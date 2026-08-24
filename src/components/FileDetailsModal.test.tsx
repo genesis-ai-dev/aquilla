@@ -10,6 +10,7 @@ import { describe, it, expect, vi } from "vitest"
 import type { FileReference } from "@/lib/parsers/types"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { BIDI_FSI, BIDI_PDI } from "@/lib/i18n/format"
+import { fmtShortCalendarDate } from "@/lib/format-date"
 import { FileDetailsModal } from "./FileDetailsModal"
 
 const usfmFile: FileReference = {
@@ -42,6 +43,21 @@ describe("FileDetailsModal", () => {
     expect(screen.getByText("USFM")).toBeTruthy()
     expect(screen.getByText("GEN")).toBeTruthy()
     expect(screen.getByText("1533")).toBeTruthy()
+    expect(screen.getByText(fmtShortCalendarDate(usfmFile.createdAt))).toBeTruthy()
+  })
+
+  it("shows only the source language, not the file's stale target-language stamp", () => {
+    renderModal({
+      file: {
+        ...usfmFile,
+        sourceLanguage: "English",
+        targetLanguage: "Spanish",
+      },
+    })
+
+    expect(screen.getByText("Source language")).toBeTruthy()
+    expect(screen.getByText("English")).toBeTruthy()
+    expect(screen.queryByText("Spanish")).toBeNull()
   })
 
   it("does not render file actions", () => {

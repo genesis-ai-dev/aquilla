@@ -47,7 +47,7 @@ test("sparkle on a footnoted source commits translated base + reintegrated footn
   // Point the per-device LLM override at the spec-local mock server (checked
   // first in complete() and in useCompletion's isConfigured).
   await alice.evaluate(({ endpoint }) => {
-    localStorage.setItem("codex:userProviderOverride", JSON.stringify({
+    localStorage.setItem("aquilla:userProviderOverride", JSON.stringify({
       endpoint,
       model: "mock-model",
       apiKey: "",

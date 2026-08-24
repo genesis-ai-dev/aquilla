@@ -57,7 +57,11 @@ export function RulesPage() {
 
   const { patch: patchShared, settings: projectWideSettings } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
   const { userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(project, refresh, patchShared)
-  const { cells: validatedCells, error: projectCellsError } = useLivingMemory({ projectId: id ?? "" })
+  const { cells: validatedCells, error: projectCellsError } = useLivingMemory({
+    projectId: id ?? "",
+    project,
+    enabled: project != null,
+  })
 
   // AQU-291: pending delete confirmation state.
   const [pendingDeleteRuleId, setPendingDeleteRuleId] = useState<string | null>(null)

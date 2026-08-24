@@ -8,7 +8,7 @@
  * onboarding wizard. The happy path is "sign in to Frontier — done."
  */
 
-const KEY = "codex:userProviderOverride"
+const KEY = "aquilla:userProviderOverride"
 
 export interface UserProviderOverride {
   /** OpenAI-compatible base URL (e.g. "https://openrouter.ai/api/v1"). */

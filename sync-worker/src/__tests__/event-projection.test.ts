@@ -878,6 +878,9 @@ describe('isChainMutatingKind', () => {
     'source.cell.delete': true,
     'source.cell.reorder': true,
     'source.cell.metadata.patch': false,
+    // AQU-931: anchor-only repair — must NOT arbitrate (a parent-null event
+    // would lose the genesis slot to the cell's own create on rebuild).
+    'source.cell.reanchor': false,
     'target.cell.create': true,
     'target.cell.commit': true,
     'target.cell.delete': true,
@@ -908,10 +911,15 @@ describe('isChainMutatingKind', () => {
     'cast.assign': false,
     'cell.retime': false,
     'cell.audio.rename': false,
+    'cell.audio.trim': false,
+    // A link says which subtitle a heard line performs; it never moves the
+    // cell's own text chain.
+    'cell.link.set': false,
     'cell.audio.measure': false,
     'cell.lane.retime': false,
     'file.video.set': false,
     'file.timing.set': false,
+    'file.track.set': false,
     // AQU-476: mirror events replicate an ordering the upstream already
     // arbitrated — see CHAIN_MUTATING_KINDS's doc comment.
     'source.cell.mirror': false,

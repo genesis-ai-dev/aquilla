@@ -388,7 +388,7 @@ async function main() {
   // away). The mapper only sees cells still in the array, so nothing else
   // retracts them and they survive every otherwise-idempotent re-run.
   const existingEventIds = await fetchExistingEventIds(aquillaProjectId, secret)
-  const orphans = await computeOrphanRetractions({
+  const { retractions, repairs, resurrections } = await computeOrphanRetractions({
     syncBase: SYNC,
     secret,
     projectId: aquillaProjectId,
@@ -397,9 +397,23 @@ async function main() {
     fallbackAuthor: FALLBACK_AUTHOR,
     fallbackTs: opts.fallbackTs,
   })
-  if (orphans.length) {
-    console.log(`  retracting ${orphans.length} cell(s) removed from Codex since the last migration`)
-    events.push(...orphans)
+  if (retractions.length) {
+    console.log(`  retracting ${retractions.length} cell(s) removed from Codex since the last migration`)
+    events.push(...retractions)
+  }
+  // Resurrection: live cells a previous run wrongly deleted (their creates
+  // delta-filter forever) — re-emitted under escalated ids so they re-project.
+  if (resurrections.length) {
+    const cells = new Set(resurrections.filter((e) => e.kind === "source.cell.create").map((e) => e.cellId))
+    console.log(`  resurrecting ${cells.size} live cell(s) a previous run wrongly deleted (${resurrections.length} events)`)
+    events.push(...resurrections)
+  }
+  // AQU-931: retractions delete rows that surviving cells still anchor to (the
+  // deterministic creates never re-project), which scrambles the read order —
+  // re-anchor every survivor whose stored anchor differs from today's chain.
+  if (repairs.length) {
+    console.log(`  re-anchoring ${repairs.length} cell(s) whose chain changed since the last migration`)
+    events.push(...repairs)
   }
 
   // Source upload requires a projected file row. Project only those genesis

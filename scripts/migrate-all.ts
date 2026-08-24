@@ -130,7 +130,9 @@ const STATE_FILE = ".migrate-state.json"
 // the fix never reached the data — a large part of why deleted headings kept
 // coming back. BUMP THIS whenever the mapped event stream changes so the next
 // sweep re-derives every project once.
-const CONTENT_LOGIC_VERSION = 2
+// v3: milestone cells are retracted instead of migrated as pairs (AQU-930).
+// v4: merged-away cells (`data.merged`) are retracted like deleted ones (AQU-944).
+const CONTENT_LOGIC_VERSION = 4
 type MigState = Record<
   string,
   { contentSha?: string; contentLogic?: number; audioSha?: string; audioFastSha?: string }
@@ -525,7 +527,7 @@ async function doProject(
   // has AT ALL (hard-deleted, or merged away). The mapper can only skip/retract
   // cells still present in the notebook, so these are invisible to it and no
   // amount of re-running purges them.
-  const orphans = await computeOrphanRetractions({
+  const { retractions, repairs, resurrections } = await computeOrphanRetractions({
     syncBase: SYNC,
     secret: process.env.SYNC_SECRET_KEY!,
     projectId,
@@ -534,9 +536,23 @@ async function doProject(
     fallbackAuthor: FALLBACK_AUTHOR,
     fallbackTs: Date.now(),
   })
-  if (orphans.length) {
-    console.log(`  ↳ retracting ${orphans.length} cell(s) removed from Codex since the last migration`)
-    events.push(...orphans)
+  if (retractions.length) {
+    console.log(`  ↳ retracting ${retractions.length} cell(s) removed from Codex since the last migration`)
+    events.push(...retractions)
+  }
+  // Resurrection: live cells a previous run wrongly deleted (their creates
+  // delta-filter forever) — re-emitted under escalated ids so they re-project.
+  if (resurrections.length) {
+    const cells = new Set(resurrections.filter((e) => e.kind === "source.cell.create").map((e) => e.cellId))
+    console.log(`  ↳ resurrecting ${cells.size} live cell(s) a previous run wrongly deleted (${resurrections.length} events)`)
+    events.push(...resurrections)
+  }
+  // AQU-931: retractions delete rows that surviving cells still anchor to (the
+  // deterministic creates never re-project), which scrambles the read order —
+  // re-anchor every survivor whose stored anchor differs from today's chain.
+  if (repairs.length) {
+    console.log(`  ↳ re-anchoring ${repairs.length} cell(s) whose chain changed since the last migration`)
+    events.push(...repairs)
   }
   const newEvents = existing.size ? events.filter((e) => !existing.has(e.id)) : events
   if (existing.size) {

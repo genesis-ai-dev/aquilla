@@ -9,7 +9,12 @@ import { handleMigrateCellIdsRequest } from "../events/migrate-cell-ids-route"
 const SECRET = "cell-ids-secret"
 
 interface CellsBody {
-  cells: { cellId: string; hasSource: boolean; hasTarget: boolean }[]
+  cells: {
+    cellId: string
+    hasSource: boolean
+    hasTarget: boolean
+    sourceAnchorCellId: string | null
+  }[]
   lastCellId: string
   more: boolean
 }
@@ -62,10 +67,33 @@ describe("handleMigrateCellIdsRequest", () => {
     expect(res?.status).toBe(200)
     const body = (await res!.json()) as CellsBody
     expect(body.cells).toEqual([
-      { cellId: "c1", hasSource: true, hasTarget: true },
-      { cellId: "c2", hasSource: true, hasTarget: false },
+      { cellId: "c1", hasSource: true, hasTarget: true, sourceAnchorCellId: null },
+      { cellId: "c2", hasSource: true, hasTarget: false, sourceAnchorCellId: null },
     ])
     expect(body.more).toBe(false)
+  })
+
+  it("carries the SOURCE row's anchor per cell — null for a target-only cell (AQU-931)", async () => {
+    t = await makeTestDb({
+      cells: [
+        cell({ cell_id: "v1", side: "source" }),
+        // v2's source anchors to v1; its target row's anchor must not leak in.
+        { ...cell({ cell_id: "v2", side: "source" }), anchor_cell_id: "v1" },
+        { ...cell({ cell_id: "v2", side: "target" }), anchor_cell_id: "target-noise" },
+        cell({ cell_id: "v3", side: "target" }),
+      ],
+    })
+
+    const res = await handleMigrateCellIdsRequest(req("projectId=proj-a&fileId=file-x"), {
+      AQUILLA_PG: t.db,
+      SYNC_SECRET_KEY: SECRET,
+    })
+    const body = (await res!.json()) as CellsBody
+    expect(body.cells).toEqual([
+      { cellId: "v1", hasSource: true, hasTarget: false, sourceAnchorCellId: null },
+      { cellId: "v2", hasSource: true, hasTarget: true, sourceAnchorCellId: "v1" },
+      { cellId: "v3", hasSource: false, hasTarget: true, sourceAnchorCellId: null },
+    ])
   })
 
   it("pages forward on the cell_id cursor without splitting a cell's two sides", async () => {
@@ -83,7 +111,7 @@ describe("handleMigrateCellIdsRequest", () => {
       { AQUILLA_PG: t.db, SYNC_SECRET_KEY: SECRET },
     ))!.json()) as CellsBody
     // One CELL, both its sides — never a half-cell page.
-    expect(first.cells).toEqual([{ cellId: "a", hasSource: true, hasTarget: true }])
+    expect(first.cells).toEqual([{ cellId: "a", hasSource: true, hasTarget: true, sourceAnchorCellId: null }])
     expect(first.more).toBe(true)
     expect(first.lastCellId).toBe("a")
 
@@ -91,7 +119,7 @@ describe("handleMigrateCellIdsRequest", () => {
       req(`projectId=proj-a&fileId=file-x&limit=1&after=${first.lastCellId}`),
       { AQUILLA_PG: t.db, SYNC_SECRET_KEY: SECRET },
     ))!.json()) as CellsBody
-    expect(second.cells).toEqual([{ cellId: "b", hasSource: true, hasTarget: true }])
+    expect(second.cells).toEqual([{ cellId: "b", hasSource: true, hasTarget: true, sourceAnchorCellId: null }])
   })
 
   it("rejects a wrong secret, requires projectId + fileId, ignores other paths", async () => {

@@ -73,10 +73,7 @@ test("comments page empty state, filters, search, and resolved surface session",
     const filtersBtn = alice.getByRole("button", { name: /^Filters$/i })
     await expect(filtersBtn).toBeVisible({ timeout: 10_000 })
 
-    const sortTrigger = alice
-      .locator("label")
-      .filter({ has: alice.locator("span", { hasText: /^Sort$/ }) })
-      .getByRole("combobox")
+    const sortTrigger = alice.getByRole("combobox", { name: /^Sort$/i })
     await expect(sortTrigger).not.toBeVisible()
 
     await filtersBtn.click()
@@ -172,15 +169,12 @@ test("comments page empty state, filters, search, and resolved surface session",
     await alice.goto(`/project/${projectId}/comments`)
     await alice.getByRole("button", { name: /^Filters$/i }).click()
 
-    const showResolvedCheckbox = alice
-      .locator("label")
-      .filter({ hasText: /Show resolved/i })
-      .getByRole("checkbox")
-    await expect(showResolvedCheckbox).toBeVisible({ timeout: 5_000 })
-    await expect(showResolvedCheckbox).not.toBeChecked()
+    const showResolvedSwitch = alice.getByRole("switch", { name: /Show resolved/i })
+    await expect(showResolvedSwitch).toBeVisible({ timeout: 5_000 })
+    await expect(showResolvedSwitch).not.toBeChecked()
 
     const reopenBtn = alice.getByRole("button", { name: /^Reopen$/i }).first()
-    await showResolvedCheckbox.check()
+    await showResolvedSwitch.click()
     await expect(async () => {
       await alice.getByRole("button", { name: /^Refresh$/i }).click()
       await expect(reopenBtn).toBeVisible({ timeout: 1_000 })
@@ -192,10 +186,12 @@ test("comments page empty state, filters, search, and resolved surface session",
     }
     await expect(alice.getByText(commentText)).toBeVisible({ timeout: 5_000 })
 
-    await showResolvedCheckbox.uncheck()
+    await alice.getByRole("button", { name: /^Filters$/i }).click()
+    await expect(showResolvedSwitch).toBeVisible({ timeout: 5_000 })
+    await showResolvedSwitch.click()
     await expect(reopenBtn).not.toBeVisible({ timeout: 5_000 })
 
-    await showResolvedCheckbox.check()
+    await showResolvedSwitch.click()
     await expect(reopenBtn).toBeVisible({ timeout: 5_000 })
   })
 })

@@ -84,6 +84,17 @@ export const common = defineNamespace({
     "common.saveChanges": "Save changes",
     "common.readOnly": "Read-only",
 
+    // — DateTooltip hover prefixes (short calendar date in the UI, labeled
+    //   datetime on hover). Kept in common so every surface can share one
+    //   translation of each verb/noun instead of minting per-page copies.
+    "common.date.edited": "Edited",
+    "common.date.created": "Created",
+    "common.date.posted": "Posted",
+    "common.date.released": "Released",
+    "common.date.lastUsed": "Last used",
+    "common.date.expires": "Expires",
+    "common.date.pushed": "Pushed",
+
     // — Role vocabulary (AQU-832 wave 3, WS-08): the seven-level role ladder
     //   (src/lib/frontier/roles.ts) generated every display label by string
     //   manipulation (snake_case → spaces → capitalize) and pluralised by
@@ -598,6 +609,39 @@ export const common = defineNamespace({
           "the floor required to act — an org-level translation rule, and the " +
           "terminology review queue.",
         screenshot: "project-settings",
+      },
+      "common.date.edited": {
+        description:
+          "DateTooltip hover prefix for an edit timestamp — visible text is the short " +
+          "calendar date; this word prefixes the full datetime on hover.",
+      },
+      "common.date.created": {
+        description:
+          "DateTooltip hover prefix for a created-at timestamp (knowledge docs, memory " +
+          "entries, Monday connection).",
+      },
+      "common.date.posted": {
+        description:
+          "DateTooltip hover prefix for a comment or activity timestamp that was posted, " +
+          "not necessarily edited.",
+      },
+      "common.date.released": {
+        description:
+          "DateTooltip hover prefix for a catalog resource's published/released date " +
+          "(Door43 search results).",
+      },
+      "common.date.lastUsed": {
+        description:
+          "DateTooltip hover prefix for the last-used timestamp on a personal API token.",
+      },
+      "common.date.expires": {
+        description:
+          "DateTooltip hover prefix for an expiry timestamp — invite links, API tokens, " +
+          "and ask-mode changesets.",
+      },
+      "common.date.pushed": {
+        description:
+          "DateTooltip hover prefix for the last Monday.com progress push.",
       },
       "common.role.viewer": {
         description:

@@ -66,7 +66,6 @@ export const nav = defineNamespace({
     // -- ProjectWorkspace: projectNavItems feeding SidebarProjectSection above --
     "nav.sidebarSection.rules": "Rules",
     "nav.sidebarSection.terminology": "Terminology",
-    "nav.sidebarSection.memory": "Memory",
     "nav.sidebarSection.share": "Share",
     "nav.sidebarSection.trash": "Recently deleted",
 
@@ -618,11 +617,6 @@ export const nav = defineNamespace({
         description:
           "Project nav row opening the project's termbase/glossary surface. Noun " +
           "naming a destination.",
-      },
-      "nav.sidebarSection.memory": {
-        description:
-          "Project nav row opening the agent's living-memory surface for this " +
-          "project. Noun naming a destination.",
       },
       "nav.sidebarSection.share": {
         description:

@@ -21,7 +21,7 @@ async function setupProject(alice: import("@playwright/test").Page, name: string
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name })
   const ws = await openSeededProject(alice, seeded)
   await alice.evaluate(({ endpoint }) => {
-    localStorage.setItem("codex:userProviderOverride", JSON.stringify({
+    localStorage.setItem("aquilla:userProviderOverride", JSON.stringify({
       endpoint, model: "mock-model", apiKey: "",
     }))
   }, { endpoint: `${mockLLM.baseUrl}/v1` })

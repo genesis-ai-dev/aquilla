@@ -134,4 +134,40 @@ describe("POST /api/v2/sync-token", () => {
     )
     expect(res.status).toBe(401)
   })
+
+  it("rejects a fileId containing a path separator", async () => {
+    await seedUser(42, "alice")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES (?, ?, NULL, 42)",
+    )
+      .bind("proj-1", "Test")
+      .run()
+    const res = await app.request(
+      "/api/v2/sync-token",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("alice")),
+        body: JSON.stringify({ projectId: "proj-1", fileId: "../other-project/files/x" }),
+      },
+      env,
+    )
+    // Would otherwise mint a JWT whose fileId claim can be interpolated into
+    // a downstream R2 key (sync-worker tts.ts/voice-convert.ts) to reach
+    // outside the file's own key namespace.
+    expect(res.status).toBe(400)
+  })
+
+  it("rejects a projectId containing a path separator", async () => {
+    await seedUser(42, "alice")
+    const res = await app.request(
+      "/api/v2/sync-token",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("alice")),
+        body: JSON.stringify({ projectId: "proj-1/../proj-2", fileId: "file-a" }),
+      },
+      env,
+    )
+    expect(res.status).toBe(400)
+  })
 })

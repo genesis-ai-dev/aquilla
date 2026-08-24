@@ -5,7 +5,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
-import { formatDate } from "@/lib/i18n/format"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 
 interface TargetValidationControlProps {
   cellRef: string
@@ -31,7 +31,7 @@ function ValidationHistoryTimeline({
   entries: EditValidationSummary[]
   currentUsername: string
 }) {
-  const { t, locale } = useI18n()
+  const { t } = useI18n()
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null)
   const historical = entries.slice(0, -1).reverse()
   if (historical.length === 0) return null
@@ -45,7 +45,6 @@ function ValidationHistoryTimeline({
           const snippet = typeof entry.value === "string"
             ? (entry.value.length > 40 ? `${entry.value.slice(0, 40)}…` : entry.value)
             : ""
-          const date = formatDate(entry.timestamp, locale, { month: "short", day: "numeric" })
           const authors = entry.authors.join(", ")
           const expanded = expandedIdx === index
           return (
@@ -56,7 +55,10 @@ function ValidationHistoryTimeline({
                 onClick={() => setExpandedIdx(expanded ? null : index)}
               >
                 <span className="truncate">
-                  <span className="text-muted-foreground">{date} · </span>
+                  <span className="text-muted-foreground">
+                    <DateTooltip value={entry.timestamp} label={t("common.date.edited")} />
+                    {" · "}
+                  </span>
                   <span>{authors}</span>
                 </span>
               </button>
@@ -77,7 +79,7 @@ function ValidationHistoryTimeline({
                     >
                       <span>{validator.username}{validator.username === currentUsername ? ` ${t("editor.validation.you")}` : ""}</span>
                       <span className="ms-auto text-muted-foreground/60">
-                        {formatDate(validator.updatedTimestamp, locale, { month: "short", day: "numeric" })}
+                        <DateTooltip value={validator.updatedTimestamp} label={t("org.orgHome.table.validatedHeaderLabel")} />
                       </span>
                     </li>
                   ))}

@@ -194,3 +194,96 @@ describe("AQU-346 — removal routes notify the sync-worker (live-session eject)
     ).toBe(false)
   })
 })
+
+// [Pen test 2026-08-17] a role CHANGE (not removal) must also propagate to
+// the sync-worker, so a live WS connection's cached role (used to gate
+// focus.claim/focus.renew) doesn't stay stale until reconnect. Companion to
+// the removal-notify tests above.
+describe("Pen test 2026-08-17 — role changes notify the sync-worker", () => {
+  it("POST /:projectId/members (single-user) notifies member-role-changed on success", async () => {
+    await seedProjectWithMember()
+    const fetchSpy = stubFetch()
+
+    const res = await app.request(
+      "/api/v2/projects/proj-r/members",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("owner")),
+        body: JSON.stringify({ username: "bob", role: 200 }),
+      },
+      envWithSyncWorker(),
+    )
+    expect(res.status).toBe(200)
+    await new Promise((r) => setTimeout(r, 0))
+
+    const call = fetchSpy.mock.calls.find(
+      (c) => String(c[0]).includes("/admin/projects/proj-r/member-role-changed"),
+    )
+    expect(call).toBeDefined()
+    const init = call![1] as RequestInit
+    expect(init.headers).toMatchObject({ Authorization: `Bearer ${SYNC_SECRET}` })
+    expect(JSON.parse(String(init.body))).toEqual({ userId: 2, username: "bob", role: 200 })
+  })
+
+  it("POST /:projectId/members (batch) notifies once per successful grant, skips failures", async () => {
+    await seedUser(3, "eve")
+    await seedProjectWithMember()
+    const fetchSpy = stubFetch()
+
+    const res = await app.request(
+      "/api/v2/projects/proj-r/members",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("owner")),
+        body: JSON.stringify({
+          members: [
+            { username: "bob", role: 300 },
+            { username: "nobody-such-user", role: 300 },
+          ],
+        }),
+      },
+      envWithSyncWorker(),
+    )
+    expect(res.status).toBe(200)
+    await new Promise((r) => setTimeout(r, 0))
+
+    const calls = fetchSpy.mock.calls.filter(
+      (c) => String(c[0]).includes("/admin/projects/proj-r/member-role-changed"),
+    )
+    expect(calls).toHaveLength(1)
+    expect(JSON.parse(String((calls[0][1] as RequestInit).body))).toEqual({
+      userId: 2,
+      username: "bob",
+      role: 300,
+    })
+  })
+
+  it("does NOT notify when the grant is rejected (e.g. role above caller)", async () => {
+    await seedProjectWithMember()
+    const fetchSpy = stubFetch()
+
+    // "bob" is a contributor (400); owner attempting to grant self is rejected
+    // via a different path, so use a role_above_caller case: a maintainer (600)
+    // granting owner (700) to someone else.
+    await env.AQUILLA_PG.prepare(
+      "UPDATE project_members SET role_level = 600 WHERE project_id = 'proj-r' AND user_id = 2",
+    ).run()
+    await seedUser(3, "eve")
+
+    const res = await app.request(
+      "/api/v2/projects/proj-r/members",
+      {
+        method: "POST",
+        headers: authHeader(await jwtFor("bob")),
+        body: JSON.stringify({ username: "eve", role: 700 }),
+      },
+      envWithSyncWorker(),
+    )
+    expect(res.status).toBe(403)
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(
+      fetchSpy.mock.calls.some((c) => String(c[0]).includes("member-role-changed")),
+    ).toBe(false)
+  })
+})

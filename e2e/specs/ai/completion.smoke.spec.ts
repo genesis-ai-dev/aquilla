@@ -25,7 +25,7 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
   const llmBase = process.env.VITE_LLM_BASE_URL ?? ""
   expect(llmBase).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
   await alice.evaluate(({ endpoint }) => {
-    localStorage.setItem("codex:userProviderOverride", JSON.stringify({
+    localStorage.setItem("aquilla:userProviderOverride", JSON.stringify({
       endpoint,   // e.g. http://127.0.0.1:<port>/v1
       model: "mock-model",
       apiKey: "",

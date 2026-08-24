@@ -1,5 +1,6 @@
+import type { ReactNode } from "react"
 import { Input } from "@/components/ui/input"
-import { FieldDescription, OptionalMark } from "@/components/ui/field"
+import { OptionalMark } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
 import {
   Select,
@@ -48,7 +49,7 @@ interface Props {
   /** When true, all inputs are disabled (role/offline gate). */
   disabled?: boolean
   /** Tooltip shown on hover when disabled is true. */
-  disabledTooltip?: string
+  disabledTooltip?: ReactNode
   onChange: (
     updates: Partial<
       Pick<
@@ -225,9 +226,6 @@ export function ValidationSettingsSection({
             onValueChange={(next) => onChange({ validationNamedUsers: next })}
           />
         </DisabledFieldTooltip>
-        {disabled ? (
-          <FieldDescription className="mt-2">{disabledTooltip}</FieldDescription>
-        ) : null}
       </SettingsRow>
     </SettingsGroup>
   )

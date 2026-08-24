@@ -16,6 +16,49 @@ describe("role-policy (client mirror)", () => {
     expect(requiredRoleFor("some.future.kind")).toBeNull()
   })
 
+  it("keeps the structural file.* kinds at the maintainer floor", () => {
+    // Both relayout the timeline for every collaborator, so they sit a rung
+    // above the contributor-level editing kinds. Drift here costs a redundant
+    // 403 rather than a hole, but it defeats the guard — so pin both sides.
+    expect(requiredRoleFor("file.timing.set")).toBe(ROLE.MAINTAINER)
+    expect(requiredRoleFor("file.track.set")).toBe(ROLE.MAINTAINER)
+  })
+
+  // ── The setup/handoff line (AQU-646, Sam 2026-08-18) ────────────────────
+  //
+  // The client's own process settles the film, the cue pairings and the
+  // character sheets BEFORE handing the project to translators and dubbers.
+  // Those people are contributors, and none of these three is theirs to
+  // change: each one silently rewrites what everybody else is working against.
+  it("keeps project SETUP above the contributors who receive the handoff", () => {
+    expect(requiredRoleFor("file.video.set")).toBe(ROLE.PROJECT_LEAD)
+    expect(requiredRoleFor("cell.link.set")).toBe(ROLE.PROJECT_LEAD)
+  })
+
+  it("refuses both for a contributor, and allows them for a lead", () => {
+    for (const kind of ["file.video.set", "cell.link.set"]) {
+      expect(canPerform(kind, ROLE.CONTRIBUTOR)).toBe(false)
+      expect(canPerform(kind, ROLE.PROJECT_LEAD)).toBe(true)
+    }
+  })
+
+  it("puts the characters above even a project lead (Sam, 2026-08-20)", () => {
+    // Characters are one person's job here: the client's producer owns the
+    // sheets and holds maintainer, and nobody below her reconciles them. A
+    // lead can still link the film and cut the pairings — this is the one
+    // piece of setup that went a rung higher than the rest.
+    expect(requiredRoleFor("cast.assign")).toBe(ROLE.MAINTAINER)
+    expect(canPerform("cast.assign", ROLE.PROJECT_LEAD)).toBe(false)
+    expect(canPerform("cast.assign", ROLE.MAINTAINER)).toBe(true)
+  })
+
+  it("knows about cast.assign at all", () => {
+    // It was absent from this mirror until 2026-08-18. `canPerform` fails open
+    // on an unknown kind, so the character-import button's own permission check
+    // returned true for every role and the server's 403 was the only guard.
+    expect(requiredRoleFor("cast.assign")).not.toBeNull()
+  })
+
   describe("canPerform", () => {
     it("blocks only when role is KNOWN and provably below the requirement", () => {
       expect(canPerform("cell.validate", ROLE.COMMENTER)).toBe(false) // 200 < 300

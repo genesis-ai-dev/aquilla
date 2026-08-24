@@ -19,12 +19,26 @@ export function parseTimestampRange(context: string): TimestampRange | null {
   }
 }
 
+/**
+ * `HH:MM:SS.mmm`, rounded to the millisecond.
+ *
+ * ROUNDED ONCE, TO A WHOLE NUMBER OF MILLISECONDS, and every field derived from
+ * that. Rounding the fractional part on its own let it reach 1000 with nothing
+ * to carry into: `formatVttTime(1.9995)` returned `"00:00:01.1000"` — a
+ * four-digit millisecond field that the app's own VTT parser rejects, in a file
+ * we had just written. Cue times parsed from a VTT are exact multiples of a
+ * millisecond and never hit it; a cue somebody dragged on the timeline, or one
+ * scaled by a timebase correction, is an arbitrary float and does.
+ */
 export function formatVttTime(seconds: number): string {
-  const h = Math.floor(seconds / 3600).toString().padStart(2, "0")
-  const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, "0")
-  const s = Math.floor(seconds % 60).toString().padStart(2, "0")
-  const ms = Math.round((seconds - Math.floor(seconds)) * 1000).toString().padStart(3, "0")
-  return `${h}:${m}:${s}.${ms}`
+  const totalMs = Math.max(0, Math.round(seconds * 1000))
+  const pad = (n: number, width = 2) => n.toString().padStart(width, "0")
+  return (
+    `${pad(Math.floor(totalMs / 3_600_000))}:` +
+    `${pad(Math.floor((totalMs % 3_600_000) / 60_000))}:` +
+    `${pad(Math.floor((totalMs % 60_000) / 1000))}.` +
+    `${pad(totalMs % 1000, 3)}`
+  )
 }
 
 export function stripHtml(text: string): string {

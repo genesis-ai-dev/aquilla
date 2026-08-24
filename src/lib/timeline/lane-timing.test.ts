@@ -9,6 +9,7 @@ import {
   subtitleSpanSec,
   targetChipGeom,
   targetDueSec,
+  targetOffsetMsFor,
 } from "./lane-timing"
 import type { CellData } from "@/hooks/useCells"
 
@@ -93,6 +94,71 @@ describe("targetChipGeom — clip-zero anchored (round 7)", () => {
   })
   it("null without section timing", () => {
     expect(targetChipGeom(cell({ startTime: undefined }), { durationMs: 1000 })).toBeNull()
+  })
+})
+
+describe("targetChipGeom — the anchor is relative to the cell (round 8)", () => {
+  it("an offset resolves against the cell's own start", () => {
+    const g = targetChipGeom(cell({ metadata: { target_offset_ms: 2000 } }), { durationMs: 4000 })
+    expect(g).toMatchObject({ anchor: 12, start: 12, end: 16 })
+  })
+  it("the take travels when the cell moves — the whole point", () => {
+    const meta = { target_offset_ms: 2000 }
+    expect(targetChipGeom(cell({ metadata: meta }), { durationMs: 4000 })?.anchor).toBe(12)
+    // Same take, cell dragged 5s later.
+    expect(
+      targetChipGeom(cell({ startTime: 15, endTime: 25, metadata: meta }), { durationMs: 4000 })?.anchor,
+    ).toBe(17)
+  })
+  it("an offset of exactly 0 is an offset, not an absent key", () => {
+    // Truthiness here would fall through to the legacy branch and then to the
+    // section start. The two happen to agree at offset 0 — so assert the case
+    // that separates them: a legacy key present alongside a zero offset.
+    const g = targetChipGeom(
+      cell({ metadata: { target_offset_ms: 0, target_start_ms: 99000 } }),
+      { durationMs: 4000 },
+    )
+    expect(g).toMatchObject({ anchor: 10 })
+  })
+  it("a negative offset leads the line", () => {
+    const g = targetChipGeom(cell({ metadata: { target_offset_ms: -1500 } }), { durationMs: 4000 })
+    expect(g).toMatchObject({ anchor: 8.5, start: 8.5, end: 12.5 })
+  })
+  it("the offset wins when both keys are present", () => {
+    const g = targetChipGeom(
+      cell({ metadata: { target_offset_ms: 2000, target_start_ms: 50000 } }),
+      { durationMs: 4000 },
+    )
+    expect(g).toMatchObject({ anchor: 12 })
+  })
+  it("legacy takes still resolve absolutely, and do NOT follow the cell", () => {
+    // The permanent fallback. A legacy take keeps behaving exactly as it does
+    // today until someone next drags it — unchanged, rather than silently moved.
+    const meta = { target_start_ms: 12000 }
+    expect(targetChipGeom(cell({ metadata: meta }), { durationMs: 4000 })?.anchor).toBe(12)
+    expect(
+      targetChipGeom(cell({ startTime: 15, endTime: 25, metadata: meta }), { durationMs: 4000 })?.anchor,
+    ).toBe(12)
+  })
+})
+
+describe("targetOffsetMsFor — the inverse", () => {
+  it("round-trips through targetChipGeom", () => {
+    const c = cell({})
+    const offset = targetOffsetMsFor(c, 12.5)
+    expect(offset).toBe(2500)
+    expect(targetChipGeom(cell({ metadata: { target_offset_ms: offset } }), { durationMs: 1000 })?.anchor)
+      .toBe(12.5)
+  })
+  it("a take before its line is a negative offset, not a clamp", () => {
+    expect(targetOffsetMsFor(cell({}), 4)).toBe(-6000)
+  })
+  it("but never before file zero", () => {
+    expect(targetOffsetMsFor(cell({ startTime: 3 }), -2)).toBe(-3000)
+    expect(targetOffsetMsFor(cell({ startTime: 0 }), -2)).toBe(0)
+  })
+  it("a cell with no start treats file zero as its origin", () => {
+    expect(targetOffsetMsFor(cell({ startTime: undefined }), 4)).toBe(4000)
   })
 })
 

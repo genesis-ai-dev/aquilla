@@ -29,7 +29,7 @@ export function NameStep({
 
   function handleContinue() {
     const name = value.trim() || "Anonymous"
-    localStorage.setItem("codex:username", name)
+    localStorage.setItem("aquilla:username", name)
     onChange(name)
     onNext()
   }

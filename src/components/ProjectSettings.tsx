@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react"
-import { useLocation, useParams, useNavigate, useSearchParams, type Location } from "react-router-dom"
+import { Navigate, useLocation, useParams, useNavigate, useSearchParams, type Location } from "react-router-dom"
 import {
   isProjectEditorPath,
+  projectMemoryPath,
   projectSettingsPath,
   safeReturnPath,
   withSettingsReturn,
@@ -9,7 +10,7 @@ import {
 import {
   Check, CheckCircle, XCircle, ChevronDown, Save, Sparkles,
   SlidersHorizontal, Link2, BarChart3, ShieldCheck, AudioLines, Plug, FlaskConical,
-  Users, SpellCheck, BrainCircuit,
+  Users,
 } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { Button } from "@/components/ui/button"
@@ -22,6 +23,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
 import { OptionalMark } from "@/components/ui/field"
@@ -36,7 +39,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
-import { Textarea } from "@/components/ui/textarea"
 import {
   Dialog,
   DialogBody,
@@ -46,7 +48,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { DisabledFieldTooltip } from "./ProjectSettings/DisabledFieldTooltip"
+import { DisabledFieldTooltip, PermissionLockHint } from "./ProjectSettings/DisabledFieldTooltip"
+import { PrivilegedMembersDialog } from "./ProjectSettings/PrivilegedMembersDialog"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
@@ -71,7 +74,12 @@ import type {
   DecaySettings,
   ProjectRecord,
 } from "@/lib/parsers/types"
-import { projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import {
+  AUDIO_MEDIA_STRATEGY_LABELS,
+  projectHasScriptureFiles,
+  resolveBibleResourcesEnabled,
+} from "@/lib/parsers/types"
+import { resolveTimingLocked } from "@/lib/sync/project-settings"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
@@ -82,8 +90,7 @@ import { SourceLinkSection } from "./ProjectSettings/SourceLinkSection"
 import { ExperimentalFlagsSection } from "./ProjectSettings/ExperimentalFlagsSection"
 import { LanguagesSection } from "./ProjectSettings/LanguagesSection"
 import { MembersSection } from "./ProjectSettings/MembersSection"
-import { RulesSettingsSection } from "./ProjectSettings/RulesSection"
-import { LivingMemoryPage } from "./LivingMemoryPage"
+import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
 import { DcsUpstreamPanel } from "@/components/dcs/DcsUpstreamPanel"
 import { readCursor } from "@/lib/dcs/cursor"
 import { UpstreamChangesPanel } from "./linked/UpstreamChangesPanel"
@@ -98,8 +105,8 @@ import { readValidationCount, readValidationCountAudio } from "@/lib/progress/re
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
-import { humanRoleName, resolveRoleName, ROLE } from "@/lib/frontier/roles"
+import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
+import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { renameProject } from "@/lib/sync/cloud-projects"
@@ -205,7 +212,6 @@ interface Baseline {
   model: string
   maxTokens: number
   temperature: number
-  systemPrompt: string
   llmHealthPenalty: number
   top_k: number
   contextSize: ContextSize
@@ -221,6 +227,9 @@ interface Baseline {
   validationRoleFloor: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers: string[]
   allowSelfValidation: boolean
+  /** AQU-646: may people add lines into the timeline's silences? */
+  allowLineCreation: boolean
+  timingLocked: boolean
   harmonize_min_role: "project_lead" | "maintainer"
   /** AQU-460: EXPLICIT persisted value only. `undefined` = no explicit choice
    *  yet — the effective (displayed) state is derived via
@@ -249,7 +258,6 @@ function buildBaseline(project: ProjectRecord): Baseline {
     // default snapshots (512/4096) are upgraded to the current default.
     maxTokens: normalizeCompletionMaxTokens(project.completionSettings?.maxTokens),
     temperature: project.completionSettings?.temperature ?? 0.3,
-    systemPrompt: project.completionSettings?.systemPrompt || DEFAULT_SYSTEM_PROMPT,
     llmHealthPenalty: project.completionSettings?.llmHealthPenalty ?? 0.1,
     top_k: project.completionSettings?.top_k ?? DEFAULT_APPROVED_EXAMPLE_COUNT,
     contextSize: project.completionSettings?.contextSize ?? "medium",
@@ -266,6 +274,12 @@ function buildBaseline(project: ProjectRecord): Baseline {
     validationRoleFloor: project.validationRoleFloor ?? "reviewer",
     validationNamedUsers: project.validationNamedUsers ?? [],
     allowSelfValidation: project.allowSelfValidation ?? true,
+    // Off unless a project has said otherwise: the affordance is speculative
+    // and underdeveloped, so absent must read as off, not as unset.
+    allowLineCreation: project.allowLineCreation ?? false,
+    // AQU-646: absent means LOCKED, so the box starts ticked on every project
+    // that predates the setting. See resolveTimingLocked.
+    timingLocked: resolveTimingLocked(project),
     harmonize_min_role: project.harmonize_min_role ?? "project_lead",
     // AQU-460: preserve "unset" — do NOT default to false here, that would
     // make an unset scripture project look explicitly off in the diff/baseline.
@@ -297,13 +311,19 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const modalState = location.state as {
     backgroundLocation?: Location
     projectSettingsModalDepth?: number
+    projectSnapshot?: ProjectRecord
   } | null
   const backgroundLocation = modal ? modalState?.backgroundLocation : undefined
   const modalDepth = modal ? (modalState?.projectSettingsModalDepth ?? 1) : 0
   const nextModalState = backgroundLocation
     ? { backgroundLocation, projectSettingsModalDepth: modalDepth + 1 }
     : undefined
-  const { project, loading, refresh } = useProject(id!)
+  const { project, loading, refresh } = useProject(id!, {
+    initialProject: modal ? modalState?.projectSnapshot : undefined,
+    // This page owns the editable settings hook below. Asking useProject for
+    // its read-only overlay as well creates a second settings request.
+    includeSettings: false,
+  })
 
   // Workspace handoff (`?return=…`) — only accept same-origin relative paths.
   // The Editor breadcrumb is only for this handoff (settings opened from /editor).
@@ -343,6 +363,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     project?.syncRole?.level ?? null,
   )
   const canSeeMembers = !isCloudProject || canViewRoster
+  const [privilegedOpen, setPrivilegedOpen] = useState(false)
   const metricsFiles = useMemo(
     () => (project?.files ?? []).map((f) => ({ id: f.id, name: f.name })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -368,19 +389,29 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     [getJwt, id],
   )
 
-  // Server enforces MAINTAINER (600) for settings writes — show the correct
-  // floor in the read-only tooltip so users know what role they need.
+  // Server enforces MAINTAINER (600) for settings writes. Explain the lock on
+  // the control itself (GitHub-style hint), not with a page-level banner.
+  const privilegedRole = resolveRoleName(t, ROLE.MAINTAINER, { plural: true })
+  const roleLockHint = (
+    <PermissionLockHint
+      title={t("projectSettings.permission.onlyRoleCanModify", {
+        role: privilegedRole,
+      })}
+      onView={id ? () => setPrivilegedOpen(true) : undefined}
+      href={id ? undefined : PERMISSION_DOCS_URL}
+      linkLabel={
+        id
+          ? t("projectSettings.permission.viewPrivilegedMembers", {
+              role: privilegedRole,
+            })
+          : t("error.permissionDenied.learnMore")
+      }
+    />
+  )
   const sharedDisabledTooltip =
-    reasonCannotEdit === "offline" ? "Reconnect to edit shared settings."
-    : reasonCannotEdit === "role" ? "Maintainer or higher can edit shared settings."
+    reasonCannotEdit === "offline" ? t("projectSettings.permission.reconnectToEdit")
+    : reasonCannotEdit === "role" ? roleLockHint
     : null
-
-  // AQU-623: a below-floor member's shared inputs are disabled up-front, so a
-  // role-blocked save can never actually fire — show the denial alert
-  // persistently for them instead of only after a rejected PATCH. Gated on
-  // isCloudProject because unsynced projects also report reason "role"
-  // (roleLevel is null) but have no shared-settings permission model.
-  const roleBlocked = isCloudProject && reasonCannotEdit === "role"
 
   // AQU-765: renaming a synced project now persists to the server rename
   // endpoint (maintainer+). Local (unsynced) projects keep their name editable
@@ -390,9 +421,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const projectRoleLevel = project?.syncRole?.level ?? null
   const canRenameProject =
     !isCloudProject || (projectRoleLevel != null && projectRoleLevel >= ROLE.MAINTAINER)
-  const renameDisabledTooltip = canRenameProject
-    ? null
-    : "Maintainer or higher can rename this project."
+  const renameDisabledTooltip = canRenameProject ? null : roleLockHint
 
   // Baseline is the last-saved snapshot of every field on the page. The diff
   // between baseline and the form state determines `isDirty` and which writes
@@ -415,7 +444,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [model, setModel] = useState("")
   const [maxTokens, setMaxTokens] = useState(DEFAULT_COMPLETION_MAX_TOKENS)
   const [temperature, setTemperature] = useState(0.3)
-  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT)
   const [llmHealthPenalty, setLlmHealthPenalty] = useState(0.1)
   const [topK, setTopK] = useState(DEFAULT_APPROVED_EXAMPLE_COUNT)
   const [contextSize, setContextSize] = useState<ContextSize>("medium")
@@ -431,6 +459,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [validationRoleFloor, setValidationRoleFloor] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
   const [validationNamedUsers, setValidationNamedUsers] = useState<string[]>([])
   const [allowSelfValidation, setAllowSelfValidation] = useState(true)
+  const [allowLineCreation, setAllowLineCreation] = useState(false)
+  const [timingLocked, setTimingLocked] = useState(true)
   // AQU-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
   const [harmonizeMinRole, setHarmonizeMinRole] = useState<"project_lead" | "maintainer">("project_lead")
   // AQU-460: EXPLICIT persisted value only — `undefined` means no explicit
@@ -475,7 +505,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setModel(b.model)
     setMaxTokens(b.maxTokens)
     setTemperature(b.temperature)
-    setSystemPrompt(b.systemPrompt)
     setLlmHealthPenalty(b.llmHealthPenalty)
     setTopK(b.top_k)
     setContextSize(b.contextSize)
@@ -491,6 +520,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setValidationRoleFloor(b.validationRoleFloor)
     setValidationNamedUsers(b.validationNamedUsers)
     setAllowSelfValidation(b.allowSelfValidation)
+    setAllowLineCreation(b.allowLineCreation)
+    setTimingLocked(b.timingLocked)
     setHarmonizeMinRole(b.harmonize_min_role)
     setBibleResourcesEnabled(b.bibleResourcesEnabled)
     setDecaySettings(b.decaySettings)
@@ -574,7 +605,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       model !== baseline.model ||
       maxTokens !== baseline.maxTokens ||
       temperature !== baseline.temperature ||
-      systemPrompt !== baseline.systemPrompt ||
       llmHealthPenalty !== baseline.llmHealthPenalty ||
       topK !== baseline.top_k ||
       contextSize !== baseline.contextSize ||
@@ -590,6 +620,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       validationRoleFloor !== baseline.validationRoleFloor ||
       JSON.stringify(validationNamedUsers) !== JSON.stringify(baseline.validationNamedUsers) ||
       allowSelfValidation !== baseline.allowSelfValidation ||
+      allowLineCreation !== baseline.allowLineCreation ||
+      timingLocked !== baseline.timingLocked ||
       harmonizeMinRole !== baseline.harmonize_min_role ||
       bibleResourcesEnabled !== baseline.bibleResourcesEnabled ||
       audioMediaStrategy !== baseline.audioMediaStrategy ||
@@ -600,11 +632,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     )
   }, [
     baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
-    model, maxTokens, temperature, systemPrompt, llmHealthPenalty,
+    model, maxTokens, temperature, llmHealthPenalty,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
-    validationRoleFloor, validationNamedUsers, allowSelfValidation,
+    validationRoleFloor, validationNamedUsers, allowSelfValidation, allowLineCreation,
+    timingLocked,
     harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
     precedingTargetCells, importExcludeFrontMatter,
   ])
@@ -625,17 +658,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [pendingHistoryDelta, setPendingHistoryDelta] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  // Distinct from `saveError`: a shared-settings save blocked by the active
-  // account's role. Rendered as an enriched inline alert (names the account,
-  // offers an account switch) rather than the bare header string.
-  const [permissionBlocked, setPermissionBlocked] = useState(false)
-  // Clear the permission alert when the active account changes (e.g. the user
-  // clicks "switch account" in the alert itself) or the current account gains
-  // edit permission — otherwise the stale alert re-renders and misattributes the
-  // denial to the newly-active, possibly-authorized account.
-  useEffect(() => {
-    setPermissionBlocked(false)
-  }, [session?.username, canEditShared])
   // AQU-408: success message reflects the actual delta saved (a brief
   // enumeration of which fields changed), not a generic "Saved". Auto-dismisses
   // after a few seconds. The modal/page itself stays open on save — only an
@@ -719,7 +741,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     if (!id || !baseline) return false
     setSaving(true)
     setSaveError(null)
-    setPermissionBlocked(false)
     setSavedMessage(null)
     setNameError(null)
     // AQU-408: track which fields actually changed so the success message can
@@ -766,7 +787,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             await renameProject(jwt, id, trimmedName)
           } catch (err) {
             if (err instanceof UserError && err.status === 403) {
-              setPermissionBlocked(true)
+              setSaveError(t("projectSettings.permission.onlyRoleCanModify", {
+                role: resolveRoleName(t, ROLE.MAINTAINER, { plural: true }),
+              }))
             } else {
               setSaveError(err instanceof Error ? err.message : "Renaming the project failed.")
             }
@@ -810,7 +833,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       const sharedUpdates: ProjectWideSettings = {}
       if (sourceLanguage !== baseline.sourceLanguage) { sharedUpdates.sourceLanguage = sourceLanguage; changedFieldLabels.push("source language") }
       if (targetLanguage !== baseline.targetLanguage) { sharedUpdates.targetLanguage = targetLanguage; changedFieldLabels.push("target language") }
-      if (systemPrompt !== baseline.systemPrompt) { sharedUpdates.systemPrompt = systemPrompt; changedFieldLabels.push("AI instructions") }
       if (validationCount !== baseline.validationCount) { sharedUpdates.validationCount = validationCount; changedFieldLabels.push("validation count") }
       if (validationCountAudio !== baseline.validationCountAudio) {
         sharedUpdates.validationCountAudio = validationCountAudio
@@ -822,6 +844,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         changedFieldLabels.push("named validators")
       }
       if (allowSelfValidation !== baseline.allowSelfValidation) { sharedUpdates.allowSelfValidation = allowSelfValidation; changedFieldLabels.push("self-validation") }
+      if (allowLineCreation !== baseline.allowLineCreation) { sharedUpdates.allowLineCreation = allowLineCreation; changedFieldLabels.push("adding timeline lines") }
+      if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked; changedFieldLabels.push("the timing lock") }
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
       if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible resources") }
       if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push("USFM front matter") }
@@ -846,10 +870,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           if (out.reason === "offline") {
             setSaveError("You're offline. Reconnect to save shared fields.")
           } else {
-            // Permission (role) block — surface the enriched alert that names
-            // the active account and offers an account switch, instead of the
-            // bare "You don't have permission…" header string.
-            setPermissionBlocked(true)
+            setSaveError(t("projectSettings.permission.onlyRoleCanModify", {
+              role: resolveRoleName(t, ROLE.MAINTAINER, { plural: true }),
+            }))
           }
           return false
         }
@@ -878,7 +901,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         model,
         maxTokens,
         temperature,
-        systemPrompt,
         llmHealthPenalty,
         top_k: topK,
         contextSize,
@@ -894,6 +916,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         validationRoleFloor,
         validationNamedUsers,
         allowSelfValidation,
+        allowLineCreation,
+        timingLocked,
         harmonize_min_role: harmonizeMinRole,
         bibleResourcesEnabled,
         decaySettings,
@@ -929,13 +953,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     }
   }, [
     id, baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
-    model, maxTokens, temperature, systemPrompt, llmHealthPenalty,
+    model, maxTokens, temperature, llmHealthPenalty,
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
     bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
-    precedingTargetCells, importExcludeFrontMatter, getJwt, isCloudProject,
+    precedingTargetCells, importExcludeFrontMatter, getJwt, isCloudProject, t,
   ])
 
   const handleSaveAndClose = useCallback(async () => {
@@ -1002,16 +1026,14 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot"] },
-    { id: "section-system-prompt", label: "System prompt", keywords: ["system prompt", "ai instructions", "prompt", "product", "tone", "style", "domain", "guidance"] },
     { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
     { id: "section-voice", label: "Voice", keywords: ["tts", "voice studio", "audio", "gemini", "api key", "tts key"] },
     { id: "section-local-models", label: "Local AI models", keywords: ["whisper", "kokoro", "mms", "transcription", "model", "download", "offline", "local ai"] },
-    { id: "section-rules", label: "Rules", keywords: ["rules", "checks", "lqa", "autofix", "forbidden", "pattern", "org rules"] },
-    { id: "section-memory", label: "Living Memory", keywords: ["living memory", "memory", "brief", "instructions", "standards", "examples", "validated"] },
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-decay", label: "Retrieval support", keywords: ["decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
+    { id: "section-timeline", label: "Timeline", keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines"] },
     { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
     { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts"] },
     { id: "section-termbase-sharing", label: "Term Base Sharing", keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"], visible: SHOW_TERMBASE_SHARING_IN_SETTINGS },
@@ -1096,39 +1118,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       description: "Instructions, draft context, provider, voice, terminology",
       icon: Sparkles,
       hub: "AI & media",
-      // System prompt is a nested detail page (linked with a chevron from this
-      // pane); it is not listed again on the settings index.
+      // The system prompt (and the rest of Living Memory) lives on the
+      // standalone /project/:id/memory surface; this pane keeps a cross-link
+      // NavRow to memory/instructions instead of a nested settings page.
       sectionIds: [
         "section-ai-instructions", "section-draft-context", "section-advanced-llm",
         "section-voice", "section-local-models", "section-terminology", "section-termbase-sharing",
       ],
-    },
-    {
-      id: "system-prompt",
-      label: "System prompt",
-      description: "How translations should read for this project — used on every AI completion",
-      icon: Sparkles,
-      hub: "AI & media",
-      /** Nested under AI & completion — only deep-linked / opened from that pane. */
-      hideFromIndex: true,
-      parentId: "ai",
-      sectionIds: ["section-system-prompt"],
-    },
-    {
-      id: "rules",
-      label: "Rules",
-      description: "Translation checks, custom rules, and org-wide rules",
-      icon: SpellCheck,
-      hub: "Quality",
-      sectionIds: ["section-rules"],
-    },
-    {
-      id: "memory",
-      label: "Living Memory",
-      description: "Instructions, standards, and validated examples the AI draws on",
-      icon: BrainCircuit,
-      hub: "Quality",
-      sectionIds: ["section-memory"],
     },
     {
       id: "validation",
@@ -1144,7 +1140,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       description: "How audio is fetched from storage",
       icon: AudioLines,
       hub: "AI & media",
-      sectionIds: ["section-audio-media"],
+      sectionIds: ["section-audio-media", "section-timeline"],
     },
     {
       id: "metrics",
@@ -1178,9 +1174,28 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const visibleGroups = SETTINGS_GROUPS
     .map((g) => ({ ...g, sectionIds: g.sectionIds.filter((id) => visibleSectionIdSet.has(id)) }))
     .filter((g) => g.sectionIds.length > 0)
-  // Index lists only hub-level entries; nested panes (e.g. system-prompt) are
-  // opened from a parent pane NavRow.
+  // Index lists only hub-level entries; a `hideFromIndex` pane stays
+  // deep-linkable but is opened from a parent pane NavRow.
   const indexGroups = visibleGroups.filter((g) => !g.hideFromIndex)
+
+  // Living Memory extraction: `memory`, `rules`, and `system-prompt` moved out
+  // of settings onto the standalone /project/:id/memory surface. Old section
+  // ids redirect (replace) instead of falling back to the index so deep links
+  // keep working — the server-sent `settings/memory` readiness href, and
+  // RuleDrawer's `settings/rules?ruleId=…` — with query params carried along.
+  // Returning here, before either shell renders, covers both the routed page
+  // and the route-modal dialog.
+  const movedSectionRedirects: Record<string, string> = id
+    ? {
+        memory: projectMemoryPath(id),
+        rules: projectMemoryPath(id, "quality"),
+        "system-prompt": projectMemoryPath(id, "instructions"),
+      }
+    : {}
+  const movedSectionTarget = sectionParam ? movedSectionRedirects[sectionParam] : undefined
+  if (movedSectionTarget) {
+    return <Navigate to={`${movedSectionTarget}${location.search}`} replace />
+  }
 
   // Navigation between the index and a pane uses `/settings/:section` —
   // deep-linkable and back-button friendly.
@@ -1214,9 +1229,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       "section-bible-resources",
       "section-user",
       "section-members",
-      "section-rules",
-      "section-memory",
-      "section-system-prompt",
       "section-ai-instructions",
       "section-draft-context",
       "section-advanced-llm",
@@ -1225,6 +1237,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       "section-validation",
       "section-decay",
       "section-audio-media",
+      "section-timeline",
       "section-git-sync",
       "section-terminology",
       "section-termbase-sharing",
@@ -1239,7 +1252,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (!group || claimedGroups.has(group.id)) continue
       claimedGroups.add(group.id)
       // Nested panes that are hidden from the index still show their own title
-      // (e.g. "System prompt") rather than the parent hub name in search.
+      // rather than the parent hub name in search.
       headers.set(sectionId, group.label)
     }
     return headers
@@ -1264,17 +1277,18 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   // Table panes (Members roster) need the wider content well; form panes stay
   // intentional/narrow. Search flattens across groups → keep default width.
   const pageSize = activeGroup?.wide && !lowerQuery ? "wide" : "default"
+  const modalWidthClass = pageSize === "wide"
+    ? "max-w-[min(72rem,calc(100%-2rem))] sm:max-w-[min(72rem,calc(100%-2rem))]"
+    : "max-w-[min(42rem,calc(100%-2rem))] sm:max-w-[min(42rem,calc(100%-2rem))]"
 
   // Hints for index NavRows — short current-value summaries (org / Preferences pattern).
   const groupHints: Record<string, string> = {
     general: name.trim() || "Untitled",
     members: "Roles & invites",
-    rules: "Checks",
-    memory: "Brief & examples",
     "source-sync": hasSourceLink ? "Linked" : hasGitOrigin ? "Git" : "None",
     ai: provider === "frontier" ? "Frontier" : "Custom",
-    validation: validationRoleFloor.replace(/_/g, " "),
-    "audio-media": audioMediaStrategy,
+    validation: resolveRoleName(t, validationRoleFloor),
+    "audio-media": t(AUDIO_MEDIA_STRATEGY_LABELS[audioMediaStrategy].nameKey),
     metrics: "Post-edit",
     integrations: "Monday.com",
     experimental: "This device",
@@ -1369,7 +1383,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       return (
         <Dialog open onOpenChange={(open) => { if (!open) closeSettings() }}>
           <DialogContent
-            className="h-[min(90dvh,56rem)] max-w-[min(72rem,calc(100%-2rem))] gap-0 p-0 sm:max-w-[min(72rem,calc(100%-2rem))]"
+            className={`h-[min(90dvh,56rem)] gap-0 p-0 ${modalWidthClass}`}
             data-testid="project-settings-dialog"
           >
             <DialogHeader className="sr-only">
@@ -1391,12 +1405,17 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     )
   }
 
+  // Living Memory cross-link hint (Custom vs Default): the prompt itself is
+  // edited on memory/instructions now, so read the saved value straight off
+  // the project record — the same source the removed form baseline used.
+  const savedSystemPrompt = project?.completionSettings?.systemPrompt || DEFAULT_SYSTEM_PROMPT
+
   const settingsContent = (
     <Page size={pageSize}>
           {modal && onSettingsPane ? (
             <BackLink
               className="mb-6"
-              label={breadcrumbParent?.label ?? "Project settings"}
+              label={breadcrumbParent?.label ?? t("editor.navTitle.projectSettings")}
               onClick={() => requestHistoryNavigation(-1)}
             />
           ) : null}
@@ -1441,15 +1460,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               <p className="px-2 py-1.5 text-sm text-muted-foreground">{t("projectSettings.noMatchingSettings")}</p>
             ) : null}
 
-        {(permissionBlocked || roleBlocked) && (
-          <PermissionDeniedAlert
-            action="projectSettings.permission.changeSharedSettingsAction"
-            requiredRoleLevel={ROLE.MAINTAINER}
-            currentRole={
-              project?.syncRole ? humanRoleName(project.syncRole.level) : undefined
-            }
-          />
-        )}
         {sharedConflict && (
           <div
             role="alert"
@@ -1501,8 +1511,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 label={<label htmlFor="pname">{t("projectSettings.info.titleLabel")}</label>}
                 description={
                   sharedUpdatedBy && sharedUpdatedAt && sharedVersion != null && sharedVersion > 0
-                    ? `Last edited by ${sharedUpdatedBy.username} · ${new Date(sharedUpdatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}`
-                    : "Shown across the workspace and project list."
+                    ? t("projectSettings.shared.lastEdited", {
+                        name: sharedUpdatedBy.username,
+                        date: new Date(sharedUpdatedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }),
+                      })
+                    : t("projectSettings.shared.nameHint")
                 }
                 control={
                   <DisabledFieldTooltip
@@ -1527,10 +1540,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               {nameError ? (
                 <p role="alert" className="px-4 pb-2 text-xs text-destructive">
                   {nameError}
-                </p>
-              ) : !canRenameProject ? (
-                <p className="px-4 pb-2 text-xs text-muted-foreground">
-                  {renameDisabledTooltip}
                 </p>
               ) : null}
               <SettingsRow
@@ -1665,68 +1674,22 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           <MembersSection projectId={id} />
         )}
 
-        {searchGroupLabel("section-rules")}
-        {id && sectionsToRender.some((s) => s.id === "section-rules") && (
-          <div id="section-rules">
-            <RulesSettingsSection projectId={id} />
-          </div>
-        )}
-
-        {searchGroupLabel("section-memory")}
-        {sectionsToRender.some((s) => s.id === "section-memory") && (
-          <div id="section-memory">
-            <LivingMemoryPage embedded />
-          </div>
-        )}
-
-        {searchGroupLabel("section-system-prompt")}
-        {sectionsToRender.some((s) => s.id === "section-system-prompt") && (
-          <div id="section-system-prompt">
-            <SettingsGroup>
-              <SettingsRow
-                label={<label htmlFor="sp">{t("projectSettings.systemPrompt.label")}</label>}
-                description={withStyledTerms(
-                  t("projectSettings.ai.instructionsHelp", {
-                    sourceVar: "{sourceLanguage}",
-                    targetVar: "{targetLanguage}",
-                  }),
-                  [
-                    { text: "{sourceLanguage}", as: "code" },
-                    { text: "{targetLanguage}", as: "code" },
-                  ],
-                )}
-                block
-              >
-                <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
-                  <Textarea
-                    id="sp"
-                    value={systemPrompt}
-                    onChange={(e) => setSystemPrompt(e.target.value)}
-                    rows={24}
-                    disabled={!canEditShared}
-                    className="min-h-[28rem] bg-background font-mono text-sm leading-relaxed"
-                    placeholder={DEFAULT_SYSTEM_PROMPT}
-                    aria-label={t("projectSettings.systemPrompt.label")}
-                  />
-                </DisabledFieldTooltip>
-              </SettingsRow>
-            </SettingsGroup>
-          </div>
-        )}
-
         {searchGroupLabel("section-ai-instructions")}
         {sectionsToRender.some((s) => s.id === "section-ai-instructions") && (
           <div id="section-ai-instructions" className="flex flex-col gap-12">
-            {/* Nested detail: system prompt lives on its own page; open via chevron row. */}
+            {/* Cross-link: the system prompt is edited on the Living Memory
+                surface (memory/instructions). A real navigation out of
+                settings — deliberately no modal `state` (unlike sibling
+                NavRows), so the route-modal doesn't try to stack it. */}
             {!lowerQuery && id ? (
               <NavList>
                 <NavRow
-                  to={settingsHref("system-prompt")}
-                  state={nextModalState}
-                  title={t("projectSettings.systemPrompt.label")}
+                  to={projectMemoryPath(id, "instructions")}
+                  icon={LIVING_MEMORY_ICON}
+                  title={t("terminology.livingMemory.title")}
                   description={t("projectSettings.systemPrompt.navDescription")}
                   hint={
-                    systemPrompt.trim() && systemPrompt !== DEFAULT_SYSTEM_PROMPT
+                    savedSystemPrompt.trim() && savedSystemPrompt !== DEFAULT_SYSTEM_PROMPT
                       ? "Custom"
                       : "Default"
                   }
@@ -1955,6 +1918,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 </RadioGroup>
               </SettingsRow>
 
+              {/* i18n-exempt "custom" is a completion-provider token, not copy */}
               {provider === "custom" && (
                 <>
                   <SettingsRow
@@ -2009,7 +1973,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                         aria-label={t("projectSettings.advancedLlm.endpointLabel")}
                       />
                       <Button onClick={handleConnect} disabled={connecting}>
-                        {connecting ? <Spinner /> : "Connect"}
+                        {connecting ? <Spinner /> : t("projectSettings.advancedLlm.connectButton")}
                       </Button>
                     </div>
                     {connected && <p className="mt-1 flex items-center gap-1 text-xs text-green-600"><CheckCircle className="h-3 w-3" /> {t("projectSettings.advancedLlm.connectedStatus", { count: models.length })}</p>}
@@ -2018,7 +1982,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   <SettingsRow
                     label={
                       preset.requiresKey ? (
-                        "API key *"
+                        t("projectSettings.field.apiKeyRequired")
                       ) : (
                         <>
                           {t("projectSettings.field.apiKey")} <OptionalMark />
@@ -2031,14 +1995,14 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                     <ApiKeyField
                       label={
                         preset.requiresKey ? (
-                          "API key *"
+                          t("projectSettings.field.apiKeyRequired")
                         ) : (
                           <>
                             {t("projectSettings.field.apiKey")} <OptionalMark />
                           </>
                         )
                       }
-                      placeholder={preset.keyHint ?? (preset.requiresKey ? "Paste your API key" : "Leave blank for no auth")}
+                      placeholder={preset.keyHint ?? (preset.requiresKey ? t("projectSettings.field.apiKeyPlaceholder") : t("projectSettings.field.apiKeyNoAuth"))}
                       projectKey={apiKey}
                       userKey={completionUserKey}
                       onProjectKeyChange={setApiKey}
@@ -2075,7 +2039,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                           id="mdl-manual"
                           value={model}
                           onChange={(e) => setModel(e.target.value)}
-                          placeholder={presetId === "openrouter" ? "anthropic/claude-3.5-sonnet" : "Type a model id"}
+                          placeholder={presetId === "openrouter" ? "anthropic/claude-3.5-sonnet" : t("projectSettings.advancedLlm.modelPlaceholder")}
                           aria-label={t("projectSettings.advancedLlm.modelManualLabel")}
                           className="w-56 bg-background"
                         />
@@ -2085,6 +2049,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 </>
               )}
 
+              {/* i18n-exempt "frontier" is a completion-provider token, not copy */}
               {provider === "frontier" && (
                 <SettingsRow
                   label={
@@ -2179,7 +2144,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 description={t("projectSettings.voice.libraryNote")}
                 control={
                   <Button variant="outline" onClick={() => {
-                    try { window.localStorage.setItem(`codex:editorLens:${id}`, "audio") } catch { /* ignore */ }
+                    try { window.localStorage.setItem(`aquilla:editorLens:${id}`, "audio") } catch { /* ignore */ }
                     requestNavigate(`/project/${id}/editor`)
                   }}>
                     {t("projectSettings.voice.openStudioButton")}
@@ -2290,7 +2255,49 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           </div>
         )}
 
+        {searchGroupLabel("section-timeline")}
+        {sectionsToRender.some((s) => s.id === "section-timeline") && (
+          <Card id="section-timeline">
+            <CardHeader><CardTitle>{t("editor.timeline.title")}</CardTitle></CardHeader>
+            <CardContent className="space-y-3">
+              {/* AQU-646. FIRST in the card because it constrains everything
+                  below it — the pencil under it is moot while nothing moves. */}
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  id="timing-locked"
+                  data-testid="settings-timing-locked"
+                  checked={timingLocked}
+                  disabled={!canEditShared}
+                  onCheckedChange={(checked) => setTimingLocked(checked)}
+                />
+                <label htmlFor="timing-locked" className="text-sm">
+                  {t("projectSettings.timeline.lockLabel")}
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("projectSettings.timeline.lockHint")}
+                  </p>
+                </label>
+              </div>
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  id="allow-line-creation"
+                  data-testid="settings-allow-line-creation"
+                  checked={allowLineCreation}
+                  disabled={!canEditShared}
+                  onCheckedChange={(checked) => setAllowLineCreation(checked)}
+                />
+                <label htmlFor="allow-line-creation" className="text-sm">
+                  {t("projectSettings.timeline.addLinesLabel")}
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("projectSettings.timeline.addLinesHint")}
+                  </p>
+                </label>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {searchGroupLabel("section-git-sync")}
+        {/* i18n-exempt "git" is a project-origin kind, not copy */}
         {project?.origin?.kind === "git" && sectionsToRender.some((s) => s.id === "section-git-sync") && (
           <div id="section-git-sync">
             <SettingsGroup label={t("projectSettings.section.gitSync")}>
@@ -2388,7 +2395,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const shell = modal ? (
     <Dialog open onOpenChange={(open) => { if (!open) closeSettings() }}>
       <DialogContent
-        className="h-[min(90dvh,56rem)] max-w-[min(72rem,calc(100%-2rem))] gap-0 p-0 sm:max-w-[min(72rem,calc(100%-2rem))]"
+        className={`h-[min(90dvh,56rem)] gap-0 p-0 ${modalWidthClass}`}
         data-testid="project-settings-dialog"
       >
         <DialogHeader className="sr-only">
@@ -2426,6 +2433,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <PrivilegedMembersDialog
+        open={privilegedOpen}
+        onOpenChange={setPrivilegedOpen}
+        projectId={id ?? null}
+        roleLabel={privilegedRole}
+      />
 
     </>
   )

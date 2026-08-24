@@ -139,11 +139,15 @@ export async function register(args: RegisterArgs): Promise<FrontierSession> {
  * endpoint 404s (i.e. WRANGLER_LOCAL is not set — production), so callers
  * can fall back silently. NEVER call this from a prod build.
  */
-export async function devLogin(): Promise<FrontierSession | null> {
+export async function devLogin(username = "dev"): Promise<FrontierSession | null> {
   if (!import.meta.env.DEV) return null;
   let res: Response;
   try {
-    res = await fetch(`${AUTH_BASE}/__dev__/login`, { method: "POST" });
+    res = await fetch(`${AUTH_BASE}/__dev__/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username }),
+    });
   } catch {
     return null;
   }

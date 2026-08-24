@@ -53,6 +53,12 @@ function InputGroupAddon({
       data-align={align}
       className={cn(inputGroupAddonVariants({ align }), className)}
       onClick={(e) => {
+        // React bubbles portal clicks through the component tree, so a click
+        // inside e.g. a popover mounted from this addon lands here too — and
+        // stealing focus from it closes any open native <select> dropdown.
+        if (!e.currentTarget.contains(e.target as Node)) {
+          return
+        }
         if ((e.target as HTMLElement).closest("button")) {
           return
         }

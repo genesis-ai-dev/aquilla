@@ -101,6 +101,13 @@ export function projectSettingsPath(projectId: string, section?: string): string
     : `/project/${projectId}/settings`
 }
 
+/** Living Memory surface — the section index, or one of its detail panes. */
+export function projectMemoryPath(projectId: string, section?: string): string {
+  return section
+    ? `/project/${projectId}/memory/${section}`
+    : `/project/${projectId}/memory`
+}
+
 /** Default work surface — paired cell editor (`/project/$id/editor`). */
 export function projectEditorPath(projectId: string, fileId?: string | null): string {
   const base = `/project/${projectId}/editor`

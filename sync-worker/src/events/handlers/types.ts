@@ -9,6 +9,27 @@
 import type { RealtimeMessage, ProjectionTable } from '../realtime'
 import type { ChainSlot } from '../chain-claims'
 
+/**
+ * What the dispatcher hands back for ONE event: either the work to commit, or
+ * a per-event refusal the route turns into an entry in the response's
+ * `rejected` array.
+ *
+ * A handler that spots a bad shape must return the `ok: false` form rather
+ * than throw. Nothing catches a throw between here and the worker's fetch
+ * handler, so one malformed event would 500 the whole POST — and the client
+ * reads 5xx as transient and retries the identical batch forever WITHOUT
+ * burning its attempt budget, so a single bad event wedges the outbox
+ * permanently (and, because batches are grouped by the head record's file,
+ * for every project the user has open).
+ *
+ * Lives here rather than in dispatch.ts so handlers can name their own return
+ * type: they already import DispatchResult from this file, and importing it
+ * from the dispatcher would point the dependency the wrong way round.
+ */
+export type DispatchOutcome =
+  | { ok: true; result: DispatchResult }
+  | { ok: false; status: number; reason: string }
+
 export interface DispatchResult {
   /**
    * The events INSERT statement plus any projection statements

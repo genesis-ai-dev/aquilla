@@ -1,4 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { AutopilotActivityInspector } from "./AutopilotActivityInspector"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
@@ -6,6 +7,7 @@ import { CATALOGS } from "@/lib/i18n/messages"
 import type { Catalog } from "@/lib/i18n/messages/en"
 import { LOCALE_STORAGE_KEY } from "@/lib/i18n/store"
 import type {
+  ContextualDecisionsPage,
   ContextualOverview,
   ContextualRunActivity,
   ContextualRunActivityOptions,
@@ -112,6 +114,10 @@ beforeAll(() => {
   })
 })
 
+const decisionsMock = vi.fn(async (
+  _projectId: string,
+): Promise<ContextualDecisionsPage> => ({ decisions: [], openCount: 0, cap: 3 }))
+
 vi.mock("@/lib/contextual/transport", () => ({
   fetchContextualRuns: (projectId: string, options?: ContextualRunListOptions) => runsMock(projectId, options),
   fetchContextualRunActivity: (
@@ -122,6 +128,7 @@ vi.mock("@/lib/contextual/transport", () => ({
   commandContextualRun: (projectId: string, runId: string, command: string) => commandMock(projectId, runId, command),
   startFileContextualRun: (projectId: string, fileId: string, targetLang?: string) =>
     retryMock(projectId, fileId, targetLang),
+  fetchContextualDecisions: (projectId: string) => decisionsMock(projectId),
 }))
 
 beforeEach(() => {
@@ -135,6 +142,8 @@ beforeEach(() => {
   commandMock.mockResolvedValue({ ...run, status: "paused" })
   retryMock.mockReset()
   retryMock.mockResolvedValue({ runId: "new-run" })
+  decisionsMock.mockReset()
+  decisionsMock.mockResolvedValue({ decisions: [], openCount: 0, cap: 3 })
 })
 
 afterEach(() => {
@@ -143,16 +152,20 @@ afterEach(() => {
   CATALOGS.my = originalMyanmarCatalog
 })
 
+// Router context is required: the inspector renders react-router Links (the
+// readiness "Set up" links) and the LivingMemoryButton (useNavigate).
 function renderInspector(props: Partial<React.ComponentProps<typeof AutopilotActivityInspector>> = {}) {
   return render(
-    <AutopilotActivityInspector
-      projectId="p1"
-      open
-      onOpenChange={vi.fn()}
-      fileNames={new Map([["file-1", "LUK.usfm"]])}
-      canControl
-      {...props}
-    />,
+    <MemoryRouter>
+      <AutopilotActivityInspector
+        projectId="p1"
+        open
+        onOpenChange={vi.fn()}
+        fileNames={new Map([["file-1", "LUK.usfm"]])}
+        canControl
+        {...props}
+      />
+    </MemoryRouter>,
   )
 }
 
@@ -182,14 +195,16 @@ describe("AutopilotActivityInspector", () => {
     }
 
     render(
-      <I18nProvider>
-        <AutopilotActivityInspector
-          projectId="p1"
-          open
-          onOpenChange={vi.fn()}
-          fileNames={new Map([["file-1", "LUK.usfm"]])}
-        />
-      </I18nProvider>,
+      <MemoryRouter>
+        <I18nProvider>
+          <AutopilotActivityInspector
+            projectId="p1"
+            open
+            onOpenChange={vi.fn()}
+            fileNames={new Map([["file-1", "LUK.usfm"]])}
+          />
+        </I18nProvider>
+      </MemoryRouter>,
     )
 
     expect(screen.getByRole("dialog")).toHaveAccessibleName("အလိုအလျောက် လုပ်ဆောင်မှု")
@@ -567,15 +582,17 @@ describe("AutopilotActivityInspector", () => {
     // Mirrors the editor parent refreshing its fallback snapshot after the
     // mutation while focusRunId still points at the failed run.
     rerender(
-      <AutopilotActivityInspector
-        projectId="p1"
-        open
-        onOpenChange={vi.fn()}
-        fileNames={new Map([["file-1", "LUK.usfm"]])}
-        focusRunId={failed.runId}
-        focusFileId={failed.fileId}
-        fallbackRun={{ ...failed, updatedAt: "2026-08-11T10:03:00.000Z" }}
-      />,
+      <MemoryRouter>
+        <AutopilotActivityInspector
+          projectId="p1"
+          open
+          onOpenChange={vi.fn()}
+          fileNames={new Map([["file-1", "LUK.usfm"]])}
+          focusRunId={failed.runId}
+          focusFileId={failed.fileId}
+          fallbackRun={{ ...failed, updatedAt: "2026-08-11T10:03:00.000Z" }}
+        />
+      </MemoryRouter>,
     )
 
     const selected = screen.getAllByRole("button").find((button) => button.getAttribute("aria-pressed") === "true")
@@ -747,6 +764,19 @@ describe("AutopilotActivityInspector", () => {
     expect(screen.getByText(/Could not refresh run history/)).toBeInTheDocument()
   })
 
+  it("warns when decisions fail to load instead of claiming nothing needs the user", async () => {
+    // A 500 (or any non-404/501 failure) must not render like "no open
+    // decisions" — that would be a false reassurance in the one region whose
+    // entire job is to say a person is needed. Assert both: the warning is
+    // shown, AND the empty-state text is not — showing both, or showing only
+    // the empty state, is exactly the bug this guards against.
+    decisionsMock.mockRejectedValueOnce(new Error("server error"))
+    renderInspector({ fallbackRun: run })
+
+    expect(await screen.findByText(/Could not refresh decisions/)).toBeInTheDocument()
+    expect(screen.queryByText(/Nothing needs you right now/)).not.toBeInTheDocument()
+  })
+
   it("Refresh retries both run history and selected activity", async () => {
     activityMock.mockRejectedValueOnce(new Error("offline"))
     renderInspector({ fallbackRun: run })
@@ -767,7 +797,7 @@ describe("AutopilotActivityInspector", () => {
         blockingGaps: 2,
         items: [
           { id: "terminology", label: "Key terms", level: "missing", detail: "Missing", href: "terminology" },
-          { id: "brief", label: "Translation brief", level: "missing", detail: "Missing", href: "settings/memory" },
+          { id: "brief", label: "Translation brief", level: "missing", detail: "Missing", href: "memory/brief" },
         ],
       },
     })
@@ -778,7 +808,7 @@ describe("AutopilotActivityInspector", () => {
     )
     expect(screen.getByRole("link", { name: "Set up Translation brief" })).toHaveAttribute(
       "href",
-      "/project/p1/settings/memory",
+      "/project/p1/memory/brief",
     )
   })
 

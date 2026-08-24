@@ -1,6 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
-import { ProjectSettings } from "../../helpers/page-objects/ProjectSettings"
+import { LivingMemory } from "../../helpers/page-objects/LivingMemory"
 
 /**
  * AQU-765: synced projects can now be renamed from Settings — the name field
@@ -28,6 +28,7 @@ test("project settings renames the project and saves source language", async ({ 
   await expect(settingsLink).toBeVisible({ timeout: 10_000 })
   await settingsLink.click()
   await alice.waitForURL(new RegExp(`/project/${projectId}/settings`), { timeout: 10_000 })
+  await expect(alice.getByTestId("project-settings-dialog")).toBeVisible()
 
   // Index → General (name / languages live there).
   const generalLink = alice.getByRole("link", { name: /General/i })
@@ -74,16 +75,17 @@ test("project settings renames the project and saves source language", async ({ 
 
   // AQU-825: Knowledge Base originals cross SPA → auth-worker → Postgres + R2.
   // Exercise the real upload, rehydrate it after navigation, read the server-
-  // extracted content, and delete it through the same project settings surface.
-  const settings = new ProjectSettings(alice)
+  // extracted content, and delete it. AQU-932 moved the Knowledge Base to the
+  // standalone Living Memory surface (/project/:id/memory/knowledge).
+  const memory = new LivingMemory(alice)
   const knowledgeName = `style-${Date.now()}.md`
   const knowledgeText = "Use formal language for every translated heading."
-  await settings.openLivingMemory(projectId!)
-  await settings.uploadKnowledgeDocument(knowledgeName, knowledgeText)
+  await memory.openKnowledge(projectId!)
+  await memory.uploadKnowledgeDocument(knowledgeName, knowledgeText)
 
   await alice.reload()
-  const knowledgeDialog = await settings.openKnowledgeDocument(knowledgeName)
+  const knowledgeDialog = await memory.openKnowledgeDocument(knowledgeName)
   await expect(knowledgeDialog.getByText(knowledgeText)).toBeVisible({ timeout: 10_000 })
   await knowledgeDialog.getByRole("button", { name: "Close" }).click()
-  await settings.deleteKnowledgeDocument(knowledgeName)
+  await memory.deleteKnowledgeDocument(knowledgeName)
 })

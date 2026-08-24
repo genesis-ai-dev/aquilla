@@ -40,7 +40,7 @@ export function AccessLinkPage() {
       // provisioned; the link IS the onboarding. saveSession (inside redeem)
       // already set the aq_hint cookie.
       try {
-        localStorage.setItem("codex:onboardingComplete", "true")
+        localStorage.setItem("aquilla:onboardingComplete", "true")
       } catch {
         // Private-mode / storage-blocked: navigation below still works; the
         // RootRedirect guard only matters at "/", not the project route.

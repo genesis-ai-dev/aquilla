@@ -29,4 +29,9 @@ describe("NotFound", () => {
     expect(link).toBeInTheDocument()
     expect(link).toHaveAttribute("href", "/")
   })
+
+  it("renders a SearchX icon for the missing page", () => {
+    const { container } = renderUnknown()
+    expect(container.querySelector("svg.lucide-search-x")).toBeTruthy()
+  })
 })

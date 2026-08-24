@@ -12,7 +12,7 @@ import {
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { PageHeader, SettingsGroup, SettingsRow, EmptyState } from "@/components/ui/page"
+import { PageHeader, SettingsGroup, SettingsRow, EmptyState, NotFoundIcon } from "@/components/ui/page"
 import { toast } from "@/components/ui/toast"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
@@ -53,6 +53,8 @@ export function TeamSettingsIndex() {
       setTeam(fetched)
       setName(fetched?.name ?? "")
       setDescription(fetched?.description ?? "")
+    } catch {
+      setTeam(null)
     } finally {
       setLoading(false)
     }
@@ -131,6 +133,7 @@ export function TeamSettingsIndex() {
   } else if (team == null) {
     body = (
       <EmptyState
+        icon={NotFoundIcon}
         title={t("org.teamDetail.notFoundTitle")}
         description={t("org.teamDetail.notFoundDescription")}
       />

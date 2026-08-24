@@ -54,6 +54,10 @@ describe("Biblica study-notes parser adapter", () => {
     expect(strings[1].metadata?.biblica).toMatchObject({
       paragraphStyle: "ParagraphStyle/intro%3aipi",
     })
+    // JOB-SNG sets Psalm labels in `head:cl`, not `intro:*`.
+    expect(strings[3].metadata?.biblica).toMatchObject({
+      paragraphStyle: "ParagraphStyle/head%3acl",
+    })
   })
 
   it("carries the rejoin ranges only on cells that are part of a sliced note block", async () => {

@@ -75,8 +75,8 @@ async function main() {
       open.onsuccess = () => { const db = open.result; const tx = db.transaction("session", "readwrite"); tx.objectStore("session").put({ active: s.username, sessions: { [s.username]: s } }, "envelope"); tx.oncomplete = () => { db.close(); res() }; tx.onerror = () => rej(tx.error) }
       open.onerror = () => rej(open.error)
     })
-    localStorage.setItem("codex:onboardingComplete", "true")
-    localStorage.setItem("codex:productTourDone", "1")
+    localStorage.setItem("aquilla:onboardingComplete", "true")
+    localStorage.setItem("aquilla:productTourDone", "1")
     document.cookie = "aq_hint=1; Path=/; Max-Age=31536000; SameSite=Lax"
   }, { jwt, username: "dev", createdAt: new Date().toISOString() })
 

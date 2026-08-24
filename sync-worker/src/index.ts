@@ -16,6 +16,10 @@ import { notifyProjectDo } from "./archive-broadcast"
 import { handleCorsPreflight, withCors } from "./cors"
 import { handleProjectArchiveRequest } from "./project-archive"
 import { handleMemberRemovedRequest, notifyProjectDoMemberRemoved } from "./member-removed"
+import {
+  handleMemberRoleChangedRequest,
+  notifyProjectDoMemberRoleChanged,
+} from "./member-role-changed"
 import { handleProjectSettingsChangedRequest } from "./project-settings-notify"
 import { handleContextualActivityRequest } from "./contextual-activity-notify"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
@@ -25,9 +29,11 @@ import { handleCellsReadRequest } from "./events/cells-read-route"
 import { handleCellConfidenceRequest } from "./events/cell-confidence-route"
 import { handleHealthRollupRequest } from "./events/health-rollup-route"
 import { handleCellAudioReadRequest } from "./events/cell-audio-read-route"
+import { handleCellLinksReadRequest } from "./events/cell-links-read-route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
 import { handleExternalChangesetsRequest } from "./external/changesets-route"
+import { handleSessionChangesetsRequest } from "./external/session-routes"
 import { handleExternalArtifactsRequest } from "./external/artifacts-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleProgressReadRequest } from "./events/progress-read-route"
@@ -270,6 +276,14 @@ const worker = {
       notifyProjectDoMemberRemoved,
     )
     if (memberRemovedResponse) return memberRemovedResponse
+    // [Pen test 2026-08-17] sync a live connection's cached role after a
+    // direct project-member role change, without forcing a reconnect.
+    const memberRoleChangedResponse = await handleMemberRoleChangedRequest(
+      request,
+      env,
+      notifyProjectDoMemberRoleChanged,
+    )
+    if (memberRoleChangedResponse) return memberRoleChangedResponse
     const projectSettingsChangedResponse = await handleProjectSettingsChangedRequest(request, env)
     if (projectSettingsChangedResponse) return projectSettingsChangedResponse
     const contextualActivityResponse = await handleContextualActivityRequest(request, env)
@@ -308,6 +322,8 @@ const worker = {
     if (healthRollupResponse) return withCors(healthRollupResponse, request)
     const cellAudioReadResponse = await handleCellAudioReadRequest(request, env)
     if (cellAudioReadResponse) return withCors(cellAudioReadResponse, request)
+    const cellLinksReadResponse = await handleCellLinksReadRequest(request, env)
+    if (cellLinksReadResponse) return withCors(cellLinksReadResponse, request)
     const cellHistoryResponse = await handleCellHistoryReadRequest(request, env)
     if (cellHistoryResponse) return withCors(cellHistoryResponse, request)
     const memberActivityResponse = await handleMemberActivityReadRequest(request, env)
@@ -379,6 +395,13 @@ const worker = {
     // AQU-533: Agent API changeset engine (external command layer).
     const externalChangesetsResponse = await handleExternalChangesetsRequest(request, env, ctx)
     if (externalChangesetsResponse) return withCors(externalChangesetsResponse, request)
+
+    // AQU-926: session-token changeset routes (/api/v1/changesets/*) — the
+    // in-app agent harness + review card drive the same engine with the
+    // browser's sync token. Disjoint from /api/v1/external/* and
+    // /api/v1/projects/* so ordering here is not load-bearing.
+    const sessionChangesetsResponse = await handleSessionChangesetsRequest(request, env, ctx)
+    if (sessionChangesetsResponse) return withCors(sessionChangesetsResponse, request)
 
     // AQU-533: Agent API remote MCP server (tools-only, streamable HTTP).
     const externalMcpResponse = await handleExternalMcpRequest(request, env, ctx)

@@ -91,11 +91,16 @@ describe("GET /api/v2/orgs/:orgId/groups/:groupId", () => {
     await seedGroups()
     const res = await app.request("/api/v2/orgs/1/groups/10", { headers: authHeader(await jwtFor("wendi")) }, env)
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { id: number; name: string; description: string | null; members: Array<{ username: string; email: string | null }>; projects: Array<{ id: string; name: string; grantedRoleLevel: number }> }
+    const body = (await res.json()) as { id: number; name: string; description: string | null; members: Array<{ username: string; email: string | null; addedAt: string | null }>; projects: Array<{ id: string; name: string; grantedRoleLevel: number; grantedAt: string | null }> }
     expect(body.members.map((m) => m.username).sort()).toEqual(["anna", "wendi"])
     // Email comes from the users row (seedUser derives it from the username).
     expect(body.members.every((m) => typeof m.email === "string" && m.email.includes("@"))).toBe(true)
-    expect(body.projects).toEqual([{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }])
+    expect(body.members.every((m) => typeof m.addedAt === "string" && !Number.isNaN(Date.parse(m.addedAt)))).toBe(true)
+    expect(body.projects).toHaveLength(1)
+    expect(body.projects[0]).toMatchObject({ id: "pa", name: "Bambara", grantedRoleLevel: 400 })
+    // granted_at DEFAULT now() on insert — always present for a live grant.
+    expect(body.projects[0].grantedAt).toBeTruthy()
+    expect(Number.isNaN(Date.parse(body.projects[0].grantedAt!))).toBe(false)
     // AQU-264: description must be present in the detail response (null when not set)
     expect(Object.keys(body)).toContain("description")
     expect(body.description).toBeNull()
@@ -159,5 +164,31 @@ describe("GET /api/v2/orgs/:orgId/groups/:groupId", () => {
     const res = await app.request("/api/v2/orgs/1/groups/10", { headers: authHeader(await jwtFor("wendi")) }, env)
     const body = (await res.json()) as { projects: Array<{ id: string }> }
     expect(body.projects.map((p) => p.id)).toEqual(["pa"]) // pb (org 2) excluded
+  })
+
+  it("returns grantedAt from the group_project_grants row", async () => {
+    await seedGroups()
+    await env.AQUILLA_PG.prepare(
+      "UPDATE group_project_grants SET granted_at = '2026-07-22T15:00:00Z' WHERE group_id = 10 AND project_id = 'pa'",
+    ).run()
+    const res = await app.request("/api/v2/orgs/1/groups/10", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; grantedAt: string | null }> }
+    const pa = body.projects.find((p) => p.id === "pa")
+    expect(pa?.grantedAt).toBeTruthy()
+    expect(Date.parse(pa!.grantedAt!)).toBe(Date.parse("2026-07-22T15:00:00Z"))
+  })
+
+  it("returns addedAt from the group_members row", async () => {
+    await seedGroups()
+    await env.AQUILLA_PG.prepare(
+      "UPDATE group_members SET added_at = '2026-07-20T09:00:00Z' WHERE group_id = 10 AND user_id = 2",
+    ).run()
+    const res = await app.request("/api/v2/orgs/1/groups/10", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { members: Array<{ username: string; addedAt: string | null }> }
+    const anna = body.members.find((m) => m.username === "anna")
+    expect(anna?.addedAt).toBeTruthy()
+    expect(Date.parse(anna!.addedAt!)).toBe(Date.parse("2026-07-20T09:00:00Z"))
   })
 })

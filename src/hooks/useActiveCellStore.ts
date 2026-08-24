@@ -15,6 +15,7 @@ import type { ImportMilestoneKind } from "../../shared/import-contract"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
+const EMPTY_TAKES: ReadonlySet<string> = new Set()
 const EMPTY_CELL_IDS: readonly string[] = Object.freeze([])
 const EMPTY_SUMMARIES: readonly CellSummary[] = Object.freeze([])
 const EMPTY_TEXT_PAIRS: readonly CellTextPair[] = Object.freeze([])
@@ -73,6 +74,8 @@ export interface CellSummary {
   sequenceIndex?: number
   medium?: CellData["medium"]
   selectedGeneratedVoiceAudioId?: string
+  /** AQU-646: this line carries a recording of its own — see `applyOwnTake`. */
+  hasOwnTake?: boolean
 }
 
 export interface CellTextPair {
@@ -171,6 +174,17 @@ interface RuntimeContext {
   requiredValidations: number
   auditStats: ReadonlyMap<string, CellAuditStats>
   /**
+   * AQU-646: cells that carry a recording of their OWN (a clip seeded with the
+   * cell's id, not the file-seeded imported source clip).
+   *
+   * A line added into a silence may never get text — the dub is the
+   * deliverable — and it still has to count as translated work. Audio does not
+   * live in the cell projection at all, so the workspace feeds this in from
+   * the attachment hook; without it the store would have to be taught about
+   * `cell_audio`, which is a much bigger change for the same answer.
+   */
+  ownTakeCellIds?: ReadonlySet<string>
+  /**
    * AQU-538: the active target LANE the view renders. `''`/undefined = the
    * default lane (byte-identical to pre-lane behaviour). Optional so existing
    * `setRuntime` callers that predate lanes keep compiling; normalized to `''`.
@@ -211,6 +225,7 @@ export class CellStore {
     username: "local",
     requiredValidations: 1,
     auditStats: EMPTY_STATS,
+    ownTakeCellIds: EMPTY_TAKES,
     lane: "",
   }
 
@@ -245,6 +260,12 @@ export class CellStore {
   private derivedVersion = 0
   private writeSeq = 0
   private maxServerSeq: number | null = null
+  /** AQU-943: the project incarnation `maxServerSeq` was minted against. A
+   *  wipe + re-migration under the same deterministic ids restarts the seq
+   *  allocator, which inverts the cursor and makes every delta answer
+   *  "nothing newer". Echoed as `?epoch=` so the server can spot that; null ⇒
+   *  the cursor is unverifiable and the delta path is skipped. */
+  private projectEpoch: number | null = null
   private navIndex: CellNavigationEntry[] = []
   private fileProgressSnapshot: FileProgressResponse | null = null
   private sectionLabelById = new Map<string, string>()
@@ -256,13 +277,39 @@ export class CellStore {
   }>()
   private derivedCache: DerivedCache = { baseVersion: -1, summaries: [], textPairs: [] }
 
+  /**
+   * AQU-646: which cells carry a recording of their own.
+   *
+   * Separate from `setRuntime` because audio is not part of the cell
+   * projection — it is fetched by `useFileAudioAttachments`, which resolves
+   * after the store is constructed. Changing it re-derives every affected
+   * cell's status, so it bumps and emits exactly the cells whose membership
+   * changed, keeping the version/emit pairing the audit-stats path documents
+   * above.
+   */
+  setOwnTakeCellIds(ids: ReadonlySet<string>): void {
+    const prev = this.ctx.ownTakeCellIds ?? EMPTY_TAKES
+    if (prev === ids) return
+    const changed = new Set<string>()
+    for (const id of ids) if (!prev.has(id)) changed.add(id)
+    for (const id of prev) if (!ids.has(id)) changed.add(id)
+    this.ctx = { ...this.ctx, ownTakeCellIds: ids }
+    if (changed.size === 0) return
+    this.bumpCells(changed)
+    this.fileVersion++
+    this.rebuildDerivedIndexes()
+    this.emit(changed)
+  }
+
   setRuntime(next: RuntimeContext): void {
     const prevStats = this.ctx.auditStats
     const nextLane = next.lane ?? ""
     const statsChanged = prevStats !== next.auditStats
     const userChanged = this.ctx.username !== next.username || this.ctx.requiredValidations !== next.requiredValidations
     const laneChanged = (this.ctx.lane ?? "") !== nextLane
-    this.ctx = { ...next, lane: nextLane }
+    // AQU-646: the take set arrives from the attachment hook via its own
+    // setter, not from these options, so a runtime update must not blank it.
+    this.ctx = { ...next, lane: nextLane, ownTakeCellIds: next.ownTakeCellIds ?? this.ctx.ownTakeCellIds }
     if (laneChanged) {
       // AQU-538: re-partition the already-loaded rows against the new active
       // lane. `toRows()` retains every lane's rows, so switching lane re-derives
@@ -318,6 +365,7 @@ export class CellStore {
     this.freshnessFloors = new Map()
     this.cellVersionById = new Map()
     this.maxServerSeq = null
+    this.projectEpoch = null
     this.writeSeq = 0
     this.footnoteCache = new Map()
     this.rebuildDerivedIndexes()
@@ -356,6 +404,10 @@ export class CellStore {
   getProjectId = (): string | null => this.ctx.projectId
   getCellCount = (): number => this.order.length
   getMaxServerSeq = (): number | null => this.maxServerSeq
+  getProjectEpoch = (): number | null => this.projectEpoch
+  setProjectEpoch(epoch: number | null): void {
+    this.projectEpoch = epoch
+  }
   setMaxServerSeq(seq: number | null): void {
     this.maxServerSeq = seq
     if (this.fileProgressSnapshot) {
@@ -467,7 +519,41 @@ export class CellStore {
       this.ctx.auditStats.get(cellId),
     )
     this.applyContentOverlays(cell)
+    this.applyOwnTake(cell)
     return cell
+  }
+
+  /**
+   * AQU-646: a line whose only target content is a recording.
+   *
+   * ONE place, deliberately. `deriveStatus` is left alone — it takes only
+   * (text, validated) and is called from a dozen contexts, several of which
+   * genuinely mean "has text" (few-shot corpora, terminology checks, batch
+   * synthesis). Flipping it there would have quietly changed all of them.
+   * Flipping the assembled VIEW instead carries the change to exactly the
+   * things that ask "is this line done": the status bar, file progress,
+   * validation status, the health cache key (status is part of it), and the
+   * rule engine's empty-target short-circuit.
+   *
+   * `hasOwnTake` rides along so consumers that need the distinction — the
+   * empty-target check, which must not fire on a deliberately silent line —
+   * can see WHY the status is what it is.
+   */
+  private applyOwnTake(cell: CellData): void {
+    if (!this.ctx.ownTakeCellIds?.has(cell.id)) return
+    cell.hasOwnTake = true
+    if (cell.status !== "empty") return
+    // Read the row, not the view: `deriveStatus` answers "empty" for a target
+    // row with no text even when it IS validated, which is exactly the row an
+    // empty commit plus a validation produces.
+    const validated = this.targetById.get(cell.id)?.validated ?? false
+    cell.status = validated ? "validated" : "unvalidated"
+    cell.validationStatus = deriveValidationStatus(
+      cell.status,
+      cell.activeValidators,
+      this.ctx.username,
+      this.ctx.requiredValidations,
+    )
   }
 
   getCellDetailsSummary(cellId: string): CellDetailsSummary | null {
@@ -565,7 +651,64 @@ export class CellStore {
       sequenceIndex: view.sequenceIndex,
       medium: view.medium,
       selectedGeneratedVoiceAudioId: view.selectedGeneratedVoiceAudioId,
+      hasOwnTake: view.hasOwnTake,
     }
+  }
+
+  /**
+   * AQU-646: everything removing a line needs — its own source-side chain head,
+   * the cell it is anchored to, and the row anchored TO it, whose anchor has to
+   * be re-pointed or `walkAnchorChain` appends it at the tail of the file and a
+   * delete silently reorders the document.
+   *
+   * Reads `sourceById` because `CellData` carries neither field.
+   */
+  getRemovalPlan(cellId: string): {
+    eventId: string
+    anchorCellId: string | null
+    successor: { cellId: string; eventId: string } | null
+    /** The target-side rows to take with it, per language lane. */
+    targetLangs: string[]
+  } | null {
+    const source = this.sourceById.get(cellId)
+    if (!source) return null
+    let successor: { cellId: string; eventId: string } | null = null
+    for (const [id, row] of this.sourceById) {
+      if (row.anchorCellId === cellId) {
+        successor = { cellId: id, eventId: row.eventId }
+        break
+      }
+    }
+    const targetLangs: string[] = []
+    const own = this.targetById.get(cellId)
+    if (own) targetLangs.push(own.targetLang ?? "")
+    for (const row of this.otherLaneTargetRows) {
+      if (row.cellId === cellId) targetLangs.push(row.targetLang ?? "")
+    }
+    return { eventId: source.eventId, anchorCellId: source.anchorCellId, successor, targetLangs }
+  }
+
+  /**
+   * The row that starts the file's anchor chain — the one with no cell before
+   * it. AQU-646 round 8: inserting a line BEFORE the first cue would otherwise
+   * give the file two of these, and walkAnchorChain buckets both under the same
+   * null key and breaks the tie by event id. A fresh uuidv7 always sorts last,
+   * so the whole original chain got emitted first and the new line landed at the
+   * TAIL of store order while display order correctly put it first — the two
+   * diverging as far as they possibly can, on a file with a thousand rows.
+   *
+   * The caller re-points the old head onto the new line, so the invariant holds:
+   * exactly one source row has a null anchor.
+   *
+   * Walks `order` rather than the map so the answer is the FIRST such row in the
+   * order the store already resolved, not whichever the map happens to yield.
+   */
+  getChainHeadCellId(): { cellId: string; eventId: string } | null {
+    for (const id of this.order) {
+      const row = this.sourceById.get(id)
+      if (row && row.anchorCellId == null) return { cellId: id, eventId: row.eventId }
+    }
+    return null
   }
 
   getCommitHandle(cellId: string): CellCommitHandle | null {
@@ -1208,7 +1351,9 @@ export class CellStore {
           ?? (pending?.targetLang === activeLane ? pending.value : undefined)
           ?? target?.value
           ?? ""
-        if (targetValue.trim()) translated += 1
+        // AQU-646: a dub with no text is translated work too — same rule the
+        // status bar and file progress follow via applyOwnTake.
+        if (targetValue.trim() || this.ctx.ownTakeCellIds?.has(cellId)) translated += 1
         if (target?.validated) validated += 1
       }
       return { translated, validated, total: cellIds.length }
@@ -1369,10 +1514,12 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       if (generationRef.current !== gen) return
       if (cached && cached.rows.length > 0) {
         store.replaceRows(cached.rows, { full: true, maxServerSeq: cached.maxServerSeq ?? null })
+        store.setProjectEpoch(cached.projectEpoch ?? null)
         setIsLoading(false)
         usedCache = true
       } else {
         store.setMaxServerSeq(null)
+        store.setProjectEpoch(null)
         setIsLoading(true)
       }
     }
@@ -1401,22 +1548,31 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       tokenAttemptsRef.current = 0
 
       const since = store.getMaxServerSeq()
-      if (since !== null) {
+      // AQU-943: a cursor whose incarnation is unknown (cache entry written
+      // before the epoch existed) cannot be validated against a wipe + re-
+      // create, so it is not trusted — one full stream re-mints both.
+      const epoch = store.getProjectEpoch()
+      if (since !== null && epoch !== null) {
         const deltaStartSeq = store.getWriteSeq()
-        const result = await fetchCellsDelta(pid, fid, since, token)
+        const result = await fetchCellsDelta(pid, fid, since, token, undefined, epoch)
         if (generationRef.current !== gen) return
         if (result.kind === "delta") {
           let nextWatermark = result.maxServerSeq
+          // The server answered with a delta rather than a resync, so it
+          // confirmed the cursor's incarnation; pre-AQU-943 servers report
+          // none — hold the epoch we already had.
+          const nextEpoch = result.projectEpoch ?? epoch
+          store.setProjectEpoch(nextEpoch)
           if (result.changedCellIds.length > 0) {
             store.clearConfirmedShadows(result.cells, deltaStartSeq)
             const merged = mergeCellsDelta(store.toRows(), result.changedCellIds, result.cells)
             const { rows: kept, discardedCellIds } = store.mergeProtectedRows(merged, deltaStartSeq)
             store.replaceRows(kept, { changedCellIds: result.changedCellIds, maxServerSeq: discardedCellIds.size > 0 ? since : nextWatermark })
             if (discardedCellIds.size > 0) nextWatermark = since
-            void writeCellsCache(pid, fid, store.toRows(), nextWatermark)
+            void writeCellsCache(pid, fid, store.toRows(), nextWatermark, nextEpoch ?? undefined)
           } else if (result.maxServerSeq !== since) {
             store.setMaxServerSeq(result.maxServerSeq)
-            void writeCellsCache(pid, fid, store.toRows(), result.maxServerSeq)
+            void writeCellsCache(pid, fid, store.toRows(), result.maxServerSeq, nextEpoch ?? undefined)
           }
           setIsLoading(false)
           return
@@ -1442,16 +1598,20 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
 
       const startSeq = store.getWriteSeq()
       let streamMaxSeq: number | null = null
+      // AQU-943: incarnation of `streamMaxSeq`, taken from the same first page
+      // so cursor and epoch always describe the same snapshot.
+      let streamEpoch: number | null = null
       let streamTorn = false
       let cursorSeen = false
       const trackStreamMeta = () => {
         let sideFirst: number | null = null
         let sideSeen = false
-        return (meta: { maxServerSeq?: number | null }) => {
+        return (meta: { maxServerSeq?: number | null; projectEpoch?: number | null }) => {
           const value = typeof meta.maxServerSeq === "number" ? meta.maxServerSeq : null
           if (!cursorSeen) {
             cursorSeen = true
             streamMaxSeq = value
+            streamEpoch = typeof meta.projectEpoch === "number" ? meta.projectEpoch : null
           }
           if (!sideSeen) {
             sideSeen = true
@@ -1478,8 +1638,10 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       }
 
       const watermark = streamTorn || discardedProtected ? null : streamMaxSeq
+      const watermarkEpoch = watermark === null ? null : streamEpoch
       store.setMaxServerSeq(watermark)
-      void writeCellsCache(pid, fid, store.toRows(), watermark ?? undefined)
+      store.setProjectEpoch(watermarkEpoch)
+      void writeCellsCache(pid, fid, store.toRows(), watermark ?? undefined, watermarkEpoch ?? undefined)
       setIsLoading(false)
     } catch (err) {
       if (generationRef.current !== gen) return
@@ -1598,7 +1760,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     const pid = projectRef.current
     const fid = fileRef.current
     if (!pid || !fid) return
-    void writeCellsCache(pid, fid, store.toRows(), maxServerSeq ?? store.getMaxServerSeq() ?? undefined)
+    void writeCellsCache(
+      pid,
+      fid,
+      store.toRows(),
+      maxServerSeq ?? store.getMaxServerSeq() ?? undefined,
+      store.getProjectEpoch() ?? undefined,
+    )
   }, [store])
 
   const revalidateCellRef = useRef<(cellId: string) => void>(() => {})

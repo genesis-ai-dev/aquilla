@@ -65,14 +65,38 @@ spot, both deferred rather than mixed into the single-theme budget.
   `CellAudioButton.tsx` uses the icon and tooltip lookups from PR #391. Their exported
   signatures and fallback values remain unchanged.
 
-- **`src/lib/text/word-diff.ts`** (~lines 32–56) — remaining type-tightening spot: ~14
-  dense non-null assertions (`text[i]!`-style) inside a tight DP loop, same "loop
-  condition already bounds the index" story as the ones fixed in
-  `src/lib/biblica/sentence-cuts.ts`. Friction: the density of assertions in one tight
-  loop raises the risk of a transcription typo during a bulk edit for a line-count-only
-  benefit; wants a dedicated, careful pass rather than being bundled with other fixes.
-  Proof needed: `pnpm build` clean (confirms TS still infers the narrower type without
-  the assertions) plus `pnpm test` green, no test files touched.
+- **`src/lib/text/word-diff.ts`** — done in the 2026-08-24 run: all 14 non-null
+  assertions in the LCS DP loop removed (TS already infers the narrower type without
+  `noUncheckedIndexedAccess`). `pnpm test src/lib/text/word-diff.test.ts` green
+  (4/4), `pnpm test` full-suite failure list byte-identical to baseline (8 files / 10
+  tests, all pre-existing), `pnpm lint` problem count unchanged (782, both runs
+  measured twice to rule out cache noise), no test file touched.
+
+## 2026-08-24 — fresh `!`-assertion grep, more spots than fit one run's budget
+
+A repo-wide `grep -rEn "\w+\[[a-zA-Z0-9_+ ]+\]!" src` (excluding `*.test.ts`) after the
+`word-diff.ts` pass above still turns up ~29 more array-index non-null-assertion sites,
+same "redundant because there's no `noUncheckedIndexedAccess`" story (confirmed:
+`tsconfig.app.json` has `strict: true` but not `noUncheckedIndexedAccess`, so plain
+`arr[i]` already types as non-optional and the `!` is a no-op erased at compile time —
+safe to drop without changing runtime behavior). Not attempted this run to keep the
+diff to one dedicated, carefully-checked file per the queued candidate's own caution
+about bulk-edit transcription risk in dense assertion clusters. Grouped by file for a
+future pass (verify each still applies — code moves):
+  - `src/lib/import/milestones.ts` (7 sites: lines ~144, 173, 217, 219, 270×2, 328, 417)
+    — the densest cluster, same shape as word-diff.ts, good next candidate.
+  - `src/lib/milestone-navigation.ts` (5 sites: ~85, 86, 110, 114, 126)
+  - `src/lib/biblica/treasure-hunt/notes.ts:173`, `note-rules.ts` (~179, 205),
+    `reach4life/notes.ts:153`
+  - `src/lib/idml/completion.ts` (~334, 466), `src/lib/migrate/idml.ts` (~336, 417),
+    `src/lib/migrate/map.ts:245`
+  - `src/lib/export/exporters/vtt.ts` (~209, 210, 243), `src/lib/export/audio-bwf.ts:85`,
+    `src/lib/export/audio-by-character.ts:326`, `src/lib/audio/whisper-worker.ts:186`
+  - `src/hooks/useActiveCellStore.ts:1366`, `src/components/MultiProjectInviteDialog.tsx:126`,
+    `src/lib/import/normalized-manifest.ts:471`
+- **Proof needed when revisited**: same as this run — isolate with `npx tsc --noEmit -p
+  tsconfig.app.json` scoped to the touched file(s) plus full `pnpm test`/`pnpm lint`
+  byte-identical-failure-list comparison; no test files touched.
 
 ## `src/hooks/useSubscribedConcepts.ts` — looks dead, is not
 

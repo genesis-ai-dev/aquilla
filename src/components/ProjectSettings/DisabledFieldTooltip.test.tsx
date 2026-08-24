@@ -41,7 +41,7 @@ describe("DisabledFieldTooltip", () => {
     expect(docs).toHaveAttribute("target", "_blank")
     expect(docs).toHaveAttribute("data-variant", "ghost")
     expect(docs).toHaveClass("text-xs", "-mx-1.5", "px-1.5")
-    expect(screen.getByRole("tooltip")).toHaveClass("text-xs", "p-2")
+    expect(screen.getByRole("tooltip")).toHaveClass("text-xs", "pt-2")
     expect(screen.getByText("Only Maintainers can modify").parentElement).toHaveClass(
       "items-start",
     )

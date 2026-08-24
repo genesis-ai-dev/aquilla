@@ -320,8 +320,10 @@ function parseVtt(file: string, prefix: string): LinkableCue[] {
 
 describe.skipIf(!haveSamples)("against The Chosen episode 101", () => {
   const NTSC = 24 / (24000 / 1001)
-  const textCells = parseVtt(TEXT_VTT, "s")
-  const audioCues = parseVtt(AUDIO_VTT, "c").map((c) => ({
+  // skipIf still runs this callback to collect the tests, so nothing here may
+  // touch the disk when the samples are absent.
+  const textCells = haveSamples ? parseVtt(TEXT_VTT, "s") : []
+  const audioCues = (haveSamples ? parseVtt(AUDIO_VTT, "c") : []).map((c) => ({
     ...c,
     startTime: applyTimebaseScale(c.startTime!, NTSC),
     endTime: applyTimebaseScale(c.endTime!, NTSC),

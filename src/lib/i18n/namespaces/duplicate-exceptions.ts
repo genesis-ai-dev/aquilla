@@ -777,9 +777,9 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "run-timeline chip (AgentRunView), sibling of the equally terse 'sql'/'docs'/" +
     "'read'/'examples'/'search' tool-kind labels on identical chips — the same class " +
     "of split already documented for agent.run.tool.search just below. " +
-    "autopilot.inspector.review.draftTitle is a capitalized panel/section TITLE " +
-    "heading a single AI-drafted cell proposal in the Autopilot review inspector. A " +
-    "lower-case technical chip label and a capitalized section heading take " +
+    "autopilot.graph.node.draft is the capitalized caption of the drafting STAGE " +
+    "in the Autopilot pipeline graph (and the review inspector's card title). A " +
+    "lower-case technical chip label and a capitalized stage caption take " +
     "different forms in most languages.",
   "agent.run.tool.search":
     "Lower-case, font-mono technical label naming which TOOL the agent called in one " +
@@ -828,10 +828,10 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
   "terminology.livingMemory.section.brief.statusDraft":
     "Hint on the Living Memory index saying the brief document is partially " +
     "filled in — a document maturity state ('a draft'). " +
-    "autopilot.inspector.review.draftTitle and autopilot.graph.node.draft label " +
-    "the autopilot DRAFTING step and its produced draft translations — the " +
-    "activity of machine-drafting text, a different sense languages split from " +
-    "'unfinished document'.",
+    "autopilot.graph.node.draft labels the autopilot DRAFTING step and its " +
+    "produced draft translations (the pipeline-graph caption and the review " +
+    "inspector's card title) — the activity of machine-drafting text, a " +
+    "different sense languages split from 'unfinished document'.",
   "terminology.livingMemory.section.brief.statusComplete":
     "Hint on the Living Memory index saying every brief field is filled in — " +
     "'complete' as document completeness. autopilot.status.complete is the " +

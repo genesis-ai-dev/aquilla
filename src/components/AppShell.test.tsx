@@ -128,6 +128,25 @@ describe("AppShell main-content error containment", () => {
     expect(container.querySelector('[data-slot="app-shell-header"]')).toHaveClass("h-[52px]", "min-h-[52px]", "items-center")
   })
 
+  it("stacks sidebar chrome in a 40px column when the dock rail is collapsed", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <AppShell
+          header={<div>header</div>}
+          statusBar={null}
+          leftDock={<div data-testid="left-dock">dock</div>}
+          logoSlot={<span>logo</span>}
+          railCollapsed
+          main={<div>main</div>}
+        />
+      </MemoryRouter>,
+    )
+
+    const chrome = container.querySelector('[data-slot="app-shell-sidebar-chrome"]')
+    expect(chrome).toHaveClass("flex-col", "w-10")
+    expect(chrome).not.toHaveClass("px-2")
+  })
+
   it("sits the floating content card flush under the header (no top margin)", () => {
     const { container } = render(
       <MemoryRouter>
@@ -245,7 +264,7 @@ describe("AppShell main-content error containment", () => {
   })
 })
 
-describe("AppShell mobile org sidebar sheet", () => {
+describe("AppShell mobile sidebar sheet", () => {
   afterEach(() => {
     window.matchMedia = originalMatchMedia
   })
@@ -278,7 +297,7 @@ describe("AppShell mobile org sidebar sheet", () => {
     expect(sheet.querySelector('[data-testid="sidebar"]')).toHaveTextContent("sidebar")
   })
 
-  it("does not move the editor leftDock into a sheet on small viewports", () => {
+  it("opens the editor leftDock in a left sheet from a PanelLeft control beside the header", async () => {
     stubLgUp(false)
     render(
       <MemoryRouter>
@@ -286,11 +305,25 @@ describe("AppShell mobile org sidebar sheet", () => {
           header={<div data-testid="header">header</div>}
           statusBar={null}
           leftDock={<div data-testid="left-dock">dock</div>}
+          logoSlot={<span>logo</span>}
+          logoAccessory={<button type="button">Collapse sidebar</button>}
+          railCollapsed
           main={<div data-testid="content">content</div>}
         />
       </MemoryRouter>,
     )
-    expect(screen.getByTestId("left-dock")).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: "Open sidebar" })).not.toBeInTheDocument()
+
+    const trigger = screen.getByRole("button", { name: "Open sidebar" })
+    expect(trigger).toBeInTheDocument()
+    expect(screen.queryByTestId("left-dock")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Collapse sidebar" })).not.toBeInTheDocument()
+
+    await userEvent.click(trigger)
+    const sheet = await screen.findByRole("dialog", { name: "Navigation" })
+    expect(sheet.querySelector('[data-testid="left-dock"]')).toHaveTextContent("dock")
+    const chrome = sheet.querySelector('[data-slot="app-shell-sidebar-chrome"]')
+    expect(chrome).not.toHaveClass("w-10", "flex-col")
+    expect(sheet.querySelector('[data-testid="left-dock"]')).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Collapse sidebar" })).not.toBeInTheDocument()
   })
 })

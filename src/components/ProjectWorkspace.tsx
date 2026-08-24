@@ -843,8 +843,6 @@ export function ProjectWorkspace() {
         : next
     ))
   }, [])
-  const [editorHeaderNavTarget, setEditorHeaderNavTarget] = useState<HTMLDivElement | null>(null)
-
   const editorReturnPath = useMemo(() => {
     if (!projectId) return null
     if (centerSurface === "editor") return workspaceReturnPath(projectId, activeFileId)
@@ -939,12 +937,15 @@ export function ProjectWorkspace() {
   useEffect(() => {
     writeAgentTabOpen(projectId, agentTabOpen)
   }, [projectId, agentTabOpen])
-  const openAgentTab = useCallback(() => {
+  const [agentExpandedFromDock, setAgentExpandedFromDock] = useState(false)
+  const openAgentTab = useCallback((origin?: "sidebar" | "editor") => {
+    if (origin) setAgentExpandedFromDock(origin === "sidebar")
     setAgentTabOpen(true)
     openOverlay("agent")
   }, [openOverlay])
   const closeAgentTab = useCallback(() => {
     setAgentTabOpen(false)
+    setAgentExpandedFromDock(false)
     if (centerSurface === "agent" && projectId) {
       navigate(editorReturnPath ?? `/project/${projectId}/editor`)
     }
@@ -955,7 +956,7 @@ export function ProjectWorkspace() {
   const [pendingChip, setPendingChip] = useState<ContextChip | null>(null)
   const handleAskAiFromSelection = useCallback((chip: ContextChip) => {
     setPendingChip(chip)
-    openAgentTab()
+    openAgentTab("editor")
   }, [openAgentTab])
   // FRO-309: expanded search results overlay in the main area
   const [searchExpandedQuery, setSearchExpandedQuery] = useState<string | null>(null)
@@ -8667,7 +8668,7 @@ export function ProjectWorkspace() {
         switchLens(l)
         if (l === "audio") setDockTab("voices")
       }}
-      onAgentSelect={openAgentTab}
+      onAgentSelect={() => openAgentTab("editor")}
       timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
       checkOpen={checkOpen}
       checkRunning={checkRunning}
@@ -8897,7 +8898,7 @@ export function ProjectWorkspace() {
                 pendingChip={pendingChip}
                 onPendingChipConsumed={() => setPendingChip(null)}
                 credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
-                onExpand={openAgentTab}
+                onExpand={() => openAgentTab("sidebar")}
                 expanded={centerSurface === "agent"}
               />
             }
@@ -8942,13 +8943,6 @@ export function ProjectWorkspace() {
             surfaceLabel={workspaceBreadcrumb.surfaceLabel}
             editorHref={workspaceBreadcrumb.editorHref}
           >
-            {centerSurface === "editor" && activeFileId ? (
-              <div
-                ref={setEditorHeaderNavTarget}
-                className="flex min-w-0 max-w-[min(58vw,52rem)] items-center"
-                data-editor-header-navigation=""
-              />
-            ) : null}
             {/* AQU-615: Door43 upstream-sync badge — visible hint that source
                 cells are managed by a DCS link. Self-gated: renders nothing
                 when project_settings has no dcsUpstream cursor. */}
@@ -8959,9 +8953,9 @@ export function ProjectWorkspace() {
                 onClick={openProjectSettings}
               />
             )}
-
             {/* AQU-661: file-scoped actions live in the chapter-row File options
-                menu; Import is a header button. */}
+                menu; Import + Settings stay as header buttons on this
+                breadcrumb row. */}
           </WorkspaceHeader>
         }
         aboveCard={
@@ -9228,7 +9222,17 @@ export function ProjectWorkspace() {
             }}
             credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
             onClose={closeAgentTab}
+            onCollapse={agentExpandedFromDock ? closeAgentTab : undefined}
             onChooseFile={() => setDockTab("files")}
+            editorMode={{
+              lens,
+              timeOrdered: activeFile ? fileOrderedBy(activeFile) === "time" : false,
+              onLensChange: (next) => {
+                switchLens(next)
+                if (next === "audio") setDockTab("voices")
+                closeAgentTab()
+              },
+            }}
             onJumpToCell={(fileId, cellId) =>
               navigate(`/project/${projectId}/editor/file/${fileId}?cellId=${encodeURIComponent(cellId)}`)
             }
@@ -9572,9 +9576,9 @@ export function ProjectWorkspace() {
             onVisibleRefChange={setTrackedCellRef}
             onVisibleCellIdsChange={handleVisibleCellIdsChange}
             // Stacked mode already shows the toolbar in the media header row
-            // above the timeline — don't render it twice.
+            // above the timeline — don't render it twice. Chapter picker +
+            // file options live in the in-editor row above Source/Target.
             chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
-            chapterNavPortalTarget={editorHeaderNavTarget}
           />
               </div>
               </div>

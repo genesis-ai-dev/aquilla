@@ -33,6 +33,28 @@ describe("FileChapterToolbar translate as read", () => {
     expect(onAgentSelect).toHaveBeenCalledOnce()
   })
 
+  it("selects Agent when the workbench is showing and returns to Text on click", async () => {
+    const onLensChange = vi.fn()
+    render(
+      <FileChapterToolbar
+        lens="text"
+        onLensChange={onLensChange}
+        onAgentSelect={vi.fn()}
+        agentActive
+        checkOpen={false}
+        checkRunning={false}
+        checkResult={null}
+        onCheckToggle={vi.fn()}
+        menuItems={[]}
+      />,
+    )
+
+    expect(screen.getByRole("tab", { name: "Agent" })).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByRole("tab", { name: "Text" })).toHaveAttribute("aria-selected", "false")
+    await userEvent.click(screen.getByRole("tab", { name: "Text" }))
+    expect(onLensChange).toHaveBeenCalledWith("text")
+  })
+
   it("keeps mode labels in quick tooltips instead of visible text", async () => {
     render(
       <FileChapterToolbar

@@ -9,6 +9,7 @@ interface FileChapterToolbarProps {
   lens: EditorLens
   onLensChange: (lens: EditorLens) => void
   onAgentSelect?: () => void
+  agentActive?: boolean
   timeOrdered?: boolean
   checkOpen: boolean
   checkRunning: boolean
@@ -28,6 +29,7 @@ export function FileChapterToolbar({
   lens,
   onLensChange,
   onAgentSelect,
+  agentActive = false,
   timeOrdered = false,
   checkOpen,
   checkRunning,
@@ -104,6 +106,7 @@ export function FileChapterToolbar({
           lens={lens}
           onChange={onLensChange}
           onAgentSelect={onAgentSelect}
+          agentActive={agentActive}
           timeOrdered={timeOrdered}
         />
         <OverflowMenu

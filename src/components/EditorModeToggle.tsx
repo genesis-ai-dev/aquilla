@@ -21,6 +21,9 @@ interface Props {
   /** Open the full Agent workbench. Agent is a destination rather than a
    * persisted editor lens, so selecting it delegates navigation to the shell. */
   onAgentSelect?: () => void
+  /** When the Agent workbench is showing, select the Agent tab so Text/Audio
+   *  remain one click away. */
+  agentActive?: boolean
   /** Timeline-segment-model: when true the active file is time-ordered, so the
    *  second lens selects the MEDIA layer (separate media segments) rather than
    *  audio-attachments on the same text cells. Relabels "Audio" → "Media". */
@@ -31,6 +34,7 @@ export function EditorModeToggle({
   lens,
   onChange,
   onAgentSelect,
+  agentActive = false,
   timeOrdered = false,
 }: Props) {
   const t = useT()
@@ -44,7 +48,7 @@ export function EditorModeToggle({
   const SecondIcon = timeOrdered ? AudioWaveform : Mic2
   return (
     <Tabs
-      value={lens}
+      value={agentActive ? "agent" : lens}
       onValueChange={(value) => {
         if (value === "agent") {
           onAgentSelect?.()
@@ -65,7 +69,7 @@ export function EditorModeToggle({
             <SecondIcon />
           </TabsTrigger>
         </AppTooltip>
-        {onAgentSelect ? (
+        {(onAgentSelect || agentActive) ? (
           <AppTooltip content={t("nav.dock.agentTab")} side="bottom" delay={150}>
             <TabsTrigger value="agent" aria-label={t("nav.dock.agentTab")}>
               <Bot />

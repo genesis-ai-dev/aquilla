@@ -23,7 +23,7 @@ export function OrgSettingsIndex() {
   return (
     <OrgSettingsShell header={<OrgBreadcrumb section="Settings" />}>
       <PageHeader
-        title={t("billing.settings.title")}
+        title={t("editor.navTitle.organizationSettings")}
         description={
           <RichMessage
             k="settings.orgSettingsIndex.description"
@@ -38,7 +38,7 @@ export function OrgSettingsIndex() {
         }
       />
       <div className="flex flex-col gap-12">
-        <NavList label={t("billing.settings.organization")}>
+        <NavList label={t("onboarding.apiTokens.orgLabel")}>
           <NavRow to={orgSettingsPath(activeOrgId, "identity")} icon={Building2} title={t("settings.orgSettingsIndex.navIdentity")} hint={activeOrg?.name ?? "Untitled"} />
           <NavRow to={orgSettingsPath(activeOrgId, "security")} icon={Shield} title={t("settings.orgSettingsIndex.navSecurity")} hint="Visibility & permissions" />
           <NavRow to={orgSettingsPath(activeOrgId, "billing")} icon={CreditCard} title={t("billing.settings.billing")} hint="Field Plan" />

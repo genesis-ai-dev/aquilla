@@ -416,10 +416,12 @@ function parseVtt(file: string): LinkableCue[] {
 
 describe.skipIf(!haveSamples)("against The Chosen episode 101", () => {
   const NTSC = 24 / (24000 / 1001)
-  const texts = parseVtt(TEXT_VTT)
+  // skipIf still runs this callback to collect the tests, so nothing here may
+  // touch the disk when the samples are absent.
+  const texts = haveSamples ? parseVtt(TEXT_VTT) : []
   // The audio VTT ships at 24fps against a 23.976 master; the importer corrects
   // it, so the linker sees corrected cues and this must too.
-  const cues = parseVtt(AUDIO_VTT).map((c) => ({
+  const cues = (haveSamples ? parseVtt(AUDIO_VTT) : []).map((c) => ({
     ...c,
     startTime: applyTimebaseScale(c.startTime!, NTSC),
     endTime: applyTimebaseScale(c.endTime!, NTSC),

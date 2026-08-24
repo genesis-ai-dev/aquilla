@@ -614,7 +614,7 @@ function ReviewDraft({
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle>{cellTitle ?? t("autopilot.inspector.review.draftTitle")}</CardTitle>
+        <CardTitle>{cellTitle ?? t("autopilot.graph.node.draft")}</CardTitle>
         {passage && (
           <CardDescription>{t("autopilot.draft.draftedFrom", { spanLabel: passage })}</CardDescription>
         )}

@@ -4,8 +4,15 @@
  * The set of locales the UI can switch to, plus their writing direction. English
  * is the base/source locale; every other catalog falls back to it per key (see
  * `translate.ts`). Directions follow the ticket: only Arabic is RTL for now;
- * Thai/Burmese/Patani-Malay render LTR. Add a locale here + a catalog in
- * `messages/index.ts` to make it selectable.
+ * Thai/Burmese/Patani-Malay/Traditional-Chinese render LTR. Add a locale here +
+ * a catalog in `messages/index.ts` to make it selectable.
+ *
+ * `zh-Hant` (AQU-976) is the first entry whose code carries a script subtag, and
+ * `normalizeLocale()` matches on the primary subtag — so a browser preferring
+ * Simplified Chinese (`zh-CN` / `zh-Hans`) also lands on the Traditional
+ * Chinese UI. That is accepted behaviour while zh-Hant is the only Chinese
+ * locale: a Chinese UI is closer than English. Adding a `zh-Hans` catalog later
+ * makes the exact-match branch pick the right one with no code change here.
  */
 
 export type Direction = "ltr" | "rtl"
@@ -27,6 +34,7 @@ export const LOCALES: readonly LocaleMeta[] = [
   { code: "my", englishName: "Burmese", nativeName: "မြန်မာ", dir: "ltr" },
   { code: "mfa", englishName: "Patani Malay", nativeName: "Bahasa Melayu Patani", dir: "ltr" },
   { code: "ar", englishName: "Arabic", nativeName: "العربية", dir: "rtl" },
+  { code: "zh-Hant", englishName: "Traditional Chinese", nativeName: "繁體中文", dir: "ltr" },
 ] as const
 
 export const DEFAULT_LOCALE = "en"

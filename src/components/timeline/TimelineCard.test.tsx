@@ -38,7 +38,29 @@ describe("TimelineCard", () => {
     const onSelect = vi.fn()
     render(<TimelineCard cell={cell()} {...base} onSelect={onSelect} onRetime={() => {}} />)
     fireEvent.click(screen.getByTestId("tl-card-c1"))
+    // AQU-928: a PLAIN click reports no modifiers — it stays the one-argument
+    // call it always was, so mods-unaware handlers (and spies) see no change.
     expect(onSelect).toHaveBeenCalledWith("c1")
+  })
+
+  // AQU-928: a modified click is a selection-building gesture, so it must not
+  // also drag the playhead to the clip.
+  it("reports the modifier and suppresses the seek on a ⌘/Ctrl-click", () => {
+    const onSeek = vi.fn()
+    const onSelect = vi.fn()
+    render(<TimelineCard cell={cell()} {...base} onSelect={onSelect} onRetime={() => {}} onSeek={onSeek} />)
+    fireEvent.click(screen.getByTestId("tl-card-c1"), { metaKey: true })
+    expect(onSelect).toHaveBeenCalledWith("c1", { toggle: true })
+    expect(onSeek).not.toHaveBeenCalled()
+  })
+
+  it("reports a range on a Shift-click, and still does not seek", () => {
+    const onSeek = vi.fn()
+    const onSelect = vi.fn()
+    render(<TimelineCard cell={cell()} {...base} onSelect={onSelect} onRetime={() => {}} onSeek={onSeek} />)
+    fireEvent.click(screen.getByTestId("tl-card-c1"), { shiftKey: true })
+    expect(onSelect).toHaveBeenCalledWith("c1", { range: true })
+    expect(onSeek).not.toHaveBeenCalled()
   })
 
   it("emits moved bounds after dragging the body (subtitle lane)", () => {

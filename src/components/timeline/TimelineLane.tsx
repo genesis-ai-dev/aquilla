@@ -19,6 +19,7 @@ import { TimelineSlotButton } from "./TimelineSlotButton"
 import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
 import { subtitleSpanSec } from "@/lib/timeline/lane-timing"
 import { TimelineCard } from "./TimelineCard"
+import type { SelectMods } from "./selection"
 import { CueLinkOverlay, type LaneLinkOverlay } from "./CueLinkOverlay"
 import type { TimelineLayout } from "@/lib/timeline/layout"
 import type { CellData } from "@/hooks/useCells"
@@ -38,6 +39,8 @@ export interface TimelineLaneProps {
   viewStartSec: number
   viewEndSec: number
   selectedId: string | null
+  /** AQU-928: the rest of the section selection (batch scope), primary aside. */
+  multiSelectedIds?: ReadonlySet<string>
   editable: boolean
   /** Round 6: whether cards in this lane may be retimed at all. */
   retimable: boolean
@@ -51,7 +54,7 @@ export interface TimelineLaneProps {
    *  default — SUB-36's media-subtitle card is deliberately free to sit
    *  anywhere, and an always-on bound would silently cage it. */
   boundNeighbours?: boolean
-  onSelect(id: string): void
+  onSelect(id: string, mods?: SelectMods): void
   onRetime(id: string, startSec: number, endSec: number): void
   /** AQU-646: clean click on a card navigates playback to it. */
   onSeek?(id: string): void
@@ -76,6 +79,7 @@ export function TimelineLane({
   viewStartSec,
   viewEndSec,
   selectedId,
+  multiSelectedIds,
   editable,
   retimable,
   canRetimeCell,
@@ -219,6 +223,7 @@ export function TimelineLane({
           laneStartSec={0}
           variant={variant}
           selected={selectedId === c.id}
+          multiSelected={multiSelectedIds?.has(c.id)}
           editable={editable}
           retimable={cardRetimable}
           span={spanOf(c)}

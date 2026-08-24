@@ -326,7 +326,6 @@ export const workspace = defineNamespace({
     "workspace.denoise.revertButton": "Revert",
 
     // -- chat/ChatComposer (Send reuses autopilot.steering.send, Stop reuses common.stop) --
-    "workspace.chatComposer.keyboardHint": "Enter to send · Shift+Enter for newline",
     "workspace.chatComposer.queueTooltip": "Queue — sends when the current run finishes",
     "workspace.chatComposer.queueMessage": "Queue message",
 
@@ -1416,12 +1415,6 @@ export const workspace = defineNamespace({
         description: "Button that re-selects the original recording take instead of the denoised one.",
       },
 
-      "workspace.chatComposer.keyboardHint": {
-        description:
-          "Small footer hint inside the AI chat composer explaining the " +
-          "keyboard shortcuts for sending vs inserting a newline.",
-        maxLength: 48,
-      },
       "workspace.chatComposer.queueTooltip": {
         description:
           "Tooltip on the queue button shown while a run is streaming (only " +

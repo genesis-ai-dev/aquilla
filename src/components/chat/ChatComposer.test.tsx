@@ -41,7 +41,8 @@ describe("ChatComposer (TipTap)", () => {
   it("keeps keyboard shortcuts functional without permanent help copy", () => {
     render(<ChatComposer isStreaming={false} isConfigured onSend={vi.fn()} onStop={vi.fn()} />)
     expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Shift\+Enter for newline/)).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument()
-    expect(screen.getByRole("textbox")).toHaveClass("min-h-10", "max-h-32", "overflow-y-auto")
+    expect(screen.getByRole("textbox")).toHaveClass("min-h-9", "max-h-32", "overflow-y-auto")
   })
 })

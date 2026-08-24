@@ -23,7 +23,10 @@
 > management, adding OPS-18 (login response time as a user-enumeration oracle),
 > OPS-19 (the password-reset request handler reflecting internal error text and
 > re-opening the same oracle) and OPS-20 (password-reset and email-verification
-> tokens stored in plaintext at rest).
+> tokens stored in plaintext at rest). It also records OPS-21 — the required
+> PR gate is red on `dev` and fails in the first of three sequential phases, so
+> the worker test suites and the SPA build never execute at all; reported with
+> patches rather than fixed, since none of it is auth/session work.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)

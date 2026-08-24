@@ -188,6 +188,72 @@ drive the rest of a flow (`email-verification.test.ts`,
 `activity-log-writes.test.ts`) had to be rewritten to plant a token whose hash
 they control — which is the fix demonstrating itself.
 
+### OPS-21 — The required PR check is red on `dev`, and it fails before the lanes that would run any test — **NOT FIXED, reported** [FACT]
+
+Found while verifying the three fixes above: the Workers Build that gates every
+pull request (`scripts/cloudflare-ci-checks.mjs`, AQU-564 — `ci.yml` and
+`e2e-hetzner.yml` are both `workflow_dispatch`-only, so this is the *only*
+automatic PR validation) fails on `dev` itself, and fails in a way that
+silently skips most of what it is supposed to check.
+
+`runParallelChecks` runs three **sequential** phases and throws on the first
+phase with any failing lane, so a later phase never starts:
+
+| Phase | Lanes | Status |
+|---|---|---|
+| 1 `frontend-contracts` | ROOT (`pnpm test`), **LINT**, AGENT | **fails** |
+| 2 `backend-contracts` | SYNC, RELEASE | never runs |
+| 3 `final` | **IDENTITY**, SPA | never runs |
+
+`pnpm lint` reports **399 errors, every one of them `i18n/no-unkeyed-string`**,
+across 118 files (100 in `src/components/`). Lane steps also run in sequence
+and abort on failure, so `i18n:check` — the next step in the same lane — never
+runs either. `scan:secrets` runs *first* and passes; that ordering is OPS-13's
+fix and it is holding.
+
+The consequence is the part that matters. Because phase 3 never starts, the
+**IDENTITY lane never runs** — which is `auth-worker`'s `type-check` *and* its
+full 1496-test suite, including every test added by this change. The SYNC,
+RELEASE and SPA lanes are skipped for the same reason. The gate reports
+failure, so nothing merges silently — but no PR in this window has had its
+worker suites or its SPA build actually executed.
+
+This is the OPS-13 / OPS-17 pattern for the third time in this series, and
+this time the lint-lane comment in `cloudflare-ci-checks.mjs` describes the
+present state almost verbatim: *"that is exactly what was happening on `dev` at
+the time this was written (484 eslint errors from the i18n gate), which turned
+'rides an already-required check' into 'rides a check that was already
+failing'."* Same rule, same gate, 399 errors instead of 484.
+
+**Not fixed here, deliberately.** None of the 399 errors is in a file this PR
+touches (verified: zero overlap between the 118 error files and this diff's
+10), the rule is unrelated to auth/session, and fixing it would mean touching
+100+ component files in a security change. Fixing it also would *not* turn this
+PR green on its own — see the second item below. Reported with patches rather
+than absorbed:
+
+- **The 399 `i18n/no-unkeyed-string` errors** are the blocker and belong to
+  whoever owns the i18n gate. They need either the strings keyed or the rule's
+  scope revisited — a decision, not a mechanical fix.
+- **`auth-worker` `type-check` is separately red on `dev`**: 5 × `TS18046
+  'body' is of type 'unknown'` in
+  `src/__tests__/contextual-decisions-routes.test.ts` (lines 105-108, 138),
+  reproduced against `origin/dev`'s sources with CI's own dependency set. Fix
+  is two annotations — `const body = (await res.json()) as { … }` at the two
+  `await res.json()` sites — matching how every sibling test in that file
+  already types its body. Left to the owner of that file for the same reason.
+
+**Measurement note, correcting this document's own first draft:** the
+"15 pre-existing type errors" figure originally reported here was measured with
+`auth-worker`'s deps installed via `npm ci` (its `package-lock.json`), which
+resolves `@cloudflare/workers-types` 4.20260702.1. CI installs with
+`pnpm --frozen-lockfile` (its `pnpm-lock.yaml`), which resolves 4.20260610.1
+and does not produce the `ExecutionContext<unknown>` / `tracing` mismatches.
+Under CI's actual dependency set the true figure is **5 errors, all
+pre-existing, all in the file named above** — unchanged by this PR. The two
+lockfiles in `auth-worker/` disagreeing about a types version is a smaller
+finding in its own right, and worth a look.
+
 ---
 
 ## Risk assessment
@@ -197,6 +263,7 @@ they control — which is the fix demonstrating itself.
 | OPS-18 | Login timing reveals whether an account exists | High — unauthenticated, no password needed, 20× signal, throttles don't cover it | Medium — D3 linkage feeding targeted phishing / translator identification | **High** | Fixed |
 | OPS-19 | Reset-request catch reflects internals and re-opens the enumeration oracle | Medium — reflection on any handler throw; oracle needs an induced failure | Medium — internal detail disclosure + the same D3 linkage | **Medium** | Fixed |
 | OPS-20 | Reset / verification tokens in plaintext at rest | Low — needs DB read access | High — 24h account takeover per pending reset, no trace | **Medium-High** | Fixed |
+| OPS-21 | Required PR gate red on `dev`; worker suites and SPA build never execute | Certain — reproduced at this commit | Medium — the gate fails loudly, so nothing merges unchecked, but nothing is checked either | **Medium** | Reported, not fixed (see finding) |
 
 ---
 
@@ -213,9 +280,13 @@ Every one has a test:
 to fail with the fix reverted), `password-reset.test.ts` (OPS-19's
 induced-failure test, OPS-20's digest and rollover tests),
 `email-verification.test.ts` (OPS-20 digest + rollover). Full auth-worker suite
-green: **146 files, 1496 tests**. `npx tsc --noEmit` reports the same 15
-pre-existing errors before and after this change (uninstalled sync-worker
-deps and unrelated `workers-types` drift) — none in any file touched here.
+green: **146 files, 1496 tests**. Under CI's own dependency set
+(`pnpm --frozen-lockfile`), `tsc --noEmit` reports the same **5** pre-existing
+errors before and after this change — all in
+`contextual-decisions-routes.test.ts`, none in any file touched here; see
+OPS-21 for that figure's correction and for why CI itself never reaches this
+step. `pnpm lint` reports zero errors and zero warnings in the files this
+change touches.
 
 ## Reviewed, no finding
 
@@ -259,6 +330,15 @@ deps and unrelated `workers-types` drift) — none in any file touched here.
   lookups and then the `token` columns, once 24h (resets) / 7d (verification)
   have elapsed since deploy. Steps are in the migration header; the two
   rollover tests are commented for deletion at the same time.
+- **OPS-21's two blockers** — the 399 `i18n/no-unkeyed-string` errors gating
+  every PR, and the 5 `TS18046` errors in `contextual-decisions-routes.test.ts`
+  that keep `auth-worker`'s own suite from running once the gate gets that far.
+  Patches described in the finding; both belong to the owners of those files.
+- **`auth-worker` carries two lockfiles** (`package-lock.json` and
+  `pnpm-lock.yaml`) that resolve different `@cloudflare/workers-types`
+  versions, so a local `npm ci` and CI's `pnpm --frozen-lockfile` type-check
+  different code. Surfaced by OPS-21's measurement note. One of the two should
+  probably go.
 - **Chat proxy budget-guard atomicity** (`auth-worker/src/routes/chat.ts`) —
   carried forward unchanged from the 2026-08-20 pass. Still unverified,
   still worth a dedicated look.

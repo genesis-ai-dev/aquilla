@@ -143,6 +143,86 @@ describe("password reset — request (AQU-675: never creates an account)", () =>
     ).first<{ n: number }>()
     expect(Number(totalAfter!.n)).toBe(Number(totalBefore!.n))
   })
+
+  // [Pen test] Auth & session mgmt (2026-08-24), OPS-20. The minted token is a
+  // 24-hour account-takeover credential; it must not be readable from the
+  // table, so a snapshot/replica/support query of password_reset_tokens is not
+  // a set of live takeover links.
+  it("stores the reset token as a digest, never as plaintext (OPS-20)", async () => {
+    await register("ops20user", "ops20user@example.com", "old-password-1")
+    await reqJson("/api/v2/auth/password-reset/request", { email: "ops20user@example.com" })
+
+    const row = await env.AQUILLA_PG.prepare(
+      `SELECT t.token, t.token_hash FROM password_reset_tokens t
+       JOIN users u ON u.id = t.user_id WHERE u.username = 'ops20user'`,
+    ).first<{ token: string | null; token_hash: string | null }>()
+
+    expect(row).toBeTruthy()
+    expect(row!.token).toBeNull()
+    expect(row!.token_hash).toMatch(/^[0-9a-f]{64}$/)
+  })
+
+  // [Pen test] Auth & session mgmt (2026-08-24), OPS-20. Rollover coverage:
+  // a link already in someone's inbox when 0080 deployed still resolves.
+  // Delete this together with the plaintext arm in routes/auth.ts once the
+  // 24-hour window has passed.
+  it("still accepts a pre-0080 plaintext token row (rollover)", async () => {
+    await register("ops20legacy", "ops20legacy@example.com", "old-password-1")
+    await seedToken("ops20legacy", "legacy-plaintext-token-1", soon())
+
+    const res = await reqJson("/api/v2/auth/password-reset/verify", {
+      token: "legacy-plaintext-token-1",
+      username: "ops20legacy",
+    })
+    expect(res.status).toBe(200)
+  })
+
+  // [Pen test] Auth & session mgmt (2026-08-24), OPS-19. The whole handler
+  // used to sit inside one catch that returned
+  // `Failed to send reset email: ${err.message}` with a 500 — which (a)
+  // reflected raw internal error text to an unauthenticated caller, the same
+  // bug SEC-11 fixed in /register, and (b) meant any failure in the
+  // REGISTERED-ONLY work below the lookup produced a visibly different
+  // response from the generic 200 an unregistered address gets. That
+  // difference is a user-enumeration oracle — the exact one the 2026-07-20
+  // pass closed for email-send failures and left open for everything else on
+  // that branch.
+  //
+  // Simulated by making the token INSERT fail for the duration of the request
+  // (a CHECK the row can't satisfy), which is the first registered-only
+  // statement in the handler.
+  it("returns the generic response when the registered-only work fails (OPS-19)", async () => {
+    await register("ops19user", "ops19user@example.com", "old-password-1")
+
+    const unregistered = await reqJson("/api/v2/auth/password-reset/request", {
+      email: "ops19-nobody@example.com",
+    })
+    const generic = await unregistered.json()
+
+    await env.AQUILLA_PG.prepare(
+      "ALTER TABLE password_reset_tokens ADD CONSTRAINT ops19_break CHECK (false) NOT VALID",
+    ).run()
+    try {
+      const res = await reqJson("/api/v2/auth/password-reset/request", {
+        email: "ops19user@example.com",
+      })
+      // Indistinguishable from the unregistered-address response, in both
+      // status and body — no oracle, and no internal error text.
+      expect(res.status).toBe(unregistered.status)
+      expect(await res.json()).toEqual(generic)
+      // Proof the failure path was actually exercised rather than the
+      // constraint silently not biting: the mint really did fail.
+      const tok = await env.AQUILLA_PG.prepare(
+        `SELECT COUNT(*) AS n FROM password_reset_tokens t
+         JOIN users u ON u.id = t.user_id WHERE u.username = 'ops19user'`,
+      ).first<{ n: number }>()
+      expect(Number(tok!.n)).toBe(0)
+    } finally {
+      await env.AQUILLA_PG.prepare(
+        "ALTER TABLE password_reset_tokens DROP CONSTRAINT ops19_break",
+      ).run()
+    }
+  })
 })
 
 describe("password reset — verify", () => {

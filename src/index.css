@@ -289,7 +289,8 @@
     overscroll-behavior: none;
   }
   html {
-    @apply font-sans;
+    /* antialiased is macOS-only (grayscale AA). Windows/Linux ignore it. */
+    @apply font-sans antialiased;
     overscroll-behavior: none;
   }
   html.dark {

@@ -12,7 +12,7 @@
 
 import { useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Sparkles, VolumeX } from "lucide-react"
+import { ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
@@ -346,7 +346,12 @@ function TargetAudioChip({
     window.addEventListener("pointerup", onUp)
   }
 
-  const Icon = chip.item.kind === "take" ? Mic : Sparkles
+  // AQU-646: NO KIND GLYPH IN THE CHIP (Sam, 2026-08-24). A mic or sparkles sat
+  // dead centre — which is exactly where speech waveforms peak — so it fought
+  // the one thing the chip is now for. The emerald/violet tint already says
+  // which kind this is, and `data-kind` still says it to tests and to anyone
+  // inspecting. Note the hover-record mic further down is a different control
+  // (an action, not a label) and stays.
   const overflowSec = span.end - section.end
   const paintedPx = Math.max(10, secToPx(paintedEnd - paintedStart, pxPerSec))
   const fullPx = secToPx(geom.end - geom.start, pxPerSec)
@@ -571,7 +576,6 @@ function TargetAudioChip({
           <span className="h-4 w-0.5 rounded bg-current" />
         </span>
       )}
-      <Icon className="h-3.5 w-3.5 shrink-0" />
       {/* SUB-48: an unmeasurable clip says so instead of quietly borrowing
           the section's width and passing for a measured take. */}
       {geom.usingFallback && fitsBadges && (

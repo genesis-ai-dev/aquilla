@@ -10,11 +10,13 @@
 // WRANGLER_LOCAL isn't set in prod auth-worker.
 
 import { useEffect, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { devLogin } from "@/lib/frontier/auth"
 
 export function DevLoginRoute() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const as = searchParams.get("as")?.trim() || "dev"
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -25,7 +27,7 @@ export function DevLoginRoute() {
     let cancelled = false
     void (async () => {
       try {
-        const session = await devLogin()
+        const session = await devLogin(as)
         if (cancelled) return
         if (!session) {
           setError(
@@ -33,8 +35,11 @@ export function DevLoginRoute() {
           )
           return
         }
-        // Seeded project id is hardcoded in auth-worker/src/routes/dev-seed.ts.
-        navigate("/project/dev-project/editor", { replace: true })
+        const dest =
+          as === "carol"
+            ? "/project/dev-project/settings/general"
+            : "/project/dev-project/editor"
+        navigate(dest, { replace: true })
       } catch (e) {
         if (cancelled) return
         setError(e instanceof Error ? e.message : String(e))
@@ -43,7 +48,7 @@ export function DevLoginRoute() {
     return () => {
       cancelled = true
     }
-  }, [navigate])
+  }, [as, navigate])
 
   return (
     <div className="flex h-screen items-center justify-center p-6">
@@ -54,7 +59,7 @@ export function DevLoginRoute() {
             {error}
           </p>
         ) : (
-          <p className="text-sm text-muted-foreground">Signing in as dev…</p>
+          <p className="text-sm text-muted-foreground">Signing in as {as}…</p>
         )}
       </div>
     </div>

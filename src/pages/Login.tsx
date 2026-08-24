@@ -51,7 +51,7 @@ export function Login() {
   // straight into the app. Same gate AppEntry uses.
   const onboarded =
     typeof localStorage !== "undefined" &&
-    localStorage.getItem("codex:onboardingComplete") === "true"
+    localStorage.getItem("aquilla:onboardingComplete") === "true"
   const alreadySignedIn = hasAuthHintCookie() || onboarded
 
   const form = useForm({

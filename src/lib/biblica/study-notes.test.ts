@@ -4,16 +4,26 @@ import {
   type IdmlTextSlot,
   type IdmlTranslationUnit,
 } from "@aquilla/idml-roundtrip"
-import { selectBiblicaStudyNotes } from "./study-notes"
+import { isBiblicaFrontBackMatterPackage, selectBiblicaStudyNotes } from "./study-notes"
 import {
+  FRONT_BACK_MATTER,
   SAMPLE_NOTES,
+  biblicaFrontBackMatterStory,
   biblicaSampleStory,
+  bookTitle,
+  closedVerse,
+  divisionHeading,
+  layoutText,
   makeBiblicaIdml,
   note,
   noteList,
+  noteWithTrailingVerseMarker,
   openVerse,
   paragraph,
+  psalmsVerse,
   run,
+  scriptureHeading,
+  verseMarkerOnlyNote,
 } from "./__fixtures__/biblica-idml"
 
 /**
@@ -311,12 +321,82 @@ describe("Biblica study-note selection", () => {
     expect(selection.verseUnitCount).toBe(0)
   })
 
-  it("tracks Psalms-style meta:c chapter markers", () => {
+  it("imports the Psalter's layout headings and leaves the verse lines out", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "PSA")),
+      note("p-title", "Psalms", "intro%3aimt1"),
+      scriptureHeading("p-ms", SAMPLE_NOTES.psalmBookHeading, "head%3ams"),
+      scriptureHeading("p-mr", SAMPLE_NOTES.psalmBookRange, "head%3amr_h"),
+      scriptureHeading("p-cl1", "Psalm 1"),
+      psalmsVerse("p-v1", "1", "1", "Blessed is the person who obeys the law of the LORD."),
+      scriptureHeading("p-cl3", "Psalm 3"),
+      scriptureHeading("p-d", SAMPLE_NOTES.psalmSuperscription, "head%3ad_h"),
+      paragraph("p-q", "text%3aq1", run("$ID/[No character style]", "Lord, I have so many enemies!")),
+      closedVerse("p-v3", "1", "Lord, I have so many enemies!"),
+      note("p-n", "3:1-8 A cry for help when enemies close in.", "intro%3aimi"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [
+      entry.unit.sourceText,
+      entry.chapterLabel,
+      entry.bookCode,
+    ])).toEqual([
+      ["Psalms", "Preface", "PSA"],
+      [SAMPLE_NOTES.psalmBookHeading, "Preface", "PSA"],
+      [SAMPLE_NOTES.psalmBookRange, "Preface", "PSA"],
+      ["Psalm 1", "1", "PSA"],
+      ["Psalm 3", "3", "PSA"],
+      [SAMPLE_NOTES.psalmSuperscription, "3", "PSA"],
+      ["3:1-8 A cry for help when enemies close in.", "3", "PSA"],
+    ])
+    expect(selection.notes.map((entry) => entry.unit.sourceText).join("\n"))
+      .not.toContain("Blessed is the person")
+    expect(selection.notes.map((entry) => entry.unit.sourceText).join("\n"))
+      .not.toContain("Lord, I have so many enemies!")
+  })
+
+  it("imports speaker lines and Psalm 119 acrostic letters", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "PSA")),
+      scriptureHeading("p-cl", "Psalm 119"),
+      scriptureHeading("p-qa", "Aleph", "head%3aqa"),
+      closedVerse("p-v", "1", "Blessed are those whose ways are blameless."),
+      paragraph("p-sng", "meta%3abk", run("$ID/[No character style]", "SNG")),
+      scriptureHeading("p-sp", "She says", "head%3asp"),
+      closedVerse("p-v2", "2", "Let him kiss me with the kisses of his mouth.", "1"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [entry.unit.sourceText, entry.bookCode])).toEqual([
+      ["Psalm 119", "PSA"],
+      ["Aleph", "PSA"],
+      ["She says", "SNG"],
+    ])
+  })
+
+  it("does not swallow a Psalm heading as the continuation of an unclosed verse", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "PSA")),
+      openVerse("p-v", "6", "I lie down and sleep;", "3"),
+      scriptureHeading("p-cl", "Psalm 4"),
+      note("p-n", "A night prayer that follows the cry of Psalm 3."),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [entry.unit.sourceText, entry.chapterLabel])).toEqual([
+      ["Psalm 4", "4"],
+      ["A night prayer that follows the cry of Psalm 3.", "4"],
+    ])
+  })
+
+  it("tracks Psalms-style meta:c chapter markers even when they follow the verse number", () => {
     const units = [
       syntheticUnit("ParagraphStyle/meta%3abk", [["PSA", PLAIN]], 0),
-      syntheticUnit("ParagraphStyle/cv%3ap", [
+      // JOB-SNG order: cv:v, then meta:c "23:", then the verse body.
+      syntheticUnit("ParagraphStyle/text%3aq1", [
+        ["1", "CharacterStyle/cv%3av"],
         ["23:", "CharacterStyle/meta%3ac"],
-        ["1", "CharacterStyle/cv%3av1"],
         ["1", "CharacterStyle/meta%3av"],
         ["The LORD is my shepherd.", PLAIN],
         ["1", "CharacterStyle/meta%3av"],
@@ -327,6 +407,248 @@ describe("Biblica study-note selection", () => {
     const selection = selectBiblicaStudyNotes(units)
 
     expect(selection.notes[0].chapterLabel).toBe("23")
+  })
+
+  it("does not label Psalm 1 notes with Job's last chapter after 42:17 is flushed into intro:ie", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-job", "meta%3abk", run("$ID/[No character style]", "JOB")),
+      closedVerse("p-job-v", "17", "And so Job died. He had lived for a very long time.", "42"),
+      note("p-job-n", "Job passed the test that Satan had suggested."),
+      paragraph("p-psa", "meta%3abk", run("$ID/[No character style]", "PSA")),
+      note("p-pref", "Psalms is a book of Israel's prayers and songs."),
+      // Job's closing 42:17, flushed into Psalms' intro:ie — the JOB-SNG shape.
+      verseMarkerOnlyNote("p-ie", "42", "17"),
+      scriptureHeading("p-cl", "Psalm 1"),
+      psalmsVerse("p-v1", "1", "1", "Blessed is the person who obeys the law of the LORD."),
+      note("p-n1", "Psalm 1 is a wisdom psalm about two ways to live.", "intro%3aipi"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [
+      entry.unit.sourceText,
+      entry.chapterLabel,
+      entry.bookCode,
+    ])).toEqual([
+      ["Job passed the test that Satan had suggested.", "42", "JOB"],
+      ["Psalms is a book of Israel's prayers and songs.", "Preface", "PSA"],
+      ["Psalm 1", "1", "PSA"],
+      ["Psalm 1 is a wisdom psalm about two ways to live.", "1", "PSA"],
+    ])
+    expect(selection.notes.map((entry) => entry.chapterLabel).join(","))
+      .not.toMatch(/42-1|42–1/)
+  })
+
+  it("imports no cell for a preface paragraph that is only the previous book's markers", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "MRK")),
+      note("p-title", "The Gospel of Mark", "intro%3aimt1"),
+      // Matthew's closing "28:20", flushed into Mark's preface by InDesign.
+      verseMarkerOnlyNote("p-ie", "28", "20"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => entry.unit.sourceText)).toEqual([
+      "The Gospel of Mark",
+    ])
+    expect(selection.otherUnitCount).toBe(2)
+  })
+
+  it("cuts a verse marker off the end of the note it was flushed into", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "REV")),
+      noteWithTrailingVerseMarker("p-n", "The fourth vision John wrote about.", "21"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes).toHaveLength(1)
+    const [only] = selection.notes
+    expect(only.unit.sourceText).toBe("The fourth vision John wrote about.")
+    // The cell is no longer the whole paragraph, so it says which part it owns:
+    // the marker slot is left out and keeps the publisher's text on export.
+    expect(only.rejoin).toEqual({
+      index: 0,
+      count: 1,
+      ranges: [{ slot: 0, start: 0, end: "The fourth vision John wrote about.".length }],
+    })
+  })
+
+  it("keeps the sentences of a note whose paragraph ends with a verse marker", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "GEN")),
+      noteWithTrailingVerseMarker("p-n", SAMPLE_NOTES.noteBlock, "7"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units, { splitSentences: true })
+
+    expect(selection.notes.map((entry) => entry.unit.sourceText))
+      .toEqual([...SAMPLE_NOTES.noteBlockSentences])
+    // The dropped marker slice is not counted, so the siblings still number
+    // 0..n-1 of n — which is what the exporter checks before it merges them.
+    expect(selection.notes.map((entry) => entry.rejoin?.index)).toEqual([0, 1, 2])
+    expect(selection.notes.every((entry) => entry.rejoin?.count === 3)).toBe(true)
+    expect(selection.notes.flatMap((entry) => entry.rejoin?.ranges ?? [])
+      .every((range) => range.slot === 0)).toBe(true)
+  })
+
+  it("keeps a note whose only marker sits between its words", async () => {
+    const units = [
+      syntheticUnit("ParagraphStyle/meta%3abk", [["PSA", PLAIN]], 0),
+      syntheticUnit("ParagraphStyle/intro%3aimi", [
+        ["Creation: Genesis 1:1 – 2:25.", PLAIN],
+        ["8:", "CharacterStyle/meta%3ac"],
+      ], 1),
+    ]
+
+    const selection = selectBiblicaStudyNotes(units)
+
+    expect(selection.notes.map((entry) => entry.unit.sourceText))
+      .toEqual(["Creation: Genesis 1:1 – 2:25."])
+  })
+
+  it("gives a division heading and its description a section of their own", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "GEN")),
+      // InDesign stores the typesetter's soft hyphens inside the heading text.
+      divisionHeading("p-div", "Israel\u02BCs cove\u00adnant history"),
+      note("p-div-body", "The books from Genesis to Esther record Israel's story."),
+      bookTitle("p-title", "Genesis"),
+      note("p-pref", SAMPLE_NOTES.preface),
+      closedVerse("p-v1", "1", "In the beginning God created.", "1"),
+      note("p-n1", SAMPLE_NOTES.afterChapterOne, "intro%3aipi"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [
+      entry.unit.sourceText,
+      entry.section?.label,
+      entry.chapterLabel,
+      entry.bookCode,
+    ])).toEqual([
+      // The heading names a group of books, so its cells carry no book and no
+      // chapter range — the soft hyphens stay in the text but not in the label.
+      ["Israel\u02BCs cove\u00adnant history", "Israel\u02BCs covenant history", undefined, undefined],
+      [
+        "The books from Genesis to Esther record Israel's story.",
+        "Israel\u02BCs covenant history",
+        undefined,
+        undefined,
+      ],
+      // The book title ends the division: Genesis owns everything after it.
+      ["Genesis", undefined, "Preface", "GEN"],
+      [SAMPLE_NOTES.preface, undefined, "Preface", "GEN"],
+      [SAMPLE_NOTES.afterChapterOne, undefined, "1", "GEN"],
+    ])
+  })
+
+  it("recognizes a front/back matter volume by what it does not contain", async () => {
+    const frontBack = await parseIdml(await makeBiblicaIdml(biblicaFrontBackMatterStory))
+    const bookVolume = await parseIdml(await makeBiblicaIdml())
+
+    expect(isBiblicaFrontBackMatterPackage(frontBack.units)).toBe(true)
+    expect(isBiblicaFrontBackMatterPackage(bookVolume.units)).toBe(false)
+    // The maps volume is artwork: nothing parses out of it at all.
+    expect(isBiblicaFrontBackMatterPackage([])).toBe(true)
+    // A notes-only excerpt is still a book volume — it names its book and sets
+    // its text in intro/* styles, so it must not be read as layout text.
+    const notesOnly = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "GEN")),
+      note("p-n", SAMPLE_NOTES.preface),
+    ]))
+    expect(isBiblicaFrontBackMatterPackage(notesOnly.units)).toBe(false)
+
+    // Biblica's other titles hold no study-Bible chapter markers either, but
+    // they are not this importer's to read — each has a template of its own,
+    // whether it groups its styles (Reach 4 Life) or names them flat (the
+    // Treasure Hunt Bible, whose front matter is `par` / `toc_l2` / `fm_title`).
+    for (const style of ["R4Lv4 Paragraph Styles%3aLesson body", "%21meta_par", "par", "toc_l2"]) {
+      const foreign = await parseIdml(await makeBiblicaIdml([
+        paragraph("p-f", style, run("$ID/[No character style]", "Whose text is this?")),
+      ]))
+      expect(isBiblicaFrontBackMatterPackage(foreign.units)).toBe(false)
+    }
+
+    // The cover is artwork with a few lines of type over it, set in InDesign's
+    // default style — it belongs to no template, so nothing rules it out.
+    const cover = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-c", "%24ID%2fNormalParagraphStyle", run("$ID/[No character style]", "Study Bible")),
+    ]))
+    expect(isBiblicaFrontBackMatterPackage(cover.units)).toBe(true)
+  })
+
+  it("imports every text-bearing paragraph of a front/back matter volume, grouped by heading", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml(biblicaFrontBackMatterStory))
+    const selection = selectBiblicaStudyNotes(parsed.units, { frontBackMatter: true })
+
+    expect(selection.notes.map((entry) => [entry.unit.sourceText, entry.section?.label])).toEqual([
+      [FRONT_BACK_MATTER.title, FRONT_BACK_MATTER.title],
+      [FRONT_BACK_MATTER.firstLetter, FRONT_BACK_MATTER.firstLetter],
+      [FRONT_BACK_MATTER.firstEntry, FRONT_BACK_MATTER.firstLetter],
+      [FRONT_BACK_MATTER.firstBody.join(""), FRONT_BACK_MATTER.firstLetter],
+      [FRONT_BACK_MATTER.secondLetter, FRONT_BACK_MATTER.secondLetter],
+      [FRONT_BACK_MATTER.secondEntry, FRONT_BACK_MATTER.secondLetter],
+    ])
+    // A volume with no chapters labels nothing by chapter, and belongs to no book.
+    expect(selection.notes.every((entry) => (
+      entry.chapterLabel === undefined && entry.bookCode === undefined
+    ))).toBe(true)
+    // Only the running head is left out — InDesign regenerates it from the layout.
+    expect(selection.otherUnitCount).toBe(1)
+    expect(selection.notes.map((entry) => entry.unit.sourceText))
+      .not.toContain(FRONT_BACK_MATTER.runningHead)
+  })
+
+  it("opens a section at the title page and at the contents, so nothing hangs before the first heading", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-t", "title%3amt1", run("$ID/[No character style]", "HOLY BIBLE")),
+      layoutText("p-c", "Copyright \u00a9 2025 by Biblica, Inc.", "text%3apc"),
+      paragraph("p-toc", "toc%3atoc_hd", run("$ID/[No character style]", "Contents")),
+      layoutText("p-g", "Genesis 6", "toc%3aTOC body text"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units, { frontBackMatter: true })
+
+    expect(selection.notes.map((entry) => entry.section?.label))
+      .toEqual(["HOLY BIBLE", "HOLY BIBLE", "Contents", "Contents"])
+  })
+
+  it("reads a heading InDesign broke over several lines as one label", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      noteList("p-h", ["The Drama of the Bible:", "a visual chronology"], "intro%3aimt2"),
+      layoutText("p-1", "Act 1 begins in a garden."),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units, { frontBackMatter: true })
+
+    // Each line is its own cell, but the label reads as the heading was set —
+    // without the space the two lines would run together into one word.
+    expect(selection.notes.map((entry) => entry.unit.sourceText))
+      .toEqual(["The Drama of the Bible:", "a visual chronology", "Act 1 begins in a garden."])
+    expect(selection.notes.every((entry) => (
+      entry.section?.label === "The Drama of the Bible: a visual chronology"
+    ))).toBe(true)
+  })
+
+  it("keeps two sections with the same heading apart", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-a", "head%3ams1", run("$ID/[No character style]", "A")),
+      paragraph("p-a1", "text%3am", run("$ID/[No character style]", "The first A entry.")),
+      paragraph("p-b", "head%3ams1", run("$ID/[No character style]", "A")),
+      paragraph("p-b1", "text%3am", run("$ID/[No character style]", "The second A entry.")),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units, { frontBackMatter: true })
+
+    const ids = selection.notes.map((entry) => entry.section?.id)
+    expect(new Set(ids).size).toBe(2)
+    expect(selection.notes.every((entry) => entry.section?.label === "A")).toBe(true)
+  })
+
+  it("reads an apostrophe slot as text in front/back matter and as glue in a book volume", () => {
+    const apostrophe = [
+      syntheticUnit("ParagraphStyle/intro%3aip", [["\u02BC", "CharacterStyle/source serif"]], 0),
+    ]
+
+    // In a book volume that slot is InDesign glue, so the paragraph holds no
+    // words of its own. In prose-heavy front/back matter it is a possessive.
+    expect(selectBiblicaStudyNotes(apostrophe).notes).toEqual([])
+    expect(selectBiblicaStudyNotes(apostrophe, { frontBackMatter: true }).notes)
+      .toHaveLength(1)
   })
 
   it("returns nothing for a package with no note paragraphs", async () => {

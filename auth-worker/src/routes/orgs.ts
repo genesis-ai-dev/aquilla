@@ -32,6 +32,7 @@ import {
   listOrgMembersWithUsers,
   listPendingInvitesInOrg,
   listUserDirectMembershipsInOrg,
+  listProjectGrantOrgIds,
   listUserOrgs,
   removeGroupMember,
   renameOrg,
@@ -160,6 +161,11 @@ orgs.use("*", authMiddleware)
  * flagged `viaPlatformAdmin` and appended AFTER genuine memberships — the
  * SPA's default active org is the first entry, which must stay a real
  * membership so an admin's fresh session doesn't land in someone else's org.
+ *
+ * Exception: an org the operator already reaches via a project-level grant
+ * (no org_members row) is omitted from that append. The SPA derives it as a
+ * guest org from the project directory, so the picker can tag it Guest
+ * instead of Admin.
  */
 orgs.get("/", async (c) => {
   const user = c.get("user")
@@ -177,11 +183,12 @@ orgs.get("/", async (c) => {
 
   if (isPlatformAdminEmail(c.env, user.email)) {
     const memberIds = new Set(list.map((o) => o.id))
+    const guestGrantOrgIds = await listProjectGrantOrgIds(c.env, user.id)
     const all = await c.env.AQUILLA_PG.prepare(
       "SELECT id, name FROM organizations ORDER BY LOWER(COALESCE(name, ''))",
     ).all<{ id: number; name: string | null }>()
     for (const o of all.results ?? []) {
-      if (memberIds.has(o.id)) continue
+      if (memberIds.has(o.id) || guestGrantOrgIds.has(o.id)) continue
       result.push({
         id: o.id,
         name: o.name,

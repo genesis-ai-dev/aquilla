@@ -16,6 +16,7 @@
 
 import JSZip from "jszip"
 import { parseCsvRows } from "./csv-bilingual"
+import type { CameraState } from "@/lib/sync/cells-read-types"
 import { assertSafeArchiveInputSize, assertSafeZipArchive } from "./zip-safety"
 export { parseCsvRows }
 
@@ -44,13 +45,35 @@ function parseSharedStrings(xml: string): string[] {
   return strs
 }
 
+/**
+ * Decode the entities an xlsx may carry, in the ONE order that round-trips.
+ *
+ * `&amp;` MUST GO LAST, and this is not a style preference — it decoded first
+ * until 2026-08-20, which silently rewrote any cell whose real text contained
+ * an entity. A character note reading `&lt;` (the four literal characters) is
+ * written by any conforming writer as `&amp;lt;`; decoding `&amp;` first turns
+ * that into `&lt;`, and the next replace turns it into `<`. The text that came
+ * back was not the text that went in, and nothing announced it.
+ *
+ * Numeric character references are handled for the same round-trip reason: our
+ * writer emits `&#13;` for a carriage return, because a LITERAL CR in element
+ * content is normalised to LF by every conforming XML parser (XML 1.0 §2.11) —
+ * so a cell containing one would come back with a different line ending. They
+ * are decoded before `&amp;` too, so a literal `&#13;` in somebody's text
+ * (written out as `&amp;#13;`) survives as text rather than becoming a control
+ * character.
+ */
 function decodeXmlEntities(s: string): string {
   return s
-    .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex: string) =>
+      String.fromCodePoint(Number.parseInt(hex, 16)),
+    )
+    .replace(/&#(\d+);/g, (_, dec: string) => String.fromCodePoint(Number(dec)))
+    .replace(/&amp;/g, "&")
 }
 
 /**
@@ -89,14 +112,26 @@ function parseSheetXml(xml: string, sharedStrings: string[]): string[][] {
           value = sharedStrings[idx] ?? ""
         }
       } else if (cellType === "inlineStr") {
-        const tMatch2 = /<t>([^<]*)<\/t>/.exec(inner)
+        // `<t>` may carry attributes — xml:space="preserve" is normal when a
+        // value has leading or trailing spaces.
+        const tMatch2 = /<t(?:\s[^>]*)?>([^<]*)<\/t>/.exec(inner)
         value = decodeXmlEntities(tMatch2?.[1] ?? "")
       } else {
-        // Number, boolean, or formula result
+        // Number, boolean, or formula result — AND `t="str"`, which is a
+        // STRING despite living on this branch. Everything here must therefore
+        // be decoded like any other text.
+        //
+        // It was not, until 2026-08-18, and the client's audio character sheet
+        // is the file that found it: written with no shared-strings table and
+        // every cell as `t="str"`, so `MARY MAGDALENE&apos;S FATHER` arrived
+        // with the entity intact and would have been filed as a second,
+        // separate character from the `MARY MAGDALENE'S FATHER` already in the
+        // roster. Silently doubling a cast is a bad way to learn that the
+        // decode was attached to the two branches that happened to be tested.
         const vMatch = /<v>([^<]*)<\/v>/.exec(inner)
-        value = vMatch?.[1] ?? ""
+        value = decodeXmlEntities(vMatch?.[1] ?? "")
         // For formulas, also check <is><t> inline string override
-        const isMatch = /<is><t>([^<]*)<\/t><\/is>/.exec(inner)
+        const isMatch = /<is><t(?:\s[^>]*)?>([^<]*)<\/t><\/is>/.exec(inner)
         if (isMatch) value = decodeXmlEntities(isMatch[1])
       }
 
@@ -408,28 +443,38 @@ export function mappedRowsToStrings(rows: MappedRow[]): TranslatableString[] {
  *   "Narrator"                →  voice = "Narrator",       angle = undefined
  *
  * The trailing `(…)` group is always separated from the name by one or more
- * spaces. Unknown angle synonyms are passed through as-is so they can be
- * stored and rounded to the nearest known CameraState by the caller.
+ * spaces.
  *
  * Synonym mapping (normalises common variants to CameraState literals):
  *   on    → "on"
  *   off   → "off"
  *   mixed → "mixed"
- *   group → "mixed"   (a group shot → mixed lip-sync constraint)
- *   (any other text) → returned verbatim; the caller maps to "mixed" as fallback
+ *   group → "group"
+ *   (any other text) → "mixed", as a last resort
+ *
+ * `group` USED TO FOLD INTO `mixed` here, on the reasoning that a group shot
+ * is a mixed lip-sync constraint. It is its own state as of 2026-08-20: the
+ * client's sheets distinguish the two, and folding them meant a corrected
+ * workbook could never say `Group` again (AQU-646). See `CameraState`.
+ *
+ * The unknown-word fallback is deliberately NOT verbatim passthrough — an
+ * older version of this comment claimed it was, while the code below has
+ * always collapsed unrecognised angles to `mixed`. Storing an arbitrary word
+ * as a camera state would put a value in the column that nothing downstream
+ * can render or compare.
  */
 export interface SplitCastName {
   /** The voice/character name with the angle suffix stripped. */
   voice: string
   /** Normalised CameraState, or undefined when no angle was present. */
-  cameraState: "on" | "mixed" | "off" | undefined
+  cameraState: CameraState | undefined
 }
 
-const CAMERA_STATE_SYNONYM_MAP: Record<string, "on" | "mixed" | "off"> = {
+const CAMERA_STATE_SYNONYM_MAP: Record<string, CameraState> = {
   on: "on",
   off: "off",
   mixed: "mixed",
-  group: "mixed",
+  group: "group",
 }
 
 /**

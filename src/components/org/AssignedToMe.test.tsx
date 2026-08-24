@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
-import { fmtShortCalendarDate } from "@/lib/format-date"
+import { fmtDeadlineDate } from "@/lib/format-date"
 import { AssignedToMe } from "./AssignedToMe"
 
 const navigate = vi.fn()
@@ -51,8 +51,9 @@ describe("AssignedToMe", () => {
     mockGetMy.mockImplementationOnce(() => new Promise(() => {}))
     renderInbox()
 
-    // Match TeamsList: pulse card shell while the org inbox loads.
-    await waitFor(() => expect(document.querySelector(".animate-pulse")).toBeTruthy())
+    await waitFor(() => expect(screen.getByPlaceholderText("Search assignments…")).toBeInTheDocument())
+    expect(screen.getByRole("status", { name: "Loading assignments" })).toHaveAttribute("aria-busy", "true")
+    expect(document.querySelector(".animate-pulse")).toBeTruthy()
   })
 
   it("aggregates the caller's open assignments across projects with progress", async () => {
@@ -69,8 +70,8 @@ describe("AssignedToMe", () => {
     expect(screen.getByText("02-MRK.usfm")).toBeInTheDocument()
     expect(screen.getByText("4/10 cells · 40%")).toBeInTheDocument()
     expect(screen.getByText("5/5 cells · 100%")).toBeInTheDocument()
-    // Admin-console DateTooltip short calendar label (not raw ISO).
-    expect(screen.getByText(fmtShortCalendarDate("2026-06-30"))).toBeInTheDocument()
+    // Deadline DateTooltip: month + day, year only when it isn't this year.
+    expect(screen.getByText(fmtDeadlineDate("2026-06-30"))).toBeInTheDocument()
     expect(mockGetMy).toHaveBeenCalledWith("jwt", 1)
   })
 

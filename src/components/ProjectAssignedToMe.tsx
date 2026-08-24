@@ -13,6 +13,8 @@ import { ChevronDown, ChevronRight, ClipboardList } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { DateTooltip } from "@/components/ui/date-tooltip"
+import { fmtDeadlineDate } from "@/lib/format-date"
 import { getMyAssignments, type MyAssignment } from "@/lib/sync/assignments"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -125,7 +127,18 @@ export function ProjectAssignedToMe({
                     </div>
                     <p className="mt-0.5 text-[10px] text-muted-foreground">
                       {t("workspace.assignedToMe.cellsProgress", { done: a.cellsDone, total: a.cellsTotal })}
-                      {a.deadline ? ` · Due ${a.deadline}` : ""}
+                      {a.deadline ? (
+                        <>
+                          {" · "}
+                          <DateTooltip
+                            value={a.deadline}
+                            label={t("org.assignedToMe.dueColumnLabel")}
+                            variant="deadline"
+                          >
+                            {`${t("org.assignedToMe.dueColumnLabel")} ${fmtDeadlineDate(a.deadline)}`}
+                          </DateTooltip>
+                        </>
+                      ) : null}
                     </p>
                   </button>
                 </AppTooltip>

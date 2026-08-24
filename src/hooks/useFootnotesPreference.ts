@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react"
 import type { FootnoteViewMode } from "@/lib/footnotes/types"
 
-const STORAGE_KEY = "codex:showFootnotesInline:"
+const STORAGE_KEY = "aquilla:showFootnotesInline:"
 
 function normalizeMode(raw: string | null): FootnoteViewMode {
   if (raw === "inline" || raw === "tray" || raw === "off") return raw

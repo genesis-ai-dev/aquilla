@@ -9,7 +9,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 const TAB_WIDTH = "w-[200px]"
 
 const TAB_BASE =
-  `group/tab relative flex h-7 ${TAB_WIDTH} shrink-0 items-center gap-1 overflow-hidden rounded-lg border px-1.5 text-xs leading-none transition-all`
+  `group/tab relative flex h-7 ${TAB_WIDTH} shrink-0 items-center gap-1 overflow-hidden rounded-lg border px-1.5 text-xs leading-none`
 
 function tabClasses(active: boolean): string {
   return cn(

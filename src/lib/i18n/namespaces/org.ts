@@ -84,17 +84,21 @@ export const org = defineNamespace({
     "org.orgHome.projectsPanel.clearFilterAria": "Clear project filter",
     "org.orgHome.projectsPanel.statusLabel": "Status",
     "org.orgHome.projectsPanel.statusFilterAria": "Project status filter",
+    "org.orgHome.originFilter.aria": "Filter projects by origin",
     "org.orgHome.projectsPanel.sortByLabel": "Sort by",
     "org.orgHome.projectsPanel.sortAria": "Project sort",
     "org.orgHome.projectsPanel.sortProjectsAria": "Sort projects",
     "org.orgHome.projectsPanel.noMatchingProjects": "No matching projects.",
 
     "org.orgHome.statusFilter.all": "All",
+    "org.orgHome.statusFilter.shared": "Shared",
 
     "org.orgHome.emptyTitle.stalled": "No stalled projects.",
     "org.orgHome.emptyTitle.attention": "No projects need attention.",
     "org.orgHome.emptyTitle.overdue": "No overdue projects.",
 
+    // Invite-cohort copy; the Projects table no longer uses these. Invite lives
+    // on Overview via OrgSetupChecklist.
     "org.orgHome.readyTitle": "Your organization is ready",
     "org.orgHome.readyDescription":
       "Start a translation project, or bring your team in first — Aquilla is built for people working together.",
@@ -130,7 +134,7 @@ export const org = defineNamespace({
     "org.orgHome.table.sourceTargetLanguageAria": "Source and target language",
     "org.orgHome.table.audioPctAria": "{pct}% audio",
 
-    // -- GuestOrgHome: overview for a project-only guest viewing an org they don't belong to --
+    // -- Guest org projects page: same table as a member org, guest copy --
     "org.guestOrgHome.orgFallbackWithId": "Org #{id}",
     "org.guestOrgHome.description":
       "Projects in {orgName} shared with you. You’re a guest here — you have access to these projects, but not to the organization itself.",
@@ -428,7 +432,6 @@ export const org = defineNamespace({
     "org.projectOverview.openAssignmentsStat": "{count} open · {percent}",
     "org.projectOverview.viewActivityAria": "View activity for {username}",
     "org.projectOverview.hide": "Hide",
-    "org.projectOverview.membersVisibilityDescription": "Who can see the member roster on this project.",
     "org.projectOverview.noFilesToExport": "This project has no files to export yet.",
     "org.projectOverview.archiveForbidden": "Only owners can archive a project.",
     "org.projectOverview.restoreForbidden": "Only owners can restore a project.",
@@ -967,7 +970,8 @@ export const org = defineNamespace({
     // see the call site for the full mapping). Only genuinely new strings: --
     "org.orgHome.pendingInvitations.description":
       "Invites sent to your email that you have not accepted yet.",
-    "org.orgHome.projectsPanel.sectionDescription": "Projects across every organization you belong to.",
+    "org.orgHome.projectsPanel.sectionDescription":
+      "Projects across organizations you belong to, plus any shared with you.",
     // Distinct from org.orgHome.noProjectsYet ("No projects yet.", with a
     // period) — this is the DataTable's own inline empty-state title, which
     // the source renders without one.
@@ -981,7 +985,7 @@ export const org = defineNamespace({
     // ("No matching organizations.", with a period) — same split as above.
     "org.orgHome.organizationsPanel.searchEmptyTitle": "No matching organizations",
 
-    // -- OrgOverview: single-org operator home (rollup tiles + needs-attention) --
+    // -- OrgOverview: single-org operator home (rollup tiles + recent projects) --
     "org.overview.loadingLabel": "Loading overview",
     "org.overview.needsAttentionHeading": "Needs attention",
     "org.overview.needsAttentionDescription":
@@ -989,6 +993,12 @@ export const org = defineNamespace({
     "org.overview.allClearTitle": "All clear",
     "org.overview.allClearDescription":
       "No active project is overdue, due soon, or stalled right now.",
+    "org.overview.projectsDescription": "Most recently updated first.",
+    "org.overview.showMoreProjects": plural({
+      one: "Show {count} more",
+      other: "Show {count} more",
+    }),
+    "org.overview.emptyDescription": "Create a project to start translating.",
 
     // -- OrgProjectsDataTable: shared portfolio projects DataTable (page/embedded) --
     // "Project" header → common.project (identical text)
@@ -1014,9 +1024,9 @@ export const org = defineNamespace({
     // "Projects" page title → nav.projects (identical text)
     "org.orgProjectsPage.pageDescription":
       "Open a project to edit, or start a new translation workspace.",
-    // "Your organization is ready" → org.orgHome.readyTitle (identical text)
-    // readyDescription → org.orgHome.readyDescription (identical text)
-    // "Invite your team" → org.orgHome.inviteYourTeam (identical text)
+    // Zero-projects empty title → org.orgHome.projectsPanel.emptyTitle
+    // Zero-projects empty description → org.overview.emptyDescription
+    // Invite-a-teammate lives on Overview (OrgSetupChecklist), not this table.
 
     // -- OrgSwitcher: sidebar org-switcher combobox dropdown --
     // "Organizations" group label → org.orgHome.organizations (identical text)
@@ -1024,6 +1034,9 @@ export const org = defineNamespace({
     // "Retry loading shared organizations" aria-label → org.switcher.retrySharedOrganizationsAriaLabel (identical text)
     // "Retry" → common.retry (identical text)
     "org.switcher.guestOrganizationsGroupLabel": "Guest organizations",
+    // Role chip on guest-org rows in the switcher (not a ladder role).
+    "org.switcher.guestRole": "Guest",
+    // Platform-admin chip on viaPlatformAdmin rows → org.orgSidebar.admin (identical text)
     // "All projects" → org.switcher.allProjects (identical text)
     // "Retry loading organizations" aria-label → org.switcher.retryOrganizationsAriaLabel (identical text)
     // "Couldn't load organizations" → org.routeGate.errorTitle (identical text)
@@ -1056,6 +1069,7 @@ export const org = defineNamespace({
     "org.teamDetail.sectionsAriaLabel": "Team sections",
     "org.teamDetail.projectsTabDescription":
       "Projects this team can access, and the role granted to members.",
+    "org.teamDetail.addedColumn": "Added",
     "org.teamDetail.attachProjectDialogTitle": "Attach project to '{name}'",
     "org.teamDetail.attachProjectDialogDescription": "Grant this team access at a chosen role.",
     "org.teamDetail.selectProjectPlaceholder": "Select a project…",
@@ -1079,6 +1093,11 @@ export const org = defineNamespace({
         "Organizations, teams, members and invitations — the permanent chrome above a project: the org switcher, breadcrumb trail, member and team management, invite flows and permission surfaces. Most of these strings sit in a narrow header or sidebar that is on screen on every route, so they compete for horizontal space with the project's own content.",
     },
     keys: {
+      "org.overview.showMoreProjects": {
+        description:
+          "Last-row control on the single-organization Overview's project table that expands the ten-project preview to reveal the remaining projects inline. Count is how many rows are still hidden, not the org total.",
+        placeholders: { count: "Number of projects not currently shown." },
+      },
       "org.switcher.triggerAriaLabel": {
         description:
           "Accessible name for the sidebar button that opens the org switcher dropdown. {org} is the currently selected organization's name (or 'All organizations'/'Workspace').",
@@ -1168,7 +1187,11 @@ export const org = defineNamespace({
       },
       "org.orgHome.projectsPanel.statusFilterAria": {
         description:
-          "Accessible name for the project status filter control (the All / Stalled / Overdue / Needs attention segmented tabs) on OrgHome.",
+          "Accessible name for the project status filter control (All / Stalled / Overdue / Needs attention) on OrgHome.",
+      },
+      "org.orgHome.originFilter.aria": {
+        description:
+          "Accessible name for the All / Shared / Org tabs that filter the all-orgs projects table by whether a project comes from an organization the caller belongs to or was shared with them. The Org tab is omitted when the caller has no organization memberships.",
       },
       "org.orgHome.projectsPanel.sortProjectsAria": {
         description: "Accessible name for the 'Sort by' project-lens select control on OrgHome.",
@@ -1186,16 +1209,16 @@ export const org = defineNamespace({
       },
       "org.guestOrgHome.orgFallbackWithId": {
         description:
-          "Heading fallback on GuestOrgHome when the guest org's name hasn't loaded yet but its id is known.",
+          "Heading fallback on the guest-org projects page when the org's name hasn't loaded yet but its id is known.",
         placeholders: { id: "Numeric id of the guest organization." },
       },
       "org.guestOrgHome.description": {
         description:
-          "Subheading on GuestOrgHome explaining the caller's guest access: they can see this org's shared projects but aren't a member of the organization itself.",
+          "Subheading on the guest-org projects page explaining the caller's guest access: they can see this org's shared projects but aren't a member of the organization itself.",
         placeholders: { orgName: "Display name of the guest organization — not translated." },
       },
       "org.guestOrgHome.emptyTitle": {
-        description: "Empty-state title on GuestOrgHome when no projects in the guest org are shared with the caller.",
+        description: "Empty-state title on the guest-org projects page when no projects in the guest org are shared with the caller.",
         placeholders: { orgName: "Display name of the guest organization — not translated." },
       },
       "org.membersPage.removeDirectAccessTooltip": {
@@ -1967,6 +1990,11 @@ export const org = defineNamespace({
       },
       "org.teamDetail.sectionsAriaLabel": {
         description: "Accessible name for the Projects/Members/Overview tab list on TeamDetail.",
+      },
+      "org.teamDetail.addedColumn": {
+        description:
+          "Sortable column heading on TeamDetail's projects and members tables for when the project or person was added to the team. Also the DateTooltip hover prefix on that cell (short calendar date visible, labeled datetime on hover).",
+        maxLength: 16,
       },
     },
   },

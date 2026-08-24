@@ -86,6 +86,12 @@ export const audio = defineNamespace({
     "audio.recordingModal.autoAdvanceEnableLabel": "Move to the next line after saving",
     "audio.recordingModal.muteBeepTooltip": "Mute countdown beep",
     "audio.recordingModal.unmuteBeepTooltip": "Enable countdown beep",
+    "audio.recordingModal.muteVideoTooltip": "Mute the scene video",
+    "audio.recordingModal.unmuteVideoTooltip": "Unmute the scene video",
+    "audio.recordingModal.videoMutedBadge": "Muted",
+    "audio.recordingModal.videoMutedWhileRecording":
+      "The scene plays muted while recording so it can't bleed into your take.",
+    "audio.recordingModal.videoScenePreview": "Scene for this line — plays while you record.",
     "audio.recordingModal.closeTooltip": "Close (Esc)",
     "audio.recordingModal.emptySource": "empty",
     "audio.recordingModal.readAloudLabel": "Read aloud",
@@ -120,6 +126,69 @@ export const audio = defineNamespace({
     "audio.recordingModal.ttsDoneTooltip": "Voice generated — it plays on the Target track",
     "audio.recordingModal.cancelCountdown": "Cancel countdown",
 
+    // AudioRecordingModal, AQU-646 rebuild — the film panel beside the
+    // recorder, the two-row header, the per-phase notices, and the utility
+    // strip along the bottom (takes / recording format / recorder settings).
+    // Keys above with near-identical wording belong to the pre-rebuild layout
+    // and are still translated; these are the strings the dialog renders now.
+    "audio.recordingModal.collapseFilmTooltip": "Hide the film and use the narrow recorder",
+    "audio.recordingModal.collapseFilmAriaLabel": "Hide the film",
+    "audio.recordingModal.collapseFilmButton": "Collapse video",
+    "audio.recordingModal.expandFilmTooltip": "Show the film for this line beside the recorder",
+    "audio.recordingModal.expandFilmAriaLabel": "Show the film",
+    "audio.recordingModal.prevLineTooltip": "Previous line (⌥←)",
+    "audio.recordingModal.nextLineTooltip": "Next line (⌥→)",
+    "audio.recordingModal.veryShortWindowTitle":
+      "This section is very short — you can still record, but there is barely room for anything.",
+    "audio.recordingModal.lineCounter": "{index} / {total}",
+    "audio.recordingModal.lineCounterWindow": "{index} / {total} · window {seconds}s",
+    "audio.recordingModal.lineCounterVeryShort":
+      "{index} / {total} · window {seconds}s · very short",
+    "audio.recordingModal.cueReferenceLabel": "This cue:",
+    "audio.recordingModal.maxDuration": "max {minutes}m",
+    "audio.recordingModal.overrunNotice": "Past the window — this will overrun the cue.",
+    "audio.recordingModal.nearLimitNotice":
+      "Recording is {warnMinutes} minutes — it stops automatically at {hardStopMinutes}.",
+    "audio.recordingModal.capturedNotice": "Captured — review, then keep or retake.",
+    "audio.recordingModal.noTimedWindow": "This line has no timed window.",
+    "audio.recordingModal.generateButton": "Generate",
+    "audio.recordingModal.uploadTooltip": "Attach an audio file as a take",
+    "audio.recordingModal.uploadButton": "Upload",
+    "audio.recordingModal.takesLabel": "Takes",
+    "audio.recordingModal.formatLockedTooltip":
+      "This take is already captured — the format applies to the next one.",
+    "audio.recordingModal.formatWavTooltip":
+      "Recording at full WAV quality — about three times the file size. Click to record " +
+      "compressed instead.",
+    "audio.recordingModal.formatCompressedTooltip":
+      "Recording compressed — much smaller files, slightly less detail. Click to record at " +
+      "full WAV quality.",
+    "audio.recordingModal.formatWavAriaLabel": "Recording format: WAV — click to record compressed",
+    "audio.recordingModal.formatCompressedAriaLabel":
+      "Recording format: compressed — click to record in WAV",
+    "audio.recordingModal.settingsAriaLabel": "Recorder settings",
+    "audio.recordingModal.autoAdvanceTitle": "Move on after saving",
+    "audio.recordingModal.autoAdvanceOnDescription": "Jumps to the next line",
+    "audio.recordingModal.autoAdvanceOffDescription": "Stays on this line",
+    "audio.recordingModal.beepTitle": "Countdown beep",
+    "audio.recordingModal.beepOnDescription": "3-2-1 tones before recording",
+    "audio.recordingModal.beepOffDescription": "Silent countdown",
+    "audio.recordingModal.noTakesYet": "No takes yet — record one and it lands here.",
+
+    // RecordingVideoSurface — the film panel inside that dialog, and the
+    // headphones-only control that lets its sound out.
+    "audio.recordingModal.filmAriaLabel": "Film for the line being recorded",
+    "audio.recordingModal.filmAudibleTooltip":
+      "The film is playing out loud. Unless you are on headphones it is going into your take " +
+      "— click to mute it.",
+    "audio.recordingModal.filmMutedTooltip":
+      "The film is muted. Unmuting is for headphones only — the mic records with echo " +
+      "cancellation off, so on speakers the film goes into your take.",
+    "audio.recordingModal.filmMuteAriaLabel": "Mute the film",
+    "audio.recordingModal.filmUnmuteAriaLabel": "Unmute the film (headphones only)",
+    "audio.recordingModal.filmAudibleWarning":
+      "The film is not muted. Use headphones — on speakers it will be recorded into your take.",
+
     // TakesStrip — per-cell recorded-take management row.
     "audio.takesStrip.heading": "Takes ({count})",
     "audio.takesStrip.cleanedLabel": "Cleaned",
@@ -127,6 +196,9 @@ export const audio = defineNamespace({
     "audio.takesStrip.renameTooltip": "Rename take",
     "audio.takesStrip.unknownLengthTooltip": "Length unknown — re-record or re-upload to fix",
     "audio.takesStrip.pendingSyncTooltip": "Saving — kept safe on this device until it syncs",
+    "audio.takesStrip.syncFailedTooltip":
+      "Couldn't save to the server — this take is still on this device. Retry to send it again.",
+    "audio.takesStrip.syncFailedRetry": "Not saved — retry",
     "audio.takesStrip.playTakeTooltip": "Play take",
     "audio.takesStrip.removeNoiseTooltip": "Remove noise (adds a cleaned take)",
     "audio.takesStrip.revertTooltip": "Revert to the original recording",
@@ -213,6 +285,7 @@ export const audio = defineNamespace({
     "audio.castGutter.namedTooltip": "{castName} — voiced by {voiceName}",
     "audio.castGutter.defaultTooltip": "{voiceName} — default (no one cast yet)",
     "audio.castGutter.chooseCharacterAriaLabel": "{tooltip}. Choose a character",
+    "audio.castGutter.noCharacter": "No character",
 
     // useCellAudio — errors surfaced while loading/streaming a cell's audio.
     "audio.error.noAttachment": "No audio attachment on this cell",
@@ -680,6 +753,32 @@ export const audio = defineNamespace({
           "Tooltip and accessible name for the same header button, shown when the " +
           "beep is currently off (pressing it turns the beep back on).",
       },
+      "audio.recordingModal.muteVideoTooltip": {
+        description:
+          "Tooltip and accessible name for the button that mutes the linked scene " +
+          "video shown inside the recording dialog, used while its sound is on.",
+      },
+      "audio.recordingModal.unmuteVideoTooltip": {
+        description:
+          "Tooltip and accessible name for the same button while the scene video is " +
+          "already muted (pressing it turns the video's sound back on).",
+      },
+      "audio.recordingModal.videoMutedBadge": {
+        description:
+          "Very short badge drawn over the top-right corner of the scene video while " +
+          "its sound is off. Keep it to one word if the language allows.",
+      },
+      "audio.recordingModal.videoMutedWhileRecording": {
+        description:
+          "Explains why the scene video's sound is forced off during a take: an " +
+          "audible video would be picked up by the microphone ('bleed into your " +
+          "take' is recording-studio idiom for exactly that).",
+      },
+      "audio.recordingModal.videoScenePreview": {
+        description:
+          "Caption under the scene video between takes, naming what the video is " +
+          "(the footage for the line being dubbed) and when it will play.",
+      },
       "audio.recordingModal.closeTooltip": {
         description:
           "Tooltip for the dialog's close button, including its keyboard shortcut " +
@@ -862,6 +961,120 @@ export const audio = defineNamespace({
           "recording starts, returning to the idle state.",
         maxLength: 20,
       },
+      "audio.recordingModal.collapseFilmAriaLabel": {
+        description:
+          "Screen-reader name of the small button in the top-right corner of the " +
+          "film panel that hides the film, leaving the narrow recorder column on " +
+          "its own. Its visible caption is the shorter " +
+          "audio.recordingModal.collapseFilmButton; this is the fuller phrase " +
+          "assistive tech reads instead.",
+      },
+      "audio.recordingModal.expandFilmAriaLabel": {
+        description:
+          "Screen-reader name of the button in the recorder's header that brings " +
+          "the film back beside the recorder after it was hidden. Only offered " +
+          "when this line actually has a film. Its visible caption is the single " +
+          "word 'Video'.",
+      },
+      "audio.recordingModal.lineCounter": {
+        description:
+          "Position readout under the line's name in the recording dialog's " +
+          "header, when the line has no timed window: which line of the file is " +
+          "being recorded, out of how many. Rendered in a narrow fixed-width " +
+          "strip between the previous/next arrows, so it must stay very short.",
+        placeholders: {
+          index: "1-based position of the line being recorded.",
+          total: "How many lines are in this recording run altogether.",
+        },
+      },
+      "audio.recordingModal.lineCounterWindow": {
+        description:
+          "The same position readout as audio.recordingModal.lineCounter, with " +
+          "the length of this line's timed window appended after a middle dot. " +
+          "The 'window' is how many seconds the finished recording is meant to " +
+          "fit into. The trailing 's' is the abbreviation for seconds.",
+        placeholders: {
+          index: "1-based position of the line being recorded.",
+          total: "How many lines are in this recording run altogether.",
+          seconds:
+            "Length of the line's timed window in seconds, to two decimal places.",
+        },
+      },
+      "audio.recordingModal.lineCounterVeryShort": {
+        description:
+          "The same readout as audio.recordingModal.lineCounterWindow, with a " +
+          "third part warning that the window is so short there is barely room to " +
+          "say anything. Shown in amber. Recording is still allowed — this is a " +
+          "caution, never a refusal.",
+        placeholders: {
+          index: "1-based position of the line being recorded.",
+          total: "How many lines are in this recording run altogether.",
+          seconds:
+            "Length of the line's timed window in seconds, to two decimal places.",
+        },
+      },
+      "audio.recordingModal.maxDuration": {
+        description:
+          "Tiny readout in the corner of the live recording meter naming the " +
+          "longest this take may run before it is stopped automatically. The " +
+          "trailing 'm' is the abbreviation for minutes. Abbreviated hard: it " +
+          "shares one narrow row with the running clock.",
+        placeholders: {
+          minutes: "Whole minutes at which recording stops by itself.",
+        },
+        maxLength: 12,
+      },
+      "audio.recordingModal.nearLimitNotice": {
+        description:
+          "Amber warning under the meter once a take has been running a long " +
+          "time, telling the performer how long it has been and when it will be " +
+          "cut off. Both numbers are whole minutes and the second one has no unit " +
+          "word of its own — it borrows 'minutes' from the first clause.",
+        placeholders: {
+          warnMinutes: "How many minutes the take has been running.",
+          hardStopMinutes:
+            "How many minutes in total the recorder allows before stopping by itself.",
+        },
+      },
+      "audio.recordingModal.formatWavAriaLabel": {
+        description:
+          "Screen-reader name of the recording-format toggle while it is set to " +
+          "WAV, stating the current setting and what pressing it would do. WAV is " +
+          "the uncompressed, larger, higher-quality file format; 'compressed' is " +
+          "the smaller alternative. The visible caption is just the word 'WAV'.",
+      },
+      "audio.recordingModal.formatCompressedAriaLabel": {
+        description:
+          "Screen-reader name of the same toggle while it is set to the " +
+          "compressed format, stating the current setting and what pressing it " +
+          "would do. The visible caption is the single word 'COMPRESSED'.",
+      },
+      "audio.recordingModal.settingsAriaLabel": {
+        description:
+          "Screen-reader name of the gear button at the end of the recorder's " +
+          "bottom strip. It opens a small menu holding two preferences: whether " +
+          "to move on to the next line after each save, and whether the countdown " +
+          "beeps.",
+      },
+      "audio.recordingModal.filmAriaLabel": {
+        description:
+          "Screen-reader name of the video element showing the film for the line " +
+          "being recorded. The film is reference only — the performer watches it " +
+          "to time their delivery — so this names what the picture is, not " +
+          "something to operate.",
+      },
+      "audio.recordingModal.filmMuteAriaLabel": {
+        description:
+          "Screen-reader name of the button under the film while its sound is " +
+          "playing: pressing it silences the film. Imperative.",
+      },
+      "audio.recordingModal.filmUnmuteAriaLabel": {
+        description:
+          "Screen-reader name of the same button while the film is silent: " +
+          "pressing it lets the film's sound out. The parenthetical is a warning, " +
+          "not a condition of the button — on speakers the film would be recorded " +
+          "into the take, so this is only safe on headphones.",
+      },
       "audio.takesStrip.heading": {
         description:
           "Small caption above the row of take chips for the current line, naming " +
@@ -903,6 +1116,19 @@ export const audio = defineNamespace({
           "Hover title on the cloud badge of a take that has been saved on this " +
           "device but not yet uploaded to the server. Reassurance: nothing is lost " +
           "while it waits.",
+      },
+      "audio.takesStrip.syncFailedTooltip": {
+        description:
+          "Hover title on the red badge of a take whose save to the server FAILED " +
+          "and will not be retried automatically. Distinct from the 'saving' badge: " +
+          "that one is still on its way, this one is stuck and needs the user to " +
+          "retry. Reassures that the recording itself is not lost.",
+      },
+      "audio.takesStrip.syncFailedRetry": {
+        description:
+          "Label on the small red button shown on a take that failed to save to the " +
+          "server; pressing it queues the save again. Very short — it sits inline on " +
+          "a compact take row.",
       },
       "audio.takesStrip.playTakeTooltip": {
         description:

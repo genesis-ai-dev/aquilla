@@ -63,11 +63,15 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   assign("validationRoleFloor", settings.validationRoleFloor)
   assign("validationNamedUsers", settings.validationNamedUsers)
   assign("allowSelfValidation", settings.allowSelfValidation)
+  assign("allowLineCreation", settings.allowLineCreation)
   assign("bibleResourcesEnabled", settings.bibleResourcesEnabled)
   assign("draftContext", settings.draftContext)
   // AQU-646 SUB-53: the Media lens reads this to decide whether to draw the
   // timeline against the imported file's clock or lay the verses out end to end.
   assign("audioTimingMode", settings.audioTimingMode)
+  // AQU-646: the timeline lock. Must reach the workspace or the chips would be
+  // draggable for everyone until someone opened Project Settings.
+  assign("timingLocked", settings.timingLocked)
   // AQU-634: USFM front-matter opt-out must reach the workspace so ImportDialog
   // and the target-import panel drop front matter when it's on.
   assign("importExcludeFrontMatter", settings.importExcludeFrontMatter)
@@ -105,9 +109,24 @@ export type ProjectLoadStatus =
   | "unreachable"  // network error or 5xx — server is down, not a missing project
   | "no-session"   // no jwt available; can't fetch
 
-export function useProject(projectId: string) {
-  const [project, setProject] = useState<ProjectRecord | null>(null)
-  const [status, setStatus] = useState<ProjectLoadStatus>("loading")
+export interface UseProjectOptions {
+  /** Seed a route-modal from its already-mounted background workspace. The
+   * authoritative project request still revalidates in the background. */
+  initialProject?: ProjectRecord | null
+  /** Callers that own a dedicated useProjectSettings instance can disable the
+   * otherwise-duplicate settings overlay request. */
+  includeSettings?: boolean
+  /** Reuse a project owned by an ancestor without starting another project
+   * resolve. Useful for workspace sub-routes that remain mounted inside the
+   * already-resolved workspace shell. */
+  enabled?: boolean
+}
+
+export function useProject(projectId: string, options?: UseProjectOptions) {
+  const enabled = options?.enabled ?? true
+  const initialProject = options?.initialProject ?? null
+  const [project, setProject] = useState<ProjectRecord | null>(initialProject)
+  const [status, setStatus] = useState<ProjectLoadStatus>(initialProject ? "ready" : "loading")
   // AQU-334: the caller's role as returned by THIS load's GET /:projectId (or
   // its list-endpoint fallback) — always populated together with `project` on
   // a successful resolve. Kept separate from `project.syncRole` because that
@@ -119,15 +138,16 @@ export function useProject(projectId: string) {
   // on its guarded actions (SWARM-TODO in RoleGatedStep.tsx), so it must not
   // key off a value that's allowed to be missing or behind. `roleLevel` here
   // is the fresh, guaranteed-non-null value from the resolve that just ran.
-  const [roleLevel, setRoleLevel] = useState<number | null>(null)
+  const [roleLevel, setRoleLevel] = useState<number | null>(initialProject?.syncRole?.level ?? null)
   // AQU-507: the project's designated PM from THIS load's resolve. null =
   // unassigned or not-yet-resolved; the overview's PM card reads it and
   // refresh()es after an assignment.
   const [pm, setPm] = useState<{ id: number; username: string } | null>(null)
-  const hasLoaded = useRef(false)
+  const hasLoaded = useRef(Boolean(initialProject))
   const { session, loading: sessionLoading } = useFrontierSession()
 
   const refresh = useCallback(() => {
+    if (!enabled) return () => {}
     if (!hasLoaded.current) setStatus("loading")
 
     // The session store hydrates asynchronously on first load. Until it
@@ -179,7 +199,7 @@ export function useProject(projectId: string) {
     })()
 
     return () => { cancelled = true }
-  }, [projectId, session?.jwt, sessionLoading])
+  }, [enabled, projectId, session?.jwt, sessionLoading])
 
   useEffect(() => {
     const cleanup = refresh()
@@ -192,11 +212,12 @@ export function useProject(projectId: string) {
   // AQU-822: the org's termbase-edit floor rides along on the project record,
   // so a terminology-only patch can be permitted below the maintainer settings
   // floor without any extra fetch here.
-  const { settings: syncedSettings, patch: patchSettings, hasFetched: settingsFetched } = useProjectSettings(
-    projectId,
+  const projectSettings = useProjectSettings(
+    !enabled || options?.includeSettings === false ? null : projectId,
     roleLevel,
     { termbaseEditMinRole: project?.termbaseEditMinRole },
   )
+  const { settings: syncedSettings, patch: patchSettings, hasFetched: settingsFetched } = projectSettings
   const overlaid = useMemo(
     () => project ? overlaySettings(project, syncedSettings) : null,
     [project, syncedSettings],
@@ -223,6 +244,9 @@ export function useProject(projectId: string) {
     refresh,
     /** Persist project-wide settings (incl. synced voice profiles) to the server. */
     patchSettings,
+    /** The full settings-query owner. Workspace sub-routes can reuse this
+     * instance instead of mounting another GET + optimistic overlay. */
+    projectSettings,
     /** True once the settings overlay's GET has confirmed — before this, the
      *  overlaid shared fields (audioTimingMode, …) may still be defaults.
      *  Consumers that COMPARE those fields over time (the timing-mode ack)

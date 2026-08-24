@@ -4,6 +4,7 @@ import {
   fetchProjectSettingsResult,
   patchProjectSettings,
   PROJECT_SETTINGS_VERSION_INITIAL,
+  resolveTimingLocked,
 } from "./project-settings"
 import type { TranslationBrief } from "@/lib/brief/types"
 
@@ -195,5 +196,35 @@ describe("fetchProjectSettingsResult (fail-closed contract)", () => {
     const got = await fetchProjectSettingsResult("jwt", "p1", API)
     expect(got.ok).toBe(false)
     if (!got.ok) expect(got.status).toBe(0)
+  })
+})
+
+
+// ── The timing lock (AQU-646, Sam 2026-08-20) ────────────────────────────
+//
+// The ONE setting in this file that inverts its convention: absent means the
+// guard is ON. Everything else here defaults to "whatever we did before", so
+// this deserves tests that pin the inversion rather than assume it.
+
+describe("resolveTimingLocked", () => {
+  it("locks a project that has never heard of the setting", () => {
+    // Which is every project that exists the day this ships.
+    expect(resolveTimingLocked(undefined)).toBe(true)
+    expect(resolveTimingLocked(null)).toBe(true)
+    expect(resolveTimingLocked({})).toBe(true)
+  })
+
+  it("unlocks only on an explicit false", () => {
+    expect(resolveTimingLocked({ timingLocked: false })).toBe(false)
+    expect(resolveTimingLocked({ timingLocked: true })).toBe(true)
+  })
+
+  it("agrees with the server's copy on every shape", () => {
+    // sync-worker/src/events/timing-authority.ts holds the same rule; if these
+    // two ever disagree the app hides handles the server would have accepted,
+    // or worse, shows handles it will refuse.
+    for (const value of [undefined, true, 0, 1, "", "false", null]) {
+      expect(resolveTimingLocked({ timingLocked: value as never })).toBe(true)
+    }
   })
 })

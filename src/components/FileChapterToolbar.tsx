@@ -1,31 +1,14 @@
-import { useMemo, useSyncExternalStore, type RefObject, type ReactNode } from "react"
+import { useMemo, type RefObject, type ReactNode } from "react"
 import { ListChecks, LoaderCircle, WandSparkles } from "lucide-react"
-import { CheckFileButton } from "@/components/CheckFileButton"
 import { EditorModeToggle, type EditorLens } from "@/components/EditorModeToggle"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import type { CheckRunResult } from "@/lib/check/deterministic-check"
-import { Switch } from "@/components/ui/switch"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
-
-/** Tailwind `sm` — below this, Check file folds into the ⋯ menu. */
-const SM_MIN_WIDTH_QUERY = "(min-width: 640px)"
-
-function useIsSmUp(): boolean {
-  return useSyncExternalStore(
-    (onStoreChange) => {
-      const mq = window.matchMedia(SM_MIN_WIDTH_QUERY)
-      mq.addEventListener("change", onStoreChange)
-      return () => mq.removeEventListener("change", onStoreChange)
-    },
-    () => window.matchMedia(SM_MIN_WIDTH_QUERY).matches,
-    () => true,
-  )
-}
 
 interface FileChapterToolbarProps {
   lens: EditorLens
   onLensChange: (lens: EditorLens) => void
+  onAgentSelect?: () => void
   timeOrdered?: boolean
   checkOpen: boolean
   checkRunning: boolean
@@ -40,10 +23,11 @@ interface FileChapterToolbarProps {
   onTranslateAsReadChange?: (enabled: boolean) => void
 }
 
-/** Chapter-row right-side controls: lens switch, file check, and overflow menu. */
+/** Chapter-row right-side controls: mode switch and file-options menu. */
 export function FileChapterToolbar({
   lens,
   onLensChange,
+  onAgentSelect,
   timeOrdered = false,
   checkOpen,
   checkRunning,
@@ -58,15 +42,11 @@ export function FileChapterToolbar({
   onTranslateAsReadChange,
 }: FileChapterToolbarProps) {
   const t = useT()
-  const smUp = useIsSmUp()
 
   const overflowItems = useMemo((): OverflowMenuItem[] => {
-    if (smUp) return menuItems
     const checkLabel = checkRunning
       ? "Checking…"
-      : checkOpen
-        ? "Close file check"
-        : "Check file"
+      : t("rules.checkFileButton.label")
     const badge = checkResult && !checkRunning ? (
       <span
         className={checkResult.totalFindingCount > 0
@@ -77,17 +57,43 @@ export function FileChapterToolbar({
       </span>
     ) : undefined
     return [
+      ...(onTranslateAsReadChange ? [{
+        id: "translate-as-read",
+        type: "checkbox" as const,
+        label: t("agentWorkspace.translateAsRead"),
+        icon: translateAsReadActive ? LoaderCircle : WandSparkles,
+        checked: translateAsReadEnabled,
+        disabled: translateAsReadDisabled,
+        onCheckedChange: onTranslateAsReadChange,
+      }] : []),
       {
         id: "check-file",
+        type: "checkbox",
         label: checkLabel,
         icon: ListChecks,
+        checked: checkOpen,
         badge,
         disabled: checkRunning,
-        onClick: onCheckToggle,
+        onCheckedChange: onCheckToggle,
       },
+      ...(menuItems.length > 0 ? [{
+        id: "toolbar-controls-separator",
+        type: "separator" as const,
+      }] : []),
       ...menuItems,
     ]
-  }, [smUp, menuItems, checkOpen, checkRunning, checkResult, onCheckToggle])
+  }, [
+    menuItems,
+    checkOpen,
+    checkRunning,
+    checkResult,
+    onCheckToggle,
+    onTranslateAsReadChange,
+    t,
+    translateAsReadActive,
+    translateAsReadDisabled,
+    translateAsReadEnabled,
+  ])
 
   return (
     // Keep the portal-only viewSettingsMenu outside the gap flex — an empty
@@ -97,41 +103,9 @@ export function FileChapterToolbar({
         <EditorModeToggle
           lens={lens}
           onChange={onLensChange}
+          onAgentSelect={onAgentSelect}
           timeOrdered={timeOrdered}
         />
-        {onTranslateAsReadChange ? (
-          <AppTooltip
-            content={translateAsReadDisabled
-              ? "AI translation is unavailable or this file is read-only"
-              : "Draft visible empty cells. Refresh untouched AI drafts only when better evidence is available."}
-          >
-            <div className={translateAsReadDisabled
-              ? "flex cursor-not-allowed items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 text-xs text-muted-foreground opacity-60"
-              : "flex items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 text-xs font-medium text-foreground shadow-xs transition-colors hover:bg-accent"}
-            >
-              {translateAsReadActive
-                ? <LoaderCircle className="h-3.5 w-3.5 animate-spin text-primary" />
-                : <WandSparkles className="h-3.5 w-3.5 text-primary" />}
-              <span className="hidden whitespace-nowrap lg:inline">{t("agentWorkspace.translateAsRead")}</span>
-              <Switch
-                size="sm"
-                aria-label={t("agentWorkspace.translateAsRead")}
-                checked={translateAsReadEnabled}
-                disabled={translateAsReadDisabled}
-                onCheckedChange={onTranslateAsReadChange}
-              />
-            </div>
-          </AppTooltip>
-        ) : null}
-        {/* Really small: Check file lives in the ⋯ menu instead. */}
-        <div className="hidden sm:contents">
-          <CheckFileButton
-            checkOpen={checkOpen}
-            checkRunning={checkRunning}
-            checkResult={checkResult}
-            onToggle={onCheckToggle}
-          />
-        </div>
         <OverflowMenu
           items={overflowItems}
           triggerRef={fileOptionsAnchorRef}

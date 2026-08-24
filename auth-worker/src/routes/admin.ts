@@ -12,7 +12,7 @@
 //   GET /overview              — top-line counts (orgs, users, projects, active-7d)
 //   GET /orgs                  — every org + owner + member/project counts
 //   GET /users                 — every user
-//   GET /projects              — every project + org/creator + cell/word rollup
+//   GET /projects              — every project + org/creator + cell/word rollup + shared flag
 //   GET /activity              — cross-tenant activity_logs feed (?limit, ?since)
 //   GET /credits/orgs          — all orgs with day/week credit spend + caps
 //   PATCH /credits/org/:orgId  — update per-org credit config (org_settings.credits)
@@ -380,7 +380,12 @@ admin.get("/users", async (c) => {
   })
 })
 
-/** GET /api/v2/admin/projects — every project with org/creator + rollup. */
+/** True when a PG boolean / 0-1 flag is on. */
+function asBool(value: boolean | number | null | undefined): boolean {
+  return value === true || value === 1
+}
+
+/** GET /api/v2/admin/projects — every project with org/creator + rollup + shared flag. */
 admin.get("/projects", async (c) => {
   const { results } = await c.env.AQUILLA_PG.prepare(
     `SELECT p.id, p.name, p.org_id, p.archived_at, p.created_at, p.deadline_at,
@@ -389,7 +394,28 @@ admin.get("/projects", async (c) => {
             COALESCE(SUM(f.cell_count), 0) AS total_cells,
             COALESCE(SUM(f.approved_count), 0) AS validated_cells,
             COALESCE(SUM(f.word_count), 0) AS word_count,
-            MAX(f.last_edit_at) AS last_edit_at
+            MAX(f.last_edit_at) AS last_edit_at,
+            (
+              EXISTS (
+                SELECT 1 FROM project_members pm
+                 WHERE pm.project_id = p.id
+                   AND p.org_id IS NOT NULL
+                   AND NOT EXISTS (
+                     SELECT 1 FROM org_members om
+                      WHERE om.org_id = p.org_id AND om.user_id = pm.user_id
+                   )
+              ) OR EXISTS (
+                SELECT 1
+                  FROM group_project_grants gpg
+                  JOIN group_members gm ON gm.group_id = gpg.group_id
+                 WHERE gpg.project_id = p.id
+                   AND p.org_id IS NOT NULL
+                   AND NOT EXISTS (
+                     SELECT 1 FROM org_members om
+                      WHERE om.org_id = p.org_id AND om.user_id = gm.user_id
+                   )
+              )
+            ) AS shared
        FROM projects p
        LEFT JOIN organizations o ON o.id = p.org_id
        LEFT JOIN users u ON u.id = p.created_by
@@ -409,6 +435,7 @@ admin.get("/projects", async (c) => {
     validated_cells: number
     word_count: number
     last_edit_at: number | null
+    shared: boolean | number | null
   }>()
   return c.json({
     projects: results.map((r) => ({
@@ -424,6 +451,7 @@ admin.get("/projects", async (c) => {
       validatedCells: r.validated_cells,
       wordCount: r.word_count,
       lastEditAt: r.last_edit_at,
+      shared: asBool(r.shared),
     })),
   })
 })
@@ -641,6 +669,19 @@ admin.get("/settings", async (c) => {
         rec.settings.defaultLlmModel || c.env.DEFAULT_LLM_MODEL || DEFAULT_LLM_MODEL_ID,
       agentModel:
         rec.settings.agentModel || c.env.AGENT_MODEL_DEFAULT || DEFAULT_LLM_MODEL_ID,
+      // Autopilot tiers, resolved exactly as lib/contextual/tick.ts does.
+      // `fast` unset means every tier runs on one frontier model, so the
+      // console shows what is ACTUALLY in force rather than an empty field.
+      contextualFastModel:
+        rec.settings.contextualFastModel || c.env.CONTEXTUAL_FAST_MODEL || DEFAULT_LLM_MODEL_ID,
+      contextualDeepModel:
+        rec.settings.contextualDeepModel
+        || c.env.CONTEXTUAL_DEEP_MODEL
+        || rec.settings.agentDraftModel
+        || c.env.AGENT_DRAFT_MODEL_DEFAULT
+        || rec.settings.agentModel
+        || c.env.AGENT_MODEL_DEFAULT
+        || DEFAULT_LLM_MODEL_ID,
       allowedModels: allowedMenu,
     },
   })
@@ -649,6 +690,10 @@ admin.get("/settings", async (c) => {
 const platformSettingsPatchSchema = z.object({
   defaultLlmModel:    z.string().min(1).optional(),
   agentModel:         z.string().min(1).optional(),
+  // Optional tiers: "" CLEARS the stored value so the env/default fallback
+  // takes over again. min(1) would make a set tier impossible to unset.
+  contextualFastModel: z.string().optional(),
+  contextualDeepModel: z.string().optional(),
   allowedModels:      z.array(z.string().min(1)).optional(),
   aiUserDailyLimit:   z.number().int().nonnegative().optional(),
   aiGlobalDailyLimit: z.number().int().nonnegative().optional(),
@@ -678,8 +723,18 @@ admin.patch("/settings", zValidator("json", platformSettingsPatchSchema), async 
   // "shrink the list below the current model".
   const current = await loadPlatformSettings(c.env)
   const merged = { ...current.settings, ...patch }
+  // An empty string is "clear this tier", not "pin it to nothing" — drop the
+  // key so the env/default fallback resolves again.
+  for (const field of ["contextualFastModel", "contextualDeepModel"] as const) {
+    if (merged[field] === "") delete merged[field]
+  }
   const mergedAllowed = getAllowedModels(c.env, merged)
-  for (const field of ["defaultLlmModel", "agentModel"] as const) {
+  for (const field of [
+    "defaultLlmModel",
+    "agentModel",
+    "contextualFastModel",
+    "contextualDeepModel",
+  ] as const) {
     const value = merged[field]
     if (value !== undefined && !mergedAllowed.has(value)) {
       return c.json(

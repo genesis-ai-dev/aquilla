@@ -67,28 +67,52 @@ export async function stripeForm(
   return json
 }
 
+/**
+ * Verify a `Stripe-Signature` header against the endpoint's webhook secret.
+ *
+ * OPS-12 (docs/OPSEC-REVIEW-2026-08-17.md) — the header carries ONE `t` and
+ * one-or-more `v1` entries:
+ *
+ *     t=1699999999,v1=<sig under secret A>,v1=<sig under secret B>
+ *
+ * More than one appears exactly while a webhook secret is being rolled: Stripe
+ * signs with both the old and the new secret until the old one is expired.
+ * Parsing the header into an object keeps only the LAST `v1`, so an endpoint
+ * still holding the old secret would reject every event for the whole rollover
+ * window — fail-closed, but it means webhook delivery breaks during the one
+ * operation we most want to be routine, and billing state silently drifts
+ * behind Stripe's. Check every candidate instead.
+ */
 export function verifyStripeSignature(args: {
   payload: string
   header: string
   secret: string
   nowSec?: number
 }): boolean {
-  const parts = Object.fromEntries(
-    args.header.split(",").map((piece) => {
-      const idx = piece.indexOf("=")
-      return [piece.slice(0, idx).trim(), piece.slice(idx + 1).trim()]
-    }),
-  )
-  const timestamp = parts.t
-  const signature = parts.v1
-  if (!timestamp || !signature) return false
+  let timestamp: string | null = null
+  const signatures: string[] = []
+  for (const piece of args.header.split(",")) {
+    const idx = piece.indexOf("=")
+    if (idx < 0) continue
+    const key = piece.slice(0, idx).trim()
+    const value = piece.slice(idx + 1).trim()
+    if (key === "t") timestamp ??= value
+    else if (key === "v1") signatures.push(value)
+  }
+  if (!timestamp || signatures.length === 0) return false
 
   const ts = Number(timestamp)
   const now = args.nowSec ?? Math.floor(Date.now() / 1000)
   if (!Number.isFinite(ts) || Math.abs(now - ts) > SIGNATURE_TOLERANCE_SEC) return false
 
   const expected = bytesToHex(hmac(sha256, utf8ToBytes(args.secret), utf8ToBytes(`${timestamp}.${args.payload}`)))
-  return secureCompare(expected, signature)
+  // No early return: every candidate is compared, so the work does not depend
+  // on which position matched.
+  let matched = false
+  for (const signature of signatures) {
+    if (secureCompare(expected, signature)) matched = true
+  }
+  return matched
 }
 
 export interface StripeCheckoutSession {

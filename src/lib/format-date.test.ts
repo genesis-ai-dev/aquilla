@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { fmtLabeledDateTime, fmtShortCalendarDate } from "./format-date"
+import { fmtDeadlineDate, fmtLabeledDeadlineDate, fmtLabeledDateTime, fmtShortCalendarDate } from "./format-date"
 
 const NOW = new Date(2026, 6, 9).getTime()
 const RECENT = new Date(2026, 6, 3, 13, 37, 8)
@@ -45,5 +45,45 @@ describe("fmtLabeledDateTime", () => {
       second: "2-digit",
     })
     expect(fmtLabeledDateTime(OLD.getTime(), "Archived", NOW)).toBe(`Archived ${when}`)
+  })
+
+  it("omits the prefix when the label is blank", () => {
+    const when = RECENT.toLocaleString(undefined, {
+      month: "long",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+    })
+    expect(fmtLabeledDateTime(RECENT.getTime(), "", NOW)).toBe(when)
+  })
+})
+
+describe("fmtDeadlineDate", () => {
+  it("omits the year when the deadline is in the current calendar year", () => {
+    expect(fmtDeadlineDate("2026-06-02", NOW)).toBe("June 2")
+  })
+
+  it("includes the year when the deadline is in a later calendar year", () => {
+    expect(fmtDeadlineDate("2027-06-02", NOW)).toBe("June 2, 2027")
+  })
+
+  it("includes the year when the deadline is in a previous calendar year", () => {
+    expect(fmtDeadlineDate("2025-06-02", NOW)).toBe("June 2, 2025")
+  })
+
+  it("parses YYYY-MM-DD as a local calendar date", () => {
+    expect(fmtDeadlineDate("2026-07-01", NOW)).toBe("July 1")
+  })
+
+  it("returns em dash for null", () => {
+    expect(fmtDeadlineDate(null, NOW)).toBe("—")
+  })
+})
+
+describe("fmtLabeledDeadlineDate", () => {
+  it("always includes the year and omits the time", () => {
+    expect(fmtLabeledDeadlineDate("2026-06-02", "Due")).toBe("Due June 2, 2026")
+    expect(fmtLabeledDeadlineDate("2027-06-02", "Due")).toBe("Due June 2, 2027")
   })
 })

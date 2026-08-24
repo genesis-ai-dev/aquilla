@@ -1,29 +1,25 @@
-import { useState } from "react"
 import { Activity as ActivityIcon } from "lucide-react"
 import { EmptyState } from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
-import { formatRelativeTime } from "@/lib/time/relative"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import type { AdminActivity } from "@/lib/frontier/admin"
 
 /**
  * The global activity feed as a timeline rather than a 4-column table. A left
  * rail of dots reads chronologically at a glance; the type is a small chip and
- * the timestamp is relative ("3 hours ago"). Reused on the Overview home with a
- * `limit` + "View all" affordance.
+ * the timestamp is a short calendar date (full datetime on hover), matching
+ * admin console tables.
  */
 export function AdminActivityTimeline({
   activity,
   limit,
-  now,
 }: {
   activity: AdminActivity[]
   limit?: number
+  /** @deprecated relative-time clock; DateTooltip uses Date.now() internally. */
   now?: number
 }) {
-  // Stable fallback clock when a parent doesn't pin one (e.g. the Activity tab).
-  const [fallbackNow] = useState(() => Date.now())
-  const nowMs = now ?? fallbackNow
   if (activity.length === 0) {
     return (
       <EmptyState
@@ -63,7 +59,7 @@ export function AdminActivityTimeline({
               )}
             </div>
             <time className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
-              {formatRelativeTime(a.timestamp, nowMs) ?? "—"}
+              <DateTooltip value={a.timestamp} label="Occurred" />
             </time>
           </div>
         </li>

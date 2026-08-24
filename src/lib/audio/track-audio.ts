@@ -62,6 +62,19 @@ export function sourceClipAudioForCell(cell: CellData): TrackAudioRef | null {
  */
 export function activeTargetForCell(cell: CellData): TargetAudioRef | null {
   if (cell.medium !== "media") return null
+  return resolveTargetAudio(cell)
+}
+
+/**
+ * The same resolution WITHOUT the medium gate. (AQU-646)
+ *
+ * A subtitle file timed against footage carries takes on TEXT cells — there are
+ * no media cells to hang them on — so the Target track has to be able to find
+ * them. Deliberately a separate export rather than relaxing the gate above: on
+ * a MIXED dubbing file that would put a dub chip and a hover mic on every
+ * subtitle cue in the file, which is not what that arrangement means.
+ */
+export function resolveTargetAudio(cell: CellData): TargetAudioRef | null {
   const sel = cell.selectedAudioId
   if (sel && audioIdSeededWith(sel, cell.id)) {
     const att = liveAttachment(cell, sel)

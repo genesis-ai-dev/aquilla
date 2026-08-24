@@ -18,6 +18,19 @@ export const workspace = defineNamespace({
   keys: {
     // -- ProjectWorkspace: session/access/loading states before the editor mounts --
     "workspace.status.notOnDevice": "This project isn't on this device. {signIn} to open it from the cloud.",
+    // AQU-646, keyed 2026-08-20. Trails the "Deleted" badge on a project card,
+    // so it starts with a space and reads as a continuation, not a sentence.
+    "workspace.projectCard.deletedBy": " by {name}",
+    "workspace.diarize.discardWarning": plural({
+      one: "Diarizing re-segments this file and will DISCARD the transcription/translation on {count} section. Diarize first, then transcribe and translate. Continue anyway?",
+      other: "Diarizing re-segments this file and will DISCARD the transcription/translation on {count} sections. Diarize first, then transcribe and translate. Continue anyway?",
+    }),
+    "workspace.idml.historyRestoreBlocked": "This IDML history entry cannot be restored safely.",
+    "workspace.idml.replacementBlocked": "Protected IDML replacement was blocked.",
+    "workspace.outbox.staleRejected": plural({
+      one: "{count} change was rejected because it conflicted with a newer edit from another session.",
+      other: "{count} changes were rejected because they conflicted with newer edits from another session.",
+    }),
     "workspace.status.unreachable": "Can't reach the server — your project may still be available.",
     "workspace.status.forbidden":
       "You no longer have access to this project. Ask a project maintainer to re-invite you if this is unexpected. {backLink}.",
@@ -46,6 +59,7 @@ export const workspace = defineNamespace({
     "workspace.focusLock.editingNotice":
       "{user} is now editing this cell — your editor is read-only. Copy any unsaved text before moving away.",
     "workspace.loadingComments": "Loading comments",
+    "workspace.loadingMemory": "Loading Living Memory",
     // "Loading terminology" → terminology.loadingLabel (same panel, same surface)
 
     // -- ProjectWorkspace: "Recently deleted" trash dialog --
@@ -404,6 +418,36 @@ export const workspace = defineNamespace({
       screenshot: "workspace-nav",
     },
     keys: {
+      "workspace.diarize.discardWarning": {
+        description:
+          "Body of the browser confirm() shown before diarizing a file that already " +
+          "has work on it. Ends in a question because the dialog's buttons answer " +
+          "it. DISCARD is capitalised deliberately — it is the word that stops " +
+          "someone clicking through — and the recommended order is stated before " +
+          "the question.",
+        placeholders: {
+          count: "How many sections would lose their transcription or translation.",
+        },
+      },
+      "workspace.outbox.staleRejected": {
+        description:
+          "Amber banner above the editor after the server refused queued edits " +
+          "that a newer edit from another session had overtaken. Full sentence " +
+          "with a period. States the cause, not blame.",
+        placeholders: {
+          count: "How many queued changes were rejected.",
+        },
+      },
+      "workspace.projectCard.deletedBy": {
+        description:
+          "Trailing fragment appended to the 'Deleted' badge on a project card, " +
+          "naming who deleted it. NOT a sentence — it continues the badge and is " +
+          "followed by a middle dot and a date, so it keeps its leading space and " +
+          "takes no capital and no period.",
+        placeholders: {
+          name: "Username of the person who deleted the project.",
+        },
+      },
       "workspace.status.notOnDevice": {
         description:
           "Shown instead of the editor when the project exists only server-side and " +
@@ -510,6 +554,13 @@ export const workspace = defineNamespace({
         description:
           "Loading-panel label shown while the full-page Comments surface inside " +
           "the workspace shell is being fetched.",
+      },
+      "workspace.loadingMemory": {
+        description:
+          "Loading-panel label shown while the full-page Living Memory surface " +
+          "inside the workspace shell is being fetched. 'Living Memory' is the " +
+          "product name of that surface — keep it aligned with " +
+          "terminology.livingMemory.title.",
       },
       "workspace.trash.empty": {
         description:

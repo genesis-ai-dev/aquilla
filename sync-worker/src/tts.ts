@@ -14,7 +14,7 @@
 // Metering: audio seconds, per-user with org_id attribution, in
 //           tts_usage_daily (see tts-budget.ts + migration 0041).
 
-import { audioObjectKey, r2KeyPrefix } from "./audio"
+import { audioObjectKey, isPathSafeId, r2KeyPrefix } from "./audio"
 import { verifyTokenForFile } from "./auth"
 import { runTtsGuard, recordTtsUsage } from "./tts-budget"
 import { recordCredit } from "./credits"
@@ -91,6 +91,12 @@ export async function handleTtsRequest(
   const { projectId, fileId, text, referenceAudioId, language } = body
   if (!projectId || !fileId || !text) {
     return new Response("missing projectId, fileId, or text", { status: 400 })
+  }
+  // projectId/fileId come straight from the JSON body (unlike /audio, whose
+  // ids are URL-path segments matched by `[^/]+`) and land directly in an R2
+  // key below, so reject anything that could act as a path separator there.
+  if (!isPathSafeId(projectId) || !isPathSafeId(fileId)) {
+    return new Response("invalid projectId or fileId", { status: 400 })
   }
   // Bound text size — an authenticated caller could otherwise exhaust the GPU
   // request timeout with a multi-MB payload.

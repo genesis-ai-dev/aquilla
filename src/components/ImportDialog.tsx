@@ -57,6 +57,7 @@ import {
   type MaculaProgress,
   type TnProgress,
   type BiblicaProgress,
+  type BiblicaEdition,
   type ParatextImportProgress,
   type SourceCellRef,
   type ImportResult,
@@ -187,7 +188,7 @@ interface ImportDialogProps {
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
 function skipStorageKey(projectId: string) {
-  return `codex.importDirectionSkipped.${projectId}`
+  return `aquilla.importDirectionSkipped.${projectId}`
 }
 
 export function ImportDialog({
@@ -349,7 +350,7 @@ export function ImportDialog({
         setScreen("result")
         // Persist per-project so a re-show is possible (bonus scope).
         try {
-          const key = `codex.lastImportReport.${projectId}`
+          const key = `aquilla.lastImportReport.${projectId}`
           localStorage.setItem(
             key,
             JSON.stringify({ ts: Date.now(), skipped: skippedBooks, importedCount: refs.length }),
@@ -3599,6 +3600,11 @@ function BiblicaPanel({
   const [file, setFile] = useState<File | null>(null)
   // Off by default: each InDesign line stays one cell unless the translator opts in.
   const [splitSentences, setSplitSentences] = useState(false)
+  // The three Biblica templates disagree about what a paragraph style means —
+  // a study Bible marks its notes, the other two mark scripture instead — and
+  // nothing in the package says which title it is, so the person importing it
+  // does. One edition at a time, hence a single value rather than two flags.
+  const [edition, setEdition] = useState<BiblicaEdition>("study-notes")
 
   async function handleImport() {
     if (!file || importing) return
@@ -3616,7 +3622,7 @@ function BiblicaPanel({
           getToken,
         },
         setProgress,
-        { splitSentences },
+        { splitSentences, edition },
       )
       await onImported(ref)
     } catch (err) {
@@ -3627,12 +3633,27 @@ function BiblicaPanel({
     }
   }
 
+  function chooseEdition(next: BiblicaEdition, checked: boolean) {
+    setEdition(checked ? next : "study-notes")
+    setError(null)
+  }
+
   return (
     <div className="flex flex-col gap-4 py-2">
-      <p className="text-xs text-muted-foreground">{t("importExport.biblica.description")}</p>
+      <p className="text-xs text-muted-foreground">
+        {edition === "treasure-hunt"
+          ? t("importExport.biblica.descriptionTreasureHunt")
+          : edition === "reach4life"
+          ? t("importExport.biblica.descriptionReach4Life")
+          : t("importExport.biblica.description")}
+      </p>
       <div className="flex flex-col gap-2">
-        <Button variant="outline" nativeButton={false} render={<label className="cursor-pointer" />}>
-          {file ? file.name : t("importExport.biblica.chooseFile")}
+        <Button variant="outline" size="sm" nativeButton={false} render={<label className="cursor-pointer" />}>
+          {file
+            ? file.name
+            : edition === "treasure-hunt" ? t("importExport.biblica.chooseFileTreasureHunt")
+            : edition === "reach4life" ? t("importExport.biblica.chooseFileReach4Life")
+            : t("importExport.biblica.chooseFile")}
           <input
             type="file"
             className="hidden"
@@ -3650,6 +3671,36 @@ function BiblicaPanel({
             {file.name} — {(file.size / 1024 / 1024).toFixed(2)} MB
           </p>
         )}
+        <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
+          <Checkbox
+            className="mt-0.5"
+            checked={edition === "treasure-hunt"}
+            disabled={importing}
+            onCheckedChange={(checked) => chooseEdition("treasure-hunt", checked === true)}
+            aria-label={t("importExport.biblica.treasureHuntLabel")}
+          />
+          <span className="flex flex-col gap-0.5">
+            <span>{t("importExport.biblica.treasureHuntLabel")}</span>
+            <span className="text-xs text-muted-foreground">
+              {t("importExport.biblica.treasureHuntHint")}
+            </span>
+          </span>
+        </label>
+        <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
+          <Checkbox
+            className="mt-0.5"
+            checked={edition === "reach4life"}
+            disabled={importing}
+            onCheckedChange={(checked) => chooseEdition("reach4life", checked === true)}
+            aria-label={t("importExport.biblica.reach4lifeLabel")}
+          />
+          <span className="flex flex-col gap-0.5">
+            <span>{t("importExport.biblica.reach4lifeLabel")}</span>
+            <span className="text-xs text-muted-foreground">
+              {t("importExport.biblica.reach4lifeHint")}
+            </span>
+          </span>
+        </label>
         <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
           <Checkbox
             className="mt-0.5"

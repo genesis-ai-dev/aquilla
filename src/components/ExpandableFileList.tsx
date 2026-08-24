@@ -41,6 +41,8 @@ interface Props {
   onExport?: (fileId: string) => void
   /** Opens Assign work scoped to the given file. Hidden when omitted. */
   onAssignWork?: (fileId: string) => void
+  /** Opens the Segmentation dialog for the given file (rendered by the caller). */
+  onSegmentation?: (fileId: string) => void
   /** AQU-271: Optional — pass undefined to hide delete for roles below project_lead (500). */
   onDelete?: (fileId: string) => void
   onApplySuggestion?: (fileId: string) => void
@@ -59,7 +61,7 @@ interface Props {
 
 export function ExpandableFileList({
   projectId, files, activeFileId, fileProgress,
-  suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onDelete,
+  suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onDelete,
   targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
   renameSignal, activeChapterHealth,
@@ -67,7 +69,7 @@ export function ExpandableFileList({
   const t = useT()
   const { expanded, toggle } = useSidebarExpansion(projectId)
   const { members: collapsed, toggle: toggleCollapsed } = usePersistedToggleSet(
-    `codex:sidebar:corpus-collapsed:${projectId}`,
+    `aquilla:sidebar:corpus-collapsed:${projectId}`,
   )
   const [editingFileId, setEditingFileId] = useState<string | null>(null)
   useEffect(() => {
@@ -229,6 +231,7 @@ export function ExpandableFileList({
                             onMove={() => onMove(file.id)}
                             onExport={onExport ? () => onExport(file.id) : undefined}
                             onAssignWork={onAssignWork ? () => onAssignWork(file.id) : undefined}
+                            onSegmentation={onSegmentation ? () => onSegmentation(file.id) : undefined}
                             onDelete={onDelete ? () => onDelete(file.id) : undefined}
                             onExportSource={
                               canExportSourceFile(file, canExportByOrgPolicy)

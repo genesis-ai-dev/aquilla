@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { Link } from "react-router-dom"
 import {
   AlertTriangle,
   ChevronDown,
@@ -33,12 +34,21 @@ import {
 } from "@/components/ui/sheet"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
+import { LivingMemoryButton } from "@/components/LivingMemoryButton"
 import { useI18n, useT, type TFunction } from "@/lib/i18n/I18nProvider"
+import { DateTooltip } from "@/components/ui/date-tooltip"
+import { fmtShortCalendarDate } from "@/lib/format-date"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { draftReviewHref } from "@/components/project-workspace-lane-deeplink"
 import { AutopilotProcessGraph } from "@/components/contextual/AutopilotProcessGraph"
 import {
+  collapseListToRange,
+  humanPassageLabel,
+} from "../../../shared/span-label"
+import { DecisionCard } from "@/components/contextual/DecisionCard"
+import {
   commandContextualRun,
+  fetchContextualDecisions,
   fetchContextualRunActivity,
   fetchContextualRuns,
   startFileContextualRun,
@@ -46,6 +56,7 @@ import {
   type ContextualActivityDraft,
   type ContextualActivityEvent,
   type ContextualActivitySceneBrief,
+  type ContextualDecisionView,
   type ContextualDraftCursor,
   type ContextualOverview,
   type ContextualRunActivity,
@@ -134,18 +145,18 @@ function StatusBadge({ run }: { run: ContextualRunRecord }) {
   )
 }
 
-function formatTimestamp(
-  value: string | null | undefined,
-  locale: string,
-  t: TFunction,
-): string {
-  if (!value) return t("autopilot.time.notRecorded")
+function Timestamp({
+  value,
+  label,
+}: {
+  value: string | null | undefined
+  label: string
+}) {
+  const { t } = useI18n()
+  if (!value) return <>{t("autopilot.time.notRecorded")}</>
   const date = new Date(value)
-  if (Number.isNaN(date.valueOf())) return t("autopilot.time.notRecorded")
-  return new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date)
+  if (Number.isNaN(date.valueOf())) return <>{t("autopilot.time.notRecorded")}</>
+  return <DateTooltip value={value} label={label} />
 }
 
 function phaseLabel(value: string | null | undefined, t: TFunction): string | null {
@@ -336,6 +347,29 @@ function redactedDetails(value: unknown, key = ""): unknown {
   return value
 }
 
+const CELL_ID_LIST_KEY = /cellids$/i
+
+function displayDetails(value: unknown, key = ""): unknown {
+  if (CELL_ID_LIST_KEY.test(key) && Array.isArray(value)) {
+    return collapseListToRange(value) ?? value
+  }
+  if (/authorization|cookie|token|secret|api.?key|prompt|completion/i.test(key)) return "[redacted]"
+  if (Array.isArray(value)) return value.map((item) => displayDetails(item))
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([childKey, child]) => [
+        childKey,
+        displayDetails(child, childKey),
+      ]),
+    )
+  }
+  return value
+}
+
+function humanCellTitle(cellLabel: string | null | undefined, cellId: string | null | undefined): string | null {
+  return humanPassageLabel(cellLabel) ?? humanPassageLabel(cellId)
+}
+
 function activityLog(run: ContextualRunRecord, activity: ContextualRunActivity | null): string {
   return JSON.stringify({
     run: {
@@ -489,8 +523,9 @@ function eventSummary(event: ContextualActivityEvent, t: TFunction): string {
     return t("autopilot.inspector.event.statusChanged")
   }
   if (event.kind === "span_started") {
-    return event.spanLabel
-      ? t("autopilot.inspector.event.spanStarted", { spanLabel: event.spanLabel })
+    const spanLabel = humanPassageLabel(event.spanLabel)
+    return spanLabel
+      ? t("autopilot.inspector.event.spanStarted", { spanLabel })
       : t("autopilot.inspector.event.spanStartedGeneric")
   }
   if (event.kind === "phase") {
@@ -526,7 +561,7 @@ function eventSummary(event: ContextualActivityEvent, t: TFunction): string {
 }
 
 function EventTimeline({ events }: { events: ContextualActivityEvent[] }) {
-  const { locale, t } = useI18n()
+  const { t } = useI18n()
   if (events.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
@@ -550,8 +585,8 @@ function EventTimeline({ events }: { events: ContextualActivityEvent[] }) {
               {(event.phase || event.status) && (
                 <Badge variant="secondary">{eventStatusLabel(event, t)}</Badge>
               )}
-              <time className="text-xs text-muted-foreground" dateTime={event.createdAt}>
-                {formatTimestamp(event.createdAt, locale, t)}
+              <time className="text-xs text-muted-foreground" dateTime={event.createdAt ?? undefined}>
+                <Timestamp value={event.createdAt} label={t("common.date.posted")} />
               </time>
             </div>
             <p className="mt-1 text-sm">{eventSummary(event, t)}</p>
@@ -573,17 +608,16 @@ function ReviewDraft({
   runTargetLang?: string
 }) {
   const t = useT()
-  const provenance = draft.provenance && Object.keys(draft.provenance).length > 0
-    ? JSON.stringify(draft.provenance)
-    : t("autopilot.inspector.review.noProvenance")
+  const cellTitle = humanCellTitle(draft.cellLabel, draft.cellId)
+  const passage = humanPassageLabel(draft.spanLabel)
   const draftStatus = evidenceStatusLabel(draft.status, t)
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle>{draft.cellId
-          ? t("common.cellLabel", { id: draft.cellId })
-          : t("autopilot.inspector.review.draftTitle")}</CardTitle>
-        <CardDescription>{provenance}</CardDescription>
+        <CardTitle>{cellTitle ?? t("autopilot.inspector.review.draftTitle")}</CardTitle>
+        {passage && (
+          <CardDescription>{t("autopilot.draft.draftedFrom", { spanLabel: passage })}</CardDescription>
+        )}
         <CardAction>
           <Badge variant="outline">
             {draftStatus ?? t("autopilot.evidence.status.unknown")}
@@ -595,8 +629,8 @@ function ReviewDraft({
         <CardFooter>
           <a
             href={draftReviewHref(projectId, draft.fileId, draft.cellId, runTargetLang ?? "")}
-            aria-label={draft.cellId
-              ? t("autopilot.inspector.review.inEditorCell", { cellId: draft.cellId })
+            aria-label={cellTitle
+              ? t("autopilot.inspector.review.inEditorCell", { cellId: cellTitle })
               : t("autopilot.inspector.review.inEditor")}
             className="text-sm font-medium text-primary underline-offset-4 hover:underline"
           >
@@ -615,9 +649,8 @@ function SceneBriefEvidence({ brief }: { brief: ContextualActivitySceneBrief }) 
   return (
     <Card size="sm">
       <CardHeader>
-        <CardTitle>{brief.startCellId && brief.endCellId
-          ? `${brief.startCellId} → ${brief.endCellId}`
-          : t("autopilot.inspector.context.sceneBrief")}</CardTitle>
+        <CardTitle>{humanPassageLabel(brief.spanLabel)
+          ?? t("autopilot.inspector.context.sceneBrief")}</CardTitle>
         <CardDescription>
           {brief.l1Summary ?? t("autopilot.inspector.context.noSceneSummary")}
         </CardDescription>
@@ -735,7 +768,11 @@ export function AutopilotActivityInspector({
   const [technicalOpen, setTechnicalOpen] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [actionMessage, setActionMessage] = useState<InspectorNotice | null>(null)
+  const [decisions, setDecisions] = useState<ContextualDecisionView[]>([])
+  const [decisionsOpenCount, setDecisionsOpenCount] = useState(0)
+  const [decisionsWarning, setDecisionsWarning] = useState<MessageKey | null>(null)
   const seqRef = useRef(0)
+  const decisionsSeqRef = useRef(0)
   const activitySeqRef = useRef(0)
   const activityRef = useRef<ContextualRunActivity | null>(null)
   const activityRunRef = useRef<string | null>(null)
@@ -846,6 +883,25 @@ export function AutopilotActivityInspector({
     }
   }, [loadingOlderRuns, nextRunCursor, projectId])
 
+  const loadDecisions = useCallback(async () => {
+    const seq = ++decisionsSeqRef.current
+    try {
+      const page = await fetchContextualDecisions(projectId)
+      if (seq !== decisionsSeqRef.current) return
+      setDecisions(page.decisions)
+      setDecisionsOpenCount(page.openCount)
+      setDecisionsWarning(null)
+    } catch {
+      // The transport only degrades 404/501 to an empty page; anything else
+      // reaching here is a real failure. Silence would render exactly like
+      // "no open decisions" — the one false reassurance this region must
+      // never give — so surface it instead of swallowing it.
+      if (seq === decisionsSeqRef.current) {
+        setDecisionsWarning("autopilot.inspector.warning.decisionsRefresh")
+      }
+    }
+  }, [projectId])
+
   const loadActivity = useCallback(async (runId: string) => {
     const seq = ++activitySeqRef.current
     setLoadingActivity(true)
@@ -927,8 +983,12 @@ export function AutopilotActivityInspector({
     const openingRunId = focusRunId ?? preferredRun(fallbackRuns, initialSection)?.runId ?? null
     selectedRunRef.current = openingRunId
     setSelectedRunId(openingRunId)
+    setDecisions([])
+    setDecisionsOpenCount(0)
+    setDecisionsWarning(null)
     void loadRuns()
-  }, [fallbackRuns, focusRunId, initialSection, loadRuns, open])
+    void loadDecisions()
+  }, [fallbackRuns, focusRunId, initialSection, loadDecisions, loadRuns, open])
 
   useEffect(() => {
     if (!open || !selectedRun?.runId) return
@@ -1104,13 +1164,23 @@ export function AutopilotActivityInspector({
   const selectedRunError = selectedRun ? humanRunError(selectedRun, t) : null
   const runsWarningText = runsWarning ? t(runsWarning) : null
   const activityWarningText = activityWarning ? t(activityWarning) : null
+  const decisionsWarningText = decisionsWarning ? t(decisionsWarning) : null
   const actionMessageText = noticeText(actionMessage, t)
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent side="right" className="w-full sm:max-w-2xl!" data-testid="autopilot-activity-inspector">
         <SheetHeader className="pe-12">
-          <SheetTitle>{t("autopilot.inspector.title")}</SheetTitle>
+          <div className="flex items-center gap-1">
+            <SheetTitle>{t("autopilot.inspector.title")}</SheetTitle>
+            {/* Co-referential Living Memory entry point: what autopilot knows
+                lives there, so the surface reporting its work links to it. */}
+            <LivingMemoryButton
+              projectId={projectId}
+              iconOnly
+              onNavigate={() => onOpenChange(false)}
+            />
+          </div>
           <SheetDescription>
             {t("autopilot.inspector.description")}
           </SheetDescription>
@@ -1154,6 +1224,7 @@ export function AutopilotActivityInspector({
                     void Promise.all([
                       loadRuns(),
                       selectedRun?.runId ? loadActivity(selectedRun.runId) : Promise.resolve(),
+                      loadDecisions(),
                     ])
                   }}
                   disabled={loadingRuns || loadingActivity}
@@ -1240,6 +1311,45 @@ export function AutopilotActivityInspector({
               )}
             </section>
 
+            <section aria-label={t("autopilot.decisions.heading")} className="flex flex-col gap-2">
+              <h3 className="text-sm font-medium">{t("autopilot.decisions.heading")}</h3>
+              {decisionsWarningText && (
+                <p role="status" className="flex items-start gap-2 text-sm text-destructive">
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+                  {decisionsWarningText}
+                </p>
+              )}
+              {decisions.length > 0 ? (
+                <div className="flex flex-col gap-2">
+                  {decisions.map((decision) => (
+                    <DecisionCard
+                      key={decision.id}
+                      decision={decision}
+                      projectId={projectId}
+                      onResolved={() => void loadDecisions()}
+                    />
+                  ))}
+                </div>
+              ) : (
+                // A fetch failure must not read as "nothing needs you" — that
+                // is a false reassurance in the one region whose job is to
+                // say a person is needed. Only show the empty state when the
+                // fetch actually succeeded with zero decisions.
+                !decisionsWarningText && (
+                  <p className="text-sm text-muted-foreground">
+                    {t("autopilot.decisions.empty")}
+                  </p>
+                )
+              )}
+              {decisionsOpenCount > decisions.length && (
+                <p className="text-xs text-muted-foreground">
+                  {t("autopilot.decisions.held", {
+                    count: decisionsOpenCount - decisions.length,
+                  })}
+                </p>
+              )}
+            </section>
+
             {selectedRun && (
               <>
                 <Separator />
@@ -1299,9 +1409,17 @@ export function AutopilotActivityInspector({
                     )}
                   </CardContent>
                   <CardFooter className="justify-between gap-3 text-xs text-muted-foreground">
-                    <span>{t("autopilot.inspector.run.updatedAt", {
-                      time: formatTimestamp(selectedRun.updatedAt, locale, t),
-                    })}</span>
+                    <span>
+                      {selectedRun.updatedAt ? (
+                        <DateTooltip value={selectedRun.updatedAt} label={t("autopilot.inspector.details.lastUpdate")}>
+                          {t("autopilot.inspector.run.updatedAt", {
+                            time: fmtShortCalendarDate(selectedRun.updatedAt, undefined, locale),
+                          })}
+                        </DateTooltip>
+                      ) : t("autopilot.inspector.run.updatedAt", {
+                        time: t("autopilot.time.notRecorded"),
+                      })}
+                    </span>
                     <span className="flex flex-wrap gap-x-2">
                       <span>
                         {t("autopilot.inspector.run.calls", { count: selectedRun.callsSpent })}
@@ -1318,8 +1436,8 @@ export function AutopilotActivityInspector({
 
                 <Disclosure title={t("autopilot.inspector.details.title")} open={detailsOpen} onOpenChange={setDetailsOpen}>
                   <dl className="grid grid-cols-2 gap-3 text-sm">
-                    <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.started")}</dt><dd>{formatTimestamp(selectedRun.createdAt, locale, t)}</dd></div>
-                    <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.lastUpdate")}</dt><dd>{formatTimestamp(selectedRun.updatedAt, locale, t)}</dd></div>
+                    <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.started")}</dt><dd><Timestamp value={selectedRun.createdAt} label={t("autopilot.inspector.details.started")} /></dd></div>
+                    <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.lastUpdate")}</dt><dd><Timestamp value={selectedRun.updatedAt} label={t("autopilot.inspector.details.lastUpdate")} /></dd></div>
                     <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.modelCalls")}</dt><dd className="tabular-nums">{selectedRun.callsSpent}</dd></div>
                     <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.unitsUsed")}</dt><dd className="tabular-nums">{selectedRun.unitsSpent}</dd></div>
                     <div><dt className="text-xs text-muted-foreground">{t("autopilot.inspector.details.startedBy")}</dt><dd>{selectedRun.initiatedBy ?? t("autopilot.time.notRecorded")}</dd></div>
@@ -1441,15 +1559,19 @@ export function AutopilotActivityInspector({
                             <div className="flex shrink-0 items-center gap-2">
                               <Badge variant="outline">{readinessLevelLabel(item, t)}</Badge>
                               {item.href && item.level !== "ready" && (
-                                <a
+                                <Link
                                   aria-label={t("autopilot.inspector.context.setupNamed", {
                                     label: itemLabel,
                                   })}
-                                  href={`/project/${projectId}/${item.href}`}
+                                  to={`/project/${projectId}/${item.href}`}
                                   className="text-xs text-primary underline-offset-2 hover:underline"
+                                  // SPA navigation keeps this sheet mounted (the old
+                                  // raw <a> reloaded the page) — close it so the
+                                  // destination isn't hidden behind the overlay.
+                                  onClick={() => onOpenChange(false)}
                                 >
                                   {t("autopilot.inspector.context.setup")}
-                                </a>
+                                </Link>
                               )}
                             </div>
                           </div>
@@ -1491,7 +1613,7 @@ export function AutopilotActivityInspector({
                             </Button>
                           )}
                         </div>
-                        <pre className="whitespace-pre-wrap break-words text-xs text-muted-foreground">{JSON.stringify(redactedDetails(event.details), null, 2)}</pre>
+                        <pre className="whitespace-pre-wrap break-words text-xs text-muted-foreground">{JSON.stringify(displayDetails(event.details), null, 2)}</pre>
                       </div>
                     )
                   })}

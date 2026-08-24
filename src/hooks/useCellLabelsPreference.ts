@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react"
 
-const STORAGE_KEY = "codex:cellLabelsEnabled:"
+const STORAGE_KEY = "aquilla:cellLabelsEnabled:"
 
 function readPreference(projectId: string): boolean {
   try {

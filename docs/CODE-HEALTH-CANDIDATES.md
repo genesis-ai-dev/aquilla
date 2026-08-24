@@ -6,29 +6,27 @@ a later run completes.
 
 ## "D1 is the live datastore" comment drift
 
-- **Status**: `src/hooks/` and `src/components/` slice done in the 2026-08-11 run (7 files:
-  `useCellsAuditStatsWithOverlay.ts`, `useRules.ts`, `HistoryDrawer.tsx`, `EditorTable.tsx`,
-  `TerminologyTermDetail.tsx`, `ProjectWorkspace.tsx`, `RuleSuggestFromEditsDialog.tsx`) —
-  comment-only, reworded to "Postgres"/"server" instead of "D1".
-- **Remaining files**: `src/lib/` still has real hits describing D1 as the live datastore —
-  `src/lib/sync/audit-stats-overlay.ts:2,4` ("D1-backed audit stats" / "D1 is the source of
-  truth"), `src/lib/sync/project-settings.ts:50` ("Synced to D1"), `src/lib/sync/
-  file-projection.ts:18` ("the D1 rows remain"), `src/lib/sync/events-emit.ts:62`
-  ("round-tripped to D1"), `src/lib/audio/transcribe.ts:3,204,295` ("D1 event log" /
-  "Persist ... durably via D1"), `src/lib/audio/timings.ts:3`, `src/lib/rules/edit-miner.ts:
-  7,32`, `src/lib/export/export-service.ts:3`, `src/lib/frontier/members.ts:20`,
-  `src/lib/global-tm/index.ts:17`, `src/lib/migrate/group-sync.ts:5` (this last one already
-  frames it as historical — "completing the D1→Neon cutover" — verify before touching, it
-  may already be correct).
+- **Status**: `src/hooks/` and `src/components/` slice done in the 2026-08-11 run (7 files).
+  A second slice done in the 2026-08-19 run (8 files, comment-only, reworded to "Postgres"):
+  `src/lib/sync/audit-stats-overlay.ts`, `src/lib/sync/project-settings.ts`,
+  `src/lib/sync/file-projection.ts`, `src/lib/sync/events-emit.ts`,
+  `src/lib/audio/transcribe.ts`, `src/lib/audio/timings.ts`, `src/lib/rules/edit-miner.ts`,
+  `src/lib/export/export-service.ts`.
+- **Remaining files**: `src/lib/frontier/members.ts:20` ("The D1 schema has no
+  gitlab_project_id column") and `src/lib/global-tm/index.ts:17` ("the Worker can back it
+  with D1/PG" — should just say "Postgres" since no worker binds D1 anymore) — both deferred
+  past the ≤8-file budget in the 2026-08-19 run. `src/lib/migrate/group-sync.ts:5` already
+  frames it as historical ("completing the D1→Neon cutover") — confirmed correct as-is,
+  leave alone.
 - **False positives to skip** (not database D1 — a paragraph-model spec-section tag, see
   `docs/superpowers/specs/2026-06-18-paragraph-drafting-retrieval-context-design.md`):
   `src/hooks/useCells.ts:123,309`, `src/lib/parsers/paragraphs.ts`, `src/lib/parsers/types.ts:
   52`, `src/lib/sync/bulk-import.ts:67`, `src/lib/parsers/usfm-lossless.ts:31`,
-  `src/lib/parsers/text-splitter.ts:6`. Also skip `AD-2 chain pointer... entry came from D1`
-  at `src/lib/parsers/types.ts:723` only after re-reading in context (mixed usage nearby).
-- **Why deferred further**: `src/lib/` is ~50 subsystems; doing it in the same pass as
-  `src/hooks/`+`src/components/` would have exceeded the ≤8-file budget. Good candidate for
-  the next comment-drift-themed run.
+  `src/lib/parsers/text-splitter.ts:6`, `src/lib/sync/project-settings.ts:65` ("D10" spec
+  tag). Also skip `AD-2 chain pointer... entry came from D1` at `src/lib/parsers/types.ts:723`
+  only after re-reading in context (mixed usage nearby).
+- **Why deferred further**: only 2 files left, small enough to fold into the next
+  comment-drift-themed run alongside a fresh grep sweep (new drift may have landed since).
 - **Proof needed**: comment-only edits; verify each hit is genuinely describing D1 as live
   (not historical "migrated from D1" framing, not the paragraph-model tag above) before
   touching it.
@@ -98,6 +96,63 @@ environment note, not a product regression. The 2026-08-12 and 2026-08-14 runs h
 same limitation (`pnpm test:e2e:smoke` → `Docker unavailable`, no local Postgres socket,
 all 3 shards refuse to run rather than reset against a stale schema) — still an
 environment gap, not something a code-health PR should try to patch around.
+
+## 2026-08-17 run — dead-code deletion blocked by a reproducible test-isolation flake
+
+Attempted theme: dead-code deletion. Found and verified as genuinely unreferenced
+(zero importers anywhere in `src/`, all four worker packages, `e2e/`, `scripts/`, and
+`parity/`):
+
+- `src/components/import/DirectionPanel.tsx` (93 lines) — `ImportDialog.tsx` defines
+  its own private inline `function DirectionPanel(...)` (line ~2695) and renders that,
+  never importing the standalone file.
+- `src/components/import/ImportResultPanel.tsx` (89 lines) — same pattern, inline
+  duplicate at `ImportDialog.tsx` line ~2776.
+- `src/components/import/MaculaPanel.tsx` (107 lines) — same pattern, inline duplicate
+  at `ImportDialog.tsx` line ~3482.
+- `src/lib/cell-context.ts` (14 lines) — its own header comment says it was "relocated
+  here" from a since-removed chat service; the `CellContext` type it exports has zero
+  references anywhere else.
+
+(The rest of the `src/components/import/*.tsx` cluster — `BiblicaPanel`, `SdbhPanel`,
+`DcsPanel`, `ObsPanel`, `TnPanel`, `CollisionPanel`, `ImportLanding`, `HelloaoPanel`,
+`EBiblePanel`, `UploadPanel`, ~2,350 more lines — follows the identical
+inline-duplicate-shadows-standalone-file pattern and is equally provable dead code once
+the blocker below is resolved.)
+
+**Why not shipped**: deleting just the 4 smallest files (303 lines) and re-running the
+root `pnpm test` suite repeatedly surfaced a reproducible correlation that has nothing to
+do with these files' contents:
+
+| Run | Deletion present? | Result |
+|---|---|---|
+| 1 | no (true baseline) | 6 failed / 5 files — no `TeamsList.test.tsx` failure |
+| 2 | yes | 7 failed / 6 files — `TeamsList.test.tsx` fails ("empty-org state...") |
+| 3 | yes | 7 failed / 6 files — `TeamsList.test.tsx` fails ("shows New team for an org admin...") |
+| 4 | no (re-stashed, re-verified) | 6 failed / 5 files — no `TeamsList.test.tsx` failure |
+| 5 | yes (re-popped) | 7 failed / 6 files — `TeamsList.test.tsx` fails (same test as run 3) |
+
+`src/components/org/TeamsList.test.tsx` has **zero** references — direct or transitive —
+to any of the 4 deleted files (confirmed by grep), and passes 14/14 in isolation
+(`vitest run src/components/org/TeamsList.test.tsx`) every time. The most likely
+mechanism: removing 4 files shifts vitest's file-to-worker sharding/ordering, which
+changes which other test file(s) `TeamsList.test.tsx` runs concurrently with in the same
+worker — and something in that suite (a leaked mock, a module-level singleton, an
+unresolved async task) is order/neighbor-dependent. That's a **pre-existing test-isolation
+bug**, exposed rather than caused by the deletion, but it means `pnpm test` cannot
+currently be trusted to stay green across *any* change that alters the repo's test-file
+count — which breaks this routine's core green-to-green proof mechanism for every future
+run until it's fixed.
+
+- **Filed**: [genesis-ai-dev/aquilla#410](https://github.com/genesis-ai-dev/aquilla/issues/410)
+  — needs a human or a dedicated `/diagnose` pass, not a code-health cleanup.
+- **What would unblock this candidate**: once the `TeamsList.test.tsx` isolation bug is
+  fixed (or confirmed benign and quarantined properly), re-verify these 4 files are still
+  unreferenced and delete them; then proceed to the other 10 files in the same directory
+  as follow-ups.
+- **Proof needed when revisited**: same as this run — `grep -rn` zero-importer check per
+  file, `pnpm test` green before and after, run at least twice each way given the
+  demonstrated flake risk.
 
 ## Remaining "frontier-server" comment mention (frozen — test file)
 

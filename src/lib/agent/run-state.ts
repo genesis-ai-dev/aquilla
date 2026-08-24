@@ -78,7 +78,7 @@ export interface CodeActivityItem {
   durationMs?: number
 }
 
-/** A legacy persisted PlanImport changeset awaiting human approval. */
+/** A staged changeset awaiting human approval (changeset.staged frame). */
 export interface ChangesetItem {
   id: string
   kind: "changeset"
@@ -86,6 +86,14 @@ export interface ChangesetItem {
   approvalUrl: string
   summary: string
   cellCount: number
+  /** AQU-926 additive frame fields (docs/COMMAND-REGISTRY.md §4–5). Their
+   *  presence (digest in particular) upgrades ChangesetCard to the live
+   *  approve-and-commit review flow; absent = legacy rendering, unchanged. */
+  digest?: string
+  /** Command risk tier ('prepared' | 'structural' | 'testimony' | …). */
+  tier?: string
+  /** Command kinds staged in this changeset (e.g. ['SetTranslation']). */
+  kinds?: string[]
 }
 
 /** A proposed project memory (agent_memories row), pending review. */
@@ -267,6 +275,11 @@ export function reduceRunFrame(run: AgentRunUi, frame: AgentFrame): AgentRunUi {
         approvalUrl: frame.approvalUrl,
         summary: frame.summary,
         cellCount: frame.cellCount,
+        // AQU-926: spread conditionally so legacy frames produce an item that
+        // is deep-equal to what older builds produced (no undefined keys).
+        ...(frame.digest !== undefined ? { digest: frame.digest } : {}),
+        ...(frame.tier !== undefined ? { tier: frame.tier } : {}),
+        ...(frame.kinds !== undefined ? { kinds: frame.kinds } : {}),
       })
     case "memory.proposed":
       return appendItem(run, {

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   reconcileContextualAfterRealtimeOpen,
   reconcileContextualDraftsAfterAppliedEvent,
-} from "./ProjectWorkspace"
+} from "./project-workspace-helpers"
 import {
   attachContextualRun,
   getContextualRunProgress,

@@ -43,6 +43,27 @@ export function closedVerse(self: string, verse: string, body: string, chapter?:
   )
 }
 
+/**
+ * A Psalms verse: `[cv:v N][meta:c C:][meta:v N] body [meta:v N]`.
+ * The chapter marker sits *after* the verse number, unlike Job's drop-cap.
+ */
+export function psalmsVerse(
+  self: string,
+  chapter: string,
+  verse: string,
+  body: string,
+): string {
+  return paragraph(
+    self,
+    "text%3aq1",
+    run("cv%3av", verse)
+      + run("meta%3ac", `${chapter}:`)
+      + run("meta%3av", verse)
+      + run(PLAIN, body)
+      + run("meta%3av", verse),
+  )
+}
+
 /** A verse whose closing `meta:v` bookend is missing, so it runs on. */
 export function openVerse(self: string, verse: string, body: string, chapter?: string): string {
   return paragraph(
@@ -62,6 +83,55 @@ export function verseContinuation(self: string, verse: string, body: string): st
 
 export function note(self: string, body: string, style = "intro%3aip"): string {
   return paragraph(self, style, run(PLAIN, body))
+}
+
+/**
+ * A note whose paragraph ends with the closing `meta:v` bookend of the verse
+ * that came before it — InDesign flushes those markers into the next paragraph
+ * of the text flow, so they surface inside the notes.
+ */
+export function noteWithTrailingVerseMarker(
+  self: string,
+  body: string,
+  verse: string,
+  style = "intro%3aipi",
+): string {
+  return paragraph(self, style, run(PLAIN, body) + run("meta%3av", verse))
+}
+
+/**
+ * The `intro:ie` paragraph that closes a book: nothing but the previous book's
+ * final chapter/verse markers, which is how "28:20" ends up in Mark's preface.
+ */
+export function verseMarkerOnlyNote(self: string, chapter: string, verse: string): string {
+  return paragraph(self, "intro%3aie", run("meta%3ac", `${chapter}:`) + run("meta%3av", verse))
+}
+
+/**
+ * The `intro:imt2` heading that opens a division — a group of books such as
+ * "Israelʼs covenant history". InDesign sets it inside the following book's
+ * front matter, and stores the typesetter's soft hyphens in the text itself.
+ */
+export function divisionHeading(self: string, text: string): string {
+  return paragraph(self, "intro%3aimt2", run(PLAIN, text))
+}
+
+/** The `intro:imt1` book title that closes a division and opens a preface. */
+export function bookTitle(self: string, text: string): string {
+  return paragraph(self, "intro%3aimt1", run(PLAIN, text))
+}
+
+/**
+ * A heading the study Bible sets in the scripture flow (`head:cl`, `head:d_h`,
+ * `head:ms`, …). Unlike the verses around it, this is layout text that has to
+ * be translated here — JOB-SNG uses `head:cl` for "Psalm 1", not `intro:head:cl`.
+ */
+export function scriptureHeading(
+  self: string,
+  text: string,
+  style = "head%3acl",
+): string {
+  return paragraph(self, style, run(PLAIN, text))
 }
 
 /**
@@ -98,6 +168,9 @@ export const SAMPLE_NOTES = {
   afterChapterOne: "1:1 God alone creates; the heavens and the earth are not rivals.",
   afterChaptersTwoToThree: "2:5 The garden is planted before there is anyone to till it.",
   psalmHeading: "Psalm 2",
+  psalmSuperscription: "A psalm of David.",
+  psalmBookHeading: "Book I",
+  psalmBookRange: "Psalms 1\u201441",
   psalmNote: "The nations rage, but the LORD reigns.",
   /** A cross-reference list set as one paragraph with line breaks between items. */
   referenceList: [
@@ -126,10 +199,56 @@ export const biblicaSampleStory: readonly string[] = [
   note("p-n2", SAMPLE_NOTES.afterChaptersTwoToThree, "intro%3aipi"),
   // Running header: not scripture, not a note.
   paragraph("p-rh", "meta%3arh", run(PLAIN, "GENESIS 2")),
-  paragraph("p-cl", "intro%3ahead%3acl", run(PLAIN, SAMPLE_NOTES.psalmHeading)),
+  scriptureHeading("p-cl", SAMPLE_NOTES.psalmHeading),
   note("p-n3", SAMPLE_NOTES.psalmNote, "intro%3ad_h"),
   noteList("p-n4", SAMPLE_NOTES.referenceList),
   note("p-n5", SAMPLE_NOTES.noteBlock),
+]
+
+/**
+ * A paragraph of a front/back matter volume: its text sits in a layout style
+ * (`text:*`, `toc:*`, `title:*`, `Box Text`) rather than in an `intro:*` note.
+ */
+export function layoutText(self: string, body: string, style = "text%3am"): string {
+  return paragraph(self, style, run(PLAIN, body))
+}
+
+/** The `head:ms1` heading that opens a section of a front/back volume. */
+export function majorSectionHeading(self: string, text: string): string {
+  return paragraph(self, "head%3ams1", run(PLAIN, text))
+}
+
+export const FRONT_BACK_MATTER = {
+  title: "Bible Dictionary",
+  firstLetter: "A",
+  firstEntry: "Aaron: Exodus 4:14. Page 89",
+  /** Prose whose apostrophe is an ordinary possessive, not structural glue. */
+  firstBody: ["Aaron was Moses", "\u02BC", "s brother and the first priest."],
+  runningHead: "Bible Dictionary 1701",
+  secondLetter: "B",
+  secondEntry: "Babel: Genesis 11:1\u20139. Page 24",
+} as const
+
+/**
+ * A front/back matter volume, in the shape the Bible Dictionary has: a title,
+ * a section per alphabet letter, entries and prose in layout styles, and the
+ * running heads InDesign regenerates on every page. No book marker and no
+ * verse markers anywhere — which is what says it is not a book volume.
+ */
+export const biblicaFrontBackMatterStory: readonly string[] = [
+  paragraph("p-title", "intro%3aimt2", run(PLAIN, FRONT_BACK_MATTER.title)),
+  majorSectionHeading("p-a", FRONT_BACK_MATTER.firstLetter),
+  layoutText("p-a1", FRONT_BACK_MATTER.firstEntry, "text%3ap"),
+  paragraph(
+    "p-a2",
+    "text%3am",
+    run(PLAIN, FRONT_BACK_MATTER.firstBody[0])
+      + run("source serif", FRONT_BACK_MATTER.firstBody[1])
+      + run(PLAIN, FRONT_BACK_MATTER.firstBody[2]),
+  ),
+  paragraph("p-rh", "meta%3arh", run(PLAIN, FRONT_BACK_MATTER.runningHead)),
+  majorSectionHeading("p-b", FRONT_BACK_MATTER.secondLetter),
+  layoutText("p-b1", FRONT_BACK_MATTER.secondEntry, "text%3ap"),
 ]
 
 export function makeBiblicaIdml(

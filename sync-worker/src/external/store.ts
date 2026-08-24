@@ -93,6 +93,74 @@ export async function loadChangeset(
   return row ? rowToStored(row) : null
 }
 
+/** Statuses a changeset row can hold — mirrors the schema CHECK constraint
+ *  (`superseded` added by migration 0079, P1 §1). Every status filter validates
+ *  against THIS list; nothing else may hard-code the set. */
+export const CHANGESET_STATUSES = [
+  'staged', 'committing', 'committed', 'discarded', 'stale', 'superseded', 'expired',
+] as const
+
+/** Hard cap on the session list endpoint (AQU-926 §3) — also the scan window
+ *  the inbox ranks and pages over. */
+export const LIST_CHANGESETS_MAX = 50
+
+/** Staged rows surfaced by the default inbox view (P1 §3.3). The rest are
+ *  reported as `heldCount`, never as rows — held, not closed, so a later
+ *  supersession sweep can still resolve them. An explicit `limit` pages the
+ *  full ranked list instead. */
+export const SURFACED_CAP = 3
+
+/** Blast radius = every effect the server counted at prepare (P1 §3.3):
+ *  translations, source cells + variants, created files, linked media, emitted
+ *  events, and settings keys. Ranking is descending, so a plan whose summary
+ *  counts nothing sorts last rather than crashing. */
+export function blastRadius(summary: ChangesetSummary): number {
+  const events = (summary.events ?? []).reduce((n, e) => n + e.count, 0)
+  const settingsKeys = Object.keys(summary.settingsChanges ?? {}).length
+  return (
+    (summary.translationsAdded ?? 0) +
+    (summary.translationsModified ?? 0) +
+    (summary.sourceCellsAdded ?? 0) +
+    (summary.targetVariantsAdded ?? 0) +
+    (summary.filesCreated ?? 0) +
+    (summary.mediaLinked ?? 0) +
+    events +
+    settingsKeys
+  )
+}
+
+/** List a project's changesets, newest-first, over the fixed LIST_CHANGESETS_MAX
+ *  scan window (P1 §2.3: the caller is no longer restricted to their own rows —
+ *  the route filters by the per-changeset role floor, which needs the stored
+ *  commands, so the visibility filter cannot be pushed into SQL). `status`
+ *  filters exactly. */
+export async function listChangesetsForProject(
+  db: AquillaDb,
+  projectId: string,
+  opts: { status?: string } = {},
+): Promise<StoredChangeset[]> {
+  const binds: unknown[] = [projectId]
+  let statusFilter = ''
+  if (opts.status) {
+    statusFilter = ' AND status = ?'
+    binds.push(opts.status)
+  }
+  binds.push(LIST_CHANGESETS_MAX)
+  const { results } = await db
+    .prepare(
+      `SELECT id, project_id, created_by_user_id, credential_id, autonomy_mode,
+              status, commands, preconditions, summary, digest, receipt,
+              confirmation_id, created_at, expires_at, committed_at
+         FROM changesets
+        WHERE project_id = ?${statusFilter}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?`,
+    )
+    .bind(...binds)
+    .all<ChangesetRow>()
+  return results.map(rowToStored)
+}
+
 /** Shape a changeset for API responses — no secret fields exist, but this keeps
  *  the wire shape stable and camelCased. */
 export function changesetToResponse(cs: StoredChangeset): Record<string, unknown> {

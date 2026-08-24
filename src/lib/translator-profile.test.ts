@@ -26,7 +26,7 @@ describe("get/set", () => {
   })
 
   it("survives corrupt JSON in storage", () => {
-    localStorage.setItem("codex:translatorProfile", "{not json")
+    localStorage.setItem("aquilla:translatorProfile", "{not json")
     expect(getTranslatorProfile()).toEqual({})
   })
 

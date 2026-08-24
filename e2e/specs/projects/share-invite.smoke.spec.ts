@@ -225,13 +225,7 @@ test("invite accept shows confirmation and the project surfaces on the invitee's
   await acceptBtn.click()
   await bob.waitForURL(/\/project\//, { timeout: 15_000 })
 
-  await bob.goto("/")
-  const sharedLink = bob.getByRole("link", { name: "Shared with you" })
-  await expect(sharedLink).toBeVisible({ timeout: 10_000 })
-  await sharedLink.click()
-  await bob.waitForURL(/\/shared$/, { timeout: 10_000 })
-
-  const shared = bob.getByTestId("shared-with-you")
-  await expect(shared).toBeVisible({ timeout: 10_000 })
-  await expect(shared.getByText(name)).toBeVisible()
+  await bob.goto("/orgs/all")
+  await expect(bob.getByTestId("project-table").getByText(name)).toBeVisible({ timeout: 10_000 })
+  await expect(bob.getByTestId("shared-filter-chip")).toBeVisible()
 })

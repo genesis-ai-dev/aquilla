@@ -38,7 +38,7 @@ import type { OutboxRawEvent } from "./project-do-types"
 import { mondayNotifyProject, notifyMondayProgress } from "./monday-notify"
 import { mirrorSync, type MirrorSyncResult } from "./events/link-sync"
 import { makePostgres } from "../../db/shim/postgres"
-import { secureCompare } from "./lib/secure-compare"
+import { serviceBearerMatches } from "./lib/service-auth"
 
 const LEASE_SWEEP_INTERVAL_MS = 5_000
 
@@ -169,9 +169,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // that only one fold ran (the second awaited the first's in-flight
     // promise) and B's cells match A's head afterward.
     if (request.method === "POST" && url.pathname === "/__link-sync") {
-      const auth = request.headers.get("Authorization") ?? ""
-      const expected = this.env.SYNC_SECRET_KEY ? `Bearer ${this.env.SYNC_SECRET_KEY}` : null
-      if (!expected || !secureCompare(auth, expected)) {
+      if (!serviceBearerMatches(request.headers.get("Authorization"), this.env)) {
         return new Response("unauthorized", { status: 401 })
       }
       const projectId = url.searchParams.get("project")
@@ -202,11 +200,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // Internal broadcast hook (POST /events fans out to us here). Pre-built
     // ServerMessage; we forward to every connection.
     if (request.method === "POST" && url.pathname === "/__broadcast") {
-      const auth = request.headers.get("Authorization") ?? ""
-      const expected = this.env.SYNC_SECRET_KEY
-        ? `Bearer ${this.env.SYNC_SECRET_KEY}`
-        : null
-      if (!expected || !secureCompare(auth, expected)) {
+      if (!serviceBearerMatches(request.headers.get("Authorization"), this.env)) {
         return new Response("unauthorized", { status: 401 })
       }
       let body: unknown
@@ -239,11 +233,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // and denylist the numeric userId for longer than the token TTL so a
     // cached still-valid token can't just reconnect.
     if (request.method === "POST" && url.pathname === "/__member-removed") {
-      const auth = request.headers.get("Authorization") ?? ""
-      const expected = this.env.SYNC_SECRET_KEY
-        ? `Bearer ${this.env.SYNC_SECRET_KEY}`
-        : null
-      if (!expected || !secureCompare(auth, expected)) {
+      if (!serviceBearerMatches(request.headers.get("Authorization"), this.env)) {
         return new Response("unauthorized", { status: 401 })
       }
       let body: { project?: string; userId?: number; username?: string }
@@ -275,6 +265,39 @@ export class ProjectSync extends DurableObject<DOEnv> {
         ejected++
       }
       return Response.json({ ok: true, ejected })
+    }
+
+    // [Pen test 2026-08-17] role-change hook, companion to /__member-removed
+    // above. A live connection's role is captured once at /connect (see
+    // ConnectionState) and gates focus.claim/focus.renew — without this, a
+    // demotion (e.g. contributor -> viewer) doesn't take effect until the
+    // socket reconnects, letting an already-connected demoted user keep
+    // holding/renewing the edit lock. Updates the cached role in place;
+    // deliberately does NOT close the socket (an ordinary role change,
+    // including promotions, isn't itself a reason to force a reconnect).
+    if (request.method === "POST" && url.pathname === "/__member-role-changed") {
+      if (!serviceBearerMatches(request.headers.get("Authorization"), this.env)) {
+        return new Response("unauthorized", { status: 401 })
+      }
+      let body: { project?: string; userId?: number; username?: string; role?: number }
+      try {
+        body = (await request.json()) as typeof body
+      } catch {
+        return new Response("bad request", { status: 400 })
+      }
+      if (typeof body.userId !== "number" || typeof body.role !== "number") {
+        return new Response("userId (number) and role (number) required", { status: 400 })
+      }
+      let updated = 0
+      for (const conn of this.connections.values()) {
+        const matches =
+          conn.numericUserId === body.userId ||
+          (body.username != null && conn.userId === body.username)
+        if (!matches) continue
+        conn.role = body.role
+        updated++
+      }
+      return Response.json({ ok: true, updated })
     }
 
     if (url.pathname !== "/connect") {

@@ -105,6 +105,38 @@ describe("roster visibility — default (no org policy configured)", () => {
     const body = (await res.json()) as { members: unknown[] }
     expect(Array.isArray(body.members)).toBe(true)
   })
+
+  it("project members ?minRole=600: a below-floor project member still sees only Maintainer+", async () => {
+    await seedOrgAndProject()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj1', 3, 400, 1)",
+    ).run()
+    const res = await app.request(
+      "/api/v2/projects/proj1/members?minRole=600",
+      { headers: authHeader(await jwtFor("tom")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { members: Array<{ username: string; role: { level: number } }> }
+    expect(body.members.map((m) => m.username).sort()).toEqual(["anna", "wendi"])
+    expect(body.members.every((m) => m.role.level >= 600)).toBe(true)
+  })
+
+  it("project members ?minRole=400 does not bypass the roster hide", async () => {
+    await seedOrgAndProject()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('proj1', 3, 400, 1)",
+    ).run()
+    const res = await app.request(
+      "/api/v2/projects/proj1/members?minRole=400",
+      { headers: authHeader(await jwtFor("tom")) },
+      env,
+    )
+    expect(res.status).toBe(403)
+    const body = (await res.json()) as { rosterHidden?: boolean; members?: unknown }
+    expect(body.rosterHidden).toBe(true)
+    expect(body.members).toBeUndefined()
+  })
 })
 
 describe("roster visibility — rosterViewMinRole=maintainer(600) configured", () => {

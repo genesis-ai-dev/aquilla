@@ -85,6 +85,27 @@ describe("AutopilotProcessGraph", () => {
     expect(screen.getByRole("img", { name: "Autopilot process graph" })).toBeInTheDocument()
   })
 
+  it("shows a passage range in inspect instead of cell UUIDs", () => {
+    const opaque = "01920000-0000-7000-8000-000000000001"
+    render(<AutopilotProcessGraph
+      run={{ ...run, spanLabel: opaque }}
+      activity={{
+        ...activity,
+        events: activity.events.map((event) => ({ ...event, spanLabel: "1–12" })),
+        sceneBriefs: [{
+          ...activity.sceneBriefs[0],
+          startCellId: opaque,
+          endCellId: opaque,
+          spanLabel: "1–12",
+        }],
+      }}
+    />)
+    fireEvent.click(screen.getByRole("button", { name: "Situation" }))
+    const inspect = screen.getByTestId("autopilot-process-graph-inspect")
+    expect(inspect).toHaveTextContent("1–12")
+    expect(inspect).not.toHaveTextContent(opaque)
+  })
+
   it("renders an unlabeled miniature on the project card", () => {
     const overview: ContextualOverview = {
       available: true,

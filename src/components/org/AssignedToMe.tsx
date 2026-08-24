@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { DateTooltip } from "@/components/ui/date-tooltip"
-import { EmptyState, Page, PageHeader } from "@/components/ui/page"
+import { EmptyState, Page, PageHeader, TableEmptyState } from "@/components/ui/page"
 import { OrgSidebar } from "./OrgSidebar"
 import { OrgBreadcrumb } from "./OrgBreadcrumb"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -156,6 +156,7 @@ export function AssignedToMe() {
           <DateTooltip
             value={row.original.deadline}
             label={t("org.assignedToMe.dueColumnLabel")}
+            variant="deadline"
             className="text-muted-foreground"
           />
         ),
@@ -185,14 +186,14 @@ export function AssignedToMe() {
               title={t("org.teamsList.selectOrgTitle")}
               description={t("org.assignedToMe.selectOrgDescription")}
             />
-          ) : loading ? (
-            <div className="h-48 animate-pulse rounded-lg border bg-card" />
           ) : error ? (
             <p className="text-sm text-destructive">{error}</p>
           ) : (
             <DataTable
               columns={columns}
               data={rows}
+              loading={loading}
+              loadingLabel={t("org.assignedToMe.loadingLabel")}
               getRowId={(a) => a.assignmentId}
               onRowClick={(a) => {
                 navigate(assignmentHref(a))
@@ -214,9 +215,7 @@ export function AssignedToMe() {
                 const search = String(table.getState().globalFilter ?? "").trim()
                 if (rows.length === 0) {
                   return (
-                    <EmptyState
-                      variant="inline"
-                      className="flex-none py-12"
+                    <TableEmptyState
                       icon={NAV_PAGE_ICONS.assigned}
                       title={t("org.assignedToMe.emptyTitle")}
                       description={t("org.assignedToMe.noOpenAssignmentsDescription")}
@@ -225,9 +224,7 @@ export function AssignedToMe() {
                 }
                 if (!search) {
                   return (
-                    <EmptyState
-                      variant="inline"
-                      className="flex-none py-12"
+                    <TableEmptyState
                       icon={NAV_PAGE_ICONS.assigned}
                       title={t("org.assignedToMe.noAssignmentsMatchFilters")}
                     />

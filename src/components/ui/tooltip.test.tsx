@@ -22,6 +22,24 @@ describe("AppTooltip", () => {
     }, { timeout: 250 })
   })
 
+  it("right-aligns the popup when align is end", async () => {
+    render(
+      <TooltipProvider delay={0}>
+        <AppTooltip content="Refresh" side="bottom" align="end">
+          <button type="button">Refresh</button>
+        </AppTooltip>
+      </TooltipProvider>,
+    )
+
+    const trigger = screen.getByRole("button", { name: "Refresh" })
+    fireEvent.pointerEnter(trigger, { pointerType: "mouse" })
+    fireEvent.mouseEnter(trigger)
+
+    await waitFor(() => {
+      expect(screen.getByRole("tooltip").closest("[data-align]")).toHaveAttribute("data-align", "end")
+    })
+  })
+
   it("keeps the trigger mounted when disabled toggles (popover-anchor stability)", () => {
     const { rerender } = render(
       <TooltipProvider delay={0}>

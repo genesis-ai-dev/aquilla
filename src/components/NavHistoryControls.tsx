@@ -18,6 +18,7 @@ import {
   type RecentKind,
 } from "@/lib/navigation/recent-visits"
 import { Button } from "@/components/ui/button"
+import { ButtonGroup } from "@/components/ui/button-group"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,10 +38,12 @@ export function NavHistoryControls() {
   const t = useT()
   if (!nav) return null
   return (
-    <div className="flex items-center gap-0.5" role="group" aria-label={t("nav.historyControls.groupLabel")}>
+    <div className="flex items-center gap-1" role="group" aria-label={t("nav.historyControls.groupLabel")}>
       <HistoryMenuButton nav={nav} />
-      <NavArrowButton direction="back" nav={nav} />
-      <NavArrowButton direction="forward" nav={nav} />
+      <ButtonGroup>
+        <NavArrowButton direction="back" nav={nav} />
+        <NavArrowButton direction="forward" nav={nav} />
+      </ButtonGroup>
     </div>
   )
 }

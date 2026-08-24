@@ -23,6 +23,7 @@ import { handleExternalReadRequest } from './read-routes'
 import { handleExternalChangesetsRequest } from './changesets-route'
 import { listProjectsForCredential } from './projects-list'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
+import { COMMAND_CATALOG } from '../../../db/shared/command-catalog'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import type { ExternalEnv } from './types'
 
@@ -112,6 +113,24 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
     // SetTranslation, via that `commands` argument — see projectLifecycle and
     // linkMedia below for their per-kind rules.
     commandKinds: ['SetTranslation', 'PlanImport', 'CreateProject', 'UpdateProjectSettings', 'LinkMedia'],
+    // AQU-926 command registry: the role-agnostic catalog index (every
+    // agent-reachable command, incl. the newer PatchSettings / EmitEvents).
+    // Static floors only — dynamic checks (org overrides, per-event floors)
+    // run at prepare. Full per-command params docs are served by the in-app
+    // harness's describe_command tool; a matching MCP tool is planned (P3) —
+    // do not invent one from this index.
+    commands: {
+      index: COMMAND_CATALOG.filter((c) => c.agentReachable).map((c) => ({
+        kind: c.kind,
+        title: c.title,
+        tier: c.tier,
+        minRoleLevel: c.minRoleLevel,
+      })),
+      note:
+        'Commands stage via prepare_translations `commands` (or REST .../changesets) and ' +
+        'commit via confirm_changeset. describe_command (in-app agent harness) serves each ' +
+        "command's full parameter doc; it is not yet an MCP tool.",
+    },
     planImport: {
       stagingChannels: ['rest', 'mcp'],
       mcpStagingTool: 'prepare_import',

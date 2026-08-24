@@ -12,12 +12,23 @@
 
 import { useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { ChevronsLeft, ChevronsRight, CloudUpload, Mic, Sparkles, VolumeX } from "lucide-react"
+import { ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Sparkles, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
-import { isVisible, secToPx, pxToSec } from "@/lib/timeline/scale"
+import { TimelineSlotButton } from "./TimelineSlotButton"
+import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
+import { isVisible, secToPx, pxToSec, chipRadiusPx } from "@/lib/timeline/scale"
+import {
+  MIN_CHIP_GRIP_H_PX,
+  MIN_CHIP_META_H_PX,
+  slotButtonPx,
+  slotIconPx,
+  TL_CHIP_BOX_CLASS,
+  TL_ROW_H_CLASS,
+} from "@/lib/timeline/row-metrics"
+import { useRowMetrics } from "./useRowMetrics"
 import {
   targetChipGeom,
   chipOverflowState,
@@ -28,6 +39,7 @@ import {
 } from "@/lib/timeline/lane-timing"
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
+import { DragTimeChip } from "./DragTimeChip"
 import type { TimelineLayout } from "@/lib/timeline/layout"
 import type { CellData } from "@/hooks/useCells"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -56,6 +68,10 @@ export interface TargetAudioLaneProps {
    *  badge (decision 2026-08-05). */
   missingCellIds?: ReadonlySet<string>
   editable: boolean
+  /** The linked PICTURE is the transport's master (video-first): takes fire
+   *  through the external dub driver, which honours their trims, so chips are
+   *  trimmable even on text cells that own no source clip of their own. */
+  externalMaster?: boolean
   snapEnabled?: boolean
   onSelect(id: string): void
   /** Clean chip click navigates playback to the section (same as a card). */
@@ -71,6 +87,10 @@ export interface TargetAudioLaneProps {
    *  row reveals a record button on hover, so starting a line doesn't need a
    *  trip to the detail pane. */
   emptyCells?: CellData[]
+  /** AQU-646: stretches of film with no cell at all. The mic here creates the
+   *  blank line first and then opens the recorder. */
+  emptySpans?: readonly { startSec: number; endSec: number }[]
+  onAddLineAndRecord?(startSec: number, endSec: number): void
 }
 
 type ChipDragMode = "move" | "resize-l" | "resize-r"
@@ -142,8 +162,15 @@ function TargetAudioChip({
   const [drag, setDrag] = useState<{ mode: ChipDragMode; dx: number } | null>(null)
   const [hovered, setHovered] = useState(false)
   const movedRef = useRef(false)
+  // AQU-646 stage 3: how tall this chip is drawn. Outside a timeline (this
+  // lane's own tests) the context answers with the shipped 46px chip, so every
+  // height gate below reads exactly as it did before it existed.
+  const { chipH } = useRowMetrics()
   // SUB-48: this clip is saved on this device but its event is still queued.
   const pendingSync = Boolean(cell.attachments?.[chip.item.audioId]?.pendingSync)
+  // AQU-924: saved on this device, and its attach event will NOT reach the
+  // server without user action (quarantined / out of retries).
+  const syncFailed = Boolean(cell.attachments?.[chip.item.audioId]?.syncFailed)
 
   // The one span transform shared by preview and commit.
   function proposeSpan(mode: ChipDragMode, dxSec: number): { start: number; end: number } {
@@ -253,8 +280,12 @@ function TargetAudioChip({
   const truncatedHead = paintedStart > span.start + 0.0005
   const truncatedTail = paintedEnd < span.end - 0.0005
   const truncated = truncatedHead || truncatedTail
+  // The height term is the same argument as the width one: a trim handle is a
+  // target you have to hit, and on a compact band it is smaller than the
+  // pointer that has to find it.
   const canResize =
     editable && Boolean(onTrimTarget) && chip.resizable &&
+    chipH >= MIN_CHIP_GRIP_H_PX &&
     secToPx(geom.end - geom.start, pxPerSec) >= 24
 
   function beginDrag(mode: ChipDragMode, e: React.PointerEvent) {
@@ -306,10 +337,25 @@ function TargetAudioChip({
   // saving (informational). Same width discipline as before: the glyph needs
   // room in the PAINTED box, and the hover mic button must leave the corner
   // alone whenever any glyph wants it.
-  const leftGlyph: "missing" | "loading" | "saving" | null =
-    missing ? "missing" : loading ? "loading" : pendingSync ? "saving" : null
-  const showLeftGlyph = leftGlyph != null && paintedPx >= 20
-  const showRecordButton = editable && Boolean(onOpenRecording) && fullPx >= (leftGlyph != null ? 46 : 28)
+  // AQU-924: `syncFailed` ranks with `missing` — both are permanent and
+  // actionable, and unlike "saving" this clip is NOT on its way anywhere. It
+  // outranks loading: a spinner over a take that will never sync is a lie.
+  const leftGlyph: "missing" | "syncFailed" | "loading" | "saving" | null =
+    missing ? "missing" : syncFailed ? "syncFailed" : loading ? "loading" : pendingSync ? "saving" : null
+  // AQU-646 stage 3: everything on this chip beyond its kind icon and its
+  // colours — the "?" unknown-length badge, that corner priority slot, the
+  // hover record button — is fixed-size furniture pinned near the top edge, so
+  // on a short chip the chip's own overflow-hidden clips it to a sliver of a
+  // circle. Below the meta height they all go.
+  //
+  // What deliberately STAYS at any height, because it is load-bearing and
+  // costs nothing: the kind icon, the amber soft-overflow ring, the red
+  // overlap body and the truncation chevrons. A row squeezed down to colour
+  // bands must still be able to say "these two dubs collide".
+  const fitsBadges = chipH >= MIN_CHIP_META_H_PX
+  const showLeftGlyph = leftGlyph != null && fitsBadges && paintedPx >= 20
+  const showRecordButton =
+    editable && Boolean(onOpenRecording) && fitsBadges && fullPx >= (leftGlyph != null ? 46 : 28)
   const kindTitle = chip.item.kind === "take" ? "Recorded take" : "Generated voice"
   // SUB-53: audio-first says how the two compare instead of warning. Longer is
   // normal here; shorter is equally unremarkable.
@@ -362,6 +408,9 @@ function TargetAudioChip({
   // SUB-48: never let a guessed width read as a measured one.
   if (geom.usingFallback) tipLines.push(<div key="fallback" className="text-muted-foreground">{t("audio.takesStrip.unknownLengthTooltip")}</div>)
   if (pendingSync) tipLines.push(<div key="saving" className="text-muted-foreground">{t("audio.takesStrip.pendingSyncTooltip")}</div>)
+  // AQU-924: a take that never reached the server says so, in red — it used to
+  // disappear from the lane entirely.
+  if (syncFailed) tipLines.push(<div key="sync-failed" className="font-semibold text-red-600 dark:text-red-400">{t("audio.takesStrip.syncFailedTooltip")}</div>)
   // NOTE (2026-08-08): keyed on the CUTS, not on the painted state — hovering
   // is what opens this tooltip and hovering is also what restores full length,
   // so a line keyed on `truncated` could never actually be read.
@@ -390,6 +439,7 @@ function TargetAudioChip({
       data-overflow={overflow}
       {...(geom.usingFallback ? { "data-unknown-length": "true" } : {})}
       {...(pendingSync ? { "data-pending-sync": "true" } : {})}
+      {...(syncFailed ? { "data-sync-failed": "true" } : {})}
       {...(missing ? { "data-missing": "true" } : {})}
       {...(loading ? { "data-loading": "true" } : {})}
       {...(truncated
@@ -413,10 +463,18 @@ function TargetAudioChip({
       style={{
         left: `${secToPx(paintedStart, pxPerSec)}px`,
         width: `${paintedPx}px`,
+        // Same rule as every other chip, its own smaller cap (was rounded-md).
+        borderRadius: `${chipRadiusPx(paintedPx, 6)}px`,
         zIndex: (drag ? 2000 : selected || hovered ? 1000 : 0) + paintOrder,
       }}
       className={cn(
-        "group/chip absolute top-2.5 flex h-[46px] touch-none select-none items-center justify-center overflow-hidden rounded-md border",
+        "group/chip absolute flex touch-none select-none items-center justify-center border",
+        // Matt's QA (2026-08-21): the drag readout renders above the chip's
+        // bounds, so overflow can't be hidden mid-drag — same trade the
+        // timeline cards make; the glyphs inside are small enough to hold.
+        drag ? "overflow-visible" : "overflow-hidden",
+        // The row's live geometry, or 10-46-10 outside a timeline.
+        TL_CHIP_BOX_CLASS,
         chip.item.kind === "take"
           ? "border-emerald-500/60 bg-emerald-100/80 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300"
           : "border-violet-500/60 bg-violet-100/80 text-violet-800 dark:bg-violet-950/70 dark:text-violet-300",
@@ -434,6 +492,18 @@ function TargetAudioChip({
         selected && "ring-2 ring-sky-500",
       )}
     >
+      {drag && (
+        // Matt's QA (2026-08-21): a dub-take drag used to show NOTHING — the
+        // tooltip is disabled mid-drag and there was no readout at all. Same
+        // bubble as the timeline cards: a move reads the whole span (sliding
+        // a clip keeps its length), a trim reads the edge being pulled.
+        <DragTimeChip
+          mode={drag.mode}
+          startSec={span.start}
+          endSec={span.end}
+          deltaSec={drag.mode === "resize-r" ? span.end - geom.end : span.start - geom.start}
+        />
+      )}
       {canResize && (
         <span
           aria-hidden
@@ -447,7 +517,7 @@ function TargetAudioChip({
       <Icon className="h-3.5 w-3.5 shrink-0" />
       {/* SUB-48: an unmeasurable clip says so instead of quietly borrowing
           the section's width and passing for a measured take. */}
-      {geom.usingFallback && (
+      {geom.usingFallback && fitsBadges && (
         <span
           aria-hidden
           data-testid={`tl-target-${cell.id}-unknown-length`}
@@ -457,6 +527,7 @@ function TargetAudioChip({
         </span>
       )}
       {/* The corner priority slot: missing badge (decision 2026-08-05) >
+          AQU-924 sync-failed badge (never reached the server; needs a retry) >
           loading spinner (the readiness gate is parked on this verse) >
           SUB-48 saving glyph (still in the outbox — "safe, on its way"). */}
       {showLeftGlyph && (
@@ -464,15 +535,19 @@ function TargetAudioChip({
           title={
             leftGlyph === "missing"
               ? MISSING_AUDIO_MESSAGE
-              : leftGlyph === "loading"
-                ? "Loading this clip's audio…"
-                : "Saving — kept safe on this device until it syncs"
+              : leftGlyph === "syncFailed"
+                ? t("audio.takesStrip.syncFailedTooltip")
+                : leftGlyph === "loading"
+                  ? t("editor.timeline.takeLoading")
+                  : t("editor.timeline.takeSaving")
           }
           data-testid={`tl-target-${cell.id}-${leftGlyph}`}
           className="absolute left-1.5 top-1 z-10 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-background/85 shadow-sm ring-1 ring-border"
         >
           {leftGlyph === "missing" ? (
             <VolumeX className="h-2.5 w-2.5 text-red-600 dark:text-red-400" />
+          ) : leftGlyph === "syncFailed" ? (
+            <CloudAlert className="h-2.5 w-2.5 text-red-600 dark:text-red-400" />
           ) : leftGlyph === "loading" ? (
             <Spinner className="h-2.5 w-2.5" />
           ) : (
@@ -564,6 +639,7 @@ export function TargetAudioLane({
   loadingCellId,
   missingCellIds,
   editable,
+  externalMaster,
   snapEnabled,
   onSelect,
   onSeek,
@@ -571,6 +647,8 @@ export function TargetAudioLane({
   onTrimTarget,
   onOpenRecording,
   emptyCells,
+  emptySpans,
+  onAddLineAndRecord,
 }: TargetAudioLaneProps) {
   const t = useT()
   const audioFirst = layout?.mode === "audioFirst"
@@ -592,8 +670,18 @@ export function TargetAudioLane({
       // section plays via the MASTER (which ignores dub trims), so a handle
       // there would lie. Audio-first plays the dub as its own clip, trims and
       // all, so only the unknown-length case disqualifies it.
+      //
+      // 2026-08-14: …and when the PICTURE is the master, that "take-only"
+      // reasoning inverts, exactly as planTargetOverlay's masterIsExternal
+      // gate already spells out. Every cue is a section of the film whether or
+      // not it has a source clip of its own, and takes on a VTT-timed file
+      // hang on TEXT cells, which never have one — so this gate was switching
+      // the handles off across the whole video-first workflow. The external
+      // dub driver fires those takes through the overlay pool, which honours
+      // trimStart AND trimEnd, so a handle there tells the truth.
       resizable:
-        !geom.usingFallback && (audioFirst || sourceClipAudioForCell(item.cell) != null),
+        !geom.usingFallback &&
+        (audioFirst || externalMaster || sourceClipAudioForCell(item.cell) != null),
       ratio:
         slot && slot.targetLenSec > 0 && slot.sourceLenSec > 0
           ? slot.targetLenSec / slot.sourceLenSec
@@ -611,6 +699,19 @@ export function TargetAudioLane({
     return out
   }
 
+  // Which record slot the pointer is on — ONE for both kinds, so an
+  // add-and-record slot and an empty-section slot can never both be lit. Keys
+  // are prefixed because a span start and a cell id share no namespace.
+  const { hotKey, slotHoverProps } = useHotSlot(viewStartSec, pxPerSec)
+  // The mic is a circle in a slot with no overflow-hidden, so at a fixed size it
+  // draws over the lanes above and below on a short row. Stage 3 hid it there;
+  // it shrinks with the ROW HEIGHT instead, because a compact timeline is
+  // exactly when you can see every un-dubbed stretch at once and want to record
+  // into one. It takes no account of how WIDE its region is (Sam, 2026-08-14):
+  // a narrow region gets the same circle, centred and overflowing either side.
+  // See `slotButtonPx`.
+  const { chipH } = useRowMetrics()
+
   // SUB-51: a record button hiding in the empty space under each dub-free
   // section. Rendered BEFORE the chips and with no z-index, so a real chip —
   // including an overlong neighbour painting across — always wins the pointer.
@@ -625,7 +726,7 @@ export function TargetAudioLane({
           if (typeof start !== "number" || typeof end !== "number") return []
           if (!isVisible(start, end, viewStartSec, viewEndSec)) return []
           const widthPx = secToPx(end - start, pxPerSec)
-          if (widthPx < 24) return [] // no room for a button worth hitting
+          if (widthPx < MIN_SLOT_PX) return []
           return [{ cell, leftPx: secToPx(start, pxPerSec), widthPx }]
         })
       : []
@@ -645,29 +746,65 @@ export function TargetAudioLane({
 
   return (
     // `isolate`: chip z-indexes stack within the lane — never over the playhead.
-    <div data-testid="tl-target-lane" className="isolate relative h-[66px] border-b border-border">
+    <div data-testid="tl-target-lane" className={`isolate relative ${TL_ROW_H_CLASS} border-b border-border`}>
+      {(emptySpans ?? []).map((span) => {
+        const leftPx = secToPx(span.startSec, pxPerSec)
+        const widthPx = secToPx(span.endSec - span.startSec, pxPerSec)
+        // Same floor as a section's own slot.
+        if (!editable || !onAddLineAndRecord || widthPx < MIN_SLOT_PX) return null
+        if (!isVisible(span.startSec, span.endSec, viewStartSec, viewEndSec)) return null
+        return (
+          <div
+            key={`addrec-${span.startSec}`}
+            data-testid={`tl-target-add-${span.startSec}`}
+            style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+            className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center justify-center`}
+            {...slotHoverProps(`add-${span.startSec}`)}
+          >
+            {(() => {
+              const buttonPx = slotButtonPx(chipH)
+              const iconPx = slotIconPx(buttonPx)
+              return (
+              <TimelineSlotButton
+                testId={`tl-target-add-${span.startSec}-record`}
+                label={t("editor.timeline.recordOverStretch")}
+                hot={hotKey === `add-${span.startSec}`}
+                sizePx={buttonPx}
+                onClick={() => onAddLineAndRecord(span.startSec, span.endSec)}
+              >
+                <Mic style={{ width: `${iconPx}px`, height: `${iconPx}px` }} />
+              </TimelineSlotButton>
+              )
+            })()}
+          </div>
+        )
+      })}
       {emptySlots.map(({ cell, leftPx, widthPx }) => (
         <div
           key={`empty-${cell.id}`}
           data-testid={`tl-target-empty-${cell.id}`}
           style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
-          className="group/empty absolute top-2.5 flex h-[46px] items-center justify-center"
+          className={`absolute ${TL_CHIP_BOX_CLASS} flex items-center justify-center`}
+          {...slotHoverProps(`empty-${cell.id}`)}
         >
-          <button
-            type="button"
-            title={t("workspace.targetAudioLane.recordAudio")}
-            data-testid={`tl-target-empty-${cell.id}-record`}
-            aria-label={t("workspace.targetAudioLane.recordAudio")}
-            onPointerDown={(e) => e.stopPropagation()}
-            onClick={(e) => {
-              e.stopPropagation()
-              onSelect(cell.id)
-              onOpenRecording?.(cell.id)
-            }}
-            className="flex h-7 w-7 items-center justify-center rounded-full bg-background/90 opacity-0 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/empty:opacity-100 focus-visible:opacity-100"
-          >
-            <Mic className="h-3.5 w-3.5" />
-          </button>
+          {(() => {
+            const buttonPx = slotButtonPx(chipH)
+            const iconPx = slotIconPx(buttonPx)
+            return (
+              <TimelineSlotButton
+                testId={`tl-target-empty-${cell.id}-record`}
+                label={t("workspace.targetAudioLane.recordAudio")}
+                hot={hotKey === `empty-${cell.id}`}
+                sizePx={buttonPx}
+                onClick={() => {
+                  onSelect(cell.id)
+                  onOpenRecording?.(cell.id)
+                }}
+              >
+                <Mic style={{ width: `${iconPx}px`, height: `${iconPx}px` }} />
+              </TimelineSlotButton>
+            )
+          })()}
         </div>
       ))}
       {chips.map((chip, i) =>

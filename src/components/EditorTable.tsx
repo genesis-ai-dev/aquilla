@@ -15,10 +15,12 @@ import {
   Lock,
   Pilcrow,
   PilcrowRight,
+  X,
+  Plus,
+  ArrowUp,
+  ArrowDown,
   Bold,
-  Loader2,
   VolumeX,
-  Bot,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -46,7 +48,7 @@ import { useEditorCapabilities } from "@/hooks/useProjectPermissions"
 import { canPerform, canSwitchLanes } from "@/lib/sync/role-policy"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
-import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive, emitCellAudioAttach } from "@/lib/sync/events-emit"
+import { emitTargetCellCommit, emitSourceCellCommit, emitCellValidate, emitCellUnvalidate, emitCellWaive, emitCellUnwaive } from "@/lib/sync/events-emit"
 import { resolveSourceCommitParent, reconcilePendingSourceCommit } from "@/lib/sync/source-commit-chain"
 import { ExamplePanel } from "./ExamplePanel"
 import { HighlightedText, buildHighlightsFromExamples } from "./HighlightedText"
@@ -61,25 +63,21 @@ import {
   type HealthRibbonStage,
 } from "@/lib/health/health-ribbon"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
-import { CellWaveform } from "./CellWaveform"
-import { CellAudioButton } from "./CellAudioButton"
-import { DenoiseButton } from "./audio/DenoiseButton"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
-import { CellTranscriptPreview } from "./CellTranscriptPreview"
 import { BacktranslationPanel } from "./BacktranslationPanel"
 import {
   overlayBacktranslation,
   type BacktranslationActionSource,
   type BacktranslationRecord,
 } from "@/lib/completion/bt-record"
-import { remapTranscriptTimings } from "@/lib/audio/correct-transcript"
 import { ContextualDraftCard } from "./contextual/ContextualDraftCard"
-import { CellTranscribeBadge } from "./CellTranscribeBadge"
 import { CellActionRail, RailButton, isInteractiveTarget } from "./CellActionRail"
 import { useIsMediaCursorCell, useMediaSyncActive } from "@/lib/timeline/media-cursor"
+import { useUiSlot } from "@/lib/ui-slots"
 import { CastGutterVoice } from "@/components/voice/CastGutterVoice"
 import { useIsQueueCurrentCell, useQueueCurrentCellId } from "@/lib/audio/play-queue"
+import { useVideoClockPlaying, useVideoSoundingCellId } from "@/lib/timeline/video-clock"
 import { useRailIdleHide } from "@/hooks/useRailIdleHide"
 import {
   computeRailPinned,
@@ -87,15 +85,13 @@ import {
   railFocusOwnerOnBlur,
   railFocusOwnerOnFocus,
 } from "@/lib/editor/cell-rail-pin"
+import { shouldDismissCellErrorsOnBlur } from "@/lib/editor/cell-error-dismiss"
 import { CellExpansion } from "./CellExpansion"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
 import { tokenizeWords, activeWordRange } from "@/lib/audio/timings"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { useCellAudio } from "@/hooks/useCellAudio"
-import { useTranscribeStatus } from "@/lib/audio/transcribe-status"
-import { transcribeCell } from "@/lib/audio/transcribe"
-import { notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { isSourceSegmentSelected } from "@/lib/audio/batch-audio"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
@@ -142,6 +138,10 @@ import { CellVoicePanel } from "./cell/CellVoicePanel"
 import { getUnsupportedReason } from "./CellAudioRecordButton"
 // AQU-513: plain file-picker upload next to the mic — works on mobile too.
 import { CellAudioUploadButton } from "./CellAudioUploadButton"
+import { resolveTargetAudio } from "@/lib/audio/track-audio"
+import { CellTakeBlock } from "./CellTakeBlock"
+import { fmtClock } from "./timeline/format"
+import type { LinkedTake } from "@/lib/audio/linked-takes"
 import { useMicPermission } from "@/hooks/useMicPermission"
 import { assignedCastVoiceId, findVoice, getVoiceLibrary, resolveCastVoice } from "@/lib/audio/voices"
 import { useLocation, useNavigate } from "react-router-dom"
@@ -255,10 +255,18 @@ export function MediaFollowDriver({
    *  its follow-hover lock. */
   onFollowRest: () => void
 }) {
+  // AQU-646 round 5: EITHER transport. This subscribed to the queue alone,
+  // which is why the dialogue table never scrolled on a file whose transport is
+  // the linked picture — the queue is idle there by construction, so the scroll
+  // effect below could never pass its guard. The queue still wins when it is
+  // genuinely running, matching the video pane's caption precedence.
   const queueCellId = useQueueCurrentCellId()
-  // Same stale-singleton guard as the timeline: a queue running another
+  const videoCellId = useVideoSoundingCellId()
+  const videoPlaying = useVideoClockPlaying()
+  const runningCellId = queueCellId ?? (videoPlaying ? videoCellId : null)
+  // Same stale-singleton guard as the timeline: a transport running another
   // file's cells must not scroll this table.
-  const queueRunning = queueCellId != null && isCellDisplayed(queueCellId)
+  const queueRunning = runningCellId != null && isCellDisplayed(runningCellId)
   const [follow, setFollow] = useState(true)
   // Rising edge of running (play, resume) re-engages following — a user who
   // scrolled away re-opts-in by pressing play, exactly like the track view.
@@ -281,8 +289,8 @@ export function MediaFollowDriver({
   }, [followCommand])
   // A cell boundary IS the page-flip: bring the running row to ~1/3 height.
   useEffect(() => {
-    if (follow && queueRunning && queueCellId != null) scrollToCell(queueCellId)
-  }, [follow, queueRunning, queueCellId, scrollToCell])
+    if (follow && queueRunning && runningCellId != null) scrollToCell(runningCellId)
+  }, [follow, queueRunning, runningCellId, scrollToCell])
   // The truce: a scroll more than 250ms after our own programmatic scroll is
   // the USER moving away — stop following until the next play/resume. 250ms
   // (vs the track's 150ms) absorbs LegendList's post-scrollToIndex settling
@@ -444,7 +452,7 @@ function SynthStatusBadge({
           data-testid="synth-status-busy"
           className={cn(gutterIconShell, "bg-primary/15 text-primary")}
         >
-          <Loader2 className="h-3 w-3 animate-spin" />
+          <Spinner className="h-3 w-3" />
         </span>
       </AppTooltip>
     )
@@ -458,7 +466,7 @@ function SynthStatusBadge({
           data-testid="synth-status-busy"
           className={cn(gutterIconShell, "bg-primary/15 text-primary")}
         >
-          <Loader2 className="h-3 w-3 animate-spin" />
+          <Spinner className="h-3 w-3" />
         </span>
       </AppTooltip>
     )
@@ -565,6 +573,9 @@ export interface EditorTableHandle {
   getCurrentIndex?: () => number
   /** Briefly outline a cell after a "Go to cell" so the user sees where the search landed. */
   flashCell: (cellId: string, searchTerm: string) => void
+  /** AQU-646 round 8: pulse rows twice WITHOUT selecting them — "look here",
+   *  for the lines bracketing a silence the user clicked on the source band. */
+  pulseCells: (cellIds: readonly string[]) => void
 }
 
 /** Per-cell audio production data + actions, supplied only when the editor is
@@ -694,6 +705,11 @@ interface EditorTableProps {
    *  so the user sees progress immediately instead of waiting for the
    *  commit + outbox flush to land. */
   previews: Map<string, string>
+  /** AQU-913: forget this cell's inline AI failures — the draft error, the
+   *  back-translation error, and the per-cell "error" status behind them.
+   *  Called when focus leaves the cell's row so a failure stops following the
+   *  user around the file. Omit to keep errors sticky (legacy callers). */
+  onClearCellErrors?: (cellId: string) => void
   onCompleteSingle: (cell: CellData, opts?: { regenerate?: boolean }) => void | Promise<boolean>
   onCompleteBatch: (cells: CellData[]) => void
   /** p1-paragraph-ui-wiring: draft the whole paragraph group containing
@@ -711,6 +727,17 @@ interface EditorTableProps {
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
   backtranslationByCellId?: ReadonlyMap<string, BacktranslationRecord>
+  /**
+   * A row's takes that live on ANOTHER cell (review feedback, 2026-08-22):
+   * subtitle cell id → the audio cues performing it that hold a recording, in
+   * film order, already merged with the cue sibling's attachments.
+   *
+   * This table reads exactly one file (`cellStore.getFileId()`), which is why
+   * the Recording tab used to show "No audio yet" over a line whose take was
+   * plainly on the timeline. Absent/empty ⇒ every non-dubbing arrangement
+   * behaves exactly as before.
+   */
+  linkedTakesByCell?: ReadonlyMap<string, LinkedTake[]>
   /** Called when user saves a BT edit. Parent emits `cell.backtranslation.set`. */
   onSaveBacktranslation?: (cell: CellData, btText: string, polished: boolean) => void
   /** On-demand statistical gloss (corpus-derived, never persisted) for the BT
@@ -719,8 +746,28 @@ interface EditorTableProps {
   cellOpenCommentCount?: Map<string, number>
   // onOpenComments/onOpenHistory moved to EditorActionsContext (FRO perf
   // cleanup) — pure pass-through, never consumed above the row.
-  activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
+  /**
+   * AQU-646 round 8: add and remove lines from the TABLE, mirroring the
+   * gestures the timeline already offers. Undefined in every arrangement but
+   * VTT-plus-footage — and then nothing here renders at all, which is how every
+   * other workflow stays untouched.
+   *
+   * The silences arrive pre-resolved (one pass per store version in the
+   * workspace) so a thousand-row file does one map lookup per row rather than
+   * a scan. A row with no room after it simply gets no control — the same rule
+   * as the timeline's pencil, never a disabled button.
+   */
+  sourceLineEditing?: {
+    /** The silence before the first cue, offered as "insert above" on row 0. */
+    head: { startSec: number; endSec: number } | null
+    /** Keyed by the cell whose row offers "insert below". */
+    afterCell: ReadonlyMap<string, { startSec: number; endSec: number }>
+    onAddLine(startSec: number, endSec: number): void
+    /** The workspace owns what is removable, exactly as the timeline lane does. */
+    canRemove(cell: CellData): boolean
+    onRemoveLine(cellId: string): void
+  }
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
   sourceDirectionMode?: DirectionMode
@@ -799,22 +846,22 @@ interface EditorTableProps {
   /** Move chapter navigation into a shell-owned header slot. `null` reserves
    *  the slot while it mounts; `undefined` keeps the legacy in-editor row. */
   chapterNavPortalTarget?: HTMLElement | null
-  /** Open the Agent as the center pane between Source and Target. */
-  onAgentToggle?: () => void
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
   project, cellStore, fileType, username, activeLane = "", lanes, archivedLanes, onLaneChange, defaultLaneLabel,
   onEditTargetLanguage,
   isCompletionConfigured, isCompletionAvailable,
-  completing, examples, errors, previews,
+  completing, examples, errors, previews, onClearCellErrors,
   onCompleteSingle, onCompleteBatch, onCompleteParagraph, healthMap,
   infractions = new Map(), rules = [],
   isBacktranslationConfigured, onBacktranslate, backtranslating, backtranslationErrors,
   backtranslationByCellId,
+  linkedTakesByCell,
   onSaveBacktranslation, getStatisticalBt,
   cellOpenCommentCount,
-  activeCueIndex, onSeekToCue,
+  onSeekToCue,
+  sourceLineEditing,
   lineNumbersEnabled, cellLabelsEnabled, sourceDirectionMode = "auto", targetDirectionMode = "auto", sourceTextDirection, targetTextDirection,
   isAnonymous, onJumpToCell,
   audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
@@ -843,7 +890,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onFootnoteCreated,
   chapterNavTrailing,
   chapterNavPortalTarget,
-  onAgentToggle,
 }, ref) {
   const t = useT()
   // DCS lockdown: while this project is pinned to a Door43 upstream, the
@@ -1321,6 +1367,27 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     })
   }, [getListQueryRoot])
 
+  // AQU-646 round 8: two short beats on a set of rows, with NO selection — the
+  // gap-click's "look here" for the lines on either side of a silence. Removing
+  // the class first is what lets a second click on the same pair re-fire it;
+  // re-adding a class the node already carries restarts nothing.
+  const pulseCellsDom = useCallback((cellIds: readonly string[]) => {
+    if (cellIds.length === 0) return
+    requestAnimationFrame(() => {
+      const root = getListQueryRoot()
+      if (!root) return
+      for (const cellId of cellIds) {
+        const el = root.querySelector<HTMLElement>(`[data-cell-id="${CSS.escape(cellId)}"]`)
+        if (!el) continue
+        el.classList.remove("codex-gap-pulse")
+        // Force a reflow so the removal is committed before the re-add.
+        void el.offsetWidth
+        el.classList.add("codex-gap-pulse")
+        window.setTimeout(() => el.classList.remove("codex-gap-pulse"), 600)
+      }
+    })
+  }, [getListQueryRoot])
+
   useImperativeHandle(ref, () => ({
     scrollToCellIndex(index: number) {
       if (index >= 0 && index < displayCellIds.length) {
@@ -1378,7 +1445,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     flashCell(cellId, _searchTerm) {
       flashCellDom(cellId)
     },
-  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom, programmaticListScroll, issueFollowCommand])
+    pulseCells(cellIds) {
+      pulseCellsDom(cellIds)
+    },
+  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom, pulseCellsDom, programmaticListScroll, issueFollowCommand])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
@@ -2033,6 +2103,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const renderListItem = useCallback(({ item: cellId, index }: LegendListRenderItemProps<string>) => {
     const audioEntry = audioByCellId.get(cellId)
     const backtranslation = backtranslationByCellId?.get(cellId)
+    const linkedTakes = linkedTakesByCell?.get(cellId)
     return (
       <CellStoreRow
         cellId={cellId}
@@ -2060,6 +2131,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           const paragraphGroupInfo = cell.paragraphStart === true
             ? paragraphGroupInfoByCellId.get(cell.id)
             : undefined
+          // AQU-646: the row's STRUCTURAL controls — add a line into the
+          // silence after it, take an empty added line back. One map lookup and
+          // one predicate call per row; no scans.
+          //
+          // `insertAbove` reaches only the first row, because that is the only
+          // row with a silence in front of it — everywhere else "above me" is
+          // "below my predecessor", which that row already offers.
+          const insertBelow = sourceLineEditing?.afterCell.get(cell.id) ?? null
+          const insertAbove = index === 0 ? (sourceLineEditing?.head ?? null) : null
+          const canRemoveLine = Boolean(sourceLineEditing?.canRemove(cell))
           return (
       <div
         data-cell-id={cell.id}
@@ -2069,10 +2150,23 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         aria-label={untimedInTimeLens ? t("editor.row.noTimingAria") : undefined}
         className={cn(
           "relative",
+          // The hover group for the structural strip below. Named so it cannot
+          // be caught by the row's other `group` users.
+          (insertBelow || insertAbove || canRemoveLine) && "group/rowstrip",
           untimedInTimeLens && "border-s-2 border-dashed border-amber-400/70",
           showParagraphBoundary && "mt-3",
         )}
       >
+        {sourceLineEditing && (
+          <RowStructureCorner
+            testId={`row-structure-${cell.id}`}
+            insertBelow={insertBelow}
+            insertAbove={insertAbove}
+            onAddLine={sourceLineEditing.onAddLine}
+            onRemove={canRemoveLine ? () => sourceLineEditing.onRemoveLine(cell.id) : undefined}
+            removeTestId={`row-remove-${cell.id}`}
+          />
+        )}
         {untimedInTimeLens && (
           <span className="pointer-events-none absolute start-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium text-amber-600 dark:text-amber-400">
             {t("editor.row.noTimingBadge")}
@@ -2103,10 +2197,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           key={cell.id}
           project={project}
           cell={cell}
+          linkedTakes={linkedTakes}
           isEditorActive={activeEditorCellId === cell.id}
           isRowFocused={isRailFocusPinned(focusedRailCellId, cell.id)}
           onRowFocusPin={handleRowFocusPin}
           onRowFocusRelease={handleRowFocusRelease}
+          onClearCellErrors={onClearCellErrors}
           onActivateEditor={handleActivateEditor}
           getEditorActivationVersion={getEditorActivationVersion}
           onDeactivateEditor={handleDeactivateEditor}
@@ -2150,7 +2246,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           getStatisticalBt={getStatisticalBt}
           getFootnoteDetails={getFootnoteDetails}
           cellOpenCommentCount={cellOpenCommentCount}
-          activeCueIndex={activeCueIndex}
           onSeekToCue={onSeekToCue}
           rowIndex={index}
           contentNumber={sequentialNumberByCellId.get(cell.id) ?? index + 1}
@@ -2205,19 +2300,21 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       </CellStoreRow>
     )
   }, [
-    activeCueIndex,
+    sourceLineEditing,
     activeEditorCellId,
     castGutter,
     ttsSettings,
     focusedRailCellId,
     handleRowFocusPin,
     handleRowFocusRelease,
+    onClearCellErrors,
     activeLane,
     audioByCellId,
     audioLens,
     castGutter,
     ttsSettings,
     backtranslationByCellId,
+    linkedTakesByCell,
     backtranslating,
     backtranslationErrors,
     canEdit,
@@ -2301,14 +2398,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const showMilestoneNav = !castGutter && milestoneNavigationItems.length > 0 && Boolean(activeChapterLabel)
   const showStripNav = castGutter && milestoneNavigationItems.length > 0 && Boolean(activeChapterLabel)
-  const [stripNavSlot, setStripNavSlot] = useState<HTMLElement | null>(null)
-  useEffect(() => {
-    if (!showStripNav) {
-      setStripNavSlot(null)
-      return
-    }
-    setStripNavSlot(document.querySelector<HTMLElement>("[data-strip-nav-slot]"))
-  }, [showStripNav])
+  // The strip registers its slot by name — it is itself portaled into the
+  // media band (one commit after this table), so the old one-shot
+  // querySelector in a mount effect would run too early and never retry.
+  const stripNavSlot = useUiSlot("strip-nav")
 
   const renderChapterNavigation = (portaled: boolean) => {
     if (!showMilestoneNav && !chapterNavTrailing) return null
@@ -2415,19 +2508,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             )}
           </div>
           <div className="relative flex items-center justify-end gap-2 ps-6 pe-2 text-end">
-            {onAgentToggle ? (
-              <AppTooltip content={t("nav.dock.agentTab")}>
-                <button
-                  type="button"
-                  aria-label={t("nav.dock.agentTab")}
-                  onClick={onAgentToggle}
-                  className="absolute start-0 top-1/2 z-10 flex h-8 -translate-y-1/2 items-center justify-center gap-1.5 rounded-full border border-primary/40 bg-background px-2.5 text-primary shadow-md ring-4 ring-background transition-all hover:scale-105 hover:bg-primary/10 hover:text-primary ltr:-translate-x-1/2 rtl:translate-x-1/2"
-                >
-                  <Bot className="h-4 w-4" />
-                  <span className="text-[11px] font-semibold">{t("nav.dock.agentTab")}</span>
-                </button>
-              </AppTooltip>
-            ) : null}
             {t("editor.column.target")}
             {/* AQU-602 / AQU-583: the target-language tag doubles as the lane
                 switcher AND the entry point to change the target language.
@@ -2629,6 +2709,141 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   )
 })
 
+/**
+ * AQU-646: the row's structural controls — "add a line into the silence here"
+ * and "take this line back" — as a PAIR in the row's bottom-right corner.
+ *
+ * Round 9 rewrote this twice-over, and both mistakes are worth keeping written
+ * down. First cut hung a hover-revealed strip 12px BELOW the row so it would
+ * straddle the divider: the virtualised list wraps every row in a container
+ * carrying `contain: content`, which implies PAINT containment, so the 12px
+ * outside the row was simply clipped away and the control was invisible in a
+ * real browser. Unit tests cannot catch that — happy-dom has no layout engine,
+ * so a clipped element still measures as present. Second cut moved it inside
+ * the row but left it centred and hover-only, which read as a stray pencil
+ * floating in the middle of the row; Sam could not tell what it was.
+ *
+ * What it is now, per Sam's markup: two SQUARES in the bottom-right corner,
+ * `[x][+]` — remove on the left, insert on the right. Always visible at half
+ * opacity so the affordance is discoverable without hunting, full opacity when
+ * the pointer is anywhere on the row.
+ *
+ * The corner is chosen, not incidental. The row's TOP-right is already the
+ * action rail's (`absolute right-2 top-0.5 z-20`) with its always-on chevron
+ * and attention dot, and the target column reserves `pr-9` for that lane. The
+ * bottom-right is the only free corner, and it is out of the text's way.
+ *
+ * Deliberately NOT the timeline's round slot button. That one is a hover-only
+ * affordance over an empty stretch of track; this is persistent row chrome. The
+ * two surfaces asking the same question does not make them the same control.
+ */
+function RowStructureCorner({
+  testId,
+  /** The silence after this row. Null = no room, so no `+` AT ALL — never a
+   *  disabled one. The same "no room, no add" rule the timeline's pencil obeys. */
+  insertBelow,
+  /** The silence before the FIRST cue. Only ever passed to the first row. */
+  insertAbove,
+  onAddLine,
+  onRemove,
+  removeTestId,
+}: {
+  testId: string
+  insertBelow: { startSec: number; endSec: number } | null
+  insertAbove: { startSec: number; endSec: number } | null
+  onAddLine(startSec: number, endSec: number): void
+  onRemove?: () => void
+  removeTestId?: string
+}) {
+  // Above the early return: a hook after one runs in a different order on the
+  // renders that bail out, which is the rules-of-hooks error this was.
+  const t = useT()
+  if (!insertBelow && !insertAbove && !onRemove) return null
+  // Both directions available (only ever the first row, and only while the
+  // file still opens on a silence) — the button has to ask which. One
+  // direction available: just do it. A one-item menu is a click for nothing.
+  const needsMenu = Boolean(insertAbove && insertBelow)
+  const square =
+    "flex h-6 w-6 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
+  return (
+    <div
+      data-testid={testId}
+      className={cn(
+        "absolute right-2 bottom-1 z-20 flex items-center gap-1",
+        // Half-visible at rest; the whole row is the hover target, so reaching
+        // for the corner lights it before you arrive.
+        "opacity-50 transition-opacity group-hover/rowstrip:opacity-100 focus-within:opacity-100",
+      )}
+    >
+      {onRemove && (
+        <button
+          type="button"
+          title={t("editor.row.removeLine")}
+          aria-label={t("editor.row.removeLine")}
+          data-testid={removeTestId ?? `${testId}-remove`}
+          className={square}
+          onClick={(e) => {
+            e.stopPropagation()
+            onRemove()
+          }}
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      )}
+      {(insertBelow || insertAbove) &&
+        (needsMenu ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <button
+                  type="button"
+                  title={t("editor.row.addLine")}
+                  aria-label={t("editor.row.addLine")}
+                  data-testid={`${testId}-add`}
+                  className={square}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              }
+            />
+            <DropdownMenuContent align="end" className="min-w-[9rem]">
+              <DropdownMenuItem
+                data-testid="row-insert-above"
+                onClick={() => onAddLine(insertAbove!.startSec, insertAbove!.endSec)}
+              >
+                <ArrowUp className="mr-2 h-3.5 w-3.5" />
+                {t("editor.row.insertAbove")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                data-testid="row-insert-below"
+                onClick={() => onAddLine(insertBelow!.startSec, insertBelow!.endSec)}
+              >
+                <ArrowDown className="mr-2 h-3.5 w-3.5" />
+                {t("editor.row.insertBelow")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <button
+            type="button"
+            title={insertAbove ? t("editor.row.addLineAbove") : t("editor.row.addLineBelow")}
+            aria-label={insertAbove ? t("editor.row.addLineAbove") : t("editor.row.addLineBelow")}
+            data-testid={`${testId}-add`}
+            className={square}
+            onClick={(e) => {
+              e.stopPropagation()
+              const span = insertBelow ?? insertAbove!
+              onAddLine(span.startSec, span.endSec)
+            }}
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        ))}
+    </div>
+  )
+}
+
 interface CellStoreRowProps {
   cellId: string
   cellStore: CellStore
@@ -2671,6 +2886,9 @@ function CellStoreRow({
 interface MemoizedRowProps {
   project: ProjectRecord
   cell: CellData
+  /** The heard lines performing this row that hold a recording — see
+   *  `linkedTakesByCell` on the table's props. */
+  linkedTakes?: LinkedTake[]
   isEditorActive: boolean
   /** AQU-669: this cell is the single exclusive focus-pin owner (its id equals
    *  the table's `focusedRailCellId`). Drives the rail's focus pin so a stale
@@ -2680,6 +2898,8 @@ interface MemoizedRowProps {
   onRowFocusPin: (cellId: string) => void
   /** AQU-669: called when focus leaves this row — clears the owner if still ours. */
   onRowFocusRelease: (cellId: string) => void
+  /** AQU-913: called when focus leaves this row — dismisses this cell's AI errors. */
+  onClearCellErrors?: (cellId: string) => void
   onActivateEditor: ActivateEditor
   getEditorActivationVersion: () => number
   onDeactivateEditor: (cellId: string) => void
@@ -2751,7 +2971,6 @@ interface MemoizedRowProps {
   getStatisticalBt?: (translatedText: string) => string
   getFootnoteDetails: (cellId: string) => CellFootnoteDetails
   cellOpenCommentCount?: Map<string, number>
-  activeCueIndex?: number
   onSeekToCue?: (cellId: string) => void
   rowIndex: number
   /** AQU-610: 1-based ordinal among numbered (non-paratext) cells for sequential numbering. */
@@ -2818,9 +3037,9 @@ interface MemoizedRowProps {
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
-    cell, examples, completing, errors, previews, healthRibbonPoint, infractions,
+    cell, linkedTakes, examples, completing, errors, previews, healthRibbonPoint, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
-    activeCueIndex, rowIndex, contentNumber, gridCols, castGutter, ttsSettings,
+    rowIndex, contentNumber, gridCols, castGutter, ttsSettings,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
     onSelectionPointerDown: onSelectionPointerDownParent,
     onNavigateCell: onNavigateCellParent,
@@ -2836,6 +3055,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     isRowFocused,
     onRowFocusPin,
     onRowFocusRelease,
+    onClearCellErrors,
     onActivateEditor,
     getEditorActivationVersion,
     onDeactivateEditor,
@@ -2910,7 +3130,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const isBacktranslating = backtranslating?.has(cellId)
   const backtranslationError = backtranslationErrors?.get(cellId)
   const openCommentCount = cellOpenCommentCount?.get(cellId) ?? 0
-  const isActiveCue = activeCueIndex !== undefined && activeCueIndex === rowIndex
 
   // Bind the stable parent (cellId) => void handlers to this row's cellId.
   // Stable per-row because both parent callbacks and cellId are stable.
@@ -2945,10 +3164,12 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
       <EditorRow
         project={project}
         cell={cell}
+        linkedTakes={linkedTakes}
         isEditorActive={isEditorActive}
         isRowFocused={isRowFocused}
         onRowFocusPin={onRowFocusPin}
         onRowFocusRelease={onRowFocusRelease}
+        onClearCellErrors={onClearCellErrors}
         onActivateEditor={onActivateEditor}
         getEditorActivationVersion={getEditorActivationVersion}
         onDeactivateEditor={onDeactivateEditor}
@@ -2985,7 +3206,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         getStatisticalBt={getStatisticalBt}
         getFootnoteDetails={getFootnoteDetails}
         openCommentCount={openCommentCount}
-        isActiveCue={isActiveCue}
         onSeekToCue={onSeekToCue}
         rowIndex={rowIndex}
         contentNumber={contentNumber}
@@ -3047,12 +3267,17 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
 interface EditorRowProps {
   project: ProjectRecord
   cell: CellData
+  /** The heard lines performing this row that hold a recording, in film order
+   *  — see `linkedTakesByCell` on the table's props. */
+  linkedTakes?: LinkedTake[]
   isEditorActive: boolean
   /** AQU-669: this row is the single exclusive focus-pin owner. */
   isRowFocused: boolean
   /** AQU-669: report focus entering / leaving this row to the exclusive owner. */
   onRowFocusPin: (cellId: string) => void
   onRowFocusRelease: (cellId: string) => void
+  /** AQU-913: dismiss this cell's inline AI errors when focus leaves the row. */
+  onClearCellErrors?: (cellId: string) => void
   onActivateEditor: ActivateEditor
   getEditorActivationVersion: () => number
   onDeactivateEditor: (cellId: string) => void
@@ -3133,7 +3358,6 @@ interface EditorRowProps {
   /** FRO-207: Called when user confirms/invalidates an alignment. */
   onAlignmentSeedChange?: (seed: import("@/lib/completion/interlinear").AlignmentSeed) => void
   openCommentCount: number
-  isActiveCue?: boolean
   onSeekToCue?: (cellId: string) => void
   onDragStart: () => void
   onDragEnter: () => void
@@ -3905,7 +4129,7 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
 }
 
 function EditorRow({
-  project, cell, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
+  project, cell, linkedTakes, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
   completionPreview, loadingPhase,
   cellExamples, highlights, error, healthRibbonPoint,
@@ -3916,7 +4140,7 @@ function EditorRow({
   getStatisticalBt,
   getFootnoteDetails,
   openCommentCount,
-  isActiveCue: _isActiveCue, onSeekToCue,
+  onSeekToCue,
   onDragStart, onDragEnter, onSelectionPointerDown, onNavigateCell,
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
@@ -3945,7 +4169,7 @@ function EditorRow({
   // keeps them out of MemoizedRow's React.memo compare surface.
   const {
     onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording,
-    onMediaRowActivate, onAssignCastVoice, myScopes,
+    onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, myScopes,
   } = useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
   // Combine the role capability with the per-cell scope check so an out-of-scope
@@ -3961,8 +4185,11 @@ function EditorRow({
   // lens keeps its existing scroll-and-flash behavior unchanged). Both hooks
   // run unconditionally; only the combination is conditional.
   const isQueueCurrentCell = useIsQueueCurrentCell(cell.id)
+  // Round 5: the same "either transport" rule the follow driver uses — without
+  // it the sounding row went unmarked on a file the picture is driving.
+  const videoSoundingCellId = useVideoSoundingCellId()
   const rowMediaSyncActive = useMediaSyncActive()
-  const isQueueRow = isQueueCurrentCell && rowMediaSyncActive
+  const isQueueRow = (isQueueCurrentCell || videoSoundingCellId === cell.id) && rowMediaSyncActive
   const remoteCellPresence = useCellPresence(presenceStore, cell.id)
   // A focus lock admits one active writer. Prefer its newest ephemeral draft
   // so the read surface and remote caret advance together between commits.
@@ -4013,6 +4240,12 @@ function EditorRow({
   // machinery in useCells) shown until the projection round-trips.
   const [sourceEditing, setSourceEditing] = useState(false)
   const [sourceDraft, setSourceDraft] = useState<{ value: string; valueHtml: string } | null>(null)
+  // AQU-646: a media cell's editable source text is its TRANSCRIPTION. The
+  // stored value is the import FILENAME — an import record, not prose — so for
+  // these cells the editor opens on the transcript (blank when untranscribed,
+  // never the filename) and commits land on `transcription`, leaving the
+  // filename intact. Before this, editing surfaced the filename and saving it
+  // replaced the transcript on screen permanently.
   // Tracks the newest source.cell.commit this row enqueued whose projection
   // head hasn't caught up yet, as { eventId, parentId }. Successive source edits
   // chain onto `eventId`; the reconciling effect below clears it once the
@@ -4095,8 +4328,18 @@ function EditorRow({
   const hasTranslatedText = Boolean(visibleTranslated?.trim())
   const showCompletionOverlay = isLoading && !hasTranslatedText
   const sourceCellDirection = useMemo(
-    () => resolveTextDirection(sourceDirectionMode, cell.originalHtml ?? cell.original, sourceTextDirection),
-    [sourceDirectionMode, sourceTextDirection, cell.originalHtml, cell.original],
+    () =>
+      resolveTextDirection(
+        sourceDirectionMode,
+        // Media cells read direction off the TRANSCRIPT — their stored value is
+        // the import filename, whose Latin script would force LTR on an RTL
+        // transcript.
+        cell.medium === "media" && cell.transcription?.trim()
+          ? cell.transcription
+          : (cell.originalHtml ?? cell.original),
+        sourceTextDirection,
+      ),
+    [sourceDirectionMode, sourceTextDirection, cell.originalHtml, cell.original, cell.medium, cell.transcription],
   )
   const targetCellDirection = useMemo(
     () => resolveTextDirection(
@@ -4727,7 +4970,13 @@ function EditorRow({
       console.warn("[validate] aborting: cell out of the caller's assigned scope")
       return false
     }
-    const editEventId = cell.targetEventId ?? pendingTargetEventIdRef.current
+    // AQU-646: `getPendingTargetEventId` covers the take case. Recording emits an
+    // empty target commit to create the row, and the projection has not come
+    // back by the time the control appears — without this, validating a
+    // just-recorded line would silently do nothing, which is the exact failure
+    // the empty commit exists to prevent.
+    const editEventId =
+      cell.targetEventId ?? pendingTargetEventIdRef.current ?? getPendingTargetEventId?.(cell.id) ?? null
     if (!project.id || !editEventId) return false
     // AQU-538: scope the validation to the active lane. emitCellValidate/
     // emitCellUnvalidate omit `''` (default lane) on the wire, so N=1 is
@@ -4750,7 +4999,7 @@ function EditorRow({
       setWriteError("Couldn't save this change locally — copy your text and reload.")
       return false
     }
-  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, onCellCommitted])
+  }, [cell.fileId, cell.id, cell.targetEventId, project.id, project.syncRole?.level, username, activeLane, myScopes, onCellCommitted, getPendingTargetEventId])
 
   const editorFocusedRef = useRef(false)
   const requestTargetEdit = useCallback((pointerSelection?: IdmlPointerSelection | null) => {
@@ -4951,54 +5200,19 @@ function EditorRow({
       }
     }
   }, [audioController.isPlaying, generatedVoiceController.isPlaying])
-  const transcribeStatus = useTranscribeStatus(cell.selectedAudioId)
-  const isTranscribing = transcribeStatus.kind === "loading" || transcribeStatus.kind === "transcribing"
-  const transcriptPreviewRef = useRef<HTMLDivElement | null>(null)
+  // The transcribe / correct-transcript handlers moved into CellTakeBlock
+  // (2026-08-22) so they can be scoped to whichever cell OWNS the recording —
+  // a linked heard line's take must write to the cue sibling, not to this row.
   const { session: rowSession } = useFrontierSession()
 
-  const handleTranscribe = useCallback(async () => {
-    if (!cell.selectedAudioId) return
-    // AQU-646: the ASR language must match the AUDIO. Imported media segments
-    // are SOURCE speech (→ sourceLanguage); recorded takes voice the TARGET
-    // text (→ targetLanguage). Mapping to a Whisper tag happens downstream.
-    const language = isSourceSegmentSelected(cell) ? project.sourceLanguage : project.targetLanguage
-    await transcribeCell({ cell, session: rowSession, projectId: project.id, language })
-    // AQU-783: transcription persists a cell.audio.attach (source transcript on
-    // cells.transcription + karaoke timings) through the outbox but, unlike an
-    // editor commit, fired no completion callback — so the result only landed
-    // in the local projection after a manual page refresh. Reuse the commit
-    // callback (flush outbox + revalidate the cell row → picks up the new
-    // transcription) and poke the per-file audio read (timings) so the result
-    // appears immediately in both the text and media sections.
-    await onCellCommitted?.(cell.id)
-    notifyAudioAttachmentsChanged(cell.fileId)
-  }, [cell, rowSession, project.id, project.sourceLanguage, project.targetLanguage, onCellCommitted])
-
-  const handleCorrectTranscript = useCallback((corrected: string) => {
-    if (!cell.selectedAudioId || !cellAudioTimings || cellAudioTimings.length === 0) return
-    const nextTimings = remapTranscriptTimings(cellAudioTimings, corrected)
-    if (nextTimings.length === 0) return
-    const attachment = cell.attachments?.[cell.selectedAudioId]
-    if (!attachment?.url) return
-    void emitCellAudioAttach({
-      projectId: project.id,
-      fileId: cell.fileId,
-      cellId: cell.id,
-      audioId: cell.selectedAudioId,
-      url: attachment.url,
-      slot: cell.selectedAudioId === cell.selectedGeneratedVoiceAudioId ? "generatedVoice" : "recording",
-      timings: nextTimings,
-      ...(attachment.durationMs != null ? { durationMs: attachment.durationMs } : {}),
-      ...(attachment.voiceId ? { voiceId: attachment.voiceId } : {}),
-      ...(attachment.referenceAudioId ? { referenceAudioId: attachment.referenceAudioId } : {}),
-      ...(isSourceSegmentSelected(cell) ? { transcription: corrected } : {}),
-      author: username,
-    }).catch((err) => {
-      console.warn("[transcript] correct emit failed:", err)
-    })
-  }, [cell, cellAudioTimings, project.id, username])
-
-  const hasContent = Boolean(visibleTranslated && visibleTranslated.trim())
+  // AQU-646: a recorded take IS target content. A line added into a silence may
+  // never get text — the dub is the deliverable — and it still has to be
+  // validatable and countable. `resolveTargetAudio` is the take-aware test: it
+  // matches a clip seeded with THIS cell's id, so the shared imported source
+  // clip (seeded with the file's id) can never masquerade as somebody's work.
+  // The row's `cell` already carries attachments via applyRowOverlays.
+  const hasContent =
+    Boolean(visibleTranslated && visibleTranslated.trim()) || Boolean(resolveTargetAudio(cell))
 
   // The automatic stage uses the smoothed server-derived estimate. Missing
   // evidence is unknown, not an endorsement-derived zero. Validation is a
@@ -5047,17 +5261,26 @@ function EditorRow({
     displayLabel: importDisplayLabel(cell.metadata),
   })
   // ── Character gutter (2026-08-07, stacked media lens only) ──────────────
-  // A row "speaks" unless it's structure (paratext/heading) or has no source
-  // text at all — the same set whose number pill is suppressed, so the two
-  // left-edge columns read consistently. The voice resolves through the LIVE
-  // tts settings (castAssignments → per-cell pin → default); "explicit" is
-  // gated through findVoice so an assignment pointing at a DELETED voice
-  // truthfully renders as the faded fallback rather than solid-but-narrator.
+  // A row "speaks" unless it's STRUCTURE (paratext/heading) — the same set
+  // whose number pill is suppressed, so the two left-edge columns read
+  // consistently. The voice resolves through the LIVE tts settings
+  // (castAssignments → per-cell pin → default); "explicit" is gated through
+  // findVoice so an assignment pointing at a DELETED voice truthfully renders
+  // as the faded fallback rather than solid-but-narrator.
+  //
+  // AQU-646 round 8: the rule used to ALSO require source text, which is what
+  // the comment above has always claimed the number pill does — and it does
+  // not. Two rows lost their circle to that: a line someone just added into a
+  // silence, which has no text yet by definition, and a transcribed media cell
+  // whose stored `value` is the import filename. (Reaching for `??` there
+  // never helped either: cell.original is decodeHtmlEntities(value ?? ""), so
+  // it is always a string and never nullish, and cell.transcription was never
+  // consulted.) The 40px gutter column is reserved unconditionally, so a
+  // missing circle read as a missing CONTROL rather than a missing column.
   const gutterSpeaking =
     castGutter &&
     cell.type !== "paratext" &&
-    cell.type !== "heading" &&
-    Boolean((cell.original ?? cell.transcription ?? "").trim())
+    cell.type !== "heading"
   const gutterVoice = gutterSpeaking
     ? resolveCastVoice(ttsSettings, cell.id, cell.ttsSettings?.voiceId)
     : null
@@ -5239,6 +5462,13 @@ function EditorRow({
   }
   const handleRowBlurCapture = (e: React.FocusEvent) => {
     const next = e.relatedTarget as Node | null
+    // AQU-913: dismiss this cell's inline AI errors (draft + back-translation)
+    // once focus has really left the cell. Evaluated BEFORE the containment
+    // early-return below because it uses a wider notion of "still in the cell":
+    // the error's info popover is portaled out of the row, so reading it must
+    // not count as leaving, while the focus-pin release deliberately still
+    // fires for that case (AQU-669).
+    if (shouldDismissCellErrorsOnBlur(rowRef.current, next)) onClearCellErrors?.(cell.id)
     if (next && rowRef.current?.contains(next)) return
     // AQU-669: focus left the row entirely — relinquish the pin (only if this
     // row still holds it; a newer focus may already own it).
@@ -5398,6 +5628,11 @@ function EditorRow({
         // AQU-590: exposes AI-translation-in-progress on the row itself so the
         // signal is testable and not only carried by a transient CSS ring.
         data-ai-translating={isLoading ? "true" : undefined}
+        // AQU-646 round 5: the row the TRANSPORT is on — the queue's cell, or
+        // the line the linked picture is playing over. Exposed for the same
+        // reason as the line above: the ring it draws is the same gold as
+        // multi-select's, so a class check cannot tell the two apart.
+        data-queue-row={isQueueRow ? "true" : undefined}
         tabIndex={0}
         aria-label={t("editor.row.cellAria", { ref: cellRef })}
         className={cn(
@@ -5424,8 +5659,6 @@ function EditorRow({
           isMultiSelected && "bg-primary/5 ring-1 ring-primary/40 ring-inset",
           // Open-comments accent — a soft inset ring.
           openCommentCount > 0 && "ring-1 ring-blue-400/50 ring-inset",
-          // Active cue highlight — tinted fill + gold ring.
-          _isActiveCue && "bg-primary/5 ring-1 ring-primary/40 ring-inset",
           // Timeline cursor (media lens): sky ring, same language as the
           // selected chip's ring.
           isMediaCursorRow && "bg-sky-500/5 ring-1 ring-sky-500/40 ring-inset",
@@ -5478,6 +5711,7 @@ function EditorRow({
                     editable={editable && Boolean(onAssignCastVoice)}
                     voices={gutterVoices}
                     onPick={(voiceId, opts) => onAssignCastVoice?.(cell, voiceId, opts)}
+                    onClear={onClearCastVoice ? (opts) => onClearCastVoice(cell, opts) : undefined}
                   />
                 )}
               </span>
@@ -5560,7 +5794,7 @@ function EditorRow({
                     </span>
                   </AppTooltip>
                 )}
-                {(isSynthBusy || isSynthError) && (
+                {((isSynthBusy && !audioLens) || isSynthError) && (
                   <SynthStatusBadge status={synthStatus} cellId={cell.id} projectId={project.id} onOpenAudioSetup={onOpenAudioSetup} />
                 )}
                 {/* AQU-599: persistent "has comment" indicator. Unlike the
@@ -6051,11 +6285,12 @@ function EditorRow({
               className="sr-only"
             >
               {isLoading && !completionPreview
-                ? (loadingPhase === "searching"
-                    ? `${cellRef}: Looking up similar examples…`
-                    : `${cellRef}: Generating translation…`)
+                ? // i18n-exempt "searching" is a loading-phase tag, not copy
+                  (loadingPhase === "searching"
+                    ? t("editor.row.draftSearching", { cellRef })
+                    : t("editor.row.draftGenerating", { cellRef }))
                 : isLoading && completionPreview
-                  ? `${cellRef}: Translation preview available`
+                  ? t("editor.row.draftPreviewReady", { cellRef })
                   : null}
             </div>
             {/* FRO-274: write-failure banner — shown when an outbox enqueue
@@ -6250,6 +6485,7 @@ function EditorRow({
                   cellId={cell.id}
                   username={username}
                   disabled={!editable}
+                  onTakeSaved={onTakeSaved}
                 />
               )}
 
@@ -6354,8 +6590,8 @@ function EditorRow({
                       <p className="font-medium text-foreground">{t("agentWorkspace.assuranceValidated")}</p>
                       <p>
                         {cellInfractions.length > 0
-                          ? "Validation is authoritative, but automatic checks still found an issue."
-                          : "Human review is complete. Automatic evidence remains available as context."}
+                          ? t("editor.assurance.validatedWithInfractions")
+                          : t("editor.assurance.validatedClean")}
                       </p>
                     </>
                   ) : healthRibbonPoint.stage === "automatic" ? (
@@ -6371,8 +6607,8 @@ function EditorRow({
                         </p>
                         <p>
                           {cellNeedsAttention
-                            ? "Lower local support — review terminology and context closely."
-                            : "Better local support — human review is still required."}
+                            ? t("editor.assurance.lowerSupport")
+                            : t("editor.assurance.betterSupport")}
                         </p>
                       </>
                     )
@@ -6449,7 +6685,7 @@ function EditorRow({
               label: t("editor.expansion.recording"),
               attentionDot: transcriptNeedsAttention
                 ? "amber"
-                : (hasAudio || hasGeneratedVoice)
+                : (hasAudio || hasGeneratedVoice || (linkedTakes?.length ?? 0) > 0)
                   ? "emerald"
                   : undefined,
               renderContent: () => (
@@ -6484,133 +6720,82 @@ function EditorRow({
                       })()}
                     </div>
                   )}
-                  {hasAudio ? (
-                    <>
-                      <div className="flex items-center gap-2">
-                        <CellAudioButton controller={audioController} />
-                        <div className="flex-1">
-                          <CellWaveform
-                            controller={audioController}
-                            height={36}
-                            strategy={project.audioMediaStrategy ?? "lazy"}
-                          />
+                  {/* BOTH/AND, not either/or (Sam, 2026-08-22): this row's own
+                      audio first, then every take that lives on a heard line
+                      performing it. A line can have both, and a reader who
+                      opened this panel wants to see everything that sounds for
+                      this line, not whichever one we ranked highest. */}
+                  {hasAudio && (
+                    <CellTakeBlock
+                      project={project}
+                      owner={cell}
+                      timings={cellAudioTimings}
+                      cellText={visibleTranslated}
+                      editable={editable}
+                      username={username}
+                      session={rowSession}
+                      onOpenRecording={onOpenRecording}
+                      onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
+                      onCommitted={onCellCommitted}
+                    />
+                  )}
+                  {hasGeneratedVoice && (
+                    // A synthesized voice is nobody's performance: it can be
+                    // recorded over, but not transcribed or cleaned up.
+                    <CellTakeBlock
+                      project={project}
+                      owner={cell}
+                      audioId={cell.selectedGeneratedVoiceAudioId}
+                      timings={generatedVoiceTimings}
+                      cellText={visibleTranslated}
+                      editable={editable}
+                      username={username}
+                      session={rowSession}
+                      onOpenRecording={onOpenRecording}
+                      onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
+                      recordLabel={t("editor.audio.recordOver")}
+                      readOnlyTranscript
+                      header={
+                        <span className="text-[11px] text-muted-foreground">
+                          {t("editor.voice.aiGeneratedHint")}
+                        </span>
+                      }
+                    />
+                  )}
+                  {linkedTakes?.map(({ cell: take, sharedWith }) => (
+                    <CellTakeBlock
+                      key={take.id}
+                      project={project}
+                      owner={take}
+                      timings={take.selectedAudioId ? take.audioTimings?.[take.selectedAudioId] : undefined}
+                      cellText={visibleTranslated}
+                      editable={editable}
+                      username={username}
+                      session={rowSession}
+                      onOpenRecording={onOpenRecording}
+                      onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
+                      onCommitted={onCellCommitted}
+                      header={
+                        <div data-testid="cell-linked-take" className="flex flex-col gap-0.5 border-t border-border pt-2">
+                          <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+                            {t("editor.audio.heardLineAt", {
+                              range: `${fmtClock(take.startTime ?? 0, true)}–${fmtClock(take.endTime ?? take.startTime ?? 0, true)}`,
+                            })}
+                          </span>
+                          {sharedWith > 1 && (
+                            // One heard line can perform several subtitle lines
+                            // — real in this data, up to seven. Re-recording it
+                            // changes all of them, and that should not be a
+                            // surprise discovered afterwards.
+                            <span className="text-[10px] text-muted-foreground">
+                              {t("editor.audio.heardLineShared", { count: sharedWith - 1 })}
+                            </span>
+                          )}
                         </div>
-                      </div>
-                      {cellAudioTimings && cellAudioTimings.length > 0 && (
-                        <CellTranscriptPreview
-                          ref={transcriptPreviewRef}
-                          timings={cellAudioTimings}
-                          cellText={visibleTranslated}
-                          cellId={cell.id}
-                          alignedToCellText={
-                            tokenizeWords(visibleTranslated).length === cellAudioTimings.length
-                          }
-                          editable={editable}
-                          onRetranscribe={handleTranscribe}
-                          onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
-                          onCorrectTranscript={handleCorrectTranscript}
-                        />
-                      )}
-                      <div className="flex flex-wrap gap-1.5">
-                        <Button
-                          type="button"
-                          size="xs"
-                          variant="outline"
-                          onClick={() => onOpenRecording?.(cell.id)}
-                          disabled={!editable || !onOpenRecording}
-                        >
-                          <Mic className="h-3 w-3" />
-                          {t("editor.audio.reRecordShort")}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="xs"
-                          variant="outline"
-                          onClick={handleTranscribe}
-                          disabled={!editable || isTranscribing}
-                        >
-                          <Sparkles
-                            className={cn(
-                              "h-3 w-3",
-                              isTranscribing && "animate-pulse",
-                            )}
-                          />
-                          {isTranscribing ? t("common.transcribing") : t("editor.cell.transcribeShort")}
-                        </Button>
-                        {/* Surfaces model-download %, failures (click-to-expand
-                            with Retry), and a success flash. Errors previously
-                            existed in transcribe-status but were rendered
-                            nowhere — the button just reverted to "Transcribe". */}
-                        <CellTranscribeBadge
-                          audioId={cell.selectedAudioId}
-                          hasTimings={(cellAudioTimings?.length ?? 0) > 0}
-                          onJumpToTranscript={() => transcriptPreviewRef.current?.scrollIntoView({ block: "nearest" })}
-                          onRetry={handleTranscribe}
-                        />
-                        {cell.selectedAudioId && selectedAudio && (
-                          <DenoiseButton
-                            projectId={project.id}
-                            fileId={cell.fileId}
-                            cellId={cell.id}
-                            selectedAudioId={cell.selectedAudioId}
-                            selectedUrl={selectedAudio.url}
-                            referenceAudioId={selectedAudio.referenceAudioId ?? null}
-                            originalUrl={
-                              selectedAudio.referenceAudioId
-                                ? cell.attachments?.[selectedAudio.referenceAudioId]?.url ?? null
-                                : null
-                            }
-                            originalDurationMs={
-                              selectedAudio.referenceAudioId
-                                ? cell.attachments?.[selectedAudio.referenceAudioId]?.durationMs ?? null
-                                : null
-                            }
-                            author={username}
-                            session={rowSession}
-                            editable={editable}
-                          />
-                        )}
-                      </div>
-                    </>
-                  ) : hasGeneratedVoice ? (
-                    <>
-                      <div className="flex items-center gap-2">
-                        <CellAudioButton controller={generatedVoiceController} />
-                        <div className="flex-1">
-                          <CellWaveform
-                            controller={generatedVoiceController}
-                            height={36}
-                            strategy={project.audioMediaStrategy ?? "lazy"}
-                          />
-                        </div>
-                      </div>
-                      {generatedVoiceTimings && generatedVoiceTimings.length > 0 && (
-                        <CellTranscriptPreview
-                          timings={generatedVoiceTimings}
-                          cellText={visibleTranslated}
-                          cellId={cell.id}
-                          alignedToCellText={
-                            tokenizeWords(visibleTranslated).length === generatedVoiceTimings.length
-                          }
-                          editable={editable}
-                          onUseAsCellText={(transcript) => handleEditorCommit({ value: transcript, valueHtml: transcript })}
-                        />
-                      )}
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-[11px] text-muted-foreground">{t("editor.voice.aiGeneratedHint")}</span>
-                        <Button
-                          type="button"
-                          size="xs"
-                          variant="outline"
-                          onClick={() => onOpenRecording?.(cell.id)}
-                          disabled={!editable || !onOpenRecording}
-                        >
-                          <Mic className="h-3 w-3" />
-                          {t("editor.audio.recordOver")}
-                        </Button>
-                      </div>
-                    </>
-                  ) : (
+                      }
+                    />
+                  ))}
+                  {!hasAudio && !hasGeneratedVoice && !linkedTakes?.length && (
                     <div className="flex flex-col items-center gap-3 py-4 text-center">
                       <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-muted/40 text-muted-foreground/50">
                         <Mic className="h-5 w-5" />

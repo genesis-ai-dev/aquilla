@@ -12,7 +12,7 @@
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
-import type { Env, Variables } from "../types"
+import type { AuthUser, Env, Variables } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
@@ -62,6 +62,13 @@ import {
   type ProposeBriefArgs,
   type ReadMemoryArgs,
 } from "../lib/agent/harness-tools"
+import {
+  proposeCommandTool,
+  describeCommandTool,
+  type CommandToolCtx,
+  type ProposeCommandArgs,
+  type DescribeCommandArgs,
+} from "../lib/agent/command-tools"
 
 const agent = new Hono<{ Bindings: Env; Variables: Variables }>()
 
@@ -210,7 +217,7 @@ function buildTools(bibleResourcesEnabled: boolean) {
           properties: {
             ...SCOPE_PROPS,
             cellIds: { type: "array", items: { type: "string" }, description: "Draft exactly these cells (ids or #c-aliases) instead of every untranslated cell in scope." },
-            limit: { type: "number", description: "Max cells this call (default 20, cap 50)." },
+            limit: { type: "number", description: "Max cells this call (default 10, cap 10)." },
             instructions: { type: "string", description: "Extra guidance for this batch (tone, term choices, fixes from lint)." },
           },
         },
@@ -254,6 +261,40 @@ function buildTools(bibleResourcesEnabled: boolean) {
           type: "object",
           properties: { topic: { type: "string" } },
           required: ["topic"],
+        },
+      },
+    },
+    // ── AQU-926 registered-command tools (COMMAND-REGISTRY §4) ──────────────
+    {
+      type: "function",
+      function: {
+        name: "propose_command",
+        description:
+          "STAGE registered changeset commands (see the Changeset commands index) as one changeset for human review — nothing applies until the user reviews it in-app; do not poll. Call describe_command({kind}) for a command's exact params first. Pass changesetId only to retry the same staging idempotently.",
+        parameters: {
+          type: "object",
+          properties: {
+            commands: {
+              type: "array",
+              items: { type: "object" },
+              description: "Registered commands, each {kind, …params}.",
+            },
+            changesetId: { type: "string", description: "Optional client-generated UUID for idempotent retry." },
+          },
+          required: ["commands"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "describe_command",
+        description:
+          "Full params, gotchas, and a worked example for one changeset command kind — free; call before propose_command.",
+        parameters: {
+          type: "object",
+          properties: { kind: { type: "string", description: "Command kind, e.g. SetTranslation." } },
+          required: ["kind"],
         },
       },
     },
@@ -540,7 +581,7 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
       const send = (frame: AgentFrame) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`))
       }
-      runAgentLoop({ env, body, storedConvo, storedUntrusted, user: { id: user.id, username: user.username }, roleLevel: role.level, runId, orgId, model: agentModel, draftModel: resolveDraftModel(c.env, platformSettings, agentModel), signal, send })
+      runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel: role.level, runId, orgId, model: agentModel, draftModel: resolveDraftModel(c.env, platformSettings, agentModel), signal, send })
         .catch((err) => {
           // Last-resort: surface, then settle the ledger as error.
           try {
@@ -604,7 +645,9 @@ interface LoopArgs {
   storedConvo: StoredMessage[]
   /** Session's carried-over untrusted-content bit (false when sessionless). */
   storedUntrusted: boolean
-  user: { id: number; username: string }
+  /** Full auth user — propose_command mints a sync token AS this user
+   *  (resolveProjectRole reads id + email); the loop itself uses id/username. */
+  user: AuthUser
   roleLevel: number
   runId: string
   orgId: number
@@ -775,6 +818,17 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       untrusted.runHad = true
     },
     isUntrustedActive: () => untrusted.active,
+  }
+  // AQU-926 — registered-command staging (COMMAND-REGISTRY §4): propose_command
+  // stages through sync-worker's changeset engine as the run's user.
+  const commandCtx: CommandToolCtx = {
+    env,
+    runId,
+    projectId: body.projectId,
+    roleLevel,
+    user,
+    signal,
+    send,
   }
 
   send({ type: "run_start", runId, ...(body.sessionId ? { sessionId: body.sessionId } : {}) })
@@ -971,6 +1025,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
             stagedCount += n
           },
           harness,
+          command: commandCtx,
         })
         // Tool wall-clock is the orchestration+infra half of an ACU: `run_code`
         // is container time, `sql`/`search` are DB time. None of it appears as
@@ -1079,6 +1134,8 @@ interface ToolCallEnv {
   countStaged: (n: number) => void
   /** AQU-AGENT §2 harness context (sandbox / import / memory tools). */
   harness: HarnessToolCtx
+  /** AQU-926 registered-command context (propose_command / describe_command). */
+  command: CommandToolCtx
 }
 
 /** Does this tool call consume the write/SQL iteration budget? Write-shaped
@@ -1088,6 +1145,9 @@ function budgetedCall(call: ToolCall): boolean {
   const name = call.function.name
   if (name === "draft" || name === "propose" || name === "sql") return true
   if (name === "propose_memory" || name === "propose_brief_update") return true
+  // AQU-926: stages a changeset server-side — write-shaped, so budgeted
+  // (describe_command stays free like the other read-shaped tools).
+  if (name === "propose_command") return true
   if (name !== "execute") return false
   try {
     const args = JSON.parse(call.function.arguments ?? "{}") as Record<string, unknown>
@@ -1277,6 +1337,12 @@ async function executeToolCall(call: ToolCall, t: ToolCallEnv): Promise<string> 
       return proposeBriefUpdateTool(args as ProposeBriefArgs, t.harness)
     case "read_memory":
       return readMemoryTool(args as ReadMemoryArgs, t.harness)
+    // AQU-926 registered-command tools (COMMAND-REGISTRY §4). propose_command
+    // emits its own changeset.staged frame; describe_command is a pure read.
+    case "propose_command":
+      return proposeCommandTool(args as ProposeCommandArgs, t.command)
+    case "describe_command":
+      return describeCommandTool(args as DescribeCommandArgs, t.command)
     case "propose": {
       if (!Array.isArray(args.events)) {
         t.send({ type: "code_start", step: t.step, kind: "emit", summary: "(invalid call)" })

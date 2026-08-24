@@ -137,7 +137,7 @@ function TokenExpiredView({ username }: { username: string }) {
         </p>
         <a
           href="/"
-          className="inline-flex w-full items-center justify-center rounded-xl border px-3 py-1.5 text-sm font-medium transition-all hover:bg-muted"
+          className="inline-flex w-full items-center justify-center rounded-xl border px-3 py-1.5 text-sm font-medium hover:bg-muted"
         >
           {t("auth.resetPassword.backToApp")}
         </a>

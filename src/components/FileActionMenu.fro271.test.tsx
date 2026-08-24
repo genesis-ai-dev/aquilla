@@ -63,3 +63,23 @@ describe("FileActionMenu — export and assign work", () => {
     ).toBeTruthy()
   })
 })
+
+describe("FileActionMenu — segmentation", () => {
+  it("hides Segmentation when onSegmentation is omitted", () => {
+    renderMenu()
+    expect(screen.queryByRole("menuitem", { name: /segmentation/i })).toBeNull()
+  })
+
+  it("shows Segmentation between Assign work and Export", () => {
+    renderMenu({ onExport: vi.fn(), onAssignWork: vi.fn(), onSegmentation: vi.fn() })
+    const assign = screen.getByRole("menuitem", { name: /assign work/i })
+    const segmentation = screen.getByRole("menuitem", { name: /segmentation/i })
+    const exportItem = screen.getByRole("menuitem", { name: /^Export$/ })
+    expect(
+      assign.compareDocumentPosition(segmentation) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      segmentation.compareDocumentPosition(exportItem) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+})

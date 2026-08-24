@@ -15,7 +15,9 @@ import { loadSession } from "@/lib/frontier/session-store"
 import {
   ContextualApiError,
   ContextualAuthError,
+  actOnContextualDecision,
   commandContextualRun,
+  fetchContextualDecisions,
   fetchContextualDrafts,
   fetchContextualOverview,
   fetchContextualRunActivity,
@@ -95,9 +97,28 @@ describe("fetchContextualDrafts", () => {
       runId: "older-owning-run",
       cellId: "cell-1",
       text: "Review me",
-      spanLabel: "span-1",
     }])
     expect(lastRequest().url).toContain("/contextual/drafts?fileId=file%201&status=proposed")
+  })
+
+  it("keeps a human passage label from draft provenance and ignores span ids", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      drafts: [{
+        id: "draft-1",
+        runId: "run-1",
+        cellId: "cell-1",
+        text: "Review me",
+        provenance: { spanId: "01920000-0000-7000-8000-000000000001", spanLabel: "LUK 1:1–1:8" },
+      }],
+    }))
+
+    await expect(fetchContextualDrafts(PROJECT_ID, FILE_ID)).resolves.toEqual([{
+      draftId: "draft-1",
+      runId: "run-1",
+      cellId: "cell-1",
+      text: "Review me",
+      spanLabel: "LUK 1:1–1:8",
+    }])
   })
 })
 
@@ -403,5 +424,67 @@ describe("installContextualTransport", () => {
     expect(lastRequest().url).toContain("/contextual/runs")
     expect(getContextualRunState().runId).toBe(RUN.runId)
     expect(getContextualRunState().status).toBe("running")
+  })
+})
+
+describe("fetchContextualDecisions", () => {
+  it("degrades to an empty page when the backend predates the endpoint", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("not found", { status: 404 }))
+    const page = await fetchContextualDecisions(PROJECT_ID)
+    expect(page).toEqual({ decisions: [], openCount: 0, cap: 0 })
+  })
+
+  it("passes through the cap and the true open count", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      decisions: [{ id: "d1", reason: "why", blastRadius: 6 }],
+      openCount: 5,
+      cap: 3,
+    }))
+    const page = await fetchContextualDecisions(PROJECT_ID)
+    expect(page.openCount).toBe(5)
+    expect(page.cap).toBe(3)
+    expect(page.decisions).toHaveLength(1)
+  })
+
+  it("GETs the project-scoped decisions route with the JWT", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ decisions: [], openCount: 0, cap: 3 }))
+    await fetchContextualDecisions(PROJECT_ID)
+    const { url, init } = lastRequest()
+    expect(url).toContain("/api/v2/projects/proj%2F1/contextual/decisions")
+    expect(init.method).toBeUndefined() // GET
+    expect(init.headers).toMatchObject({ Authorization: "Bearer jwt-token" })
+  })
+
+  it("throws ContextualApiError with the server message on other failures", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: { message: "quota exceeded" } }, 429))
+    const err = await fetchContextualDecisions(PROJECT_ID).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ContextualApiError)
+    expect((err as ContextualApiError).status).toBe(429)
+  })
+})
+
+describe("actOnContextualDecision", () => {
+  it("POSTs the decision action route with the payload", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true }))
+    await actOnContextualDecision(PROJECT_ID, "d1", "answer", { answer: "Use formal register" })
+    const { url, init } = lastRequest()
+    expect(url).toContain("/api/v2/projects/proj%2F1/contextual/decisions/d1/answer")
+    expect(init.method).toBe("POST")
+    expect(init.headers).toMatchObject({ Authorization: "Bearer jwt-token" })
+    expect(JSON.parse(init.body as string)).toEqual({ answer: "Use formal register" })
+  })
+
+  it("defaults to an empty payload when none is given", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true }))
+    await actOnContextualDecision(PROJECT_ID, "d1", "dismiss")
+    expect(JSON.parse(lastRequest().init.body as string)).toEqual({})
+  })
+
+  it("maps a failed action to ContextualApiError with status", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: { message: "already resolved" } }, 409))
+    const err = await actOnContextualDecision(PROJECT_ID, "d1", "assign", { userId: 42 })
+      .catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ContextualApiError)
+    expect((err as ContextualApiError).status).toBe(409)
   })
 })

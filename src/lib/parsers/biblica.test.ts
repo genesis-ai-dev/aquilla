@@ -5,9 +5,16 @@ import {
   type IdmlFormatMetadataV2,
 } from "@aquilla/idml-roundtrip"
 import {
+  FRONT_BACK_MATTER,
   SAMPLE_NOTES,
   BIBLICA_STORY_PATH,
+  biblicaFrontBackMatterStory,
+  bookTitle,
+  divisionHeading,
   makeBiblicaIdml,
+  note,
+  paragraph,
+  run,
 } from "@/lib/biblica/__fixtures__/biblica-idml"
 import { selectBiblicaStudyNotes } from "@/lib/biblica/study-notes"
 import { extractBiblicaStudyNoteStrings } from "./biblica"
@@ -46,6 +53,10 @@ describe("Biblica study-notes parser adapter", () => {
     // The paragraph style is retained so a note's role stays auditable after import.
     expect(strings[1].metadata?.biblica).toMatchObject({
       paragraphStyle: "ParagraphStyle/intro%3aipi",
+    })
+    // JOB-SNG sets Psalm labels in `head:cl`, not `intro:*`.
+    expect(strings[3].metadata?.biblica).toMatchObject({
+      paragraphStyle: "ParagraphStyle/head%3acl",
     })
   })
 
@@ -139,6 +150,75 @@ describe("Biblica study-notes parser adapter", () => {
       signal: controller.signal,
       onProgress,
     })
+  })
+
+  it("gives a division its own milestone, titled by the heading and scoped to no book", async () => {
+    const buffer = await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "MAT")),
+      divisionHeading("p-div", "Sto\u00adries about Jesus"),
+      note("p-div-body", "The books from Matthew to Acts are stories about Jesus."),
+      bookTitle("p-title", "The Gospel of Matthew"),
+      note("p-pref", "Matthew wrote for readers who knew the Scriptures."),
+    ])
+    const parsed = await parseIdml(buffer)
+    const { strings } = await extractBiblicaStudyNoteStrings(buffer, async () => parsed)
+
+    const [heading, description, title, preface] = strings
+    expect(heading!.milestone).toEqual({
+      key: "biblica:section:1:Stories about Jesus",
+      kind: "section",
+      label: "Stories about Jesus",
+      shortLabel: "1",
+    })
+    // The description shares the heading's milestone; both stand outside the book.
+    expect(description!.milestone).toEqual(heading!.milestone)
+    expect(heading!.section).toBe("Stories about Jesus")
+    expect(heading!.globalReferences).toBeUndefined()
+    expect(heading!.metadata?.biblica).toMatchObject({
+      contentType: "notes",
+      sectionLabel: "Stories about Jesus",
+    })
+    // The book title closes the division, so Matthew's preface labels as before.
+    expect(title!.milestone).toBeUndefined()
+    expect(title!.section).toBe("MAT Preface")
+    expect(preface!.section).toBe("MAT Preface")
+    expect(preface!.globalReferences).toEqual(["MAT"])
+  })
+
+  it("imports a front/back matter volume as layout text grouped by its headings", async () => {
+    const buffer = await makeBiblicaIdml(biblicaFrontBackMatterStory)
+    const parsed = await parseIdml(buffer)
+    const { strings, bookCodes, frontBackMatter } =
+      await extractBiblicaStudyNoteStrings(buffer, async () => parsed)
+
+    expect(frontBackMatter).toBe(true)
+    expect(bookCodes).toEqual([])
+    expect(strings.map((cell) => [cell.original, cell.milestone?.label])).toEqual([
+      [FRONT_BACK_MATTER.title, FRONT_BACK_MATTER.title],
+      [FRONT_BACK_MATTER.firstLetter, FRONT_BACK_MATTER.firstLetter],
+      [FRONT_BACK_MATTER.firstEntry, FRONT_BACK_MATTER.firstLetter],
+      [FRONT_BACK_MATTER.firstBody.join(""), FRONT_BACK_MATTER.firstLetter],
+      [FRONT_BACK_MATTER.secondLetter, FRONT_BACK_MATTER.secondLetter],
+      [FRONT_BACK_MATTER.secondEntry, FRONT_BACK_MATTER.secondLetter],
+    ])
+    // A one- or two-character heading is its own badge; longer ones are numbered.
+    expect(strings.map((cell) => cell.milestone?.shortLabel))
+      .toEqual(["1", "A", "A", "A", "B", "B"])
+    for (const cell of strings) {
+      expect(cell.metadata?.biblica).toMatchObject({ contentType: "front-back-matter" })
+      expect(cell.metadata?.biblica).not.toHaveProperty("chapterLabel")
+      expect(cell.sourceLocator).toMatchObject({ kind: "idml" })
+    }
+  })
+
+  it("reads a book volume as notes even though it holds no front/back matter", async () => {
+    const buffer = await makeBiblicaIdml()
+    const parsed = await parseIdml(buffer)
+    const { frontBackMatter, strings } =
+      await extractBiblicaStudyNoteStrings(buffer, async () => parsed)
+
+    expect(frontBackMatter).toBe(false)
+    expect(strings.every((cell) => cell.milestone === undefined)).toBe(true)
   })
 
   it("returns no cells for an IDML package that has no note paragraphs", async () => {

@@ -64,7 +64,7 @@ export function DataTableColumnHeader<TData, TValue>({
           // bg fills the padding and bleeds around the title like a ghost chip.
           // Label stays muted; only the sort arrow uses foreground contrast.
           "group/sort -mx-1.5 -my-0.5 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-medium text-muted-foreground",
-          "hover:bg-muted/50",
+          "hover:bg-accent/40",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
         )}
         onClick={column.getToggleSortingHandler()}

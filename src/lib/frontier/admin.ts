@@ -67,6 +67,8 @@ export interface AdminProject {
   validatedCells: number
   wordCount: number
   lastEditAt: number | null
+  /** True when someone who is not a member of the owning org can access it. */
+  shared: boolean
 }
 
 export interface AdminActivity {
@@ -119,6 +121,11 @@ export interface AbTestConfig {
 export interface PlatformSettings {
   defaultLlmModel?: string
   agentModel?: string
+  /** Autopilot FAST tier (summarize, support check, passage detection).
+   *  Send "" to clear it and fall back to the server's env/default. */
+  contextualFastModel?: string
+  /** Autopilot DEEP tier (the verifier stances). "" clears it. */
+  contextualDeepModel?: string
   allowedModels?: string[]
   aiUserDailyLimit?: number
   aiGlobalDailyLimit?: number
@@ -135,6 +142,9 @@ export interface PlatformSettingsResponse {
   effective: {
     defaultLlmModel: string
     agentModel: string
+    /** What the autopilot tiers resolve to right now, store value or not. */
+    contextualFastModel: string
+    contextualDeepModel: string
     allowedModels: string[]
   }
 }

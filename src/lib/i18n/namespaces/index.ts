@@ -40,6 +40,7 @@ import { knowledgeBase } from "./knowledgeBase"
 import { settings } from "./settings"
 import { agent } from "./agent"
 import { workspace } from "./workspace"
+import { segmentation } from "./segmentation"
 
 export const NAMESPACES = [
   common,
@@ -66,4 +67,5 @@ export const NAMESPACES = [
   settings,
   agent,
   workspace,
+  segmentation,
 ] as const

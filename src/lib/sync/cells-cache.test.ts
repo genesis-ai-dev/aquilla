@@ -98,6 +98,60 @@ describe("mergeCellsDelta", () => {
     expect(merged.map((r) => r.cellId)).toEqual(["a", "x", "b"])
   })
 
+  // AQU-646 round 8: inserting a line BEFORE the first cue. The pair of tests
+  // matters more than either one — the first pins the bug so it cannot come
+  // back quietly, the second proves the fix.
+  it("WITHOUT re-pointing the old head, a head insert lands at the TAIL", () => {
+    // Two rows now claim a null anchor. They bucket under the same key and
+    // tiebreak by eventId, and a fresh uuidv7 always sorts last — so the whole
+    // original chain is emitted first and the new row is appended after it.
+    const cached = chain("source", "a", "b")
+    const merged = mergeCellsDelta(cached, ["x"], [
+      row("x", "source", { anchorCellId: null, eventId: "e-zzz-newer" }),
+    ])
+    expect(merged.map((r) => r.cellId)).toEqual(["a", "b", "x"])
+  })
+
+  it("re-pointing the old head puts the new line FIRST, where it belongs", () => {
+    const cached = chain("source", "a", "b")
+    const merged = mergeCellsDelta(cached, ["x", "a"], [
+      row("x", "source", { anchorCellId: null, eventId: "e-zzz-newer" }),
+      row("a", "source", { anchorCellId: "x", eventId: "e-a2" }),
+    ])
+    expect(merged.map((r) => r.cellId)).toEqual(["x", "a", "b"])
+    // ...and the file is back to exactly one row with no cell before it.
+    expect(merged.filter((r) => r.anchorCellId == null)).toHaveLength(1)
+  })
+
+  // Round 4: the SAME bug one position along. The head fix only re-pointed the
+  // old head, so a MID-FILE insert left the successor still anchored to the
+  // cell before it — two siblings on one anchor. Invisible in the table
+  // (time-sorted) and invisible until the file is exported, which reads chain
+  // order.
+  it("WITHOUT re-pointing the successor, a mid-file insert lands at the TAIL", () => {
+    const cached = chain("source", "a", "b", "c")
+    // x inserted between a and b, but b still points at a.
+    const merged = mergeCellsDelta(cached, ["x"], [
+      row("x", "source", { anchorCellId: "a", eventId: "e-zzz-newer" }),
+    ])
+    // b (lower event id) is emitted first AND drags its whole subtree — the
+    // rest of the file — before x gets a turn.
+    expect(merged.map((r) => r.cellId)).toEqual(["a", "b", "c", "x"])
+  })
+
+  it("re-pointing the successor puts the new line where the clock says", () => {
+    const cached = chain("source", "a", "b", "c")
+    const merged = mergeCellsDelta(cached, ["x", "b"], [
+      row("x", "source", { anchorCellId: "a", eventId: "e-zzz-newer" }),
+      row("b", "source", { anchorCellId: "x", eventId: "e-b2" }),
+    ])
+    expect(merged.map((r) => r.cellId)).toEqual(["a", "x", "b", "c"])
+    // Still exactly one head, and no cell claims an anchor twice.
+    expect(merged.filter((r) => r.anchorCellId == null)).toHaveLength(1)
+    const anchors = merged.map((r) => r.anchorCellId).filter(Boolean)
+    expect(new Set(anchors).size).toBe(anchors.length)
+  })
+
   it("replaces a changed row in place without disturbing order (validate flip)", () => {
     const cached = chain("target", "a", "b", "c")
     const merged = mergeCellsDelta(cached, ["b"], [
@@ -184,5 +238,21 @@ describe("cells cache maxServerSeq cursor", () => {
     await writeCellsCache("p1", "f-noseq", [row("a", "source")])
     const entry = await readCellsCache("p1", "f-noseq")
     expect(entry?.maxServerSeq).toBeUndefined()
+  })
+
+  // AQU-943: the cursor alone cannot say WHICH incarnation of the project it
+  // was minted against, so a wipe + re-migration under the same ids leaves it
+  // pointing at a seq range that no longer exists. The epoch travels with it.
+  it("round-trips the project incarnation beside the cursor", async () => {
+    await writeCellsCache("p1", "f-epoch", [row("a", "source")], 42, 2_000)
+    const entry = await readCellsCache("p1", "f-epoch")
+    expect(entry?.maxServerSeq).toBe(42)
+    expect(entry?.projectEpoch).toBe(2_000)
+  })
+
+  it("omits the incarnation when the server did not provide one (pre-AQU-943 fallback)", async () => {
+    await writeCellsCache("p1", "f-noepoch", [row("a", "source")], 42)
+    const entry = await readCellsCache("p1", "f-noepoch")
+    expect(entry?.projectEpoch).toBeUndefined()
   })
 })

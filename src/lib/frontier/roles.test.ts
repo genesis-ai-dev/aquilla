@@ -6,6 +6,7 @@ import {
   PROJECT_ROLE_PICKER,
   ORG_ROLE_PICKER,
   roleName,
+  roleLevelFromName,
   roleNameKey,
   unknownRoleLabel,
   resolveRoleName,
@@ -50,6 +51,13 @@ describe("ROLE constants", () => {
   it("returns a sentinel name for non-canonical levels", () => {
     expect(roleName(250)).toBe("level_250")
     expect(roleName(0)).toBe("level_0")
+  })
+
+  it("maps a canonical name back to its ladder level", () => {
+    expect(roleLevelFromName("viewer")).toBe(100)
+    expect(roleLevelFromName("project_lead")).toBe(500)
+    expect(roleLevelFromName("owner")).toBe(700)
+    expect(roleLevelFromName("level_250")).toBeNull()
   })
 
   it("provides a description key for every canonical level, resolving to non-empty text", () => {

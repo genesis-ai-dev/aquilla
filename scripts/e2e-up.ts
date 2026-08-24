@@ -255,6 +255,78 @@ function dockerPgAvailable(): boolean {
   return spawnSync("docker", ["exec", PG_CONTAINER, "true"], { stdio: "ignore" }).status === 0
 }
 
+/** Blocks the event loop for `seconds` — used only for the short synchronous
+ * polling loops below (colima/container boot), which run before any workers
+ * are spawned. */
+function sleepSync(seconds: number): void {
+  spawnSync("sleep", [String(seconds)])
+}
+
+/** True when the `colima` CLI is on PATH — this repo's local Docker runtime
+ * (not Docker Desktop). See docs/CLAUDE memory: run `colima start` before
+ * anything that needs Docker. */
+function hasColima(): boolean {
+  return spawnSync("colima", ["version"], { stdio: "ignore" }).status === 0
+}
+
+/** True when the default colima VM is already running. */
+function colimaRunning(): boolean {
+  return spawnSync("colima", ["status"], { stdio: "ignore" }).status === 0
+}
+
+/**
+ * Auto-start Colima when it's installed but not running, so `pnpm test:e2e`
+ * (and the pre-push smoke hook) don't fail with a bare "no Docker container"
+ * error on a machine where Docker itself just isn't up yet. No-op when
+ * Colima isn't installed (Docker Desktop / Homebrew Postgres setups) or is
+ * already running. Failure here is non-fatal — resetE2ePostgres() falls back
+ * to local psql, or reports the original error.
+ *
+ * Sharded runs (scripts/e2e-shard.ts) launch several of these as separate
+ * processes concurrently, so more than one can call this at once — `colima
+ * start` on an instance that's still booting just logs "already running,
+ * ignoring" and returns immediately rather than waiting. We poll
+ * colimaRunning() afterward (with a generous timeout) so every shard blocks
+ * until the VM is actually up, instead of racing ahead to a Docker call that
+ * will fail.
+ */
+function ensureColimaStarted(): void {
+  if (!hasColima()) return
+  if (!colimaRunning()) {
+    console.log(`${TAG}[e2e-up] Colima not running — starting it (this can take ~30s)…`)
+    const result = spawnSync("colima", ["start"], { stdio: "inherit" })
+    if (result.status !== 0) {
+      console.error(`${TAG}[e2e-up] 'colima start' failed (exit ${result.status}) — continuing, will fall back if Docker stays unavailable.`)
+    }
+  }
+  const deadline = Date.now() + 60_000
+  while (!colimaRunning() && Date.now() < deadline) {
+    sleepSync(1)
+  }
+  if (!colimaRunning()) {
+    console.error(`${TAG}[e2e-up] Colima still not reporting 'running' after 60s — continuing, will fall back if Docker stays unavailable.`)
+  }
+}
+
+/**
+ * Start the `aquilla-dev-pg` container when Colima/Docker is up but the
+ * container was previously stopped (e.g. left over from a `colima stop` or a
+ * machine restart). No-op when Docker itself isn't reachable (handled by the
+ * dockerPgAvailable() check in resetE2ePostgres) or the container doesn't
+ * exist at all (first-time setup — see e2e/README.md).
+ */
+function ensureDockerPgContainerStarted(): void {
+  if (dockerPgAvailable()) return
+  const inspect = spawnSync("docker", ["inspect", "-f", "{{.State.Running}}", PG_CONTAINER], { stdio: ["ignore", "pipe", "ignore"] })
+  if (inspect.status !== 0) return // container doesn't exist — nothing to start
+  console.log(`${TAG}[e2e-up] '${PG_CONTAINER}' container exists but isn't running — starting it…`)
+  spawnSync("docker", ["start", PG_CONTAINER], { stdio: "inherit" })
+  const deadline = Date.now() + 30_000
+  while (!dockerPgAvailable() && Date.now() < deadline) {
+    sleepSync(1)
+  }
+}
+
 /** True when a local `psql` client is on PATH (the Docker-less fallback). */
 function hasLocalPsql(): boolean {
   return spawnSync("psql", ["--version"], { stdio: "ignore" }).status === 0
@@ -274,6 +346,9 @@ function hasLocalPsql(): boolean {
  */
 function resetE2ePostgres(): void {
   const schemaSql = readFileSync(path.join(REPO_ROOT, "db/postgres/schema.sql"))
+
+  ensureColimaStarted()
+  ensureDockerPgContainerStarted()
 
   if (dockerPgAvailable()) {
     const dropResult = spawnSync(

@@ -81,6 +81,16 @@ export interface BulkImportFileMeta {
   fileType?: string
   role?: string
   kind?: string
+  /** File-level pairing mirror of the shared cell_ids: the source file this
+   *  target-side file was created against (`files.source_file_id`). */
+  sourceFileId?: string
+  /** The file this one hangs off (`files.anchor_file_id`). Stage 2's audio-cue
+   *  sibling (role "audio-cues") is paired to its text file this way — the
+   *  sibling is hidden from every file list, so the anchor is the ONLY thing
+   *  that says whose timeline those cues belong to. The `/import` route has
+   *  always forwarded both ids into the file.create payload and the projection
+   *  has always written the columns; this type was simply never widened. */
+  anchorFileId?: string
   importFormat?: string
   parserVersion?: string
   sourceLanguage?: string

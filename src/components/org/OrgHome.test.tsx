@@ -18,7 +18,7 @@ function projectsRollupStat() {
 }
 
 function renderMemberShell(path: string) {
-  return render(
+  return renderWithTooltips(
     <MemoryRouter initialEntries={[path]}>
       <OrgProvider>
         <Routes>
@@ -99,9 +99,9 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
 // portfolio-focused assertions below are unaffected.
 vi.mock("@/lib/sync/assignments", () => ({ getWorkload: vi.fn(async () => []) }))
 
-// AQU-335/AQU-416: accessible-projects feed for the "Shared with you" section
-// (and OrgProvider's guest-org derivation). Default empty — the shared-section
-// test overrides it with a foreign-org grant.
+// AQU-335/AQU-416: accessible-projects feed for foreign-org grants (and
+// OrgProvider's guest-org derivation). Default empty — the all-orgs Shared
+// origin test overrides it with a foreign-org grant.
 const fetchAccessibleProjectsMock = vi.fn(async (): Promise<unknown[]> => [])
 vi.mock("@/lib/sync/cloud-projects", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/sync/cloud-projects")>()
@@ -402,19 +402,27 @@ describe("OrgOverview / OrgProjects", () => {
     )
 
     try {
-      await waitFor(() => expect(screen.getByTestId("org-projects-loading")).toBeInTheDocument())
-      expect(screen.getByText("Loading projects…")).toBeInTheDocument()
-      expect(screen.getByTestId("org-projects-loading-template")).toBeInTheDocument()
+      await waitFor(() =>
+        expect(screen.getByRole("status", { name: "Loading projects" })).toBeInTheDocument(),
+      )
+      expect(screen.getByPlaceholderText("Search projects…")).toBeInTheDocument()
       expect(document.querySelector('[data-slot="app-shell-header"]')).not.toBeNull()
       expect(screen.queryByTestId("loading-neutral-template")).not.toBeInTheDocument()
       await act(async () => { await Promise.resolve() })
-      expect(addedText.join("\n")).not.toContain("Your organization is ready")
+      // Description is unique to the resolved zero-projects empty state; the
+      // title ("No projects yet") is also the loading-table placeholder.
+      expect(addedText.join("\n")).not.toContain("Create a project to start translating.")
 
       // Keep subsequent refetches empty so the empty-state isn't replaced by default mock data.
       vi.mocked(getPortfolio).mockResolvedValue([])
       await act(async () => { resolvePortfolio([]) })
-      await waitFor(() => expect(screen.queryByTestId("org-projects-loading")).not.toBeInTheDocument())
-      expect(screen.getByText("Your organization is ready")).toBeInTheDocument()
+      await waitFor(() =>
+        expect(screen.queryByRole("status", { name: "Loading projects" })).not.toBeInTheDocument(),
+      )
+      expect(screen.getByText("No projects yet")).toBeInTheDocument()
+      expect(screen.getByText("Create a project to start translating.")).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "Invite your team" })).not.toBeInTheDocument()
+      expect(screen.getByPlaceholderText("Search projects…")).toBeInTheDocument()
     } finally {
       observer.disconnect()
       view.unmount()
@@ -541,7 +549,7 @@ describe("OrgOverview / OrgProjects", () => {
 
   it("renders no Pending invitations card when there are none", async () => {
     renderMemberOverview()
-    await waitFor(() => expect(screen.getByTestId("org-overview-attention-table")).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByTestId("org-overview-projects-table")).toBeInTheDocument())
     expect(screen.queryByTestId("pending-invitations")).not.toBeInTheDocument()
   })
 
@@ -558,6 +566,63 @@ describe("OrgOverview / OrgProjects", () => {
     renderMemberOverview()
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
     expect(screen.getAllByText("Overdue").length).toBeGreaterThan(0)
+  })
+
+  it("shows every project directly in recent-update order", async () => {
+    renderMemberOverview()
+
+    const table = await screen.findByTestId("org-overview-projects-table")
+    const recentProject = within(table).getByText("New Testament")
+    const staleProject = within(table).getByText("Legacy Translation")
+
+    expect(staleProject.compareDocumentPosition(recentProject) & Node.DOCUMENT_POSITION_PRECEDING)
+      .toBeTruthy()
+    expect(within(staleProject.closest("tr")!).queryByRole("img", { name: /needs attention/i }))
+      .not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /view projects/i })).not.toBeInTheDocument()
+  })
+
+  it("shows the ten most recently updated projects first and expands the rest inline", async () => {
+    const { getPortfolio } = await import("@/lib/frontier/portfolio")
+    const now = Date.now()
+    vi.mocked(getPortfolio).mockResolvedValue(
+      Array.from({ length: 12 }, (_, index) => ({
+        id: `project-${index + 1}`,
+        name: `Project ${String(index + 1).padStart(2, "0")}`,
+        totalCells: 100,
+        validatedCells: 50,
+        filledCells: 50,
+        aiDraftedCells: 0,
+        lastEditAt: now - index * 1_000,
+        audioCells: 0,
+        validatedAudioCells: 0,
+        recordedMs: 0,
+        deadlineAt: null,
+        sourceLanguage: null,
+        targetLanguage: null,
+      })),
+    )
+
+    renderMemberOverview()
+
+    const table = await screen.findByTestId("org-overview-projects-table")
+    expect(within(table).getByText("Project 01")).toBeInTheDocument()
+    expect(within(table).getByText("Project 10")).toBeInTheDocument()
+    expect(within(table).queryByText("Project 11")).not.toBeInTheDocument()
+
+    const showAll = within(table).getByRole("button", { name: "Show 2 more" })
+    expect(showAll).toHaveAttribute("aria-expanded", "false")
+    expect(showAll.closest("tr")).toBe(table.querySelector("tbody tr:last-child"))
+    fireEvent.click(showAll)
+
+    expect(within(table).getByText("Project 11")).toBeInTheDocument()
+    expect(within(table).getByText("Project 12")).toBeInTheDocument()
+    const showFewer = within(table).getByRole("button", { name: "Show fewer" })
+    expect(showFewer).toHaveAttribute("aria-expanded", "true")
+    expect(showFewer.closest("tr")).toBe(table.querySelector("tbody tr:last-child"))
+
+    fireEvent.click(showFewer)
+    expect(within(table).queryByText("Project 11")).not.toBeInTheDocument()
   })
 
   it("shows the audio rollup card and per-project audio % on the projects table", async () => {
@@ -664,18 +729,16 @@ describe("OrgOverview / OrgProjects", () => {
     expect(screen.getByText("No projects match your search.")).toBeInTheDocument()
   })
 
-  // AQU-417: cross-org grants are no longer listed on the org dashboard — they
-  // were scattered under every org's project list. They now live on the
-  // dedicated /shared page (SharedProjectsPage), reached via the sidebar. The
-  // dashboard must NOT render the "Shared with you" section anymore, even when
-  // the caller holds a foreign-org grant. (The /shared page's own test pins the
-  // client-side <Link> to /projects/:id that AQU-416 originally guarded.)
-  it("does not render a Shared with you section on the org overview (moved to /shared, AQU-417)", async () => {
+  // AQU-417: cross-org grants are no longer listed on a single org's
+  // dashboard — they were scattered under every org's project list. They
+  // now live on `/orgs/all` as Shared-origin rows. The org overview must
+  // NOT render a Shared with you section, even when the caller holds a
+  // foreign-org grant.
+  it("does not render a Shared with you section on the org overview (moved to /orgs/all)", async () => {
     fetchAccessibleProjectsMock.mockResolvedValue([
       // In the caller's own org (id 1) — surfaces via the normal portfolio.
       { id: "own-1", name: "Legacy Translation", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] },
-      // Foreign-org grant (viewer via invite) — previously in the dashboard's
-      // shared section; now collected on /shared instead.
+      // Foreign-org grant (viewer via invite) — collected on /orgs/all, not here.
       { id: "p503", name: "Guest Gospel", orgId: 503, orgName: "Host Org", role: { level: 100, name: "viewer", source: "override" }, files: [] },
     ])
 
@@ -685,6 +748,20 @@ describe("OrgOverview / OrgProjects", () => {
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
     expect(screen.queryByTestId("shared-with-you")).not.toBeInTheDocument()
     expect(screen.queryByText("Guest Gospel")).not.toBeInTheDocument()
+  })
+
+  it("does not list foreign-org grants on a single org's Projects table (AQU-417)", async () => {
+    fetchAccessibleProjectsMock.mockResolvedValue([
+      { id: "own-1", name: "Legacy Translation", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] },
+      { id: "p503", name: "Guest Gospel", orgId: 503, orgName: "Host Org", role: { level: 100, name: "viewer", source: "override" }, files: [] },
+    ])
+
+    renderMemberProjects()
+
+    await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+    expect(screen.queryByText("Guest Gospel")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("shared-filter-chip")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("project-shared-badge")).not.toBeInTheDocument()
   })
 })
 
@@ -832,11 +909,13 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
     { id: 2, name: "Side Org", role: { level: 700, name: "owner" } },
   ]
 
-  async function renderAllOrgs() {
+  async function renderAllOrgs(
+    portfolios: Array<{ orgId: number; projects: unknown[] }> = [],
+  ) {
     const { listMyOrgs } = await import("@/lib/frontier/orgs")
     vi.mocked(listMyOrgs).mockResolvedValue(twoOrgs)
     const { getPortfolios } = await import("@/lib/frontier/portfolio")
-    vi.mocked(getPortfolios).mockResolvedValue([])
+    vi.mocked(getPortfolios).mockResolvedValue(portfolios as never)
     return render(
       <MemoryRouter initialEntries={["/orgs/all"]}>
         <OrgProvider><OrgHome /></OrgProvider>
@@ -880,5 +959,68 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
     await waitFor(() => expect(screen.getByText("Come and See")).toBeInTheDocument())
     expect(screen.queryByTestId("project-directory-error")).not.toBeInTheDocument()
     expect(screen.getByText("No projects yet")).toBeInTheDocument()
+  })
+
+  it("lists foreign-org grants in the projects table as a Shared origin, without mixing them into org rollup tiles", async () => {
+    fetchAccessibleProjectsMock.mockResolvedValue([
+      {
+        id: "p503",
+        name: "Guest Gospel",
+        orgId: 503,
+        orgName: "Host Org",
+        role: { level: 100, name: "viewer", source: "override" },
+        grantedAt: "2026-07-20T00:00:00Z",
+        files: [],
+      },
+    ])
+    await renderAllOrgs([
+      { orgId: 1, projects: [{
+        id: "own-1",
+        name: "Legacy Translation",
+        totalCells: 200,
+        validatedCells: 20,
+        filledCells: 20,
+        aiDraftedCells: 0,
+        lastEditAt: Date.now(),
+        audioCells: 0,
+        validatedAudioCells: 0,
+        recordedMs: 0,
+        deadlineAt: null,
+      }] },
+      { orgId: 2, projects: [] },
+    ])
+
+    expect(await screen.findByText("Guest Gospel")).toBeInTheDocument()
+    expect(screen.getByText("Legacy Translation")).toBeInTheDocument()
+    expect(screen.getByTestId("project-shared-badge")).toBeInTheDocument()
+    // Soft fill — secondary/muted match the table surface in this theme.
+    expect(screen.getByTestId("project-shared-badge")).toHaveClass("bg-foreground/10")
+    expect(screen.getByTestId("project-shared-badge")).toHaveClass("text-muted-foreground")
+    expect(screen.getByText("Host Org")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "All" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Org" })).toBeInTheDocument()
+    expect(screen.getByTestId("shared-filter-chip")).toBeInTheDocument()
+    const originTabs = within(screen.getByRole("tablist")).getAllByRole("tab")
+    expect(originTabs.map((tab) => tab.textContent)).toEqual(["All", "SharedNew", "Org"])
+    expect(screen.getByTestId("new-shared-nav-badge")).toBeInTheDocument()
+    expect(screen.getByTestId("organizations-panel")).toBeInTheDocument()
+    // Member rollup only — mixing the 0%-of-N shared stub would make this 2
+    // projects and 5% avg translated.
+    expect(within(projectsRollupStat()).getByText("1")).toBeInTheDocument()
+    const avgTile = screen.getByText("Avg translated").parentElement?.parentElement
+    expect(avgTile).toBeTruthy()
+    expect(within(avgTile!).getByText("10%")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("shared-filter-chip"))
+    await waitFor(() => {
+      expect(screen.queryByText("Legacy Translation")).not.toBeInTheDocument()
+    })
+    expect(screen.getByText("Guest Gospel")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("tab", { name: "Org" }))
+    await waitFor(() => {
+      expect(screen.queryByText("Guest Gospel")).not.toBeInTheDocument()
+    })
+    expect(screen.getByText("Legacy Translation")).toBeInTheDocument()
   })
 })

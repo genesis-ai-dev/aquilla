@@ -96,7 +96,8 @@ ORDER BY s.canonical_ref`
 
 // ── Contextual pipeline nodes (auth-worker/src/lib/contextual/*) ────────────
 // Each node's system prompt carries a routing marker ([[ctx:construe]],
-// [[ctx:summarize]], [[ctx:draft]], [[ctx:verify:<stance>]]) so the mock can
+// [[ctx:summarize]], [[ctx:draft]], [[ctx:support]], [[ctx:segment]],
+// [[ctx:verify:<stance>]]) so the mock can
 // return a VALID canned JSON body per node without sniffing prompt copy.
 
 /** Cell ids referenced as "[<id>]" in the construe window block. */
@@ -135,6 +136,26 @@ function contextualMockResponse(marker: string, userText: string) {
   if (marker.startsWith("draft")) {
     const lines = extractNumberedLines(userText)
     return respond(JSON.stringify(lines.map(({ i, body }) => ({ i, t: `MOCK ${body}` }))))
+  }
+  if (marker.startsWith("segment")) {
+    // Passage detection. Break every 10 lines so the shape is deterministic
+    // and the coverage invariant is exercised without depending on content.
+    const lines = extractNumberedLines(userText)
+    const count = lines.length
+    const out: { line: number; title: string; gist: string }[] = []
+    for (let line = 1; line <= count; line += 10) {
+      out.push({ line, title: `Mock passage ${out.length + 1}`, gist: "A mock passage." })
+    }
+    return respond(JSON.stringify({ passages: out }))
+  }
+  if (marker.startsWith("support")) {
+    // Fast-tier triage of unattested wording. Clear everything: the mock
+    // drafter echoes the source, so its "novel" tokens are an artifact of the
+    // mock, not a finding — confirming them would escalate every e2e span to
+    // the full verifier panel.
+    const count = Number(userText.match(/Triage these (\d+) draft segment/)?.[1] ?? 0)
+    const cells = Array.from({ length: count }, (_, idx) => ({ i: idx + 1, risky: false, reason: "mock: benign" }))
+    return respond(JSON.stringify({ cells }))
   }
   if (marker.startsWith("verify")) {
     const count = Number(userText.match(/Verify these (\d+) drafted cells/)?.[1] ?? 0)

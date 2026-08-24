@@ -6,7 +6,7 @@
 // playable blobs and emits cell.audio.select / .remove / .rename.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Bird, Check, CloudUpload, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
+import { Bird, Check, CloudAlert, CloudUpload, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -14,7 +14,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
 import type { FrontierSession } from "@/lib/frontier/types"
-import { fetchCellAudio, isDenoisedAudioId, parseFrontierAudioUrl } from "@/lib/audio/upload"
+import { audioIdSeededWith, fetchCellAudio, isDenoisedAudioId, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { audioMimeForExt } from "@/lib/audio/mime"
 import { emitCellAudioSelect, emitCellAudioRemove, emitCellAudioRename } from "@/lib/sync/events-emit"
@@ -22,6 +22,7 @@ import {
   injectOptimisticAudioAttachment,
   injectOptimisticAudioRemove,
   notifyAudioAttachmentsChanged,
+  retryFailedAudioSync,
 } from "@/lib/audio/audio-attachments-bus"
 
 /** "Take 7" → 7; anything else → null. */
@@ -49,6 +50,12 @@ interface Props {
   cellId: string
   /** Recorded AND generated (TTS) takes — one list (round 8c). */
   takes: AudioAttachmentOut[]
+  /**
+   * AQU-646: the LAST take belonging to this cell was just removed. The
+   * workspace uses it to reset the target row an earlier take created, so a
+   * line does not keep counting as finished work after its recording is gone.
+   */
+  onLastTakeRemoved?: (cellId: string) => void
   /** RAW recording-slot selection (may be the source clip — not in `takes`). */
   selectedAudioId: string | null
   /** RAW generated-slot selection. */
@@ -58,6 +65,10 @@ interface Props {
   sourceClip?: AudioAttachmentOut | null
   author: string
   session: FrontierSession | null
+  /** Rows only: no border, no "Takes (N)" heading, tighter padding. The
+   *  recorder's utility strip owns that chrome and the count, so the two
+   *  cannot say the same thing twice. */
+  chromeless?: boolean
 }
 
 export function TakesStrip({
@@ -65,11 +76,13 @@ export function TakesStrip({
   fileId,
   cellId,
   takes,
+  onLastTakeRemoved,
   selectedAudioId,
   selectedGeneratedAudioId = null,
   sourceClip = null,
   author,
   session,
+  chromeless = false,
 }: Props) {
   const t = useT()
   const [playingId, setPlayingId] = useState<string | null>(null)
@@ -199,13 +212,21 @@ export function TakesStrip({
       injectOptimisticAudioRemove(fileId, cellId, audioId, slot, removeP)
       await removeP
       notifyAudioAttachmentsChanged(fileId)
+      // Was that the cell's last recording? `takes` still holds the pre-removal
+      // list, so the survivors are everything else that is a take OF THIS CELL
+      // — `audioIdSeededWith` keeps the shared imported source clip, which is
+      // seeded with the file's id, from counting as one.
+      const ownTakesLeft = takes.filter(
+        (t) => t.audioId !== audioId && t.slot !== "generatedVoice" && audioIdSeededWith(t.audioId, cellId),
+      )
+      if (ownTakesLeft.length === 0) onLastTakeRemoved?.(cellId)
     } catch {
       // The overlay drops itself on rejection and pokes a refetch, so the row
       // reappears from server truth rather than the UI wedging.
     } finally {
       setBusyId((cur) => (cur === audioId ? null : cur))
     }
-  }, [playingId, stopPlayback, takes, projectId, fileId, cellId, author])
+  }, [playingId, stopPlayback, takes, projectId, fileId, cellId, author, onLastTakeRemoved])
 
   // On-device noise removal: clean THIS take into a new (denoised) take. The
   // heavy RNNoise/wasm path is dynamically imported so it's only loaded when a
@@ -331,11 +352,21 @@ export function TakesStrip({
   const haveTake = new Set(takes.map((t) => t.audioId))
 
   return (
-    <div className="border-t px-5 py-3">
-      <div className="mb-2 text-xs text-muted-foreground/60">
-        {t("audio.takesStrip.heading", { count: takes.length })}
-      </div>
-      {/* Round 8: rows, not chips — one take per line, name first. */}
+    <div className={chromeless ? "px-4 py-2" : "border-t px-5 py-3"}>
+      {/* The recorder's utility strip carries the count and the border itself,
+          so inside it this component renders rows and nothing else — two
+          "Takes (3)" headings three inches apart is the failure this avoids. */}
+      {!chromeless && (
+        <div className="mb-2 text-xs text-muted-foreground/60">
+          {t("audio.takesStrip.heading", { count: takes.length })}
+        </div>
+      )}
+      {/* Round 8: rows, not chips — one take per line, name first.
+          The strip does NOT cap or scroll itself: its container does. In the
+          narrow recorder it is a drawer filling the column's lower half; beside
+          a film it is a disclosure raised over the column. Both own a height
+          this component cannot know, and a second cap in here would fight
+          whichever one it is inside. */}
       <div className="flex flex-col gap-1">
         {ordered.map(({ att, isCleaned }) => {
           // Use optimistic override while in-flight; fall back to server value.
@@ -427,6 +458,21 @@ export function TakesStrip({
                       >
                         <CloudUpload className="h-3 w-3 animate-pulse" /> {t("common.saving")}
                       </span>
+                    )}
+                    {/* AQU-924: this take never reached the server. Say so ON the
+                        take and offer the retry here — it used to just vanish. */}
+                    {att.syncFailed && (
+                      <button
+                        type="button"
+                        title={t("audio.takesStrip.syncFailedTooltip")}
+                        data-testid={`take-sync-failed-${att.audioId}`}
+                        onClick={() => {
+                          void retryFailedAudioSync(projectId, fileId, cellId, att.audioId)
+                        }}
+                        className="flex shrink-0 items-center gap-0.5 rounded px-1 text-[10px] text-destructive hover:bg-destructive/10"
+                      >
+                        <CloudAlert className="h-3 w-3" /> {t("audio.takesStrip.syncFailedRetry")}
+                      </button>
                     )}
                     <AppTooltip content={t("audio.takesStrip.renameTooltip")}>
                       <Button

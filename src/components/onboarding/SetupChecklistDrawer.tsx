@@ -1,11 +1,14 @@
-import { useEffect, useRef } from "react"
-import { CheckCircle2, Sparkles } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Progress } from "@/components/ui/progress"
+import { SettingsGroup } from "@/components/ui/page"
 import posthog from "@/lib/posthog"
 import { SETUP_CHECKLIST_COMPLETED } from "@/lib/event-names"
 import {
   Sheet,
   SheetContent,
+  SheetFooter,
   SheetHeader,
   SheetTitle,
   SheetDescription,
@@ -61,8 +64,13 @@ export function SetupChecklistDrawer({
   onOpenImport,
 }: SetupChecklistDrawerProps) {
   const t = useT()
+  const [inviteDialogOpen, setInviteDialogOpen] = useState(false)
   const allDone = state.completedCount === state.totalCount && state.totalCount > 0
-  const progress = state.totalCount === 0 ? 0 : state.completedCount / state.totalCount
+  const progress = state.totalCount === 0 ? 0 : (state.completedCount / state.totalCount) * 100
+  const progressLabel = t("onboarding.checklist.drawer.progress", {
+    completed: state.completedCount,
+    total: state.totalCount,
+  })
 
   // Activation milestone: fire once when the checklist first reaches 100%.
   // Consent-gated at the posthog module level.
@@ -75,104 +83,107 @@ export function SetupChecklistDrawer({
   }, [allDone, project.id])
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="flex w-[28rem] flex-col">
-        <SheetHeader className="border-b">
-          <SheetTitle className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-primary" aria-hidden />
-            {t("onboarding.checklist.drawer.title")}
-          </SheetTitle>
+    <Sheet open={open} onOpenChange={onOpenChange} disablePointerDismissal={inviteDialogOpen}>
+      <SheetContent
+        side="right"
+        className="gap-0 data-[side=right]:w-full data-[side=right]:sm:max-w-md"
+      >
+        <SheetHeader className="border-b pe-12">
+          <SheetTitle>{t("onboarding.checklist.drawer.title")}</SheetTitle>
           <SheetDescription>
             {t("onboarding.checklist.drawer.description")}
           </SheetDescription>
-          <ProgressBar value={progress} />
-          <p className="text-xs text-muted-foreground">
-            {t("onboarding.checklist.drawer.progress", { completed: state.completedCount, total: state.totalCount })}
-          </p>
+          <div className="mt-3 flex flex-col gap-1.5">
+            <p className="text-xs text-muted-foreground tabular-nums">{progressLabel}</p>
+            <Progress value={progress} aria-label={progressLabel} />
+          </div>
         </SheetHeader>
 
-        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
-          <ChecklistItem
-            title={t("onboarding.checklist.importFiles.title")}
-            description={t("onboarding.checklist.importFiles.stepDescription")}
-            complete={state.importFiles}
-          >
-            <ImportFilesStep
-              project={project}
-              onOpenImport={() => {
-                // AQU-693: launching the import dialog from step 1 must NOT
-                // count as a dismissal. Calling onOpenChange(false) here routed
-                // through the workspace's close handler, which persists the
-                // `setupChecklistDismissed` flag — silently ending the whole
-                // setup flow the moment the user used step 1 as intended. The
-                // parent (ProjectWorkspace) now owns hiding the drawer while the
-                // import dialog is on top and reopening it afterwards, without
-                // ever recording a dismissal.
-                onOpenImport?.()
-              }}
-            />
-          </ChecklistItem>
-
-          <ChecklistItem
-            title={t("onboarding.checklist.aiInstructions.title")}
-            description={t("onboarding.checklist.aiInstructions.stepDescription")}
-            complete={state.aiInstructions}
-          >
-            <RoleGatedStep
-              roleLevel={roleLevel}
-              requiredRole={ROLE.MAINTAINER}
-              actionLabel={t("onboarding.checklist.aiInstructions.actionLabel")}
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          <SettingsGroup>
+            <ChecklistItem
+              title={t("onboarding.checklist.importFiles.title")}
+              description={t("onboarding.checklist.importFiles.stepDescription")}
+              complete={state.importFiles}
             >
-              <AiInstructionsStep project={project} onUpdated={onProjectUpdated} />
-            </RoleGatedStep>
-          </ChecklistItem>
+              <ImportFilesStep
+                project={project}
+                onOpenImport={() => {
+                  // AQU-693: launching the import dialog from step 1 must NOT
+                  // count as a dismissal. Calling onOpenChange(false) here routed
+                  // through the workspace's close handler, which persists the
+                  // `setupChecklistDismissed` flag — silently ending the whole
+                  // setup flow the moment the user used step 1 as intended. The
+                  // parent (ProjectWorkspace) now owns hiding the drawer while the
+                  // import dialog is on top and reopening it afterwards, without
+                  // ever recording a dismissal.
+                  onOpenImport?.()
+                }}
+              />
+            </ChecklistItem>
 
-          <ChecklistItem
-            title={t("onboarding.checklist.invite.title")}
-            description={t("onboarding.checklist.invite.stepDescription")}
-            complete={state.collaborators}
-          >
-            <RoleGatedStep
-              roleLevel={roleLevel}
-              requiredRole={ROLE.PROJECT_LEAD}
-              actionLabel={t("onboarding.checklist.invite.actionLabel")}
+            <ChecklistItem
+              title={t("onboarding.checklist.aiInstructions.title")}
+              description={t("onboarding.checklist.aiInstructions.stepDescription")}
+              complete={state.aiInstructions}
             >
+              <RoleGatedStep
+                roleLevel={roleLevel}
+                requiredRole={ROLE.MAINTAINER}
+                actionLabel={t("onboarding.checklist.aiInstructions.actionLabel")}
+              >
+                <AiInstructionsStep project={project} onUpdated={onProjectUpdated} />
+              </RoleGatedStep>
+            </ChecklistItem>
+
+            <ChecklistItem
+              title={t("onboarding.checklist.invite.title")}
+              description={t("onboarding.checklist.invite.stepDescription")}
+              complete={state.collaborators}
+            >
+              <RoleGatedStep
+                roleLevel={roleLevel}
+                requiredRole={ROLE.PROJECT_LEAD}
+                actionLabel={t("onboarding.checklist.invite.actionLabel")}
+              >
               <InviteStep
                 projectId={project.id}
                 onSharesChanged={onSharesChanged}
+                onDialogOpenChange={setInviteDialogOpen}
               />
-            </RoleGatedStep>
-          </ChecklistItem>
+              </RoleGatedStep>
+            </ChecklistItem>
 
-          <ChecklistItem
-            title={t("onboarding.checklist.aiModels.title")}
-            description={t("onboarding.checklist.aiModels.stepDescription")}
-            complete={state.aiModels}
-          >
-            <RoleGatedStep
-              roleLevel={roleLevel}
-              requiredRole={ROLE.MAINTAINER}
-              actionLabel={t("onboarding.checklist.aiModels.actionLabel")}
+            <ChecklistItem
+              title={t("onboarding.checklist.aiModels.title")}
+              description={t("onboarding.checklist.aiModels.stepDescription")}
+              complete={state.aiModels}
             >
-              <AiModelsStep project={project} onUpdated={onProjectUpdated} />
-            </RoleGatedStep>
-          </ChecklistItem>
+              <RoleGatedStep
+                roleLevel={roleLevel}
+                requiredRole={ROLE.MAINTAINER}
+                actionLabel={t("onboarding.checklist.aiModels.actionLabel")}
+              >
+                <AiModelsStep project={project} onUpdated={onProjectUpdated} />
+              </RoleGatedStep>
+            </ChecklistItem>
 
-          <ComingSoonStep
-            title={t("onboarding.checklist.comingSoon.standards.title")}
-            description={t("onboarding.checklist.comingSoon.standards.description")}
-          />
-          <ComingSoonStep
-            title={t("onboarding.checklist.comingSoon.glossary.title")}
-            description={t("onboarding.checklist.comingSoon.glossary.description")}
-          />
+            <ComingSoonStep
+              title={t("onboarding.checklist.comingSoon.standards.title")}
+              description={t("onboarding.checklist.comingSoon.standards.description")}
+            />
+            <ComingSoonStep
+              title={t("onboarding.checklist.comingSoon.glossary.title")}
+              description={t("onboarding.checklist.comingSoon.glossary.description")}
+            />
+          </SettingsGroup>
         </div>
 
-        <div className="border-t bg-card/40 p-4">
+        <SheetFooter className="border-t bg-muted/30">
           {allDone ? (
             <div className="space-y-2">
-              <div className="flex items-center gap-2 text-sm font-medium text-emerald-700 dark:text-emerald-400">
-                <CheckCircle2 className="h-4 w-4" />
+              <div className="flex items-center gap-2 text-sm font-medium text-green-600 dark:text-green-400">
+                <Check className="size-3.5" aria-hidden />
                 {t("onboarding.checklist.drawer.allSetTitle")}
               </div>
               <p className="text-xs text-muted-foreground">
@@ -183,30 +194,12 @@ export function SetupChecklistDrawer({
               </Button>
             </div>
           ) : (
-            <Button variant="ghost" onClick={onDismiss} className="w-full">
+            <Button variant="ghost" size="sm" onClick={onDismiss} className="-ms-2 self-start">
               {t("onboarding.common.skipForNow")}
             </Button>
           )}
-        </div>
+        </SheetFooter>
       </SheetContent>
     </Sheet>
-  )
-}
-
-function ProgressBar({ value }: { value: number }) {
-  const pct = Math.max(0, Math.min(1, value))
-  return (
-    <div
-      className="h-1 w-full overflow-hidden rounded-full bg-muted"
-      role="progressbar"
-      aria-valuenow={Math.round(pct * 100)}
-      aria-valuemin={0}
-      aria-valuemax={100}
-    >
-      <div
-        className="h-full bg-primary transition-[width] duration-200"
-        style={{ width: `${pct * 100}%` }}
-      />
-    </div>
   )
 }

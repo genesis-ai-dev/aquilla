@@ -28,6 +28,7 @@ function project(over: Partial<AdminProject> = {}): AdminProject {
     validatedCells: 50,
     wordCount: 1000,
     lastEditAt: NOW,
+    shared: false,
     ...over,
   }
 }

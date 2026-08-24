@@ -28,6 +28,8 @@ import {
 import posthog from "@/lib/posthog"
 import { FIRST_CELL_COMMIT, FIRST_CELL_VALIDATE } from "@/lib/event-names"
 import { noteAbDraftText, reportAbOutcome } from "@/lib/ab/feedback"
+import type { TrackKind } from "@/lib/timeline/tracks"
+import type { CameraState } from "@/lib/sync/cells-read-types"
 
 // Session-scoped flags — reset on page reload (true "first in session" semantics).
 let _firstCommitFired = false
@@ -59,7 +61,7 @@ export interface BuildEventInput<K extends OutboxEventKind> {
  * but we don't enforce it client-side — there are valid transient states
  * (the very first target.cell.commit on a cell whose target row hasn't been
  * projected locally yet, the importer's chained commits within a single
- * transaction before any have round-tripped to D1, etc.). The server's
+ * transaction before any have round-tripped to Postgres, etc.). The server's
  * parent-chain guard is authoritative; a wrong client-side parentId
  * surfaces as a stale-sibling broadcast and the outbox dead-letters.
  */
@@ -118,6 +120,30 @@ export class InsufficientRoleError extends Error {
     this.required = required
     this.name = "InsufficientRoleError"
   }
+}
+
+/**
+ * AQU-927: coerce a millisecond value to an integer at the emit boundary.
+ *
+ * Every ms field below is projected into a Postgres **BIGINT** column
+ * (`cells.start_ms/end_ms`, `cell_audio.duration_ms/trim_start_ms/trim_end_ms`).
+ * Postgres rejects a fractional literal outright, and because a flush is
+ * applied as one batch, a single stray float fails *every* event in it — which
+ * is how whole groups of cells silently lost their audio. Producers should
+ * still round at the source (a rounded value is the correct value); this is the
+ * last line of defence so one un-rounded producer can never poison a batch.
+ *
+ * Non-finite input (NaN/Infinity) is passed through untouched so the existing
+ * validation/`Number.isFinite` guards downstream keep reporting it, rather than
+ * being silently rewritten to 0.
+ */
+export function intMs(value: number): number
+export function intMs(value: number | null): number | null
+export function intMs(value: number | undefined): number | undefined
+export function intMs(value: number | null | undefined): number | null | undefined
+export function intMs(value: number | null | undefined): number | null | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return value
+  return Math.round(value)
 }
 
 export async function enqueueEvent<K extends OutboxEventKind>(
@@ -436,10 +462,10 @@ export async function emitCellAudioAttach(input: CellAudioAttachInput): Promise<
       ...(input.mimeType !== undefined ? { mimeType: input.mimeType } : {}),
       ...(input.voiceId !== undefined ? { voiceId: input.voiceId } : {}),
       ...(input.referenceAudioId !== undefined ? { referenceAudioId: input.referenceAudioId } : {}),
-      ...(input.durationMs !== undefined ? { durationMs: input.durationMs } : {}),
+      ...(input.durationMs !== undefined ? { durationMs: intMs(input.durationMs) } : {}),
       ...(input.label !== undefined ? { label: input.label } : {}),
-      ...(input.trimStartMs !== undefined ? { trimStartMs: input.trimStartMs } : {}),
-      ...(input.trimEndMs !== undefined ? { trimEndMs: input.trimEndMs } : {}),
+      ...(input.trimStartMs !== undefined ? { trimStartMs: intMs(input.trimStartMs) } : {}),
+      ...(input.trimEndMs !== undefined ? { trimEndMs: intMs(input.trimEndMs) } : {}),
       ...(input.timings !== undefined ? { timings: input.timings } : {}),
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
     },
@@ -474,6 +500,96 @@ export async function emitCellAudioRename(input: CellAudioRenameInput): Promise<
   return eventId
 }
 
+export interface CellAudioTrimInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  /** The COMPLETE window. null on either end = back to the clip's own edge. */
+  trimStartMs: number | null
+  trimEndMs: number | null
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.audio.trim` — the playback window ONLY; never selection, slot,
+ * url, duration or timings.
+ *
+ * This is deliberately not a re-attach. Trims used to ride `cell.audio.attach`,
+ * where "clear this window" and "I'm not here about the window" were both
+ * spelled as an absent field — so the transcription's word-timings re-attach,
+ * landing ~800ms after a take was saved, wiped the window that take had just
+ * been given and left it playing a few hundred ms early. Stating both ends,
+ * always, is what makes a clear expressible without making silence dangerous.
+ */
+export async function emitCellAudioTrim(input: CellAudioTrimInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.trim",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      audioId: input.audioId,
+      trimStartMs: input.trimStartMs,
+      trimEndMs: input.trimEndMs,
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface CellLinkSetInput {
+  projectId: string
+  /** The SUBTITLE side — rides the envelope, so per-file auth works. */
+  fileId: string
+  cellId: string
+  /** The AUDIO CUE side, in the hidden `role: "audio-cues"` sibling file. */
+  toFileId: string
+  toCellId: string
+  linked: boolean
+  origin: "auto" | "manual"
+  /** The linker's score; null for a hand edit. Diagnostic only. */
+  confidence?: number | null
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.link.set` — one edge between a subtitle cell and an audio cue.
+ *
+ * `linked` is ALWAYS stated. An unlink is `linked: false`, never an omitted
+ * field: the server keys the row on the two endpoints and plain-assigns the
+ * flag, so a missing value could only ever mean "leave it alone", which is
+ * exactly the ambiguity that cost every take its trim window in stage 4.5.
+ *
+ * The import-time linker emits several hundred of these in one pass. They are
+ * ordinary outbox events — no bulk path — because that is what makes a later
+ * hand correction, an undo, and cross-device sync all work the same way.
+ */
+export async function emitCellLinkSet(input: CellLinkSetInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.link.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: {
+      kind: "text-audio",
+      toFileId: input.toFileId,
+      toCellId: input.toCellId,
+      linked: input.linked,
+      origin: input.origin,
+      confidence: input.confidence ?? null,
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface CellAudioMeasureInput {
   projectId: string
   fileId: string
@@ -498,7 +614,7 @@ export async function emitCellAudioMeasure(input: CellAudioMeasureInput): Promis
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { audioId: input.audioId, durationMs: input.durationMs },
+    payload: { audioId: input.audioId, durationMs: intMs(input.durationMs) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -550,7 +666,7 @@ export async function emitCellRetime(input: CellRetimeInput): Promise<string> {
     cellId: input.cellId,
     parentId: null,
     author: input.author,
-    payload: { startMs: input.startMs, endMs: input.endMs },
+    payload: { startMs: intMs(input.startMs), endMs: intMs(input.endMs) },
     clientTs: input.clientTs,
   })
   return eventId
@@ -563,7 +679,12 @@ export interface CellLaneRetimeInput {
   /** Subtitle span, absolute file ms. null clears (back to the source split). */
   subtitleStartMs?: number | null
   subtitleEndMs?: number | null
-  /** Target-audio (dub) start, absolute file ms. null clears (section start). */
+  /** Target-audio (dub) start RELATIVE to the cell's own start, in ms. May be
+   *  negative (a take that leads its line). null clears (section start). */
+  targetOffsetMs?: number | null
+  /** Legacy absolute dub start. Nothing writes this any more — it exists so
+   *  historical events keep projecting. See lane-timing.ts for why the read
+   *  fallback is permanent rather than a migration. */
   targetStartMs?: number | null
   author: string
   clientTs?: number
@@ -577,6 +698,7 @@ export async function emitCellLaneRetime(input: CellLaneRetimeInput): Promise<st
   if (
     input.subtitleStartMs === undefined &&
     input.subtitleEndMs === undefined &&
+    input.targetOffsetMs === undefined &&
     input.targetStartMs === undefined
   ) {
     throw new Error("emitCellLaneRetime: at least one timing key is required")
@@ -589,9 +711,10 @@ export async function emitCellLaneRetime(input: CellLaneRetimeInput): Promise<st
     parentId: null,
     author: input.author,
     payload: {
-      ...(input.subtitleStartMs !== undefined ? { subtitleStartMs: input.subtitleStartMs } : {}),
-      ...(input.subtitleEndMs !== undefined ? { subtitleEndMs: input.subtitleEndMs } : {}),
-      ...(input.targetStartMs !== undefined ? { targetStartMs: input.targetStartMs } : {}),
+      ...(input.subtitleStartMs !== undefined ? { subtitleStartMs: intMs(input.subtitleStartMs) } : {}),
+      ...(input.subtitleEndMs !== undefined ? { subtitleEndMs: intMs(input.subtitleEndMs) } : {}),
+      ...(input.targetOffsetMs !== undefined ? { targetOffsetMs: intMs(input.targetOffsetMs) } : {}),
+      ...(input.targetStartMs !== undefined ? { targetStartMs: intMs(input.targetStartMs) } : {}),
     },
     clientTs: input.clientTs,
   })
@@ -642,6 +765,52 @@ export async function emitFileTimingSet(input: FileTimingSetInput): Promise<stri
     parentId: null,
     author: input.author,
     payload: { timingMode: input.timingMode },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface FileTrackSetInput {
+  projectId: string
+  fileId: string
+  /** The track this delta is about. Default tracks use their kind as the id
+   *  ("source-subtitles" / "source-audio" / "target-subtitles" /
+   *  "target-audio"); user-added tracks carry a generated one. An id is
+   *  forever once written — it is the meta key. */
+  trackId: string
+  /**
+   * The delta to merge, or null to DELETE the whole entry (drop a user-added
+   * track, reset a default back to pure defaults). Within a patch, null on a
+   * field clears just that override and an absent field leaves it alone —
+   * so a rename by one collaborator and a reorder by another both survive.
+   * `kind` has no null form: a track's kind is its identity.
+   */
+  patch: {
+    kind?: TrackKind
+    name?: string | null
+    order?: number | null
+    groupId?: string | null
+  } | null
+  author: string
+  clientTs?: number
+}
+
+/** Emit a `file.track.set` — one track's presentation overrides, stored in
+ *  files.meta under `trackOverrides`. Maintainer floor: the server rejects
+ *  lower roles.
+ *
+ *  DORMANT in stage 1 — nothing calls this yet. It stays one generic helper
+ *  on purpose: stage 3's UI wraps it in intent-named functions (renameTrack,
+ *  addTargetTrack, …) so components never assemble raw patches, which is what
+ *  keeps the allow-listed payload shape in one place when it grows. */
+export async function emitFileTrackSet(input: FileTrackSetInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "file.track.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    parentId: null,
+    author: input.author,
+    payload: { trackId: input.trackId, patch: input.patch },
     clientTs: input.clientTs,
   })
   return eventId
@@ -854,8 +1023,8 @@ export async function emitSourceCellCreate(
       ...(input.type !== undefined ? { type: input.type } : {}),
       ...(input.canonicalRef !== undefined ? { canonicalRef: input.canonicalRef } : {}),
       ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
-      ...(input.startMs !== undefined ? { startMs: input.startMs } : {}),
-      ...(input.endMs !== undefined ? { endMs: input.endMs } : {}),
+      ...(input.startMs !== undefined ? { startMs: intMs(input.startMs) } : {}),
+      ...(input.endMs !== undefined ? { endMs: intMs(input.endMs) } : {}),
       ...(input.medium !== undefined ? { medium: input.medium } : {}),
       ...(input.sequenceIndex !== undefined ? { sequenceIndex: input.sequenceIndex } : {}),
       ...(input.transcription !== undefined ? { transcription: input.transcription } : {}),
@@ -866,10 +1035,51 @@ export async function emitSourceCellCreate(
   return eventId
 }
 
+export interface SourceCellReorderInput {
+  projectId: string
+  fileId: string
+  /** The cell being re-pointed (NOT the one being removed). */
+  cellId: string
+  /** Its current source-side chain head — reorder is chain-mutating. */
+  parentId: string | null
+  /** Its new predecessor; null makes it the head of the file. */
+  anchorCellId: string | null
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `source.cell.reorder` — re-point one cell's place in the anchor chain.
+ * (AQU-646: the first client emitter for this kind.)
+ *
+ * Removing a line has to re-point whatever pointed AT it, or that row becomes
+ * unreachable and `walkAnchorChain` appends it at the TAIL of the file — a
+ * delete would silently reorder the document.
+ */
+export async function emitSourceCellReorder(input: SourceCellReorderInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "source.cell.reorder",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: input.parentId ?? null,
+    author: input.author,
+    payload: { anchorCellId: input.anchorCellId },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface SourceCellDeleteInput {
   projectId: string
   fileId: string
   cellId: string
+  /** AQU-646: `source.cell.delete` is CHAIN-MUTATING, so it needs the row's
+   *  current head. It used to be hardcoded null here, which the server's
+   *  parent-chain guard reads as a stale write — the delete simply never
+   *  applied. Optional only so the existing callers (diarization, DCS) keep
+   *  their previous behaviour until they are looked at. */
+  parentId?: string | null
   author: string
   clientTs?: number
 }
@@ -885,7 +1095,7 @@ export async function emitSourceCellDelete(input: SourceCellDeleteInput): Promis
     projectId: input.projectId,
     fileId: input.fileId,
     cellId: input.cellId,
-    parentId: null,
+    parentId: input.parentId ?? null,
     author: input.author,
     payload: {},
     clientTs: input.clientTs,
@@ -900,12 +1110,18 @@ export interface SourceCellCommitInput {
   /** Current chain-head event_id for this source cell row (the parent this
    *  commit chains on — from `cells.event_id`). */
   parentId: string | null
-  value: string
+  value?: string
   valueHtml?: string
-  /** AQU-847: corrected source text for a MEDIA section. An imported media
-   *  cell's `value` holds the import FILENAME (provenance) and must stay put,
-   *  so a source edit on such a cell sends its text here instead. Omitted for
-   *  ordinary text cells, which keep writing `value`/`valueHtml`. */
+  /**
+   * AQU-847 / AQU-646: corrected source text for a MEDIA section. An imported
+   * media cell's `value` holds the import FILENAME (provenance) and must stay
+   * put, so a source edit on such a cell sends its text here instead. Omitted
+   * for ordinary text cells, which keep writing `value`/`valueHtml`.
+   *
+   * The projection leaves value/value_html/word_count untouched when this is
+   * present, and still advances the chain head — which is what correctly flags
+   * downstream targets stale, since the text translators work from changed.
+   */
   transcription?: string
   /** Pre-generated event id (deterministic uuidv5 for the DCS delta path so a
    *  re-run dedupes idempotently). Defaults to a fresh UUIDv7. */
@@ -1052,7 +1268,14 @@ export interface CastAssignInput {
    * also updates cells.camera_state so angle-embedded label strings (e.g.
    * "Mary Magdalene   (on)") can be fully split on import.
    */
-  cameraState?: "on" | "mixed" | "off" | null
+  cameraState?: CameraState | null
+  /**
+   * AQU-646: the client's own line number for this row, when her character
+   * sheet carried one. Stored beside `cast_name` in the cell's metadata so a
+   * corrected sheet can go back in HER numbering rather than a fresh 1..n
+   * count. A string because it identifies rather than counts.
+   */
+  lineNumber?: string | null
   author: string
   clientTs?: number
 }
@@ -1074,6 +1297,7 @@ export async function emitCastAssign(input: CastAssignInput): Promise<string> {
     payload: {
       castName: input.castName,
       ...(input.cameraState !== undefined ? { cameraState: input.cameraState } : {}),
+      ...(input.lineNumber !== undefined ? { lineNumber: input.lineNumber } : {}),
     },
     clientTs: input.clientTs,
   })

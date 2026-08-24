@@ -4,6 +4,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { OrgProvider } from "@/context/OrgContext"
 import { TeamDetail } from "./TeamDetail"
+import { fmtShortCalendarDate } from "@/lib/format-date"
 
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }) }))
 const listMyOrgs = vi.fn()
@@ -127,6 +128,21 @@ describe("TeamDetail project management", () => {
     await act(async () => { screen.getByRole("button", { name: /^save$/i }).click() })
     await waitFor(() => expect(changeProjectRole).toHaveBeenCalledWith("jwt", 1, 10, "pa", 100))
   })
+
+  it("shows when each project was added to the team", async () => {
+    const grantedAt = "2026-07-22T15:00:00.000Z"
+    getTeam.mockResolvedValue({
+      id: 10,
+      name: "WA",
+      members: [],
+      projects: [{ id: "pa", name: "Bambara", grantedRoleLevel: 400, grantedAt }],
+    })
+    renderDetail()
+    await openTeamTab(/^projects$/i)
+    await waitFor(() => expect(screen.getByText("Bambara")).toBeInTheDocument())
+    expect(screen.getByRole("columnheader", { name: /added/i })).toBeInTheDocument()
+    expect(screen.getByText(fmtShortCalendarDate(grantedAt))).toBeInTheDocument()
+  })
 })
 
 describe("TeamDetail admin management", () => {
@@ -205,6 +221,21 @@ describe("TeamDetail admin management", () => {
     await waitFor(() => expect(removeTeamMember).toHaveBeenCalledWith("jwt", 1, 10, 2))
   })
 
+  it("shows when each member was added to the team", async () => {
+    const addedAt = "2026-07-20T09:00:00.000Z"
+    getTeam.mockResolvedValue({
+      id: 10,
+      name: "WA",
+      members: [{ userId: 2, username: "anna", roleLevel: 100, addedAt }],
+      projects: [],
+    })
+    renderDetail()
+    await openTeamTab(/^members$/i)
+    await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
+    expect(screen.getByRole("columnheader", { name: /added/i })).toBeInTheDocument()
+    expect(screen.getByText(fmtShortCalendarDate(addedAt))).toBeInTheDocument()
+  })
+
   it("links admins to team settings", async () => {
     renderDetail()
     await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
@@ -239,16 +270,21 @@ describe("TeamDetail admin management", () => {
     expect(screen.getByText("West Africa translation")).toBeInTheDocument()
   })
 
-  it("bleeds the avatar outside the wide well instead of padding max-w-6xl", async () => {
+  it("keeps the avatar in flow and pads body content to the title on wide screens", async () => {
     renderDetail()
     await waitFor(() => expect(screen.getByRole("heading", { name: "WA" })).toBeInTheDocument())
-    const well = screen.getByRole("heading", { name: "WA" }).closest(".max-w-6xl")
-    expect(well).toBeTruthy()
-    expect(well).not.toHaveClass("pl-14")
-    expect(well).not.toHaveClass("sm:pl-16")
+    const title = screen.getByRole("heading", { name: "WA" })
+    const well = screen.getByTestId("team-detail-well")
+    expect(well).toHaveClass("max-w-6xl")
+    expect(well.className).toContain("@6xl/team-detail:max-w-[calc(72rem+2.75rem)]")
     const avatar = screen.getByTestId("team-detail-avatar")
-    expect(avatar).toHaveClass("absolute", "right-full")
-    expect(well?.contains(avatar)).toBe(true)
+    expect(avatar).not.toHaveClass("absolute")
+    expect(avatar).not.toHaveClass("right-full")
+    expect(avatar.nextElementSibling).toContainElement(title)
+    const tabs = screen.getByRole("tablist", { name: /team sections/i })
+    expect(tabs.parentElement).toHaveClass("@6xl/team-detail:pl-11")
+    expect(tabs.parentElement).not.toHaveClass("pl-11")
+    expect(well).toContainElement(tabs)
   })
 })
 
@@ -269,20 +305,18 @@ describe("TeamDetail non-admin gating", () => {
   })
 
   // AQU-789: a non-maintainer who can view a team (they're a member) must see a
-  // DISABLED Remove affordance explaining who may remove, not a missing control.
-  it("shows a disabled Remove control with an explanation for a non-admin", async () => {
+  // DISABLED Remove item in the row menu explaining who may remove, not a
+  // missing control or an inline table button.
+  it("shows a disabled Remove item in the row menu for a non-admin", async () => {
     listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 100, name: "viewer" } }])
     getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [] })
     renderDetail()
     await openTeamTab(/^members$/i)
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
-    // No actionable (enabled) remove button for a non-admin…
     expect(screen.queryByRole("button", { name: /remove anna/i })).toBeNull()
-    // …but the control is present, disabled, and labelled with the reason.
-    const disabled = screen.getByLabelText(/remove anna — maintainers only/i)
-    expect(disabled).toHaveAttribute("aria-disabled", "true")
-    // It's an inert affordance, not an actionable button.
-    expect(disabled.tagName).toBe("SPAN")
+    await act(async () => { (await screen.findByRole("button", { name: /actions for anna/i })).click() })
+    const remove = await screen.findByRole("menuitem", { name: /remove anna — maintainers only/i })
+    expect(remove).toHaveAttribute("aria-disabled", "true")
   })
 })
 
@@ -298,7 +332,7 @@ describe("TeamDetail member role editing (AQU-139)", () => {
     renderDetail()
     await openTeamTab(/^members$/i)
     await waitFor(() => expect(screen.getByText("anna")).toBeInTheDocument())
-    // Role column shows the current role as plain text, not a combobox.
+    // Role column shows the current role as a badge, not a combobox.
     expect(screen.queryByRole("combobox", { name: /role for anna/i })).toBeNull()
     expect(screen.getByText("Viewer")).toBeInTheDocument()
     await act(async () => { (await screen.findByRole("button", { name: /actions for anna/i })).click() })
@@ -321,7 +355,7 @@ describe("TeamDetail member role editing (AQU-139)", () => {
     await waitFor(() => expect(addOrgMember).toHaveBeenCalledWith("jwt", 1, "anna", 400))
   })
 
-  it("maintainer (600) cannot see Change role — only read-only role text with tooltip", async () => {
+  it("maintainer (600) cannot see Change role — only a read-only role badge with tooltip", async () => {
     // Maintainers can manage teams but only owners can change org-level roles (POST /orgs/:id/members requires 700).
     listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 600, name: "maintainer" } }])
     getTeam.mockResolvedValue({ id: 10, name: "WA", members: [{ userId: 2, username: "anna", roleLevel: 100 }], projects: [] })
@@ -334,5 +368,14 @@ describe("TeamDetail member role editing (AQU-139)", () => {
     expect(screen.getByLabelText(/org-level role: viewer/i)).toBeInTheDocument()
     await act(async () => { (await screen.findByRole("button", { name: /actions for anna/i })).click() })
     expect(screen.queryByRole("menuitem", { name: /change role/i })).toBeNull()
+  })
+})
+
+describe("TeamDetail not found", () => {
+  it("shows the shared SearchX icon when the team cannot be loaded", async () => {
+    getTeam.mockRejectedValue(new Error("not found"))
+    renderDetail()
+    await waitFor(() => expect(screen.getByText("Team not found.")).toBeInTheDocument())
+    expect(document.querySelector("svg.lucide-search-x")).toBeTruthy()
   })
 })

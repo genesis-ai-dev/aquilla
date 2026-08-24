@@ -2507,7 +2507,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               </Badge>
             )}
           </div>
-          <div className="relative flex items-center justify-end gap-2 ps-6 pe-2 text-end">
+          <div data-testid="table-target-header" className="relative flex items-center gap-2 ps-6 pe-2">
             {t("editor.column.target")}
             {/* AQU-602 / AQU-583: the target-language tag doubles as the lane
                 switcher AND the entry point to change the target language.

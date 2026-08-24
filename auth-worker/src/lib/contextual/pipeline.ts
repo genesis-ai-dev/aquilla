@@ -155,6 +155,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
   const skipped: SkippedCell[] = []
   const notes: string[] = []
   const incompleteReasons: string[] = []
+  let decisionRequired: SpanReport["decisionRequired"]
   /** Progress is decoration: a broken reporter must never fail a span. */
   const phase = (p: SpanPhase): void => {
     try {
@@ -172,6 +173,7 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
     ambiguities,
     incomplete: incompleteReasons.length > 0,
     incompleteReasons,
+    ...(decisionRequired ? { decisionRequired } : {}),
     notes,
     unitsUsed: budget.unitsUsed,
     callsUsed: budget.callsUsed,
@@ -207,6 +209,16 @@ export async function runSpan(deps: RunSpanDeps): Promise<SpanReport> {
     // named as dropped instead.
     incompleteReasons.push(`scene construal did not close (exit: ${closure.exit}, ${closure.rounds} rounds)`)
     for (const p of work) skipped.push({ cellId: p.cellId, reason: `construal incomplete (${closure.exit})` })
+    const questions = closure.construal.openQuestions
+      .map((question) => question.trim())
+      .filter(Boolean)
+      .slice(0, 3)
+    decisionRequired = {
+      reason: questions.length > 0
+        ? `Autopilot needs context before it can safely translate this passage: ${questions.join(" ")}`
+        : "Autopilot could not safely determine the passage context. Clarify who is speaking, the intended situation, or the translation direction that should govern this passage.",
+      cellIds: work.map((pair) => pair.cellId),
+    }
     return report([], 0)
   }
 

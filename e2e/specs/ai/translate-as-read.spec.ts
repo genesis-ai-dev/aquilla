@@ -20,7 +20,7 @@ test("translate as read drafts the viewport without replacing human text", async
   const ws = await openSeededProject(alice, seeded)
 
   await alice.evaluate(({ endpoint }) => {
-    localStorage.setItem("codex:userProviderOverride", JSON.stringify({
+    localStorage.setItem("aquilla:userProviderOverride", JSON.stringify({
       endpoint,
       model: "mock-model",
       apiKey: "",

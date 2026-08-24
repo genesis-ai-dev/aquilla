@@ -24,10 +24,21 @@ export const ROLE = {
 
 /** Minimum role level required to emit each event kind. Mirrors the server. */
 const REQUIRED_ROLE: Record<string, number> = {
-  "source.cell.create": ROLE.PROJECT_LEAD,
+  // Sam, 2026-08-21: create/delete/reorder sit at CONTRIBUTOR so the "let
+  // people add new lines" project setting can admit contributors. Reorder is
+  // in the set because it is the chain bookkeeping RIDING every add and
+  // remove (handleAddLine/handleRemoveLine batch it in), and a floor that
+  // refused it silently killed the whole batch. This static floor is the
+  // LOWEST reachable one; the server conditionally re-imposes PROJECT_LEAD —
+  // all three refused below lead unless the project opted in, deletes
+  // additionally only for a cell a person added by hand (sync-worker
+  // authorize.ts + line-creation-authority.ts). The client gate's own rule
+  // applies: only block what is PROVABLY insufficient, and with the
+  // carve-out a contributor no longer is.
+  "source.cell.create": ROLE.CONTRIBUTOR,
   "source.cell.commit": ROLE.PROJECT_LEAD,
-  "source.cell.delete": ROLE.PROJECT_LEAD,
-  "source.cell.reorder": ROLE.PROJECT_LEAD,
+  "source.cell.delete": ROLE.CONTRIBUTOR,
+  "source.cell.reorder": ROLE.CONTRIBUTOR,
 
   "target.cell.create": ROLE.CONTRIBUTOR,
   "target.cell.commit": ROLE.CONTRIBUTOR,
@@ -44,6 +55,11 @@ const REQUIRED_ROLE: Record<string, number> = {
   "cell.audio.select": ROLE.CONTRIBUTOR,
   "cell.audio.remove": ROLE.CONTRIBUTOR,
   "cell.audio.rename": ROLE.CONTRIBUTOR,
+  "cell.audio.trim": ROLE.CONTRIBUTOR,
+  // AQU-646: project lead, not contributor. The pairings are settled during
+  // setup and handed off; a contributor re-cutting one silently moves which
+  // line a recording belongs to, for everyone.
+  "cell.link.set": ROLE.PROJECT_LEAD,
   "cell.audio.measure": ROLE.CONTRIBUTOR,
 
   "file.create": ROLE.PROJECT_LEAD,
@@ -65,9 +81,33 @@ const REQUIRED_ROLE: Record<string, number> = {
   // Timeline editor (mirrors server).
   "cell.retime": ROLE.CONTRIBUTOR,
   "cell.lane.retime": ROLE.CONTRIBUTOR,
-  "file.video.set": ROLE.CONTRIBUTOR,
+  // AQU-646: the linked film is what the whole team times, records and reviews
+  // against — project setup, not an edit.
+  "file.video.set": ROLE.PROJECT_LEAD,
+  // AQU-646: MISSING FROM THIS MIRROR until 2026-08-18, which is why the
+  // character-import button appeared for everyone — `canPerform` fails open on
+  // a kind it has never heard of, so the UI's own gate always said yes and the
+  // server's 403 was the only thing stopping anyone.
+  //
+  // AQU-646 (Sam, 2026-08-20): RAISED AGAIN, to MAINTAINER. Characters are one
+  //   person's job here — the client's producer owns the sheets, and she holds
+  //   maintainer. Nobody below her reconciles the two sheets against each other,
+  //   so the resolve drawer this event also backs has an audience of one and does
+  //   not need a lower floor to stay reachable.
+  // 
+  //   KNOWN CONSEQUENCE, accepted deliberately: `cast.assign` also carries the
+  //   older CSV label round-trip (AQU-438 — download a template, fill in a
+  //   `cast_name` column, re-upload), which has no UI role gate of its own. That
+  //   flow now needs maintainer too. It surfaces as the panel's inline error rather
+  //   than a crash, because the client mirror throws before anything reaches the
+  //   durable outbox.
+  "cast.assign": ROLE.MAINTAINER,
   // Structural — keeps the clearance the setting had in Project Settings.
   "file.timing.set": ROLE.MAINTAINER,
+  // Track structure IS file structure: a rename or reorder relayouts the
+  // timeline for everyone who opens the file, so it sits with file.timing.set
+  // rather than with the contributor-level file.rename / file.video.set.
+  "file.track.set": ROLE.MAINTAINER,
 
   // AQU-478: repin ("accept upstream change as-is") — same authority bar
   // as validating (spec §12). Bulk repin is gated higher (project_lead 500)

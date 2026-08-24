@@ -7,6 +7,7 @@ import type { ReactElement, ReactNode } from "react"
 import { cn } from "@/lib/utils"
 
 type TooltipSide = "top" | "bottom" | "left" | "right"
+type TooltipAlign = NonNullable<TooltipPrimitive.Positioner.Props["align"]>
 
 const DEFAULT_TOOLTIP_DELAY = 600
 
@@ -76,6 +77,7 @@ function AppTooltip({
   children,
   content,
   side = "top",
+  align = "center",
   delay = DEFAULT_TOOLTIP_DELAY,
   disabled = false,
   className,
@@ -83,6 +85,7 @@ function AppTooltip({
   children: ReactElement
   content: ReactNode
   side?: TooltipSide
+  align?: TooltipAlign
   delay?: number
   disabled?: boolean
   className?: string
@@ -105,7 +108,7 @@ function AppTooltip({
   return (
     <Tooltip disabled={disabled}>
       <TooltipTrigger render={trigger} delay={delay} />
-      <TooltipContent side={side} className={className}>
+      <TooltipContent side={side} align={align} className={className}>
         {content}
       </TooltipContent>
     </Tooltip>

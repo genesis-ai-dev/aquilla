@@ -34,10 +34,13 @@ const DEV_PROJECT_NAME = "Dev Project"
 // Extra projects + collaborators so the org Members matrix has something to
 // render locally (AQU-218). All under the dev org, created_by dev. The access
 // configs below deliberately exercise each of the four resolution paths:
-//   - creator: dev on every project
-//   - org:     alice (org maintainer) inherits on every project
+//   - creator:  dev on every project
+//   - org:      alice (org maintainer) inherits on every project
 //   - override: alice has a direct OWNER row on Genesis that beats her org tier
-//   - group:   bob (NOT an org member) reaches Exodus only via the Reviewers group
+//   - group:    bob (NOT an org member) reaches Exodus only via the Reviewers group
+//   - below-floor: carol is a Contributor on Dev Project (settings write lock)
+//   - invite:   `dev` is a contributor on Partner Org projects with no org
+//               membership — the dashboard "Shared with you" section
 const GENESIS_PROJECT_ID = "dev-project-genesis"
 const GENESIS_PROJECT_NAME = "Genesis"
 const EXODUS_PROJECT_ID = "dev-project-exodus"
@@ -50,7 +53,20 @@ const ALICE_USERNAME = "alice"
 const ALICE_EMAIL = "alice@local.test"
 const BOB_USERNAME = "bob"
 const BOB_EMAIL = "bob@local.test"
+const CAROL_USERNAME = "carol"
+const CAROL_EMAIL = "carol@local.test"
 const REVIEWERS_GROUP_NAME = "Reviewers"
+const DEV_LOGIN_USERNAMES = new Set([
+  DEV_USERNAME,
+  ALICE_USERNAME,
+  BOB_USERNAME,
+  CAROL_USERNAME,
+])
+const PARTNER_ORG_NAME = "Partner Org"
+const SHARED_MATTHEW_PROJECT_ID = "dev-project-shared-matthew"
+const SHARED_MATTHEW_PROJECT_NAME = "Matthew"
+const SHARED_AUDIO_PROJECT_ID = "dev-project-shared-audio"
+const SHARED_AUDIO_PROJECT_NAME = "Audio dubbing"
 
 interface UserIdRow {
   id: number
@@ -159,6 +175,52 @@ async function upsertProjectMember(
     .run()
 }
 
+/** Merge one permission-policy floor into org_settings without wiping other keys. */
+async function upsertOrgSettingFloor(
+  db: AquillaDb,
+  orgId: number,
+  updatedBy: number,
+  key: string,
+  value: number,
+): Promise<void> {
+  const row = await db
+    .prepare("SELECT settings, version FROM org_settings WHERE org_id = ?")
+    .bind(orgId)
+    .first<{ settings: string; version: number }>()
+  let settings: Record<string, unknown> = {}
+  if (row?.settings) {
+    try {
+      const parsed: unknown = JSON.parse(row.settings)
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        settings = parsed as Record<string, unknown>
+      }
+    } catch {
+      settings = {}
+    }
+  }
+  settings[key] = value
+  const json = JSON.stringify(settings)
+  if (row) {
+    await db
+      .prepare(
+        `UPDATE org_settings
+            SET settings = ?, version = version + 1,
+                updated_at = CURRENT_TIMESTAMP, updated_by = ?
+          WHERE org_id = ?`,
+      )
+      .bind(json, updatedBy, orgId)
+      .run()
+    return
+  }
+  await db
+    .prepare(
+      `INSERT INTO org_settings (org_id, settings, version, updated_by)
+       VALUES (?, ?, 1, ?)`,
+    )
+    .bind(orgId, json, updatedBy)
+    .run()
+}
+
 // SWARM-TODO (FRO terminology demo-truth): the Wave-1 QA bug ("seeded concept
 // grace→gracia doesn't match Adzera source cells") cannot be fixed here. This
 // route seeds ONLY users / orgs / projects / members in Postgres (aquilla-db). It
@@ -238,6 +300,7 @@ async function seedDev(db: AquillaDb): Promise<{
   // ── Extra collaborators + projects so the Members matrix is non-trivial ──
   const aliceId = await upsertUser(db, ALICE_USERNAME, ALICE_EMAIL, passwordHash)
   const bobId = await upsertUser(db, BOB_USERNAME, BOB_EMAIL, passwordHash)
+  const carolId = await upsertUser(db, CAROL_USERNAME, CAROL_EMAIL, passwordHash)
 
   await upsertProject(db, GENESIS_PROJECT_ID, GENESIS_PROJECT_NAME, orgId, userId)
   await upsertProject(db, EXODUS_PROJECT_ID, EXODUS_PROJECT_NAME, orgId, userId)
@@ -253,6 +316,17 @@ async function seedDev(db: AquillaDb): Promise<{
   // wins there with "org" demoted to a secondary source.
   await upsertOrgMember(db, orgId, aliceId, ROLE.MAINTAINER, userId)
   await upsertProjectMember(db, GENESIS_PROJECT_ID, aliceId, ROLE.OWNER, userId)
+
+  // carol is an org contributor with a direct CONTRIBUTOR row on Dev Project.
+  // Below the MAINTAINER settings-write floor, so local QA can hover locked
+  // shared-settings controls (password `dev`; /__dev/login?as=carol).
+  await upsertOrgMember(db, orgId, carolId, ROLE.CONTRIBUTOR, userId)
+  await upsertProjectMember(db, DEV_PROJECT_ID, carolId, ROLE.CONTRIBUTOR, userId)
+
+  // Product default for rosterViewMinRole is MAINTAINER, which hides the
+  // members list from carol. Open it to Contributor on Dev Org so the
+  // locked-settings hint can link "View Maintainers" and the roster is reachable.
+  await upsertOrgSettingFloor(db, orgId, userId, "rosterViewMinRole", ROLE.CONTRIBUTOR)
 
   // bob is NOT an org member. He reaches Exodus (and only Exodus) via the
   // Reviewers group → the "group" path, and has empty cells everywhere else.
@@ -294,7 +368,47 @@ async function seedDev(db: AquillaDb): Promise<{
     .bind(groupId, EXODUS_PROJECT_ID, ROLE.REVIEWER, userId)
     .run()
 
-  await applyDemoTimestamps(db, { userId, aliceId, bobId, orgId })
+  // Partner Org is alice's. `dev` gets project_members only — no org_members
+  // row — so partitionSharedProjects() lists these under "Shared with you".
+  let partnerOrg = await db
+    .prepare("SELECT id FROM organizations WHERE owner_user_id = ? AND name = ?")
+    .bind(aliceId, PARTNER_ORG_NAME)
+    .first<OrgIdRow>()
+  if (!partnerOrg) {
+    await db
+      .prepare(
+        `INSERT INTO organizations (name, owner_user_id, created_at, updated_at)
+         VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      )
+      .bind(PARTNER_ORG_NAME, aliceId)
+      .run()
+    partnerOrg = await db
+      .prepare("SELECT id FROM organizations WHERE owner_user_id = ? AND name = ?")
+      .bind(aliceId, PARTNER_ORG_NAME)
+      .first<OrgIdRow>()
+  }
+  if (!partnerOrg) throw new Error("partner org not found after insert")
+  await upsertOrgMember(db, partnerOrg.id, aliceId, ROLE.OWNER, aliceId)
+  await upsertProject(
+    db,
+    SHARED_MATTHEW_PROJECT_ID,
+    SHARED_MATTHEW_PROJECT_NAME,
+    partnerOrg.id,
+    aliceId,
+  )
+  await upsertProject(
+    db,
+    SHARED_AUDIO_PROJECT_ID,
+    SHARED_AUDIO_PROJECT_NAME,
+    partnerOrg.id,
+    aliceId,
+  )
+  await upsertProjectMember(db, SHARED_MATTHEW_PROJECT_ID, aliceId, ROLE.OWNER, aliceId)
+  await upsertProjectMember(db, SHARED_AUDIO_PROJECT_ID, aliceId, ROLE.OWNER, aliceId)
+  await upsertProjectMember(db, SHARED_MATTHEW_PROJECT_ID, userId, ROLE.CONTRIBUTOR, aliceId)
+  await upsertProjectMember(db, SHARED_AUDIO_PROJECT_ID, userId, ROLE.CONTRIBUTOR, aliceId)
+
+  await applyDemoTimestamps(db, { userId, aliceId, bobId, carolId, orgId })
 
   return { userId, orgId, projectId: DEV_PROJECT_ID }
 }
@@ -302,9 +416,9 @@ async function seedDev(db: AquillaDb): Promise<{
 /** Backdate seeded rows so date formatting shows both recent and >1y labels. */
 async function applyDemoTimestamps(
   db: AquillaDb,
-  ids: { userId: number; aliceId: number; bobId: number; orgId: number },
+  ids: { userId: number; aliceId: number; bobId: number; carolId: number; orgId: number },
 ): Promise<void> {
-  const { userId, aliceId, bobId, orgId } = ids
+  const { userId, aliceId, bobId, carolId, orgId } = ids
 
   // Users — Admin People "Joined": mix of "May 25" vs "Jun 2025" short labels.
   await db
@@ -318,6 +432,10 @@ async function applyDemoTimestamps(
   await db
     .prepare("UPDATE users SET created_at = ?, updated_at = ? WHERE id = ?")
     .bind(isoTimestampOffset(-45), isoTimestampOffset(-45), bobId)
+    .run()
+  await db
+    .prepare("UPDATE users SET created_at = ?, updated_at = ? WHERE id = ?")
+    .bind(isoTimestampOffset(-20), isoTimestampOffset(-1), carolId)
     .run()
 
   await db
@@ -353,6 +471,12 @@ async function applyDemoTimestamps(
     )
     .bind(isoTimestampOffset(-200), isoTimestampOffset(-45), orgId, aliceId)
     .run()
+  await db
+    .prepare(
+      "UPDATE org_members SET granted_at = ?, last_active_at = ? WHERE org_id = ? AND user_id = ?",
+    )
+    .bind(isoTimestampOffset(-30), isoTimestampOffset(-1), orgId, carolId)
+    .run()
 }
 
 devSeed.post("/seed", async (c) => {
@@ -386,13 +510,32 @@ devSeed.post("/login", async (c) => {
   }
   try {
     const ids = await seedDev(c.env.AQUILLA_PG)
+    let requested = DEV_USERNAME
+    try {
+      const body = await c.req.json<{ username?: string }>()
+      if (typeof body?.username === "string" && body.username.trim()) {
+        requested = body.username.trim()
+      }
+    } catch {
+      // Empty body keeps the historical "log in as dev" contract.
+    }
+    if (!DEV_LOGIN_USERNAMES.has(requested)) {
+      return c.json({ error: "unknown seed user", username: requested }, 400)
+    }
+    const userRow = await c.env.AQUILLA_PG
+      .prepare("SELECT id, username, email FROM users WHERE username = ?")
+      .bind(requested)
+      .first<{ id: number; username: string; email: string }>()
+    if (!userRow) {
+      return c.json({ error: "seed user missing after seed", username: requested }, 500)
+    }
     const jwt = new JWTService(c.env)
-    const accessToken = await jwt.createAccessToken(DEV_USERNAME)
+    const accessToken = await jwt.createAccessToken(userRow.username)
     return c.json({
       access_token: accessToken,
       token_type: "bearer",
-      username: DEV_USERNAME,
-      user: { id: ids.userId, username: DEV_USERNAME, email: DEV_EMAIL },
+      username: userRow.username,
+      user: { id: userRow.id, username: userRow.username, email: userRow.email },
       org: { id: ids.orgId, name: DEV_ORG_NAME },
       project: { id: ids.projectId, name: DEV_PROJECT_NAME },
     })

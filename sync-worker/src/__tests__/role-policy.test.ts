@@ -21,20 +21,23 @@ describe("requiredRoleFor — target.* (translator)", () => {
 })
 
 describe("requiredRoleFor — source.* (importer / admin)", () => {
-  it("returns PROJECT_LEAD for source.cell.create", () => {
-    expect(requiredRoleFor('source.cell.create')).toBe(ROLE.PROJECT_LEAD)
+  // Sam, 2026-08-21: create/delete dropped to CONTRIBUTOR so the
+  // `allowLineCreation` setting can admit contributors; authorize.ts
+  // conditionally re-imposes PROJECT_LEAD (see authorize-line-creation.test.ts).
+  it("returns CONTRIBUTOR for source.cell.create — the conditional floor lives in authorize", () => {
+    expect(requiredRoleFor('source.cell.create')).toBe(ROLE.CONTRIBUTOR)
   })
 
   it("returns PROJECT_LEAD for source.cell.commit", () => {
     expect(requiredRoleFor('source.cell.commit')).toBe(ROLE.PROJECT_LEAD)
   })
 
-  it("returns PROJECT_LEAD for source.cell.delete", () => {
-    expect(requiredRoleFor('source.cell.delete')).toBe(ROLE.PROJECT_LEAD)
+  it("returns CONTRIBUTOR for source.cell.delete — the user-inserted guard lives in authorize", () => {
+    expect(requiredRoleFor('source.cell.delete')).toBe(ROLE.CONTRIBUTOR)
   })
 
-  it("returns PROJECT_LEAD for source.cell.reorder", () => {
-    expect(requiredRoleFor('source.cell.reorder')).toBe(ROLE.PROJECT_LEAD)
+  it("returns CONTRIBUTOR for source.cell.reorder — it rides every add/remove batch", () => {
+    expect(requiredRoleFor('source.cell.reorder')).toBe(ROLE.CONTRIBUTOR)
   })
 })
 

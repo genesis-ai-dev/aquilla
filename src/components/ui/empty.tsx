@@ -1,20 +1,28 @@
 import * as React from "react"
 import { cva, type VariantProps } from "class-variance-authority"
+import { SearchX } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+
+/**
+ * Canonical Lucide glyph for resource/page not-found states (team, org, project,
+ * unmatched route). SearchX reads as "we looked; it isn't here" — distinct from
+ * Search (no matches) and AlertTriangle (something broke).
+ */
+const NotFoundIcon = SearchX
 
 const emptyStateVariants = cva("", {
   variants: {
     variant: {
-      /** Standalone empty beat — solid card on org/account pages. */
-      card: "rounded-lg border-solid bg-card/40 px-6 py-12",
-      /** Nested inside a Section or panel — no extra chrome. */
+      /** Standalone empty beat — solid bordered card on org/account pages. */
+      card: "rounded-lg border border-solid bg-card px-6 py-12",
+      /** Nested inside a Section or DataTable panel — no extra chrome. */
       inline: "border-0 bg-transparent",
       /**
-       * Table/list empty beat — same layout as `card`, but `bg-card` so it
-       * matches DataTable / ADMIN_TABLE_PANEL_CLASS surfaces.
+       * Table/list empty beat — same surface as `card`, matching DataTable /
+       * ADMIN_TABLE_PANEL_CLASS contrast (solid border, bg-card, no primary).
        */
-      panel: "rounded-lg border-solid bg-card px-6 py-12",
+      panel: "rounded-lg border border-solid bg-card px-6 py-12",
     },
   },
   defaultVariants: {
@@ -114,6 +122,17 @@ function EmptyContent({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
+type EmptyStateProps = {
+  icon?: React.ComponentType<{ className?: string }>
+  title: React.ReactNode
+  description?: React.ReactNode
+  action?: React.ReactNode
+  variant?: NonNullable<VariantProps<typeof emptyStateVariants>["variant"]>
+  className?: string
+  titleClassName?: string
+  descriptionClassName?: string
+} & Omit<React.ComponentProps<"div">, "title">
+
 /**
  * The one composed empty state for the app. Wraps shadcn `Empty` primitives so
  * every surface shares icon/title/description/action layout and typography.
@@ -128,16 +147,7 @@ function EmptyState({
   titleClassName,
   descriptionClassName,
   ...props
-}: {
-  icon?: React.ComponentType<{ className?: string }>
-  title: React.ReactNode
-  description?: React.ReactNode
-  action?: React.ReactNode
-  variant?: NonNullable<VariantProps<typeof emptyStateVariants>["variant"]>
-  className?: string
-  titleClassName?: string
-  descriptionClassName?: string
-} & Omit<React.ComponentProps<"div">, "title">) {
+}: EmptyStateProps) {
   return (
     <Empty className={cn(emptyStateVariants({ variant }), className)} {...props}>
       <EmptyHeader>
@@ -158,6 +168,23 @@ function EmptyState({
   )
 }
 
+/**
+ * Empty beat nested inside a DataTable panel — Assigned-to-me is the reference:
+ * muted icon tile, solid panel border from the table chrome, no primary wash.
+ */
+function TableEmptyState({
+  className,
+  ...props
+}: Omit<EmptyStateProps, "variant">) {
+  return (
+    <EmptyState
+      variant="inline"
+      className={cn("flex-none py-12", className)}
+      {...props}
+    />
+  )
+}
+
 export {
   Empty,
   EmptyHeader,
@@ -166,4 +193,6 @@ export {
   EmptyContent,
   EmptyMedia,
   EmptyState,
+  NotFoundIcon,
+  TableEmptyState,
 }

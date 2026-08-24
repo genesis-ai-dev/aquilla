@@ -160,7 +160,40 @@ describe("/api/v2/admin/* platform-admin gate", () => {
       validatedCells: 50,
       wordCount: 800,
       lastEditAt: 2000,
+      shared: false,
     })
+  })
+
+  it("GET /projects flags a project as shared when a non-org member can access it", async () => {
+    await seedUser(7, "root")
+    await seedUser(1, "wendi")
+    await seedUser(2, "guest")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('own', 'John', 1, 1), ('guested', 'Matthew', 1, 1), ('teamed', 'Exodus', 1, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('guested', 2, 100, 1)",
+    ).run()
+    await seedUser(3, "bob")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO groups (id, org_id, name, created_by) VALUES (10, 1, 'Reviewers', 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare("INSERT INTO group_members (group_id, user_id, added_by) VALUES (10, 3, 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by) VALUES (10, 'teamed', 100, 1)",
+    ).run()
+
+    const res = await app.request("/api/v2/admin/projects", { headers: authHeader(await jwtFor("root")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; shared: boolean }> }
+    const byId = Object.fromEntries(body.projects.map((p) => [p.id, p.shared]))
+    expect(byId.own).toBe(false)
+    expect(byId.guested).toBe(true)
+    expect(byId.teamed).toBe(true)
   })
 
   it("GET /activity returns the cross-tenant feed, honours limit, and joins usernames", async () => {

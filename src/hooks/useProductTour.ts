@@ -1,8 +1,8 @@
 /**
  * AQU-243: Product tour persistence logic.
  *
- * Persistence key: `codex:productTourDone` (localStorage "1").
- * Auto-start condition: onboarding wizard completed (`codex:onboardingComplete`)
+ * Persistence key: `aquilla:productTourDone` (localStorage "1").
+ * Auto-start condition: onboarding wizard completed (`aquilla:onboardingComplete`)
  * AND tour not yet done. This fires once per browser profile, user-wide (not
  * per-project like AQU-244's setup checklist flag).
  *
@@ -10,8 +10,8 @@
  * tests without a render cycle.
  */
 
-const TOUR_DONE_KEY = "codex:productTourDone"
-const ONBOARDING_DONE_KEY = "codex:onboardingComplete"
+const TOUR_DONE_KEY = "aquilla:productTourDone"
+const ONBOARDING_DONE_KEY = "aquilla:onboardingComplete"
 
 export function wasProductTourDone(): boolean {
   try {

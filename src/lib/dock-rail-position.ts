@@ -1,7 +1,7 @@
 export type DockRailPosition = "left" | "top"
 
-const STORAGE_KEY = "codex:dockRailPosition"
-const CHANGE_EVENT = "codex:dock-rail-position-changed"
+const STORAGE_KEY = "aquilla:dockRailPosition"
+const CHANGE_EVENT = "aquilla:dock-rail-position-changed"
 const DEFAULT: DockRailPosition = "top"
 
 export function getDockRailPosition(): DockRailPosition {

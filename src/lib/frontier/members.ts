@@ -1,5 +1,6 @@
 import { FRONTIER_BASE, AUTH_BASE } from "./auth";
 import { UserError } from "@/lib/errors/user-error";
+import { ROLE } from "@/lib/frontier/roles";
 
 export interface LookedUpUser {
   id: number;
@@ -109,9 +110,12 @@ export type ProjectRosterResult =
 export async function fetchProjectRoster(
   jwt: string,
   projectId: string,
+  opts?: { minRole?: number },
 ): Promise<ProjectRosterResult> {
+  const qs =
+    opts?.minRole != null ? `?minRole=${encodeURIComponent(String(opts.minRole))}` : ""
   const res = await fetch(
-    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members`,
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members${qs}`,
     { headers: authHeaders(jwt) }
   );
   if (res.status === 403) {
@@ -141,6 +145,18 @@ export async function listProjectMembers(
 ): Promise<ProjectMember[] | null> {
   const result = await fetchProjectRoster(jwt, projectId);
   return result.kind === "ok" ? result.members : null;
+}
+
+/**
+ * People who can change shared project settings (Maintainer+). Uses
+ * `?minRole=` so a below-roster-floor caller still gets this list without
+ * the rest of the roster.
+ */
+export async function fetchPrivilegedProjectMembers(
+  jwt: string,
+  projectId: string,
+): Promise<ProjectRosterResult> {
+  return fetchProjectRoster(jwt, projectId, { minRole: ROLE.MAINTAINER })
 }
 
 /**

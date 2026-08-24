@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { OrgProvider } from "@/context/OrgContext"
 import { MembersPage } from "./MembersPage"
+import { listMyOrgs } from "@/lib/frontier/orgs"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
@@ -113,6 +114,9 @@ vi.mock("@/hooks/useAccessibleProjects", () => ({
 beforeEach(() => {
   localStorage.clear()
   rosterSettings.canViewRoster = true
+  vi.mocked(listMyOrgs).mockResolvedValue([
+    { id: 42, name: "Come and See", role: { level: 700, name: "owner" } },
+  ])
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -299,7 +303,136 @@ describe("MembersPage — Teams-style roster table", () => {
     expect(screen.getByText("anna@example.com")).toBeInTheDocument()
     expect(screen.getByText("Contributor")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /add a member/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /add to projects/i })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /add to projects/i })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /actions for ben/i })).toBeInTheDocument()
+    expect(screen.queryByText(/^remove$/i)).not.toBeInTheDocument()
+  })
+
+  it("keeps Remove in the row menu, disabled for a non-owner", async () => {
+    vi.mocked(listMyOrgs).mockResolvedValue([
+      { id: 42, name: "Come and See", role: { level: 400, name: "contributor" } },
+    ])
+    const { useOrgMembers } = await import("@/hooks/useOrg")
+    vi.mocked(useOrgMembers).mockReturnValue({
+      members: [
+        {
+          userId: 2,
+          username: "ben",
+          email: "ben@example.com",
+          role: { level: 400, name: "contributor" },
+          lastActiveAt: null,
+        },
+      ],
+      isLoading: false,
+      error: null,
+      rosterHidden: false,
+      refresh: vi.fn(async () => {}),
+      add: vi.fn(async () => null),
+      addMany: vi.fn(async () => []),
+      remove: vi.fn(async () => {}),
+      listMemberProjects: vi.fn(async () => []),
+    })
+
+    renderMembers()
+    await waitFor(() => expect(screen.getByTestId("org-members-table")).toBeInTheDocument())
+    expect(screen.queryByRole("button", { name: /add a member/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /add to projects/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/^remove$/i)).not.toBeInTheDocument()
+
+    const row = screen.getByText("ben").closest("tr")!
+    fireEvent.contextMenu(row)
+    const fromContext = await screen.findByRole("menuitem", { name: /remove ben — owners only/i })
+    expect(fromContext).toHaveAttribute("aria-disabled", "true")
+    fireEvent.keyDown(document, { key: "Escape" })
+
+    fireEvent.click(screen.getByRole("button", { name: /actions for ben/i }))
+    const fromMenu = await screen.findByRole("menuitem", { name: /remove ben — owners only/i })
+    expect(fromMenu).toHaveAttribute("aria-disabled", "true")
+  })
+
+  it("shows Add to projects when the caller can grant membership on a project", async () => {
+    const { useAccessibleProjects } = await import("@/hooks/useAccessibleProjects")
+    vi.mocked(useAccessibleProjects).mockReturnValue({
+      projects: [
+        {
+          id: "p1",
+          name: "John",
+          gitlabProjectId: null,
+          role: { level: 600, name: "maintainer", source: "grant" },
+        },
+      ],
+      isLoading: false,
+      refresh: vi.fn(async () => {}),
+    })
+    const { useOrgMembers } = await import("@/hooks/useOrg")
+    vi.mocked(useOrgMembers).mockReturnValue({
+      members: [
+        {
+          userId: 1,
+          username: "anna",
+          email: "anna@example.com",
+          role: { level: 700, name: "owner" },
+          lastActiveAt: null,
+        },
+      ],
+      isLoading: false,
+      error: null,
+      rosterHidden: false,
+      refresh: vi.fn(async () => {}),
+      add: vi.fn(async () => null),
+      addMany: vi.fn(async () => []),
+      remove: vi.fn(async () => {}),
+      listMemberProjects: vi.fn(async () => []),
+    })
+
+    renderMembers()
+    await waitFor(() => expect(screen.getByRole("button", { name: /add to projects/i })).toBeInTheDocument())
+    expect(screen.getByRole("button", { name: /add to projects/i })).toBeEnabled()
+    expect(screen.getByRole("button", { name: /add a member/i })).toBeInTheDocument()
+  })
+
+  it("hides Add a member but keeps Add to projects for a non-owner with project grants", async () => {
+    vi.mocked(listMyOrgs).mockResolvedValue([
+      { id: 42, name: "Come and See", role: { level: 400, name: "contributor" } },
+    ])
+    const { useAccessibleProjects } = await import("@/hooks/useAccessibleProjects")
+    vi.mocked(useAccessibleProjects).mockReturnValue({
+      projects: [
+        {
+          id: "p1",
+          name: "John",
+          gitlabProjectId: null,
+          role: { level: 600, name: "maintainer", source: "grant" },
+        },
+      ],
+      isLoading: false,
+      refresh: vi.fn(async () => {}),
+    })
+    const { useOrgMembers } = await import("@/hooks/useOrg")
+    vi.mocked(useOrgMembers).mockReturnValue({
+      members: [
+        {
+          userId: 2,
+          username: "ben",
+          email: "ben@example.com",
+          role: { level: 400, name: "contributor" },
+          lastActiveAt: null,
+        },
+      ],
+      isLoading: false,
+      error: null,
+      rosterHidden: false,
+      refresh: vi.fn(async () => {}),
+      add: vi.fn(async () => null),
+      addMany: vi.fn(async () => []),
+      remove: vi.fn(async () => {}),
+      listMemberProjects: vi.fn(async () => []),
+    })
+
+    renderMembers()
+    await waitFor(() => expect(screen.getByRole("button", { name: /add to projects/i })).toBeInTheDocument())
+    expect(screen.getByRole("button", { name: /add to projects/i })).toBeEnabled()
+    expect(screen.queryByRole("button", { name: /add a member/i })).not.toBeInTheDocument()
   })
 
   it("opens the add-member dialog from the toolbar", async () => {

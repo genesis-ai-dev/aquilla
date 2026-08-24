@@ -138,7 +138,11 @@ describe("rendering", () => {
     expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled()
   })
 
-  it("still gates source.cell.create below project_lead (AQU-890)", () => {
+  it("gates source.cell.create at CONTRIBUTOR now — the server arbitrates the setting (AQU-890 → 2026-08-21)", () => {
+    // The static floor dropped so the `allowLineCreation` project setting can
+    // admit contributors; whether THIS project has opted in is the server's
+    // per-event call (sync-worker line-creation-authority.ts), not a fact the
+    // card can know. So a contributor may try, and a viewer still may not.
     const proposal = makeProposal({
       events: [
         {
@@ -151,8 +155,23 @@ describe("rendering", () => {
       ],
     })
     render(<ProposalCard {...BASE_PROPS} proposal={proposal} roleLevel={ROLE.CONTRIBUTOR} />)
+    expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled()
+  })
+
+  it("still refuses a viewer a source.cell.create outright", () => {
+    const proposal = makeProposal({
+      events: [
+        {
+          kind: "source.cell.create",
+          fileId: "f-1",
+          cellId: "c-new",
+          payload: { cellId: "c-new", value: "Section heading" },
+          display: { after: "Section heading" },
+        },
+      ],
+    })
+    render(<ProposalCard {...BASE_PROPS} proposal={proposal} roleLevel={ROLE.VIEWER} />)
     expect(screen.getByRole("button", { name: "Apply" })).toBeDisabled()
-    expect(screen.getByText("Requires Project lead role or higher")).toBeInTheDocument()
   })
 })
 

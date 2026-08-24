@@ -31,6 +31,7 @@ import type { ChangesetSummary, ChangesetWarning, ExternalEnv, PlannedEventIds }
 import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings } from '../../../db/shared/projects'
+import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 import { ROLE } from '../events/role-policy'
 
 // Staging primitives moved to stage.ts (AQU-926) so the new command modules
@@ -42,6 +43,13 @@ function bearer(request: Request): string | null {
   const h = request.headers.get('Authorization') ?? ''
   return h.startsWith('Bearer ') ? h.slice(7) : null
 }
+
+// [Pen test] API security & data exposure (2026-08-20): the external Agent
+// API's only throttle was on /search (2026-07-30 pen test) — every mutating
+// route, including this one, was unlimited. A leaked or malicious PAT could
+// stage unbounded changesets. Wide enough that a real agent loop staging a
+// plan every few seconds never trips it.
+const PREPARE_MAX_PER_CREDENTIAL = 300
 
 /** PAT-authenticated entrypoint (REST + the MCP adapter's synthetic request):
  *  resolves the credential, parses the body, and hands off to the shared core
@@ -56,6 +64,13 @@ export async function handlePrepare(
 
   const cred = await validateApiCredential(db, bearer(request) ?? "")
   if (!cred) return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
+
+  const identifier = `credential:${cred.credentialId}`
+  const recent = await countRecentRateLimitEvents(db, 'external_prepare', identifier)
+  if (recent >= PREPARE_MAX_PER_CREDENTIAL) {
+    return errorResponse('rate_limited', 'changeset staging rate limit exceeded, slow down')
+  }
+  await recordRateLimitEvent(db, 'external_prepare', identifier)
 
   let body: unknown
   try {

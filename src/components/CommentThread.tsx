@@ -8,7 +8,7 @@ import { renderCommentHtml, isThreadStale } from "@/lib/comments/comment-helpers
 import DOMPurify from "dompurify"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
-import { formatDateTime } from "@/lib/i18n/format"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 
 interface CommentThreadProps {
   thread: ThreadData
@@ -27,7 +27,7 @@ function draftKey(projectId: string | undefined, cellId: string | undefined, thr
 }
 
 export function CommentThread({ thread, currentTranslated, canReply = true, canResolve = true, onReply, onResolve, onReopen, projectId, cellId }: CommentThreadProps) {
-  const { t, locale } = useI18n()
+  const { t } = useI18n()
   const storageKey = draftKey(projectId, cellId, thread.id)
   const [replyText, setReplyText] = useState(() => {
     if (typeof window === "undefined") return ""
@@ -46,14 +46,6 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
       }
     } catch { /* ignore quota errors */ }
   }, [replyText, storageKey])
-
-  function formatTimestamp(iso: string): string {
-    try {
-      return formatDateTime(iso, locale)
-    } catch {
-      return iso
-    }
-  }
 
   function handleReply() {
     if (!replyText.trim()) return
@@ -109,7 +101,9 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
             </span>
           </AppTooltip>
         )}
-        <span className="text-muted-foreground">{formatTimestamp(thread.createdAt)}</span>
+        <span className="text-muted-foreground">
+          <DateTooltip value={thread.createdAt} label={t("common.date.posted")} />
+        </span>
       </div>
 
       <ul className="space-y-2">
@@ -117,7 +111,9 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
           <li key={m.id} className="bg-muted rounded-lg p-2">
             <div className="flex items-baseline gap-1.5 text-xs">
               <span className="font-medium">{m.author}</span>
-              <span className="text-muted-foreground">{formatTimestamp(m.timestamp)}</span>
+              <span className="text-muted-foreground">
+                <DateTooltip value={m.timestamp} label={t("common.date.posted")} />
+              </span>
             </div>
             {/* eslint-disable-next-line react/no-danger */}
             <div

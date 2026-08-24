@@ -114,22 +114,21 @@ describe("OrgBreadcrumb", () => {
     expect(screen.getByRole("link", { name: "All organizations" })).toBeInTheDocument()
   })
 
-  // AQU-790: viewing a guest org (`/orgs/:guestId`), the guest org is a sibling
-  // of "All organizations" — NOT nested under one of the caller's owned orgs.
+  // AQU-790: viewing a guest org (`/orgs/:guestId/projects`), the guest org is a
+  // sibling of "All organizations" — NOT nested under one of the caller's owned
+  // orgs. Same trail shape as a member org's projects page.
   it("renders a guest org as its own crumb, not a descendant of an owned org", () => {
     orgContext.activeOrgId = 2
     orgContext.orgs = [{ id: 7, name: "Dev Org" }]
     orgContext.guestOrgs = [{ id: 2, name: "Guest Org" }]
 
-    renderBreadcrumb(<OrgBreadcrumb section="Projects" isProjectsLanding />, "/orgs/2")
+    renderBreadcrumb(<OrgBreadcrumb section="Projects" />, "/orgs/2/projects")
 
-    // The guest org is the current page, directly under All organizations.
     expect(screen.getByRole("link", { name: "All organizations" })).toHaveAttribute("href", "/orgs/all")
-    expect(screen.getByText("Guest Org")).toHaveAttribute("aria-current", "page")
+    expect(screen.getByRole("link", { name: "Guest Org" })).toHaveAttribute("href", "/orgs/2")
+    expect(screen.getByText("Projects")).toHaveAttribute("aria-current", "page")
     // The caller's owned org never appears as an ancestor of the guest org.
     expect(screen.queryByText("Dev Org")).not.toBeInTheDocument()
-    // Guest index is the project list — no separate Projects section crumb.
-    expect(screen.queryByText("Projects")).not.toBeInTheDocument()
   })
 
   it("keeps the breadcrumb on one line and scrolls horizontally instead of clipping", () => {

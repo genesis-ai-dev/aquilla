@@ -212,7 +212,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
           <button
             type="button"
             onClick={() => applyDirectionMismatchFix("auto")}
-            className="rounded-md px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
+            className="rounded-md px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-card active:scale-[0.95]"
           >
             {t("editor.view.directionAuto")}
           </button>
@@ -220,7 +220,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
             <button
               type="button"
               onClick={() => applyDirectionMismatchFix(detectedManualDirection)}
-              className="rounded-md px-2 py-0.5 text-[11px] font-medium text-primary transition-all duration-150 ease-out hover:bg-card active:scale-[0.95]"
+              className="rounded-md px-2 py-0.5 text-[11px] font-medium text-primary hover:bg-card active:scale-[0.95]"
             >
               {detectedManualDirection.toUpperCase()}
             </button>

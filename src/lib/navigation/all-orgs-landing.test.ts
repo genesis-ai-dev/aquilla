@@ -6,42 +6,52 @@ import { resolveAllOrgsLanding } from "./all-orgs-landing"
 // buttons wired to a null org id. These cases pin the landing decision.
 
 const org = (id: number) => ({ id })
-const project = (id: string) => ({ id })
+const project = (id: string, orgId?: number | null) =>
+  orgId === undefined ? { id } : { id, orgId }
 
 describe("resolveAllOrgsLanding (AQU-864)", () => {
   it("renders the aggregate portfolio for 2+ memberships", () => {
     expect(
       resolveAllOrgsLanding({
         orgs: [org(1), org(2)],
-        accessibleProjects: [project("p1")],
+        accessibleProjects: [project("p1", 1)],
         orgsError: null,
         accessibleProjectsError: null,
       }),
     ).toEqual({ kind: "portfolio" })
   })
 
-  it("sends a single-membership caller to that org's home", () => {
+  it("sends a single-membership caller with no foreign grants to that org's home", () => {
     expect(
       resolveAllOrgsLanding({
         orgs: [org(7)],
-        accessibleProjects: [project("p1")],
+        accessibleProjects: [project("p1", 7)],
         orgsError: null,
         accessibleProjectsError: null,
       }),
     ).toEqual({ kind: "org", orgId: 7 })
   })
 
-  it("sends a project-only caller with no membership to the shared surface", () => {
-    // The reported case: access is entirely project-level, so the portfolio has
-    // nothing to aggregate but the caller demonstrably has projects.
+  it("keeps a single-membership caller on the aggregate when they also have a foreign-org grant", () => {
     expect(
       resolveAllOrgsLanding({
-        orgs: [],
-        accessibleProjects: [project("p1"), project("p2")],
+        orgs: [org(7)],
+        accessibleProjects: [project("p1", 7), project("p2", 503)],
         orgsError: null,
         accessibleProjectsError: null,
       }),
-    ).toEqual({ kind: "shared" })
+    ).toEqual({ kind: "portfolio" })
+  })
+
+  it("renders the aggregate for a project-only caller with no membership", () => {
+    expect(
+      resolveAllOrgsLanding({
+        orgs: [],
+        accessibleProjects: [project("p1", 503), project("p2", 777)],
+        orgsError: null,
+        accessibleProjectsError: null,
+      }),
+    ).toEqual({ kind: "portfolio" })
   })
 
   it("keeps the create-your-organization empty state for a caller with no access at all", () => {
@@ -56,8 +66,6 @@ describe("resolveAllOrgsLanding (AQU-864)", () => {
   })
 
   it("reports an error rather than an empty state when the org list failed to load", () => {
-    // A failed fetch leaves `orgs` empty too; treating that as "no orgs" is how
-    // a transient outage turned into a permanent-looking dead end.
     expect(
       resolveAllOrgsLanding({
         orgs: [],
@@ -68,20 +76,17 @@ describe("resolveAllOrgsLanding (AQU-864)", () => {
     ).toEqual({ kind: "error" })
   })
 
-  it("prefers the error over a shared-projects redirect when the org list failed", () => {
+  it("prefers the error over a shared-projects portfolio when the org list failed", () => {
     expect(
       resolveAllOrgsLanding({
         orgs: [],
-        accessibleProjects: [project("p1")],
+        accessibleProjects: [project("p1", 503)],
         orgsError: "500 Internal Server Error",
         accessibleProjectsError: null,
       }),
     ).toEqual({ kind: "error" })
   })
 
-  // AQU-883: at zero memberships the shared-vs-empty decision is made entirely
-  // from the project directory, so its failure makes the caller's access
-  // unknown — never the create-your-organization empty state.
   it("reports an error rather than an empty state when the project directory failed at zero memberships", () => {
     expect(
       resolveAllOrgsLanding({
@@ -94,8 +99,6 @@ describe("resolveAllOrgsLanding (AQU-864)", () => {
   })
 
   it("still routes a member to their org when only the project directory failed", () => {
-    // Membership decides the landing on its own; the org home surfaces the
-    // directory failure in its projects panel (AQU-883) with its own retry.
     expect(
       resolveAllOrgsLanding({
         orgs: [org(7)],

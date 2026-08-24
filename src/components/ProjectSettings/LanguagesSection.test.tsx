@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { LanguagesSection } from "./LanguagesSection"
 import type { PatchOutcome } from "@/hooks/useProjectSettings"
+import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 
 function renderSection(overrides: Partial<Parameters<typeof LanguagesSection>[0]> = {}) {
   const patch = vi.fn(async (): Promise<PatchOutcome> => ({ kind: "ok" }))
@@ -163,8 +164,19 @@ describe("LanguagesSection", () => {
     expect((screen.getByTestId("restore-lane-fr-BE") as HTMLButtonElement).disabled).toBe(true)
   })
 
-  it("shows the disabled-reason note when write controls are gated", () => {
-    renderSection({ canEdit: false, disabledTooltip: "Maintainer or higher can edit shared settings." })
-    expect(screen.getByText(/maintainer or higher can edit shared settings/i)).toBeTruthy()
+  it("shows the disabled-reason hint on a locked write control", async () => {
+    renderWithTooltips(
+      <LanguagesSection
+        defaultTargetLanguage="French"
+        targetLanes={[]}
+        canEdit={false}
+        disabledTooltip="Maintainer or higher can edit shared settings."
+        patch={vi.fn(async (): Promise<PatchOutcome> => ({ kind: "ok" }))}
+      />,
+    )
+    await expectTooltip(
+      screen.getByTestId("add-target-lang-btn"),
+      /maintainer or higher can edit shared settings/i,
+    )
   })
 })

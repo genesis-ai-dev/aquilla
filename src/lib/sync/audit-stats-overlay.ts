@@ -1,7 +1,7 @@
 /**
- * Optimistic overlay for D1-backed audit stats.
+ * Optimistic overlay for Postgres-backed audit stats.
  *
- * D1 is the source of truth for validation status, but the outbox holds events
+ * Postgres is the source of truth for validation status, but the outbox holds events
  * the client has produced that haven't been ack'd yet (offline edits, in-flight
  * batches). Without an overlay, a freshly toggled validate would not appear
  * until the next 30s refetch — users would see their click do nothing.

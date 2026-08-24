@@ -1,6 +1,6 @@
 // Word-level audio timing helpers. The read/write helpers that touched
 // per-file Y.Doc handles were dropped in Phase 2c-γ; reattaching timings
-// to D1 cells is deferred to its own event grammar. The pure helpers
+// to the Postgres cells projection is deferred to its own event grammar. The pure helpers
 // below are still in use by the karaoke renderer (TranslatedEditor) and
 // the editor table (EditorTable) so they survive untouched.
 

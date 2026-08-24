@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useWorkspaceTabs } from "./useWorkspaceTabs"
 
 const PROJECT_ID = "project-1"
-const STORAGE_KEY = `codex:tabs:${PROJECT_ID}`
+const STORAGE_KEY = `aquilla:tabs:${PROJECT_ID}`
 
 function renderTabs(props: {
   fileIds: string[]

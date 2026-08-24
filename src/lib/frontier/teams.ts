@@ -6,8 +6,8 @@ import type { MemberGrantResult } from "./members"
 export interface TeamSummary { id: number; name: string; memberCount: number; projectCount: number; viewerIsMember: boolean; isInternal: boolean }
 export interface TeamDetail {
   id: number; name: string; description?: string | null
-  members: Array<{ userId: number; username: string; email?: string | null; roleLevel: number | null }>
-  projects: Array<{ id: string; name: string; grantedRoleLevel: number }>
+  members: Array<{ userId: number; username: string; email?: string | null; roleLevel: number | null; addedAt?: string | null }>
+  projects: Array<{ id: string; name: string; grantedRoleLevel: number; grantedAt?: string | null }>
 }
 function authHeaders(jwt: string): HeadersInit { return { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` } }
 

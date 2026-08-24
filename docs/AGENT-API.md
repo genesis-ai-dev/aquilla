@@ -28,9 +28,11 @@ Status against the §6 release gates:
 | 10 | Cold-start test | **Not run** — no evidence of an executed cold-start session in this repo. Cold-start hardening landed 2026-07-21 after real-world agent feedback: unauthenticated discovery root (`GET /api/v1/external` — machine-readable API map), REST bootstrap pair (`GET /me`, `GET /projects`), JSON 404s with hints on unmatched external paths, teaching 401/405 messages, a `quickstart` in `get_capabilities`, and a hand-to-your-agent [`docs/api/QUICKSTART.md`](api/QUICKSTART.md). |
 
 Also not yet implemented, called out explicitly rather than left silent: `run_checks`, jobs
-(`get_job`), export (`prepare_export`/`get_export`), OAuth 2.1, rate limiting, and an MCP staging
+(`get_job`), export (`prepare_export`/`get_export`), OAuth 2.1, and an MCP staging
 tool for `PlanImport` (REST-only). Full detail in `docs/api/agent-api.md` §8 and the running list
-in `docs/swarm/AGENT-API-TRACES.md`.
+in `docs/swarm/AGENT-API-TRACES.md`. Rate limiting is partial: `/search` (2026-07-30 pen test),
+changeset prepare/commit, and artifact upload are throttled per credential (2026-08-20 pen test);
+reads other than `/search` (project/file/cell GETs) and changeset GET/discard remain unlimited.
 
 ---
 

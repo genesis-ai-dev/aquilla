@@ -40,7 +40,7 @@ test("AQU-633: a self-validate 403 surfaces the reason banner (not a silent reve
   // server-created projects, per the cross-user-validate spec).
   await alice.goto(`/project/${projectId}/editor`)
   await alice.evaluate(
-    (id) => localStorage.setItem(`codex.importDirectionSkipped.${id}`, "true"),
+    (id) => localStorage.setItem(`aquilla.importDirectionSkipped.${id}`, "true"),
     projectId,
   )
   const aliceWs = new Workspace(alice)

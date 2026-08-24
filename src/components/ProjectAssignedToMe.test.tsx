@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ProjectAssignedToMe } from "./ProjectAssignedToMe"
 import type { MyAssignment } from "@/lib/sync/assignments"
+import { fmtDeadlineDate } from "@/lib/format-date"
 
 vi.mock("@/lib/sync/assignments", () => ({
   getMyAssignments: vi.fn(),
@@ -92,7 +93,9 @@ describe("ProjectAssignedToMe", () => {
       makeAssignment({ scopeLabel: "Genesis", deadline: "2026-07-01" }),
     ])
     render(<ProjectAssignedToMe projectId="proj-1" jwt="test-jwt" />)
-    await waitFor(() => expect(screen.getByText(/Due 2026-07-01/)).toBeTruthy())
+    await waitFor(() => {
+      expect(screen.getByText(`Due ${fmtDeadlineDate("2026-07-01")}`)).toBeTruthy()
+    })
   })
 
   it("collapses and re-expands when the header is clicked", async () => {

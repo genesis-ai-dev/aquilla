@@ -13,7 +13,7 @@ import { resolveRoleName, type RoleLevel } from "@/lib/frontier/roles"
 // AQU-623: link denials to the docs page describing permission levels, so a
 // blocked user can learn what each role can do and how to get a higher one.
 // Same build-time override + default convention as HelpMenu's DOCS_URL.
-const PERMISSION_DOCS_URL =
+export const PERMISSION_DOCS_URL =
   ((import.meta.env.VITE_DOCS_URL as string | undefined)?.trim() ||
     "https://help.aquilla.app") + "/permissions"
 

@@ -11,6 +11,55 @@
 
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import type { OrgSummary } from "@/lib/frontier/orgs"
+import type { PortfolioProject } from "@/lib/frontier/portfolio"
+
+/** A shared grant projected into the all-orgs projects table. */
+export type SharedPortfolioRow = PortfolioProject & {
+  orgId?: number
+  orgName?: string | null
+  origin: "shared"
+  grantedAt?: string | null
+}
+
+/** True when any accessible project lives outside the caller's member orgs. */
+export function hasForeignOrgGrants(
+  projects: Pick<CloudProjectSummary, "orgId">[],
+  myOrgs: Pick<OrgSummary, "id">[],
+): boolean {
+  const myOrgIds = new Set(myOrgs.map((o) => o.id))
+  return projects.some((p) => p.orgId == null || !myOrgIds.has(p.orgId))
+}
+
+/**
+ * Map a project-level grant into a portfolio row so it can sit in the all-orgs
+ * table. Guest orgs 403 the member-org portfolio endpoint, so progress fields
+ * stay empty rather than fabricating 0%-of-N from file cell counts.
+ */
+export function toSharedPortfolioRow(p: CloudProjectSummary): SharedPortfolioRow {
+  const files = p.files ?? []
+  const withSource = files.find((f) => f.sourceLanguage)
+  const withTarget = files.find((f) => f.targetLanguage)
+  return {
+    id: p.id,
+    name: p.name,
+    totalCells: 0,
+    validatedCells: 0,
+    filledCells: 0,
+    aiDraftedCells: 0,
+    lastEditAt: null,
+    audioCells: 0,
+    validatedAudioCells: 0,
+    recordedMs: 0,
+    deadlineAt: null,
+    sourceLanguage: withSource?.sourceLanguage ?? null,
+    targetLanguage: withTarget?.targetLanguage ?? null,
+    pm: p.pm ?? null,
+    orgId: p.orgId ?? undefined,
+    orgName: p.orgName ?? null,
+    origin: "shared",
+    grantedAt: p.grantedAt ?? null,
+  }
+}
 
 export interface PartitionedProjects {
   /** Projects belonging to the active org — the existing org-scoped list. */

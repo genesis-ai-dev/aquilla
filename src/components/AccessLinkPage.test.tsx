@@ -48,7 +48,7 @@ describe("AccessLinkPage", () => {
       expect(navigate).toHaveBeenCalledWith("/project/proj-9/editor", { replace: true })
     })
     // Onboarding is marked complete so the fresh browser isn't bounced.
-    expect(localStorage.getItem("codex:onboardingComplete")).toBe("true")
+    expect(localStorage.getItem("aquilla:onboardingComplete")).toBe("true")
   })
 
   it("shows the generic dead-link error on a wrong PIN and does not navigate", async () => {

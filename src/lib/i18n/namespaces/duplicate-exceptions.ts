@@ -36,6 +36,20 @@
  * longer collides). The 10 that remain are genuine meaning splits.
  */
 export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
+  "importExport.dialog.characterPreviewHeading":
+    "Noun heading over the list of characters an audio export will produce — " +
+    "'the preview', a thing on screen. common.preview is the imperative button " +
+    "that plays a clip back and swaps to common.pause while it runs. A heading " +
+    "and a command are different parts of speech and most target languages " +
+    "write them differently; folding them together would make one of the two " +
+    "wrong wherever they diverge.",
+  "importExport.dialog.audioSectionTitle":
+    "Title of the export dialog's .zip card, naming a KIND OF DELIVERABLE the " +
+    "user is about to download. nav.lens.audio names the editor's Audio lens — " +
+    "a mode you switch into — and its own context pins it as shared by every " +
+    "entry point that toggles that lens so the name can never drift. Reusing it " +
+    "here would tie a file-format label to a UI mode's name, and a later edit " +
+    "for one would silently change the other.",
   "nav.sidebarSection.more":
     "Expands a collapsed sidebar section. common.moreBreadcrumbs is screen-reader " +
     "text for a truncated breadcrumb path — 'more of this path' vs 'expand this " +
@@ -511,6 +525,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "rendering. Different case AND different fixed vocabularies (rule-" +
     "enforcement mode vs term lifecycle status) that happen to share one " +
     "English word.",
+  "org.teamDetail.addedColumn":
+    "Nominal table-column heading (and DateTooltip hover prefix) for the timestamp " +
+    "a project or person was added to a team, sibling of Name/Role. onboarding." +
+    "checklist.invite.addedPrefix is the past-tense VERB that starts the invite-step " +
+    "confirmation sentence 'Added {name} as contributor.' A date-column heading " +
+    "and a sentence-initial verb take different forms in many languages " +
+    "(nominalized date label vs. finite verb), so one shared string would be " +
+    "wrong for one of the two roles.",
   "org.teamDetail.detachButton":
     "Routine, reversible action in TeamDetail: unlinks a project from a team's " +
     "access-grant list with a single click, no confirmation dialog — the " +

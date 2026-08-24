@@ -120,8 +120,8 @@ describe("isSetupInProgress / markSetupInProgress / clearSetupInProgress", () =>
   // checklist the user never engaged with.
   beforeEach(() => {
     // Clear only the keys this test group uses so other tests are unaffected.
-    localStorage.removeItem("codex.setupInProgress.p-unit-1")
-    localStorage.removeItem("codex.setupInProgress.p-unit-2")
+    localStorage.removeItem("aquilla.setupInProgress.p-unit-1")
+    localStorage.removeItem("aquilla.setupInProgress.p-unit-2")
   })
 
   it("AQU-694: returns false before first mark, true after, false after clear", () => {

@@ -9,7 +9,7 @@ import {
   headerBadgeCount,
   DEFAULT_FILTER,
   resolveFileName,
-} from "./CommentsPage"
+} from "./comments-page-filters"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 
 function makeComment(overrides: Partial<CommentRecord> = {}): CommentRecord {

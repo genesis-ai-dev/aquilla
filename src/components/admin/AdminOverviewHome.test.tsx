@@ -44,6 +44,7 @@ const projects: AdminProject[] = [
     validatedCells: 10,
     wordCount: 500,
     lastEditAt: Date.now(),
+    shared: false,
   },
 ]
 const activity: AdminActivity[] = [

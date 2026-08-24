@@ -70,7 +70,7 @@ export function snapSpan(
 
 // ── Preference (GLOBAL, not per file — snapping is an editing-mode choice) ──
 
-const SNAP_KEY = "codex:timelineSnap"
+const SNAP_KEY = "aquilla:timelineSnap"
 
 export function loadSnapEnabled(): boolean {
   try {

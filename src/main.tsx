@@ -17,14 +17,9 @@ applyTheme(brand)
 document.title = brand.app.htmlTitle
 
 // Accent presets were retired in favor of the brand's neutral light/dark
-// palettes. Clear both the old DOM override and its device-scoped preference
-// so an existing session cannot retain a tinted workspace after upgrading.
+// palettes. Clear the old DOM override so an existing session cannot retain
+// a tinted workspace after upgrading.
 document.documentElement.removeAttribute("data-color-theme")
-try {
-  window.localStorage.removeItem("codex-color-theme")
-} catch {
-  // Storage can be unavailable in hardened/private browser contexts.
-}
 
 
 const queryClient = new QueryClient({

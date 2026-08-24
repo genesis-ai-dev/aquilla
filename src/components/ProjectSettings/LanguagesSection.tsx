@@ -17,7 +17,7 @@
 // (409) and role-floor (403) handling is therefore identical to every other
 // shared-settings field on this page; `sharedConflict` in the parent already
 // renders the "Settings changed elsewhere" banner when the hook detects one.
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { Archive, ArchiveRestore, Plus, Globe } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -46,8 +46,8 @@ export interface LanguagesSectionProps {
   canEdit: boolean
   /** Human-readable reason write controls are disabled (offline / role), or
    *  null when `canEdit` is true. Mirrors `sharedDisabledTooltip` in
-   *  ProjectSettings.tsx. */
-  disabledTooltip: string | null
+   *  ProjectSettings.tsx — a string or the compact PermissionLockHint. */
+  disabledTooltip: ReactNode
   /** The shared-settings patch function (ProjectSettings.tsx's `patchShared`,
    *  i.e. `useProjectSettings(...).patch`). Optimistic-conflict / role /
    *  offline handling all live in that hook already — this component only
@@ -322,9 +322,6 @@ export function LanguagesSection({
           </div>
         </DisabledFieldTooltip>
         {addError && <p className="text-xs text-destructive">{addError}</p>}
-        {!canEdit && disabledTooltip && (
-          <p className="text-xs text-muted-foreground">{disabledTooltip}</p>
-        )}
       </CardContent>
     </Card>
   )

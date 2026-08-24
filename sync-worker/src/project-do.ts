@@ -20,7 +20,6 @@
 import { DurableObject } from "cloudflare:workers"
 import { shouldBeReadOnly, verifyTokenForProject } from "./auth"
 import { isDeployedEnvironment } from "./environment-guard"
-import { secureCompare } from "./lib/secure-compare"
 import {
   applyDisconnect,
   applyFocusClaim,
@@ -259,11 +258,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // deliberately does NOT close the socket (an ordinary role change,
     // including promotions, isn't itself a reason to force a reconnect).
     if (request.method === "POST" && url.pathname === "/__member-role-changed") {
-      const auth = request.headers.get("Authorization") ?? ""
-      const expected = this.env.SYNC_SECRET_KEY
-        ? `Bearer ${this.env.SYNC_SECRET_KEY}`
-        : null
-      if (!expected || !secureCompare(auth, expected)) {
+      if (!serviceBearerMatches(request.headers.get("Authorization"), this.env)) {
         return new Response("unauthorized", { status: 401 })
       }
       let body: { project?: string; userId?: number; username?: string; role?: number }

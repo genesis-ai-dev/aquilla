@@ -96,13 +96,14 @@ export function ExternalCollaboratorsSection({
             </Badge>
             <div className="ms-auto flex flex-wrap items-center gap-1.5">
               {e.grants.map((g) => (
-                <Badge
-                  key={`${g.projectId}:${e.userId}`}
-                  variant="outline"
-                  className="gap-1 font-normal"
-                >
-                  <span className="max-w-40 truncate">{g.projectName}</span>
-                  <span className="text-muted-foreground">· <RoleLabel name={g.roleName} /></span>
+                <span key={`${g.projectId}:${e.userId}`} className="inline-flex items-center gap-1">
+                  <Badge
+                    variant="outline"
+                    className="max-w-40 truncate font-normal"
+                  >
+                    {g.projectName}
+                  </Badge>
+                  <RoleLabel name={g.roleName} />
                   {g.source === "override" ? (
                     <Button
                       size="icon"
@@ -131,7 +132,7 @@ export function ExternalCollaboratorsSection({
                       </span>
                     </AppTooltip>
                   )}
-                </Badge>
+                </span>
               ))}
             </div>
           </li>

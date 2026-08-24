@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { ThemeModeProvider } from "@/branding/ThemeMode"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
-import { Preferences } from "./Preferences"
+import { Preferences, PreferencesDialog } from "./Preferences"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }),
@@ -118,7 +118,7 @@ describe("Preferences", () => {
 
     await userEvent.click(trigger)
     await userEvent.click(await screen.findByRole("option", { name: "Dark" }))
-    expect(window.localStorage.getItem("codex-theme")).toBe("dark")
+    expect(window.localStorage.getItem("aquilla-theme")).toBe("dark")
     expect(document.documentElement).toHaveClass("dark")
   })
 
@@ -141,5 +141,50 @@ describe("Preferences", () => {
     // looking for their language will not scan for the word "Burmese".
     await userEvent.click(trigger)
     expect(await screen.findByRole("option", { name: /မြန်မာ/ })).toBeInTheDocument()
+  })
+})
+
+describe("PreferencesDialog", () => {
+  it("renders the shared preferences UI in a route-backed modal and closes to its origin", async () => {
+    const backgroundLocation = {
+      pathname: "/project/p1/editor",
+      search: "",
+      hash: "",
+      state: null,
+      key: "editor",
+    }
+    render(
+      <MemoryRouter
+        initialIndex={1}
+        initialEntries={[
+          backgroundLocation,
+          {
+            pathname: "/preferences",
+            state: { backgroundLocation, preferencesModalDepth: 1 },
+          },
+        ]}
+      >
+        <I18nProvider>
+          <ThemeModeProvider>
+            <OrgProvider>
+              <Routes>
+                <Route path="/project/:id/editor" element={<div data-testid="editor-background" />} />
+                <Route path="/preferences" element={<PreferencesDialog />} />
+                <Route path="/preferences/:section" element={<PreferencesDialog />} />
+              </Routes>
+            </OrgProvider>
+          </ThemeModeProvider>
+        </I18nProvider>
+      </MemoryRouter>,
+    )
+
+    const dialog = screen.getByTestId("preferences-dialog")
+    expect(dialog).toBeInTheDocument()
+    expect(screen.getByRole("heading", { level: 1, name: "Preferences" })).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "Theme" })).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole("button", { name: /close/i }))
+    expect(screen.getByTestId("editor-background")).toBeInTheDocument()
+    expect(screen.queryByTestId("preferences-dialog")).not.toBeInTheDocument()
   })
 })

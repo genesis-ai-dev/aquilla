@@ -1,7 +1,7 @@
 import type { FileReference } from "@/lib/parsers/types"
 import { fileOrderedBy } from "@/lib/parsers/types"
 import { useI18n } from "@/lib/i18n/I18nProvider"
-import { bidiIsolate, formatDate, formatNumber } from "@/lib/i18n/format"
+import { bidiIsolate, formatNumber } from "@/lib/i18n/format"
 import {
   Dialog,
   DialogBody,
@@ -10,6 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 
 interface FileStats { translated: number; validated: number; total: number }
 
@@ -70,7 +71,7 @@ export function FileDetailsModal({
               <DetailRow label={t("fileDetails.sourceLanguage")}>{file.sourceLanguage}</DetailRow>
             )}
             <DetailRow label={t("fileDetails.imported")}>
-              {formatDate(file.createdAt, locale, { year: "numeric", month: "short", day: "numeric" })}
+              <DateTooltip value={file.createdAt} label={t("fileDetails.imported")} />
             </DetailRow>
             {translatedPct !== null && validatedPct !== null && (
               <DetailRow label={t("fileDetails.progress")}>

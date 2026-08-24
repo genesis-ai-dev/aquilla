@@ -10,7 +10,7 @@ test("onboarding wizard welcome through ready surface session", async ({ alice }
   test.setTimeout(120_000)
 
   await alice.goto("/")
-  await alice.evaluate(() => localStorage.removeItem("codex:onboardingComplete"))
+  await alice.evaluate(() => localStorage.removeItem("aquilla:onboardingComplete"))
   await alice.goto("/onboarding")
 
   await test.step("welcome Get started advances to step 2", async () => {

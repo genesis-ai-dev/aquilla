@@ -116,7 +116,7 @@ export function RemoveOrgMemberDialog({
                   />
                   <label htmlFor={`rm-${p.id}`} className="flex-1">
                     {p.name}{" "}
-                    <span className="text-xs text-muted-foreground">(<RoleLabel name={p.role.name} />)</span>
+                    <RoleLabel name={p.role.name} />
                   </label>
                 </li>
               ))}

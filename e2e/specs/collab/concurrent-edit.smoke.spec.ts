@@ -45,7 +45,7 @@ test("alice edits cell 0; bob sees the new text in his open editor within 15s", 
   // step (ImportDialog.tsx `needsDirection`). Pre-seed the per-project skip key
   // (skipStorageKey) so importFile() completes unprompted.
   await alice.evaluate((id) => {
-    localStorage.setItem(`codex.importDirectionSkipped.${id}`, "true")
+    localStorage.setItem(`aquilla.importDirectionSkipped.${id}`, "true")
   }, projectId)
 
   const aliceWs = new Workspace(alice)

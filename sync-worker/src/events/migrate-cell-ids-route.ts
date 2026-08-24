@@ -16,7 +16,7 @@
 // Gated on SYNC_SECRET_KEY — same trust tier as /migrate/ingest and
 // /migrate/event-ids.
 
-import { secureCompare } from '../lib/secure-compare'
+import { serviceBearerMatches } from '../lib/service-auth'
 
 const PATH = '/migrate/cell-ids'
 const MAX_LIMIT = 50000
@@ -34,7 +34,7 @@ export async function handleMigrateCellIdsRequest(
   if (url.pathname !== PATH) return null
   if (request.method !== 'GET') return new Response('method not allowed', { status: 405 })
   if (!env.SYNC_SECRET_KEY) return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
-  if (!secureCompare(request.headers.get('Authorization') ?? '', `Bearer ${env.SYNC_SECRET_KEY}`)) {
+  if (!serviceBearerMatches(request.headers.get('Authorization'), env)) {
     return new Response('unauthorized', { status: 401 })
   }
   if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })

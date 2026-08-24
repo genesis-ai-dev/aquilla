@@ -280,6 +280,60 @@ export function injectOptimisticAudioAttachment(
 }
 
 /**
+ * Optimistically resize a clip's trim window, so a dragged edge moves under the
+ * pointer instead of waiting on flush + refetch.
+ *
+ * The partner of `cell.audio.trim`, and it mirrors that event's restraint: it
+ * paints the two trim fields and NOTHING else — no selection claim above all.
+ * Trimming used to ride a re-attach, whose projection sets `selected = 1`, so
+ * trimming a non-selected generated-voice clip quietly promoted it over the
+ * real take. `base` is the attachment as it should now read (the caller has it
+ * in hand already — it had to look it up to know the clip's url and slot).
+ */
+export function injectOptimisticAudioTrim(
+  fileId: string,
+  cellId: string,
+  base: AudioAttachmentOut,
+  eventId?: string | Promise<string>,
+): void {
+  const attachment = withoutViewFlags(base)
+  const byCell = cellMap(fileId)
+  const list = byCell.get(cellId) ?? []
+
+  // A pending delete outranks a trim — resizing a take the user just removed is
+  // no reason to paint it back.
+  if (list.some((s) => s.kind === "remove" && s.audioId === attachment.audioId)) return
+
+  // A live intent for this clip keeps its own values and its claim; only the
+  // window this call exists to deliver is stamped on. (Mirrors the merge in
+  // the non-claiming attach path above.)
+  const live = list.find((s) => s.kind === "attach" && s.att.audioId === attachment.audioId)
+  if (live && live.kind === "attach") {
+    live.att = {
+      ...live.att,
+      trimStartMs: attachment.trimStartMs,
+      trimEndMs: attachment.trimEndMs,
+    }
+    attachEventBinding(fileId, live, eventId)
+    broadcast(fileId, cellId, live)
+    return
+  }
+
+  const shadow: OptimisticShadow = {
+    key: nextShadowKey++,
+    eventId: null,
+    phase: "binding",
+    graceStartedAt: Date.now(),
+    kind: "attach",
+    att: attachment,
+    claimsSelection: false,
+  }
+  byCell.set(cellId, [...list, shadow])
+  attachEventBinding(fileId, shadow, eventId)
+  broadcast(fileId, cellId, shadow)
+}
+
+/**
  * Optimistically hide a just-deleted clip. Also neutralises any live attach
  * overlay for the same clip — without this, deleting a take you just recorded
  * left its attach overlay painting the take back for the rest of its lifetime

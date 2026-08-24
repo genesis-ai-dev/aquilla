@@ -15,8 +15,8 @@
  * hook instance in the tab stays in sync).
  */
 
-const STORAGE_KEY = "codex:translatorProfile"
-const CHANGE_EVENT = "codex:translator-profile-changed"
+const STORAGE_KEY = "aquilla:translatorProfile"
+const CHANGE_EVENT = "aquilla:translator-profile-changed"
 
 /** Max characters per free-text field before it is stored / sent to the model. */
 export const MAX_PROFILE_FIELD_CHARS = 280

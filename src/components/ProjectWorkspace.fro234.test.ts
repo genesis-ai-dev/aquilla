@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from "vitest"
-import { shouldPatchSystemPrompt } from "./ProjectWorkspace"
+import { shouldPatchSystemPrompt } from "./project-workspace-helpers"
 
 describe("shouldPatchSystemPrompt (AQU-234)", () => {
   // ── empty / missing prompt ─────────────────────────────────────────────────

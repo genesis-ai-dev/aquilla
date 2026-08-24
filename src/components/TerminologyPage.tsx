@@ -49,6 +49,7 @@ import { humanRoleName } from "@/lib/frontier/roles"
 import { canEditTermbase, resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
 import { computeTerminologyStats } from "@/lib/terminology/stats"
 import type { CellPair } from "@/lib/terminology/stats"
+import { isAudioCueFile } from "@/lib/parsers/types"
 import { cn } from "@/lib/utils"
 import { useProject } from "@/hooks/useProject"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -293,7 +294,7 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
     <Dialog open={open} onOpenChange={(next) => { if (!next) handleClose() }}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{initial ? "Edit concept" : "Add concept"}</DialogTitle>
+          <DialogTitle>{initial ? t("terminology.page.editConceptTitle") : t("terminology.page.addConceptButton")}</DialogTitle>
         </DialogHeader>
 
         <FieldGroup className="space-y-4 py-1">
@@ -374,7 +375,7 @@ function ConceptDialog({ open, onOpenChange, initial, onSave }: ConceptDialogPro
 
         <DialogFooter showCloseButton>
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? "Saving…" : initial ? "Save changes" : "Add concept"}
+            {saving ? t("common.saving") : initial ? t("common.saveChanges") : t("terminology.page.addConceptButton")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -497,6 +498,7 @@ function TermbaseImportDialog({
                   {t("terminology.importDialog.csvColumnsHint")}
                 </p>
               )}
+              {/* i18n-exempt "tbx" is an import-format token, not copy */}
               {tab === "tbx" && (
                 <p className="mt-2 text-xs text-muted-foreground">
                   {t("terminology.importDialog.tbxDialectsHint")}
@@ -772,9 +774,17 @@ export function TerminologyPage() {
     jwtRef.current = frontierSession?.jwt ?? null
   }, [frontierSession?.jwt])
 
+  // AQU-646 stage 2: this page reads `project.files` itself rather than the
+  // workspace's already-filtered list, so it needs its own filter. An
+  // audio-cue sibling's cells are a near-verbatim transcript of a film's
+  // soundtrack — feeding those to candidate extraction would flood the term
+  // suggestions with spoken filler from a file that has no terminology of its
+  // own and is not translated anywhere.
   const projectFiles = useMemo(
     () =>
-      (project?.files ?? []).map((f) => ({ id: f.id, name: f.name, type: f.type })),
+      (project?.files ?? [])
+        .filter((f) => !isAudioCueFile(f))
+        .map((f) => ({ id: f.id, name: f.name, type: f.type })),
     [project?.files],
   )
 
@@ -1389,8 +1399,8 @@ export function TerminologyPage() {
         title={t("terminology.page.deleteConceptDialogTitle")}
         description={
           pendingDeleteConcept
-            ? `Delete "${pendingDeleteConcept.sourceTerm}"? This removes the concept and all its renderings for everyone in the project and cannot be undone.`
-            : "Delete this concept? This removes it for everyone in the project and cannot be undone."
+            ? t("terminology.page.deleteNamedConcept", { term: pendingDeleteConcept.sourceTerm })
+            : t("terminology.page.deleteConcept")
         }
         confirmLabel="Delete concept"
         checkboxLabel="I understand this deletes the concept and all its renderings for everyone in the project."

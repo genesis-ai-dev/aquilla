@@ -4,7 +4,7 @@
  * Covers:
  *  - Existing user (has orgs): after login in SignInStep, wizard skips to dashboard
  *  - Fresh user (no orgs, no onboardingComplete): wizard continues to Name step
- *  - localStorage "codex:onboardingComplete" flag also triggers skip
+ *  - localStorage "aquilla:onboardingComplete" flag also triggers skip
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -144,7 +144,7 @@ describe("OnboardingWizard — returning user skip", () => {
   })
 
   it("navigates to / when localStorage onboardingComplete is set, even with no orgs", async () => {
-    localStorage.setItem("codex:onboardingComplete", "true")
+    localStorage.setItem("aquilla:onboardingComplete", "true")
     mockRefreshOrgs.mockResolvedValue([]) // no orgs, but flag is set
 
     renderWizard()

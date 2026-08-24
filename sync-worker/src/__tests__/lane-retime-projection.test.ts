@@ -130,3 +130,44 @@ describe('cell.lane.retime — projection', () => {
     expect(recorded[0].args[0]).toBe(1235)
   })
 })
+
+// AQU-646 round 8: the dub anchor became RELATIVE to the cell (target_offset_ms)
+// so a take travels with its line. The absolute key stays projected forever —
+// rebuild.ts replays historical events, so it can never be retired.
+describe('cell.lane.retime — target_offset_ms', () => {
+  it('sets the offset alone, leaving the legacy absolute key alone', () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(db, makeEvent({ targetOffsetMs: 2000 }), [])
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0].sql).toContain("jsonb_build_object('target_offset_ms'")
+    expect(recorded[0].sql).not.toContain('target_start_ms')
+    expect(recorded[0].args[0]).toBe(2000)
+  })
+
+  it('a NEGATIVE offset survives — a take may lead its line', () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(db, makeEvent({ targetOffsetMs: -1500 }), [])
+    expect(recorded[0].args[0]).toBe(-1500)
+  })
+
+  it('an offset of exactly 0 writes, rather than being skipped as falsy', () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(db, makeEvent({ targetOffsetMs: 0 }), [])
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0].args[0]).toBe(0)
+  })
+
+  it('null clears the offset', () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(db, makeEvent({ targetOffsetMs: null }), [])
+    expect(recorded[0].sql).toContain("metadata - 'target_offset_ms'")
+  })
+
+  it('a legacy event still projects the absolute key, untouched by the new one', () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(db, makeEvent({ targetStartMs: 9000 }), [])
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0].sql).toContain("jsonb_build_object('target_start_ms'")
+    expect(recorded[0].sql).not.toContain('target_offset_ms')
+  })
+})

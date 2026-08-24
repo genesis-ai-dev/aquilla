@@ -37,9 +37,29 @@ import {
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { DataTableColumnHeader } from "@/components/ui/data-table-column-header"
+import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { MoreHorizontal, Search } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
+
+const SKELETON_ROW_COUNT = 8
+const SKELETON_WIDTHS = [
+  "w-[72%]",
+  "w-[48%]",
+  "w-[60%]",
+  "w-[40%]",
+  "w-[55%]",
+  "w-[35%]",
+  "w-[64%]",
+  "w-[44%]",
+] as const
+
+/** Idle search chrome. Loading disables the field but must not swap in
+ *  InputGroup's muted `has-disabled:bg-input/*` / opacity — that flash is
+ *  the only difference between page-load and ready. */
+const TABLE_SEARCH_GROUP_CLASS =
+  "max-w-xs bg-card has-disabled:bg-card has-disabled:opacity-100 dark:has-disabled:bg-input/30"
+const TABLE_SEARCH_INPUT_CLASS = "disabled:opacity-100"
 
 function columnMetaClass(meta: unknown) {
   const m = meta as { align?: "right"; className?: string; hidden?: boolean } | undefined
@@ -124,6 +144,13 @@ interface DataTableProps<TData, TValue> {
   /** Shown when there are no rows to display (empty data or search/filter miss). */
   emptyState?: React.ReactNode | ((table: TanStackTable<TData>) => React.ReactNode)
   /**
+   * Keep search/toolbar chrome and skeletonize the table body. Search stays
+   * visible (disabled) so the toolbar does not jump when rows arrive.
+   */
+  loading?: boolean
+  /** Accessible status label while `loading` is true. */
+  loadingLabel?: string
+  /**
    * Compact row/header padding for portfolio-style lists (ReUI DataGrid `dense`).
    * Off = comfortable row height (`py-2.5` / `h-11`); on = tight (`py-1.5` / `h-9`).
    */
@@ -137,6 +164,12 @@ interface DataTableProps<TData, TValue> {
    * pinned above while rows scroll (in-card portfolio panels).
    */
   fillHeight?: boolean
+  /**
+   * Optional last body row (e.g. "Show N more"). Renders as a single colSpan
+   * cell so it sits in the table instead of as a detached header/footer control.
+   * Hidden while loading or when there are no rows.
+   */
+  footer?: React.ReactNode
 }
 
 function DataTable<TData, TValue>({
@@ -154,10 +187,13 @@ function DataTable<TData, TValue>({
   renderRowMenuItems,
   renderSubRow,
   emptyState,
+  loading = false,
+  loadingLabel,
   dense = false,
   className,
   tableClassName,
   fillHeight = false,
+  footer,
 }: DataTableProps<TData, TValue>) {
   const t = useT()
   const [sorting, setSorting] = React.useState<SortingState>(
@@ -191,6 +227,9 @@ function DataTable<TData, TValue>({
   const toolbarNode = typeof toolbar === "function" ? toolbar(table) : toolbar
   const emptyStateNode = typeof emptyState === "function" ? emptyState(table) : emptyState
   const hasRows = table.getRowModel().rows.length > 0
+  const showEmpty = !loading && !hasRows && emptyStateNode
+  const statusLabel = loadingLabel ?? t("common.loadingSpinner")
+  const visibleColumnCount = table.getVisibleLeafColumns().length
 
   return (
     <div
@@ -203,11 +242,12 @@ function DataTable<TData, TValue>({
       {(searchPlaceholder || toolbarNode) && (
         <div className="flex shrink-0 flex-wrap items-center gap-3">
           {searchPlaceholder ? (
-            <InputGroup className="max-w-xs bg-card">
+            <InputGroup className={TABLE_SEARCH_GROUP_CLASS}>
               <InputGroupAddon>
                 <Search />
               </InputGroupAddon>
               <InputGroupInput
+                className={TABLE_SEARCH_INPUT_CLASS}
                 placeholder={searchPlaceholder}
                 value={globalFilter}
                 onChange={(event) => setGlobalFilter(event.target.value)}
@@ -216,6 +256,7 @@ function DataTable<TData, TValue>({
                 autoCorrect="off"
                 autoCapitalize="none"
                 spellCheck={false}
+                disabled={loading}
               />
             </InputGroup>
           ) : null}
@@ -234,8 +275,11 @@ function DataTable<TData, TValue>({
             : "overflow-hidden",
         )}
         data-testid={testId}
+        {...(loading
+          ? { role: "status" as const, "aria-busy": true as const, "aria-label": statusLabel }
+          : {})}
       >
-        {!hasRows && emptyStateNode ? (
+        {showEmpty ? (
           emptyStateNode
         ) : (
           <Table className={tableClassName}>
@@ -264,7 +308,25 @@ function DataTable<TData, TValue>({
               ))}
             </TableHeader>
             <TableBody>
-              {hasRows ? (
+              {loading ? (
+                Array.from({ length: SKELETON_ROW_COUNT }, (_, row) => (
+                  <TableRow key={`skeleton-${row}`} className="hover:bg-transparent">
+                    {Array.from({ length: visibleColumnCount }, (_, col) => (
+                      <TableCell
+                        key={col}
+                        className={dense ? "py-1.5" : "py-2.5"}
+                      >
+                        <Skeleton
+                          className={cn(
+                            "h-4 max-w-full",
+                            SKELETON_WIDTHS[(row + col) % SKELETON_WIDTHS.length],
+                          )}
+                        />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : hasRows ? (
                 table.getRowModel().rows.map((row) => {
                   const sub = renderSubRow?.(row.original)
                   const menuItems = renderRowMenuItems?.(row.original) ?? null
@@ -305,11 +367,21 @@ function DataTable<TData, TValue>({
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={table.getVisibleLeafColumns().length} className="h-24 text-center">
+                  <TableCell colSpan={visibleColumnCount} className="h-24 text-center">
                     {t("workspace.dataTable.noResults")}
                   </TableCell>
                 </TableRow>
               )}
+              {footer && hasRows && !loading ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell
+                    colSpan={visibleColumnCount}
+                    className={dense ? "py-1.5" : "py-2.5"}
+                  >
+                    {footer}
+                  </TableCell>
+                </TableRow>
+              ) : null}
             </TableBody>
           </Table>
         )}
@@ -395,7 +467,7 @@ function DataTableRowActionsButton({
         // Rows are often clickable; this press belongs to the menu, not the row.
         onClick={(event) => event.stopPropagation()}
         className={cn(
-          "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+          "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
           // Snap hover/active paint (no muddy transparent→accent fade). Keep
           // transform so the shared Button active translate still works.
           "transition-transform",
@@ -427,5 +499,60 @@ function DataTableRowActionsButton({
   )
 }
 
-export { DataTable, DataTableColumnHeader, DataTableRowActionsButton }
+/**
+ * Search + bordered panel skeleton for pages that don't yet have column defs
+ * (org context still resolving). Matches DataTable toolbar geometry so the
+ * search field does not jump when the real table mounts.
+ */
+function DataTablePanelSkeleton({
+  searchPlaceholder,
+  loadingLabel,
+  className,
+  toolbar,
+}: {
+  searchPlaceholder?: string
+  loadingLabel: string
+  className?: string
+  toolbar?: React.ReactNode
+}) {
+  return (
+    <div className="flex w-full min-w-0 flex-col gap-2.5">
+      {(searchPlaceholder || toolbar) && (
+        <div className="flex shrink-0 flex-wrap items-center gap-3">
+          {searchPlaceholder ? (
+            <InputGroup className={TABLE_SEARCH_GROUP_CLASS}>
+              <InputGroupAddon>
+                <Search />
+              </InputGroupAddon>
+              <InputGroupInput
+                className={TABLE_SEARCH_INPUT_CLASS}
+                placeholder={searchPlaceholder}
+                aria-label={searchPlaceholder}
+                disabled
+              />
+            </InputGroup>
+          ) : null}
+          {toolbar}
+        </div>
+      )}
+      <div
+        role="status"
+        aria-busy="true"
+        aria-label={loadingLabel}
+        className={cn("overflow-hidden rounded-md border", className)}
+      >
+        <div className="space-y-2 p-2">
+          {Array.from({ length: SKELETON_ROW_COUNT }, (_, i) => (
+            <Skeleton
+              key={i}
+              className={cn("h-9 max-w-full", SKELETON_WIDTHS[i % SKELETON_WIDTHS.length])}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export { DataTable, DataTableColumnHeader, DataTableRowActionsButton, DataTablePanelSkeleton }
 export type { DataTableProps }

@@ -134,7 +134,10 @@ describe("ProjectCard in-flight open state (AQU-737)", () => {
     // The spinner primitive exposes role="status" for assistive tech.
     expect(overlay.querySelector('[role="status"]')).not.toBeNull()
     // aria-busy is set on the card container itself.
-    expect(overlay.closest('[aria-busy="true"]')).not.toBeNull()
+    const card = overlay.closest('[aria-busy="true"]')
+    expect(card).not.toBeNull()
+    // Loading is shown by the spinner overlay, not a wait cursor.
+    expect(card?.className).not.toContain("cursor-wait")
   })
 
   it("swallows clicks while pending so opening cannot fire twice", () => {

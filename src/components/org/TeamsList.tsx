@@ -26,7 +26,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { optionalString, requiredString } from "@/lib/forms/schemas"
 import { useSubmitError } from "@/lib/forms/submit-error"
-import { Page, PageHeader, EmptyState } from "@/components/ui/page"
+import { Page, PageHeader, EmptyState, TableEmptyState } from "@/components/ui/page"
 import { TeamWithAvatar } from "@/components/TeamWithAvatar"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -321,12 +321,11 @@ export function TeamsList() {
               title={t("org.teamsList.selectOrgTitle")}
               description={t("org.teamsList.selectOrgDescription")}
             />
-          ) : loading ? (
-            <div className="h-48 animate-pulse rounded-lg border bg-card" />
           ) : (
             <DataTable
               columns={columns}
               data={visibleTeams}
+              loading={loading}
               getRowId={(t) => String(t.id)}
               onRowClick={(t) => {
                 if (activeOrgId != null) navigate(orgPath(activeOrgId, `/teams/${t.id}`))
@@ -355,9 +354,7 @@ export function TeamsList() {
                 const search = String(table.getState().globalFilter ?? "").trim()
                 if (teams.length === 0) {
                   return (
-                    <EmptyState
-                      variant="inline"
-                      className="flex-none py-12"
+                    <TableEmptyState
                       icon={NAV_PAGE_ICONS.teams}
                       title={t("org.teamsList.noTeamsTitle")}
                       description={
@@ -370,9 +367,7 @@ export function TeamsList() {
                 }
                 if (visibleTeams.length === 0 && !search) {
                   return (
-                    <EmptyState
-                      variant="inline"
-                      className="flex-none py-12"
+                    <TableEmptyState
                       icon={NAV_PAGE_ICONS.teams}
                       title={
                         visibility === "public"

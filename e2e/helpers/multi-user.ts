@@ -57,14 +57,14 @@ async function makeAuthedPage(
   ])
   // AQU-244: the "Project setup" checklist auto-opens as a modal sheet on the
   // first workspace visit to any incomplete project, making the page inert.
-  // Its localStorage key is per-project (codex.setupAutoShown.<id>) so it
+  // Its localStorage key is per-project (aquilla.setupAutoShown.<id>) so it
   // can't be pre-seeded for projects a test creates later — patch getItem at
   // the context level so every project reads as already-shown. The checklist
   // feature itself stays reachable through its chip.
   await ctx.addInitScript(() => {
     const orig = Storage.prototype.getItem
     Storage.prototype.getItem = function (key: string) {
-      if (typeof key === "string" && key.startsWith("codex.setupAutoShown.")) return "1"
+      if (typeof key === "string" && key.startsWith("aquilla.setupAutoShown.")) return "1"
       return orig.call(this, key)
     }
   })

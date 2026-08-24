@@ -15,7 +15,7 @@ export interface DeleteFileProjectionOptions {
 /**
  * Fires and forgets. Returns true on 2xx, false on anything else (including
  * a missing jwt, which means the user isn't authenticated and we never tried
- * — the D1 rows remain, but local delete already succeeded so the user's
+ * — the server-side rows remain, but local delete already succeeded so the user's
  * editor is consistent). Callers should not block on this result.
  */
 export async function deleteFileProjection(

@@ -19,11 +19,12 @@ describe("teams API", () => {
     let url = ""
     global.fetch = vi.fn(async (input) => {
       url = typeof input === "string" ? input : (input as Request).url
-      return new Response(JSON.stringify({ id: 10, name: "West Africa", members: [{ userId: 1, username: "wendi", roleLevel: 700 }], projects: [{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }] }), { status: 200 })
+      return new Response(JSON.stringify({ id: 10, name: "West Africa", members: [{ userId: 1, username: "wendi", roleLevel: 700, addedAt: "2026-07-20T09:00:00.000Z" }], projects: [{ id: "pa", name: "Bambara", grantedRoleLevel: 400, grantedAt: "2026-07-22T15:00:00.000Z" }] }), { status: 200 })
     }) as unknown as typeof fetch
     const detail = await getTeam("jwt", 1, 10)
     expect(url).toMatch(/\/api\/v2\/orgs\/1\/groups\/10$/)
-    expect(detail.projects).toEqual([{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }])
+    expect(detail.members).toEqual([{ userId: 1, username: "wendi", roleLevel: 700, addedAt: "2026-07-20T09:00:00.000Z" }])
+    expect(detail.projects).toEqual([{ id: "pa", name: "Bambara", grantedRoleLevel: 400, grantedAt: "2026-07-22T15:00:00.000Z" }])
   })
 })
 

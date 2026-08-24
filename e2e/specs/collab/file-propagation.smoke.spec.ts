@@ -45,7 +45,7 @@ test("alice imports a file; bob (added via API) sees it in his workspace", async
   // step (ImportDialog.tsx `needsDirection`). Pre-seed the per-project skip key
   // (skipStorageKey) so importFile() completes unprompted.
   await alice.evaluate((id) => {
-    localStorage.setItem(`codex.importDirectionSkipped.${id}`, "true")
+    localStorage.setItem(`aquilla.importDirectionSkipped.${id}`, "true")
   }, projectId)
 
   const aliceWs = new Workspace(alice)

@@ -114,10 +114,10 @@ export async function injectSession(page: Page, session: PersistedSession): Prom
     db.close()
 
     // Mark onboarding complete so the app routes straight to dashboard.
-    localStorage.setItem("codex:onboardingComplete", "true")
+    localStorage.setItem("aquilla:onboardingComplete", "true")
     // Suppress the first-run product tour (AQU-243) — its modal welcome
     // dialog makes the workspace inert and blocks every role-based locator.
-    localStorage.setItem("codex:productTourDone", "1")
+    localStorage.setItem("aquilla:productTourDone", "1")
     // Set the auth-hint cookie (aq_hint=1) that App.tsx checks via
     // hasAuthHintCookie() — without it the IDB envelope write bypasses
     // writeEnvelope() which is where setAuthHint() is normally called.
@@ -126,7 +126,7 @@ export async function injectSession(page: Page, session: PersistedSession): Prom
 
   // AQU-244: the "Project setup" checklist auto-opens as a modal sheet on the
   // first workspace visit to any incomplete project, making the page inert.
-  // Its localStorage key is per-project (codex.setupAutoShown.<id>) so it
+  // Its localStorage key is per-project (aquilla.setupAutoShown.<id>) so it
   // can't be pre-seeded for projects the test creates later. Patch getItem at
   // the context level (applies to every subsequent document) so every project
   // reads as already-shown. This does NOT hide the checklist feature — the
@@ -135,7 +135,7 @@ export async function injectSession(page: Page, session: PersistedSession): Prom
   await page.context().addInitScript(() => {
     const orig = Storage.prototype.getItem
     Storage.prototype.getItem = function (key: string) {
-      if (typeof key === "string" && key.startsWith("codex.setupAutoShown.")) return "1"
+      if (typeof key === "string" && key.startsWith("aquilla.setupAutoShown.")) return "1"
       return orig.call(this, key)
     }
   })
@@ -209,8 +209,8 @@ export async function injectSessions(
     })
     db.close()
 
-    localStorage.setItem("codex:onboardingComplete", "true")
-    localStorage.setItem("codex:productTourDone", "1")
+    localStorage.setItem("aquilla:onboardingComplete", "true")
+    localStorage.setItem("aquilla:productTourDone", "1")
     document.cookie = "aq_hint=1; Path=/; Max-Age=31536000; SameSite=Lax"
   }, { sessions, activeUsername })
 

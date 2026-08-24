@@ -101,9 +101,9 @@ export function OnboardingWizard() {
   const handleLoginComplete = useCallback(async () => {
     // Force a fresh fetch; the return value is the authoritative post-login list.
     const freshOrgs = await refreshOrgs()
-    const alreadyOnboarded = localStorage.getItem("codex:onboardingComplete") === "true"
+    const alreadyOnboarded = localStorage.getItem("aquilla:onboardingComplete") === "true"
     if (alreadyOnboarded || freshOrgs.length > 0) {
-      localStorage.setItem("codex:onboardingComplete", "true")
+      localStorage.setItem("aquilla:onboardingComplete", "true")
       posthog.capture(ONBOARDING_RETURNING_USER_SKIP, {
         reason: alreadyOnboarded ? "flag" : "has-orgs",
       })
@@ -120,7 +120,7 @@ export function OnboardingWizard() {
   }, [next])
 
   const handleFinish = useCallback(() => {
-    localStorage.setItem("codex:onboardingComplete", "true")
+    localStorage.setItem("aquilla:onboardingComplete", "true")
     if (createdProject) {
       navigate(`/project/${createdProject.id}/editor`, {
         state: { openSetupChecklist: true },
@@ -131,7 +131,7 @@ export function OnboardingWizard() {
   }, [createdProject, navigate])
 
   const handleSkipProject = useCallback(() => {
-    localStorage.setItem("codex:onboardingComplete", "true")
+    localStorage.setItem("aquilla:onboardingComplete", "true")
     navigate("/")
   }, [navigate])
 

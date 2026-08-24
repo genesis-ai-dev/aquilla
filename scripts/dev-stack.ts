@@ -61,6 +61,7 @@ import {
 } from "./lib/spawn-worker"
 import {
   finalizeArtifactBindingSchema,
+  finalizeAuthTokenSchema,
   finalizeChangesetSchema,
   finalizeSourceBlobSchema,
   prepareArtifactBindingSchema,
@@ -431,6 +432,7 @@ async function reconcilePgSchema(
 
   patched.push(...await finalizeSourceBlobSchema(client, run))
   patched.push(...await finalizeChangesetSchema(client, run))
+  patched.push(...await finalizeAuthTokenSchema(client, run))
 
   if (tables.has("artifact_bindings")) {
     patched.push(...await finalizeArtifactBindingSchema(client, run))

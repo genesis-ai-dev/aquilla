@@ -194,6 +194,57 @@ describe('POST /events — authorization', () => {
   })
 })
 
+// ── Batch isolation ────────────────────────────────────────────────────
+
+describe('POST /events — one malformed event does not take its batch down', () => {
+  it('rejects a bad file.track.set per-event (400) and still accepts its co-batched sibling', async () => {
+    // file.track.set is the only handler that validates a payload SHAPE, and
+    // it used to signal every refusal with a bare throw. Nothing catches
+    // between the handler and the worker's fetch handler, so the whole POST
+    // 500'd — every other event in the batch lost with it. The client reads
+    // 5xx as transient and retries without burning its attempt budget, so the
+    // bad event came straight back at the head of the next batch: an outbox
+    // wedged forever, for every project the user had open. A per-event 400 in
+    // `rejected` is what lets the flusher drop it and move on.
+    const token = await makeToken({ role: 600 })
+    const { db, snapshot } = await makeTestDb()
+
+    const badTrackSet = {
+      id: 'evt-track-bad',
+      schemaVersion: 1,
+      kind: 'file.track.set',
+      projectId: 'proj-a',
+      fileId: 'file-x',
+      cellId: null,
+      parentId: null,
+      author: 'alice',
+      // An empty patch says nothing and is refused by the handler.
+      payload: { trackId: 'source-subtitles', patch: {} },
+      clientTs: 1000,
+    }
+    const good = targetCreate({ id: 'evt-create-good' })
+
+    const res = (await handleEventsWriteRequest(
+      // Poison at the HEAD, which is where the client's file-grouped batches
+      // would have put it.
+      await makeRequest([badTrackSet, good], token),
+      makeEnv(db),
+    ))!
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as any
+    expect(body.rejected).toHaveLength(1)
+    expect(body.rejected[0].id).toBe('evt-track-bad')
+    expect(body.rejected[0].status).toBe(400)
+    expect(body.accepted.map((a: any) => a.id)).toEqual(['evt-create-good'])
+
+    // The sibling really committed — "accepted" here is not just a label on a
+    // batch that never reached Postgres.
+    const events = (await snapshot()).events
+    expect(events.map((e: any) => e.id)).toEqual(['evt-create-good'])
+  })
+})
+
 // ── server_seq monotonicity ────────────────────────────────────────────
 
 describe('POST /events — server_seq', () => {

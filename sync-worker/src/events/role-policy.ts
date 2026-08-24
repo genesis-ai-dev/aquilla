@@ -35,10 +35,18 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // Source-side: importer (owner / admin path), or PROJECT_LEAD+ for
   // direct re-imports. The import-bot service account is provisioned at
   // OWNER level out of band.
-  'source.cell.create': ROLE.PROJECT_LEAD,
+  //
+  // Sam, 2026-08-21: create/delete/reorder dropped to CONTRIBUTOR so the
+  // `allowLineCreation` project setting can admit contributors — reorder
+  // included because it is the chain bookkeeping riding every add and remove
+  // batch. This is the LOWEST reachable floor; authorize.ts conditionally
+  // re-imposes PROJECT_LEAD — all three refused below lead unless the
+  // project opted in, deletes additionally only for a cell a person added by
+  // hand (line-creation-authority.ts).
+  'source.cell.create': ROLE.CONTRIBUTOR,
   'source.cell.commit': ROLE.PROJECT_LEAD,
-  'source.cell.delete': ROLE.PROJECT_LEAD,
-  'source.cell.reorder': ROLE.PROJECT_LEAD,
+  'source.cell.delete': ROLE.CONTRIBUTOR,
+  'source.cell.reorder': ROLE.CONTRIBUTOR,
   'source.cell.metadata.patch': ROLE.PROJECT_LEAD,
   'source.cell.reanchor': ROLE.PROJECT_LEAD,
 
@@ -62,7 +70,17 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'cell.audio.select': ROLE.CONTRIBUTOR,
   'cell.audio.remove': ROLE.CONTRIBUTOR,
   'cell.audio.rename': ROLE.CONTRIBUTOR,
+  'cell.audio.trim': ROLE.CONTRIBUTOR,
   'cell.audio.measure': ROLE.CONTRIBUTOR,
+
+  // AQU-646 (Sam, 2026-08-18): RAISED from CONTRIBUTOR to PROJECT_LEAD.
+  // The stage-4 reasoning — "pairing a subtitle line with the audio cue that
+  // performs it is ordinary dubbing work" — turned out to be wrong about who
+  // does it. The client's own process settles the pairings BEFORE handing off,
+  // and the translators and dubbers who receive the file are exactly the
+  // contributors who must not be able to re-cut them: a changed link silently
+  // moves which line a recording belongs to, for everyone.
+  'cell.link.set': ROLE.PROJECT_LEAD,
   // AQU-508: approving/withdrawing approval of a cell's audio is a review
   // action — reviewer(300)+, mirroring the text-side cell.validate gate.
   'cell.audio.validate': ROLE.REVIEWER,
@@ -108,20 +126,49 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'project.link-source': ROLE.PROJECT_LEAD,
 
   // AQU-438: cast.assign is a metadata-only label written by a PM or project
-  // lead who is assigning voice actors to cells. Contributor-level so a project
-  // lead can bulk-assign from the label import panel without needing owner role.
-  'cast.assign': ROLE.CONTRIBUTOR,
+  // lead who is assigning voice actors to cells.
+  //
+  // AQU-646 (Sam, 2026-08-18): RAISED from CONTRIBUTOR to PROJECT_LEAD. The
+  // original note already said "written by a PM or project lead" — the floor
+  // just sat a rung below the people it described. Importing a character sheet
+  // rewrites the speaker on hundreds of cells at once, which is project setup,
+  // not translation.
+  //
+  // AQU-646 (Sam, 2026-08-20): RAISED AGAIN, to MAINTAINER. Characters are one
+  //   person's job here — the client's producer owns the sheets, and she holds
+  //   maintainer. Nobody below her reconciles the two sheets against each other,
+  //   so the resolve drawer this event also backs has an audience of one and does
+  //   not need a lower floor to stay reachable.
+  // 
+  //   KNOWN CONSEQUENCE, accepted deliberately: `cast.assign` also carries the
+  //   older CSV label round-trip (AQU-438 — download a template, fill in a
+  //   `cast_name` column, re-upload), which has no UI role gate of its own. That
+  //   flow now needs maintainer too. It surfaces as the panel's inline error rather
+  //   than a crash, because the client mirror throws before anything reaches the
+  //   durable outbox.
+  'cast.assign': ROLE.MAINTAINER,
 
   // Timeline editor: retiming a cell (move/stretch) is a translator-level edit.
   'cell.retime': ROLE.CONTRIBUTOR,
   'cell.lane.retime': ROLE.CONTRIBUTOR,
-  // Timeline editor: linking a core video to a file — contributor-level, like
-  // file.rename (normal editing flow, not a structural change to the inventory).
-  'file.video.set': ROLE.CONTRIBUTOR,
+  // Timeline editor: linking a core video to a file.
+  //
+  // AQU-646 (Sam, 2026-08-18): RAISED from CONTRIBUTOR to PROJECT_LEAD. The
+  // file.rename analogy does not hold — a rename changes a label, this changes
+  // the FOOTAGE every collaborator times, records and reviews against. It is
+  // part of setting a project up, and it is one field away from pointing a
+  // whole team at the wrong episode.
+  'file.video.set': ROLE.PROJECT_LEAD,
   // The timing mode changes how the whole file lays out and plays for
   // everyone — structural, so it keeps the clearance the setting had when it
   // lived in Project Settings (the shared-settings maintainer floor).
   'file.timing.set': ROLE.MAINTAINER,
+  // Track structure IS file structure: renaming, reordering or regrouping a
+  // track relayouts the timeline for every collaborator who opens the file —
+  // the same rationale that put file.timing.set at this floor. Deliberately
+  // NOT the CONTRIBUTOR floor that file.rename and file.video.set sit at;
+  // those are normal editing flow, this changes the shared layout.
+  'file.track.set': ROLE.MAINTAINER,
 
   // AQU-476: mirror-engine kinds are server-emitted only (link-sync.ts calls
   // buildEventProjectionStmts directly in-process — never through the client

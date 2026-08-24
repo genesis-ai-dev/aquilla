@@ -111,6 +111,14 @@ export interface AutoTranscribeArgs {
   /** Runs after the batch settles — the caller flushes the outbox (the
    *  transcript emits queue there) and revalidates so text appears promptly. */
   onDone?: () => void | Promise<void>
+  /** Sam, 2026-08-18: "it takes a minute to transcribe everything so there
+   *  should be a toast that shows that it's loading." Stays silent for a
+   *  consent denial or a file with nothing to do, so no toast ever appears for
+   *  a run that never happened. */
+  onProgress?: (done: number, total: number) => void
+  /** The batch threw. Only matters to a caller that put something on screen in
+   *  `onProgress` and now has to take it back down. */
+  onFailed?: (message: string) => void
 }
 
 /**
@@ -127,9 +135,11 @@ export async function autoTranscribeImportedMedia(args: AutoTranscribeArgs): Pro
       session: args.session,
       sourceLanguage: args.sourceLanguage,
       targetLanguage: args.targetLanguage,
+      onProgress: args.onProgress,
     })
     await args.onDone?.()
   } catch (e) {
     console.warn("[auto-transcribe] post-import batch failed:", e)
+    args.onFailed?.(e instanceof Error ? e.message : String(e))
   }
 }

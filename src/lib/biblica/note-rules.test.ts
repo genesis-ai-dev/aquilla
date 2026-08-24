@@ -5,6 +5,7 @@ import {
   isBiblicaBookMarkerStyle,
   isBiblicaChapterHeadingStyle,
   isBiblicaNoteSectionStyle,
+  isBiblicaScriptureHeadingStyle,
   isChapterNumberCharacterStyle,
   isMetaChapterCharacterStyle,
   isMetaVerseCharacterStyle,
@@ -27,8 +28,18 @@ describe("Biblica IDML style rules", () => {
     expect(isBiblicaBookMarkerStyle("ParagraphStyle/meta:bk")).toBe(true)
     expect(isBiblicaBookMarkerStyle("ParagraphStyle/meta%3arh")).toBe(false)
 
+    expect(isBiblicaChapterHeadingStyle("ParagraphStyle/head%3acl")).toBe(true)
     expect(isBiblicaChapterHeadingStyle("ParagraphStyle/intro%3ahead%3acl")).toBe(true)
     expect(isBiblicaChapterHeadingStyle("ParagraphStyle/intro%3ad_h")).toBe(false)
+
+    expect(isBiblicaScriptureHeadingStyle("ParagraphStyle/head%3acl")).toBe(true)
+    expect(isBiblicaScriptureHeadingStyle("ParagraphStyle/head:d_h")).toBe(true)
+    expect(isBiblicaScriptureHeadingStyle("ParagraphStyle/head%3ams")).toBe(true)
+    expect(isBiblicaScriptureHeadingStyle("ParagraphStyle/head%3aqa")).toBe(true)
+    expect(isBiblicaScriptureHeadingStyle("ParagraphStyle/head%3asp")).toBe(true)
+    expect(isBiblicaScriptureHeadingStyle("ParagraphStyle/intro%3aip")).toBe(false)
+    expect(isBiblicaScriptureHeadingStyle("ParagraphStyle/text%3aq1")).toBe(false)
+    expect(isBiblicaScriptureHeadingStyle("ParagraphStyle/meta%3arh")).toBe(false)
   })
 
   it("keeps verse, chapter, and bookend character styles distinct", () => {

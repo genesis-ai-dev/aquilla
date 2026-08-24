@@ -12,8 +12,7 @@
 // under the UI's 8 MB cap (20s mono 48k/16-bit ≈ 1.9 MB).
 
 import { fetchCellAudio, parseFrontierAudioUrl } from "./upload"
-import { decodeToMono48k, TARGET_RATE } from "./decode-mono"
-import { concatPcm } from "@/lib/export/audio-by-character"
+import { concatPcm, decodeToMono48k, TARGET_RATE } from "./decode-mono"
 import { encodeWavPcm16 } from "./wav-encode"
 import { uploadVoiceReference, buildVoiceReferenceId } from "./voice-clone"
 

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import {
   AQUILLA_MIGRATION_NS,
+  escalatedEventId,
   projectIdFor,
   fileIdFor,
   fileCreateEventId,
@@ -37,6 +38,15 @@ describe("migrate deterministic ids", () => {
 
   it("separates gitlab vs local project keys", () => {
     expect(projectIdFor("123", "local")).not.toBe(projectIdFor("123", "gitlab"))
+  })
+
+  it("escalatedEventId: gen 1 IS the original; higher generations are stable, distinct v5 ids", () => {
+    const original = sourceCellCreateEventId("p", "f", "c")
+    expect(escalatedEventId(original, 1)).toBe(original)
+    expect(escalatedEventId(original, 2)).toBe(escalatedEventId(original, 2))
+    expect(escalatedEventId(original, 2)).not.toBe(original)
+    expect(escalatedEventId(original, 3)).not.toBe(escalatedEventId(original, 2))
+    expect(escalatedEventId(original, 2)).toMatch(UUID_RE)
   })
 
   it("distinguishes different files, cells, and edit indices", () => {

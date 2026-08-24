@@ -62,6 +62,19 @@ The existing grammar (`src/lib/sync/events-emit.ts`, projected in `sync-worker/s
 
 ## 5. Master-clock playback
 
+> **Superseded 2026-08-08 (AQU-646).** The play queue is the master clock; the
+> linked video is a slaved, muted picture surface that follows it. This section
+> describes the original arrangement, which shipped and did not work: the video
+> and the queue both wrote the timeline clock at ~4Hz with last-writer-wins, the
+> video's native play button started picture without sound, and its own
+> soundtrack played over the dub. The video now lives beside the text table
+> (`MediaVideoPane`) rather than above the lanes, with no native controls, and
+> position logic is in `src/components/timeline/video-sync.ts`.
+>
+> Also corrected in that round: the client had always mapped `coreMediaUrl` off
+> the project summary, but the identity worker never sent the field — so §4.2's
+> "read back by the preview" was never true and a linked video reached nothing.
+
 - With a `coreMediaUrl` linked, the `react-player` instance is the **master clock**: its progress drives the playhead position; clicking/dragging the ruler calls `seekTo`; cards highlight as the playhead passes.
 - Re-enables the currently-disabled video path (`ProjectWorkspace.tsx:962` hardcodes `videoSrc = null`); v1 sources `videoSrc` from the file's `coreMediaUrl` instead.
 - With no linked video, the playhead is still a draggable position cursor; **per-card audio playback stays as-is** via the existing `useCellAudio` / `CellWaveform`.
@@ -93,7 +106,7 @@ Hand-rolled over existing primitives (matching `CellWaveform` and `CombinedBound
 - **Overlapping cards within a lane** → allowed; hover raises z-order. No ripple or auto-resolve.
 - **Concurrent edits** → retime goes through the existing cell claim / focus-lock path, same as content edits.
 - **Degenerate drags** → clamp `endMs > startMs` with a minimum duration; reject NaN/negative.
-- **No `coreMediaUrl`** → preview shows an empty state with a "Link video" CTA; the timeline remains fully usable.
+- **No `coreMediaUrl`** → preview shows an empty state with a "Link video" CTA; the timeline remains fully usable. *(2026-08-08: there is no preview above the lanes any more — with no linked video the pane simply does not mount, and "Link video" lives in the toolbar. See the note in §5.)*
 - **Untimed tray** → view + select only in v1 (drag-to-assign-timing deferred).
 - **Empty media lane** → existing "No media segments yet" / `TimelineAddMedia` empty state is preserved.
 

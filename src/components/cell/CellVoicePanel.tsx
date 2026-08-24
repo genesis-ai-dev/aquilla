@@ -33,8 +33,8 @@ import { resolveCastVoice } from "@/lib/audio/voices"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { useCellAudio } from "@/hooks/useCellAudio"
 import { setCellPref, useCellPref } from "@/lib/store/audio-cell-prefs"
-import { emitCellAudioAttach } from "@/lib/sync/events-emit"
-import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { emitCellAudioTrim } from "@/lib/sync/events-emit"
+import { injectOptimisticAudioTrim, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCell } from "@/lib/codex-editor/types"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -312,25 +312,22 @@ export function CellVoicePanel({
     // Round 7: overlay the new trims onto the merged cells instantly so the
     // timeline chip resizes without waiting on flush + refetch. SUB-48: the
     // overlay rides the emit promise so it lives exactly as long as the event.
-    // Fortify pass: no mimeType on a trim re-attach — `att.type` here is the
-    // literal discriminator "audio" (mergeCellsWithAudio hardcodes it), NOT a
-    // MIME; sending it permanently overwrote the clip's real container type.
-    // The projection COALESCEs, so omitting the field keeps the stored value.
-    const trimP = emitCellAudioAttach({
+    //
+    // 2026-08-14: a trim is its own event now. This call site is the reason the
+    // distinction had to be made explicit rather than inferred — dragging a
+    // handle back to the clip's edge CLEARS a bound, and it used to say so by
+    // omitting the field, which is indistinguishable from a re-attach that
+    // simply has no opinion about trims. Now `null` says it out loud.
+    const trimP = emitCellAudioTrim({
       projectId,
       fileId: cell.fileId,
       cellId: cell.id,
       audioId: playableId,
-      url: att.url,
-      slot,
-      ...(att.voiceId ? { voiceId: att.voiceId } : {}),
-      ...(att.referenceAudioId ? { referenceAudioId: att.referenceAudioId } : {}),
-      ...(att.durationMs != null ? { durationMs: att.durationMs } : {}),
-      trimStartMs: start != null ? Math.round(start * 1000) : undefined,
-      trimEndMs: end != null ? Math.round(end * 1000) : undefined,
+      trimStartMs: start != null ? Math.round(start * 1000) : null,
+      trimEndMs: end != null ? Math.round(end * 1000) : null,
       author: username,
     })
-    injectOptimisticAudioAttachment(cell.fileId, cell.id, {
+    injectOptimisticAudioTrim(cell.fileId, cell.id, {
       audioId: playableId,
       url: att.url,
       slot,

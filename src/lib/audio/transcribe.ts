@@ -1,6 +1,6 @@
 // Main-thread orchestrator: audio bytes → 16kHz Float32 PCM → Whisper worker
 // → word-level timings. No Y.Doc dependency — timings are written back via the
-// D1 event log (cell.audio.attach with timings payload).
+// Postgres event log (cell.audio.attach with timings payload).
 //
 // Owns a single worker instance per page so the Whisper model stays cached in
 // memory after the first run.
@@ -273,7 +273,7 @@ export function __setTranscribeAudioForTests(fn: typeof transcribeAudio | null):
  * Transcribe a single cell's selected audio. Drives the per-cell
  * transcribe-status store (so CellTranscribeBadge shows progress), then
  * re-emits a cell.audio.attach with the word-level timings so they land in
- * D1 durably.
+ * Postgres durably.
  *
  * Returns the word count on success, or 0 if the cell has no audio / consent
  * was denied. Never throws — errors are stored in transcribe-status.
@@ -364,7 +364,7 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
 
     const wordCount = result.chunks.length
 
-    // Persist timings durably via D1 event log — re-attach the same audioId
+    // Persist timings durably via the Postgres event log — re-attach the same audioId
     // with the word-level timing chunks so the projection writer can store
     // them. start/end must be char offsets into the cell's plain text — the
     // karaoke decoration maps them against the TipTap doc, so align against
@@ -399,10 +399,18 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         timings,
         // Preserve attachment fields the projection UPSERT would otherwise
         // null out — belt and braces now that the projection COALESCEs them
-        // too (SUB-49). The trim window is load-bearing for imported segments
-        // (it defines the cell's slice of the shared clip).
-        ...(attachment?.trimStartMs != null ? { trimStartMs: attachment.trimStartMs } : {}),
-        ...(attachment?.trimEndMs != null ? { trimEndMs: attachment.trimEndMs } : {}),
+        // too (SUB-49).
+        //
+        // The TRIM WINDOW is deliberately not forwarded here, and forwarding it
+        // is not a fix anyone should re-add. This attach lands ~800ms after a
+        // take is saved, and callers hand `cell` in as a small hand-built stub
+        // (see AudioRecordingModal's save) — so `attachment.trimStartMs` was
+        // reliably undefined, the field was omitted, and the projection read
+        // that omission as "clear it", wiping the window every recorded take
+        // had just been given. The window is owned by `cell.audio.trim` now and
+        // an attach can no longer clear one, so this event simply cannot reach
+        // it. That is the point: correctness here must not depend on a caller
+        // remembering to echo a field back.
         ...(attachment?.durationMs != null ? { durationMs: attachment.durationMs } : {}),
         ...(attachment?.voiceId ? { voiceId: attachment.voiceId } : {}),
         ...(attachment?.referenceAudioId ? { referenceAudioId: attachment.referenceAudioId } : {}),

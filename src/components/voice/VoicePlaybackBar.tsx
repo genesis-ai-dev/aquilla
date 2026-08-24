@@ -17,9 +17,12 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
 import {
-  hasAnyPlayableAudio, pauseQueue, resumeQueue, seekQueueToTime, setQueueRate, setQueueVolume,
-  skipBack, skipForward, startQueue, updateQueueCells, useQueueProgress, useQueueState,
+  hasAnyPlayableAudio, pauseQueue, queueClockIsFileTime, resumeQueue, seekQueueToTime,
+  setQueueRate, setQueueVolume, skipBack, skipForward, startQueue, updateQueueCells,
 } from "@/lib/audio/play-queue"
+import { toggleAudibility, useQueueAudibility } from "@/lib/audio/audibility"
+import { useTransportForFile } from "@/hooks/useTransportForFile"
+import { useVideoController } from "@/lib/timeline/video-controller"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { resolveCastVoice } from "@/lib/audio/voices"
@@ -41,6 +44,14 @@ interface Props {
    *  set, pressing Play starts from this section instead of the file's start
    *  (AQU-666). */
   startCellId?: string | null
+  /** AQU-646 round 5: the linked picture, when this file has one. With it, the
+   *  bar reports and drives the FILM rather than a queue that is idle — the
+   *  arrangement where it used to read "paused / 0:00" over a running video. */
+  coreMediaUrl?: string | null
+  /** Round 6: whether the video PANE is on screen. A linked video is not enough
+   *  — the pane is what registers the controller, so in Free timing the bar was
+   *  claiming a transport with nothing behind it and every control went dead. */
+  videoPaneOnScreen?: boolean
   /** Status chips / stats nested under "now playing" so transport stays vertically centered. */
   below?: ReactNode
 }
@@ -53,11 +64,10 @@ function fmtTime(s: number): string {
 }
 
 export function VoicePlaybackBar({
-  cells: rawCells, projectId, session, settings, onActiveCell, startCellId, below,
+  cells: rawCells, projectId, session, settings, onActiveCell, startCellId, coreMediaUrl,
+  videoPaneOnScreen = false, below,
 }: Props) {
   const t = useT()
-  const queue = useQueueState()
-  const { currentTime, duration, rate, volume } = useQueueProgress()
 
   // The cells handed down from useCells carry no audio attachments — those are
   // read per-file by useFileAudioAttachments and merged in (the editor table
@@ -71,22 +81,37 @@ export function VoicePlaybackBar({
     [rawCells, audioByCellId],
   )
 
-  const canPlay = useMemo(() => hasAnyPlayableAudio(cells), [cells])
-  const activeIndex =
-    queue.kind === "playing" || queue.kind === "paused" || queue.kind === "loading"
-      ? queue.cellIndex
-      : -1
+  // WHICH ENGINE owns this file. On a subtitle file timed against footage the
+  // picture is the transport; everywhere else this is the queue, scoped to
+  // these cells (it was previously read unscoped, so another file's playback
+  // drove this bar).
+  const cellIds = useMemo(() => new Set(cells.map((c) => c.id)), [cells])
+  const anyCellClockIsFileTime = useMemo(() => cells.some((c) => queueClockIsFileTime(c)), [cells])
+  const transport = useTransportForFile({
+    cellIds,
+    coreMediaUrl,
+    anyCellClockIsFileTime,
+    paneOnScreen: videoPaneOnScreen,
+  })
+  const videoController = useVideoController()
+  const drivesVideo = transport.source === "video"
+  const sourceAudible = useQueueAudibility().source
+  const { currentTime, duration, rate, volume } = transport.progress
+
+  // A picture is always playable; the queue needs a clip to play.
+  const canPlay = useMemo(() => drivesVideo || hasAnyPlayableAudio(cells), [drivesVideo, cells])
+  const activeIndex = transport.cellId ? cells.findIndex((c) => c.id === transport.cellId) : -1
   const activeCell = activeIndex >= 0 ? cells[activeIndex] : undefined
   const activeVoice = activeCell ? resolveCastVoice(settings, activeCell.id) : undefined
 
   // Keep the running queue's snapshot fresh so a mid-playback generate is heard
   // on the next advance.
   useEffect(() => {
-    if (queue.kind !== "idle") updateQueueCells(cells)
-  }, [cells, queue.kind])
+    if (transport.source === "queue" && transport.kind !== "idle") updateQueueCells(cells)
+  }, [cells, transport.source, transport.kind])
 
-  const isPlaying = queue.kind === "playing"
-  const isLoading = queue.kind === "loading"
+  const isPlaying = transport.playing
+  const isLoading = transport.kind === "loading"
 
   const startAt = useCallback((from: number, explicit = false) => {
     if (!session?.jwt) return
@@ -94,20 +119,33 @@ export function VoicePlaybackBar({
   }, [cells, projectId, session, onActiveCell])
 
   const onPlayPause = useCallback(() => {
+    // The picture owns this file: drive the element, never the queue. Starting
+    // the queue here is what played a lone recorded take with no film behind it.
+    if (drivesVideo) {
+      if (!videoController) return
+      // Round 6: a press while the picture is getting ready CANCELS the start,
+      // the same as it does during the queue's cold load below. The element is
+      // still `paused` all through that wait, so without this the press would
+      // just re-ask and the spinner would be the only way out.
+      if (transport.kind === "loading") { videoController.pause(); return }
+      if (videoController.isPaused()) videoController.play()
+      else videoController.pause()
+      return
+    }
     if (isPlaying) { pauseQueue(); return }
     // FORTIFY: during a cold load the button shows a spinner — clicking it (or
     // Space) must CANCEL the pending start, not dispose the in-flight load and
     // start over from the top (which also made the transport unstoppable
     // until sound was already playing).
-    if (queue.kind === "loading") { pauseQueue(); return }
-    if (queue.kind === "paused") { void resumeQueue(); return }
+    if (transport.kind === "loading") { pauseQueue(); return }
+    if (transport.kind === "paused") { void resumeQueue(); return }
     // Start from the highlighted section when one is selected, else the top of
     // the file (AQU-666). A selected start is "explicit": if that clip's audio
     // is missing, surface it there instead of skipping to a neighbour (AQU-660);
     // plain play-all keeps skipping forward past a missing clip.
     const from = startCellId ? cells.findIndex((c) => c.id === startCellId) : -1
     startAt(from >= 0 ? from : 0, from >= 0)
-  }, [isPlaying, queue.kind, startAt, cells, startCellId])
+  }, [drivesVideo, videoController, isPlaying, transport.kind, startAt, cells, startCellId])
 
   // Spacebar toggles play/pause while the Audio-lens bar is mounted (this bar
   // only renders in the audio lens, so the binding is naturally scoped to it).
@@ -146,15 +184,48 @@ export function VoicePlaybackBar({
     return () => window.removeEventListener("keydown", onKeyDown)
   }, [canPlay, onPlayPause])
 
+  // PREV/NEXT on a picture step between LINES of the film, which is what the
+  // buttons say. Left on the queue's `skipBack`/`skipForward` they walked a
+  // programme that is not running, so on a video-first file they did nothing.
+  const lineStarts = useMemo(() => {
+    if (!drivesVideo) return []
+    return cells
+      .map((c) => c.startTime)
+      .filter((t): t is number => typeof t === "number" && Number.isFinite(t))
+      .sort((a, b) => a - b)
+  }, [drivesVideo, cells])
+  const stepLine = useCallback(
+    (dir: -1 | 1) => {
+      if (!drivesVideo) {
+        if (dir < 0) skipBack()
+        else skipForward()
+        return
+      }
+      if (!videoController) return
+      // A small lead-in on the way back, so pressing Previous just after a line
+      // starts returns to the line before it rather than jumping in place —
+      // the same courtesy every media player extends.
+      const from = dir < 0 ? currentTime - 0.75 : currentTime
+      const next = dir < 0
+        ? [...lineStarts].reverse().find((t) => t < from)
+        : lineStarts.find((t) => t > from)
+      videoController.seek(Math.max(0, next ?? (dir < 0 ? 0 : duration)))
+    },
+    [drivesVideo, videoController, currentTime, duration, lineStarts],
+  )
+
   const progressFraction = duration > 0 ? Math.min(1, currentTime / duration) : 0
 
   return (
     <div className="border-t">
       {/* Full-width progress line doubling as a scrubber. */}
+      {/* Gated on the TRANSPORT being active, not on a line being under the
+          playhead: a film sitting in a silence has a real position and a real
+          duration, and `activeIndex < 0` used to make the scrubber dead there. */}
       <BarScrubber
         fraction={progressFraction}
-        disabled={activeIndex < 0 || duration <= 0}
-        onSeek={(f) => seekQueueToTime(f * duration)}
+        disabled={!transport.active || duration <= 0}
+        onSeek={(f) => (drivesVideo ? videoController?.seek(f * duration) : seekQueueToTime(f * duration))}
       />
 
       {/* Equal flex side columns keep the transport truly centered; stretch +
@@ -169,8 +240,8 @@ export function VoicePlaybackBar({
                 {activeCell ? (activeCell.cellLabel || t("audio.playbackBar.lineFallback")) : t("audio.playbackBar.nothingPlaying")}
               </div>
               <div className="truncate text-[10px] leading-tight text-muted-foreground">
-                {queue.kind === "error"
-                  ? queue.message
+                {transport.errorMessage != null
+                  ? transport.errorMessage
                   : activeVoice
                     ? activeVoice.name
                     : canPlay ? t("audio.playbackBar.pressPlayToListen") : t("audio.playbackBar.noVoicedLines")}
@@ -182,8 +253,8 @@ export function VoicePlaybackBar({
 
         {/* Transport */}
         <div className="flex shrink-0 items-center gap-0.5 self-center">
-          <SpeedButton rate={rate} onChange={setQueueRate} />
-          <IconButton title={t("audio.playbackBar.previousLine")} disabled={!canPlay} onClick={skipBack}>
+          <SpeedButton rate={rate} onChange={(r) => (drivesVideo ? videoController?.setRate(r) : setQueueRate(r))} />
+          <IconButton title={t("audio.playbackBar.previousLine")} disabled={!canPlay} onClick={() => stepLine(-1)}>
             <SkipBack className="h-4 w-4" />
           </IconButton>
           <AppTooltip content={isPlaying ? t("common.pause") : t("audio.playbackBar.playAll")}>
@@ -199,7 +270,7 @@ export function VoicePlaybackBar({
               {isLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-px" />}
             </Button>
           </AppTooltip>
-          <IconButton title={t("audio.playbackBar.nextLine")} disabled={!canPlay} onClick={skipForward}>
+          <IconButton title={t("audio.playbackBar.nextLine")} disabled={!canPlay} onClick={() => stepLine(1)}>
             <SkipForward className="h-4 w-4" />
           </IconButton>
           <span className="ms-1.5 shrink-0 text-[11px] tabular-nums text-muted-foreground">
@@ -209,7 +280,27 @@ export function VoicePlaybackBar({
 
         {/* Volume — matching flex-1 balances the left column for true center */}
         <div className="flex min-w-0 flex-1 items-center justify-end self-center">
-          <VolumeControl volume={volume} onChange={setQueueVolume} />
+          <VolumeControl
+            volume={volume}
+            // Driving the film, the mute that counts is the audibility flag the
+            // corner button owns — the same one, so the two surfaces cannot
+            // disagree. Driving the queue there is no such flag and mute stays
+            // what it always was: volume 0.
+            muted={drivesVideo ? !sourceAudible : volume === 0}
+            // Driving the film this reaches the SOURCE flag only, so the dub
+            // takes playing over the picture are untouched — which is exactly
+            // what an operator wants and could not tell from the word "Mute".
+            // Driving the queue it is the queue's own volume, i.e. everything.
+            what={drivesVideo ? "the film's own sound" : "playback"}
+            onChange={(v) => (drivesVideo ? videoController?.setVolume(v) : setQueueVolume(v))}
+            onToggleMute={() => {
+              if (drivesVideo && fileId) {
+                toggleAudibility(fileId, "source")
+                return
+              }
+              setQueueVolume(volume === 0 ? 1 : 0)
+            }}
+          />
         </div>
       </div>
     </div>
@@ -311,18 +402,46 @@ function SpeedButton({ rate, onChange }: { rate: number; onChange: (r: number) =
   )
 }
 
-function VolumeControl({ volume, onChange }: { volume: number; onChange: (v: number) => void }) {
+/**
+ * Volume, plus a mute that may not be volume at all.
+ *
+ * Driving the queue, mute has always just been volume 0 — there is no other
+ * flag to reach. Driving the FILM there is: the button in the corner of the
+ * picture sets the element's real `muted` property through the audibility
+ * module, and a real mute OVERRIDES volume. So the caller passes both, and this
+ * control reports whichever silence is in force. Without that, the bar happily
+ * read "volume 80%" beside a film muted from the corner, and nothing on screen
+ * said why it was silent. (2026-08-14)
+ */
+function VolumeControl({
+  volume,
+  muted,
+  what,
+  onChange,
+  onToggleMute,
+}: {
+  volume: number
+  muted: boolean
+  /** What goes quiet, named. This button silences DIFFERENT things depending on
+   *  which engine is driving, and it used to say only "Mute" — so on a film with
+   *  takes playing over it there was no way to tell, before clicking, whether
+   *  you were about to lose the picture's sound or your own recordings. */
+  what: string
+  onChange: (v: number) => void
+  onToggleMute: () => void
+}) {
   const t = useT()
-  const muted = volume === 0
+  const label = `${muted ? t("audio.playbackBar.unmute") : t("audio.playbackBar.mute")} ${what}`
   return (
     <div className="flex items-center gap-2">
-      <AppTooltip content={muted ? t("audio.playbackBar.unmute") : t("audio.playbackBar.mute")}>
+      <AppTooltip content={label}>
         <Button
           type="button"
           size="icon-sm"
           variant="ghost"
-          aria-label={muted ? t("audio.playbackBar.unmute") : t("audio.playbackBar.mute")}
-          onClick={() => onChange(muted ? 1 : 0)}
+          aria-label={label}
+          aria-pressed={muted}
+          onClick={onToggleMute}
         >
           {muted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
         </Button>
@@ -332,7 +451,14 @@ function VolumeControl({ volume, onChange }: { volume: number; onChange: (v: num
         max={1}
         step={0.01}
         value={[volume]}
-        onValueChange={(next) => onChange(Array.isArray(next) ? next[0] : next)}
+        onValueChange={(next) => {
+          const v = Array.isArray(next) ? next[0] : next
+          onChange(v)
+          // Reaching for the slider is asking to hear it. Leaving the mute on
+          // would make the slider look broken — you would drag it up and get
+          // nothing, with the reason two panes away.
+          if (muted && v > 0) onToggleMute()
+        }}
         aria-label={t("common.volume")}
         className="hidden w-24 sm:block"
       />

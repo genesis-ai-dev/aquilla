@@ -27,6 +27,10 @@ const NOTE_BLOCK = NOTE_BLOCK_SENTENCES.join("")
 const MARKER_NOTE = "The account closes where the next book begins."
 /** The chapter/verse markers that end a book: no words, so no cell. */
 const STRAY_MARKER = "50:26"
+/** A Psalter chapter label. JOB-SNG sets these in `head:cl`, not `intro:*`. */
+const PSALM_HEADING = "Psalm 2"
+/** Poetry that belongs to the Bible text, not to the notes. */
+const PSALM_VERSE = "Why do the nations conspire?"
 
 /** The division heading that introduces a group of books, ahead of its title. */
 const DIVISION_HEADING = "Israelʼs covenant history"
@@ -120,6 +124,15 @@ async function writeBiblicaFixture(filePath: string): Promise<void> {
       paragraph("p-n2", "intro%3aip", run(PLAIN, NOTE_BLOCK)),
       paragraph("p-n3", "intro%3aipi", run(PLAIN, MARKER_NOTE) + run("meta%3av", "26")),
       paragraph("p-ie", "intro%3aie", run("meta%3ac", "50:") + run("meta%3av", "26")),
+      paragraph("p-cl", "head%3acl", run(PLAIN, PSALM_HEADING)),
+      paragraph(
+        "p-q",
+        "text%3aq1",
+        run("cv%3av1", "1")
+          + run("meta%3av", "1")
+          + run(PLAIN, PSALM_VERSE)
+          + run("meta%3av", "1"),
+      ),
   ])
 }
 
@@ -164,9 +177,10 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   await ws.waitForEditor()
 
   const rows = alice.locator("[data-cell-id]")
-  // Nine note cells from the fixture, plus the flushed-marker note; the
-  // marker-only paragraph owns no cell. Sentence splitting is off.
-  await expect(rows).toHaveCount(10, { timeout: 15_000 })
+  // Ten note cells from the fixture, plus the flushed-marker note and the
+  // Psalm heading; the marker-only paragraph and the poetry line own no cell.
+  // Sentence splitting is off.
+  await expect(rows).toHaveCount(11, { timeout: 15_000 })
   await expect(ws.cellRow(0)).toContainText(GLOBAL_PREFACE_NOTE)
   await expect(ws.cellRow(1)).toContainText(DIVISION_HEADING)
   await expect(ws.cellRow(2)).toContainText(DIVISION_NOTE)
@@ -190,6 +204,11 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   await expect(ws.cellRow(9)).toContainText(MARKER_NOTE)
   await expect(ws.cellRow(9)).not.toContainText("26")
   await expect(alice.getByText(STRAY_MARKER)).toHaveCount(0)
+
+  // Psalm labels live in `head:cl`, not `intro:*`. They are still notes — the
+  // poetry under them is the Bible text and stays out.
+  await expect(ws.cellRow(10)).toContainText(PSALM_HEADING)
+  await expect(alice.getByText(PSALM_VERSE)).toHaveCount(0)
 
   // Notes retain Biblica's richer Preface/chapter grouping in the universal
   // navigator while verse paragraphs remain protected source structure.

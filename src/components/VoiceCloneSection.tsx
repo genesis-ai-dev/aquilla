@@ -43,7 +43,13 @@ const MAX_REFERENCE_BYTES = 8 * 1024 * 1024 // 8 MB — Seed-VC only needs a few
 
 export function VoiceCloneSection({ voice, projectId, fileId, session, onChange, focusSignal }: Props) {
   const t = useT()
-  const recorder = useAudioRecorder()
+  // Hand the 8 MB budget to the recorder so it becomes an early hard stop
+  // (~78s of WAV, ~4min of webm/opus) instead of a rejection delivered after
+  // the person has finished speaking. The reference follows the device's WAV
+  // preference like any other take: reference-extract.ts already uploads WAV
+  // through uploadVoiceReference, so that server path is proven, and Seed-VC
+  // reads only the first few seconds either way.
+  const recorder = useAudioRecorder({ maxBytes: MAX_REFERENCE_BYTES })
   const [status, setStatus] = useState<Status>({ kind: "idle" })
   const consumedBlobRef = useRef<Blob | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -69,6 +75,10 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
         setStatus({ kind: "error", message: t("audio.clone.errorNoContext") })
         return
       }
+      // Backstop only, and unreachable for a recorded clip now that the
+      // recorder stops itself at this budget. It still guards the file-picker
+      // path below, and it fails loudly rather than silently if the capture
+      // format's byte rate is ever wrong.
       if (blob.size > MAX_REFERENCE_BYTES) {
         setStatus({ kind: "error", message: t("audio.clone.errorTooLarge") })
         return
@@ -193,6 +203,7 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
           >
             <Upload className="me-1 h-3.5 w-3.5" /> {t("audio.clone.uploadButton")}
           </Button>
+          {/* i18n-exempt "uploading" is a clone-status tag, not copy */}
           {status.kind === "uploading" && (
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
               <Spinner className="size-3.5" /> {t("common.uploading")}
@@ -201,6 +212,7 @@ export function VoiceCloneSection({ voice, projectId, fileId, session, onChange,
         </div>
       )}
 
+      {/* i18n-exempt "error" is a clone-status tag, not copy */}
       {status.kind === "error" && (
         <p className="mt-2 rounded border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
           {status.message}

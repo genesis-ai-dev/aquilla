@@ -116,6 +116,17 @@ export const targetCellDeleteEventId = (
       : `cell-delete-target:${projectId}:${fileId}:${cellId}:gen${generation}`,
   )
 
+/** Escalated re-emission of an already-logged deterministic event — AQU-933's
+ *  delete-generation pattern generalized to ANY migration event id. Generation
+ *  1 IS the original id (byte-identical, so fresh migrations are unchanged);
+ *  generation N ≥ 2 derives a fresh deterministic id FROM the original, so a
+ *  repair whose earlier emission was undone (a poisoned stale-checkout run, a
+ *  legacy rebuild) can be re-emitted past the delta filter — while a re-run of
+ *  the same escalation still converges on the same id. Deriving from the
+ *  original id keeps the seed a pure function of stable legacy inputs. */
+export const escalatedEventId = (originalId: string, generation: number): string =>
+  generation <= 1 ? originalId : u5(`escalate:${originalId}:gen${generation}`)
+
 /** event id for a `source.cell.reanchor` repair (AQU-931), keyed by the
  *  INTENDED anchor: a re-run that derives the same chain dedupes (INSERT OR
  *  IGNORE), while a later chain change mints a fresh event — replay applies

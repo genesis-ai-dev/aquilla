@@ -196,7 +196,7 @@ import { InactiveProjectBanner } from "./InactiveProjectBanner"
 import { OfflineBanner } from "./OfflineBanner"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { restoreProject } from "@/lib/store/project-index"
-import { AppShell } from "./AppShell"
+import { AppShell, useIsLgUp } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
@@ -879,6 +879,12 @@ export function ProjectWorkspace() {
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
   // FRO-308: left dock active tab (null = collapsed rail only)
   const [dockTab, setDockTab] = useState<DockTab | null>("files")
+  const lgUp = useIsLgUp()
+  // The mobile sheet is an overlay, not a rail — keep a tab selected so the
+  // sheet opens onto the files list instead of a 40px icon strip.
+  useEffect(() => {
+    if (!lgUp && dockTab === null) setDockTab("files")
+  }, [lgUp, dockTab])
   // Agent editor tab is in the strip while the workbench is open. Minimize
   // and the tab's × dismiss it. Switching to a file tab leaves the surface
   // but keeps the tab until then.
@@ -8731,7 +8737,7 @@ export function ProjectWorkspace() {
         railCollapsed={dockTab === null}
         dockStorageKey={projectId}
         logoAccessory={
-          dockTab !== null ? (
+          dockTab !== null && lgUp ? (
             <AppTooltip content={t("workspace.sidebar.collapse")} side="bottom">
               <Button
                 type="button"

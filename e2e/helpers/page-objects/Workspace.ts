@@ -173,7 +173,7 @@ export class Workspace {
     if (projectId) {
       await this.page.evaluate(
         (key) => localStorage.setItem(key, "1"),
-        `codex.setupAutoShown.${decodeURIComponent(projectId)}`,
+        `aquilla.setupAutoShown.${decodeURIComponent(projectId)}`,
       )
     }
     const skipChecklist = this.page.getByRole("button", { name: /Skip for now/i })

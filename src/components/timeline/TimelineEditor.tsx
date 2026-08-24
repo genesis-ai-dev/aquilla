@@ -383,7 +383,7 @@ const SPEAKER_TOGGLE_KEYS: Record<
   },
 }
 
-const zoomKey = (fileId: string) => `codex:timelineZoom:${fileId}`
+const zoomKey = (fileId: string) => `aquilla:timelineZoom:${fileId}`
 
 function loadZoom(fileId: string): number {
   try {
@@ -394,7 +394,7 @@ function loadZoom(fileId: string): number {
   }
 }
 
-const rowHeightKey = (fileId: string) => `codex:timelineRowHeight:${fileId}`
+const rowHeightKey = (fileId: string) => `aquilla:timelineRowHeight:${fileId}`
 
 /**
  * Stage 3's vertical zoom, remembered PER FILE exactly as the horizontal one is

@@ -14,7 +14,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { roleName } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { useI18n } from "@/lib/i18n/I18nProvider"
-import { formatDate as formatLocaleDate } from "@/lib/i18n/format"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 
 /**
  * Has this project ever lived server-side? Two signals:
@@ -64,7 +64,7 @@ export function ProjectCard({
   canToggleLifecycle,
   onToggleLifecycle,
 }: ProjectCardProps) {
-  const { locale, t } = useI18n()
+  const { t } = useI18n()
   const isGit = project.origin?.kind === "git"
   const isTrashed = variant === "trashed"
   // isActive absent or true → active; explicit false → inactive (frozen)
@@ -104,11 +104,11 @@ export function ProjectCard({
   const fileCount = project.files.filter((f) => !isAudioCueFile(f)).length
 
   // While a card's workspace is opening it must not fire again — the click is
-  // swallowed and the cursor reflects the wait (AQU-737).
+  // swallowed and a spinner overlay shows the wait (AQU-737).
   const clickable = !isTrashed && !pending
   return (
     <Card
-      className={`relative ${isTrashed ? "opacity-70" : pending ? "cursor-wait" : "hover:bg-muted/50"} ${isInactive && !isTrashed ? "opacity-60" : ""} transition-colors`}
+      className={`relative ${isTrashed ? "opacity-70" : pending ? "" : "hover:bg-muted/50"} ${isInactive && !isTrashed ? "opacity-60" : ""} transition-colors`}
       onClick={clickable ? onClick : undefined}
       aria-busy={pending || undefined}
       data-testid={isInactive && !isTrashed ? "inactive-project-card" : undefined}
@@ -158,9 +158,7 @@ export function ProjectCard({
             )}
             {!isTrashed && myRoleLabel && (
               <AppTooltip content={t("workspace.projectCard.yourRoleTooltip")}>
-                <Badge variant="secondary">
-                  <RoleLabel name={myRoleLabel} />
-                </Badge>
+                <RoleLabel name={myRoleLabel} />
               </AppTooltip>
             )}
             {isGit && (
@@ -252,7 +250,15 @@ export function ProjectCard({
             <span className="text-xs text-muted-foreground">
               {t("comments.file.deletedBadge")}
               {project.deletedBy ? t("workspace.projectCard.deletedBy", { name: project.deletedBy }) : ""}
-              {project.deletedAt ? ` · ${formatDate(project.deletedAt, locale)}` : ""}
+              {project.deletedAt ? (
+                <>
+                  {" · "}
+                  <DateTooltip
+                    value={project.deletedAt}
+                    label={t("org.archivedProjects.deletedColumnLabel")}
+                  />
+                </>
+              ) : null}
             </span>
             {onRestore && (
               <Button size="sm" variant="outline" onClick={onRestore}>
@@ -265,12 +271,4 @@ export function ProjectCard({
       </CardContent>
     </Card>
   )
-}
-
-function formatDate(iso: string, locale: string): string {
-  try {
-    return formatLocaleDate(iso, locale, { month: "short", day: "numeric", year: "numeric" })
-  } catch {
-    return iso
-  }
 }

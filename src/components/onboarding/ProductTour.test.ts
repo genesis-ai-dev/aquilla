@@ -18,8 +18,8 @@ import { TOUR_STEPS, filterStepsByRole, ARROW_CLASS, TOUR_ARROW_PX, type TourSte
 import { ROLE } from "@/lib/frontier/roles"
 import { en } from "@/lib/i18n/messages/en"
 
-const TOUR_DONE_KEY = "codex:productTourDone"
-const ONBOARDING_DONE_KEY = "codex:onboardingComplete"
+const TOUR_DONE_KEY = "aquilla:productTourDone"
+const ONBOARDING_DONE_KEY = "aquilla:onboardingComplete"
 
 /** AQU-832: steps carry MessageKeys, not raw English — resolve against the
  *  base English catalog for these content-correctness assertions. Tour step
@@ -84,7 +84,7 @@ describe("shouldAutoStartTour", () => {
 
   it("AQU-243: independent from AQU-244 project-scoped setup flag", () => {
     // Simulate AQU-244 marking a project's setup checklist as shown.
-    localStorage.setItem("codex.setupAutoShown.some-project-id", "1")
+    localStorage.setItem("aquilla.setupAutoShown.some-project-id", "1")
     // That key must NOT affect the product tour flag.
     localStorage.setItem(ONBOARDING_DONE_KEY, "true")
     expect(shouldAutoStartTour()).toBe(true)

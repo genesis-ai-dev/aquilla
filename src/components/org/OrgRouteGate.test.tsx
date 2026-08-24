@@ -35,6 +35,7 @@ function renderGate(initialEntry: string) {
       <Routes>
         <Route path="/orgs/:orgId" element={<OrgRouteGate />}>
           <Route index element={<div>ORG INDEX</div>} />
+          <Route path="projects" element={<div>ORG PROJECTS</div>} />
           <Route path="settings" element={<div>ORG SETTINGS</div>} />
         </Route>
       </Routes>
@@ -64,13 +65,18 @@ describe("OrgRouteGate (AQU-790 guest orgs)", () => {
     expect(screen.getByText("ORG INDEX")).toBeInTheDocument()
   })
 
-  it("redirects a guest away from a member-only sub-route to the guest overview", () => {
+  it("admits a guest org's projects route", () => {
+    orgContext.guestOrgs = [{ id: 2, name: "Guest Org" }]
+    renderGate("/orgs/2/projects")
+    expect(screen.getByText("ORG PROJECTS")).toBeInTheDocument()
+  })
+
+  it("redirects a guest away from a member-only sub-route to the guest projects page", () => {
     orgContext.guestOrgs = [{ id: 2, name: "Guest Org" }]
     renderGate("/orgs/2/settings")
     expect(screen.queryByText("ORG SETTINGS")).not.toBeInTheDocument()
-    expect(screen.getByTestId("location")).toHaveTextContent("/orgs/2")
-    // The index (guest overview) renders after the redirect.
-    expect(screen.getByText("ORG INDEX")).toBeInTheDocument()
+    expect(screen.getByTestId("location")).toHaveTextContent("/orgs/2/projects")
+    expect(screen.getByText("ORG PROJECTS")).toBeInTheDocument()
   })
 
   it("keeps a member's own sub-routes reachable", () => {
@@ -92,6 +98,7 @@ describe("OrgRouteGate (AQU-790 guest orgs)", () => {
     orgContext.accessibleProjectsLoading = false
     renderGate("/orgs/999")
     expect(screen.getByText("Organization not found")).toBeInTheDocument()
+    expect(document.querySelector("svg.lucide-search-x")).toBeTruthy()
   })
 
   it("keeps the account switcher on not-found so a cross-tab account switch is visible (FRO-367)", () => {

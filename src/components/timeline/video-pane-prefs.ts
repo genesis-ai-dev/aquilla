@@ -10,9 +10,9 @@ export type SubtitleMode = "target" | "source" | "both" | "off"
 export type CaptionPlacement = "picture" | "bar"
 
 const SUBTITLE_MODES: readonly SubtitleMode[] = ["target", "source", "both", "off"]
-const SUBTITLE_MODE_KEY = "codex:video-subtitle-mode"
+const SUBTITLE_MODE_KEY = "aquilla:video-subtitle-mode"
 const CAPTION_PLACEMENTS: readonly CaptionPlacement[] = ["picture", "bar"]
-const CAPTION_PLACEMENT_KEY = "codex:video-caption-placement"
+const CAPTION_PLACEMENT_KEY = "aquilla:video-caption-placement"
 
 /** Both lines, until someone says otherwise. (Sam, 2026-08-11 — was "target".)
  *  A file being timed against footage usually has no translation yet, so a

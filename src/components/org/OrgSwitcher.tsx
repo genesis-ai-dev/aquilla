@@ -11,6 +11,8 @@ import type { OrgSummary } from "@/lib/frontier/orgs"
 import {
   ALL_ORGS_PARAM,
   orgHomePath,
+  orgProjectsPath,
+  parseOrgPath,
   swapOrgInPath,
 } from "@/lib/navigation/org-paths"
 import { cn } from "@/lib/utils"
@@ -49,6 +51,8 @@ type OrgSwitcherItem =
       id: number
       label: string
       roleName: string
+      /** Cross-tenant visibility via ADMIN_EMAILS — not a ladder role. */
+      viaPlatformAdmin?: boolean
     }
   | {
       kind: "guest"
@@ -74,6 +78,7 @@ function memberItem(org: OrgSummary): OrgSwitcherItem {
     id: org.id,
     label: org.name ?? "Workspace",
     roleName: org.role.name,
+    viaPlatformAdmin: org.viaPlatformAdmin,
   }
 }
 
@@ -253,10 +258,12 @@ function OrgSwitcherOption({
       <span className="flex shrink-0 items-center gap-1.5">
         {item.kind === "all" ? (
           <span className={ORG_META_CLASS}>{t("org.switcher.allProjects")}</span>
+        ) : item.kind === "member" && (item.viaPlatformAdmin || item.roleName === "admin") ? (
+          <span className={ORG_META_CLASS}>{t("org.orgSidebar.admin")}</span>
         ) : item.kind === "member" ? (
-          <RoleLabel name={item.roleName} className={ORG_META_CLASS} />
+          <RoleLabel name={item.roleName} />
         ) : (
-          <RoleLabel name="guest" className={ORG_META_CLASS} />
+          <span className={ORG_META_CLASS}>{t("org.switcher.guestRole")}</span>
         )}
         {selected && (
           <Check className="size-4 shrink-0" aria-hidden />
@@ -304,10 +311,15 @@ export function OrgSwitcher() {
   const selectedGuestOrgId = activeGuestOrg?.id ?? null
   const guestSelected = selectedGuest != null
 
-  const showAllOrgs = orgs.length > 1
+  const onAllOrgsPath = parseOrgPath(location.pathname)?.orgKey === ALL_ORGS_PARAM
+  // All organizations is the home for foreign-org grants as well as 2+
+  // memberships, so offer it whenever there's something to aggregate beyond
+  // a single member org.
+  const showAllOrgs = orgs.length > 1 || guestOrgs.length > 0
+  const viewingAllOrgs = !guestSelected && (isAllOrgs || onAllOrgsPath)
   const title = guestSelected
     ? selectedGuest.name ?? `Org #${selectedGuest.id}`
-    : isAllOrgs
+    : viewingAllOrgs
       ? t("org.breadcrumb.allOrganizations")
       : activeOrg?.name ?? "Workspace"
 
@@ -323,14 +335,14 @@ export function OrgSwitcher() {
     if (guestSelected && selectedGuestOrgId != null) {
       return items.find((item) => item.kind === "guest" && item.id === selectedGuestOrgId) ?? null
     }
-    if (isAllOrgs && showAllOrgs) {
+    if (viewingAllOrgs && showAllOrgs) {
       return items.find((item) => item.kind === "all") ?? null
     }
     if (activeOrgId != null) {
       return items.find((item) => item.kind === "member" && item.id === activeOrgId) ?? null
     }
     return null
-  }, [items, guestSelected, selectedGuestOrgId, isAllOrgs, showAllOrgs, activeOrgId])
+  }, [items, guestSelected, selectedGuestOrgId, viewingAllOrgs, showAllOrgs, activeOrgId])
 
   function retryProjectDirectory() {
     void refreshAccessibleProjects()
@@ -416,10 +428,10 @@ export function OrgSwitcher() {
 
     // AQU-790: guest orgs use the same path convention as owned orgs
     // (`/orgs/<id>`). Selecting one records it as the active scope (persisted for
-    // reload, which drives `activeGuestOrg`) and navigates to that org's overview
-    // — no longer the divergent `/shared?org=<id>` query param.
+    // reload, which drives `activeGuestOrg`) and navigates to that org's
+    // projects table — guests have no Overview, so `/projects` is the home.
     setActiveOrg(item.id)
-    navigate(orgHomePath(item.id))
+    navigate(orgProjectsPath(item.id))
   }
 
   async function handleCreated(orgId: number) {
@@ -466,7 +478,7 @@ export function OrgSwitcher() {
             />
           }
         >
-          <OrgMark name={title} allOrgs={!guestSelected && isAllOrgs} />
+          <OrgMark name={title} allOrgs={viewingAllOrgs} />
           <span className="truncate">{title}</span>
         </ComboboxTrigger>
         <ComboboxContent
@@ -503,7 +515,7 @@ export function OrgSwitcher() {
           <ComboboxList className="max-h-80 flex-1">
             <OrgSwitcherList
               guestSelected={guestSelected}
-              isAllOrgs={isAllOrgs}
+              isAllOrgs={viewingAllOrgs}
               activeOrgId={activeOrgId}
               selectedGuestOrgId={selectedGuestOrgId}
               directoryError={accessibleProjectsError}

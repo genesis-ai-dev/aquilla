@@ -41,7 +41,8 @@ interface Props {
 }
 
 /**
- * "Segmentation" dialog, opened from a sidebar file row's ⋯ / right-click menu.
+ * "Segmentation" dialog, opened from a sidebar file row's ⋯ / right-click
+ * menu or the editor File options ⋯ (beside Import).
  *
  * Shows how the file is currently divided into passages and lets a project
  * lead change it. The preview is server-computed through the same resolver the

@@ -6,6 +6,7 @@ import { MemberMultiAddRow } from "@/components/MemberMultiAddRow"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { OrgInviteByEmail } from "@/components/org/OrgInviteByEmail"
 import { MemberAccessSubRow } from "@/components/org/MemberAccessPanel"
+import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
 import { Button } from "@/components/ui/button"
 import {
   DataTable,
@@ -22,11 +23,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
-import { EmptyState } from "@/components/ui/page"
+import { TableEmptyState } from "@/components/ui/page"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from "@/components/ui/toast"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { RoleLabel } from "@/components/RoleLabel"
 import { RoleSelect } from "@/components/RoleSelect"
 import { toUserFacingError } from "@/lib/errors/user-error"
 import type { MemberGrantResult } from "@/lib/frontier/members"
@@ -45,6 +47,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 
 type AddDialogTab = "members" | "invite"
 
+// Shown on the disabled row-menu Remove item when the caller is not an org owner.
 const REMOVE_REQUIRES_OWNER_TOOLTIP =
   "Only org owners can remove members from the organization. Ask an owner to remove someone."
 
@@ -89,6 +92,7 @@ export function OrgMembersTable({
   add,
   addMany,
   onRequestRemove,
+  loading = false,
 }: {
   orgId: number
   members: OrgMember[]
@@ -98,6 +102,7 @@ export function OrgMembersTable({
   add: (username: string, role: number) => Promise<unknown>
   addMany: (members: Array<{ username: string; role: number }>) => Promise<MemberGrantResult[]>
   onRequestRemove: (userId: number, username: string) => void
+  loading?: boolean
 }) {
   const t = useT()
   const isOwner = (callerOrgRoleLevel ?? 0) >= ROLE.OWNER
@@ -209,9 +214,7 @@ export function OrgMembersTable({
         meta: { className: "w-[7.5rem] whitespace-nowrap" },
         cell: ({ row }) => {
           const m = row.original
-          const label = (
-            <span className="text-sm text-foreground">{roleLabel(m.role.level)}</span>
-          )
+          const label = <RoleLabel name={m.role.level} />
           if (isOwner) return label
           return (
             <AppTooltip content={lockedOrgRoleTooltip(m.role.level)} className="max-w-xs">
@@ -231,29 +234,12 @@ export function OrgMembersTable({
         enableSorting: false,
         header: () => <span className="sr-only">{t("org.overviewLaneTable.actionsColumn")}</span>,
         meta: { align: "right" as const, className: "w-10" },
-        cell: ({ row }) => {
-          const m = row.original
-          if (!isOwner) {
-            return (
-              <AppTooltip content={REMOVE_REQUIRES_OWNER_TOOLTIP} className="max-w-xs">
-                <span
-                  tabIndex={0}
-                  aria-disabled="true"
-                  aria-label={t("org.membersPage.orgTable.removeOwnersOnlyAriaLabel", { username: m.username })}
-                  className="inline-flex cursor-not-allowed items-center text-xs text-muted-foreground/70 underline decoration-dotted"
-                >
-                  {t("org.membersPage.remove")}
-                </span>
-              </AppTooltip>
-            )
-          }
-          return (
-            <DataTableRowActionsButton
-              label={t("org.rowActionsAriaLabel", { name: m.username })}
-              revealOnHover
-            />
-          )
-        },
+        cell: ({ row }) => (
+          <DataTableRowActionsButton
+            label={t("org.rowActionsAriaLabel", { name: row.original.username })}
+            revealOnHover
+          />
+        ),
       },
     ],
     [expanded, isOwner, t, toggleExpand],
@@ -356,39 +342,11 @@ export function OrgMembersTable({
         </Dialog>
       )}
 
-      {members.length === 0 ? (
-        <div className="space-y-4">
-          <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onAddToProjects}
-              disabled={!canAddToProjects}
-            >
-              <UserPlus className="mr-1.5 size-4" />
-              {t("org.membersPage.orgPage.addToProjectsButton")}
-            </Button>
-            {isOwner ? (
-              <Button type="button" onClick={() => setAdding(true)}>
-                {t("org.membersPage.orgTable.addMemberTitle")}
-              </Button>
-            ) : null}
-          </div>
-          <EmptyState
-            variant="inline"
-            icon={NAV_PAGE_ICONS.members}
-            title={t("org.membersPage.orgTable.noMembersTitle")}
-            description={
-              isOwner
-                ? "Add people by username, or invite someone by email."
-                : "An org owner can add members to this organization."
-            }
-          />
-        </div>
-      ) : (
-        <DataTable
+      <DataTable
           columns={columns}
           data={members}
+          loading={loading}
+          loadingLabel={t("org.membersPage.loadingMembers")}
           getRowId={(m) => String(m.userId)}
           getRowAttributes={(m) => ({ "data-user-id": String(m.userId) })}
           initialSorting={[{ id: "name", desc: false }]}
@@ -404,19 +362,20 @@ export function OrgMembersTable({
           }}
           toolbar={
             <>
-              <Button
-                type="button"
-                variant="outline"
-                className={isOwner ? undefined : "ml-auto shrink-0"}
-                onClick={onAddToProjects}
-                disabled={!canAddToProjects}
-              >
-                <UserPlus className="mr-1.5 size-4" />
-                {t("org.membersPage.orgPage.addToProjectsButton")}
-              </Button>
+              {canAddToProjects ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="ml-auto shrink-0"
+                  onClick={onAddToProjects}
+                >
+                  <UserPlus className="mr-1.5 size-4" />
+                  {t("org.membersPage.orgPage.addToProjectsButton")}
+                </Button>
+              ) : null}
               {isOwner ? (
                 <Button
-                  className="ml-auto shrink-0"
+                  className={canAddToProjects ? "shrink-0" : "ml-auto shrink-0"}
                   onClick={() => setAdding(true)}
                 >
                   {t("org.membersPage.orgTable.addMemberTitle")}
@@ -426,11 +385,11 @@ export function OrgMembersTable({
           }
           rowClassName="group"
           renderRowMenuItems={(m) => {
-            if (!isOwner) return null
             const isOrgOwner = m.role.level === ROLE.OWNER
+            const canRemove = isOwner && !isOrgOwner
             return (
               <>
-                {!isOrgOwner && (
+                {isOwner && !isOrgOwner && (
                   <>
                     <MenuItem onClick={() => openRoleChange(m)}>
                       <ShieldUser className="size-4" />
@@ -439,16 +398,25 @@ export function OrgMembersTable({
                     <MenuSeparator />
                   </>
                 )}
-                <MenuItem
-                  aria-label={t("org.teamDetail.removeAriaLabel", { name: m.username })}
-                  disabled={isOrgOwner}
-                  onClick={() => {
-                    if (!isOrgOwner) onRequestRemove(m.userId, m.username)
-                  }}
+                <DisabledFieldTooltip
+                  disabled={!canRemove}
+                  tooltip={!isOwner ? REMOVE_REQUIRES_OWNER_TOOLTIP : undefined}
                 >
-                  <UserMinus className="size-4" />
-                  {t("org.membersPage.orgTable.removeFromOrg")}
-                </MenuItem>
+                  <MenuItem
+                    aria-label={
+                      canRemove
+                        ? undefined
+                        : t("org.membersPage.orgTable.removeOwnersOnlyAriaLabel", { username: m.username })
+                    }
+                    disabled={!canRemove}
+                    onClick={() => {
+                      if (canRemove) onRequestRemove(m.userId, m.username)
+                    }}
+                  >
+                    <UserMinus className="size-4" />
+                    {t("org.membersPage.orgTable.removeFromOrg")}
+                  </MenuItem>
+                </DisabledFieldTooltip>
               </>
             )
           }}
@@ -463,17 +431,28 @@ export function OrgMembersTable({
             ) : null
           }
           emptyState={
-            <div className="flex flex-col items-center gap-3 py-10">
-              <p className="text-center text-sm text-muted-foreground">
-                {t("org.membersPage.orgTable.noSearchMatch")}
-              </p>
-            </div>
+            members.length === 0 ? (
+              <TableEmptyState
+                icon={NAV_PAGE_ICONS.members}
+                title={t("org.membersPage.orgTable.noMembersTitle")}
+                description={
+                  isOwner
+                    ? "Add people by username, or invite someone by email."
+                    : "An org owner can add members to this organization."
+                }
+              />
+            ) : (
+              <div className="flex flex-col items-center gap-3 py-10">
+                <p className="text-center text-sm text-muted-foreground">
+                  {t("org.membersPage.orgTable.noSearchMatch")}
+                </p>
+              </div>
+            )
           }
           testId="org-members-table"
           className={ADMIN_TABLE_PANEL_CLASS}
           dense
         />
-      )}
     </>
   )
 }

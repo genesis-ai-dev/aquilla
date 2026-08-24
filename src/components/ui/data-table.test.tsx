@@ -159,7 +159,7 @@ describe("DataTable", () => {
     expect(icon).toHaveClass("opacity-0")
     expect(icon).toHaveClass("group-hover/sort:opacity-100")
     expect(icon).toHaveClass("lucide-arrow-up") // numbers preview desc
-    expect(countHeader).toHaveClass("hover:bg-muted/50")
+    expect(countHeader).toHaveClass("hover:bg-accent/40")
     expect(countHeader).toHaveClass("text-muted-foreground")
     expect(icon).toHaveClass("text-foreground")
 
@@ -232,6 +232,33 @@ describe("DataTable", () => {
     expect(screen.getByTestId("empty-table")).toHaveClass("border", "bg-card")
   })
 
+  it("keeps search visible and skeletonizes rows while loading", () => {
+    render(
+      <DataTable
+        columns={columns}
+        data={[]}
+        searchPlaceholder="Search…"
+        loading
+        loadingLabel="Loading rows"
+        emptyState={<div data-testid="custom-empty">Nothing here</div>}
+        testId="loading-table"
+      />,
+    )
+    const search = screen.getByLabelText("Search…")
+    expect(search).toBeInTheDocument()
+    expect(search).toBeDisabled()
+    expect(search).toHaveClass("disabled:opacity-100")
+    expect(search.closest("[data-slot='input-group']")).toHaveClass(
+      "bg-card",
+      "has-disabled:bg-card",
+      "has-disabled:opacity-100",
+    )
+    expect(screen.getByRole("status", { name: "Loading rows" })).toHaveAttribute("aria-busy", "true")
+    expect(screen.getByRole("table")).toBeInTheDocument()
+    expect(screen.queryByTestId("custom-empty")).not.toBeInTheDocument()
+    expect(screen.getByTestId("loading-table").querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0)
+  })
+
   it("opens renderRowMenuItems from row right-click and from the ⋯ button", async () => {
     renderRowMenuTable()
 
@@ -279,5 +306,23 @@ describe("DataTable", () => {
     // The popup is portalled out of the table, but React bubbles its events
     // along the React tree — which runs through the row.
     expect(onRowClick).not.toHaveBeenCalled()
+  })
+
+  it("renders footer as the last body row spanning all columns", () => {
+    render(
+      <DataTable
+        columns={columns}
+        data={rows}
+        getRowId={(r) => String(r.id)}
+        footer={<button type="button">Show 2 more</button>}
+      />,
+    )
+
+    const table = screen.getByRole("table")
+    const bodyRows = within(table).getAllByRole("row").slice(1)
+    const footerRow = bodyRows[bodyRows.length - 1]
+    expect(within(footerRow).getByRole("button", { name: "Show 2 more" })).toBeInTheDocument()
+    expect(within(footerRow).getAllByRole("cell")).toHaveLength(1)
+    expect(within(footerRow).getByRole("cell")).toHaveAttribute("colspan", String(columns.length))
   })
 })

@@ -76,8 +76,8 @@ function renderPane(props: Partial<React.ComponentProps<typeof MediaVideoPane>> 
 
 describe("MediaVideoPane", () => {
   beforeEach(() => {
-    localStorage.removeItem("codex:video-subtitle-mode")
-    localStorage.removeItem("codex:video-caption-placement")
+    localStorage.removeItem("aquilla:video-subtitle-mode")
+    localStorage.removeItem("aquilla:video-caption-placement")
     mockQueue = {
       active: false,
       playing: false,
@@ -265,10 +265,10 @@ describe("MediaVideoPane", () => {
   it("remembers the caption choice, and ignores a stored value it doesn't know", () => {
     renderPane()
     fireEvent.click(screen.getByRole("tab", { name: "Off" }))
-    expect(localStorage.getItem("codex:video-subtitle-mode")).toBe("off")
+    expect(localStorage.getItem("aquilla:video-subtitle-mode")).toBe("off")
     expect(readSubtitleMode()).toBe("off")
 
-    localStorage.setItem("codex:video-subtitle-mode", "sideways")
+    localStorage.setItem("aquilla:video-subtitle-mode", "sideways")
     expect(readSubtitleMode()).toBe("both")
   })
 
@@ -276,7 +276,7 @@ describe("MediaVideoPane", () => {
   // no translation yet — the common case for footage being timed — and reads as
   // a broken caption rather than an empty one.
   it("defaults to showing BOTH lines when nothing is stored", () => {
-    localStorage.removeItem("codex:video-subtitle-mode")
+    localStorage.removeItem("aquilla:video-subtitle-mode")
     expect(readSubtitleMode()).toBe("both")
     sounding("c1")
     renderPane()
@@ -291,7 +291,7 @@ describe("MediaVideoPane", () => {
   it("still burns the source line when there is no translation yet", () => {
     // The reason the default moved off "target": footage being timed usually
     // has no target text at all, and a target-only caption burns nothing.
-    localStorage.removeItem("codex:video-subtitle-mode")
+    localStorage.removeItem("aquilla:video-subtitle-mode")
     const untranslated = [
       cell({ id: "u1", medium: "media", attachments: {}, transcription: "In the beginning was the Word.", translated: "" }),
     ]
@@ -386,10 +386,10 @@ describe("MediaVideoPane", () => {
     const caption = screen.getByTestId("video-pane-caption")
     expect(screen.getByTestId("video-pane-picture").contains(caption)).toBe(false)
     expect(screen.getByTestId("video-pane-field").contains(caption)).toBe(true)
-    expect(localStorage.getItem("codex:video-caption-placement")).toBe("bar")
+    expect(localStorage.getItem("aquilla:video-caption-placement")).toBe("bar")
     expect(readCaptionPlacement()).toBe("bar")
 
-    localStorage.setItem("codex:video-caption-placement", "sideways")
+    localStorage.setItem("aquilla:video-caption-placement", "sideways")
     expect(readCaptionPlacement()).toBe("picture")
   })
 

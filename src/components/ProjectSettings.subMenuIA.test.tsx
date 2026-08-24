@@ -311,6 +311,11 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     expect(screen.queryByText("Rules")).toBeNull()
     expect(screen.queryByText("Living Memory")).toBeNull()
 
+    // Index hints show the current value, capitalized — not the raw enum
+    // ("reviewer", "lazy") dumped before opening the pane.
+    expect(screen.getByText("Reviewer")).toBeTruthy()
+    expect(screen.getByText("Lazy (default)")).toBeTruthy()
+
     // ...not the controls themselves. Project Title (General) and AI
     // Instructions (AI & completion) must NOT both be in the document at once
     // on the index — proving this isn't still one long scroll.

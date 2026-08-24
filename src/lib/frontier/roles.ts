@@ -150,6 +150,14 @@ const ROLE_INFO: Record<number, { name: string; descriptionKey: MessageKey }> = 
   },
 }
 
+/** Numeric ladder level for a canonical role name, or `null` if unknown. */
+export function roleLevelFromName(name: string): number | null {
+  for (const [level, info] of Object.entries(ROLE_INFO)) {
+    if (info.name === name) return Number(level)
+  }
+  return null
+}
+
 /** Canonical role name for a given level (mirrors server's ROLE_NAMES).
  *
  * This is the machine-readable, locale-free identifier — the wire format

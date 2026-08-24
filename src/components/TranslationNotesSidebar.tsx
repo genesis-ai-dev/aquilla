@@ -56,7 +56,7 @@ interface TranslationNotesSidebarProps {
   className?: string
 }
 
-const STORAGE_KEY_PREFIX = "codex:tn-sidebar:"
+const STORAGE_KEY_PREFIX = "aquilla:tn-sidebar:"
 
 function sidebarVisibilityKey(projectId: string): string {
   return `${STORAGE_KEY_PREFIX}${projectId}:visible`

@@ -25,7 +25,7 @@ export const VIDEO_PANE_TABLE_MIN_WIDTH = 544
  */
 export const VIDEO_PANE_MAX_SHARE = "58%"
 
-const VIDEO_PANE_WIDTH_KEY = "codex:video-pane-width"
+const VIDEO_PANE_WIDTH_KEY = "aquilla:video-pane-width"
 
 export interface VideoPaneGateInput {
   timelineStacked: boolean

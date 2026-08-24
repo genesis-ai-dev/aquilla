@@ -3593,7 +3593,7 @@ export const editor = defineNamespace({
       },
       "editor.voice.clone": {
         description:
-          "Tooltip of the add-person button in the voice card, which turns this " +
+          "Tooltip of the clone (copy-plus) button in the voice card, which turns this " +
           "recording into a reusable synthetic voice for the project's cast. " +
           "'Clone' is the voice-synthesis term for copying a speaker's sound.",
       },

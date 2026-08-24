@@ -48,7 +48,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { DisabledFieldTooltip } from "./ProjectSettings/DisabledFieldTooltip"
+import { DisabledFieldTooltip, PermissionLockHint } from "./ProjectSettings/DisabledFieldTooltip"
+import { PrivilegedMembersDialog } from "./ProjectSettings/PrivilegedMembersDialog"
 import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
@@ -73,7 +74,11 @@ import type {
   DecaySettings,
   ProjectRecord,
 } from "@/lib/parsers/types"
-import { projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
+import {
+  AUDIO_MEDIA_STRATEGY_LABELS,
+  projectHasScriptureFiles,
+  resolveBibleResourcesEnabled,
+} from "@/lib/parsers/types"
 import { resolveTimingLocked } from "@/lib/sync/project-settings"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
@@ -100,8 +105,8 @@ import { readValidationCount, readValidationCountAudio } from "@/lib/progress/re
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
-import { humanRoleName, resolveRoleName, ROLE } from "@/lib/frontier/roles"
+import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
+import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { renameProject } from "@/lib/sync/cloud-projects"
@@ -358,6 +363,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     project?.syncRole?.level ?? null,
   )
   const canSeeMembers = !isCloudProject || canViewRoster
+  const [privilegedOpen, setPrivilegedOpen] = useState(false)
   const metricsFiles = useMemo(
     () => (project?.files ?? []).map((f) => ({ id: f.id, name: f.name })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -383,19 +389,29 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     [getJwt, id],
   )
 
-  // Server enforces MAINTAINER (600) for settings writes — show the correct
-  // floor in the read-only tooltip so users know what role they need.
+  // Server enforces MAINTAINER (600) for settings writes. Explain the lock on
+  // the control itself (GitHub-style hint), not with a page-level banner.
+  const privilegedRole = resolveRoleName(t, ROLE.MAINTAINER, { plural: true })
+  const roleLockHint = (
+    <PermissionLockHint
+      title={t("projectSettings.permission.onlyRoleCanModify", {
+        role: privilegedRole,
+      })}
+      onView={id ? () => setPrivilegedOpen(true) : undefined}
+      href={id ? undefined : PERMISSION_DOCS_URL}
+      linkLabel={
+        id
+          ? t("projectSettings.permission.viewPrivilegedMembers", {
+              role: privilegedRole,
+            })
+          : t("error.permissionDenied.learnMore")
+      }
+    />
+  )
   const sharedDisabledTooltip =
-    reasonCannotEdit === "offline" ? "Reconnect to edit shared settings."
-    : reasonCannotEdit === "role" ? "Maintainer or higher can edit shared settings."
+    reasonCannotEdit === "offline" ? t("projectSettings.permission.reconnectToEdit")
+    : reasonCannotEdit === "role" ? roleLockHint
     : null
-
-  // AQU-623: a below-floor member's shared inputs are disabled up-front, so a
-  // role-blocked save can never actually fire — show the denial alert
-  // persistently for them instead of only after a rejected PATCH. Gated on
-  // isCloudProject because unsynced projects also report reason "role"
-  // (roleLevel is null) but have no shared-settings permission model.
-  const roleBlocked = isCloudProject && reasonCannotEdit === "role"
 
   // AQU-765: renaming a synced project now persists to the server rename
   // endpoint (maintainer+). Local (unsynced) projects keep their name editable
@@ -405,9 +421,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const projectRoleLevel = project?.syncRole?.level ?? null
   const canRenameProject =
     !isCloudProject || (projectRoleLevel != null && projectRoleLevel >= ROLE.MAINTAINER)
-  const renameDisabledTooltip = canRenameProject
-    ? null
-    : "Maintainer or higher can rename this project."
+  const renameDisabledTooltip = canRenameProject ? null : roleLockHint
 
   // Baseline is the last-saved snapshot of every field on the page. The diff
   // between baseline and the form state determines `isDirty` and which writes
@@ -644,17 +658,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [pendingHistoryDelta, setPendingHistoryDelta] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
-  // Distinct from `saveError`: a shared-settings save blocked by the active
-  // account's role. Rendered as an enriched inline alert (names the account,
-  // offers an account switch) rather than the bare header string.
-  const [permissionBlocked, setPermissionBlocked] = useState(false)
-  // Clear the permission alert when the active account changes (e.g. the user
-  // clicks "switch account" in the alert itself) or the current account gains
-  // edit permission — otherwise the stale alert re-renders and misattributes the
-  // denial to the newly-active, possibly-authorized account.
-  useEffect(() => {
-    setPermissionBlocked(false)
-  }, [session?.username, canEditShared])
   // AQU-408: success message reflects the actual delta saved (a brief
   // enumeration of which fields changed), not a generic "Saved". Auto-dismisses
   // after a few seconds. The modal/page itself stays open on save — only an
@@ -738,7 +741,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     if (!id || !baseline) return false
     setSaving(true)
     setSaveError(null)
-    setPermissionBlocked(false)
     setSavedMessage(null)
     setNameError(null)
     // AQU-408: track which fields actually changed so the success message can
@@ -785,7 +787,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             await renameProject(jwt, id, trimmedName)
           } catch (err) {
             if (err instanceof UserError && err.status === 403) {
-              setPermissionBlocked(true)
+              setSaveError(t("projectSettings.permission.onlyRoleCanModify", {
+                role: resolveRoleName(t, ROLE.MAINTAINER, { plural: true }),
+              }))
             } else {
               setSaveError(err instanceof Error ? err.message : "Renaming the project failed.")
             }
@@ -866,10 +870,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           if (out.reason === "offline") {
             setSaveError("You're offline. Reconnect to save shared fields.")
           } else {
-            // Permission (role) block — surface the enriched alert that names
-            // the active account and offers an account switch, instead of the
-            // bare "You don't have permission…" header string.
-            setPermissionBlocked(true)
+            setSaveError(t("projectSettings.permission.onlyRoleCanModify", {
+              role: resolveRoleName(t, ROLE.MAINTAINER, { plural: true }),
+            }))
           }
           return false
         }
@@ -956,7 +959,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
     bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
-    precedingTargetCells, importExcludeFrontMatter, getJwt, isCloudProject,
+    precedingTargetCells, importExcludeFrontMatter, getJwt, isCloudProject, t,
   ])
 
   const handleSaveAndClose = useCallback(async () => {
@@ -1284,8 +1287,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     members: "Roles & invites",
     "source-sync": hasSourceLink ? "Linked" : hasGitOrigin ? "Git" : "None",
     ai: provider === "frontier" ? "Frontier" : "Custom",
-    validation: validationRoleFloor.replace(/_/g, " "),
-    "audio-media": audioMediaStrategy,
+    validation: resolveRoleName(t, validationRoleFloor),
+    "audio-media": t(AUDIO_MEDIA_STRATEGY_LABELS[audioMediaStrategy].nameKey),
     metrics: "Post-edit",
     integrations: "Monday.com",
     experimental: "This device",
@@ -1457,15 +1460,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               <p className="px-2 py-1.5 text-sm text-muted-foreground">{t("projectSettings.noMatchingSettings")}</p>
             ) : null}
 
-        {(permissionBlocked || roleBlocked) && (
-          <PermissionDeniedAlert
-            action="projectSettings.permission.changeSharedSettingsAction"
-            requiredRoleLevel={ROLE.MAINTAINER}
-            currentRole={
-              project?.syncRole ? humanRoleName(project.syncRole.level) : undefined
-            }
-          />
-        )}
         {sharedConflict && (
           <div
             role="alert"
@@ -1546,10 +1540,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               {nameError ? (
                 <p role="alert" className="px-4 pb-2 text-xs text-destructive">
                   {nameError}
-                </p>
-              ) : !canRenameProject ? (
-                <p className="px-4 pb-2 text-xs text-muted-foreground">
-                  {renameDisabledTooltip}
                 </p>
               ) : null}
               <SettingsRow
@@ -2154,7 +2144,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 description={t("projectSettings.voice.libraryNote")}
                 control={
                   <Button variant="outline" onClick={() => {
-                    try { window.localStorage.setItem(`codex:editorLens:${id}`, "audio") } catch { /* ignore */ }
+                    try { window.localStorage.setItem(`aquilla:editorLens:${id}`, "audio") } catch { /* ignore */ }
                     requestNavigate(`/project/${id}/editor`)
                   }}>
                     {t("projectSettings.voice.openStudioButton")}
@@ -2443,6 +2433,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <PrivilegedMembersDialog
+        open={privilegedOpen}
+        onOpenChange={setPrivilegedOpen}
+        projectId={id ?? null}
+        roleLabel={privilegedRole}
+      />
 
     </>
   )

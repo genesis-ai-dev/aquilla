@@ -7,7 +7,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 export type ThemeMode = "light" | "dark" | "system"
 export type ResolvedTheme = "light" | "dark"
 
-const STORAGE_KEY = "codex-theme"
+const STORAGE_KEY = "aquilla-theme"
 
 interface ThemeModeContextValue {
   mode: ThemeMode

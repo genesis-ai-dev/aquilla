@@ -91,7 +91,7 @@ test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice,
   const llmBase = process.env.VITE_LLM_BASE_URL ?? ""
   expect(llmBase).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
   await alice.evaluate(({ endpoint }) => {
-    localStorage.setItem("codex:userProviderOverride", JSON.stringify({
+    localStorage.setItem("aquilla:userProviderOverride", JSON.stringify({
       endpoint,
       model: "mock-model",
       apiKey: "",

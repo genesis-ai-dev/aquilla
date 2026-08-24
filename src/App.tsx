@@ -143,7 +143,7 @@ function SyncFreezeOverlay() {
  * Signed-in visitors resume their last org (`/orgs/$id` or `/orgs/all`).
  */
 function AppEntry() {
-  const onboarded = localStorage.getItem("codex:onboardingComplete") === "true"
+  const onboarded = localStorage.getItem("aquilla:onboardingComplete") === "true"
   if (!hasAuthHintCookie() && !onboarded) return <Navigate to="/login" replace />
   return <Navigate to={resumeOrgPath()} replace />
 }
@@ -214,6 +214,7 @@ export default function App() {
 function AppRoutes() {
   const location = useLocation()
   const backgroundLocation = (location.state as { backgroundLocation?: Location } | null)?.backgroundLocation
+
   return (
     <>
       {/* Workspace routes intentionally suspend to this outer boundary: when
@@ -256,7 +257,7 @@ function AppRoutes() {
         {/* Org shell — path is authoritative for active org. `/orgs/all` is home-only. */}
         <Route path="/orgs/all" element={<OrgHome />} />
         <Route path="/orgs/:orgId" element={<OrgRouteGate />}>
-          {/* AQU-790: index → guest list or redirect to overview; overview/projects split for members. */}
+          {/* AQU-790: index → guest /projects or member /overview. */}
           <Route index element={<OrgHomeRoute />} />
           <Route path="overview" element={<OrgOverview />} />
           <Route path="projects" element={<OrgProjectsPage />} />

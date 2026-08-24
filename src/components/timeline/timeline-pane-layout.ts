@@ -61,7 +61,7 @@ export const TIMELINE_PANE_MAX_SHARE = "70%"
  */
 export const MEDIA_BODY_MIN_HEIGHT = 168
 
-const timelinePaneHeightKey = (fileId: string) => `codex:timelinePaneHeight:${fileId}`
+const timelinePaneHeightKey = (fileId: string) => `aquilla:timelinePaneHeight:${fileId}`
 
 /**
  * Range-validated on the way in, not just on the way out. The stored number was

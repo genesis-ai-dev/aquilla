@@ -129,7 +129,7 @@ describe("TimelineEditor", () => {
     // Hermetic: zoom persists per file — under a persistent localStorage
     // (NODE_OPTIONS --localstorage-file) each run would ratchet 1.3× until
     // ZOOM_MAX and the assertion goes flat.
-    localStorage.removeItem("codex:timelineZoom:zoomfile")
+    localStorage.removeItem("aquilla:timelineZoom:zoomfile")
     render(
       <TimelineEditor
         fileId="zoomfile"
@@ -196,7 +196,7 @@ describe("TimelineEditor", () => {
     // implementable at all. A real two-finger scroll reports its modifiers.
     // Its own render because the horizontal zoom eases over rAF frames, so a
     // width read taken while the test above is still gliding is a race.
-    localStorage.removeItem("codex:timelineRowHeight:metafile")
+    localStorage.removeItem("aquilla:timelineRowHeight:metafile")
     render(
       <TimelineEditor
         fileId="metafile"
@@ -457,7 +457,7 @@ describe("TimelineEditor", () => {
   })
 
   it("round 6: the snap magnet is on by default, toggles, and persists globally", () => {
-    localStorage.removeItem("codex:timelineSnap")
+    localStorage.removeItem("aquilla:timelineSnap")
     render(
       <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
@@ -465,8 +465,8 @@ describe("TimelineEditor", () => {
     expect(btn).toHaveAttribute("aria-pressed", "true")
     fireEvent.click(btn)
     expect(btn).toHaveAttribute("aria-pressed", "false")
-    expect(localStorage.getItem("codex:timelineSnap")).toBe("off")
-    localStorage.removeItem("codex:timelineSnap")
+    expect(localStorage.getItem("aquilla:timelineSnap")).toBe("off")
+    localStorage.removeItem("aquilla:timelineSnap")
   })
 
   it("renders the follow toggle, pressed by default, and it toggles", () => {
@@ -590,7 +590,7 @@ describe("TimelineEditor", () => {
   })
 
   it("speaker buttons start audible, push audibility into the queue, toggle, and persist per file", () => {
-    localStorage.removeItem("codex:timelineAudibility:spkfile")
+    localStorage.removeItem("aquilla:timelineAudibility:spkfile")
     lastAudibility = null
     render(
       <TimelineEditor fileId="spkfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
@@ -605,14 +605,14 @@ describe("TimelineEditor", () => {
     fireEvent.click(src)
     expect(src).toHaveAttribute("aria-pressed", "false")
     expect(lastAudibility).toEqual({ source: false, target: true })
-    expect(JSON.parse(localStorage.getItem("codex:timelineAudibility:spkfile")!)).toEqual({ source: false, target: true })
+    expect(JSON.parse(localStorage.getItem("aquilla:timelineAudibility:spkfile")!)).toEqual({ source: false, target: true })
 
     fireEvent.click(tgt)
     expect(lastAudibility).toEqual({ source: false, target: false })
   })
 
   it("a muted-source preference persists across mounts", () => {
-    localStorage.setItem("codex:timelineAudibility:persistfile", JSON.stringify({ source: false, target: true }))
+    localStorage.setItem("aquilla:timelineAudibility:persistfile", JSON.stringify({ source: false, target: true }))
     lastAudibility = null
     render(
       <TimelineEditor fileId="persistfile" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
@@ -1065,7 +1065,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
   // suggest they exist. The band that used to demonstrate this is gone, and the
   // floor was never about the band.
   it("reaches the end of the footage with no audio VTT imported at all", () => {
-    localStorage.removeItem("codex:timelineZoom:floorfile")
+    localStorage.removeItem("aquilla:timelineZoom:floorfile")
     setVideoDurationSec(VIDEO, 120)
     render(
       <TimelineEditor
@@ -1115,7 +1115,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
   })
 
   it("an imported recording keeps its gutter source speaker, and it still publishes", () => {
-    localStorage.removeItem("codex:timelineAudibility:spk2")
+    localStorage.removeItem("aquilla:timelineAudibility:spk2")
     setVideoDurationSec(VIDEO, 120)
     render(
       <TimelineEditor fileId="spk2" coreMediaUrl={VIDEO} editable cells={importedMedia} onRetimeSubtitle={() => {}} />,
@@ -1278,7 +1278,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
   // at 0.1s, so the only thing that can still hide a 0.15s gap is the new rule.
   describe("no room, no add", () => {
     const zoomedIn = (cells: CellData[]) => {
-      localStorage.setItem("codex:timelineZoom:fzoom", String(ZOOM_MAX))
+      localStorage.setItem("aquilla:timelineZoom:fzoom", String(ZOOM_MAX))
       return render(
         <TimelineEditor
           fileId="fzoom" coreMediaUrl={VIDEO} editable cells={cells}
@@ -1317,7 +1317,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
     // audio cue. Clearance alone must not be enough to surface it.
     it("offers nothing without the project setting, however much clearance you have", () => {
       setVideoDurationSec(VIDEO, 120)
-      localStorage.setItem("codex:timelineZoom:fzoom", String(ZOOM_MAX))
+      localStorage.setItem("aquilla:timelineZoom:fzoom", String(ZOOM_MAX))
       render(
         <TimelineEditor
           fileId="fzoom" coreMediaUrl={VIDEO} editable
@@ -1339,7 +1339,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
     // being OFF; an explicit ON means on, cue track or no cue track.
     it("keeps offering the ways in on a file with an audio-cue track — the setting decides", () => {
       setVideoDurationSec(VIDEO, 120)
-      localStorage.setItem("codex:timelineZoom:fzoom", String(ZOOM_MAX))
+      localStorage.setItem("aquilla:timelineZoom:fzoom", String(ZOOM_MAX))
       render(
         <TimelineEditor
           fileId="fzoom" coreMediaUrl={VIDEO} editable

@@ -21,6 +21,13 @@ export const projectSettings = defineNamespace({
     "projectSettings.permission.editSharedSettingsRequiresRole": "{roleFloor} can edit shared settings.",
     "projectSettings.permission.renameRequiresRole": "{roleFloor} can rename this project.",
     "projectSettings.permission.reconnectToEdit": "Reconnect to edit shared settings.",
+    "projectSettings.permission.onlyRoleCanModify": "Only {role} can modify",
+    "projectSettings.permission.viewPrivilegedMembers": "View {role}",
+    "projectSettings.permission.privilegedDialogTitle": "Project {role}",
+    "projectSettings.permission.privilegedDialogDescription":
+      "{role} can change shared settings, members, and other project configuration.",
+    "projectSettings.permission.privilegedDialogEmpty": "No {role} on this project.",
+    "projectSettings.permission.privilegedDialogError": "Couldn't load {role}.",
 
     // ── Project creation dialog ──
     "projectSettings.create.trigger": "New Project",
@@ -697,6 +704,55 @@ export const projectSettings = defineNamespace({
           "account's role is below the rename floor.",
         placeholders: {
           roleFloor: "The rendered projectSettings.permission.roleOrHigher string, e.g. 'Maintainer or higher'.",
+        },
+      },
+      "projectSettings.permission.onlyRoleCanModify": {
+        description:
+          "Title of the compact per-control permission hint on a locked settings " +
+          "field (GitHub-style: 'Only admins can modify'). Names the role class " +
+          "that is allowed to edit, not the caller's current role. Short, no period.",
+        placeholders: {
+          role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
+        },
+      },
+      "projectSettings.permission.viewPrivilegedMembers": {
+        description:
+          "Next-action control under the per-control lock hint. Opens a modal of " +
+          "people who can change the setting (GitHub: 'View admins'). Short, no period.",
+        placeholders: {
+          role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
+        },
+      },
+      "projectSettings.permission.privilegedDialogTitle": {
+        description:
+          "Title of the GitHub-style 'Workspace admins' modal listing people who " +
+          "can change shared project settings. Short, no period.",
+        placeholders: {
+          role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
+        },
+      },
+      "projectSettings.permission.privilegedDialogDescription": {
+        description:
+          "One-line explanation under the privileged-members modal title. Names " +
+          "what that role class can do, not the caller's current role.",
+        placeholders: {
+          role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
+        },
+      },
+      "projectSettings.permission.privilegedDialogEmpty": {
+        description:
+          "Empty state inside the privileged-members modal when nobody on the " +
+          "project holds the write floor.",
+        placeholders: {
+          role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
+        },
+      },
+      "projectSettings.permission.privilegedDialogError": {
+        description:
+          "Error state inside the privileged-members modal when the list could " +
+          "not be loaded. Short, with a period.",
+        placeholders: {
+          role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
         },
       },
       "projectSettings.create.trigger": {

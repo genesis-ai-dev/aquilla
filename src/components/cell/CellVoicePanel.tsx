@@ -5,18 +5,19 @@
 //
 // Anatomy (a small card):
 //   ━━●━━ ( ▶ ) 0:03   once voiced: a waveform with a centered play/pause +
-//                       running time (hover reveals crop / volume / clone).
-//   [M Mary ⌄]          the cast as a single searchable combobox showing the
-//                       active voice. Opening it picks any of the (60+) voices;
-//                       picking one INSTANTLY (re)generates THIS line with it.
-//                       Recently-used voices float to the top of the list.
+//                       running time. The waveform is the seek surface — no
+//                       chrome sits on top of it.
+//   [M Mary ⌄] [✂ 🔊 ⧉] the cast combobox, with crop / volume / clone on the
+//                       same row, right-aligned. Picking a voice INSTANTLY
+//                       (re)generates THIS line with it. Recently-used voices
+//                       float to the top of the list.
 //
 // Playback is driven by useCellAudio (its own element) rather than the global
 // play-queue, so each line gets an independent scrubber + volume; the app-wide
 // audio-coordinator still guarantees only one source plays at a time.
 
 import { useCallback, useEffect, useMemo, useRef } from "react"
-import { Pause, Play, UserPlus, Volume2, VolumeX } from "lucide-react"
+import { CopyPlus, Pause, Play, Volume2, VolumeX } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -139,20 +140,22 @@ function VolumeButton({ volume, onChange }: { volume: number; onChange: (v: numb
   const t = useT()
   return (
     <Popover>
-      <PopoverTrigger
-        render={
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label={t("common.volume")}
-            className="shrink-0"
-          >
-            {volume === 0 ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
-          </Button>
-        }
-      />
-      <PopoverContent align="end" side="top" className="w-44 p-2.5">
+      <AppTooltip content={t("common.volume")}>
+        <PopoverTrigger
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("common.volume")}
+              className="shrink-0"
+            >
+              {volume === 0 ? <VolumeX className="h-3.5 w-3.5" /> : <Volume2 className="h-3.5 w-3.5" />}
+            </Button>
+          }
+        />
+      </AppTooltip>
+      <PopoverContent align="end" side="bottom" className="w-44 p-2.5">
         <div className="flex items-center gap-2">
           <VolumeX className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
           <Slider
@@ -403,7 +406,7 @@ export function CellVoicePanel({
     )
   }
 
-  const loading = isVoicing || audioState === "loading"
+  const audioLoading = audioState === "loading"
   // Scrubber maps over the cropped window (full clip when untrimmed).
   const effStart = trimStart ?? 0
   const effEnd = trimEnd ?? duration
@@ -412,28 +415,31 @@ export function CellVoicePanel({
   const fraction = effDur > 0 ? effCurrent / effDur : 0
   const primaryTitle = isPlaying ? t("common.pause") : t("editor.voice.play")
 
+  const takeTools = hasTake ? (
+    <div data-slot="voice-take-tools" className="flex shrink-0 items-center">
+      {/* Round 5: no crop on the shared source clip — its window is the
+          section's timing; retime the section in the timeline. */}
+      {!isSourceClip && (
+        <CropButton controller={audio} trim={{ start: trimStart, end: trimEnd }} onChange={changeTrim} />
+      )}
+      <VolumeButton volume={volume} onChange={changeVolume} />
+      <HeaderIconButton title={t("editor.voice.clone")} onClick={onMakeCharacter}>
+        <CopyPlus className="h-3.5 w-3.5" />
+      </HeaderIconButton>
+    </div>
+  ) : null
+
   return (
     <div
-      className="group/voice relative rounded-lg border bg-card/50 p-2.5 transition-colors hover:border-primary/30"
+      className="rounded-lg border bg-card/50 p-2.5 transition-colors hover:border-primary/30"
       dir="ltr"
     >
-      {/* Voiced: waveform with a centered play/pause + running time. Hover the
-          card to reveal crop / volume / clone. */}
+      {/* Voiced: waveform with a centered play/pause + running time. Crop /
+          volume / clone live on the cast row below — never on the waveform. */}
       {hasTake && (
-        <>
-          <div className="absolute right-1.5 top-1.5 z-10 flex items-center gap-0.5 opacity-0 transition-opacity focus-within:opacity-100 group-hover/voice:opacity-100">
-            {/* Round 5: no crop on the shared source clip — its window is the
-                section's timing; retime the section in the timeline. */}
-            {!isSourceClip && (
-              <CropButton controller={audio} trim={{ start: trimStart, end: trimEnd }} onChange={changeTrim} />
-            )}
-            <VolumeButton volume={volume} onChange={changeVolume} />
-            <HeaderIconButton title={t("editor.voice.clone")} onClick={onMakeCharacter}>
-              <UserPlus className="h-3.5 w-3.5" />
-            </HeaderIconButton>
-          </div>
-          <div className="relative mb-2 h-12">
-            <WaveScrubber fraction={fraction} onSeek={(f) => seek(effStart + f * effDur)} seed={cell.id} />
+        <div className="relative mb-2 h-12">
+          <WaveScrubber fraction={fraction} onSeek={(f) => seek(effStart + f * effDur)} seed={cell.id} />
+          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
             <AppTooltip content={primaryTitle}>
               <Button
                 type="button"
@@ -441,39 +447,40 @@ export function CellVoicePanel({
                 variant="default"
                 onClick={onPrimary}
                 aria-label={primaryTitle}
-                className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 shadow-md ring-4 ring-background transition-transform hover:scale-105"
+                className="shadow-md"
               >
-                {loading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-[1px]" />}
+                {audioLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-[1px]" />}
               </Button>
             </AppTooltip>
-            <span className="pointer-events-none absolute bottom-0 left-0 rounded bg-background/70 px-1 text-[10px] tabular-nums text-muted-foreground">
-              {isVoicing ? t("editor.voice.voicing") : `${fmtTime(effCurrent)} / ${effDur > 0 ? fmtTime(effDur) : "–:––"}`}
-            </span>
           </div>
-        </>
-      )}
-
-      {/* Unvoiced: a quiet hint above the cast strip. */}
-      {!hasTake && (
-        <div className="mb-1.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-          {isVoicing ? (
-            <>
-              <Spinner className="h-3 w-3" /> {t("editor.voice.voicing")}
-            </>
-          ) : (
-            t("editor.voice.clickVoiceToGenerate")
-          )}
+          <span className="pointer-events-none absolute bottom-0 left-0 rounded bg-background/70 px-1 text-[10px] tabular-nums text-muted-foreground">
+            {`${fmtTime(effCurrent)} / ${effDur > 0 ? fmtTime(effDur) : "–:––"}`}
+          </span>
         </div>
       )}
 
-      {/* The cast — a single searchable combobox showing the active voice.
-          Picking any voice instantly (re)voices this line with it. */}
-      <VoiceCombobox
-        voices={ordered}
-        active={active}
-        busy={isVoicing}
-        onPick={generateWith}
-      />
+      {/* Unvoiced: a quiet hint above the cast strip (hidden while voicing —
+          the combobox spinner is the sole busy indicator). */}
+      {!hasTake && !isVoicing && (
+        <div className="mb-1.5 text-[11px] text-muted-foreground">
+          {t("editor.voice.clickVoiceToGenerate")}
+        </div>
+      )}
+
+      {/* The cast — a searchable combobox. Once voiced, crop / volume / clone
+          sit on the same row, right-aligned, so the waveform stays fully
+          visible and seekable. */}
+      <div className="flex items-center gap-1">
+        <div className="min-w-0 flex-1">
+          <VoiceCombobox
+            voices={ordered}
+            active={active}
+            busy={isVoicing}
+            onPick={generateWith}
+          />
+        </div>
+        {takeTools}
+      </div>
     </div>
   )
 }

@@ -29,7 +29,7 @@ export type { TrackAudibility }
 
 /** Persisted per file, like zoom. The key is MOVED VERBATIM from TimelineEditor
  *  (round 5) so every preference already written to disk survives the move. */
-export const audibilityKey = (fileId: string) => `codex:timelineAudibility:${fileId}`
+export const audibilityKey = (fileId: string) => `aquilla:timelineAudibility:${fileId}`
 
 /** Both tracks on unless the stored value explicitly says otherwise, and both
  *  on for anything unreadable — a mute preference is not worth failing a render

@@ -4,7 +4,7 @@ import { Building2 } from "lucide-react"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { DateTooltip } from "@/components/ui/date-tooltip"
-import { EmptyState } from "@/components/ui/empty"
+import { TableEmptyState } from "@/components/ui/empty"
 import type { AdminOrg, AdminTeam } from "@/lib/frontier/admin"
 import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
@@ -106,17 +106,6 @@ export function AdminTenantsSection({
     [teamCountByOrg],
   )
 
-  if (orgs.length === 0) {
-    return (
-      <EmptyState
-        variant="panel"
-        icon={Building2}
-        title="No organizations yet"
-        description="Tenants appear here as orgs are created."
-      />
-    )
-  }
-
   return (
     <DataTable
       columns={columns}
@@ -134,6 +123,15 @@ export function AdminTenantsSection({
           (o.ownerUsername ?? "").toLowerCase().includes(q)
         )
       }}
+      emptyState={
+        orgs.length === 0 ? (
+          <TableEmptyState
+            icon={Building2}
+            title="No organizations yet"
+            description="Tenants appear here as orgs are created."
+          />
+        ) : undefined
+      }
       toolbar={(table) => (
         <span className="ml-auto text-xs tabular-nums text-muted-foreground">
           {table.getFilteredRowModel().rows.length === orgs.length

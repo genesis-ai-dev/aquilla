@@ -106,7 +106,7 @@ export function VoiceCombobox({
           render={
             <Button
               type="button"
-              size="xs"
+              size="sm"
               variant="outline"
               disabled={busy}
               aria-label={t("editor.voice.activeVoice", { name: active.name })}
@@ -126,7 +126,7 @@ export function VoiceCombobox({
           <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </PopoverTrigger>
       </AppTooltip>
-      <PopoverContent align="start" side="top" className="w-60 p-2">
+      <PopoverContent align="start" side="bottom" className="w-60 p-2">
         <VoicePickerContent
           voices={voices}
           activeId={active.id}

@@ -17,7 +17,7 @@ describe("dock-rail-position", () => {
   it("persists left position", () => {
     setDockRailPosition("left")
     expect(getDockRailPosition()).toBe("left")
-    expect(localStorage.getItem("codex:dockRailPosition")).toBe("left")
+    expect(localStorage.getItem("aquilla:dockRailPosition")).toBe("left")
   })
 
   it("notifies listeners on change", () => {

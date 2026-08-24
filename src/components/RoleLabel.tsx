@@ -1,3 +1,4 @@
+import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
 import { roleNameKey, unknownRoleLabel } from "@/lib/frontier/roles"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -23,12 +24,33 @@ interface RoleLabelProps {
   plural?: boolean
   className?: string
   as?: "span" | "strong"
+  /**
+   * Skip the members-table badge chrome. Use inside role pickers (name +
+   * blurb) and chips that already wrap the label.
+   */
+  plain?: boolean
 }
 
-/** Consistent, localized role label — use anywhere a role name is shown. */
-export function RoleLabel({ name, plural, className, as: Tag = "span" }: RoleLabelProps) {
+/** Assigned-role chip matching `/project/:id/settings/members`. */
+export function RoleLabel({
+  name,
+  plural,
+  className,
+  as: Tag = "span",
+  plain = false,
+}: RoleLabelProps) {
   const label = useRoleDisplayName(name, plural)
-  return <Tag className={cn(className)}>{label}</Tag>
+  if (plain) {
+    return <Tag className={cn("capitalize", className)}>{label}</Tag>
+  }
+  return (
+    <Badge
+      variant="secondary"
+      className={cn("font-normal capitalize bg-muted text-muted-foreground", className)}
+    >
+      {label}
+    </Badge>
+  )
 }
 
 interface RoleLevelLabelProps {
@@ -36,10 +58,11 @@ interface RoleLevelLabelProps {
   plural?: boolean
   className?: string
   as?: "span" | "strong"
+  plain?: boolean
 }
 
 /** Role label derived from a numeric level — identical to `<RoleLabel>`, kept
  *  as a distinct name at call sites that only have a level in hand. */
-export function RoleLevelLabel({ level, plural, className, as }: RoleLevelLabelProps) {
-  return <RoleLabel name={level} plural={plural} className={className} as={as} />
+export function RoleLevelLabel({ level, plural, className, as, plain }: RoleLevelLabelProps) {
+  return <RoleLabel name={level} plural={plural} className={className} as={as} plain={plain} />
 }

@@ -69,7 +69,7 @@ export function ExpandableFileList({
   const t = useT()
   const { expanded, toggle } = useSidebarExpansion(projectId)
   const { members: collapsed, toggle: toggleCollapsed } = usePersistedToggleSet(
-    `codex:sidebar:corpus-collapsed:${projectId}`,
+    `aquilla:sidebar:corpus-collapsed:${projectId}`,
   )
   const [editingFileId, setEditingFileId] = useState<string | null>(null)
   useEffect(() => {

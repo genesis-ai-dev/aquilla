@@ -33,7 +33,7 @@ describe("shouldShowVideoPane", () => {
 })
 
 describe("video pane width", () => {
-  beforeEach(() => localStorage.removeItem("codex:video-pane-width"))
+  beforeEach(() => localStorage.removeItem("aquilla:video-pane-width"))
 
   it("round-trips a width", () => {
     writeStoredVideoPaneWidth(340)
@@ -42,10 +42,10 @@ describe("video pane width", () => {
 
   it("falls back to the default when unset or nonsense", () => {
     expect(readStoredVideoPaneWidth()).toBe(VIDEO_PANE_DEFAULT_WIDTH)
-    localStorage.setItem("codex:video-pane-width", "not-a-number")
+    localStorage.setItem("aquilla:video-pane-width", "not-a-number")
     expect(readStoredVideoPaneWidth()).toBe(VIDEO_PANE_DEFAULT_WIDTH)
     // A stored width below the floor would render a pane too narrow to read.
-    localStorage.setItem("codex:video-pane-width", String(VIDEO_PANE_MIN_WIDTH - 50))
+    localStorage.setItem("aquilla:video-pane-width", String(VIDEO_PANE_MIN_WIDTH - 50))
     expect(readStoredVideoPaneWidth()).toBe(VIDEO_PANE_DEFAULT_WIDTH)
   })
 })

@@ -228,7 +228,10 @@ describe("AppShell main-content error containment", () => {
     // The picker must list endonyms, not English names — a Burmese speaker
     // looking for their language will not scan for the word "Burmese".
     await userEvent.click(trigger)
-    expect(await screen.findByRole("menuitemradio", { name: /မြန်မာ/ })).toBeInTheDocument()
+    const burmese = await screen.findByRole("menuitemradio", { name: /မြန်မာ/ })
+    expect(burmese).toBeInTheDocument()
+    expect(burmese.closest("[data-side]")).toHaveAttribute("data-side", "top")
+    expect(burmese.closest("[data-align]")).toHaveAttribute("data-align", "start")
   })
 
   it("keeps version and language controls on one row in the project workspace", async () => {
@@ -259,7 +262,9 @@ describe("AppShell main-content error containment", () => {
     expect(language).not.toHaveClass("border")
 
     await userEvent.click(help)
-    expect(await screen.findByRole("menuitem", { name: /homepage/i })).toBeInTheDocument()
+    const homepage = await screen.findByRole("menuitem", { name: /homepage/i })
+    expect(homepage.closest("[data-side]")).toHaveAttribute("data-side", "top")
+    expect(homepage.closest("[data-align]")).toHaveAttribute("data-align", "start")
     expect(screen.queryByRole("menuitem", { name: /take the tour/i })).not.toBeInTheDocument()
   })
 })

@@ -36,6 +36,21 @@ interface Props {
   testId?: string
   /** Anchor for popovers opened from this menu (e.g. View settings). */
   triggerRef?: Ref<HTMLButtonElement>
+  /**
+   * Turn the "…" into a NAMED menu. AQU-646 stage 6: the timeline's Sources
+   * menu is a labelled dropdown, not an overflow — it is the primary way to
+   * attach a film, audio cues or a character sheet to a file, so hiding it
+   * behind an ellipsis would make three discoverable buttons undiscoverable.
+   * Everything else about the menu is identical, which is why this is a prop
+   * rather than a second component.
+   */
+  triggerLabel?: string
+  triggerIcon?: ComponentType<{ className?: string }>
+  /** A count carried on the TRIGGER, so it is visible without opening the
+   *  menu. The character check's disagreement count lives here: putting it on
+   *  an item would make the thing you wanted a badge for one click further
+   *  away than it already is. */
+  triggerBadge?: ReactNode
 }
 
 /**
@@ -87,8 +102,13 @@ export function OverflowMenu({
   ariaLabel = "More",
   testId,
   triggerRef,
+  triggerLabel,
+  triggerIcon,
+  triggerBadge,
 }: Props) {
   if (items.length === 0) return null
+
+  const TriggerIcon = triggerIcon ?? MoreHorizontal
 
   return (
     <DropdownMenu>
@@ -97,12 +117,15 @@ export function OverflowMenu({
           <Button
             ref={triggerRef}
             variant={triggerVariant}
-            size={triggerSize}
+            // A labelled trigger cannot be an icon-sized square.
+            size={triggerLabel ? (triggerSize === "icon" ? "sm" : triggerSize) : triggerSize}
             className={triggerClassName}
-            aria-label={ariaLabel}
+            aria-label={triggerLabel ?? ariaLabel}
             data-testid={testId}
           >
-            <MoreHorizontal className="h-4 w-4" />
+            <TriggerIcon className="h-4 w-4" />
+            {triggerLabel}
+            {triggerBadge}
           </Button>
         }
       />

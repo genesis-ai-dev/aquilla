@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
 import { TimelineCard } from "./TimelineCard"
+import { chipRadiusPx } from "@/lib/timeline/scale"
 import type { CellData } from "@/hooks/useCells"
 
 const cell = (o: Partial<CellData> = {}): CellData =>
@@ -220,5 +221,275 @@ describe("TimelineCard", () => {
       />,
     )
     expect(screen.getByTestId("tl-card-c1")).toHaveTextContent("hola")
+  })
+
+  // ── AQU-646 round 8: neighbour walls ──
+  //
+  // A line added into a silence may move, but subtitle timing IS the cell's
+  // timing — so unlike a dub take it never gets to be approximate. The card
+  // stops dead at its neighbours' edges rather than crossing or overlapping.
+
+  describe("bounds", () => {
+    // The cell is 1s–3s at 40px/s. Walls at 0.5s and 4s leave 0.5s of slack
+    // either way.
+    const bounded = { minStartSec: 0.5, maxEndSec: 4 }
+
+    const dragBody = (dxPx: number) => {
+      const el = screen.getByTestId("tl-card-c1")
+      fireEvent.pointerDown(el, { clientX: 100, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 100 + dxPx })
+      fireEvent.pointerUp(window, { clientX: 100 + dxPx })
+    }
+
+    it("a move stops at the far wall, keeping its length", () => {
+      const onRetime = vi.fn()
+      render(
+        <TimelineCard cell={cell()} {...base} variant="subtitle" bounds={bounded}
+          onSelect={() => {}} onRetime={onRetime} />,
+      )
+      dragBody(400) // +10s, far past the wall
+      // Length preserved (2s), right edge flush with the neighbour.
+      expect(onRetime).toHaveBeenCalledWith("c1", 2, 4)
+    })
+
+    it("a move stops at the near wall too", () => {
+      const onRetime = vi.fn()
+      render(
+        <TimelineCard cell={cell()} {...base} variant="subtitle" bounds={bounded}
+          onSelect={() => {}} onRetime={onRetime} />,
+      )
+      dragBody(-400)
+      expect(onRetime).toHaveBeenCalledWith("c1", 0.5, 2.5)
+    })
+
+    it("stretching the end stops at the next cue's start", () => {
+      const onRetime = vi.fn()
+      render(
+        <TimelineCard cell={cell()} {...base} variant="subtitle" bounds={bounded}
+          onSelect={() => {}} onRetime={onRetime} />,
+      )
+      const grips = document.querySelectorAll(".cursor-ew-resize")
+      fireEvent.pointerDown(grips[1] as Element, { clientX: 200, pointerId: 2 })
+      fireEvent.pointerMove(window, { clientX: 600 })
+      fireEvent.pointerUp(window, { clientX: 600 })
+      expect(onRetime).toHaveBeenCalledWith("c1", 1, 4)
+    })
+
+    it("stretching the start stops at the previous cue's end", () => {
+      const onRetime = vi.fn()
+      render(
+        <TimelineCard cell={cell()} {...base} variant="subtitle" bounds={bounded}
+          onSelect={() => {}} onRetime={onRetime} />,
+      )
+      const grips = document.querySelectorAll(".cursor-ew-resize")
+      fireEvent.pointerDown(grips[0] as Element, { clientX: 40, pointerId: 3 })
+      fireEvent.pointerMove(window, { clientX: -400 })
+      fireEvent.pointerUp(window, { clientX: -400 })
+      expect(onRetime).toHaveBeenCalledWith("c1", 0.5, 3)
+    })
+
+    it("the wall beats a snap candidate that sits beyond it", () => {
+      // 6s is a legal edge to snap to and an illegal place to land. Clamping
+      // BEFORE snapping would let the snap step back over the wall; this is
+      // the assertion that pins the order.
+      const onRetime = vi.fn()
+      render(
+        <TimelineCard cell={cell()} {...base} variant="subtitle" bounds={bounded}
+          snap={{ enabled: true, candidates: [6] }} onSelect={() => {}} onRetime={onRetime} />,
+      )
+      dragBody(200) // +5s → 6s–8s, right on the candidate
+      expect(onRetime).toHaveBeenCalledWith("c1", 2, 4)
+    })
+
+    it("left out entirely, nothing is constrained", () => {
+      const onRetime = vi.fn()
+      render(
+        <TimelineCard cell={cell()} {...base} variant="subtitle" onSelect={() => {}} onRetime={onRetime} />,
+      )
+      dragBody(400)
+      expect(onRetime).toHaveBeenCalledWith("c1", 11, 13)
+    })
+  })
+
+  // The box and the number came from two different computations before round 8
+  // — one snapped and unclamped, the other clamped and unsnapped — so with
+  // snapping on they could disagree about where release would land.
+  it("with snapping on, the drawn box and the live readout agree", () => {
+    render(
+      <TimelineCard cell={cell()} {...base} variant="subtitle"
+        snap={{ enabled: true, candidates: [5] }} onSelect={() => {}} onRetime={() => {}} />,
+    )
+    const el = screen.getByTestId("tl-card-c1")
+    fireEvent.pointerDown(el, { clientX: 100, pointerId: 1 })
+    // +3.9s lands at 4.9s — inside the snap threshold of the 5s candidate.
+    fireEvent.pointerMove(window, { clientX: 256 })
+    // The box snapped to 5s...
+    expect(el).toHaveStyle({ left: "200px" })
+    // ...so the readout must say 5s too, not the unsnapped 4.9s.
+    expect(screen.getByTestId("tl-drag-chip").textContent).toContain("00:05.000")
+    fireEvent.pointerUp(window, { clientX: 256 })
+  })
+
+  // ── AQU-646 round 9: a chip too narrow to read says nothing ──
+  //
+  // Fully zoomed out a chip is 10-20px wide and was still rendering its label
+  // AND its clock range. Every chip became a column of one or two truncated
+  // glyphs, and the clock strings read as if they bled across neighbours. Sam
+  // called it "rendering issues in the source timeline".
+  describe("text thresholds", () => {
+    // The fixture cell is 1s-3s, so pxPerSec IS the card's width in px per 2s.
+    const atWidth = (widthPx: number) =>
+      render(
+        <TimelineCard
+          cell={cell()}
+          {...base}
+          pxPerSec={widthPx / 2}
+          onSelect={() => {}}
+          onRetime={() => {}}
+          onRemove={() => {}}
+        />,
+      )
+
+    it("a wide card says everything", () => {
+      atWidth(200)
+      const card = screen.getByTestId("tl-card-c1")
+      expect(card).toHaveTextContent("Go get the man")
+      expect(card.textContent).toContain("–")
+      expect(screen.getByTestId("tl-card-c1-remove")).toBeInTheDocument()
+    })
+
+    it("label and clock live or die together — ONE threshold, not two", () => {
+      // The first cut staggered them (clock at 72px, label at 40) because the
+      // clock had no truncate and sliced mid-glyph. Measured against the real
+      // episode that hid the timing on 69% of cues at Sam's working zoom. The
+      // clock now truncates like the label, so one number covers both.
+      atWidth(60)
+      const card = screen.getByTestId("tl-card-c1")
+      expect(card).toHaveTextContent("Go get the man")
+      expect(card.textContent).toContain("–")
+    })
+
+    it("the clock truncates rather than wrapping or slicing", () => {
+      // What makes the single threshold safe: at any width the clock stays on
+      // one line and ends in an ellipsis instead of wrapping onto extra lines
+      // and being cut mid-glyph by the card's overflow.
+      atWidth(60)
+      const clock = screen.getByTestId("tl-card-c1").querySelector("span.font-mono") as HTMLElement
+      expect(clock.className).toContain("truncate")
+      expect(clock.parentElement!.className).toContain("min-w-0")
+    })
+
+    it("below the text threshold the card is a plain block", () => {
+      atWidth(20)
+      const card = screen.getByTestId("tl-card-c1")
+      expect(card.textContent).toBe("")
+      // The X is 16px on a 20px card — it covered the whole chip.
+      expect(screen.queryByTestId("tl-card-c1-remove")).toBeNull()
+    })
+
+    it("its corner sharpens as it narrows, and the accent bar follows", () => {
+      // Asserts the WIRING, not the curve — scale.test.ts owns the maths, so a
+      // future tweak to the ramp does not have to be re-typed here. The accent
+      // bar is a separate absolutely-positioned span; with a fixed radius it
+      // would poke out of a sharpened corner.
+      const radii = (w: number) => {
+        const { unmount } = atWidth(w)
+        const card = screen.getByTestId("tl-card-c1")
+        const bar = card.querySelector("span.absolute.inset-y-0.left-0") as HTMLElement
+        const out = {
+          card: parseFloat(card.style.borderRadius),
+          barTop: parseFloat(bar.style.borderTopLeftRadius),
+          barBottom: parseFloat(bar.style.borderBottomLeftRadius),
+        }
+        unmount()
+        return out
+      }
+
+      const wide = radii(200)
+      expect(wide.card).toBeCloseTo(chipRadiusPx(200), 3)
+      expect(wide.card).toBe(8) // unchanged from the rounded-lg it replaced
+
+      const narrow = radii(20)
+      expect(narrow.card).toBeCloseTo(chipRadiusPx(20), 3)
+      expect(narrow.card).toBeLessThan(wide.card)
+
+      // The bar tracks the card in both states, or it overhangs the corner.
+      expect(wide.barTop).toBe(wide.card)
+      expect(wide.barBottom).toBe(wide.card)
+      expect(narrow.barTop).toBe(narrow.card)
+      expect(narrow.barBottom).toBe(narrow.card)
+    })
+
+    it("sheds its padding before the padding can lie about its width", () => {
+      // px-2.5 + two 1px borders is 22px of chrome, and under border-box that
+      // is a hard FLOOR on the rendered box — a 0.58s cue at 32px/s asks for
+      // 18.7px and gets drawn 22px, spilling 3.3px into its neighbour. That is
+      // the overlap Sam reported between two real chips. happy-dom has no
+      // layout engine so the class is what can be asserted here; the browser
+      // pass measures the actual seams.
+      const cls = (w: number) => {
+        const { unmount } = atWidth(w)
+        const out = screen.getByTestId("tl-card-c1").className
+        unmount()
+        return out
+      }
+      expect(cls(200)).toContain("px-2.5")
+      expect(cls(20)).toContain("px-0")
+      expect(cls(20)).not.toContain("px-2.5")
+      // Its own constant (24px), deliberately NOT the text threshold: this gate
+      // is load-bearing for geometry, so moving the text threshold must not be
+      // able to drag it under the 22px overlap floor.
+      expect(cls(30)).toContain("px-2.5")
+    })
+
+    it("the left grip clears the accent stripe instead of sitting flush to it", () => {
+      // At left-0 the grip's line landed flush against the coloured stripe and
+      // the two read as one thick left edge — which made the handle look
+      // mis-set next to a right grip that has clear space on both sides
+      // (Sam, 2026-08-11). It now starts where the stripe ends.
+      atWidth(200)
+      const card = screen.getByTestId("tl-card-c1")
+      const grips = card.querySelectorAll("span.cursor-ew-resize")
+      expect(grips).toHaveLength(2)
+      const bar = card.querySelector("span.absolute.inset-y-0.left-0") as HTMLElement
+      expect((grips[0] as HTMLElement).style.left).toBe(bar.style.width)
+      expect(bar.style.width).toBe("3px")
+    })
+
+    it("stops offering grips on a chip too narrow to aim at", () => {
+      // 3px of stripe plus two 8px targets is 19px; under ~28px there is no
+      // body left between them to grab for a move, and they start to overlap.
+      const grips = (w: number) => {
+        const { unmount } = atWidth(w)
+        const n = screen.getByTestId("tl-card-c1").querySelectorAll("span.cursor-ew-resize").length
+        unmount()
+        return n
+      }
+      expect(grips(60)).toBe(2)
+      expect(grips(28)).toBe(2)
+      expect(grips(24)).toBe(0)
+      expect(grips(12)).toBe(0)
+    })
+
+    it("a resize in progress keeps its grips however narrow the chip gets", () => {
+      // Otherwise the gesture cancels itself the moment it crosses the floor.
+      atWidth(20)
+      const card = screen.getByTestId("tl-card-c1")
+      expect(card.querySelectorAll("span.cursor-ew-resize")).toHaveLength(0)
+      fireEvent.pointerDown(card, { clientX: 100, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 140 })
+      expect(card.querySelectorAll("span.cursor-ew-resize")).toHaveLength(2)
+      fireEvent.pointerUp(window, { clientX: 140 })
+    })
+
+    it("a card being DRAGGED keeps its text however narrow it is", () => {
+      // You are looking straight at it, and the live readout is the point.
+      atWidth(20)
+      const card = screen.getByTestId("tl-card-c1")
+      fireEvent.pointerDown(card, { clientX: 100, pointerId: 1 })
+      fireEvent.pointerMove(window, { clientX: 140 })
+      expect(card).toHaveTextContent("Go get the man")
+      fireEvent.pointerUp(window, { clientX: 140 })
+    })
   })
 })

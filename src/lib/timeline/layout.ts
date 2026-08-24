@@ -44,8 +44,10 @@ export interface TimelineLayout {
   seekSecFor(cell: CellData): number | null
 }
 
-/** Trailing room past the last card, so the final chip isn't flush to the edge. */
-const TRACK_PAD_SEC = 2
+/** Trailing room past the last card, so the final chip isn't flush to the edge.
+ *  Exported so the insert arithmetic can agree with the track rather than
+ *  hard-coding the same 2. */
+export const TRACK_PAD_SEC = 2
 
 function sectionSpan(cell: CellData): SpanSec | null {
   const { startTime, endTime } = cell
@@ -54,15 +56,25 @@ function sectionSpan(cell: CellData): SpanSec | null {
   return { start: startTime, end: endTime }
 }
 
-function dubbingLayout(cells: readonly CellData[]): TimelineLayout {
+function dubbingLayout(cells: readonly CellData[], mediaDurationSec?: number | null): TimelineLayout {
   let end = 0
   for (const c of cells) {
     if (typeof c.endTime === "number" && Number.isFinite(c.endTime) && c.endTime > end) end = c.endTime
   }
+  // AQU-646: when the caller knows how long the FOOTAGE is, that is the floor.
+  // For an imported recording the cells are the recording and this changes
+  // nothing; for a subtitle file timed against a video the last cue is usually
+  // minutes short of the end, and that trailing stretch is reachable space
+  // rather than padding — on the demo episode it is three minutes that no
+  // amount of scrolling could get to.
+  const floorSec =
+    mediaDurationSec != null && Number.isFinite(mediaDurationSec) && mediaDurationSec > 0
+      ? mediaDurationSec
+      : 0
   return {
     mode: "dubbing",
     programme: null,
-    totalSec: end + TRACK_PAD_SEC,
+    totalSec: Math.max(end, floorSec) + TRACK_PAD_SEC,
     spanFor: (cell, lane) => (lane === "subtitle" ? subtitleSpanSec(cell) : sectionSpan(cell)),
     targetGeom: (cell, att) => targetChipGeom(cell, att),
     chipSection: (cell) => sectionSpan(cell),
@@ -159,11 +171,21 @@ function audioFirstLayout(_cells: readonly CellData[], dialogue: readonly CellDa
 /**
  * `cells` is everything on the file (for the track's extent); `dialogue` is
  * the time-sorted media lane from deriveLanes, which IS the programme's order.
+ *
+ * `mediaDurationSec` (AQU-646) is a FLOOR on the track's length, and applies to
+ * the dubbing layout only. Free timing lays verses end to end on its own clock,
+ * where the footage's length means nothing. Pass it only when the source-audio
+ * band is drawing: a file with real media cells that also has a video linked
+ * would otherwise get a track sized to the video while its chips still mean
+ * file-clock seconds.
  */
 export function buildTimelineLayout(
   mode: AudioTimingMode,
   cells: readonly CellData[],
   dialogue: readonly CellData[],
+  mediaDurationSec?: number | null,
 ): TimelineLayout {
-  return mode === "audioFirst" ? audioFirstLayout(cells, dialogue) : dubbingLayout(cells)
+  return mode === "audioFirst"
+    ? audioFirstLayout(cells, dialogue)
+    : dubbingLayout(cells, mediaDurationSec)
 }

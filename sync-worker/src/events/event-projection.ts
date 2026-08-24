@@ -305,7 +305,7 @@ export function buildBulkSourceCellCreateStmt(
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'comments' | 'cell_backtranslations'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'comments' | 'cell_backtranslations' | 'cell_links'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -759,27 +759,39 @@ export function buildEventProjectionStmts(
         // (it's null on source-side rows by definition). Source-side
         // validations aren't a v1 concept, so `validated` is left alone
         // here — for source-side rows it stays at its initial 0 forever.
+        // A TRANSCRIPT-ONLY COMMIT MUST NOT BLANK THE FILENAME. The editor
+        // resends `value` unchanged on a media correction, so normally this
+        // writes the filename back over itself — but a payload carrying only
+        // `transcription` (an older client, or any other caller) would
+        // otherwise land `value = ''` through the `?? ''` above and destroy
+        // the import record the correction was written to protect. The chain
+        // head still advances either way, which is what flags downstream
+        // targets stale (AD-9): the text translators work from has changed.
+        const spCommit = p as EventPayloads['source.cell.commit']
+        const transcriptOnly = p.value === undefined && typeof spCommit.transcription === 'string'
         stmts.push(
           db
             .prepare(
-              `UPDATE cells SET
-                value         = ?,
-                value_html    = ?,
-                event_id      = ?,
-                last_editor   = ?,
-                last_edit_at  = ?,
-                word_count    = ?,
-                content_hash  = ?
-              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'${gateAnd}`,
+              transcriptOnly
+                ? `UPDATE cells SET
+                    event_id      = ?,
+                    last_editor   = ?,
+                    last_edit_at  = ?
+                  WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'${gateAnd}`
+                : `UPDATE cells SET
+                    value         = ?,
+                    value_html    = ?,
+                    event_id      = ?,
+                    last_editor   = ?,
+                    last_edit_at  = ?,
+                    word_count    = ?,
+                    content_hash  = ?
+                  WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'${gateAnd}`,
             )
             .bind(
-              value,
-              valueHtml,
-              event.id,
-              event.author,
-              event.serverTs,
-              wordCount,
-              hash,
+              ...(transcriptOnly
+                ? [event.id, event.author, event.serverTs]
+                : [value, valueHtml, event.id, event.author, event.serverTs, wordCount, hash]),
               event.projectId,
               event.fileId,
               event.cellId,
@@ -1138,8 +1150,17 @@ case 'cell.audio.attach': {
       // recording's duration (its chip lost its length), its mime type and its
       // voice; a later trim then nulled the timings straight back. `label` was
       // the only protected column, which is why names survived and everything
-      // else didn't. Trims stay plain assignments on purpose: dragging an edge
-      // back to the clip boundary CLEARS them, and that must keep working.
+      // else didn't.
+      //
+      // 2026-08-14: the trim columns joined them, and the exemption they used
+      // to carry ("dragging an edge back to the clip boundary CLEARS them") was
+      // the last instance of the same bug. Clearing and having-no-opinion were
+      // both spelled "field absent", so the transcription's word-timings attach
+      // — which lands ~800ms after a take is saved — wiped the window every
+      // recorded take had just been given, leaving it anchored a few hundred ms
+      // early with nothing to undo the shift. An attach may now SET a window
+      // (a clip's birth values) and never clear one; clearing belongs to
+      // cell.audio.trim, which states both ends and can therefore mean NULL.
       stmts.push(
         db
           .prepare(
@@ -1156,8 +1177,8 @@ case 'cell.audio.attach': {
               reference_audio_id = COALESCE(excluded.reference_audio_id, cell_audio.reference_audio_id),
               duration_ms        = COALESCE(excluded.duration_ms, cell_audio.duration_ms),
               label              = COALESCE(excluded.label, cell_audio.label),
-              trim_start_ms      = excluded.trim_start_ms,
-              trim_end_ms        = excluded.trim_end_ms,
+              trim_start_ms      = COALESCE(excluded.trim_start_ms, cell_audio.trim_start_ms),
+              trim_end_ms        = COALESCE(excluded.trim_end_ms, cell_audio.trim_end_ms),
               timings_json       = COALESCE(excluded.timings_json, cell_audio.timings_json),
               selected           = 1,
               deleted            = 0,
@@ -1245,6 +1266,82 @@ case 'cell.audio.attach': {
           .bind(p.label, event.projectId, event.fileId, event.cellId, p.audioId),
       )
       return ['cell_audio']
+    }
+
+    case 'cell.audio.trim': {
+      // The clip's playback trim window, and nothing else — no selection, no
+      // slot, no url, no duration. Both ends are always stated (null = the clip
+      // edge), so unlike the attach UPSERT above this one CAN clear, which is
+      // the whole reason it exists: absence had to stop meaning two things.
+      const p = event.payload as EventPayloads['cell.audio.trim']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.audio.trim event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET trim_start_ms = ?, trim_end_ms = ?
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+          )
+          .bind(
+            p.trimStartMs ?? null,
+            p.trimEndMs ?? null,
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            p.audioId,
+          ),
+      )
+      return ['cell_audio']
+    }
+
+    case 'cell.link.set': {
+      // One edge between a subtitle cell (the envelope) and an audio cue (the
+      // payload). The ENDPOINTS are the primary key, so this is idempotent by
+      // construction: re-delivering an event, or replaying the whole log,
+      // lands on the same row rather than accumulating duplicates.
+      //
+      // `linked` is PLAIN-ASSIGNED, and that is correct here precisely because
+      // the payload always states it — do not "fix" this to COALESCE. An
+      // unlink is a tombstone (linked = 0) rather than a deleted row so that a
+      // later replay of the auto-linker's own event cannot resurrect an edge a
+      // person deliberately removed.
+      //
+      // `created_ts` is NOT overwritten: it records when the edge first
+      // appeared, which survives every later toggle of the same pair.
+      const p = event.payload as EventPayloads['cell.link.set']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.link.set event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `INSERT INTO cell_links (
+              project_id, kind, from_file_id, from_cell_id, to_file_id, to_cell_id,
+              linked, origin, confidence, event_id, created_ts
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(project_id, kind, from_file_id, from_cell_id, to_file_id, to_cell_id)
+            DO UPDATE SET
+              linked     = excluded.linked,
+              origin     = excluded.origin,
+              confidence = excluded.confidence,
+              event_id   = excluded.event_id`,
+          )
+          .bind(
+            event.projectId,
+            p.kind,
+            event.fileId,
+            event.cellId,
+            p.toFileId,
+            p.toCellId,
+            p.linked ? 1 : 0,
+            p.origin,
+            p.confidence ?? null,
+            event.id,
+            event.serverTs,
+          ),
+      )
+      return ['cell_links']
     }
 
     case 'cell.audio.measure': {
@@ -1663,6 +1760,36 @@ case 'cell.audio.attach': {
             .bind(event.projectId, event.fileId, event.cellId),
         )
       }
+      // AQU-646: the client's own line number for this row, merged into the
+      // same JSONB bucket as cast_name. A SEPARATE statement rather than one
+      // combined jsonb_build_object, because the two fields arrive
+      // independently — an import that has a name but no line number must not
+      // write a null over an existing one, and per-key merges commute, so a
+      // concurrent cast.assign cannot clobber this either.
+      if (p.lineNumber !== undefined && p.lineNumber !== null) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells
+               SET metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('line_number', ?::text)
+               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+            )
+            .bind(p.lineNumber, event.projectId, event.fileId, event.cellId),
+        )
+      } else if (p.lineNumber === null) {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cells
+               SET metadata = CASE
+                 WHEN metadata IS NULL THEN NULL
+                 ELSE metadata - 'line_number'
+               END
+               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'source'`,
+            )
+            .bind(event.projectId, event.fileId, event.cellId),
+        )
+      }
       // AQU-439: optionally update camera_state when the payload carries it.
       // Null clears the column; undefined = not provided = no-op.
       if (p.cameraState !== undefined) {
@@ -1693,6 +1820,7 @@ case 'cell.audio.attach': {
       const laneKeys: Array<[key: string, value: number | null | undefined]> = [
         ['subtitle_start_ms', p.subtitleStartMs],
         ['subtitle_end_ms', p.subtitleEndMs],
+        ['target_offset_ms', p.targetOffsetMs],
         ['target_start_ms', p.targetStartMs],
       ]
       for (const [key, value] of laneKeys) {
@@ -1767,6 +1895,25 @@ case 'cell.audio.attach': {
         throw new Error(`file.timing.set event ${event.id} is missing fileId`)
       }
       stmts.push(buildFileTimingSetStmt(db, event.projectId, event.fileId, event.id, p.timingMode))
+      return ['files']
+    }
+
+    case 'file.track.set': {
+      // Per-track presentation overrides — rebuild path; the dispatch path
+      // (handlers/file-track-set.ts) uses the same shared SQL builder.
+      //
+      // This case is a deliberately PERMISSIVE pass-through: rebuild.ts
+      // replays already-accepted history through this very function, so
+      // history that the live handler once accepted must never start being
+      // rejected here. All shape validation lives in the handler, which only
+      // ever sees new writes.
+      const p = event.payload as EventPayloads['file.track.set']
+      if (!event.fileId) {
+        throw new Error(`file.track.set event ${event.id} is missing fileId`)
+      }
+      stmts.push(
+        buildFileTrackSetStmt(db, event.projectId, event.fileId, event.id, p.trackId, p.patch),
+      )
       return ['files']
     }
 
@@ -2044,6 +2191,64 @@ export function buildFileTimingSetStmt(
         WHERE id = ? AND project_id = ?`,
     )
     .bind(timingMode, eventId, fileId, projectId)
+}
+
+/**
+ * Shared meta-merge for ONE timeline track's presentation overrides, kept in
+ * files.meta under `trackOverrides` keyed by track id. Used by both the live
+ * handler (handlers/file-track-set.ts) and the rebuild projection case above.
+ * A null patch removes the whole entry — a user-added track disappears, a
+ * default track falls back to pure defaults.
+ *
+ * The upsert merges per FIELD, not per entry: A renaming a track while B
+ * reorders the same track leaves BOTH changes standing, because each `||`
+ * only replaces the keys it actually carries (last-write-wins per field
+ * instead of per track). jsonb_set is deliberately not used — it silently
+ * no-ops when the parent key ('trackOverrides') does not exist yet, which is
+ * precisely the first-override case.
+ *
+ * WARNING: jsonb_strip_nulls is RECURSIVE. It is what turns `{"name": null}`
+ * into "drop the name override", so patches MUST stay FLAT — a nested,
+ * object-valued field would have its own nulls silently eaten too. The
+ * handler's key allow-list is what enforces flatness today; anyone adding an
+ * object-valued patch field later has to revisit this builder first.
+ */
+export function buildFileTrackSetStmt(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  eventId: string,
+  trackId: string,
+  patch: EventPayloads['file.track.set']['patch'],
+): AquillaStatement {
+  const NOW = "(extract(epoch from now()) * 1000)::bigint"
+  const META = "COALESCE(NULLIF(meta, ''), '{}')::jsonb"
+  if (patch == null) {
+    return db
+      .prepare(
+        `UPDATE files
+            SET meta = (${META} #- ARRAY['trackOverrides', ?::text])::text,
+                event_id = ?, updated_at = ${NOW}
+          WHERE id = ? AND project_id = ?`,
+      )
+      .bind(trackId, eventId, fileId, projectId)
+  }
+  // The patch binds through ::text::jsonb: postgres.js re-encodes an
+  // already-serialized string when the parameter is typed jsonb directly, so
+  // the entry would land as a JSON string instead of an object (the
+  // json-bind-contract test greps the tree for exactly that mistake). trackId
+  // binds twice — once as the key written, once to read the entry it merges
+  // onto.
+  return db
+    .prepare(
+      `UPDATE files
+          SET meta = (${META} || jsonb_build_object('trackOverrides',
+                COALESCE(${META} -> 'trackOverrides', '{}'::jsonb) || jsonb_build_object(?::text,
+                  jsonb_strip_nulls(COALESCE(${META} -> 'trackOverrides' -> ?::text, '{}'::jsonb) || ?::text::jsonb))))::text,
+              event_id = ?, updated_at = ${NOW}
+        WHERE id = ? AND project_id = ?`,
+    )
+    .bind(trackId, trackId, JSON.stringify(patch), eventId, fileId, projectId)
 }
 
 /**

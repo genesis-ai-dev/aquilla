@@ -575,6 +575,21 @@ export const editor = defineNamespace({
     "editor.timeline.laneTargetAudioSub": "takes · generated",
     "editor.timeline.laneUntimed": "Untimed",
     "editor.timeline.laneUntimedSub": "no timecode yet",
+    // AQU-646: a track whose button silences something the standard per-track
+    // sentences cannot name — on a subtitle file the source row's cues sit over
+    // the FILM's soundtrack, and "source audio" there is true but useless. The
+    // name is a frame here because the alternative is not naming it at all.
+    // AQU-646 stage 6: one menu for everything that attaches material to the
+    // file already open, as distinct from Import, which mints a new file.
+    "editor.timeline.sourcesMenu": "Sources",
+    "editor.timeline.sourcesMenuAria": "Attach material to this file",
+    "editor.timeline.checkMenu": "Check",
+    "editor.timeline.checkMenuLinking": "Linking",
+    "editor.timeline.checkMenuAria": "Check this file's pairings and characters",
+    "editor.timeline.muteNamed": "Mute {name}",
+    "editor.timeline.unmuteNamed": "Unmute {name}",
+    "editor.timeline.namedAudible": "{name} is audible — click to mute",
+    "editor.timeline.namedMuted": "{name} is muted — click to unmute",
     "editor.timeline.muteSourceAudio": "Mute source audio",
     "editor.timeline.unmuteSourceAudio": "Unmute source audio",
     "editor.timeline.sourceAudioAudible": "Source audio is audible — click to mute",
@@ -594,8 +609,11 @@ export const editor = defineNamespace({
     "editor.timeline.timingModeFreeHintLocked":
       "Verses are laid end to end — each takes as much room as its longer side. Only a maintainer can change this.",
     "editor.timeline.qualityToggleAria": "Play generated voices at original quality",
+    // AQU-646: "Recordings are always compressed" stopped being true when
+    // capture began following the device's WAV preference — a take now plays
+    // back in whatever format it was actually recorded in.
     "editor.timeline.qualityOriginalTooltip":
-      "Original quality (WAV) for generated voices — larger downloads. Recordings are always compressed.",
+      "Original quality (WAV) for generated voices — larger downloads. Recorded takes always play in the format they were captured.",
     "editor.timeline.qualityCompressedTooltip":
       "Compressed playback (smaller, faster). Toggle for original-quality generated voices.",
     "editor.timeline.snapToggleAria": "Snap to neighboring edges",
@@ -615,6 +633,351 @@ export const editor = defineNamespace({
       "Measuring downloads each recording — connect to the internet first.",
     "editor.timeline.measureBusyTooltip": "Another batch is running — wait for it to finish.",
     "editor.timeline.measureDismiss": "Dismiss for now",
+
+    // AQU-646: the video pane, the pairing overlay, and the small lane
+    // affordances. Keyed 2026-08-20 — these surfaces were authored inline
+    // while the dubbing workflow was being designed.
+    "editor.timeline.videoPaneTitle": "Video",
+    "editor.timeline.videoPaneLinked": "Linked video",
+    "editor.timeline.videoPaneStart": "Click to start the picture",
+    "editor.timeline.videoPanePicture": "picture",
+    "editor.timeline.videoPaneBar": "bar",
+    "editor.timeline.videoPaneErrorTitle": "This video could not be loaded",
+    // No `videoPaneRetry` or `videoPaneChangeVideo` here: the pane's two
+    // buttons reuse `common.retry` and `editor.timeline.changeVideo`. Minting a
+    // second key for a word the catalog already carries gives a translator two
+    // things to keep consistent for no gain — and rewording the English to dodge
+    // the duplicate scan is the mistake this catalog already made once and
+    // reverted (see no-duplicates.test.ts on commit 6b2977f5f).
+    "editor.timeline.subtitlePosition": "Subtitle position",
+    "editor.timeline.subtitleText": "Subtitle text",
+    "editor.timeline.audioTrackSearchPlaceholder": "Search languages…",
+    "editor.timeline.audioTrackSearchAria": "Search languages",
+    "editor.timeline.audioTrackNoMatch": "No language by that name.",
+    "editor.timeline.audioTrackFilmAudio": "Film audio",
+    "editor.timeline.pairingFromThis": "Pairing from this one — click a line on the other row",
+    "editor.timeline.pairedClickToUnpair": "Paired · click to unpair",
+    "editor.timeline.clickToPair": "Click to pair with the selected chip",
+    // AQU-646: the confirmation before a pairing is made or broken.
+    "editor.timeline.linkConfirmTitle": "Pair these two lines?",
+    "editor.timeline.linkConfirmDescription":
+      "The heard line's recording will belong to this subtitle. Pairings decide which line a performance is attributed to, so it is worth checking you clicked the two you meant.",
+    "editor.timeline.unlinkConfirmTitle": "Break this pairing?",
+    "editor.timeline.unlinkConfirmDescription":
+      "These two stop being a pair. Any recording on the heard line stays where it is, but it will no longer be attributed to this subtitle.",
+    // No `linkConfirmSubtitleSide` — the row label reuses
+    // `editor.timeline.chipHeadingSubtitle`, which is already this same word for
+    // this same row. A twin would be a second thing to keep in step.
+    "editor.timeline.linkConfirmHeardSide": "Heard",
+    "editor.timeline.linkConfirmGo": "Pair them",
+    "editor.timeline.unlinkConfirmGo": "Break the pairing",
+    "editor.timeline.noSpeechHere": "No speech here · {seconds}s",
+    "editor.timeline.takeLoading": "Loading this clip's audio…",
+    "editor.timeline.takeSaving": "Saving — kept safe on this device until it syncs",
+    "editor.timeline.recordOverStretch": "Record over this stretch",
+    "editor.timeline.removeThisLine": "Remove this line",
+    "editor.timeline.addLineHere": "Add a line here",
+
+    // The link-video dialog and the chip strip's field labels.
+    "editor.timeline.linkVideoTitleChange": "Change the linked video",
+    "editor.timeline.linkVideoTitleNew": "Link a video",
+    "editor.timeline.linkVideoDescription":
+      "Paste the address of the video this file was dubbed from. It plays beside the text, muted and in step with the audio — the recording you hear is always the one on the timeline.",
+    "editor.timeline.linkVideoAddressLabel": "Video address",
+    "editor.timeline.linkVideoInvalid":
+      "That doesn't look like a web address. It should start with http:// or https://.",
+    "editor.timeline.linkVideoClear": "Clear video",
+    "editor.timeline.chipHeadingDialogue": "Dialogue",
+    "editor.timeline.chipHeadingSubtitle": "Subtitle",
+    "editor.timeline.chipSpeaker": "Speaker",
+    "editor.timeline.chipCamera": "Camera",
+
+    // The toolbar, the gutter and the Sources/Check menu state badges.
+    "editor.timeline.sortableTrackRole": "sortable track",
+    "editor.timeline.gutterReorderAria":
+      "Timeline tracks — drag a name, or press Alt with the arrow keys, to reorder",
+    "editor.timeline.rowsShorterAria": "Shorter rows",
+    "editor.timeline.rowsShorterTooltip": "Shorter rows — fit more tracks on screen (⌘ + scroll)",
+    "editor.timeline.rowsTallerAria": "Taller rows",
+    "editor.timeline.rowsTallerTooltip": "Taller rows (⌘ + scroll)",
+    "editor.timeline.timingsUnlocked": "Timings unlocked",
+    "editor.timeline.pairingsFailed": "The pairings couldn't be loaded — what's shown may be incomplete.",
+    "editor.timeline.neverPaired":
+      'These cues have never been paired with the subtitles — re-import the audio VTT and tick "work out the subtitle pairings".',
+    "editor.timeline.badgePairing": "pairing…",
+    // No `badgeSaving` — the Sources row's spinner badge reuses `common.saving`.
+    // It differed only in case, and a case-only split is pure duplicate work:
+    // three of the four target locales have no letter case at all. The badge
+    // capitalises as a result, which is the cost of not having a twin.
+    "editor.timeline.badgeLinked": "linked",
+    "editor.timeline.badgeNotLinked": "not linked",
+    "editor.timeline.badgeNotImported": "not imported",
+    "editor.timeline.badgeImportedCount": "{count} imported",
+
+    // — Row hover controls + assurance panel (editing table) ——————
+    "editor.row.removeLine": "Remove this line",
+    "editor.row.addLine": "Add a line",
+    "editor.row.insertAbove": "Insert above",
+    "editor.row.insertBelow": "Insert below",
+    "editor.row.addLineAbove": "Add a line above",
+    "editor.row.addLineBelow": "Add a line below",
+    "editor.row.draftSearching": "{cellRef}: Looking up similar examples…",
+    "editor.row.draftGenerating": "{cellRef}: Generating translation…",
+    "editor.row.draftPreviewReady": "{cellRef}: Translation preview available",
+    "editor.assurance.validatedWithInfractions":
+      "Validation is authoritative, but automatic checks still found an issue.",
+    "editor.assurance.validatedClean":
+      "Human review is complete. Automatic evidence remains available as context.",
+    "editor.assurance.lowerSupport":
+      "Lower local support — review terminology and context closely.",
+    "editor.assurance.betterSupport":
+      "Better local support — human review is still required.",
+
+    // AQU-646, keyed 2026-08-20: the audio-VTT import dialog, the character-
+    // sheet import dialog, the character-check drawer and the pairing drawer.
+    // A sentence that was split around an interpolated value in JSX is ONE key
+    // here — the fragments cannot be translated, because word order moves
+    // between languages. The `{placeholder}` names say what each hole holds.
+
+    // — Import audio VTT dialog ————————————————————————————————
+    "editor.timeline.audioVttTitleReplace": "Replace the audio VTT",
+    "editor.timeline.audioVttTitleNew": "Import an audio VTT",
+    "editor.timeline.audioVttDescription":
+      "The cues become a read-only Source audio track on this file's timeline — " +
+      "the transcript of what is said in the film, on the film's own timings. The " +
+      "dialogue table below is untouched: no rows are added to \"{fileName}\", and " +
+      "nothing here is translated or exported.",
+    "editor.timeline.audioVttDescriptionReplacing":
+      "The audio track this file has now will be replaced.",
+    "editor.timeline.audioVttCueSummary": "{count} cues, {span}",
+    "editor.timeline.audioVttRepairedShortForm":
+      "{count} short-form timestamps read as minutes and seconds.",
+    "editor.timeline.audioVttStrippedTags": "Formatting removed from {count} cues.",
+    "editor.timeline.audioVttDroppedCues":
+      "{count} lines carried no usable text and were skipped.",
+    "editor.timeline.audioVttChoose": "Choose audio VTT",
+    "editor.timeline.audioVttPickHint":
+      "The episode's audio VTT — usually the one marked AUDIO_ONLY.",
+    "editor.timeline.audioVttTimebaseFyi":
+      "The timings will be adjusted slightly to line up with \"{fileName}\".",
+    "editor.timeline.audioVttUnmeasurableFyi":
+      "The timings couldn't be checked against the subtitles — importing the file as delivered.",
+    "editor.timeline.audioVttReconcileNoop":
+      "These are the {count} cues this file already has, on the same timings — " +
+      "there is nothing to update.",
+    "editor.timeline.audioVttKeptOfTotal": "{kept} of {total} cues",
+    "editor.timeline.audioVttReconcileKept":
+      "{kept} are the ones already here and keep everything attached to them",
+    "editor.timeline.audioVttKeptIncluding": "— including {takes}",
+    "editor.timeline.audioVttRecordingCount": plural({
+      one: "{count} recording",
+      other: "{count} recordings",
+    }),
+    "editor.timeline.audioVttRetimeShift": "{count} shift by up to {seconds} seconds",
+    "editor.timeline.audioVttCreates": plural({
+      one: "{count} new cue will be added.",
+      other: "{count} new cues will be added.",
+    }),
+    // The `one` form reads "1 cue are gone" — that is the English this dialog
+    // has always rendered (the component wrote "are" unconditionally and only
+    // toggled the noun's "s"), and moving copy into the catalog is not the
+    // place to change what a user sees. Flagged for the copy owner.
+    "editor.timeline.audioVttDeletes": plural({
+      one: "{count} cue is gone from this file and will be removed.",
+      other: "{count} cues are gone from this file and will be removed.",
+    }),
+    "editor.timeline.audioVttOrphanLead": plural({
+      one: "{count} recording sits on a cue that is going away",
+      other: "{count} recordings sit on a cue that is going away",
+    }),
+    "editor.timeline.audioVttOrphanWarning":
+      "{lead} and will no longer be reachable. The audio itself is kept, but " +
+      "nothing in the app would show it.",
+    "editor.timeline.audioVttRemoveLead":
+      "Take the Source audio track off \"{fileName}\"? The {count} cues and every " +
+      "subtitle pairing go with it.",
+    "editor.timeline.audioVttRemoveTakesLead": plural({
+      one: "{count} recording sits on those cues",
+      other: "{count} recordings sit on those cues",
+    }),
+    "editor.timeline.audioVttRemoveTakes":
+      "{lead} and would no longer be reachable — the audio itself is kept, but " +
+      "nothing in the app would show it.",
+    "editor.timeline.audioVttRemoveRestore":
+      "The track goes to Recently deleted, so a project lead can put it back — or " +
+      "you can import an audio VTT again afterwards.",
+    "editor.timeline.audioVttRemoveGo": "Remove the cues",
+    "editor.timeline.audioVttRemove": "Remove audio cues",
+    "editor.timeline.audioVttImport": "Import cues",
+    "editor.timeline.audioVttNothingToUpdate": "Nothing to update",
+    "editor.timeline.audioVttUpdateCues": "Update {count} cues",
+    "editor.timeline.audioVttImportCues": "Import {count} cues",
+    "editor.timeline.audioVttNoCues":
+      "This doesn't look like an audio VTT — no timed cues found.",
+    "editor.timeline.importFileEmpty": "That file is empty.",
+    "editor.timeline.importTooLargeText":
+      "\"{fileName}\" is larger than the 10 MB limit for text imports.",
+    // One key, three call sites: the answer to "are you sure?" is the same
+    // sentence in the audio-VTT removal and in both character clears.
+    "editor.timeline.keepThem": "Keep them",
+
+    // — Import characters dialog ——————————————————————————————
+    "editor.timeline.charactersTitle": "Characters",
+    "editor.timeline.charactersImportTitle": "Import characters",
+    "editor.timeline.charactersSubtitleLines": "{count} subtitle lines",
+    "editor.timeline.charactersHeardLines": "{count} heard lines",
+    "editor.timeline.charactersBothSides": "{subtitle} and {audio}",
+    "editor.timeline.charactersImportedSummary":
+      "{summary} carry a character. Import a sheet to replace a side, or clear one " +
+      "below.",
+    "editor.timeline.charactersImportHint":
+      "A spreadsheet with one row per line of \"{fileName}\", saying who speaks it " +
+      "and whether the camera is on them. Rows are matched to lines by their " +
+      "timestamps.",
+    "editor.timeline.charactersSheet": "Sheet",
+    "editor.timeline.charactersNoColumn":
+      "No character column found in this sheet. Expected a column named something " +
+      "like \"Character Label\", \"Cast\" or \"Speaker\".",
+    "editor.timeline.charactersSubtitleSheet": "subtitle character sheet",
+    "editor.timeline.charactersAudioSheet": "audio character sheet",
+    "editor.timeline.charactersWrongKindAudio":
+      "This looks like the {sheet}, not the audio one — its rows line up with the " +
+      "subtitles instead. Use the other button and it will import fine.",
+    "editor.timeline.charactersWrongKindSubtitle":
+      "This looks like the {sheet}, not the subtitle one — its rows line up with " +
+      "the heard lines instead. Use the other button and it will import fine.",
+    "editor.timeline.charactersMismatchLeadAudio":
+      "{count} of this sheet's rows match no heard line in \"{fileName}\"",
+    "editor.timeline.charactersMismatchLeadSubtitle":
+      "{count} of this sheet's rows match no line in \"{fileName}\"",
+    "editor.timeline.charactersMismatch":
+      "{lead} — starting at row {row}. That normally means the spreadsheet belongs " +
+      "to a different episode. Nothing has been changed.",
+    "editor.timeline.charactersAssignedLeadAudio": "{count} heard lines get a character",
+    "editor.timeline.charactersAssignedLeadSubtitle": "{count} lines get a character",
+    "editor.timeline.charactersAssignedSummary":
+      "{lead}, {people} people in all. Camera state comes across with them.",
+    "editor.timeline.charactersBlankRows":
+      "{count} rows have no character and are skipped — screen text and the like.",
+    "editor.timeline.charactersWithoutRowAudio":
+      "{count} heard lines are not in the sheet and keep whatever they have.",
+    "editor.timeline.charactersWithoutRowSubtitle":
+      "{count} lines are not in the sheet and keep whatever they have.",
+    "editor.timeline.charactersFilledByPosition":
+      "{count} rows do not quite match their line; the lines either side pin them, " +
+      "so they are matched by position.",
+    "editor.timeline.charactersCameraDisagreements":
+      "In {count} rows the Camera column and the angle written into the name " +
+      "disagree. The column wins.",
+    "editor.timeline.charactersPickSubtitle": "Subtitle characters",
+    "editor.timeline.charactersPickAudio": "Audio characters",
+    "editor.timeline.charactersPickHint":
+      "One row per line of \"{fileName}\", or per heard line of its audio track. " +
+      ".xlsx or .csv.",
+    "editor.timeline.charactersAlreadyHave": "{summary} already have a character.",
+    "editor.timeline.charactersClearSubtitleTitle": "Clear the characters on the subtitles?",
+    "editor.timeline.charactersClearSubtitleBody":
+      "{count} lines lose their character name, camera angle and line number. " +
+      "Corrections made since the import go too.",
+    "editor.timeline.charactersClearSubtitleAlsoAudio":
+      "The heard lines read their characters from these, so they go blank as well.",
+    "editor.timeline.charactersClearGo": "Clear the characters",
+    "editor.timeline.charactersClearAudioTitle": "Clear the characters on the heard lines?",
+    "editor.timeline.charactersClearAudioBody":
+      "{count} lines lose their character name, camera angle and line number.",
+    "editor.timeline.charactersClearAudioToSubtitles":
+      "They go back to reading their characters from the subtitles.",
+    "editor.timeline.charactersClearAudioNone": "They show no character at all.",
+    "editor.timeline.charactersClearSubtitles": "Clear subtitles",
+    "editor.timeline.charactersClearHeardLines": "Clear heard lines",
+    "editor.timeline.charactersAssignCount": "Assign {count} characters",
+    "editor.timeline.charactersAssign": "Assign characters",
+    "editor.timeline.charactersNoRows": "That spreadsheet has no rows.",
+    "editor.timeline.importTooLargeSheet":
+      "\"{fileName}\" is larger than the 10 MB limit for imports.",
+
+    // — Character-check drawer (where the two sheets disagree) ——————
+    "editor.timeline.characterCheckSpeakerSettled":
+      "Speaker settled — {rejected} was set aside.",
+    "editor.timeline.characterCheckCameraSettled":
+      "Camera settled — {rejected} was set aside.",
+    "editor.timeline.characterCheckSyncing": "Syncing…",
+    "editor.timeline.characterCheckSaving": "Saving… {done} of {total}",
+    "editor.timeline.characterCheckNothingToCheck": "nothing to check",
+    "editor.timeline.characterCheckToCheck": "{count} to check",
+    "editor.timeline.characterCheckOneSheet":
+      "Both character sheets have to be imported before there is anything to " +
+      "check. Each is keyed to one side of the script — one row per subtitle line, " +
+      "one per heard line — and comparing them is what turns up a wrong pairing or " +
+      "a wrong sheet.",
+    "editor.timeline.characterCheckImportSheets": "Import character sheets",
+    "editor.timeline.characterCheckNamesTitle": "Who says it · {count}",
+    "editor.timeline.characterCheckNamesHint":
+      "The sheets name different people. Either the pairing is wrong or one sheet is.",
+    "editor.timeline.characterCheckCameraTitle": "Camera · {count}",
+    "editor.timeline.characterCheckCameraHint":
+      "Same person; the sheets disagree about whether the camera is on them.",
+    "editor.timeline.characterCheckAlsoFlag": "Also flag",
+    "editor.timeline.characterCheckFlagMixed": "Mixed against on or off",
+    "editor.timeline.characterCheckFlagGroup": "Group against on or off",
+    "editor.timeline.characterCheckCamerasClear": "Nothing here disagrees about the camera.",
+    "editor.timeline.characterCheckBulkConfirm":
+      "Use the {side} sheet's camera answer for all {count} lines? Each lands in " +
+      "Resolved and can still be flipped one by one.",
+    "editor.timeline.characterCheckBulkGo": "Use {side}",
+    "editor.timeline.characterCheckBulkAll": "All {count}:",
+    "editor.timeline.characterCheckAllAgree":
+      "The two sheets agree everywhere they both have something to say.",
+    "editor.timeline.characterCheckShared":
+      "{count} pairings sit on a subtitle row that covers several heard lines, so " +
+      "one name cannot describe them all. Nothing to fix.",
+    "editor.timeline.characterCheckResolvedToggle": "Resolved · {count}",
+    "editor.timeline.characterCheckResetConfirm":
+      "Un-resolve all {count}? Every disagreement returns to the list with both " +
+      "answers restored. Nothing is deleted from the sheets.",
+    "editor.timeline.characterCheckResetAll": "Un-resolve everything",
+
+    // — Pairing (cue-link) drawer ——————————————————————————————
+    "editor.timeline.cueLinkHeard": "heard",
+    "editor.timeline.cueLinkLine": "line",
+    "editor.timeline.cueLinkPair": "Pair",
+    "editor.timeline.cueLinkNotAPair": "Not a pair",
+    "editor.timeline.cueLinkTitle": "Pairings",
+    "editor.timeline.cueLinkWorking": "working…",
+    "editor.timeline.cueLinkNothingToReview": "nothing to review",
+    "editor.timeline.cueLinkToReview": "{count} to review",
+    "editor.timeline.cueLinkModeNote":
+      "Linking is on — click a heard line, then the subtitle it performs.",
+    "editor.timeline.cueLinkRepairConfirm":
+      "Work out every pairing again from scratch? This discards any pairing you " +
+      "fixed by hand.",
+    "editor.timeline.cueLinkRepairAll": "Re-pair everything",
+    "editor.timeline.cueLinkConfidentTitle": "Almost certainly the same line",
+    "editor.timeline.cueLinkConfidentHint":
+      "Identical wording, moments apart, in a gap the pairings left open.",
+    "editor.timeline.cueLinkCrossScriptCandidatesTitle": "Different writing systems",
+    "editor.timeline.cueLinkCrossScriptCandidatesHint":
+      "The timings line up, but nothing could compare the words — so this was not " +
+      "paired for you.",
+    "editor.timeline.cueLinkWeakTitle": "Overlapping, words barely agree",
+    "editor.timeline.cueLinkWeakHint":
+      "Enough shared wording to notice, not enough to pair on its own.",
+    "editor.timeline.cueLinkUncertainTitle": "The only candidate nearby",
+    "editor.timeline.cueLinkUncertainHint":
+      "Nothing else is unpaired between them, but the words don't agree.",
+    "editor.timeline.cueLinkCrossScriptTitle": "Paired on timing alone",
+    "editor.timeline.cueLinkCrossScriptHint":
+      "Different writing systems, so nothing compared the words.",
+    "editor.timeline.cueLinkLowConfidenceTitle": "Paired, but barely",
+    "editor.timeline.cueLinkLowConfidenceHint": "Weak wording agreement. Probably fine.",
+    "editor.timeline.cueLinkOrphanCues": plural({
+      one: "{count} heard line with no subtitle nearby",
+      other: "{count} heard lines with no subtitle nearby",
+    }),
+    "editor.timeline.cueLinkOrphanText": plural({
+      one: "{count} line with no speech nearby",
+      other: "{count} lines with no speech nearby",
+    }),
 
     // — Per-cell voice panel (audio lens) ————————————————————————
     "editor.voice.volumeLevel": "Volume level",
@@ -833,6 +1196,8 @@ export const editor = defineNamespace({
       "No audio yet. Record below, or drag a voice onto this cell from the " +
       "toolbar above.",
     "editor.audio.recordShort": "Record",
+    "editor.audio.heardLineAt": "Heard line · {range}",
+    "editor.audio.heardLineShared": "Also performs {count} other subtitle lines — re-recording changes those too.",
 
     // — Expansion tabs: issues and metadata ————————————————————————
     "editor.expansion.issues": "Issues",
@@ -916,6 +1281,82 @@ export const editor = defineNamespace({
       screenshot: "editor-table",
     },
     keys: {
+      // AQU-646, keyed 2026-08-20. Only the two classes that require their own
+      // entry — a placeholder and an accessibility name; the rest of that batch
+      // inherits the namespace description above.
+      "editor.row.draftSearching": {
+        description:
+          "Screen-reader-only live-region announcement while an AI draft is " +
+          "being prepared for one row: it is looking up similar past " +
+          "translations. Never visible. Leads with the row's reference so a " +
+          "listener knows which line is speaking.",
+        placeholders: {
+          cellRef: "The row's reference, e.g. a verse or cue id.",
+        },
+      },
+      "editor.row.draftGenerating": {
+        description:
+          "Screen-reader-only live-region announcement while an AI draft is " +
+          "being written for one row. Never visible. Leads with the row's " +
+          "reference so a listener knows which line is speaking.",
+        placeholders: {
+          cellRef: "The row's reference, e.g. a verse or cue id.",
+        },
+      },
+      "editor.row.draftPreviewReady": {
+        description:
+          "Screen-reader-only live-region announcement when an AI draft is ready " +
+          "to look at. Never visible. Leads with the row's reference so a " +
+          "listener knows which line is speaking.",
+        placeholders: {
+          cellRef: "The row's reference, e.g. a verse or cue id.",
+        },
+      },
+      "editor.timeline.gutterReorderAria": {
+        description:
+          "Screen-reader name of the timeline's track-name gutter, which is a " +
+          "reorderable list. Names the list and states both ways to reorder it. " +
+          "Never visible.",
+      },
+      "editor.timeline.rowsShorterAria": {
+        description:
+          "Screen-reader name of the button that makes every timeline row " +
+          "shorter so more tracks fit. Never visible — the button is an icon. " +
+          "A noun phrase naming the result, not a command.",
+        maxLength: 20,
+      },
+      "editor.timeline.rowsTallerAria": {
+        description:
+          "Screen-reader name of the button that makes every timeline row " +
+          "taller. Never visible — the button is an icon. A noun phrase naming " +
+          "the result, not a command.",
+        maxLength: 20,
+      },
+      "editor.timeline.badgeImportedCount": {
+        description:
+          "State badge on the Sources menu's 'Audio cues' row, saying how many " +
+          "cues the file already carries. Lower-case, no period — it sits beside " +
+          "the row's label as a status, not a sentence.",
+        placeholders: {
+          count: "How many audio cues are imported on this file.",
+        },
+      },
+      "editor.timeline.noSpeechHere": {
+        description:
+          "Tooltip on a dashed empty chip covering a stretch of film where nobody " +
+          "speaks. Not a sentence — a label and a duration, joined by a middle dot. " +
+          "The 's' is the unit symbol for seconds and stays attached to the number.",
+        placeholders: {
+          seconds: "Length of the silent stretch in seconds, already rounded.",
+        },
+      },
+      "editor.timeline.audioTrackSearchAria": {
+        description:
+          "Screen-reader name of the text box that filters the film's audio tracks " +
+          "by language. Never visible — the box shows its placeholder instead. A " +
+          "noun phrase naming what the box searches.",
+        maxLength: 24,
+      },
       "editor.lens.text": {
         description:
           "First option of the two-option lens switch above the editing table " +
@@ -2902,6 +3343,55 @@ export const editor = defineNamespace({
           "middle dot separates the two — keep the two-word shape.",
         maxLength: 22,
       },
+      "editor.timeline.sourcesMenuAria": {
+        description:
+          "Accessible name of the timeline's Sources menu button, whose visible " +
+          "label is just 'Sources'. Names what the menu does: it attaches material " +
+          "— a film, the heard lines, a character sheet — to the file already open, " +
+          "as opposed to the Import button, which creates a new file.",
+      },
+      "editor.timeline.checkMenuAria": {
+        description:
+          "Accessible name of the timeline's Check menu button, whose visible label " +
+          "is just 'Check'. Names what the menu opens: the reviews of how the " +
+          "subtitle lines are paired with the heard lines, and of where the two " +
+          "character sheets disagree.",
+      },
+      "editor.timeline.muteNamed": {
+        description:
+          "Accessible name of a track's speaker button, for a track whose button " +
+          "silences something the per-track names cannot describe — on a subtitle " +
+          "file the source row's cues sit over the film's own soundtrack. Verb " +
+          "plus the thing that goes quiet.",
+        placeholders: {
+          name: "What goes quiet, already translated — e.g. \"the film's own sound\".",
+        },
+      },
+      "editor.timeline.unmuteNamed": {
+        description:
+          "The opposite of editor.timeline.muteNamed: accessible name of the same " +
+          "speaker button while that track is silent, so pressing it brings the " +
+          "sound back.",
+        placeholders: {
+          name: "What would become audible again, already translated.",
+        },
+      },
+      "editor.timeline.namedAudible": {
+        description:
+          "Hover tooltip on that same speaker button while the track is audible. " +
+          "States the current state and what a click does, separated by a dash.",
+        placeholders: {
+          name: "What is currently audible, already translated.",
+        },
+      },
+      "editor.timeline.namedMuted": {
+        description:
+          "Hover tooltip on that same speaker button while the track is silent. " +
+          "Mirrors editor.timeline.namedAudible in the opposite state.",
+        placeholders: {
+          name: "What is currently silent, already translated.",
+        },
+      },
       "editor.timeline.muteSourceAudio": {
         description:
           "Accessible name of the speaker button on the Source audio track while that " +
@@ -4034,6 +4524,25 @@ export const editor = defineNamespace({
           "recording modal. Imperative, one word.",
         maxLength: 14,
       },
+      "editor.audio.heardLineAt": {
+        description:
+          "Heading over one recording in the Recording tab that belongs to a " +
+          "HEARD LINE — the performance of this subtitle, which is a separate " +
+          "cue with its own place on the film. The timecode range says which " +
+          "one, since a subtitle can be performed by more than one.",
+        placeholders: {
+          range: "The heard line's start and end times, e.g. '1:03.4–1:05.9'. Already formatted.",
+        },
+      },
+      "editor.audio.heardLineShared": {
+        description:
+          "Warning under a heard line's recording when that one performance " +
+          "also covers other subtitle lines, so re-recording it changes them " +
+          "as well. Only shown when the count is at least one.",
+        placeholders: {
+          count: "How many OTHER subtitle lines this heard line performs (never zero).",
+        },
+      },
       "editor.expansion.issues": {
         description:
           "Name of the expansion tab listing translation-rule problems found in this " +
@@ -4272,6 +4781,459 @@ export const editor = defineNamespace({
       "editor.outbox.syncedTooltip": {
         description:
           "Tooltip/aria-label of the outbox chip when the queue is empty.",
+      },
+      // AQU-646, keyed 2026-08-20 — the audio-VTT import dialog, the character-
+      // sheet import dialog, the character-check drawer and the pairing drawer.
+      // Only the classes that require their own entry (a `{placeholder}` to
+      // explain, or a count-governed `plural()`); the rest of that batch
+      // inherits the namespace description above.
+      "editor.timeline.audioVttDescription": {
+        description:
+          "Explanatory paragraph under the title of the 'import an audio VTT' " +
+          "dialog. Says what the import adds (a read-only track of the film's " +
+          "spoken dialogue) and, just as importantly, what it does NOT touch.",
+        placeholders: {
+          fileName: "Name of the text file the track attaches to, e.g. 'ep101.vtt'. Content — never translate it.",
+        },
+      },
+      "editor.timeline.audioVttCueSummary": {
+        description:
+          "One line under the picked file's name summarising what was read out of " +
+          "it: how many cues, and the stretch of film they cover. Not a sentence.",
+        placeholders: {
+          count: "Number of timed cues found in the file.",
+          span: "The stretch the cues cover, already formatted as two clock times joined by an en dash, e.g. '0:00 – 45:12'.",
+        },
+      },
+      "editor.timeline.audioVttRepairedShortForm": {
+        description:
+          "Note under the file summary: some timestamps were written in a short " +
+          "form and were read as minutes and seconds rather than hours and minutes.",
+        placeholders: { count: "Number of timestamps read that way." },
+      },
+      "editor.timeline.audioVttStrippedTags": {
+        description:
+          "Note under the file summary: styling markup inside the cues was " +
+          "discarded, keeping only the words.",
+        placeholders: { count: "Number of cues that had formatting removed." },
+      },
+      "editor.timeline.audioVttDroppedCues": {
+        description:
+          "Note under the file summary: some cues had a timestamp but no words, so " +
+          "they were left out.",
+        placeholders: { count: "Number of cues skipped for having no text." },
+      },
+      "editor.timeline.audioVttTimebaseFyi": {
+        description:
+          "Quiet one-line note in the import dialog when a timing correction was " +
+          "detected and will be applied automatically. Informational only — there " +
+          "is no choice to make and no technical detail to convey.",
+        placeholders: {
+          fileName: "Name of the text file the cues will be lined up with. Content — never translate it.",
+        },
+      },
+      "editor.timeline.audioVttReconcileNoop": {
+        description:
+          "Shown when the picked file holds exactly the cues the timeline already " +
+          "has, on the same timings: there is simply nothing to do.",
+        placeholders: { count: "Number of cues, which is the same on both sides." },
+      },
+      "editor.timeline.audioVttKeptOfTotal": {
+        description:
+          "Bold fraction naming how many of the incoming cues are ones the " +
+          "timeline already has. Not a sentence — it opens a longer one.",
+        placeholders: {
+          kept: "Number of cues that already exist and are kept.",
+          total: "Number of cues in the file being imported.",
+        },
+      },
+      "editor.timeline.audioVttReconcileKept": {
+        description:
+          "What an update does to the cues already on the timeline: they keep " +
+          "their identity, and therefore their recordings and their subtitle " +
+          "pairings. The sentence may be continued by further clauses.",
+        placeholders: {
+          kept: "The bold fraction, already phrased as '540 of 550 cues'.",
+        },
+      },
+      "editor.timeline.audioVttKeptIncluding": {
+        description:
+          "Clause appended to the previous sentence when recordings hang off the " +
+          "kept cues — the thing people most want to know survives. Opens with an " +
+          "em dash because it continues the sentence before it.",
+        placeholders: {
+          takes: "The number of recordings, already phrased as '12 recordings' and shown in bold.",
+        },
+      },
+      "editor.timeline.audioVttRecordingCount": {
+        description:
+          "A count of recorded takes, shown in bold inside a longer sentence. " +
+          "Just the number and the noun.",
+        placeholders: { count: "Number of recordings." },
+      },
+      "editor.timeline.audioVttRetimeShift": {
+        description:
+          "Clause appended to the update summary when some kept cues move in " +
+          "time. States the largest move, so the reader can judge whether it matters.",
+        placeholders: {
+          count: "Number of cues whose timing changes.",
+          seconds: "The biggest move in seconds, already rounded to one decimal place.",
+        },
+      },
+      "editor.timeline.audioVttCreates": {
+        description:
+          "Part of the update summary: cues in the picked file that the timeline " +
+          "does not have yet and that will be added.",
+        placeholders: { count: "Number of cues being added." },
+      },
+      "editor.timeline.audioVttDeletes": {
+        description:
+          "Part of the update summary: cues the timeline has that the picked file " +
+          "no longer contains, and which will therefore be taken away.",
+        placeholders: { count: "Number of cues being removed." },
+      },
+      "editor.timeline.audioVttOrphanLead": {
+        description:
+          "Bold warning clause: recordings are attached to cues that this update " +
+          "would remove. Not a sentence — the consequence follows it.",
+        placeholders: { count: "Number of recordings sitting on cues that are going away." },
+      },
+      "editor.timeline.audioVttOrphanWarning": {
+        description:
+          "The full warning about recordings attached to cues an update would " +
+          "remove. Says plainly that the audio is kept but nothing will be able to " +
+          "reach it — 'lost' and 'out of reach' call for different amounts of nerve.",
+        placeholders: {
+          lead: "The bold opening clause, already phrased as '3 recordings sit on a cue that is going away'.",
+        },
+      },
+      "editor.timeline.audioVttRemoveLead": {
+        description:
+          "The question asked by the second step of removing the audio track, " +
+          "naming the file and what goes with the track.",
+        placeholders: {
+          fileName: "Name of the text file losing its audio track. Content — never translate it.",
+          count: "Number of cues that would be removed.",
+        },
+      },
+      "editor.timeline.audioVttRemoveTakesLead": {
+        description:
+          "Bold clause in the removal confirmation: recordings are attached to the " +
+          "cues being removed. Not a sentence — the consequence follows it.",
+        placeholders: { count: "Number of recordings attached to the cues." },
+      },
+      "editor.timeline.audioVttRemoveTakes": {
+        description:
+          "The consequence of removing cues that carry recordings: the audio is " +
+          "retained on the server but nothing in the app could show it again.",
+        placeholders: {
+          lead: "The bold opening clause, already phrased as '7 recordings sit on those cues'.",
+        },
+      },
+      "editor.timeline.audioVttUpdateCues": {
+        description:
+          "Confirm button of the audio-VTT dialog when the import will UPDATE the " +
+          "cues already on the timeline rather than create a new track.",
+        placeholders: { count: "Number of cues that will be updated." },
+      },
+      "editor.timeline.audioVttImportCues": {
+        description:
+          "Confirm button of the audio-VTT dialog when the import will create the " +
+          "track for the first time.",
+        placeholders: { count: "Number of cues that will be imported." },
+      },
+      "editor.timeline.importTooLargeText": {
+        description:
+          "Inline refusal shown in the dialog when the picked text file is over " +
+          "the size limit. '10 MB' is a unit and a number; keep it as it is.",
+        placeholders: { fileName: "Name of the file the user picked. Content — never translate it." },
+      },
+      "editor.timeline.charactersSubtitleLines": {
+        description:
+          "A count of subtitle lines, used as a fragment inside longer sentences " +
+          "about how many lines already carry a character name.",
+        placeholders: { count: "Number of subtitle lines." },
+      },
+      "editor.timeline.charactersHeardLines": {
+        description:
+          "A count of heard lines — lines of speech in the film's own audio — used " +
+          "as a fragment inside longer sentences.",
+        placeholders: { count: "Number of heard lines." },
+      },
+      "editor.timeline.charactersBothSides": {
+        description:
+          "Joins the two counts when both sides of the script have characters, " +
+          "e.g. '637 subtitle lines and 548 heard lines'. Only the conjunction and " +
+          "the order belong to the translator.",
+        placeholders: {
+          subtitle: "The subtitle-side count, already phrased as '637 subtitle lines'.",
+          audio: "The audio-side count, already phrased as '548 heard lines'.",
+        },
+      },
+      "editor.timeline.charactersImportedSummary": {
+        description:
+          "Explanatory paragraph of the characters dialog once at least one sheet " +
+          "has been imported: what is already there, and the two things that can " +
+          "be done about it.",
+        placeholders: {
+          summary: "What is already there, already phrased as e.g. '637 subtitle lines and 548 heard lines'.",
+        },
+      },
+      "editor.timeline.charactersImportHint": {
+        description:
+          "Explanatory paragraph of the characters dialog before anything has been " +
+          "imported: what the spreadsheet has to look like and how its rows are " +
+          "matched to the file's lines.",
+        placeholders: {
+          fileName: "Name of the file gaining characters. Content — never translate it.",
+        },
+      },
+      "editor.timeline.charactersWrongKindAudio": {
+        description:
+          "Refusal shown when the sheet picked under the AUDIO button is really " +
+          "the subtitle sheet — its rows line up with the subtitles instead. Says " +
+          "outright that the other button will work, because nothing is wrong " +
+          "with the file.",
+        placeholders: {
+          sheet: "Which sheet this actually is, already phrased as 'subtitle character sheet' and shown in bold.",
+        },
+      },
+      "editor.timeline.charactersWrongKindSubtitle": {
+        description:
+          "Refusal shown when the sheet picked under the SUBTITLE button is really " +
+          "the audio sheet — its rows line up with the heard lines instead. Says " +
+          "outright that the other button will work, because nothing is wrong " +
+          "with the file.",
+        placeholders: {
+          sheet: "Which sheet this actually is, already phrased as 'audio character sheet' and shown in bold.",
+        },
+      },
+      "editor.timeline.charactersMismatchLeadAudio": {
+        description:
+          "Bold opening of the refusal when rows of an AUDIO character sheet match " +
+          "no heard line in the file. Not a sentence — the rest follows after a dash.",
+        placeholders: {
+          count: "Number of spreadsheet rows that matched nothing.",
+          fileName: "Name of the file the sheet was checked against. Content — never translate it.",
+        },
+      },
+      "editor.timeline.charactersMismatchLeadSubtitle": {
+        description:
+          "Bold opening of the refusal when rows of a SUBTITLE character sheet " +
+          "match no line in the file. Not a sentence — the rest follows after a dash.",
+        placeholders: {
+          count: "Number of spreadsheet rows that matched nothing.",
+          fileName: "Name of the file the sheet was checked against. Content — never translate it.",
+        },
+      },
+      "editor.timeline.charactersMismatch": {
+        description:
+          "The full refusal when a character sheet's rows match nothing: it almost " +
+          "always means the spreadsheet belongs to a different episode. Ends by " +
+          "reassuring that nothing was written.",
+        placeholders: {
+          lead: "The bold opening clause naming how many rows matched nothing and in which file.",
+          row: "The number of the first spreadsheet row that matched nothing, so it can be looked up.",
+        },
+      },
+      "editor.timeline.charactersAssignedLeadAudio": {
+        description:
+          "Bold clause in the go-ahead summary for an AUDIO character sheet: how " +
+          "many heard lines gain a character. Not a sentence.",
+        placeholders: { count: "Number of heard lines that will be given a character." },
+      },
+      "editor.timeline.charactersAssignedLeadSubtitle": {
+        description:
+          "Bold clause in the go-ahead summary for a SUBTITLE character sheet: how " +
+          "many lines gain a character. Not a sentence.",
+        placeholders: { count: "Number of lines that will be given a character." },
+      },
+      "editor.timeline.charactersAssignedSummary": {
+        description:
+          "The go-ahead summary of a character import: how many lines are affected, " +
+          "how many distinct people appear, and that the camera column comes across too.",
+        placeholders: {
+          lead: "The bold opening clause, already phrased as e.g. '548 heard lines get a character'.",
+          people: "How many different characters appear across the sheet.",
+        },
+      },
+      "editor.timeline.charactersBlankRows": {
+        description:
+          "Note in the go-ahead summary: rows with no character in them are passed " +
+          "over. Usually on-screen text rather than speech, hence the example.",
+        placeholders: { count: "Number of spreadsheet rows with no character name." },
+      },
+      "editor.timeline.charactersWithoutRowAudio": {
+        description:
+          "Note in the go-ahead summary for an AUDIO sheet: heard lines the " +
+          "spreadsheet says nothing about are left exactly as they are.",
+        placeholders: { count: "Number of heard lines absent from the sheet." },
+      },
+      "editor.timeline.charactersWithoutRowSubtitle": {
+        description:
+          "Note in the go-ahead summary for a SUBTITLE sheet: lines the " +
+          "spreadsheet says nothing about are left exactly as they are.",
+        placeholders: { count: "Number of lines absent from the sheet." },
+      },
+      "editor.timeline.charactersFilledByPosition": {
+        description:
+          "Note in the go-ahead summary: some rows did not match their line on " +
+          "timestamp, but the lines on either side did, so their place in the order " +
+          "settles it.",
+        placeholders: { count: "Number of rows matched by their position rather than their timestamp." },
+      },
+      "editor.timeline.charactersCameraDisagreements": {
+        description:
+          "Warning in the go-ahead summary: the sheet's Camera column and the " +
+          "camera angle written into the character name say different things. " +
+          "States which one is used.",
+        placeholders: { count: "Number of rows where the two disagree." },
+      },
+      "editor.timeline.charactersPickHint": {
+        description:
+          "Small print under the two file-picking buttons, describing the shape of " +
+          "the spreadsheet and the file types accepted. '.xlsx' and '.csv' are file " +
+          "extensions — never translate them.",
+        placeholders: {
+          fileName: "Name of the file gaining characters. Content — never translate it.",
+        },
+      },
+      "editor.timeline.charactersAlreadyHave": {
+        description:
+          "Reminder beside the file-picking buttons that characters are already " +
+          "present, so picking a sheet will replace a side rather than fill an " +
+          "empty one.",
+        placeholders: {
+          summary: "What is already there, already phrased as e.g. '637 subtitle lines and 548 heard lines'.",
+        },
+      },
+      "editor.timeline.charactersClearSubtitleBody": {
+        description:
+          "The consequence spelled out in the 'clear the subtitle characters' " +
+          "confirmation. Says outright that hand corrections go too, because this " +
+          "empties the field rather than undoing the import.",
+        placeholders: { count: "Number of lines that would be emptied." },
+      },
+      "editor.timeline.charactersClearAudioBody": {
+        description:
+          "The consequence spelled out in the 'clear the heard-line characters' " +
+          "confirmation. A following sentence says what those lines will show instead.",
+        placeholders: { count: "Number of heard lines that would be emptied." },
+      },
+      "editor.timeline.charactersAssignCount": {
+        description:
+          "Confirm button of the characters dialog once a sheet has been read and " +
+          "accepted, naming how many lines it will write to.",
+        placeholders: { count: "Number of lines that will be given a character." },
+      },
+      "editor.timeline.importTooLargeSheet": {
+        description:
+          "Inline refusal shown in the dialog when the picked spreadsheet is over " +
+          "the size limit. '10 MB' is a unit and a number; keep it as it is.",
+        placeholders: { fileName: "Name of the file the user picked. Content — never translate it." },
+      },
+      "editor.timeline.characterCheckSpeakerSettled": {
+        description:
+          "Small note on a half-decided row of the character-check drawer: the " +
+          "speaker question has been answered, and this is the answer that was " +
+          "NOT taken — kept visible so the decision can be reversed.",
+        placeholders: { rejected: "The character name that was set aside. Content — never translate it." },
+      },
+      "editor.timeline.characterCheckCameraSettled": {
+        description:
+          "Small note on a half-decided row of the character-check drawer: the " +
+          "camera question has been answered, and this is the answer that was NOT " +
+          "taken — kept visible so the decision can be reversed.",
+        placeholders: { rejected: "The camera state that was set aside, e.g. 'on' or 'off', already translated." },
+      },
+      "editor.timeline.characterCheckSaving": {
+        description:
+          "Progress text beside a spinner in the character-check drawer's header " +
+          "while decisions are being written one at a time. Deliberately counted " +
+          "rather than a bare spinner, because a long run reads as hung.",
+        placeholders: {
+          done: "How many writes have finished.",
+          total: "How many writes there are in all.",
+        },
+      },
+      "editor.timeline.characterCheckToCheck": {
+        description:
+          "Counter in the character-check drawer's header: how many disagreements " +
+          "are still open. Lower case — it sits beside the drawer's title.",
+        placeholders: { count: "Number of open disagreements." },
+      },
+      "editor.timeline.characterCheckNamesTitle": {
+        description:
+          "Heading of the section listing lines whose two character sheets name " +
+          "different speakers, with the count after a middle dot.",
+        placeholders: { count: "Number of lines in this section." },
+      },
+      "editor.timeline.characterCheckCameraTitle": {
+        description:
+          "Heading of the section listing lines whose two character sheets " +
+          "disagree about the camera, with the count after a middle dot.",
+        placeholders: { count: "Number of lines in this section." },
+      },
+      "editor.timeline.characterCheckBulkConfirm": {
+        description:
+          "The 'are you sure' before applying one sheet's camera answer to every " +
+          "disputed line at once. Reassures that each one stays reversible.",
+        placeholders: {
+          side: "Which sheet's answer would be used — the lower-case word 'subtitle' or 'audio', matching the two column headings.",
+          count: "Number of lines the sweep would settle.",
+        },
+      },
+      "editor.timeline.characterCheckBulkGo": {
+        description:
+          "The button that carries out the bulk camera decision. Short on purpose " +
+          "— the drawer is narrow and the column headings above carry the meaning.",
+        placeholders: {
+          side: "Which sheet's answer wins — the lower-case word 'subtitle' or 'audio', matching the two column headings.",
+        },
+      },
+      "editor.timeline.characterCheckBulkAll": {
+        description:
+          "Label in front of the two bulk-decision buttons, naming how many lines " +
+          "they would settle. Ends with a colon because the buttons follow it.",
+        placeholders: { count: "Number of lines the bulk buttons would settle." },
+      },
+      "editor.timeline.characterCheckShared": {
+        description:
+          "A statement of fact rather than a job: some subtitle rows cover several " +
+          "heard lines at once, so no single character name could be right for all " +
+          "of them. Ends by saying plainly that there is nothing to do.",
+        placeholders: { count: "Number of pairings in this situation." },
+      },
+      "editor.timeline.characterCheckResolvedToggle": {
+        description:
+          "The collapsed section holding settled disagreements, with its count " +
+          "after a middle dot. Clicking it opens the list.",
+        placeholders: { count: "Number of settled disagreements." },
+      },
+      "editor.timeline.characterCheckResetConfirm": {
+        description:
+          "The 'are you sure' before undoing every settled disagreement at once. " +
+          "Says that both original answers come back and that nothing is destroyed.",
+        placeholders: { count: "Number of settled disagreements that would be reopened." },
+      },
+      "editor.timeline.cueLinkToReview": {
+        description:
+          "Counter in the pairing drawer's header: how many pairings are worth a " +
+          "look. Lower case — it sits beside the drawer's title.",
+        placeholders: { count: "Number of pairings worth reviewing." },
+      },
+      "editor.timeline.cueLinkOrphanCues": {
+        description:
+          "A collapsed count at the foot of the pairing drawer: heard lines with " +
+          "no subtitle anywhere near them, which is usually nothing to act on. " +
+          "Clicking it lists them.",
+        placeholders: { count: "Number of heard lines with no nearby subtitle." },
+      },
+      "editor.timeline.cueLinkOrphanText": {
+        description:
+          "A collapsed count at the foot of the pairing drawer: subtitle lines " +
+          "with no speech anywhere near them. Clicking it lists them.",
+        placeholders: { count: "Number of subtitle lines with no nearby speech." },
       },
     },
   },

@@ -40,6 +40,17 @@ export interface ProjectWideSettings {
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean
   /**
+   * AQU-646: may people add new lines into the silences on the timeline?
+   *
+   * OFF unless explicitly turned on. The affordance was built speculatively —
+   * no client has asked for it — and it is underdeveloped enough to be a
+   * liability: its mic over an empty stretch used to mint a subtitle line and
+   * record against it, producing a take matching no audio cue at all. Removal
+   * of an empty added line is deliberately NOT gated on this, so switching it
+   * off can never strand a line somebody already made.
+   */
+  allowLineCreation?: boolean
+  /**
    * AQU-186: minimum role level required to trigger a harmonization sweep on
    * this project. Default (absent) = project_lead (500). Configurable up to
    * maintainer (600); lowering below project_lead is not allowed (hard floor).
@@ -122,6 +133,21 @@ export interface ProjectWideSettings {
   /** AQU-646 SUB-53: dubbing (the default, and the meaning of absent) or
    *  audio-first. See the AudioTimingMode doc comment in parsers/types.ts. */
   audioTimingMode?: AudioTimingMode
+  /**
+   * AQU-646: may anyone below maintainer move a chip on the timeline?
+   *
+   * Sam, 2026-08-20: "It needs to be a very active decision to go mess around
+   * with subtitle VTT timings." The imported timings are the client's own work
+   * and the one thing in the project that nobody here should be adjusting by
+   * accident — a stray drag silently moves a line for everybody, and there is
+   * no second copy to compare against.
+   *
+   * Deliberately NOT scoped to project lead: Sam asked for leads to be locked
+   * too, on the grounds that they can mess it up just as unintentionally. Only
+   * a maintainer can unlock, which this needs no code to arrange — the settings
+   * route already refuses every write below maintainer.
+   */
+  timingLocked?: boolean
 }
 
 /** Absent means dubbing — the behaviour every project had before SUB-53. */
@@ -129,6 +155,25 @@ export function resolveAudioTimingMode(
   settings: Pick<ProjectWideSettings, "audioTimingMode"> | null | undefined,
 ): AudioTimingMode {
   return settings?.audioTimingMode === "audioFirst" ? "audioFirst" : "dubbing"
+}
+
+/**
+ * ABSENT MEANS LOCKED — the opposite of the "absent = the behaviour we had
+ * before" rule every other setting in this file follows, and deliberately so.
+ *
+ * A lock that has to be switched on protects nothing until somebody remembers
+ * to switch it on, which for a safeguard against ACCIDENTS is the wrong way
+ * round. So the only value that unlocks is an explicit `false`, and anything
+ * else — missing, malformed, a stale client's `undefined` — locks.
+ *
+ * The consequence is worth naming: every project that exists locks the moment
+ * this ships, and nobody below maintainer can move a chip until someone
+ * unlocks it. That is what Sam asked for ("default to locked for everyone").
+ */
+export function resolveTimingLocked(
+  settings: Pick<ProjectWideSettings, "timingLocked"> | null | undefined,
+): boolean {
+  return settings?.timingLocked !== false
 }
 
 export interface ProjectSettingsResponse {

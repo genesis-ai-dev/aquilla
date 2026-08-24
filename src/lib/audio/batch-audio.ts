@@ -139,6 +139,14 @@ export interface TranscribeAllArgs {
   targetLanguage?: string
   /** @deprecated single-language callers; used as targetLanguage fallback. */
   language?: string
+  /**
+   * How far along, for callers that report it themselves. Fires once with
+   * `done === 0` BEFORE any work starts, so a caller can put its total on
+   * screen while the first cell is still waiting on the Whisper model — which
+   * on a cold run is most of the wait. Not fired at all when nothing needs
+   * transcribing, so a caller can tell "no work" from "no progress yet".
+   */
+  onProgress?: (done: number, total: number) => void
 }
 
 /**
@@ -184,6 +192,8 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
   if (targets.length === 0) return
 
   _transcribeCancelFlag = false
+  args.onProgress?.(0, targets.length)
+  let completed = 0
 
   await runBatch(
     targets,
@@ -200,7 +210,11 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
     {
       kind: "transcribe",
       isCancelled: () => _transcribeCancelFlag,
-      onItemDone: () => { /* per-cell badge handles its own state */ },
+      onItemDone: () => {
+        // The per-cell badge handles its own state; this is for whoever is
+        // watching the whole batch rather than one line.
+        args.onProgress?.(++completed, targets.length)
+      },
     },
   )
 }

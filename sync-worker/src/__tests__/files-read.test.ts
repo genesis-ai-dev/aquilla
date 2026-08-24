@@ -155,6 +155,97 @@ describe("GET /api/v1/projects/:projectId/files", () => {
     expect(body.file.name).toBe("Genesis")
   })
 
+  it("maps meta.trackOverrides through untouched, unknown kinds included", async () => {
+    // The route forwards the stored deltas verbatim — the client's
+    // mergeTrackOverrides is the only validator. A kind this build cannot draw
+    // still has to reach a newer client that can.
+    const { db } = await makeTestDb({
+      files: [{
+        id: "file-tracks", project_id: "proj-a", name: "ep-101",
+        meta: JSON.stringify({
+          trackOverrides: {
+            subtitles: { name: "Script" },
+            "trk-x9": { kind: "character-audio", order: 7 },
+          },
+        }),
+      }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-tracks" })
+    const res = (await handleFilesReadRequest(new Request(
+      "https://w/api/v1/projects/proj-a/files/file-tracks",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), envWith(db)))!
+    const body = await res.json() as { file: { trackOverrides: unknown } }
+
+    expect(body.file.trackOverrides).toEqual({
+      subtitles: { name: "Script" },
+      "trk-x9": { kind: "character-audio", order: 7 },
+    })
+  })
+
+  it("reports null trackOverrides for a file that has never had one set", async () => {
+    const { db } = await makeTestDb({
+      files: [{
+        id: "file-plain", project_id: "proj-a", name: "ep-102",
+        meta: JSON.stringify({ timingMode: "dubbing" }),
+      }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-plain" })
+    const res = (await handleFilesReadRequest(new Request(
+      "https://w/api/v1/projects/proj-a/files/file-plain",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), envWith(db)))!
+    const body = await res.json() as { file: { trackOverrides: unknown } }
+
+    expect(body.file.trackOverrides).toBeNull()
+  })
+
+  it("nulls a trackOverrides that is not a plain object", async () => {
+    // An array is `typeof 'object'` and would hydrate client-side as a map with
+    // numeric keys; an empty map means exactly what an absent key means. Both
+    // collapse so the client has one "no overrides" case, not three.
+    const { db } = await makeTestDb({
+      files: [
+        { id: "f-arr", project_id: "proj-a", name: "arr", meta: JSON.stringify({ trackOverrides: [{ name: "x" }] }) },
+        { id: "f-str", project_id: "proj-a", name: "str", meta: JSON.stringify({ trackOverrides: "subtitles" }) },
+        { id: "f-empty", project_id: "proj-a", name: "empty", meta: JSON.stringify({ trackOverrides: {} }) },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
+    const res = (await handleFilesReadRequest(new Request(
+      "https://w/api/v1/projects/proj-a/files",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), envWith(db)))!
+    const body = await res.json() as { files: Array<{ fileId: string; trackOverrides: unknown }> }
+
+    expect(body.files).toHaveLength(3)
+    for (const file of body.files) expect(file.trackOverrides).toBeNull()
+  })
+
+  it("reports role/kind/anchorFileId so the client can spot a hidden sibling", async () => {
+    // `fileType` is kind ?? role, which reads "vtt" for both rows below — the
+    // audio-cue sibling is only distinguishable through the unfolded columns.
+    const { db } = await makeTestDb({
+      files: [
+        { id: "f-text", project_id: "proj-a", name: "ep-101", role: "source", kind: "vtt" },
+        {
+          id: "f-cues", project_id: "proj-a", name: "ep-101 · audio cues",
+          role: "audio-cues", kind: "vtt", anchor_file_id: "f-text",
+        },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "f-cues" })
+    const res = (await handleFilesReadRequest(new Request(
+      "https://w/api/v1/projects/proj-a/files/f-cues",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), envWith(db)))!
+    const body = await res.json() as {
+      file: { fileType: string; role: string | null; anchorFileId: string | null }
+    }
+
+    expect(body.file).toMatchObject({ fileType: "vtt", role: "audio-cues", anchorFileId: "f-text" })
+  })
+
   it("returns 404 for an unknown file id", async () => {
     const { db } = await makeTestDb({ files: [] })
     const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "missing" })
@@ -165,3 +256,71 @@ describe("GET /api/v1/projects/:projectId/files", () => {
     expect(res.status).toBe(404)
   })
 })
+
+// ── The timing correction, forwarded (AQU-646, 2026-08-19) ───────────────
+//
+// An audio VTT arrives at a different frame rate from the subtitles it belongs
+// to, and the import measures the drift and stretches the cues to match. That
+// measurement happens once and was, until now, written into the file's meta and
+// never read again. The project report signs an episode's timing off with it,
+// so the read route has to forward it — recomputing is not an option, and a
+// second opinion that disagreed with the correction actually applied would be
+// worse than silence.
+
+describe("the audio-cue timebase a file was imported with", () => {
+  const metaWith = (timebase: unknown) =>
+    JSON.stringify({ orderedBy: "time", aquillaImport: { audioVtt: { timebase } } })
+
+  async function readFiles(meta: string | null) {
+    const { db } = await makeTestDb({
+      files: [
+        {
+          id: "file-cues",
+          project_id: "proj-a",
+          name: "Episode · audio cues",
+          file_type: "vtt",
+          cell_count: 548,
+          ...(meta === null ? {} : { meta }),
+        },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
+    const res = (await handleFilesReadRequest(
+      new Request("https://w/api/v1/projects/proj-a/files", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      envWith(db),
+    ))!
+    const body = (await res.json()) as {
+      files: Array<{ audioVttTimebase: { fromFps?: string; toFps?: string; scale: number } | null }>
+    }
+    return body.files[0]!.audioVttTimebase
+  }
+
+  it("comes back with both rates when the import could name them", async () => {
+    expect(await readFiles(metaWith({ fromFps: "24", toFps: "23.976", scale: 1.001 }))).toEqual({
+      fromFps: "24",
+      toFps: "23.976",
+      scale: 1.001,
+    })
+  })
+
+  it("comes back with the scale alone when it could not", async () => {
+    // A drift measured from the words is exact even when neither frame rate is
+    // knowable — 24-against-23.976 and 30-against-29.97 are the same ratio — so
+    // the labels are optional and the scale never is.
+    expect(await readFiles(metaWith({ scale: 1.001 }))).toEqual({ scale: 1.001 })
+  })
+
+  it("is null for a file that was never measured", async () => {
+    expect(await readFiles(JSON.stringify({ orderedBy: "time" }))).toBeNull()
+    expect(await readFiles(null)).toBeNull()
+  })
+
+  it("is null rather than a lie when the stored record is malformed", async () => {
+    expect(await readFiles(metaWith({ fromFps: "24" }))).toBeNull()
+    expect(await readFiles(metaWith("nonsense"))).toBeNull()
+    expect(await readFiles(metaWith({ scale: "1.001" }))).toBeNull()
+  })
+})
+

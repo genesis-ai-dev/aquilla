@@ -1,5 +1,5 @@
 import { GitBranch, MoreVertical, PauseCircle, Trash2, Undo2 } from "lucide-react"
-import type { ProjectRecord } from "@/lib/parsers/types"
+import { isAudioCueFile, type ProjectRecord } from "@/lib/parsers/types"
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -98,6 +98,11 @@ export function ProjectCard({
     myMember?.role.name ??
     (project.syncRole ? roleName(project.syncRole.level) : null)
 
+  // AQU-646 stage 2: audio-cue siblings are hidden cue data for one timeline
+  // row, not documents — counting them here would tell the user this project
+  // holds a file they will not find anywhere once they open it.
+  const fileCount = project.files.filter((f) => !isAudioCueFile(f)).length
+
   // While a card's workspace is opening it must not fire again — the click is
   // swallowed and the cursor reflects the wait (AQU-737).
   const clickable = !isTrashed && !pending
@@ -195,7 +200,7 @@ export function ProjectCard({
                       data-testid="toggle-lifecycle-button"
                     >
                       <PauseCircle className="h-4 w-4" />
-                      {isInactive ? "Mark as Active" : "Mark as Inactive"}
+                      {isInactive ? t("org.projectOverview.markAsActive") : t("org.projectOverview.markAsInactive")}
                     </button>
                   )}
                   {canTrash && onTrash && (
@@ -235,7 +240,7 @@ export function ProjectCard({
           </p>
         )}
         <p className="text-sm text-muted-foreground">
-          {t("search.expanded.fileCount", { count: project.files.length })}
+          {t("search.expanded.fileCount", { count: fileCount })}
         </p>
         {!isTrashed && members.length > 0 && (
           <div className="mt-2">
@@ -246,7 +251,7 @@ export function ProjectCard({
           <div className="mt-3 flex items-center justify-between gap-2">
             <span className="text-xs text-muted-foreground">
               {t("comments.file.deletedBadge")}
-              {project.deletedBy ? ` by ${project.deletedBy}` : ""}
+              {project.deletedBy ? t("workspace.projectCard.deletedBy", { name: project.deletedBy }) : ""}
               {project.deletedAt ? ` · ${formatDate(project.deletedAt, locale)}` : ""}
             </span>
             {onRestore && (

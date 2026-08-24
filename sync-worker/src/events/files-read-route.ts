@@ -25,6 +25,7 @@ interface FileRowRaw {
   name: string
   role: string | null
   kind: string | null
+  anchor_file_id: string | null
   event_id: string
   meta: string
   cell_count: number
@@ -43,6 +44,11 @@ interface FileSummary {
   fileType: string
   role: string | null
   kind: string | null
+  /** The file this one hangs off. A `role: "audio-cues"` sibling points at the
+   *  text file whose timeline its cues annotate; that pairing is the only link
+   *  between them, since the sibling never appears in a file list. Null on
+   *  ordinary files. */
+  anchorFileId: string | null
   eventId: string
   sourceLanguage: string | null
   targetLanguage: string | null
@@ -57,6 +63,24 @@ interface FileSummary {
   /** The file's audio timing mode (file.timing.set), read from meta. Null ⇒
    *  the project-level default applies. */
   timingMode: 'dubbing' | 'audioFirst' | null
+  /**
+   * What the audio-VTT import did about drift, read from
+   * `meta.aquillaImport.audioVtt.timebase`. Null on every file that is not an
+   * audio-cue sibling, and on siblings imported before this was recorded.
+   *
+   * Forwarded rather than recomputed: the measurement happened once, against
+   * the reference file, at import — there is nothing here that could measure it
+   * again, and a second opinion that disagreed with the correction actually
+   * applied would be worse than silence. The project report reads this to say
+   * whether an episode's cues were corrected, aligned, or never measurable.
+   */
+  audioVttTimebase: { fromFps?: string; toFps?: string; scale: number } | null
+  /** Per-track deltas keyed by track id (file.track.set), read from meta —
+   *  NEVER the full track list, which the client derives. Null ⇒ the file
+   *  draws the three defaults. Patch fields stay widened (`kind: string`)
+   *  because a newer client may have persisted a kind this build cannot name;
+   *  the route's job is to forward it intact, not to judge it. */
+  trackOverrides: Record<string, { kind?: string; name?: string; order?: number; groupId?: string }> | null
   cellCount: number
   approvedCount: number
   /** Target cells with content (TRIM(value) != ''): the "translated" count. */
@@ -65,6 +89,21 @@ interface FileSummary {
   lastEditAt: number | null
   /** AQU-272: epoch-ms when this file was soft-deleted, or null if active. */
   deletedAt: number | null
+}
+
+/** Shape-check the recorded correction. `scale` is the only field that must be
+ *  there — a drift measured from the words is exact even when neither frame
+ *  rate could be named (24-against-23.976 and 30-against-29.97 are the same
+ *  ratio), so the labels are optional by design. */
+function normalizeTimebase(raw: unknown): FileSummary['audioVttTimebase'] {
+  if (!raw || typeof raw !== 'object') return null
+  const t = raw as { fromFps?: unknown; toFps?: unknown; scale?: unknown }
+  if (typeof t.scale !== 'number' || !Number.isFinite(t.scale)) return null
+  return {
+    ...(typeof t.fromFps === 'string' ? { fromFps: t.fromFps } : {}),
+    ...(typeof t.toFps === 'string' ? { toFps: t.toFps } : {}),
+    scale: t.scale,
+  }
 }
 
 function mapRow(row: FileRowRaw): FileSummary {
@@ -80,6 +119,8 @@ function mapRow(row: FileRowRaw): FileSummary {
     orderedBy?: string
     coreMediaUrl?: string
     timingMode?: string
+    trackOverrides?: unknown
+    aquillaImport?: { audioVtt?: { timebase?: unknown } }
   } = {}
   try {
     meta = row.meta ? JSON.parse(row.meta) : {}
@@ -93,6 +134,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     fileType: row.kind ?? row.role ?? 'codex',
     role: row.role,
     kind: row.kind,
+    anchorFileId: row.anchor_file_id,
     eventId: row.event_id,
     sourceLanguage: meta.source_language ?? meta.sourceLanguage ?? null,
     targetLanguage: meta.target_language ?? meta.targetLanguage ?? null,
@@ -101,6 +143,8 @@ function mapRow(row: FileRowRaw): FileSummary {
     orderedBy: meta.orderedBy ?? null,
     coreMediaUrl: meta.coreMediaUrl ?? null,
     timingMode: meta.timingMode === 'dubbing' || meta.timingMode === 'audioFirst' ? meta.timingMode : null,
+    audioVttTimebase: normalizeTimebase(meta.aquillaImport?.audioVtt?.timebase),
+    trackOverrides: normalizeTrackOverrides(meta.trackOverrides),
     cellCount: row.cell_count,
     approvedCount: row.approved_count,
     filledCount: row.filled_count,
@@ -112,6 +156,17 @@ function mapRow(row: FileRowRaw): FileSummary {
 
 function normalizeTextDirection(value: string | undefined): 'ltr' | 'rtl' | null {
   return value === 'ltr' || value === 'rtl' ? value : null
+}
+
+// Unlike the scalars above, this one is shape-checked rather than value-checked:
+// an array is `typeof 'object'` and would reach the client's merge as a map with
+// numeric keys, and the projection's delete branch (`#- ARRAY[…]`) can leave an
+// empty map behind, which means the same thing as no key at all. Both collapse
+// to null so the client has exactly one "no overrides" case to handle.
+function normalizeTrackOverrides(value: unknown): FileSummary['trackOverrides'] {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  const overrides = value as NonNullable<FileSummary['trackOverrides']>
+  return Object.keys(overrides).length > 0 ? overrides : null
 }
 
 // Active listing:  GET /api/v1/projects/:projectId/files
@@ -150,7 +205,7 @@ export async function handleFilesReadRequest(
   }
 
   const columns =
-    "f.id, f.project_id, f.name, f.role, f.kind, f.event_id, f.meta, " +
+    "f.id, f.project_id, f.name, f.role, f.kind, f.anchor_file_id, f.event_id, f.meta, " +
     "COALESCE(p.total_count, f.cell_count) AS cell_count, " +
     "CASE WHEN p.file_id IS NULL THEN f.approved_count ELSE COALESCE((SELECT SUM((entry.key::integer >= LEAST(15, GREATEST(1, CASE WHEN (ps.settings::jsonb->>'validationCount') ~ '^[0-9]+$' THEN (ps.settings::jsonb->>'validationCount')::integer ELSE 1 END)))::integer * entry.value::integer) FROM jsonb_each_text(p.validator_histogram) entry), 0) END AS approved_count, " +
     "COALESCE(p.filled_count, f.filled_count) AS filled_count, " +

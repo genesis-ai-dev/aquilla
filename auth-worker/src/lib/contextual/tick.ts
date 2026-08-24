@@ -21,6 +21,7 @@ import {
   failRun,
   confirmPause,
   parkRun,
+  blockRunOnDecision,
   recordWaveOutcome,
   setSpanCursor,
   touchRun,
@@ -36,6 +37,7 @@ import {
   type SpanCursor,
   type StoredSpanSeed,
 } from "../../../../db/shared/contextual-runs"
+import { raiseDecisionOnce } from "../../../../db/shared/contextual-decisions"
 import {
   proposeSceneBrief,
   listSceneBriefs,
@@ -781,7 +783,7 @@ interface RunContext {
 }
 
 interface SpanOutcome {
-  outcome: "done" | "failed"
+  outcome: "done" | "failed" | "blocked"
   lastError: string | null
   report?: SpanReport
 }
@@ -791,7 +793,7 @@ interface SpanOutcome {
  * without persisting verifier reasoning or upstream response text. */
 function spanReasonCodes(
   report: SpanReport | undefined,
-  outcome: "done" | "failed",
+  outcome: "done" | "failed" | "blocked",
   occupiedAtStage: number,
 ): ContextualSpanReason[] {
   const reasons = new Set<ContextualSpanReason>()
@@ -856,7 +858,7 @@ async function processSpan(
     shared.pairs,
   )
 
-  let outcome: "done" | "failed" = "done"
+  let outcome: "done" | "failed" | "blocked" = "done"
   let lastError: string | null = null
   let report: SpanReport | undefined
   let occupiedAtStage = 0
@@ -1008,7 +1010,9 @@ async function processSpan(
     })
     await phaseActivity
     const skippedCount = report.cellsSkipped.length
-    if (skippedCount > 0) {
+    if (report.decisionRequired) {
+      outcome = "blocked"
+    } else if (skippedCount > 0) {
       // A named skip is unfinished work even when sibling cells staged cleanly.
       // Keep the useful partial proposals, but account the passage in the
       // failure counter so the overview cannot call it a clean completion.
@@ -1210,10 +1214,26 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
 
   const reports = outcomes.flatMap((o) => (o.report ? [o.report] : []))
   const doneCount = outcomes.filter((o) => o.outcome === "done").length
-  const failedCount = outcomes.length - doneCount
+  const failedCount = outcomes.filter((o) => o.outcome === "failed").length
   const lastError = outcomes.filter((o) => o.lastError).map((o) => o.lastError).pop() ?? null
 
-  const advanced: SpanCursor = { seeds: cursor.seeds, nextIndex: cursor.nextIndex + wave.length }
+  // A blocked seed is work not done. Move only those seeds to the front of
+  // the unprocessed tail; successful siblings stay counted and are never
+  // replayed. This preserves wave concurrency without duplicating seeds or
+  // inflating totalSpans.
+  const completedWaveSeeds = wave.filter((_, i) => outcomes[i].outcome !== "blocked")
+  const blockedWaveSeeds = wave.filter((_, i) => outcomes[i].outcome === "blocked")
+  const advanced: SpanCursor = blockedWaveSeeds.length > 0
+    ? {
+        seeds: [
+          ...cursor.seeds.slice(0, cursor.nextIndex),
+          ...completedWaveSeeds,
+          ...blockedWaveSeeds,
+          ...cursor.seeds.slice(cursor.nextIndex + wave.length),
+        ],
+        nextIndex: cursor.nextIndex + completedWaveSeeds.length,
+      }
+    : { seeds: cursor.seeds, nextIndex: cursor.nextIndex + wave.length }
   const after = await recordWaveOutcome(db, runId, {
     cursor: advanced,
     doneCount,
@@ -1245,6 +1265,25 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     }
     // A hard terminate can win between the wave write and confirmation. Do
     // not publish the stale pausing snapshot in that case.
+    fresh = await getRun(db, runId)
+    return result(false, fresh?.status ?? "not_found")
+  }
+  const firstBlocked = outcomes.find((outcome) => outcome.outcome === "blocked")
+  if (fresh?.status === "running" && firstBlocked?.report?.decisionRequired) {
+    const decision = await raiseDecisionOnce(db, {
+      projectId: run.projectId,
+      runId: run.id,
+      fileId: run.fileId,
+      spanId: firstBlocked.report.spanId,
+      cellIds: firstBlocked.report.decisionRequired.cellIds,
+      reason: firstBlocked.report.decisionRequired.reason,
+      blastRadius: firstBlocked.report.decisionRequired.cellIds.length,
+    })
+    const waiting = await blockRunOnDecision(db, runId, decision.id)
+    if (waiting.status === "ok") {
+      await notify(runStateFrame(waiting.run))
+      return result(false, "waiting")
+    }
     fresh = await getRun(db, runId)
     return result(false, fresh?.status ?? "not_found")
   }

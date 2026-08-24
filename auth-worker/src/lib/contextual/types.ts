@@ -216,6 +216,13 @@ export interface SpanReport {
    *  incompleteReasons + cellsSkipped name everything that was dropped. */
   incomplete: boolean
   incompleteReasons: string[]
+  /** Present only when continuing would require a genuinely judgment-shaped
+   * human answer. The durable tick turns this producer output into a Decision
+   * and waits; ordinary verifier/model failures remain ordinary failures. */
+  decisionRequired?: {
+    reason: string
+    cellIds: string[]
+  }
   notes: string[]
   unitsUsed: number
   callsUsed: number

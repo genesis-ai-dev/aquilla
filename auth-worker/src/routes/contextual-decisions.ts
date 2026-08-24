@@ -16,12 +16,13 @@ import {
   listOpenDecisions,
   countOpenDecisions,
   getDecision,
-  answerDecision,
-  dismissDecision,
   assignDecision,
   OPEN_DECISION_SURFACE_CAP,
   type DecisionTransition,
 } from "../../../db/shared/contextual-decisions"
+import { resolveBlockingDecision } from "../../../db/shared/contextual-decision-lifecycle"
+import type { BlockingDecisionTransition } from "../../../db/shared/contextual-decision-lifecycle"
+import { kickLoop, publishRunStateOutsideTick } from "./contextual"
 
 const decisions = new Hono<AuthHonoEnv>()
 
@@ -71,25 +72,30 @@ decisions.post(
       return c.json(body, status)
     }
 
-    let result: DecisionTransition
+    const user = c.get("user")
+    let result: DecisionTransition | BlockingDecisionTransition
     if (action === "answer") {
       const parsed = answerSchema.safeParse(await c.req.json().catch(() => ({})))
       if (!parsed.success) {
         const { body, status } = errorJson("validation_failed", "answer is required", 400)
         return c.json(body, status)
       }
-      // requireRole returns only { ok, level } — it carries no user. The
-      // authenticated user comes from the middleware's context variable, the
-      // same way requireRole itself reads it (contextual.ts:130).
-      const user = c.get("user")
-      result = await answerDecision(
+      result = await resolveBlockingDecision(
         c.env.AQUILLA_PG,
-        decisionId,
-        parsed.data.answer,
-        user.id,
+        {
+          decisionId,
+          action: "answer",
+          answer: parsed.data.answer,
+          byUserId: user.id,
+          byUsername: user.username,
+        },
       )
     } else if (action === "dismiss") {
-      result = await dismissDecision(c.env.AQUILLA_PG, decisionId)
+      result = await resolveBlockingDecision(c.env.AQUILLA_PG, {
+        decisionId,
+        action: "dismiss",
+        byUsername: user.username,
+      })
     } else {
       const parsed = assignSchema.safeParse(await c.req.json().catch(() => ({})))
       if (!parsed.success || (!parsed.data.userId && !parsed.data.inviteId)) {
@@ -115,7 +121,15 @@ decisions.post(
       )
       return c.json(body, status)
     }
-    return c.json({ decision: result.decision })
+    const wokeRun = "run" in result ? result.run : undefined
+    if (wokeRun) {
+      await publishRunStateOutsideTick(c.env, c.env.AQUILLA_PG, projectId, wokeRun)
+      kickLoop(c, projectId, wokeRun.id)
+    }
+    return c.json({
+      decision: result.decision,
+      ...(wokeRun ? { wokeRunId: wokeRun.id } : {}),
+    })
   },
 )
 

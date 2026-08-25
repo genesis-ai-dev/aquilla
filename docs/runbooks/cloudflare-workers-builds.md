@@ -102,10 +102,6 @@ Connect only `aquilla-web-preview` to `genesis-ai-dev/aquilla`. Configure:
 - root directory: `/`
 - non-production branch builds: enabled
 
-The repository's `.node-version` pins Workers Builds to Node 22.23.2, matching
-the Node 22 runtime used by the fallback GitHub workflow. Do not let the preview
-gate silently follow Cloudflare's newer default major independently of CI.
-
 The build runs root lint/unit/IDML/schema/build gates, both identity and sync
 typecheck/test suites, and the agent-worker typecheck/tests. Independent lanes
 run concurrently in three bounded-memory phases so the complete gate fits both

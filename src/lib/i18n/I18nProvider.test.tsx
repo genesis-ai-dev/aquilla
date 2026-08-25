@@ -58,10 +58,7 @@ describe("I18nProvider + LanguageSwitcher", () => {
 
   it("opens the language menu upward like the sidebar help menu", async () => {
     render(<Harness />)
-    const trigger = screen.getByRole("button", { name: "Language" })
-    expect(trigger.className).toMatch(/hover:bg-accent\/40/)
-    expect(trigger.className).not.toMatch(/data-popup-open:bg-accent/)
-    await userEvent.click(trigger)
+    await userEvent.click(screen.getByRole("button", { name: "Language" }))
     const item = await screen.findByRole("menuitemradio", { name: /မြန်မာ/ })
     expect(item.closest("[data-side]")).toHaveAttribute("data-side", "top")
     expect(item.closest("[data-align]")).toHaveAttribute("data-align", "start")

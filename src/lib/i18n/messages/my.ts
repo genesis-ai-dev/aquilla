@@ -4248,7 +4248,6 @@ export const my: Catalog = {
   "workspace.denoise.removedBadge": "အသံ ဖယ်ထုတ်သည်",
   "workspace.denoise.revertTooltip": "မူလ မှတ်တမ်းကို ပြန်ရွေးချယ်ပါ",
   "workspace.denoise.revertButton": "ပြန်ပြင်သည်",
-  "workspace.chatComposer.keyboardHint": "Enter ပို့သည် · Shift+Enter အကြောင်းအရာ သုံးစွဲ",
   "workspace.chatComposer.queueTooltip": "စောင့်ဆိုင်းထားသည် — လုံးလုံးပြီးချိန် ပို့သည်",
   "workspace.chatComposer.queueMessage": "စာသားများ စောင့်ဆိုင်းထားပါ",
   "workspace.chatMarkdown.copyCode": "Code နှိုးဆော်ပါ",

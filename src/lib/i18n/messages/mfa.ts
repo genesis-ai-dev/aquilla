@@ -4232,7 +4232,6 @@ export const mfa: Catalog = {
   "workspace.denoise.removedBadge": "Kebisingan dihapus",
   "workspace.denoise.revertTooltip": "Beralih kembali ke rekaman asli",
   "workspace.denoise.revertButton": "Kembalikan",
-  "workspace.chatComposer.keyboardHint": "Enter untuk mengirim · Shift+Enter untuk baris baru",
   "workspace.chatComposer.queueTooltip": "Antrian — mengirim saat jalankan saat ini selesai",
   "workspace.chatComposer.queueMessage": "Pesan antrian",
   "workspace.chatMarkdown.copyCode": "Salin kode",

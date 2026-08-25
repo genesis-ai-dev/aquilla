@@ -482,6 +482,8 @@ describe("worker deployment environment contract", () => {
   })
 
   it("runs the former required PR gates on Cloudflare infrastructure", () => {
+    expect(readRepoFile(".node-version").trim()).toBe("22.23.2")
+
     const rootPackage = JSON.parse(readRepoFile("package.json")) as {
       scripts?: Record<string, string>
     }

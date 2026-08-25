@@ -9296,7 +9296,7 @@ export function ProjectWorkspace() {
               />
             )}
             {timelineStacked ? (
-              <div className="relative flex shrink-0 items-center justify-end gap-3 border-b border-border bg-background/90 py-2 ps-2 pe-2 backdrop-blur-xl">
+              <div className="relative flex shrink-0 items-center justify-end gap-3 border-b border-border bg-background/90 py-2 ps-4 pe-4 backdrop-blur-xl">
                 {fileChapterToolbar}
               </div>
             ) : null}

@@ -60,18 +60,18 @@ export function EditorModeToggle({
     >
       <TabsList>
         <AppTooltip content={t("editor.lens.text")} side="bottom" delay={150}>
-          <TabsTrigger value="text" aria-label={t("editor.lens.text")}>
+          <TabsTrigger value="text" aria-label={t("editor.lens.text")} className="size-6 p-0">
             <Pencil />
           </TabsTrigger>
         </AppTooltip>
         <AppTooltip content={secondLabel} side="bottom" delay={150}>
-          <TabsTrigger value="audio" aria-label={secondLabel}>
+          <TabsTrigger value="audio" aria-label={secondLabel} className="size-6 p-0">
             <SecondIcon />
           </TabsTrigger>
         </AppTooltip>
         {(onAgentSelect || agentActive) ? (
           <AppTooltip content={t("nav.dock.agentTab")} side="bottom" delay={150}>
-            <TabsTrigger value="agent" aria-label={t("nav.dock.agentTab")}>
+            <TabsTrigger value="agent" aria-label={t("nav.dock.agentTab")} className="size-6 p-0">
               <Bot />
             </TabsTrigger>
           </AppTooltip>

@@ -17,8 +17,11 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { CommentThread } from "./CommentThread"
 import type { CommentThread as ThreadData } from "@/lib/parsers/types"
+
+const DENIAL = "Only Contributors and above can resolve a thread someone else started."
 
 function makeThread(status: "open" | "resolved" = "open"): ThreadData {
   return {
@@ -65,7 +68,7 @@ describe("CommentThread — resolve controls reflect real authority (AQU-1000)",
   it("renders Resolve inert, not absent, when refused with a reason", () => {
     renderThread({
       canResolve: false,
-      resolveDenialReason: "Only Contributors and above can resolve a thread someone else started.",
+      resolveDenialReason: DENIAL,
     })
     const resolve = screen.getByTestId("comment-resolve")
     // Still on screen: the reader can see the action exists and learn why it
@@ -78,7 +81,7 @@ describe("CommentThread — resolve controls reflect real authority (AQU-1000)",
     const onResolve = vi.fn()
     renderThread({
       canResolve: false,
-      resolveDenialReason: "Only Contributors and above can resolve a thread someone else started.",
+      resolveDenialReason: DENIAL,
       onResolve,
     })
     await userEvent.click(screen.getByTestId("comment-resolve"))
@@ -90,7 +93,7 @@ describe("CommentThread — resolve controls reflect real authority (AQU-1000)",
     renderThread({
       canReply: true,
       canResolve: false,
-      resolveDenialReason: "Only Contributors and above can resolve a thread someone else started.",
+      resolveDenialReason: DENIAL,
     })
     expect(screen.getByTestId("comment-close-with-reply")).toHaveAttribute("aria-disabled", "true")
     // Replying is a different authority and must stay available.
@@ -101,7 +104,7 @@ describe("CommentThread — resolve controls reflect real authority (AQU-1000)",
     renderThread({
       thread: makeThread("resolved"),
       canResolve: false,
-      resolveDenialReason: "Only Contributors and above can resolve a thread someone else started.",
+      resolveDenialReason: DENIAL,
     })
     expect(screen.getByTestId("comment-reopen")).toHaveAttribute("aria-disabled", "true")
   })
@@ -109,6 +112,21 @@ describe("CommentThread — resolve controls reflect real authority (AQU-1000)",
   it("offers an enabled Reopen on a resolved thread when permitted", () => {
     renderThread({ thread: makeThread("resolved"), canResolve: true })
     expect(screen.getByTestId("comment-reopen")).not.toHaveAttribute("aria-disabled")
+  })
+
+  it("makes the reason reachable on hover — a disabled control that explains nothing is the thing the design rule forbids", async () => {
+    renderWithTooltips(
+      <CommentThread
+        thread={makeThread()}
+        currentTranslated="Bonjour"
+        canResolve={false}
+        resolveDenialReason={DENIAL}
+        onReply={noop}
+        onResolve={noop}
+        onReopen={noop}
+      />,
+    )
+    await expectTooltip(screen.getByTestId("comment-resolve"), /Contributors and above/i)
   })
 
   it("hides the controls entirely when there is no reason to give", () => {

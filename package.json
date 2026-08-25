@@ -35,6 +35,7 @@
     "scan:secrets": "tsx scripts/secret-scan.ts",
     "admin:request": "tsx scripts/admin-request.ts",
     "test:idml": "pnpm --filter @aquilla/idml-roundtrip test",
+    "test:idml:workers-build": "pnpm --filter @aquilla/idml-roundtrip test:workers-build",
     "build:idml": "pnpm --filter @aquilla/idml-roundtrip build",
     "idml:gate": "tsx scripts/assert-idml-release-gate.ts",
     "idml:adobe": "tsx scripts/idml-adobe-validation.ts",

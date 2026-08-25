@@ -487,29 +487,24 @@ describe("worker deployment environment contract", () => {
     }
     const command = rootPackage.scripts?.["build:workers-build"] ?? ""
     const checks = readRepoFile("scripts", "cloudflare-ci-checks.mjs")
-    const browserConformance = readRepoFile(
-      "packages",
-      "idml-roundtrip",
-      "scripts",
-      "run-browser-conformance.ts",
-    )
+    const idmlPackage = JSON.parse(readRepoFile("packages", "idml-roundtrip", "package.json")) as {
+      scripts?: Record<string, string>
+    }
 
     expect(command).toContain("scripts/cloudflare-ci-checks.mjs")
     expect(checks).toContain('["pnpm", ["lint"]]')
     expect(checks).toContain('["pnpm", ["test"]]')
     expect(checks).toContain('"build:workers-build:identity"')
     expect(checks).toContain('"build:workers-build:sync"')
-    expect(checks).toContain('["pnpm", ["test:idml"]]')
+    expect(checks).toContain('["pnpm", ["test:idml:workers-build"]]')
     expect(checks).toContain('["pnpm", ["neon:check"]]')
     expect(checks).toContain('["npm", ["ci", "--prefix", "agent-worker"]]')
     expect(checks).toContain('"type-check"')
     expect(checks).toContain('["bash", ["scripts/ci-build.sh"]]')
     expect(checks).not.toContain("playwright install")
-    expect(browserConformance).toContain('process.env.WORKERS_CI === "1"')
-    expect(browserConformance).toContain('import("@sparticuz/chromium")')
-    expect(browserConformance).toContain('"al2023.tar.br"')
-    expect(browserConformance).toContain("setupLambdaEnvironment")
-    expect(browserConformance).toContain("serverlessChromium.executablePath()")
+    expect(rootPackage.scripts?.["test:idml:workers-build"]).toContain("test:workers-build")
+    expect(idmlPackage.scripts?.["test:workers-build"]).toContain("test:conformance:node")
+    expect(idmlPackage.scripts?.test).toContain("test:conformance:browser")
     expect(checks).toContain("CHECK_PHASES")
     expect(checks).toContain("Promise.allSettled")
   })

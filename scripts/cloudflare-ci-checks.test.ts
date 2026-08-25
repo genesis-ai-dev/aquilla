@@ -25,7 +25,7 @@ describe("Cloudflare parallel CI checks", () => {
     ])
     const commands = JSON.stringify(CHECK_LANES)
     expect(commands).toContain("lint")
-    expect(commands).toContain("test:idml")
+    expect(commands).toContain("test:idml:workers-build")
     expect(commands).toContain("neon:check")
     expect(commands).toContain("build:workers-build:identity")
     expect(commands).toContain("build:workers-build:sync")

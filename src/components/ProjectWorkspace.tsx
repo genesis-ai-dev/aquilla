@@ -9743,6 +9743,7 @@ export function ProjectWorkspace() {
                 onReply={(threadId, text) => addMessage(commentsCell.id, threadId, text)}
                 onResolve={(threadId, msg) => resolveThread(commentsCell.id, threadId, msg)}
                 onReopen={(threadId) => reopenThread(commentsCell.id, threadId)}
+                currentUsername={currentUsername}
               />
             )}
             {historyCell && (

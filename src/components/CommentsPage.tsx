@@ -34,6 +34,9 @@ import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useProject } from "@/hooks/useProject"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { renderCommentHtml } from "@/lib/comments/comment-helpers"
+import { canMutateComment, foreignRoleFor } from "@/lib/sync/role-policy"
+import { denialMessage } from "@/lib/permissions/denial"
+import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
 import DOMPurify from "dompurify"
 import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -309,6 +312,11 @@ interface ThreadProps {
   root: CommentRecord
   replies: CommentRecord[]
   currentUsername?: string
+  /**
+   * AQU-1000: the reader's project role, or null for a local / git-imported
+   * project with no sync role. Drives the per-thread resolve gate below.
+   */
+  roleLevel?: number | null
   fileMap: Map<string, string>
   onResolve: (commentId: string, resolved: boolean) => void
   onEdit: (commentId: string, body: string) => Promise<void>
@@ -317,9 +325,23 @@ interface ThreadProps {
 }
 
 function CommentThreadCard({
-  root, replies, currentUsername, fileMap, onResolve, onEdit, onDelete, onNavigate,
+  root, replies, currentUsername, roleLevel = null, fileMap, onResolve, onEdit, onDelete, onNavigate,
 }: ThreadProps) {
   const t = useT()
+  // AQU-1000: this page offered Resolve / Reopen to every reader, including
+  // roles the server refuses. `useComments.resolveThread` flips `resolved`
+  // optimistically, so the refusal showed up as a thread that closed and then
+  // sprang back open. Decide before offering, and explain a refusal.
+  const isOwnThread = !!currentUsername && root.authorId === currentUsername
+  const canResolve = canMutateComment("comment.resolve", roleLevel, isOwnThread)
+  const resolveDenialReason = canResolve
+    ? null
+    : canMutateComment("comment.resolve", roleLevel, true)
+      // Role clears the self floor but not the foreign one.
+      ? t("comments.resolve.foreignDenied", {
+          minRole: resolveRoleName(t, foreignRoleFor("comment.resolve") ?? ROLE.MAINTAINER, { plural: true }),
+        })
+      : denialMessage(t, ROLE.COMMENTER, roleLevel)
   const [open, setOpen] = useState(!root.resolved)
   const [replyText, setReplyText] = useState("")
 
@@ -449,13 +471,31 @@ function CommentThreadCard({
                   </AppTooltip>
                 )
               })()}
-              <Button
-                variant="ghost"
-                className="h-6 px-2 text-xs"
-                onClick={() => onResolve(root.commentId, !root.resolved)}
-              >
-                {root.resolved ? t("comments.reopen") : t("comments.resolve")}
-              </Button>
+              {canResolve ? (
+                <Button
+                  variant="ghost"
+                  className="h-6 px-2 text-xs"
+                  data-testid="thread-resolve"
+                  onClick={() => onResolve(root.commentId, !root.resolved)}
+                >
+                  {root.resolved ? t("comments.reopen") : t("comments.resolve")}
+                </Button>
+              ) : (
+                // Disabled, not absent: the reader can see the action exists and
+                // why it is closed to them (09-design-and-ux.md → "Never disable
+                // silently"). `aria-disabled` keeps it focusable so the tooltip
+                // is reachable without a mouse.
+                <AppTooltip content={resolveDenialReason ?? ""}>
+                  <Button
+                    variant="ghost"
+                    className="h-6 px-2 text-xs cursor-not-allowed opacity-50"
+                    data-testid="thread-resolve"
+                    aria-disabled
+                  >
+                    {root.resolved ? t("comments.reopen") : t("comments.resolve")}
+                  </Button>
+                </AppTooltip>
+              )}
               <CollapsibleTrigger asChild>
                 <Button size="icon" variant="ghost" className="h-6 w-6">
                   {open ? (
@@ -956,6 +996,7 @@ export function CommentsPage({ project: workspaceProject }: CommentsPageProps = 
               root={root}
               replies={repliesByParent.get(root.commentId) ?? []}
               currentUsername={session?.username}
+              roleLevel={project?.syncRole?.level ?? null}
               fileMap={fileMap}
               onResolve={resolveThread}
               onEdit={editComment}

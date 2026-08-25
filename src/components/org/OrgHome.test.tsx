@@ -108,6 +108,10 @@ vi.mock("@/lib/sync/cloud-projects", async (importActual) => {
   return {
     ...actual,
     fetchAccessibleProjects: () => fetchAccessibleProjectsMock(),
+    fetchAccessibleProjectsResult: async () => ({
+      ok: true as const,
+      projects: await fetchAccessibleProjectsMock(),
+    }),
   }
 })
 

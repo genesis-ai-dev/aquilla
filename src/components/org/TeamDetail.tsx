@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
 import { Link, useNavigate, useParams } from "react-router-dom"
-import { FolderGit2, Settings, ShieldUser, Unlink, UserMinus, Users } from "lucide-react"
+import { AlertTriangle, FolderGit2, Settings, ShieldUser, Unlink, UserMinus, Users } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { MemberMultiSelect } from "@/components/MemberMultiSelect"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
@@ -38,7 +38,11 @@ import {
   type TeamDetail as TeamDetailType,
 } from "@/lib/frontier/teams"
 import { listOrgMembers, addOrgMember, type OrgMember } from "@/lib/frontier/orgs"
-import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
+import {
+  fetchAccessibleProjectsResult,
+  projectsResultError,
+  type CloudProjectSummary,
+} from "@/lib/sync/cloud-projects"
 import {
   Select,
   SelectContent,
@@ -58,6 +62,8 @@ import {
   roleName,
 } from "@/lib/frontier/roles"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
+import { toUserFacingError, UserError } from "@/lib/errors/user-error"
 
 type TeamTab = "overview" | "projects" | "members"
 type TeamMember = TeamDetailType["members"][number]
@@ -116,6 +122,13 @@ export function TeamDetail() {
 
   const [team, setTeam] = useState<TeamDetailType | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const teamRequestRef = useRef(0)
+  const teamScopeKey = jwt && activeOrgId != null && groupIdNum != null
+    ? `${jwt}\u0000${activeOrgId}\u0000${groupIdNum}`
+    : null
+  const teamScopeRef = useRef(teamScopeKey)
+  teamScopeRef.current = teamScopeKey
   const [tab, setTab] = useState<TeamTab>("projects")
   useNavHistoryTitle(team?.name)
 
@@ -149,15 +162,30 @@ export function TeamDetail() {
   const [projectRoleBusy, setProjectRoleBusy] = useState(false)
 
   const refetch = useCallback(async () => {
+    const request = ++teamRequestRef.current
     if (!jwt || activeOrgId == null || groupIdNum == null) return
     setLoading(true)
+    setLoadError(null)
     try {
       const t = await getTeam(jwt, activeOrgId, groupIdNum)
+      if (teamRequestRef.current !== request || teamScopeRef.current !== teamScopeKey) return
       setTeam(t)
+    } catch (error) {
+      if (teamRequestRef.current !== request || teamScopeRef.current !== teamScopeKey) return
+      if (error instanceof UserError && error.category === "session-expired") {
+        void notifySessionExpiredIfCurrent(jwt)
+      }
+      const userFacing = toUserFacingError(error, "team")
+      setTeam(null)
+      setLoadError(
+        userFacing.category === "not-found" || userFacing.category === "forbidden"
+          ? null
+          : userFacing.message,
+      )
     } finally {
-      setLoading(false)
+      if (teamRequestRef.current === request && teamScopeRef.current === teamScopeKey) setLoading(false)
     }
-  }, [jwt, activeOrgId, groupIdNum])
+  }, [jwt, activeOrgId, groupIdNum, teamScopeKey])
 
   useEffect(() => {
     void refetch()
@@ -166,14 +194,38 @@ export function TeamDetail() {
   // Load org members once for admin pickers
   useEffect(() => {
     if (!isAdmin || !jwt || activeOrgId == null) return
-    listOrgMembers(jwt, activeOrgId).then(setOrgMembers).catch(() => {})
-  }, [isAdmin, jwt, activeOrgId])
+    let cancelled = false
+    listOrgMembers(jwt, activeOrgId).then((members) => {
+      if (!cancelled && teamScopeRef.current === teamScopeKey) setOrgMembers(members)
+    }).catch((error) => {
+      if (cancelled || teamScopeRef.current !== teamScopeKey) return
+      if (error instanceof UserError && error.category === "session-expired") {
+        void notifySessionExpiredIfCurrent(jwt)
+      }
+      setOrgMembers([])
+      setAddError(toUserFacingError(error, "organization members").message)
+    })
+    return () => { cancelled = true }
+  }, [isAdmin, jwt, activeOrgId, teamScopeKey])
 
   // Load org projects once for admin attach picker
   useEffect(() => {
     if (!isAdmin || !jwt || activeOrgId == null) return
-    fetchAccessibleProjects(jwt, activeOrgId).then(setOrgProjects).catch(() => {})
-  }, [isAdmin, jwt, activeOrgId])
+    let cancelled = false
+    void fetchAccessibleProjectsResult(jwt, activeOrgId).then((result) => {
+      if (cancelled || teamScopeRef.current !== teamScopeKey) return
+      if (!result.ok) {
+        if (result.reason === "unauthenticated") void notifySessionExpiredIfCurrent(jwt)
+        throw projectsResultError(result)
+      }
+      setOrgProjects(result.projects)
+    }).catch((error) => {
+      if (!cancelled && teamScopeRef.current === teamScopeKey) {
+        setAddError(error instanceof Error ? error.message : String(error))
+      }
+    })
+    return () => { cancelled = true }
+  }, [isAdmin, jwt, activeOrgId, teamScopeKey])
 
   // Only offer org members who are not already in this team, sorted for scanning.
   const availableOrgMembers = useMemo(
@@ -462,6 +514,12 @@ export function TeamDetail() {
                 <div className="h-8 w-72 animate-pulse rounded-lg border bg-card" />
                 <div className="h-40 animate-pulse rounded-lg border bg-card" />
               </>
+            ) : loadError ? (
+              <EmptyState
+                icon={AlertTriangle}
+                title={loadError}
+                action={<Button onClick={() => void refetch()}>{t("common.retry")}</Button>}
+              />
             ) : team == null ? (
               <EmptyState
                 title={t("org.teamDetail.notFoundTitle")}

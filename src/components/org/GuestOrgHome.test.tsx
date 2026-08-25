@@ -23,7 +23,11 @@ vi.mock("@/lib/frontier/orgs", () => ({
 
 const fetchAccessibleProjects = vi.fn()
 vi.mock("@/lib/sync/cloud-projects", () => ({
-  fetchAccessibleProjects: (...a: unknown[]) => fetchAccessibleProjects(...a),
+  fetchAccessibleProjectsResult: async (...a: unknown[]) => ({
+    ok: true as const,
+    projects: await fetchAccessibleProjects(...a),
+  }),
+  projectsResultError: vi.fn(() => new Error("project load failed")),
 }))
 
 function renderGuestHome(initialEntry = "/orgs/2") {

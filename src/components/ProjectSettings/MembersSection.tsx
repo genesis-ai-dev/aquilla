@@ -44,7 +44,6 @@ import {
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useProjectOrgId } from "@/hooks/useProjectOrgId"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { useActiveOrgOptional } from "@/context/OrgContext"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import {
@@ -106,9 +105,8 @@ export function MembersSection({ projectId }: { projectId: string }) {
   const callerUsername = session?.username ?? null
   const hasJwt = Boolean(session?.jwt)
 
-  const projectOrgId = useProjectOrgId(projectId)
-  const activeOrgId = useActiveOrgOptional()?.activeOrgId ?? null
-  const rosterOrgId = projectOrgId ?? activeOrgId
+  const { orgId: projectOrgId, error: projectOrgError } = useProjectOrgId(projectId)
+  const rosterOrgId = projectOrgError ? null : projectOrgId
 
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([])
   useEffect(() => {

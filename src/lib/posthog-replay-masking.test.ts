@@ -25,6 +25,7 @@ function read(relative: string): string {
 
 const posthogSource = read("./posthog.ts")
 const editorSource = read("../components/EditorTable.tsx")
+const editorCellSurfaceSource = read("../components/cell/EditorCellSurface.tsx")
 
 function maskTextSelector(): string {
   const match = /maskTextSelector:\s*"([^"]+)"/.exec(posthogSource)
@@ -41,7 +42,7 @@ describe("session replay masking", () => {
 
   it("EditorTable still marks both columns with data-cell-type", () => {
     expect(editorSource).toMatch(/data-cell-type="source"/)
-    expect(editorSource).toMatch(/data-cell-type="target"/)
+    expect(editorCellSurfaceSource).toMatch(/data-cell-type="target"/)
   })
 
   it("comment bodies opt in explicitly — they quote the draft", () => {

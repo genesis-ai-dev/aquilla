@@ -167,7 +167,7 @@ vi.mock("@/hooks/useProjectMembers", () => ({
 }))
 
 vi.mock("@/hooks/useProjectOrgId", () => ({
-  useProjectOrgId: () => null,
+  useProjectOrgId: () => ({ orgId: null, isLoading: false, error: null }),
 }))
 
 const rosterSettings = vi.hoisted(() => ({ canViewRoster: true }))

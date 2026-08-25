@@ -65,6 +65,11 @@ function groupsByEnglish(): Map<string, { keys: string[]; sample: string }> {
   return groups
 }
 
+const withoutExceptions = (
+  keys: readonly string[],
+  exceptions: Readonly<Record<string, string>> = DUPLICATE_EXCEPTIONS,
+): string[] => keys.filter((key) => !(key in exceptions))
+
 describe("catalog has no duplicate English strings (AQU-511 / AQU-832)", () => {
   it("warns (without failing) when two keys share the same English string", () => {
     // AQU-832 relaxation: this used to be `expect(offenders).toEqual([])`, a
@@ -78,7 +83,7 @@ describe("catalog has no duplicate English strings (AQU-511 / AQU-832)", () => {
     // none of those are enforced by this test anymore, only recommended.
     const offenders: string[] = []
     for (const { keys, sample } of groupsByEnglish().values()) {
-      const unexcused = keys.filter((k) => !(k in DUPLICATE_EXCEPTIONS))
+      const unexcused = withoutExceptions(keys)
       if (unexcused.length > 1) {
         offenders.push(`${JSON.stringify(sample)} — ${unexcused.join(", ")}`)
       }
@@ -120,14 +125,14 @@ describe("catalog has no duplicate English strings (AQU-511 / AQU-832)", () => {
     // share a string and only two are excused, the remaining pair is still a
     // duplicate worth flagging (via the warning above), and the exceptions
     // file must not silently cover it.
-    const groups = groupsByEnglish()
-    for (const { keys, sample } of groups.values()) {
-      const unexcused = keys.filter((k) => !(k in DUPLICATE_EXCEPTIONS))
-      expect(
-        unexcused.length,
-        `${JSON.stringify(sample)} leaves ${unexcused.join(", ")} colliding`,
-      ).toBeLessThan(2)
+    const collidingKeys = ["example.first", "example.second", "example.third"]
+    const exceptions = {
+      "example.first": "A reviewed exception applies to this key alone, never to its whole string group.",
     }
+    expect(withoutExceptions(collidingKeys, exceptions)).toEqual([
+      "example.second",
+      "example.third",
+    ])
   })
 
   it("has no two namespaces claiming the same key", () => {

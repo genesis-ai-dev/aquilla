@@ -653,7 +653,9 @@ describe("Biblica study-note selection", () => {
 
   it("returns nothing for a package with no note paragraphs", async () => {
     const parsed = await parseIdml(await makeBiblicaIdml(
-      biblicaSampleStory.filter((block) => !block.includes("intro%3a")),
+      biblicaSampleStory.filter((block) =>
+        !block.includes("intro%3a") && !block.includes("head%3acl"),
+      ),
     ))
     const selection = selectBiblicaStudyNotes(parsed.units)
 

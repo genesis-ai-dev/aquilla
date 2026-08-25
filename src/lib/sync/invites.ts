@@ -27,6 +27,7 @@
 
 import { AUTH_API_URL } from "./sync-token"
 import { ROLE } from "@/lib/frontier/roles"
+import { UserError } from "@/lib/errors/user-error"
 
 /**
  * Invite tokens are bearer credentials — anyone holding one can join the
@@ -487,11 +488,13 @@ export async function listMyPendingInvites(
       headers: { Authorization: `Bearer ${jwt}` },
     })
     if (!res.ok) {
+      if (res.status === 401) throw new UserError(401, "", "invite")
       console.warn(`[invites] listMyPendingInvites → HTTP ${res.status}`)
       return []
     }
     return ((await res.json()) as { invites: MyPendingInvite[] }).invites
   } catch (err) {
+    if (err instanceof UserError) throw err
     console.warn("[invites] listMyPendingInvites failed:", err)
     return []
   }

@@ -49,6 +49,7 @@ export const comments = defineNamespace({
 
     // In-thread reply composer (CommentThread.tsx — no @mention hint here)
     "comments.thread.replyPlaceholder": "Reply...",
+    "comments.thread.posted": "Posted",
     "comments.thread.reply": "Reply",
     "comments.thread.closeWithReply": "Close with reply",
 
@@ -249,6 +250,12 @@ export const comments = defineNamespace({
           "Placeholder text of the reply textarea inside the editor's per-cell " +
           "comments drawer (CommentThread). Plainer than " +
           "comments.composer.replyPlaceholder — this box has no @mention support.",
+        screenshot: "cell-editor",
+      },
+      "comments.thread.posted": {
+        description:
+          "Label in the date tooltip for the time a comment or thread was first " +
+          "submitted. Past-tense event label, distinct from the Post button.",
         screenshot: "cell-editor",
       },
       "comments.thread.reply": {

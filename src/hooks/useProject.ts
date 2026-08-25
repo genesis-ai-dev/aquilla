@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { minimalProjectRecord, resolveCloudProjectResult } from "@/lib/sync/cloud-projects"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
@@ -169,6 +170,9 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
       const result = await resolveCloudProjectResult(projectId, session.jwt)
       if (cancelled) return
       if (!result.ok) {
+        if (result.reason === "unauthenticated") {
+          void notifySessionExpiredIfCurrent(session.jwt)
+        }
         setProject(null)
         setRoleLevel(null)
         setPm(null)
@@ -178,6 +182,8 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
         setStatus(
           result.reason === "unreachable"
             ? "unreachable"
+            : result.reason === "unauthenticated"
+              ? "no-session"
             : result.reason === "forbidden"
               ? "forbidden"
               : "not-found",

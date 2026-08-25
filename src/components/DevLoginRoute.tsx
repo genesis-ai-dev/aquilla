@@ -12,16 +12,19 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { devLogin } from "@/lib/frontier/auth"
+import { useAccounts } from "@/hooks/useAccounts"
 
 export function DevLoginRoute() {
   const navigate = useNavigate()
   const [error, setError] = useState<string | null>(null)
+  const { adopt, loading } = useAccounts()
 
   useEffect(() => {
     if (!import.meta.env.DEV) {
       setError("dev login is disabled in production builds")
       return
     }
+    if (loading) return
     let cancelled = false
     void (async () => {
       try {
@@ -33,6 +36,8 @@ export function DevLoginRoute() {
           )
           return
         }
+        await adopt(session)
+        if (cancelled) return
         // Seeded project id is hardcoded in auth-worker/src/routes/dev-seed.ts.
         navigate("/project/dev-project/editor", { replace: true })
       } catch (e) {
@@ -43,7 +48,7 @@ export function DevLoginRoute() {
     return () => {
       cancelled = true
     }
-  }, [navigate])
+  }, [adopt, loading, navigate])
 
   return (
     <div className="flex h-screen items-center justify-center p-6">

@@ -167,12 +167,12 @@ export async function getAdminMe(jwt: string): Promise<boolean> {
 }
 
 /**
- * Full admin identity + elevation status. Resolves to null on 403/401 (account
- * email not in the ADMIN_EMAILS allowlist), else the AdminMe object.
+ * Full admin identity + elevation status. Resolves to null on 403 (account
+ * email not in the ADMIN_EMAILS allowlist); a 401 remains session expiry.
  */
 export async function getAdminStatus(jwt: string): Promise<AdminMe | null> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/me`, { headers: authHeaders(jwt) })
-  if (res.status === 403 || res.status === 401) return null
+  if (res.status === 403) return null
   if (!res.ok) throw new UserError(res.status, "")
   const body = (await res.json()) as AdminMe
   return body.isPlatformAdmin ? body : null

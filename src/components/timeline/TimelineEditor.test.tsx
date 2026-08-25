@@ -1104,21 +1104,33 @@ describe("TimelineEditor — section-scoped transcription (AQU-928)", () => {
   const dialogueCard = (container: HTMLElement, id: string) =>
     container.querySelector(`[data-variant="dialogue"] [data-testid="tl-card-${id}"]`)! as HTMLElement
 
-  it("shows the transcribe row in the media view without opening any detail pane", () => {
-    renderBar()
-    expect(screen.getByTestId("tl-transcribe-bar")).toBeInTheDocument()
-    expect(screen.getByTestId("tl-transcribe-count")).toHaveTextContent("No section selected")
+  // STAGE 3e: THERE IS NO PERMANENT ROW ANY MORE. It used to sit under the
+  // lanes whether or not anything was selected, saying "No section selected"
+  // beside a greyed-out button — Sam, 2026-08-25: "a whole separate vertical
+  // section of the screen dedicated to one little button." The controls live in
+  // the text header now and appear only when there is something to act on.
+  it("shows nothing until a section is selected", () => {
+    const { container } = renderBar()
+    expect(screen.queryByTestId("tl-transcribe-controls")).toBeNull()
+    expect(screen.queryByTestId("tl-transcribe-count")).toBeNull()
+    // …and the moment one is, they are there — inside the text header, not in a
+    // row of their own.
+    fireEvent.click(dialogueCard(container, "d2"))
+    const controls = screen.getByTestId("tl-transcribe-controls")
+    expect(controls).toBeInTheDocument()
+    expect(controls.closest('[data-testid="tl-dialogue-header"]')).not.toBeNull()
   })
 
   // The gate is "don't pass the callback" — a read-only user is not offered a
   // run whose events the server would reject.
-  it("omits the row entirely when transcription is not offered", () => {
-    render(
+  it("omits the controls entirely when transcription is not offered", () => {
+    const { container } = render(
       <TimelineEditor
         fileId="f1" coreMediaUrl={null} editable cells={sections()} onRetimeSubtitle={() => {}}
       />,
     )
-    expect(screen.queryByTestId("tl-transcribe-bar")).toBeNull()
+    fireEvent.click(dialogueCard(container, "d2"))
+    expect(screen.queryByTestId("tl-transcribe-controls")).toBeNull()
   })
 
   it("a plain chip click arms the row for exactly that one section", () => {
@@ -1189,12 +1201,14 @@ describe("TimelineEditor — section-scoped transcription (AQU-928)", () => {
     expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "d3")
   })
 
-  it("Clear selection empties the scope and disables the run", () => {
+  // Clearing now takes the whole group off screen with it, rather than leaving
+  // a disabled button behind — which is the same change read from the other end.
+  it("Clear selection empties the scope and takes the controls with it", () => {
     const { container } = renderBar()
     fireEvent.click(dialogueCard(container, "d1"))
+    expect(screen.getByTestId("tl-transcribe-count")).toHaveTextContent("1 section selected")
     fireEvent.click(screen.getByTestId("tl-transcribe-clear"))
-    expect(screen.getByTestId("tl-transcribe-count")).toHaveTextContent("No section selected")
-    expect(screen.getByTestId("tl-transcribe-selection")).toBeDisabled()
+    expect(screen.queryByTestId("tl-transcribe-controls")).toBeNull()
   })
 })
 

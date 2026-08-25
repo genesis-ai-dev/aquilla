@@ -647,7 +647,6 @@ export const editor = defineNamespace({
     "editor.timeline.measureDismiss": "Dismiss for now",
 
     // — Section-scoped transcription (AQU-928) ————————————————————
-    "editor.timeline.transcribeSelectionEmpty": "No section selected",
     "editor.timeline.transcribeSelectionCount": plural({
       one: "{count} section selected",
       other: "{count} sections selected",
@@ -662,8 +661,6 @@ export const editor = defineNamespace({
       "Ctrl/⌘-click or Shift-click chips to select more sections.",
     "editor.timeline.transcribeSelectionTooltip":
       "Run speech-to-text on the selected sections' audio only — the rest of the file is left alone.",
-    "editor.timeline.transcribeSelectionEmptyTooltip":
-      "Click a chip on the timeline to pick a section, then transcribe just that section.",
     "editor.timeline.transcribeSelectionNoAudioTooltip":
       "None of the selected sections has audio to transcribe.",
     "editor.timeline.transcribeSelectionBusyTooltip":

@@ -131,7 +131,6 @@ import { TimelineLane } from "./TimelineLane"
 import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
 import { TimelinePlayhead } from "./TimelinePlayhead"
 import { MediaTextHeader, TimelineTimingRow } from "./TimelineChipStrip"
-import { TimelineTranscribeBar } from "./TimelineTranscribeBar"
 import {
   applySelect,
   EMPTY_SELECTION,
@@ -2046,12 +2045,6 @@ export function TimelineEditor({
   // One object for the header's two call sites below — portalled and inline.
   // They render the SAME thing and used to say so twice; a third prop was one
   // more chance for the two to drift apart.
-  const mediaTextHeaderProps = {
-    cell: currentCell,
-    headingLabel: textHeadingLabel,
-    castName: formatCueCharacter(currentCharacter.names),
-    cameraState: currentCharacter.cameraState ?? null,
-  }
   // Meeting note (2026-08-05): the detail readout carries the dub's own
   // numbers — its range, its duration, and ALWAYS the end-to-end difference
   // (original end − dub end). 2026-08-06 (Sam): the diff is INFORMATIONAL (a
@@ -2777,6 +2770,37 @@ export function TimelineEditor({
     }),
     [selectedIds, cells],
   )
+
+  const mediaTextHeaderProps = {
+    cell: currentCell,
+    headingLabel: textHeadingLabel,
+    castName: formatCueCharacter(currentCharacter.names),
+    cameraState: currentCharacter.cameraState ?? null,
+    // AQU-646 stage 3e: the transcribe controls used to be a full-width row of
+    // their own beneath the lanes, on screen whether or not there was anything
+    // to transcribe. They sit in the text header now, and ONLY WHEN THERE IS A
+    // SELECTION (Sam, 2026-08-25) — so the header reads just "Source text" the
+    // rest of the time and the row the bar used to occupy goes back to the
+    // tracks.
+    //
+    // The decision lives here rather than inside the controls because this is
+    // where the selection lives. `transcribeTargetIds` is the ELIGIBLE subset;
+    // the count beside it is the whole selection, and the gap between the two
+    // is what the button's disabled tooltip explains.
+    transcribe:
+      onTranscribeSections && selectedIds.length > 0
+        ? {
+            selectedCount: selectedIds.length,
+            eligibleCount: transcribeTargetIds.length,
+            busy: batchProgress != null,
+            onTranscribe: () => onTranscribeSections(transcribeTargetIds),
+            onClear: () => {
+              setSelectedId(null)
+              setExtraIds([])
+            },
+          }
+        : null,
+  }
 
   const laneProps = {
     layout,
@@ -3923,22 +3947,6 @@ export function TimelineEditor({
         </div>
       </RowMetricsContext.Provider>
 
-      {/* AQU-928: the section-scoped transcribe row. Above the timing row so
-          the numbers stay flush against the text band they head. */}
-      {onTranscribeSections && (
-        <div className="shrink-0">
-          <TimelineTranscribeBar
-            selectedCount={selectedIds.length}
-            eligibleCount={transcribeTargetIds.length}
-            busy={batchProgress != null}
-            onTranscribe={() => onTranscribeSections(transcribeTargetIds)}
-            onClear={() => {
-              setSelectedId(null)
-              setExtraIds([])
-            }}
-          />
-        </div>
-      )}
       {/* 2026-08-08 (Sam): the NUMBERS stay with the timeline — they measure
           the chips above, not the dialogue below — and close this section off
           at its bottom edge. The wrapper is the row's `shrink-0`: it is chrome,

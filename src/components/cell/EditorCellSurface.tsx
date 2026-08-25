@@ -6,7 +6,7 @@ import {
 import { cn } from "@/lib/utils"
 
 interface EditorCellHeaderLaneProps extends HTMLAttributes<HTMLDivElement> {
-  align?: "start" | "center"
+  align?: "start" | "center" | "end"
 }
 
 /**
@@ -24,7 +24,9 @@ export function EditorCellHeaderLane({
       dir="ltr"
       className={cn(
         "mb-1 flex h-4 items-center gap-2 text-xs text-muted-foreground",
-        align === "center" ? "justify-center text-center" : "justify-between",
+        align === "center" && "justify-center text-center",
+        align === "end" && "justify-end text-end",
+        align === "start" && "justify-start text-start",
         className,
       )}
     />
@@ -71,7 +73,7 @@ export const EditorSourceCellSurface = forwardRef<HTMLDivElement, EditorSourceCe
         style={{ fontSize: `${fontSize}px`, lineHeight: "1.6", ...style }}
       >
         {overlay}
-        <EditorCellHeaderLane align="center" data-testid="source-context-line">
+        <EditorCellHeaderLane align="end" data-testid="source-context-line">
           {header}
         </EditorCellHeaderLane>
         {children}

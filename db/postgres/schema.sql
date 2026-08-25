@@ -585,6 +585,19 @@ CREATE TABLE cell_audio (
     approved           INTEGER NOT NULL DEFAULT 0,
     approved_by        TEXT,
     approved_ts        BIGINT,
+    -- AQU-646 stage 3: where this take sits against the line it performs,
+    -- relative to the line's own start. Written only by cell.audio.place.
+    --
+    -- It used to live on the CELL (cells.metadata.target_offset_ms), which was
+    -- exact while a line could hold one dub. With extra target-audio tracks two
+    -- takes share a line, so a single anchor would make dragging one chip move
+    -- the other.
+    --
+    -- NULL means "never placed by hand", NOT "placed at zero" — zero is legal
+    -- and common. Readers fall back to the cell's metadata, which stays the
+    -- permanent home for every take that predates this column (rebuild replays
+    -- historical cell.lane.retime events into it forever).
+    target_offset_ms   BIGINT,
     PRIMARY KEY (project_id, file_id, cell_id, audio_id)
 );
 

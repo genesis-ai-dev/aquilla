@@ -81,10 +81,11 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'file.delete': ROLE.PROJECT_LEAD,
   'file.restore': ROLE.PROJECT_LEAD,
 
-  // Comments: any contributor+ can write, edit, delete, or resolve their own
+  // Comments: any commenter+ can write, edit, delete, or resolve their own
   // comment. Server-side ownership enforcement (only the author can edit/delete
   // their own comment) is done in the projector; the role gate is just the
-  // minimum bar to participate.
+  // minimum bar to participate. Mutating SOMEONE ELSE'S comment is gated
+  // separately by FOREIGN_COMMENT_ROLE below (AQU-999).
   'comment.create': ROLE.COMMENTER,
   'comment.edit': ROLE.COMMENTER,
   'comment.delete': ROLE.COMMENTER,
@@ -142,4 +143,53 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
 
 export function requiredRoleFor(kind: EventKind): number {
   return REQUIRED_ROLE[kind]
+}
+
+/** Comment kinds whose authority floor is raised when the row belongs to
+ *  someone else (the caller is not the comment's author). */
+export type ForeignCommentKind = Extract<
+  EventKind,
+  'comment.edit' | 'comment.delete' | 'comment.resolve'
+>
+
+/**
+ * AQU-999: authority floors for mutating a comment you did NOT author.
+ *
+ * These are DYNAMIC bumps on top of the static REQUIRED_ROLE floors above —
+ * they apply only once the row's `author_id` is known to differ from the
+ * caller. Self-mutation keeps the static COMMENTER (200) floor.
+ *
+ *   edit / delete — rewriting or removing another person's words is still
+ *     MAINTAINER (600). Unchanged.
+ *
+ *   resolve — LOWERED to CONTRIBUTOR (400). Closing out a thread is thread
+ *     bookkeeping, not a mutation of what anyone said: the body is untouched
+ *     and the act is reversible by reopening. Translators working a file are
+ *     exactly the people who settle the comments on it, so the maintainer bar
+ *     made "Resolve" look broken for them — the client flipped the thread
+ *     optimistically and the 403 flipped it back. Commenter (200) and
+ *     Reviewer (300) still cannot resolve a thread they did not author.
+ *
+ * Both write paths — the /events perimeter (events/route.ts) and the external
+ * Agent API emit path (external/emit-events-engine.ts) — read this table, so
+ * the policy cannot drift between them.
+ */
+export const FOREIGN_COMMENT_ROLE: Record<ForeignCommentKind, number> = {
+  'comment.edit': ROLE.MAINTAINER,
+  'comment.delete': ROLE.MAINTAINER,
+  'comment.resolve': ROLE.CONTRIBUTOR,
+}
+
+export function isForeignCommentKind(kind: EventKind): kind is ForeignCommentKind {
+  return kind === 'comment.edit' || kind === 'comment.delete' || kind === 'comment.resolve'
+}
+
+export function requiredRoleForForeignComment(kind: ForeignCommentKind): number {
+  return FOREIGN_COMMENT_ROLE[kind]
+}
+
+/** Human-readable name for a role level, for 403 reason strings. */
+export function roleLabel(level: number): string {
+  const match = Object.entries(ROLE).find(([, v]) => v === level)
+  return match ? match[0].toLowerCase() : `role level ${level}`
 }

@@ -30,7 +30,7 @@ import { mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
 import { PROJECT_SENTINEL_FILE_ID as PROJECT_SENTINEL } from '../events/authorize'
 import { handleEventsWriteRequest } from '../events/route'
-import { ROLE } from '../events/role-policy'
+import { ROLE, requiredRoleForForeignComment, roleLabel } from '../events/role-policy'
 import type { CommentScope, EventKind, RawEvent } from '../events/types'
 import type {
   ChangesetReceipt,
@@ -165,10 +165,10 @@ function collectRefs(events: readonly EmitEventInput[]) {
  * silently-skipped items is not an approvable plan. Head pins land in the
  * standard preconditions list so the shared commit gate re-checks drift.
  * `callerRoleLevel` is the live-resolved role (the static floor was already
- * enforced by the generic prepare gate); this adds the dynamic MAINTAINER
- * bumps for foreign comment mutation / foreign unvalidate, mirroring the
- * /events perimeter's own checks so a plan the caller could never commit is
- * denied here rather than staged.
+ * enforced by the generic prepare gate); this adds the dynamic foreign-row
+ * bumps — foreign comment mutation (FOREIGN_COMMENT_ROLE) and foreign
+ * unvalidate (MAINTAINER) — mirroring the /events perimeter's own checks so a
+ * plan the caller could never commit is denied here rather than staged.
  */
 export async function prepareEmitEvents(
   db: AquillaDb,
@@ -261,10 +261,15 @@ export async function prepareEmitEvents(
       if (e.kind === 'comment.resolve' && row.parent_comment_id != null) {
         return failed(i, `comment ${commentId} is a reply — only top-level threads can be resolved`)
       }
-      if (row.author_id !== cred.username && callerRoleLevel < ROLE.MAINTAINER) {
+      // AQU-999: foreign-comment floor comes from FOREIGN_COMMENT_ROLE, the
+      // same table the /events perimeter reads — maintainer (600) for
+      // edit/delete, contributor (400) for resolve/reopen.
+      const foreignFloor = requiredRoleForForeignComment(e.kind)
+      if (row.author_id !== cred.username && callerRoleLevel < foreignFloor) {
+        const verb = e.kind === 'comment.resolve' ? 'resolving' : 'mutating'
         return errorResponse(
           'permission_denied',
-          `events[${i}]: mutating another user's comment requires maintainer (600)`,
+          `events[${i}]: ${verb} another user's comment requires ${roleLabel(foreignFloor)} (${foreignFloor})`,
         )
       }
       // Pin the routing fileId now (a comment's scope never moves): the

@@ -1,4 +1,5 @@
 import type { AddressInfo } from "node:net"
+import { tmpdir } from "node:os"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -37,7 +38,20 @@ try {
   }
   const launchOptions = process.env.WORKERS_CI === "1"
     ? await (async () => {
-        const { default: serverlessChromium } = await import("@sparticuz/chromium")
+        const chromiumModule = await import("@sparticuz/chromium")
+        const { default: serverlessChromium, inflate, setupLambdaEnvironment } = chromiumModule
+
+        // Cloudflare Workers Builds runs on Ubuntu, so @sparticuz/chromium
+        // does not identify it as an Amazon Linux environment and therefore
+        // does not unpack or expose its bundled browser libraries. The
+        // headless binary still needs those libraries (notably NSS) to start.
+        // Prepare the public package bundle explicitly instead of relying on
+        // provider-specific environment detection.
+        const chromiumEntry = fileURLToPath(import.meta.resolve("@sparticuz/chromium"))
+        const chromiumPackageRoot = resolve(dirname(chromiumEntry), "..")
+        await inflate(resolve(chromiumPackageRoot, "bin", "al2023.tar.br"))
+        setupLambdaEnvironment(resolve(tmpdir(), "al2023", "lib"))
+
         return {
           args: serverlessChromium.args,
           executablePath: await serverlessChromium.executablePath(),

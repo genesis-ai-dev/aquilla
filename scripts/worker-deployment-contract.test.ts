@@ -507,6 +507,8 @@ describe("worker deployment environment contract", () => {
     expect(checks).not.toContain("playwright install")
     expect(browserConformance).toContain('process.env.WORKERS_CI === "1"')
     expect(browserConformance).toContain('import("@sparticuz/chromium")')
+    expect(browserConformance).toContain('"al2023.tar.br"')
+    expect(browserConformance).toContain("setupLambdaEnvironment")
     expect(browserConformance).toContain("serverlessChromium.executablePath()")
     expect(checks).toContain("CHECK_PHASES")
     expect(checks).toContain("Promise.allSettled")

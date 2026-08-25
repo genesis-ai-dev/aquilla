@@ -211,6 +211,9 @@ export const projectSettings = defineNamespace({
     "projectSettings.timeline.addLinesLabel": "Let people add new lines into the timeline's silences",
     "projectSettings.timeline.addLinesHint":
       "Off by default. With this on, a pencil appears over each stretch of the timeline that no line covers, and a microphone beside it that creates a line and starts recording. It is never offered on a file with imported audio cues \u2014 there the cues already say where the lines are. Deleting an empty line somebody added stays available either way, so turning this back off can never strand one.",
+    "projectSettings.timeline.trackEditingLabel": "Let maintainers add and edit timeline tracks",
+    "projectSettings.timeline.trackEditingHint":
+      "Off by default. With this on, a maintainer can add extra tracks to a file's timeline, group them into folders, give them colours and delete them. Deleting a track deletes every recording on it, and asks first. Renaming a track and dragging one up or down the list are not affected by this \u2014 a maintainer can always do both. Turning this back off leaves every track exactly as it is and everything still plays; it only stops the tracks being changed.",
     // model → projectSettings.advancedLlm.modelLabel
     "projectSettings.field.temperature": "temperature",
     "projectSettings.field.healthPenalty": "health penalty",

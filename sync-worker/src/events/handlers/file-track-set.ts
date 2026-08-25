@@ -34,28 +34,66 @@ import type { DispatchOutcome } from './types'
 const TRACK_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
 
 /**
- * The four TrackKind values. They double as the four RESERVED track ids —
- * a default track's id IS its kind string — hence the second name below:
- * the two are the same set today but gate different fields, and only the
- * alias reads correctly at its call site. Reserved rather than "default"
- * because which of them a given file actually draws depends on the file:
- * a dubbing file has no target-subtitles row, but the id stays spoken for.
+ * Every TrackKind a patch may name.
  *
  * Renamed in stage 2 ('subtitles' -> 'source-subtitles', 'target-subtitles'
  * added) while the kind was still DORMANT: no event has ever carried the old
  * spellings, so there is no stored payload to migrate. That window is now
  * spent.
  *
- * HAND-MIRRORED with DEFAULT_TRACK_IDS in src/lib/timeline/tracks.ts. The
+ * HAND-MIRRORED with TRACK_KIND_LABELS in src/lib/timeline/tracks.ts. The
  * client and this worker share no code, so the two lists are kept in step by
  * hand and must be edited together. Drift is not cosmetic: a kind the client
  * will happily persist but this allow-list rejects makes every retry of that
  * event fail identically, which wedges the client's outbox behind it.
  */
-const TRACK_KINDS = new Set(['source-subtitles', 'source-audio', 'target-subtitles', 'target-audio'])
-const DEFAULT_TRACK_IDS = TRACK_KINDS
+const TRACK_KINDS = new Set([
+  'source-subtitles',
+  'source-audio',
+  'target-subtitles',
+  'target-audio',
+  'folder',
+  'audio',
+])
 
-const PATCH_KEYS = new Set(['kind', 'name', 'order', 'groupId'])
+/**
+ * The RESERVED track ids — a derived track's id IS its kind string.
+ *
+ * THIS USED TO BE AN ALIAS OF TRACK_KINDS AND MUST NEVER BE ONE AGAIN. The two
+ * sets were identical while every kind was derived; stage 2 added kinds a USER
+ * makes ('folder', 'audio'), which are not derived by anything and therefore
+ * reserve no id. Aliasing them now would reserve 'folder' as a track id and
+ * make a track that happened to be handed that id permanently unbuildable.
+ *
+ * Reserved rather than "default" because which of them a given file actually
+ * draws depends on the file: a dubbing file has no target-subtitles row, but
+ * the id stays spoken for.
+ *
+ * HAND-MIRRORED with DEFAULT_TRACK_IDS in src/lib/timeline/tracks.ts.
+ */
+const DEFAULT_TRACK_IDS = new Set([
+  'source-subtitles',
+  'source-audio',
+  'target-subtitles',
+  'target-audio',
+])
+
+const PATCH_KEYS = new Set(['kind', 'name', 'order', 'groupId', 'color', 'sourceTrackId'])
+
+/**
+ * A palette ID, and validated as a SHAPE rather than against a list of the ids
+ * this build knows.
+ *
+ * That is the whole point. The palette lives in the client
+ * (src/lib/timeline/track-colors.ts) because what an id looks like is a
+ * rendering decision, and a newer client will ship ids this worker has never
+ * heard of. Enumerating them here would make every palette addition a
+ * coordinated worker deploy, and — worse — would reject writes from clients
+ * that are merely NEWER than the worker, which is the normal state of affairs
+ * during a rollout. An old client reading an id it cannot name simply falls
+ * back to the default pair; nothing is lost either way.
+ */
+const TRACK_COLOR_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/
 
 const MAX_TRACK_NAME_LENGTH = 120
 
@@ -171,6 +209,57 @@ export function handleFileTrackSet(
           ok: false,
           status: 400,
           reason: `file.track.set event ${event.id} carries an unusable groupId: ${String(groupId)}`,
+        }
+      }
+      // A track cannot be inside itself. Every other cycle — a 2-cycle, a
+      // folder nested in a folder — is prevented by construction on the client
+      // (buildTrackRows never reads a folder's own groupId), but this one is
+      // cheap to refuse outright and refusing it keeps the stored data honest
+      // for readers that do not share that rule.
+      if (groupId === trackId) {
+        return {
+          ok: false,
+          status: 400,
+          reason: `file.track.set event ${event.id} puts track ${trackId} inside itself`,
+        }
+      }
+    }
+
+    if ('color' in patch && patch.color !== null) {
+      const { color } = patch
+      if (typeof color !== 'string' || !TRACK_COLOR_PATTERN.test(color)) {
+        return {
+          ok: false,
+          status: 400,
+          reason: `file.track.set event ${event.id} carries an unusable track color: ${String(color)}`,
+        }
+      }
+    }
+
+    if ('sourceTrackId' in patch && patch.sourceTrackId !== null) {
+      // What an added track's chips line up against. Refused on a reserved id
+      // for exactly the reason `kind` is: a derived row's alignment comes from
+      // the file's own cells, so an override there could only be a lie.
+      const { sourceTrackId } = patch
+      if (typeof sourceTrackId !== 'string' || !TRACK_ID_PATTERN.test(sourceTrackId)) {
+        return {
+          ok: false,
+          status: 400,
+          reason: `file.track.set event ${event.id} carries an unusable sourceTrackId: ${String(sourceTrackId)}`,
+        }
+      }
+      if (sourceTrackId === trackId) {
+        return {
+          ok: false,
+          status: 400,
+          reason: `file.track.set event ${event.id} aligns track ${trackId} to itself`,
+        }
+      }
+      if (DEFAULT_TRACK_IDS.has(trackId)) {
+        return {
+          ok: false,
+          status: 400,
+          reason: `file.track.set event ${event.id} sets sourceTrackId on default track ${trackId}`,
         }
       }
     }

@@ -145,6 +145,56 @@ describe('file.track.set — accepted writes', () => {
     const authed = await authorizeTrackSet({ trackId: 'source-subtitles', patch: { name: 'x'.repeat(120) } })
     expect(dispatch(authed).ok).toBe(true)
   })
+
+  // ── Stage 2: the kinds a USER makes, and the two fields they need ────────
+  it('accepts the folder kind', async () => {
+    const authed = await authorizeTrackSet({ trackId: 'grp-1', patch: { kind: 'folder', name: 'Dubs' } })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  it('accepts an added audio track with its alignment', async () => {
+    const authed = await authorizeTrackSet({
+      trackId: 'trk-1',
+      patch: { kind: 'audio', name: 'Spanish VO', sourceTrackId: 'source-subtitles', color: 'teal' },
+    })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  // THE PALETTE IS NOT ENUMERATED HERE, ON PURPOSE. A newer client ships new
+  // palette ids, and during any rollout the client is newer than the worker;
+  // rejecting an id this build cannot name would refuse writes from clients
+  // that are merely ahead. An old READER falls back to the default pair, so
+  // nothing is lost by letting the value through. This case is what pins that
+  // decision — if someone later swaps the pattern for a Set, it fails.
+  it('accepts a palette id this build has never heard of', async () => {
+    const authed = await authorizeTrackSet({ trackId: 'trk-1', patch: { color: 'ultramarine-2' } })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  it('accepts clearing a colour back to the default pair', async () => {
+    const authed = await authorizeTrackSet({ trackId: 'trk-1', patch: { color: null } })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  // A colour is presentation, not identity — unlike kind and sourceTrackId it
+  // is legal on a derived row, because the derived target-audio row is the one
+  // every existing project is looking at and the first anybody will recolour.
+  it('accepts a colour on a default track', async () => {
+    const authed = await authorizeTrackSet({ trackId: 'target-audio', patch: { color: 'rose' } })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  // THIS IS THE CASE THAT PINS THE SET SPLIT. DEFAULT_TRACK_IDS used to be a
+  // literal alias of TRACK_KINDS, which was correct while every kind was
+  // derived. Stage 2 added kinds a USER makes, and re-aliasing them would
+  // reserve the string 'folder' as a track id — so a track that happened to be
+  // handed that id could never have its kind set, for no reason at all, since
+  // nothing DERIVES a folder and there is no row for the delta to collide
+  // with. If someone collapses the two sets again, this fails.
+  it("treats 'folder' as an ordinary track id, not a reserved one", async () => {
+    const authed = await authorizeTrackSet({ trackId: 'folder', patch: { kind: 'audio' } })
+    expect(dispatch(authed).ok).toBe(true)
+  })
 })
 
 describe('file.track.set — rejected writes', () => {
@@ -229,6 +279,36 @@ describe('file.track.set — rejected writes', () => {
       'a groupId over 64 chars',
       { trackId: 'source-subtitles', patch: { groupId: 'g'.repeat(65) } },
       /unusable groupId/,
+    ],
+    // ── Stage 2 ───────────────────────────────────────────────────────────
+    [
+      'a track put inside itself',
+      { trackId: 'trk-1', patch: { groupId: 'trk-1' } },
+      /puts track trk-1 inside itself/,
+    ],
+    ['a non-string color', { trackId: 'trk-1', patch: { color: 3 } }, /unusable track color/],
+    ['an empty color', { trackId: 'trk-1', patch: { color: '' } }, /unusable track color/],
+    // The pattern is deliberately loose (any lowercase id) but not unbounded:
+    // the value is echoed into files.meta, and meta is read on every file
+    // listing.
+    ['an UPPERCASE color', { trackId: 'trk-1', patch: { color: 'Teal' } }, /unusable track color/],
+    ['a color over 32 chars', { trackId: 'trk-1', patch: { color: 'c'.repeat(33) } }, /unusable track color/],
+    [
+      'a non-string sourceTrackId',
+      { trackId: 'trk-1', patch: { sourceTrackId: 9 } },
+      /unusable sourceTrackId/,
+    ],
+    [
+      'a track aligned to itself',
+      { trackId: 'trk-1', patch: { sourceTrackId: 'trk-1' } },
+      /aligns track trk-1 to itself/,
+    ],
+    // Same rule as `kind`, and for the same reason: a derived row's alignment
+    // comes from the file's own cells, so an override could only be a lie.
+    [
+      'a sourceTrackId on a default track',
+      { trackId: 'target-audio', patch: { sourceTrackId: 'source-subtitles' } },
+      /sets sourceTrackId on default track target-audio/,
     ],
   ]
 

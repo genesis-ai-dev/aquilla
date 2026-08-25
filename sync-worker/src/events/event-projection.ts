@@ -1295,6 +1295,41 @@ case 'cell.audio.attach': {
       return ['cell_audio']
     }
 
+    case 'cell.audio.place': {
+      // WHERE THIS TAKE SITS, and nothing else. (AQU-646 stage 3)
+      //
+      // The sibling of cell.audio.trim above, and the same discipline: one
+      // column, always stated, `null` meaning "clear it". It is a separate kind
+      // from the attach for the reason spelled out on the payload type —
+      // absence must go on meaning exactly one thing.
+      //
+      // NOT SCOPED BY SLOT, on purpose. `audio_id` is unique within a cell (it
+      // is part of the primary key), so naming the take is naming the row; a
+      // slot term could only ever disagree with itself.
+      const p = event.payload as EventPayloads['cell.audio.place']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.audio.place event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET target_offset_ms = ?
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+          )
+          .bind(
+            // `?? null` and NOT `|| null`: 0 is a legal, common offset — a take
+            // placed exactly at its line's start — and `||` would turn it back
+            // into "never placed".
+            p.targetOffsetMs ?? null,
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            p.audioId,
+          ),
+      )
+      return ['cell_audio']
+    }
+
     case 'cell.link.set': {
       // One edge between a subtitle cell (the envelope) and an audio cue (the
       // payload). The ENDPOINTS are the primary key, so this is idempotent by

@@ -229,6 +229,8 @@ interface Baseline {
   allowSelfValidation: boolean
   /** AQU-646: may people add lines into the timeline's silences? */
   allowLineCreation: boolean
+  /** AQU-646 stage 2: may this project's timelines be restructured? */
+  allowTrackEditing: boolean
   timingLocked: boolean
   harmonize_min_role: "project_lead" | "maintainer"
   /** AQU-460: EXPLICIT persisted value only. `undefined` = no explicit choice
@@ -277,6 +279,10 @@ function buildBaseline(project: ProjectRecord): Baseline {
     // Off unless a project has said otherwise: the affordance is speculative
     // and underdeveloped, so absent must read as off, not as unset.
     allowLineCreation: project.allowLineCreation ?? false,
+    // Off unless a project has said otherwise. Multi-track is capability for
+    // clients who want it, and a project that never turns it on should not be
+    // able to tell it was built.
+    allowTrackEditing: project.allowTrackEditing ?? false,
     // AQU-646: absent means LOCKED, so the box starts ticked on every project
     // that predates the setting. See resolveTimingLocked.
     timingLocked: resolveTimingLocked(project),
@@ -460,6 +466,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [validationNamedUsers, setValidationNamedUsers] = useState<string[]>([])
   const [allowSelfValidation, setAllowSelfValidation] = useState(true)
   const [allowLineCreation, setAllowLineCreation] = useState(false)
+  const [allowTrackEditing, setAllowTrackEditing] = useState(false)
   const [timingLocked, setTimingLocked] = useState(true)
   // AQU-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
   const [harmonizeMinRole, setHarmonizeMinRole] = useState<"project_lead" | "maintainer">("project_lead")
@@ -521,6 +528,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setValidationNamedUsers(b.validationNamedUsers)
     setAllowSelfValidation(b.allowSelfValidation)
     setAllowLineCreation(b.allowLineCreation)
+    setAllowTrackEditing(b.allowTrackEditing)
     setTimingLocked(b.timingLocked)
     setHarmonizeMinRole(b.harmonize_min_role)
     setBibleResourcesEnabled(b.bibleResourcesEnabled)
@@ -621,6 +629,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       JSON.stringify(validationNamedUsers) !== JSON.stringify(baseline.validationNamedUsers) ||
       allowSelfValidation !== baseline.allowSelfValidation ||
       allowLineCreation !== baseline.allowLineCreation ||
+      allowTrackEditing !== baseline.allowTrackEditing ||
       timingLocked !== baseline.timingLocked ||
       harmonizeMinRole !== baseline.harmonize_min_role ||
       bibleResourcesEnabled !== baseline.bibleResourcesEnabled ||
@@ -637,6 +646,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, allowLineCreation,
+    allowTrackEditing,
     timingLocked,
     harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
     precedingTargetCells, importExcludeFrontMatter,
@@ -845,6 +855,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       }
       if (allowSelfValidation !== baseline.allowSelfValidation) { sharedUpdates.allowSelfValidation = allowSelfValidation; changedFieldLabels.push("self-validation") }
       if (allowLineCreation !== baseline.allowLineCreation) { sharedUpdates.allowLineCreation = allowLineCreation; changedFieldLabels.push("adding timeline lines") }
+      if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing; changedFieldLabels.push("timeline track editing") }
       if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked; changedFieldLabels.push("the timing lock") }
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
       if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible resources") }
@@ -917,6 +928,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         validationNamedUsers,
         allowSelfValidation,
         allowLineCreation,
+        allowTrackEditing,
         timingLocked,
         harmonize_min_role: harmonizeMinRole,
         bibleResourcesEnabled,
@@ -1033,7 +1045,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-decay", label: "Retrieval support", keywords: ["decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
-    { id: "section-timeline", label: "Timeline", keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines"] },
+    { id: "section-timeline", label: "Timeline", keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines", "track", "tracks", "multi-track", "folder", "colour", "color"] },
     { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
     { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts"] },
     { id: "section-termbase-sharing", label: "Term Base Sharing", keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"], visible: SHOW_TERMBASE_SHARING_IN_SETTINGS },
@@ -2289,6 +2301,27 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   {t("projectSettings.timeline.addLinesLabel")}
                   <p className="mt-1 text-xs text-muted-foreground">
                     {t("projectSettings.timeline.addLinesHint")}
+                  </p>
+                </label>
+              </div>
+              {/* AQU-646 stage 2. LAST in the card, because it is the widest
+                  claim of the three: the two above constrain what may move on
+                  a timeline, this one decides whether the timeline's own rows
+                  may be added to, grouped and recoloured at all. Off by
+                  default, and enforced on the server as well — the UI
+                  withholding a button is not a permission. */}
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  id="allow-track-editing"
+                  data-testid="settings-allow-track-editing"
+                  checked={allowTrackEditing}
+                  disabled={!canEditShared}
+                  onCheckedChange={(checked) => setAllowTrackEditing(checked)}
+                />
+                <label htmlFor="allow-track-editing" className="text-sm">
+                  {t("projectSettings.timeline.trackEditingLabel")}
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("projectSettings.timeline.trackEditingHint")}
                   </p>
                 </label>
               </div>

@@ -21,6 +21,7 @@ import {
   useQueueAudibility,
   type TrackAudibility,
 } from "@/lib/audio/play-queue"
+import { isDefaultTrackSlot, slotAudible } from "@/lib/timeline/track-slots"
 
 // Re-exported so both buttons — the timeline's lane gutter and the video pane's
 // header — reach audibility through exactly one module.
@@ -39,7 +40,22 @@ export function loadAudibility(fileId: string): TrackAudibility {
     const parsed: unknown = JSON.parse(localStorage.getItem(audibilityKey(fileId)) ?? "")
     if (parsed && typeof parsed === "object") {
       const p = parsed as Partial<TrackAudibility>
-      return { source: p.source !== false, target: p.target !== false }
+      // AQU-646 stage 3: added tracks ride a slot-keyed map, read with the same
+      // `!== false` default-on rule the two named flags use — so a brand-new
+      // track is audible without anybody opting in, and a flag can only be
+      // there because somebody switched it off. Every preference already on
+      // disk parses unchanged: it simply has no `bySlot`.
+      const bySlot =
+        p.bySlot && typeof p.bySlot === "object" && !Array.isArray(p.bySlot)
+          ? Object.fromEntries(
+              Object.entries(p.bySlot).filter(([, v]) => typeof v === "boolean"),
+            )
+          : undefined
+      return {
+        source: p.source !== false,
+        target: p.target !== false,
+        ...(bySlot && Object.keys(bySlot).length > 0 ? { bySlot } : {}),
+      }
     }
   } catch {
     /* unset / private mode */
@@ -78,9 +94,25 @@ export function seedAudibility(fileId: string): void {
  * state. That is the entire reason this module exists: with two buttons live,
  * merging from either one's local copy silently drops the other's toggle.
  */
-export function toggleAudibility(fileId: string, track: keyof TrackAudibility): void {
+/**
+ * Flip one track's audio.
+ *
+ * TAKES A SLOT, not a `keyof TrackAudibility`. (AQU-646 stage 3) The two named
+ * flags are still named — `"source"` and the default row's `"recording"` /
+ * `"generatedVoice"` both mean `target` — and every added track addresses its
+ * own flag by its slot.
+ */
+export function toggleAudibility(fileId: string, slotOrTrack: string): void {
   const current = getQueueAudibility()
-  const next: TrackAudibility = { ...current, [track]: !current[track] }
+  const next: TrackAudibility =
+    slotOrTrack === "source"
+      ? { ...current, source: !current.source }
+      : isDefaultTrackSlot(slotOrTrack) || slotOrTrack === "target"
+        ? { ...current, target: !current.target }
+        : {
+            ...current,
+            bySlot: { ...current.bySlot, [slotOrTrack]: !slotAudible(current, slotOrTrack) },
+          }
   persist(fileId, next)
   setQueueAudibility(next)
 }

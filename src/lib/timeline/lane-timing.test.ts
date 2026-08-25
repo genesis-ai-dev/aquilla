@@ -142,6 +142,69 @@ describe("targetChipGeom — the anchor is relative to the cell (round 8)", () =
   })
 })
 
+// ── AQU-646 stage 3: the placement moves onto the TAKE ─────────────────────
+//
+// The reason it had to is one test: two takes share a line once extra target
+// tracks exist, and a per-cell anchor would make dragging one chip move the
+// other. Everything else here defends the fallback, which stays permanent
+// because `rebuild.ts` keeps replaying historical `cell.lane.retime` events
+// into the cell's metadata forever.
+
+describe("targetChipGeom — the take's own placement (stage 3)", () => {
+  it("uses the take's offset in preference to the cell's", () => {
+    const g = targetChipGeom(
+      cell({ metadata: { target_offset_ms: 2000 } }),
+      { durationMs: 4000, targetOffsetMs: 500 },
+    )
+    expect(g).toMatchObject({ anchor: 10.5, start: 10.5, end: 14.5 })
+  })
+
+  // THE BUG THIS EXISTS TO FIX. Two takes, one line: each sits where IT was
+  // placed. Reading the cell would give them both the same anchor, so dragging
+  // one would visibly move the other.
+  it("keeps two takes on ONE line independently placed", () => {
+    const line = cell({ metadata: { target_offset_ms: 2000 } })
+    const a = targetChipGeom(line, { durationMs: 4000, targetOffsetMs: 0 })
+    const b = targetChipGeom(line, { durationMs: 4000, targetOffsetMs: 3000 })
+    expect(a?.anchor).toBe(10)
+    expect(b?.anchor).toBe(13)
+  })
+
+  it("still follows the line when the line moves", () => {
+    const att = { durationMs: 4000, targetOffsetMs: 1000 }
+    expect(targetChipGeom(cell({}), att)?.anchor).toBe(11)
+    expect(targetChipGeom(cell({ startTime: 15, endTime: 25 }), att)?.anchor).toBe(16)
+  })
+
+  // `!= null`, not truthiness — a take placed exactly on its line's start is
+  // the common case, and `0` must not fall through to the cell's own anchor.
+  it("treats a take offset of exactly 0 as a placement", () => {
+    const g = targetChipGeom(
+      cell({ metadata: { target_offset_ms: 5000 } }),
+      { durationMs: 4000, targetOffsetMs: 0 },
+    )
+    expect(g).toMatchObject({ anchor: 10 })
+  })
+
+  it("falls back to the cell for a take that has never been placed", () => {
+    const g = targetChipGeom(cell({ metadata: { target_offset_ms: 2000 } }), { durationMs: 4000 })
+    expect(g).toMatchObject({ anchor: 12 })
+  })
+
+  it("ignores a non-finite offset rather than drawing the chip nowhere", () => {
+    const g = targetChipGeom(
+      cell({ metadata: { target_offset_ms: 2000 } }),
+      { durationMs: 4000, targetOffsetMs: Number.NaN },
+    )
+    expect(g).toMatchObject({ anchor: 12 })
+  })
+
+  it("a negative take offset leads the line", () => {
+    const g = targetChipGeom(cell({}), { durationMs: 4000, targetOffsetMs: -1500 })
+    expect(g).toMatchObject({ anchor: 8.5, start: 8.5, end: 12.5 })
+  })
+})
+
 describe("targetOffsetMsFor — the inverse", () => {
   it("round-trips through targetChipGeom", () => {
     const c = cell({})

@@ -15,6 +15,7 @@
 import type { FrontierSession } from "@/lib/frontier/types"
 import { buildAudioId, deleteCellAudio, uploadCellAudio } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
+import { RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
@@ -95,6 +96,12 @@ export function validateAudioFile(file: File): string | null {
 }
 
 export interface AttachAudioFileArgs {
+  /**
+   * AQU-646 stage 3: which TRACK the file lands on, as a storage slot.
+   * Defaults to the dub row's, so the cell action rail is unchanged; the
+   * recorder passes its own target track's.
+   */
+  slot?: string
   session: FrontierSession | null
   projectId: string
   fileId: string
@@ -132,7 +139,7 @@ export interface AttachAudioFileResult {
  * the cell.
  */
 export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<AttachAudioFileResult> {
-  const { session, projectId, fileId, cellId, file, username, label } = args
+  const { session, projectId, fileId, cellId, file, username, label, slot = RECORDING_SLOT } = args
 
   // Hard front gate, not a retry: audio bytes can NEVER be queued offline —
   // the outbox carries JSON events only and the bytes go straight to R2 by
@@ -173,7 +180,7 @@ export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<
       cellId,
       audioId: fullAudioId,
       url: result.url,
-      slot: "recording",
+      slot,
       mimeType: file.type || undefined,
       durationMs,
       label,

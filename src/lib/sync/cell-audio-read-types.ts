@@ -20,6 +20,16 @@ export interface AudioAttachmentOut {
   /** Non-destructive playback trim window into the clip, in ms (null = clip edge). */
   trimStartMs: number | null
   trimEndMs: number | null
+  /**
+   * AQU-646 stage 3: where this take sits against its line, in ms from the
+   * line's own start. Negative is legal (a take that leads its line) and `0` is
+   * a real placement.
+   *
+   * NULL MEANS "NEVER PLACED BY HAND", not "placed at zero" — readers fall back
+   * to the cell's own `target_offset_ms`, which stays the permanent home for
+   * every take made before this column existed.
+   */
+  targetOffsetMs?: number | null
   /** SUB-48: set by the optimistic overlay while this clip's event is still
    *  sitting in the outbox — i.e. saved on this device but not yet at the
    *  server. Never sent by the server; UI renders a "saving…" hint from it so
@@ -37,9 +47,23 @@ export interface AudioAttachmentOut {
 
 export interface CellAudioEntry {
   attachments: Record<string, AudioAttachmentOut>
-  /** Active clip in the "recording" slot. */
+  /**
+   * The active clip in EVERY slot, keyed by slot. (AQU-646 stage 3)
+   *
+   * Extra target-audio tracks address their takes by their own track id, so the
+   * two named pointers below cannot express a selection on one. They remain as
+   * PURE PROJECTIONS of this map — the server derives them from it rather than
+   * assigning them alongside, which is what stops the two shapes drifting.
+   *
+   * OPTIONAL, and deliberately so: a client running against a worker that
+   * predates this field still gets the two pointers, and `slotSelections()`
+   * rebuilds the map from them. Requiring it would make a version skew during
+   * a rollout look like every take vanishing.
+   */
+  selectedBySlot?: Record<string, string>
+  /** Active clip in the "recording" slot. A projection of `selectedBySlot`. */
   selectedAudioId: string | null
-  /** Active clip in the "generatedVoice" slot. */
+  /** Active clip in the "generatedVoice" slot. Also a projection. */
   selectedGeneratedVoiceAudioId: string | null
   /** Whisper word timings by audioId. */
   audioTimings: Record<string, unknown>
@@ -47,4 +71,21 @@ export interface CellAudioEntry {
 
 export interface FileAudioAttachmentsResponse {
   cells: Record<string, CellAudioEntry>
+}
+
+/**
+ * A cell's selections keyed by slot, however the server chose to express them.
+ *
+ * Prefers the map; falls back to rebuilding one from the two named pointers,
+ * which is what a worker predating `selectedBySlot` sends. Callers get one
+ * shape and never have to know which they were handed.
+ */
+export function slotSelections(
+  entry: Pick<CellAudioEntry, "selectedBySlot" | "selectedAudioId" | "selectedGeneratedVoiceAudioId">,
+): Record<string, string> {
+  if (entry.selectedBySlot) return entry.selectedBySlot
+  const rebuilt: Record<string, string> = {}
+  if (entry.selectedAudioId) rebuilt["recording"] = entry.selectedAudioId
+  if (entry.selectedGeneratedVoiceAudioId) rebuilt["generatedVoice"] = entry.selectedGeneratedVoiceAudioId
+  return rebuilt
 }

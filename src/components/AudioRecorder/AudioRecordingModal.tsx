@@ -16,6 +16,16 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { MIN_USEFUL_REGION_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
+import {
+  isDefaultTrackSlot,
+  RECORDING_SLOT,
+  slotsForTrack,
+  trackIdForSlot,
+} from "@/lib/timeline/track-slots"
+import type { TimelineTrack } from "@/lib/timeline/tracks"
+import { DEFAULT_TARGET_TRACK_ID, slotForTrack } from "@/lib/timeline/track-slots"
+import { slotSelections, type AudioAttachmentOut, type CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
+import type { FrontierSession } from "@/lib/frontier/types"
 import { takeTrims } from "@/lib/audio/take-margins"
 import { cameraLabel } from "@/lib/timeline/cue-character"
 import type { CameraState } from "@/lib/sync/cells-read-types"
@@ -58,6 +68,17 @@ interface Props {
   project: ProjectRecord
   cells: CellData[]
   activeCellId: string | null
+  /**
+   * AQU-646 stage 3: which TRACK a new take lands on, as a storage slot.
+   *
+   * Defaults to the dub row's `"recording"`, so every existing caller and every
+   * existing behaviour is unchanged. An added track's lane passes its own id,
+   * and the take is attached, injected, transcribed and listed under that.
+   */
+  targetSlot?: string
+  /** The file's tracks, so the takes list can be grouped under a heading per
+   *  track. Absent = one ungrouped list, exactly as it has always been. */
+  timelineTracks?: readonly TimelineTrack[]
   username: string
   onActiveCellChange: (cellId: string) => void
   /** AQU-646: the cell's LAST take was removed — see `onTakeSaved`'s mirror in
@@ -136,8 +157,84 @@ const READ_ALOUD_LINES = 5
  *  be trading readability for a scrollbar we would rather just have. */
 const READ_ALOUD_MIN_PX = Math.round(READ_ALOUD_BASE_PX * 0.5)
 
+/**
+ * The takes list, grouped by track. (AQU-646 stage 3, Sam's choice)
+ *
+ * ONE `TakesStrip` PER GROUP rather than one strip that knows about groups: a
+ * strip's whole job is a flat list of takes with per-take selection, and that
+ * is exactly what a group is. Threading grouping into it would have put track
+ * headings inside a component that has no other reason to know tracks exist.
+ *
+ * With a single group there is no heading at all, so the common case renders
+ * byte-for-byte what it always did.
+ */
+function GroupedTakes({
+  groups,
+  project,
+  cell,
+  entry,
+  sourceClip,
+  username,
+  session,
+  onLastTakeRemoved,
+}: {
+  groups: Array<{ trackId: string; name: string; takes: AudioAttachmentOut[] }>
+  project: ProjectRecord
+  cell: CellData
+  entry: CellAudioEntry | undefined
+  sourceClip: AudioAttachmentOut | null
+  username: string
+  session: FrontierSession | null
+  onLastTakeRemoved?: (cellId: string) => void
+}) {
+  const showHeadings = groups.length > 1
+  return (
+    <>
+      {groups.map((group) => {
+        // WHICH TAKE SOUNDS, per track. For the default row that is its
+        // recording pointer (falling through to the generated one, exactly as
+        // it always has); for an added track it is that track's single slot.
+        const isDefault = group.trackId === DEFAULT_TARGET_TRACK_ID
+        const selected = isDefault
+          ? (entry?.selectedAudioId ?? null)
+          : (slotSelections(entry ?? { selectedAudioId: null, selectedGeneratedVoiceAudioId: null })[
+              slotForTrack(group.trackId)
+            ] ?? null)
+        return (
+          <div key={group.trackId}>
+            {showHeadings && (
+              <div
+                data-testid={`rec-takes-group-${group.trackId}`}
+                className="sticky top-0 z-10 bg-muted/60 px-4 py-1 text-[11px] font-semibold text-muted-foreground"
+              >
+                {group.name}
+              </div>
+            )}
+            <TakesStrip
+              chromeless
+              projectId={project.id}
+              fileId={cell.fileId}
+              cellId={cell.id}
+              takes={group.takes}
+              onLastTakeRemoved={onLastTakeRemoved}
+              selectedAudioId={selected}
+              // The displace-to-source dance belongs to the default row alone —
+              // an added track has one slot and nothing to displace onto.
+              selectedGeneratedAudioId={isDefault ? (entry?.selectedGeneratedVoiceAudioId ?? null) : null}
+              sourceClip={isDefault ? sourceClip : null}
+              author={username}
+              session={session}
+            />
+          </div>
+        )
+      })}
+    </>
+  )
+}
+
+
 export function AudioRecordingModal({
-  open, project, cells, activeCellId, username,
+  open, project, cells, activeCellId, targetSlot = RECORDING_SLOT, timelineTracks, username,
   onActiveCellChange, onTakeSaved, onLastTakeRemoved, readAloudFor, filmFileId, onClose,
 }: Props) {
   const t = useT()
@@ -333,19 +430,85 @@ export function AudioRecordingModal({
   // refetch (poked on save below) keeps this fresh as new takes land.
   const { byCellId } = useFileAudioAttachments(open ? project.id : null, open ? (activeCell?.fileId ?? null) : null)
   const audioEntry = activeCell ? byCellId.get(activeCell.id) : undefined
+  /**
+   * The takes on THIS track. (AQU-646 stage 3)
+   *
+   * Drives the strip, the "Take N" numbering (`nextTakeLabel` reads this list,
+   * so per-track numbering falls out with no extra code) and the duration heal.
+   * `slotsForTrack` is what keeps the default row's two slots together as one
+   * list while an added track's single slot stands alone.
+   */
+  const ownSlots = useMemo(() => new Set(slotsForTrack(trackIdForSlot(targetSlot))), [targetSlot])
   const recordingTakes = useMemo(
     () => Object.values(audioEntry?.attachments ?? {})
       // Round 8c (Sam): generated TTS is a TAKE too — one list, recorded and
       // synthesized side by side, any of them circleable.
-      .filter((a) => a.slot === "recording" || a.slot === "generatedVoice")
+      .filter((a) => ownSlots.has(a.slot))
       // The imported SOURCE clip rides the recording slot too (fileId-seeded,
       // per SUB-29 provenance) but is not a take — keep it out of the strip so
       // it can't be listed, named "Take 1", or deleted from here. The Source
       // audio track owns it.
       .filter((a) => !audioIdSeededWith(a.audioId, activeCell?.fileId ?? ""))
       .sort((a, b) => a.audioId.localeCompare(b.audioId)),
-    [audioEntry, activeCell?.fileId],
+    [audioEntry, activeCell?.fileId, ownSlots],
   )
+  /**
+   * EVERY track's takes on this line, grouped. (Sam, 2026-08-24)
+   *
+   * Distinct from `recordingTakes` above, which is this track's alone and is
+   * what "Take N", the duration heal and a new take's slot all read. This one
+   * is for LOOKING: the tab lists what exists on every track under a heading
+   * each, so a take on track 2 is findable from the detail pane even though
+   * recording into track 2 only starts from that track's own lane.
+   *
+   * A single group renders exactly as the ungrouped list always did — the
+   * heading only appears once there is more than one thing to tell apart.
+   */
+  const takeGroups = useMemo(() => {
+    const all = Object.values(audioEntry?.attachments ?? {})
+      // The imported SOURCE clip rides the recording slot but is not a take.
+      .filter((a) => !audioIdSeededWith(a.audioId, activeCell?.fileId ?? ""))
+    const byTrack = new Map<string, AudioAttachmentOut[]>()
+    for (const att of all) {
+      const trackId = trackIdForSlot(att.slot)
+      const list = byTrack.get(trackId)
+      if (list) list.push(att)
+      else byTrack.set(trackId, [att])
+    }
+    // In the file's own track order, so the headings read down the tab the way
+    // the lanes read down the timeline. Tracks this build cannot name (a
+    // collaborator's newer one) still list their takes rather than hiding them.
+    const ordered = (timelineTracks ?? []).filter((tr) => byTrack.has(tr.id))
+    const named = new Set(ordered.map((tr) => tr.id))
+    return [
+      ...ordered.map((tr) => ({ trackId: tr.id, name: tr.name, takes: byTrack.get(tr.id)! })),
+      ...[...byTrack.entries()]
+        .filter(([id]) => !named.has(id))
+        .map(([id, takes]) => ({ trackId: id, name: "", takes })),
+    ].map((g) => ({ ...g, takes: g.takes.sort((a, b) => a.audioId.localeCompare(b.audioId)) }))
+  }, [audioEntry, activeCell?.fileId, timelineTracks])
+
+  /**
+   * How many takes the strip will actually LIST — every track's, not this one's.
+   *
+   * THE GATES BELOW READ THIS AND NOT `recordingTakes`, and that distinction is
+   * the whole of a bug Sam hit (2026-08-24): both render sites asked
+   * `recordingTakes.length > 0`, which is THIS track's takes, and then rendered
+   * `takeGroups`, which is EVERY track's. Open the recorder on a track that has
+   * no takes yet and the entire strip disappeared — taking with it the takes
+   * sitting on every other track, which were listed right there a moment
+   * earlier while the default track happened to hold one. From the outside the
+   * takes had simply vanished.
+   *
+   * `recordingTakes` keeps its own jobs — "Take N" numbering, the duration
+   * heal, which slot a new take is written to — because those are all
+   * per-track. Only "is there anything to show" is about the whole list.
+   */
+  const listedTakeCount = useMemo(
+    () => takeGroups.reduce((n, g) => n + g.takes.length, 0),
+    [takeGroups],
+  )
+
   // The source clip itself — the recording slot's "no take" state. Activating
   // a TTS take hands the slot back to it so the generated audio can sound.
   const sourceClip = useMemo(
@@ -632,13 +795,25 @@ export function AudioRecordingModal({
       const ok = await generateCellVoice({
         project, cell: activeCell, session, username,
         label: nextTakeLabel(recordingTakes),
+        // The voice lands on the track the recorder is pointed at, not always
+        // on the default row's generated-voice slot.
+        slot: isDefaultTrackSlot(targetSlot) ? undefined : targetSlot,
       })
       if (ok) {
         setTtsDone(true)
         // You asked for this voice — make it the one that sounds. A recorded
         // take holding the recording slot would shadow it, so hand the slot
         // back to the source clip (the "no take" state).
-        const recSel = audioEntry?.selectedAudioId
+        //
+        // THE DEFAULT TRACK ONLY, and this is why added tracks were given ONE
+        // slot rather than a pair. The juggle exists because the default row's
+        // resolution prefers whatever holds `"recording"`, and it works only
+        // because there is a shared source clip to park that slot on. An added
+        // track has no such clip — and needs no juggle, because its recorded
+        // and generated takes are siblings in one slot, so picking either
+        // deselects the other through the per-(cell, slot) rule the server
+        // already enforces.
+        const recSel = isDefaultTrackSlot(targetSlot) ? audioEntry?.selectedAudioId : null
         if (recSel && audioIdSeededWith(recSel, activeCell.id) && sourceClip) {
           const displaceP = emitCellAudioSelect({
             projectId: project.id, fileId: activeCell.fileId, cellId: activeCell.id,
@@ -652,7 +827,7 @@ export function AudioRecordingModal({
     } finally {
       setTtsBusy(false)
     }
-  }, [online, activeCell, session, ttsBusy, project, username, recordingTakes, audioEntry?.selectedAudioId, sourceClip])
+  }, [online, activeCell, session, ttsBusy, project, username, recordingTakes, audioEntry?.selectedAudioId, sourceClip, targetSlot])
 
   // Settle on the next line after a brief success indication. Shared by the
   // recorded and the uploaded path so keeping a take means exactly the same
@@ -773,7 +948,7 @@ export function AudioRecordingModal({
           cellId: activeCell.id,
           audioId: `${result.audioId}.${result.ext}`,
           url: result.url,
-          slot: "recording",
+          slot: targetSlot,
           mimeType: blob.type || undefined,
           durationMs: takeDurationMs,
           ...takeTrimWindow,
@@ -800,7 +975,7 @@ export function AudioRecordingModal({
       injectOptimisticAudioAttachment(activeCell.fileId, activeCell.id, {
         audioId: `${result.audioId}.${result.ext}`,
         url: result.url,
-        slot: "recording",
+        slot: targetSlot,
         mimeType: blob.type || null,
         voiceId: null,
         referenceAudioId: null,
@@ -873,11 +1048,12 @@ export function AudioRecordingModal({
         language: project.targetLanguage,
         // AQU-646: state the slot rather than letting transcription infer it
         // from the stub above. The stub carries `selectedAudioId` and no slot,
-        // so the inference reads every take as "recording" — which is right
-        // today and becomes a data-mover the moment a take can belong to a
-        // second target track (the re-attach assigns slot outright and its
-        // sibling-deselect would drop that track's real take).
-        slot: "recording",
+        // so the inference would read every take as "recording" — which was
+        // right until a take could belong to a second target track, and is a
+        // DATA-MOVER now: the re-attach assigns slot outright and its
+        // sibling-deselect would drop that track's real take. This is the
+        // caller that knows, so it says.
+        slot: targetSlot,
       })
       scheduleAutoAdvance()
     } catch (e) {
@@ -927,6 +1103,9 @@ export function AudioRecordingModal({
         file,
         username,
         label,
+        // Sam, 2026-08-24: uploading is the other way audio gets onto an added
+        // track, so it follows the recorder's target the same way a take does.
+        slot: targetSlot,
       })
       onTakeSaved?.(activeCell.id)
       returnToReady(`${label} added`)
@@ -1626,20 +1805,17 @@ export function AudioRecordingModal({
             {/* The raised list, expanded only. `bottom-full` puts it directly
                 above this strip; capped so it can never cover the line being
                 read, and scrolling inside that cap. */}
-            {showFilm && takesOpen && recordingTakes.length > 0 && activeCell && (
+            {showFilm && takesOpen && listedTakeCount > 0 && activeCell && (
               <div className="absolute inset-x-0 bottom-full z-20 max-h-[260px] overflow-y-auto border-t bg-popover shadow-[0_-10px_28px_rgba(0,0,0,0.2)]">
-                <TakesStrip
-                  chromeless
-                  projectId={project.id}
-                  fileId={activeCell.fileId}
-                  cellId={activeCell.id}
-                  takes={recordingTakes}
-                  onLastTakeRemoved={onLastTakeRemoved}
-                  selectedAudioId={audioEntry?.selectedAudioId ?? null}
-                  selectedGeneratedAudioId={audioEntry?.selectedGeneratedVoiceAudioId ?? null}
+                <GroupedTakes
+                  groups={takeGroups}
+                  project={project}
+                  cell={activeCell}
+                  entry={audioEntry}
                   sourceClip={sourceClip}
-                  author={username}
+                  username={username}
                   session={session ?? null}
+                  onLastTakeRemoved={onLastTakeRemoved}
                 />
               </div>
             )}
@@ -1651,16 +1827,16 @@ export function AudioRecordingModal({
                   size="sm"
                   data-testid="rec-takes-toggle"
                   aria-expanded={takesOpen}
-                  disabled={recordingTakes.length === 0}
+                  disabled={listedTakeCount === 0}
                   onClick={() => setTakesOpen((v) => !v)}
                   className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground"
                 >
-                  {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums">{recordingTakes.length}</span>
+                  {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums">{listedTakeCount}</span>
                   <ChevronUp className={cn("h-3.5 w-3.5 transition-transform", takesOpen && "rotate-180")} />
                 </Button>
               ) : (
                 <span data-testid="rec-takes-count" className="shrink-0 px-1 text-xs font-medium">
-                  {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums text-muted-foreground">{recordingTakes.length}</span>
+                  {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums text-muted-foreground">{listedTakeCount}</span>
                 </span>
               )}
 
@@ -1768,19 +1944,16 @@ export function AudioRecordingModal({
               came and went between phases. */}
           {!showFilm && (
             <div className="min-h-0 flex-1 overflow-y-auto bg-muted/20">
-              {recordingTakes.length > 0 && activeCell ? (
-                <TakesStrip
-                  chromeless
-                  projectId={project.id}
-                  fileId={activeCell.fileId}
-                  cellId={activeCell.id}
-                  takes={recordingTakes}
-                  onLastTakeRemoved={onLastTakeRemoved}
-                  selectedAudioId={audioEntry?.selectedAudioId ?? null}
-                  selectedGeneratedAudioId={audioEntry?.selectedGeneratedVoiceAudioId ?? null}
+              {listedTakeCount > 0 && activeCell ? (
+                <GroupedTakes
+                  groups={takeGroups}
+                  project={project}
+                  cell={activeCell}
+                  entry={audioEntry}
                   sourceClip={sourceClip}
-                  author={username}
+                  username={username}
                   session={session ?? null}
+                  onLastTakeRemoved={onLastTakeRemoved}
                 />
               ) : (
                 <p className="px-4 py-6 text-center text-xs text-muted-foreground/60">

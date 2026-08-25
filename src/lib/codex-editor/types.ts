@@ -90,6 +90,13 @@ export interface CodexCellAttachment {
    *  slice (transcription must decode only this window, not the whole file). */
   trimStartMs?: number;
   trimEndMs?: number;
+  /**
+   * AQU-646 stage 3: where this take sits against its line, in ms from the
+   * line's own start. Undefined means "never placed by hand" — NOT zero, which
+   * is a real placement — so readers fall back to the cell's own
+   * `target_offset_ms` for every take that predates it.
+   */
+  targetOffsetMs?: number | null;
   /** SUB-48: this clip's event is still queued locally (saved on this device,
    *  not yet at the server). Drives the "saving…" hint on chips/rows. */
   pendingSync?: true;

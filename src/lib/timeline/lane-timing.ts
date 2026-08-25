@@ -100,6 +100,13 @@ export const MIN_USEFUL_REGION_SEC = 0.5
  */
 export const MIN_ADDABLE_SPAN_SEC = 0.2
 
+/** What `targetChipGeom` needs off a take: its length, its trims, and — since
+ *  AQU-646 stage 3 — its own placement. */
+export type ChipAtt = Pick<
+  CodexCellAttachment,
+  "durationMs" | "trimStartMs" | "trimEndMs" | "targetOffsetMs"
+>
+
 export interface TargetChipGeom {
   /** File-second where the CLIP'S SAMPLE ZERO sits (the round-7 formalization —
    *  playback always cued clips relative to this). Resolved from the cell's own
@@ -125,7 +132,28 @@ export interface TargetChipGeom {
  * cell until someone next drags it, which is exactly today's behavior — better
  * than a migration that silently MOVES takes it guessed wrong about.
  */
-function targetAnchorSec(cell: CellData, section: SpanSec): number {
+function targetAnchorSec(cell: CellData, section: SpanSec, att?: ChipAtt): number {
+  // AQU-646 stage 3: THE TAKE'S OWN PLACEMENT WINS.
+  //
+  // Every rung below this one is per-CELL, which was exact while a line could
+  // hold a single dub. With extra target-audio tracks two takes share a line,
+  // and reading the cell would make dragging one chip move the other — so the
+  // take is asked first, and the cell answers only for takes made before there
+  // was anywhere else to put it.
+  //
+  // `!= null` and not truthiness: an offset of exactly 0 is legal and common
+  // (a take that starts precisely on its line) and must stay distinguishable
+  // from "never placed by hand".
+  const ownMs = att?.targetOffsetMs
+  if (ownMs != null && Number.isFinite(ownMs)) return section.start + ownMs / 1000
+  return cellAnchorSec(cell, section)
+}
+
+/** The pre-stage-3 ladder, unchanged, and permanent rather than a migration
+ *  step: `rebuild.ts` replays historical `cell.lane.retime` events into
+ *  `cells.metadata` forever, so these rungs answer for every take that has
+ *  never been placed through `cell.audio.place`. */
+function cellAnchorSec(cell: CellData, section: SpanSec): number {
   // `!= null`, not truthiness: an offset of exactly 0 is legal and common (a
   // take that starts flush with its line), and would otherwise fall through to
   // the legacy branch and then to the section start.
@@ -163,11 +191,11 @@ export function targetOffsetMsFor(cell: CellData, anchorSec: number): number {
  */
 export function targetChipGeom(
   cell: CellData,
-  att: Pick<CodexCellAttachment, "durationMs" | "trimStartMs" | "trimEndMs"> | undefined,
+  att: ChipAtt | undefined,
 ): TargetChipGeom | null {
   const section = sectionSpanSec(cell)
   if (!section) return null
-  const anchor = targetAnchorSec(cell, section)
+  const anchor = targetAnchorSec(cell, section, att)
   const trimStartSec =
     att?.trimStartMs != null && Number.isFinite(att.trimStartMs) && att.trimStartMs > 0
       ? att.trimStartMs / 1000
@@ -197,7 +225,7 @@ export function targetChipGeom(
 /** When (file seconds) a section's dub is due to fire = its AUDIBLE start. */
 export function targetDueSec(
   cell: CellData,
-  att?: Pick<CodexCellAttachment, "durationMs" | "trimStartMs" | "trimEndMs">,
+  att?: ChipAtt,
 ): number | null {
   return targetChipGeom(cell, att)?.start ?? null
 }

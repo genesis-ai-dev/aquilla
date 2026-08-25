@@ -84,7 +84,7 @@ const cellWith = (translated: string): CellData =>
     medium: "media", startTime: 0, endTime: 5,
   }) as unknown as CellData
 
-function renderModal(cell: CellData) {
+function renderModal(cell: CellData, extra: Record<string, unknown> = {}) {
   return render(
     <AudioRecordingModal
       open
@@ -94,6 +94,7 @@ function renderModal(cell: CellData) {
       username="sam"
       onActiveCellChange={() => {}}
       onClose={() => {}}
+      {...extra}
     />,
   )
 }
@@ -135,6 +136,26 @@ describe("AudioRecordingModal — takes strip contents", () => {
     expect(screen.getByTestId("take-row-audio-c1-200-take.webm")).toBeInTheDocument()
     expect(screen.getByTestId("take-row-audio-c1-300-tts.wav")).toBeInTheDocument()
     expect(screen.getByTestId("rec-takes-count")).toHaveTextContent("Takes 2")
+  })
+
+  // AQU-646 stage 3c — Sam, 2026-08-24: "if a take exists for a given cell in
+  // the default target audio track, then… any takes from other tracks connected
+  // to that cell show up as well. The moment the audio tracks from the original
+  // target audio track are removed, then the other takes disappear along with
+  // it (they are still there, but they are invisible)."
+  //
+  // The strip listed EVERY track's takes but was gated on the CURRENT track's
+  // count, so an empty current track hid the whole list — including audio that
+  // very much existed. This is the one the blocker report was about.
+  it("lists another track's takes even when this track has none of its own", () => {
+    seedEntry({
+      "audio-c1-400-other.webm": att("audio-c1-400-other.webm", { slot: "trk-2", label: "Take 1" }),
+    }, null)
+    renderModal(cellWith("bonjour"), {
+      timelineTracks: [{ id: "trk-2", kind: "audio", name: "Second track", order: 9 }],
+    })
+    expect(screen.getByTestId("take-row-audio-c1-400-other.webm")).toBeInTheDocument()
+    expect(screen.getByTestId("rec-takes-count")).toHaveTextContent("Takes 1")
   })
 })
 

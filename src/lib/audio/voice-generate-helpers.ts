@@ -13,6 +13,13 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 
 export interface GenerateCellVoiceArgs {
+  /**
+   * AQU-646 stage 3: which TRACK this lands on, as a storage slot. Defaults to
+   * the shipped one, so every existing caller is unchanged; an added track
+   * passes its own id, and its one slot holds recorded and generated takes
+   * alike.
+   */
+  slot?: string
   project: ProjectRecord
   cell: CellData
   session: FrontierSession | null
@@ -30,7 +37,7 @@ export interface GenerateCellVoiceArgs {
  * (status is surfaced via the per-cell tts badge, not thrown).
  */
 export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<boolean> {
-  const { project, cell, session, username, voiceId, label, diffusionSteps } = args
+  const { project, cell, session, username, voiceId, label, diffusionSteps, slot } = args
   const text = cell.translated?.trim()
   if (!text) return false
   if (!session?.jwt) return false
@@ -45,6 +52,7 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
   setTtsStatus(statusKey, { kind: "loading", loaded: 0, total: 0, file: "" })
   try {
     await generateAndAttachCellVoice({
+      slot,
       projectId: project.id,
       fileId: cell.fileId,
       cellId: cell.id,

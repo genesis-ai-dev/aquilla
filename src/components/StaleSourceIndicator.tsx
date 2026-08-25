@@ -142,7 +142,7 @@ function StaleBadge({
         >
           <AlertTriangle className={iconClassName ?? "h-3 w-3"} />
         </TooltipTrigger>
-        <TooltipContent side="top">
+        <TooltipContent>
           {tooltipText ?? t("editor.stale.directTooltip")}
         </TooltipContent>
       </Tooltip>
@@ -162,7 +162,7 @@ function StaleBadge({
       >
         <GitBranchPlus className={iconClassName ?? "h-3 w-3"} />
       </TooltipTrigger>
-      <TooltipContent side="top">
+      <TooltipContent>
         {upstreamTooltipText ?? t("editor.stale.upstreamTooltip")}
       </TooltipContent>
     </Tooltip>

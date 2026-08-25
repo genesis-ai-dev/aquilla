@@ -151,7 +151,7 @@ export function VersionBadge() {
           </Button>
         }
       />
-      <TooltipContent side="top" className="max-w-xs whitespace-pre-wrap font-mono">
+      <TooltipContent className="max-w-xs whitespace-pre-wrap font-mono">
         {copied ? t("nav.version.copiedTooltip") : t("nav.version.copyTooltip", { buildInfo: title })}
       </TooltipContent>
     </Tooltip>

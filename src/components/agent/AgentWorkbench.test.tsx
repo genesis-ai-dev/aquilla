@@ -257,7 +257,7 @@ describe("AgentWorkbench three-pane layout", () => {
     expect(screen.getAllByRole("separator")).toHaveLength(2)
   })
 
-  it("right-aligns the chapter and verse header in the source column", () => {
+  it("left-aligns the chapter and verse header in the source column", () => {
     render(<AgentWorkbench {...workbenchProps()} />)
     const sourcePane = screen.getByLabelText("Source pane")
     const headers = within(sourcePane).getAllByTestId("source-context-line")
@@ -265,8 +265,8 @@ describe("AgentWorkbench three-pane layout", () => {
     expect(headers[0]).toHaveTextContent("MRK 1:1")
     expect(headers[1]).toHaveTextContent("MRK 1:2")
     for (const header of headers) {
-      expect(header.className).toContain("justify-end")
-      expect(header.className).toContain("text-end")
+      expect(header.className).toContain("justify-start")
+      expect(header.className).toContain("text-start")
       expect(header.className).not.toContain("justify-center")
       expect(header.className).not.toContain("text-center")
     }

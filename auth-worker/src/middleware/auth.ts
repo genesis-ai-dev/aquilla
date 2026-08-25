@@ -27,14 +27,26 @@ export const authMiddleware = async (
     return c.json({ error: "Invalid authorization header format" }, 401)
   }
 
-  const payload = await jwtService.verifyToken(token)
-  if (!payload) {
-    return c.json({ error: "Invalid or expired token" }, 401)
+  // AQU-995: expiry gets its own response body and `code`. It is by far the
+  // most common 401 here (30-day tokens, no refresh until now) and it is a
+  // normal event, not a fault — separating it lets ops read real
+  // malformed-token incidents out of the identity logs, and lets the SPA act
+  // on a lapsed session without pattern-matching a shared message.
+  const verification = await jwtService.verifyTokenDetailed(token)
+  if (!verification.ok) {
+    return verification.reason === "expired"
+      ? c.json({ error: "Token expired", code: "token_expired" }, 401)
+      : c.json({ error: "Invalid or expired token", code: "invalid_token" }, 401)
   }
+  const payload = verification.payload
 
-  const now = Math.floor(Date.now() / 1000)
-  if (payload.exp < now) {
-    return c.json({ error: "Token expired" }, 401)
+  // This replaces a `payload.exp < now` check that could never fire —
+  // hono/jwt's `verify` already throws JwtTokenExpired on a lapsed `exp`, so
+  // reaching here means expiry was checked. What it never covered, and this
+  // does, is a token carrying *no* exp claim at all: that verifies cleanly and
+  // would otherwise authenticate forever.
+  if (typeof payload.exp !== "number") {
+    return c.json({ error: "Invalid or expired token", code: "invalid_token" }, 401)
   }
 
   // [Pen test] Auth & session mgmt (2026-08-03): reject tokens the caller

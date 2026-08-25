@@ -123,7 +123,7 @@ export function toneWavBytes(
   freqHz: number,
   durationMs: number = SEEDED_AUDIO_DURATION_MS,
   sampleRate: number = SEEDED_AUDIO_SAMPLE_RATE,
-): Uint8Array {
+): Uint8Array<ArrayBuffer> {
   const n = Math.max(1, Math.round((sampleRate * durationMs) / 1000))
   const dataBytes = n * 2
   const buffer = new ArrayBuffer(44 + dataBytes)

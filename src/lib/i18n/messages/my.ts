@@ -1541,7 +1541,7 @@ export const my: Catalog = {
   "autopilot.inspector.event.draftApplied": "မူကြမ်း အသုံးပြုပြီး",
   "autopilot.inspector.event.draftSuperseded": "မူကြမ်း အစားထိုးခံရပြီး",
   "autopilot.inspector.event.draftRejected": "မူကြမ်း ငြင်းပယ်ခံရပြီး",
-  "autopilot.inspector.review.draftTitle": "မူကြမ်း",
+  "autopilot.graph.node.draft": "မူကြမ်း",
   "autopilot.inspector.review.noProvenance": "မူလအရင်းအမြစ် မက်တာဒေတာ မှတ်တမ်းမရှိပါ",
   "autopilot.inspector.review.inEditor": "တည်းဖြတ်ခန်းတွင် သုံးသပ်ရန်",
   "autopilot.inspector.review.inEditorCell": "တည်းဖြတ်ခန်းတွင် သုံးသပ်ရန်: ဆဲလ် {cellId}",

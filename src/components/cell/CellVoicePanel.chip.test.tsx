@@ -60,7 +60,7 @@ describe("CellVoicePanel take tools", () => {
     expect(tools?.className).not.toMatch(/bg-\[/)
 
     const seek = screen.getByRole("slider", { name: "Seek" })
-    expect(tools?.compareDocumentPosition(seek) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+    expect(tools!.compareDocumentPosition(seek) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
   })
 
   it("keeps crop, volume, and clone visible without hover", () => {

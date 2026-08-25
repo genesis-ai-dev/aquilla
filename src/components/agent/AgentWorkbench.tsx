@@ -407,7 +407,7 @@ export function AgentWorkbench({ agent, credits, onCollapse, onJumpToCell, onCho
           {state.isStreaming && (
             <Button type="button" variant="outline" size="sm" onClick={stop}>
               <Square data-icon="inline-start" />
-              {t("agentWorkspace.stop")}
+              {t("common.stop")}
             </Button>
           )}
           {onCollapse ? (

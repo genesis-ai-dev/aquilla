@@ -5853,7 +5853,7 @@ function EditorRow({
               isSynthBusy && "opacity-70",
             )}
             dir={sourceCellDirection}
-            aria-label={t("agentWorkspace.sourceText")}
+            aria-label={t("editor.source.textAria")}
             data-editor-cell-surface="source"
             data-cell-type="source"
             style={{ fontSize: `${sourceFontSize}px`, lineHeight: "1.6" }}

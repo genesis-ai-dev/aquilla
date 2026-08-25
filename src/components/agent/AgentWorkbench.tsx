@@ -59,8 +59,6 @@ export interface AgentWorkbenchProps {
   agent: Omit<AgentDockViewProps, "suggestedActions" | "pendingPrompt" | "onPendingPromptConsumed">
   /** Org agent-credit gauge in the header (maintainer+ only; self-hides). */
   credits?: CreditsDialProps | null
-  /** Dismiss the workbench (tab ×, or dragging the Agent pane to zero). */
-  onClose: () => void
   /** Header Collapse — only when the workbench was expanded from the sidebar dock. */
   onCollapse?: () => void
   /** Jump the editor to a cell ("open" on a working-set row). */
@@ -106,7 +104,7 @@ export interface AgentWorkbenchProps {
   }
 }
 
-export function AgentWorkbench({ agent, credits, onClose, onCollapse, onJumpToCell, onChooseFile, editorMode, workspace }: AgentWorkbenchProps) {
+export function AgentWorkbench({ agent, credits, onCollapse, onJumpToCell, onChooseFile, editorMode, workspace }: AgentWorkbenchProps) {
   const t = useT()
   const { state, stop, reset, decide } = useAgentSession(agent.projectId)
   // Decisions per proposal row (key: proposalId:cellId) live in the SESSION
@@ -476,15 +474,7 @@ export function AgentWorkbench({ agent, credits, onClose, onCollapse, onJumpToCe
 
             <ResizableHandle aria-label={t("agentWorkspace.resizeSourceAgent")} className="bg-border/70 hover:bg-primary/40" />
 
-            <ResizablePanel
-              id="agent"
-              minSize="24%"
-              collapsible
-              collapsedSize={0}
-              onResize={(size, _id, previousSize) => {
-                if (previousSize && previousSize.inPixels > 0 && size.inPixels === 0) onClose()
-              }}
-            >
+            <ResizablePanel id="agent" minSize="24%">
               <section aria-label={t("agentWorkspace.agentPane")} className="flex h-full min-h-0 flex-col bg-background">
                 <div className="flex h-9 shrink-0 items-center border-b border-border/70 px-3">
                   <span className="text-[11px] font-semibold tracking-tight text-foreground/90">{t("agentWorkspace.agent")}</span>

@@ -9227,7 +9227,6 @@ export function ProjectWorkspace() {
               onPendingChipConsumed: () => setPendingChip(null),
             }}
             credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
-            onClose={closeAgentTab}
             onCollapse={agentExpandedFromDock ? closeAgentTab : undefined}
             onChooseFile={() => setDockTab("files")}
             editorMode={{

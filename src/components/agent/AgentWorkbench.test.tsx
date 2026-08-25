@@ -147,7 +147,6 @@ function workbenchProps(): AgentWorkbenchProps {
       resolveCell: () => undefined,
       onApplied: vi.fn(),
     },
-    onClose: () => {},
     onChooseFile: vi.fn(),
     workspace: {
       fileName: "Mark.md",
@@ -240,6 +239,13 @@ describe("AgentWorkbench three-pane layout", () => {
     expect(sourcePane).toBeInTheDocument()
     const agentPane = screen.getByLabelText("Agent pane")
     expect(agentPane).toBeInTheDocument()
+    // react-resizable-panels stamps data-testid from each panel id. The
+    // middle column is a required rail — not collapsible — so it stays in
+    // the layout instead of dragging to zero and dismissing the workbench.
+    expect(screen.getByTestId("source")).toBeVisible()
+    expect(screen.getByTestId("agent")).toBeVisible()
+    expect(screen.getByTestId("target")).toBeVisible()
+    expect(agentPane).toBeVisible()
     expect(within(agentPane).queryByRole("button", { name: "Minimize Agent" })).not.toBeInTheDocument()
     expect(targetPane).toBeInTheDocument()
     expect(sourcePane).toHaveTextContent("The beginning")

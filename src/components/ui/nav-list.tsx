@@ -102,7 +102,8 @@ function NavRow({
  * main area without relying on the header breadcrumb.
  *
  * Prefer `to` for plain navigation. Use `onClick` when the caller needs to
- * intercept (e.g. discard-unsaved confirmation) before leaving.
+ * intercept (e.g. discard-unsaved confirmation) before leaving. Hover padding
+ * stays even (`px-1.5`); `-ms-1.5` only outdents the chip to the page column.
  */
 function BackLink({
   to,
@@ -116,7 +117,7 @@ function BackLink({
   className?: string
 }) {
   const classes = cn(
-    "group -ms-1.5 inline-flex w-fit items-center gap-1 self-start rounded-md py-1 pe-1.5 ps-4 text-sm text-muted-foreground hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+    "group -ms-1.5 inline-flex w-fit items-center gap-1 self-start rounded-md px-1.5 py-1 text-sm text-muted-foreground hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
     className,
   )
   if (onClick) {

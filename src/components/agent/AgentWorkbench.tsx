@@ -7,7 +7,7 @@
  * with draft text editable in place before accepting. Accept commits what's
  * in the box (the human post-edits the machine draft), through the same
  * staged-apply outbox path as ever. A job header shows bulk-run progress
- * with Stop, plus session controls (new session, back to editor).
+ * with Stop, plus a collapse control when the pane was expanded from the dock.
  */
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -57,7 +57,7 @@ type WorkbenchTab = "sessions" | "memory"
 export interface AgentWorkbenchProps {
   /** Same wiring the dock panel gets — one source of truth in ProjectWorkspace. */
   agent: Omit<AgentDockViewProps, "suggestedActions" | "pendingPrompt" | "onPendingPromptConsumed">
-  /** Org agent-credit gauge in the header (maintainer+ only; self-hides). */
+  /** Org agent-credit gauge in the agent pane (maintainer+ only; self-hides). */
   credits?: CreditsDialProps | null
   /** Header Collapse — only when the workbench was expanded from the sidebar dock. */
   onCollapse?: () => void
@@ -404,41 +404,26 @@ export function AgentWorkbench({ agent, credits, onCollapse, onJumpToCell, onCho
               timeOrdered={editorMode.timeOrdered}
             />
           ) : null}
-          {credits && <CreditsDial {...credits} />}
           {state.isStreaming && (
             <Button type="button" variant="outline" size="sm" onClick={stop}>
               <Square data-icon="inline-start" />
               {t("agentWorkspace.stop")}
             </Button>
           )}
-          <div className="flex items-center" data-testid="agent-session-actions">
-            <AppTooltip content={t("agentWorkspace.newSessionHelp")}>
+          {onCollapse ? (
+            <AppTooltip content={t("agentWorkspace.collapseHelp")}>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon-sm"
                 className="text-muted-foreground"
-                onClick={reset}
-                aria-label={t("agentWorkspace.newSession")}
+                onClick={onCollapse}
+                aria-label={t("agentWorkspace.collapsePane")}
               >
-                <RotateCcw />
+                <Minimize2 />
               </Button>
             </AppTooltip>
-            {onCollapse ? (
-              <AppTooltip content={t("agentWorkspace.collapseHelp")}>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  className="text-muted-foreground"
-                  onClick={onCollapse}
-                  aria-label={t("agentWorkspace.collapsePane")}
-                >
-                  <Minimize2 />
-                </Button>
-              </AppTooltip>
-            ) : null}
-          </div>
+          ) : null}
         </div>
       </div>
 
@@ -476,8 +461,23 @@ export function AgentWorkbench({ agent, credits, onCollapse, onJumpToCell, onCho
 
             <ResizablePanel id="agent" minSize="24%">
               <section aria-label={t("agentWorkspace.agentPane")} className="flex h-full min-h-0 flex-col bg-background">
-                <div className="flex h-9 shrink-0 items-center border-b border-border/70 px-3">
+                <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/70 px-3">
                   <span className="text-[11px] font-semibold tracking-tight text-foreground/90">{t("agentWorkspace.agent")}</span>
+                  <div className="ms-auto flex items-center gap-1" data-testid="agent-session-actions">
+                    {credits && <CreditsDial {...credits} />}
+                    <AppTooltip content={t("agentWorkspace.newSessionHelp")}>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-muted-foreground"
+                        onClick={reset}
+                        aria-label={t("agentWorkspace.newSession")}
+                      >
+                        <RotateCcw />
+                      </Button>
+                    </AppTooltip>
+                  </div>
                 </div>
                 <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                   <AgentDockView

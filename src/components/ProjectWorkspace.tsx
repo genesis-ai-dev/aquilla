@@ -100,7 +100,8 @@ import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
-import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
+import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
+  setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
 import { videoOwnsFile } from "@/lib/audio/transport"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
@@ -120,7 +121,8 @@ import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, needsSynthesis, takesNeedingMeasure, runMeasureAll } from "@/lib/audio/batch-audio"
-import { injectOptimisticAudioTrim, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { injectOptimisticAudioTrim,
+  injectOptimisticAudioPlace, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { useOutbox } from "@/context/OutboxContext"
 import { useReconcileOnDrain } from "@/hooks/useReconcileOnDrain"
 import {
@@ -128,7 +130,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitCastAssign, emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
+import { emitCastAssign, emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -154,6 +156,8 @@ import { buildLinkedTakes } from "@/lib/audio/linked-takes"
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
+import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
+import { RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
@@ -964,6 +968,15 @@ export function ProjectWorkspace() {
   const [searchExpandedQuery, setSearchExpandedQuery] = useState<string | null>(null)
   const [aiSetupOpen, setAiSetupOpen] = useState(false)
   const [recordingCellId, setRecordingCellId] = useState<string | null>(null)
+  /**
+   * AQU-646 stage 3: WHICH TRACK the recorder is recording into.
+   *
+   * The default dub row's slot, unless the mic was pressed on an added track's
+   * lane. Held beside the cell id rather than derived, because by the time the
+   * take is saved the pointer is long gone and nothing else remembers which
+   * lane it came from.
+   */
+  const [recordingSlot, setRecordingSlot] = useState<string>(RECORDING_SLOT)
   /** A line that has just been created and is waiting for its row to exist so
    *  the timeline and the table can both land on it. */
   const [pendingNewCell, setPendingNewCell] = useState<{ cellId: string; thenRecord: boolean } | null>(null)
@@ -2037,7 +2050,7 @@ export function ProjectWorkspace() {
   // with its line — the callers still hand an absolute anchor, and this is the
   // one place that converts.
   const handleRetimeTarget = useCallback(
-    async (cellId: string, anchorSec: number) => {
+    async (cellId: string, anchorSec: number, audioId: string) => {
       if (!project?.id || !activeFileId) return
       // Without the cell we'd have no start to measure against, and defaulting
       // it to 0 would quietly persist an absolute value into an offset field.
@@ -2048,25 +2061,50 @@ export function ProjectWorkspace() {
       // targetOffsetMsFor carries the old "never before file zero" floor into
       // the offset domain; enforced here, at the single persistence point.
       const targetOffsetMs = targetOffsetMsFor(cell, anchorSec)
-      if (takeFileId === activeFileId) {
-        applyOptimisticCellTiming(cellId, { metadata: { target_offset_ms: targetOffsetMs } })
-      } else {
+
+      // AQU-646 stage 3: THE PLACEMENT GOES ON THE TAKE, not on the line.
+      //
+      // It used to ride `cell.lane.retime`, which writes the anchor into the
+      // CELL's metadata. That was exact while a line could hold one dub; with
+      // extra target-audio tracks two takes share a line, so a per-cell anchor
+      // would make dragging one chip move the other. The per-cell rungs stay as
+      // the permanent fallback for every take made before this event existed —
+      // see `targetAnchorSec`.
+      // The resolver already merged this cell's attachments (raw store cells
+      // carry none), which is the same lookup the trim path above does.
+      const att = cell.attachments?.[audioId]
+      if (att) {
+        injectOptimisticAudioPlace(takeFileId, cellId, {
+          audioId,
+          url: att.url,
+          slot: att.slot ?? (audioId === cell.selectedAudioId ? "recording" : "generatedVoice"),
+          mimeType: null,
+          voiceId: att.voiceId ?? null,
+          referenceAudioId: att.referenceAudioId ?? null,
+          durationMs: att.durationMs ?? null,
+          trimStartMs: att.trimStartMs ?? null,
+          trimEndMs: att.trimEndMs ?? null,
+          targetOffsetMs,
+        })
+      } else if (takeFileId !== activeFileId) {
         // A cue cell is not in this file's store, so the store's optimistic
         // path cannot reach it — and its file is read once and never
         // revalidated, so without this the chip springs back until a reload.
         setCueAnchorOverridesRef.current(cellId, targetOffsetMs)
       }
-      await emitCellLaneRetime({
+
+      await emitCellAudioPlace({
         projectId: project.id,
         fileId: takeFileId,
         cellId,
+        audioId,
         targetOffsetMs,
         author: currentUsername,
       })
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
     },
-    [project?.id, activeFileId, currentUsername, applyOptimisticCellTiming, getTokenForProjectFile, revalidateCells],
+    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, revalidateCells],
   )
 
   // Timeline editor: set/clear the file's core video URL. coreMediaUrl lives on
@@ -5659,7 +5697,7 @@ export function ProjectWorkspace() {
     setDrawerRuleId(null); setCommentsCellId(null); setHistoryCellId(cellId)
   }, [])
   const handleAiSetupNeeded = useCallback(() => setAiSetupOpen(true), [])
-  const handleOpenRecording = useCallback((cellId: string) => {
+  const handleOpenRecording = useCallback((cellId: string, slot: string = RECORDING_SLOT) => {
     // Opening the recorder always pauses playback — queue and single-cell
     // clip both — so the mic never records over sounding audio. Module
     // functions, so deps stay [] and the editor-actions memo contract holds.
@@ -5672,6 +5710,7 @@ export function ProjectWorkspace() {
       return
     }
     setRecordingCellId(target)
+    setRecordingSlot(slot)
   }, [])
 
   /**
@@ -7539,6 +7578,18 @@ export function ProjectWorkspace() {
   // way, as the timing mode beside it. The gate is "don't pass the callback":
   // below the floor the gutter has no grip, no grab cursor and no tab stop.
   const canReorderTracks = (serverRoleLevel ?? project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
+  // AQU-646 stage 2: RESTRUCTURING is doubly gated — the same maintainer floor
+  // AND the project's `allowTrackEditing` setting, which is off unless somebody
+  // turned it on. Two independent conditions, and the server checks both
+  // separately (track-editing-authority.ts), so this is the affordance rather
+  // than the permission.
+  //
+  // RENAME AND REORDER ARE DELIBERATELY NOT IN HERE. Both already ship, and a
+  // new setting defaulting to off must not silently take an existing capability
+  // away from every project that has one — so they stay on `canReorderTracks`'
+  // clearance alone. That split is why the editor takes `onRenameTrack` as its
+  // own prop instead of folding it into `trackEditing`.
+  const canEditTracks = canReorderTracks && (project?.allowTrackEditing ?? false)
   // Flow A (file-scoped): switching a file that HAS a linked video to Free
   // timing hides the video — confirm before emitting. Holds the FILE the
   // warning was raised for, not a bare flag, so the confirm can only ever
@@ -7822,7 +7873,20 @@ export function ProjectWorkspace() {
       // only place that persists. (The two agree: in a list sorted by `order`, a
       // row sharing a value with the insertion point is always one of its
       // immediate neighbours, which is exactly what orderForDrop compares.)
-      const tied = serverTimelineTracks.some((t) => t.id !== trackId && t.order === order)
+      //
+      // AQU-646 stage 2: BOTH THE TEST AND THE UNTANGLING ARE SCOPE-LOCAL NOW.
+      // `order` ranks a track among its own siblings — the top-level rows, or
+      // the members of one folder — so two tracks in different folders sharing
+      // a number is normal and says nothing. Asked globally, this would fire on
+      // an ordinary drag and renumber the whole file for no reason; renormalised
+      // globally, it would renumber tracks in folders the user never touched.
+      const folderIds = folderIdsOf(serverTimelineTracks)
+      const moved = serverTimelineTracks.find((t) => t.id === trackId)
+      if (!moved) return
+      const scope = trackScope(moved, folderIds)
+      const siblings = serverTimelineTracks.filter((t) => trackScope(t, folderIds) === scope)
+
+      const tied = siblings.some((t) => t.id !== trackId && t.order === order)
       if (!tied) {
         void applyTrackOrder(activeFileId, [{ trackId, order }])
         return
@@ -7832,18 +7896,394 @@ export function ProjectWorkspace() {
       // carrying their PERSISTED numbers — not the pending one — so a row that
       // happens to already sit at its index emits nothing, while the dragged row
       // (whose new number has never been stored) always does.
-      const intended = applyPendingOrders(serverTimelineTracks, new Map([[trackId, order]]))
-      const stored = new Map(serverTimelineTracks.map((t) => [t.id, t.order]))
+      const intended = applyPendingOrders(siblings, new Map([[trackId, order]]))
+      const stored = new Map(siblings.map((t) => [t.id, t.order]))
       const changes = renormaliseOrders(intended.map((t) => ({ ...t, order: stored.get(t.id) ?? t.order })))
       void applyTrackOrder(activeFileId, changes)
     },
     [activeFileId, serverTimelineTracks, applyTrackOrder],
+  )
+
+  // ── AQU-646 stage 2: the rest of track editing ───────────────────────────
+  //
+  // ONE PRIVATE EMITTER, INTENT-NAMED WRAPPERS OVER IT. Components never
+  // assemble a raw patch — that is what keeps the allow-listed payload shape in
+  // one place as it grows, and it is what `emitFileTrackSet`'s own doc comment
+  // asked for when it shipped dormant.
+  //
+  // EVERY PATCH CARRIES ONLY THE FIELDS ITS VERB OWNS. The server merges field
+  // by field into jsonb, so naming a field is CLAIMING it: send a whole track
+  // and a collaborator's rename landing in the same second is silently
+  // overwritten by whatever this client last read. That rule is why there is no
+  // generic `patchTrack(trackId, patch)` here.
+  const applyTrackPatch = useCallback(
+    async (trackId: string, patch: Parameters<typeof emitFileTrackSet>[0]["patch"], failure: string) => {
+      if (!project?.id || !activeFileId) return
+      try {
+        await emitFileTrackSet({
+          projectId: project.id,
+          fileId: activeFileId,
+          trackId,
+          patch,
+          author: currentUsername,
+        })
+        await flushOutboxBatch({
+          getTokenForFile: getTokenForProjectFile,
+          // A per-event 4xx arrives inside a 200 and the flusher drops it. The
+          // 403 this surfaces is the one that matters here: the project's
+          // track-editing setting being off, which the UI believed was on
+          // because it read a stale settings blob.
+          onRejected: (entries) => {
+            const mine = entries.filter((r) => r.kind === "file.track.set" && r.fileId === activeFileId)
+            if (mine.length === 0) return
+            toast.add({ type: "error", title: `${failure} ${mine[0].reason}` })
+          },
+        })
+        refresh()
+      } catch (e) {
+        toast.add({ type: "error", title: e instanceof Error ? `${failure} ${e.message}` : failure })
+      }
+    },
+    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, refresh],
+  )
+
+  /**
+   * The same thing for SEVERAL tracks — AQU-646 stage 2b, where the menu acts
+   * on a selection.
+   *
+   * ONE `enqueueEvents` CALL, never a loop of `applyTrackPatch`. One IDB
+   * transaction means one notify, one overlay rebuild and one flush, so a bulk
+   * recolour lands as a single change rather than three flickers — and a
+   * partial failure leaves the rest in the durable outbox instead of stranding
+   * half of it.
+   */
+  const applyTrackPatches = useCallback(
+    async (
+      changes: ReadonlyArray<{ trackId: string; patch: Parameters<typeof emitFileTrackSet>[0]["patch"] }>,
+      failure: string,
+    ) => {
+      if (!project?.id || !activeFileId || changes.length === 0) return
+      try {
+        await enqueueEvents(
+          changes.map((c) => ({
+            kind: "file.track.set" as const,
+            projectId: project.id,
+            fileId: activeFileId,
+            parentId: null,
+            author: currentUsername,
+            payload: { trackId: c.trackId, patch: c.patch },
+          })),
+        )
+        await flushOutboxBatch({
+          getTokenForFile: getTokenForProjectFile,
+          onRejected: (entries) => {
+            const mine = entries.filter((r) => r.kind === "file.track.set" && r.fileId === activeFileId)
+            if (mine.length === 0) return
+            toast.add({ type: "error", title: `${failure} ${mine[0].reason}` })
+          },
+        })
+        refresh()
+      } catch (e) {
+        toast.add({ type: "error", title: e instanceof Error ? `${failure} ${e.message}` : failure })
+      }
+    },
+    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, refresh],
+  )
+
+  const handleRenameTrack = useCallback(
+    (trackId: string, name: string) => {
+      void applyTrackPatch(trackId, { name }, "Couldn't rename the track:")
+    },
+    [applyTrackPatch],
+  )
+
+  const handleAddTrack = useCallback(
+    (spec: { kind: "audio" | "folder"; name: string; sourceTrackId?: string | null }): string => {
+      // A NEW TRACK GOES AT THE BOTTOM OF THE TOP LEVEL. Not into whichever
+      // folder happens to be open, and not at the top: a new row appearing
+      // above the ones somebody is working on moves everything they were
+      // looking at. `orderForScopeAppend` measures the top-level scope only,
+      // which is the whole reason it takes a scope.
+      const order = orderForScopeAppend(serverTimelineTracks, null)
+      const trackId = uuidv7()
+      void applyTrackPatch(
+        trackId,
+        {
+          kind: spec.kind,
+          name: spec.name,
+          order,
+          // Only on an audio track, and only when there is something to align
+          // to. The server refuses it on a derived id, and a folder has no
+          // alignment at all.
+          ...(spec.kind === "audio" && spec.sourceTrackId ? { sourceTrackId: spec.sourceTrackId } : {}),
+        },
+        "Couldn't add the track:",
+      )
+      return trackId
+    },
+    [applyTrackPatch, serverTimelineTracks],
+  )
+
+  /**
+   * ONE VALUE PER TRACK, not one value for the list — stage 3c.
+   *
+   * Colour is two independent axes now, so setting the recorded-take tone
+   * across a selection has to keep each track's own generated-voice tone. The
+   * menu works those strings out (it is the side that knows the palette) and
+   * hands them over already paired with their track; this stays one enqueue, so
+   * a bulk recolour is still one write that lands or fails together.
+   */
+  const handleSetTrackColor = useCallback(
+    (updates: ReadonlyArray<{ trackId: string; color: string | null }>) => {
+      void applyTrackPatches(
+        updates.map(({ trackId, color }) => ({ trackId, patch: { color } })),
+        "Couldn't change the colour:",
+      )
+    },
+    [applyTrackPatches],
+  )
+
+  /**
+   * BOTH FIELDS IN ONE PATCH, and this is the one place the one-field-per-verb
+   * rule bends — because the two ARE one verb. A track changing scope needs a
+   * rank among its new siblings, and its old number is a rank in a different
+   * scope entirely; splitting them into two events would leave the track half
+   * moved if the second were refused.
+   *
+   * The orders ascend from the first free slot so a run of tracks keeps the
+   * sequence it had rather than all landing on one number.
+   */
+  const handleLeaveFolder = useCallback(
+    (trackIds: readonly string[]) => {
+      const firstFree = orderForScopeAppend(serverTimelineTracks, null)
+      void applyTrackPatches(
+        trackIds.map((trackId, i) => ({ trackId, patch: { groupId: null, order: firstFree + i } })),
+        "Couldn't take the track out of its folder:",
+      )
+    },
+    [applyTrackPatches, serverTimelineTracks],
+  )
+
+  /**
+   * Sam, 2026-08-24: a folder is made FROM tracks, never picked from a list of
+   * destinations.
+   *
+   * The folder takes the place of the TOPMOST selected track, so the block
+   * lands where the person was already looking rather than at the bottom of the
+   * file. Its members are then numbered 0..n-1 inside it, in the order they
+   * appeared — a folder's `order` is scoped to its own contents, so those
+   * numbers say nothing about where the folder itself sits.
+   *
+   * The new id is returned so the caller can open the rename on it: a folder
+   * called "Folder" is not a name, and asking for one immediately is the
+   * difference between naming it and meaning to.
+   */
+  /**
+   * A drag that crossed a folder wall. Stage 2b.
+   *
+   * BOTH FIELDS IN ONE PATCH, like every other scope change here — a track
+   * arriving in a folder needs a rank among its new siblings, and splitting the
+   * two into separate events would leave it half-moved if the second were
+   * refused.
+   *
+   * A TIE IS RESOLVED BY APPENDING, not by renormalising the target scope. The
+   * resolver hands out midpoints, and a midpoint can only collide when the two
+   * neighbours already share a number; putting the track at the end of that
+   * scope is a free, unambiguous slot and costs one write instead of N. The
+   * user can drag it where they meant afterwards — which is the ungated
+   * gesture, so it is always available.
+   */
+  const handleMoveTrackToScope = useCallback(
+    (trackId: string, groupId: string | null, order: number) => {
+      if (!Number.isFinite(order)) return
+      const folderIds = folderIdsOf(serverTimelineTracks)
+      const tied = serverTimelineTracks.some(
+        (t) => t.id !== trackId && trackScope(t, folderIds) === groupId && t.order === order,
+      )
+      const settled = tied ? orderForScopeAppend(serverTimelineTracks, groupId) : order
+      void applyTrackPatch(trackId, { groupId, order: settled }, "Couldn't move the track:")
+    },
+    [applyTrackPatch, serverTimelineTracks],
+  )
+
+  const handleCreateFolderFrom = useCallback(
+    (trackIds: readonly string[]): string => {
+      const folderId = uuidv7()
+      const chosen = new Set(trackIds)
+      const members = serverTimelineTracks.filter((tr) => chosen.has(tr.id))
+      const topMost = members.length > 0 ? members[0] : null
+      const folderIds = folderIdsOf(serverTimelineTracks)
+      // Where the block goes: the topmost member's own slot when it is already
+      // top-level, otherwise the bottom. A folder cannot be created inside a
+      // folder, so a member that lives in one contributes no position.
+      const order =
+        topMost && trackScope(topMost, folderIds) === null
+          ? topMost.order
+          : orderForScopeAppend(serverTimelineTracks, null)
+
+      void applyTrackPatches(
+        [
+          {
+            trackId: folderId,
+            patch: { kind: "folder", name: t("editor.timeline.trackAddFolder"), order },
+          },
+          ...members.map((member, i) => ({
+            trackId: member.id,
+            patch: { groupId: folderId, order: i },
+          })),
+        ],
+        "Couldn't make the folder:",
+      )
+      return folderId
+    },
+    [applyTrackPatches, serverTimelineTracks, t],
+  )
+
+  const handleDeleteTrack = useCallback(
+    (trackIds: readonly string[]) => {
+      if (!project?.id || !activeFileId || trackIds.length === 0) return
+      const chosen = new Set(trackIds)
+      const doomed = serverTimelineTracks.filter((t) => chosen.has(t.id))
+      if (doomed.length === 0) return
+
+      // TAKES FIRST, THEN THE ROW, IN ONE ENQUEUE. One IDB transaction means
+      // one notify, one overlay rebuild and one flush — so "interrupted" means
+      // the durable outbox still holds the rest, rather than the pairing being
+      // lost. The order within the batch still matters for what a half-applied
+      // batch LOOKS like: an empty track someone can delete again beats audio
+      // with no row to reach it from.
+      //
+      // Soft-deleted, the same way removing a take from a cell has always
+      // worked — hidden from every read path and replayed as gone. Not a purge
+      // of the stored bytes, and the confirmation says "delete" meaning exactly
+      // what every other delete in this app means.
+      //
+      // THE PER-FILE AUDIO READ IS THE ONLY HONEST SOURCE for which clips are
+      // on a track. Timeline cells carry no attachments; this read does, it is
+      // already filtered to the live ones (`deleted = 0`), and — the part that
+      // makes this possible at all — it carries each clip's SLOT, which has
+      // been the binding for "which track a take belongs to" since the contract
+      // shipped (`cell_audio.slot` is unconstrained TEXT; an added track
+      // addresses its takes by its own id).
+      //
+      // Stage 2b: several tracks at once, so the slots are gathered into a SET
+      // and the attachment scan runs once. Looping the whole read per track
+      // would be N passes over every cell in the file for no reason.
+      const doomedSlots = new Set(
+        doomed.filter((t) => t.kind !== "folder").map((t) => (t.id === "target-audio" ? "recording" : t.id)),
+      )
+      const removals: Array<{ cellId: string; audioId: string }> = []
+      if (doomedSlots.size > 0) {
+        for (const [cellId, entry] of timelineAudioByCellId) {
+          for (const [audioId, att] of Object.entries(entry.attachments)) {
+            if (!doomedSlots.has(att.slot)) continue
+            removals.push({ cellId, audioId })
+          }
+        }
+      }
+
+      // A FOLDER'S MEMBERS ARE EJECTED, NOT DELETED. A folder is an arrangement
+      // of tracks, not a container that owns them — deleting it must not take a
+      // week of somebody's recordings with it. Their new top-level orders are
+      // computed here, ascending from the end, so they land below the existing
+      // rows in the sequence they had inside the folder.
+      //
+      // A member that is ITSELF being deleted is not ejected — it would be a
+      // patch putting a track back at the top level one event before the patch
+      // that removes it.
+      const members = doomed
+        .filter((t) => t.kind === "folder")
+        .flatMap((t) => folderMembers(serverTimelineTracks, t.id))
+        .filter((m) => !chosen.has(m.id))
+      const firstFreeOrder = orderForScopeAppend(serverTimelineTracks, null)
+
+      void (async () => {
+        try {
+          await enqueueEvents([
+            ...removals.map((r) => ({
+              kind: "cell.audio.remove" as const,
+              projectId: project.id,
+              fileId: activeFileId,
+              cellId: r.cellId,
+              parentId: null,
+              author: currentUsername,
+              payload: { audioId: r.audioId },
+            })),
+            ...members.map((member, i) => ({
+              kind: "file.track.set" as const,
+              projectId: project.id,
+              fileId: activeFileId,
+              parentId: null,
+              author: currentUsername,
+              payload: { trackId: member.id, patch: { groupId: null, order: firstFreeOrder + i } },
+            })),
+            ...doomed.map((t) => ({
+              kind: "file.track.set" as const,
+              projectId: project.id,
+              fileId: activeFileId,
+              parentId: null,
+              author: currentUsername,
+              payload: { trackId: t.id, patch: null },
+            })),
+          ])
+          await flushOutboxBatch({
+            getTokenForFile: getTokenForProjectFile,
+            // DO NOT REVERT on a partial failure: the removes that succeeded
+            // are already gone, and there is nothing to put back. Say how far
+            // it got and refresh, so what is on screen is what is on the server.
+            onRejected: (entries) => {
+              const mine = entries.filter((r) => r.fileId === activeFileId)
+              if (mine.length === 0) return
+              toast.add({
+                type: "error",
+                title: `Some of the track couldn't be deleted: ${mine[0].reason}`,
+              })
+            },
+          })
+          refresh()
+        } catch (e) {
+          toast.add({
+            type: "error",
+            title: e instanceof Error ? `Couldn't delete the track: ${e.message}` : "Couldn't delete the track.",
+          })
+        }
+      })()
+    },
+    [
+      project?.id,
+      activeFileId,
+      currentUsername,
+      timelineAudioByCellId,
+      serverTimelineTracks,
+      getTokenForProjectFile,
+      refresh,
+    ],
   )
   // The transport speaks file seconds in dubbing and programme seconds in
   // audio-first, so it has to know which before anything seeks.
   useEffect(() => {
     setQueueTimingMode(timingMode)
   }, [timingMode])
+
+  /**
+   * AQU-646 stage 3: which target tracks the queue should sound.
+   *
+   * Published the same way the timing mode is, and for the same reason: the
+   * queue's overlay planner runs from eight call sites, none of which has any
+   * other business knowing what a track is. One setter beats eight threaded
+   * parameters — and it is also what sizes the overlay pool, so a file with
+   * three tracks stops evicting its own dubs.
+   */
+  const targetSlots = useMemo(
+    () =>
+      serverTimelineTracks
+        .filter((tr) => tr.kind === "target-audio" || tr.kind === "audio")
+        .map((tr) => slotForTrack(tr.id)),
+    [serverTimelineTracks],
+  )
+  useEffect(() => {
+    setQueueTargetSlots(targetSlots)
+  }, [targetSlots])
 
   // Smooth-playback layer 1: while the Media lens is open, quietly stock the
   // on-device byte cache with the open file's dub clips (nearest the selection
@@ -9447,6 +9887,25 @@ export function ProjectWorkspace() {
                         : undefined
                     }
                     onReorderTrack={canReorderTracks ? handleReorderTrack : undefined}
+                    // AQU-646 stage 2. Rename rides the reorder clearance
+                    // alone; everything that RESTRUCTURES also needs the
+                    // project's allowTrackEditing setting. Withholding the
+                    // callback withholds the whole affordance — see the props'
+                    // own comments in TimelineEditor for why absent, not
+                    // disabled.
+                    onRenameTrack={canReorderTracks ? handleRenameTrack : undefined}
+                    trackEditing={
+                      canEditTracks
+                        ? {
+                            onAdd: handleAddTrack,
+                            onSetColor: handleSetTrackColor,
+                            onLeaveFolder: handleLeaveFolder,
+                            onMoveToScope: handleMoveTrackToScope,
+                            onCreateFolderFrom: handleCreateFolderFrom,
+                            onDelete: handleDeleteTrack,
+                          }
+                        : undefined
+                    }
                     onLinkingModeChange={(on) => {
                       setCueLinkDrawerOpen(on)
                       if (on) {
@@ -9943,6 +10402,13 @@ export function ProjectWorkspace() {
           // and the take's window all follow the cue's own timing.
           cells={audioCueCells ?? legacyCells}
           activeCellId={recordingCellId}
+          // Where the take lands. "recording" for the default dub row, so its
+          // behaviour is byte-for-byte unchanged; an added track's own id when
+          // the mic was pressed on that track's lane.
+          targetSlot={recordingSlot}
+          // …and the file's tracks, so the takes list can be grouped under a
+          // heading per track (Sam, 2026-08-24).
+          timelineTracks={serverTimelineTracks}
           username={currentUsername}
           readAloudFor={audioCueCells ? resolveCueReadAloud : undefined}
           // The take goes to the cue sibling; the PICTURE belongs to the file

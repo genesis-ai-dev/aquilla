@@ -624,6 +624,15 @@ export const editor = defineNamespace({
     "editor.timeline.outputLatencyNote":
       "Bluetooth audio arrives a moment after the app sends it. The playhead is adjusted for the delay it can measure, but a little is unmeasurable — trust your ears over the line for fine timing.",
     "editor.timeline.outputDeviceChangedToast": "Playback paused — the audio output changed.",
+    // AQU-646 stage 2: the track colour palette. Each names a PAIR — the tone
+    // recorded takes are drawn in, and the near neighbour generated voices get
+    // — so the label is the family, not either exact hue.
+    "editor.timeline.colorGreen": "Green",
+    "editor.timeline.colorTeal": "Teal",
+    "editor.timeline.colorIndigo": "Indigo",
+    "editor.timeline.colorViolet": "Violet",
+    "editor.timeline.colorFuchsia": "Magenta",
+    "editor.timeline.colorSlate": "Grey",
     "editor.timeline.measureNote": plural({
       one: "{count} recording has no measured length — its chip is drawn at a guessed width.",
       other:
@@ -722,6 +731,70 @@ export const editor = defineNamespace({
     "editor.timeline.sortableTrackRole": "sortable track",
     "editor.timeline.gutterReorderAria":
       "Timeline tracks — drag a name, or press Alt with the arrow keys, to reorder",
+    // AQU-646 stage 2: folders in the track gutter.
+    "editor.timeline.folderTrackCount": plural({
+      one: "{count} track",
+      other: "{count} tracks",
+    }),
+    "editor.timeline.gutterCollapseAria": "Narrow the track names",
+    "editor.timeline.gutterExpandAria": "Show the track names",
+    "editor.timeline.folderExpandAria": "Show the tracks in {name}",
+    "editor.timeline.folderCollapseAria": "Hide the tracks in {name}",
+    "editor.timeline.trackMenuAria": "Track options for {name}",
+    "editor.timeline.trackRename": "Rename",
+    "editor.timeline.trackColor": "Colour",
+    "editor.timeline.trackColorPrimary": "Primary:",
+    "editor.timeline.trackColorSecondary": "Secondary:",
+    "editor.timeline.trackColorRecorded": "Recorded takes",
+    "editor.timeline.trackColorGenerated": "Generated voices",
+    "editor.timeline.trackColorCount": plural({
+      one: "Colour {count} track",
+      other: "Colour {count} tracks",
+    }),
+    "editor.timeline.trackNewFolderFrom": "New folder from this track",
+    "editor.timeline.trackNewFolderFromCount": plural({
+      one: "New folder from {count} track",
+      other: "New folder from {count} tracks",
+    }),
+    "editor.timeline.trackLeaveFolder": "Take out of folder",
+    "editor.timeline.trackLeaveFolderCount": plural({
+      one: "Take {count} track out of its folder",
+      other: "Take {count} tracks out of their folders",
+    }),
+    "editor.timeline.trackDelete": "Delete track",
+    "editor.timeline.trackDeleteFolder": "Delete folder",
+    "editor.timeline.trackDeleteCount": plural({
+      one: "Delete {count} track",
+      other: "Delete {count} tracks",
+    }),
+    "editor.timeline.trackAdd": "Add track",
+    "editor.timeline.trackAddTrack": "Audio track",
+    "editor.timeline.trackAddFolder": "Folder",
+    // "Folder" → editor.timeline.trackAddFolder (identical text)
+    "editor.timeline.trackNewTrackName": "Audio",
+    // The add-track dialog.
+    "editor.timeline.addTrackTitle": "Add an audio track",
+    // "Name" → common.name (identical text)
+    "editor.timeline.addTrackAlignLabel": "Line it up with",
+    "editor.timeline.addTrackAlignHint":
+      "The new track's recordings sit against this track's lines. It can't be changed afterwards.",
+    // "Add track" → editor.timeline.trackAdd (identical text)
+    // The delete confirmation.
+    "editor.timeline.deleteTrackTitle": "Delete {name}?",
+    "editor.timeline.deleteTracksTitle": plural({
+      one: "Delete {count} track?",
+      other: "Delete {count} tracks?",
+    }),
+    "editor.timeline.deleteTrackEmpty": "This track has no recordings on it.",
+    "editor.timeline.deleteTrackTakes": plural({
+      one: "{count} recording on this track will be deleted with it.",
+      other: "{count} recordings on this track will be deleted with it.",
+    }),
+    "editor.timeline.deleteFolderMembers": plural({
+      one: "The {count} track inside it will be moved out, not deleted.",
+      other: "The {count} tracks inside it will be moved out, not deleted.",
+    }),
+    // "Delete" → common.delete (identical text)
     "editor.timeline.rowsShorterAria": "Shorter rows",
     "editor.timeline.rowsShorterTooltip": "Shorter rows — fit more tracks on screen (⌘ + scroll)",
     "editor.timeline.rowsTallerAria": "Taller rows",
@@ -1343,6 +1416,120 @@ export const editor = defineNamespace({
           "Screen-reader name of the timeline's track-name gutter, which is a " +
           "reorderable list. Names the list and states both ways to reorder it. " +
           "Never visible.",
+      },
+      "editor.timeline.folderTrackCount": {
+        description:
+          "The line under a timeline folder's name, saying how many tracks are " +
+          "inside it. It sits where every other track row states what KIND of " +
+          "row it is; a folder's kind is obvious from its disclosure triangle, " +
+          "so it states its size instead — the one fact about a closed folder " +
+          "that is not already on screen.",
+        placeholders: {
+          count:
+            "How many tracks the folder holds; it also selects which plural form is used.",
+        },
+      },
+      "editor.timeline.trackMenuAria": {
+        description:
+          "Screen-reader name of the '…' button on a timeline track's row, " +
+          "which opens the same options right-clicking the track does. Never " +
+          "visible — the button is an icon.",
+        placeholders: { name: "The track's name, as the user set it." },
+      },
+      "editor.timeline.deleteTrackTitle": {
+        description:
+          "Title of the confirmation asked before deleting a timeline track. " +
+          "Deleting really deletes: the recordings on the track go with it.",
+        placeholders: { name: "The track's name, as the user set it." },
+      },
+      "editor.timeline.deleteTracksTitle": {
+        description:
+          "The same confirmation when SEVERAL selected timeline tracks are " +
+          "being deleted at once, where naming them all would not fit. The " +
+          "line beneath states how many recordings go with them.",
+        placeholders: { count: "How many tracks are being deleted; it also selects the plural form." },
+      },
+      "editor.timeline.trackColorCount": {
+        description:
+          "Submenu label when several timeline tracks are selected at once. " +
+          "The count is how many of the selected tracks can actually take a " +
+          "colour — source rows cannot — so it may be fewer than are selected.",
+        placeholders: { count: "How many tracks will be recoloured; it also selects the plural form." },
+      },
+      "editor.timeline.trackNewFolderFromCount": {
+        description:
+          "Menu item that creates a folder containing the selected timeline " +
+          "tracks. Replaces an older 'move to folder' submenu: a folder is made " +
+          "FROM tracks, and moving into an existing one is a drag.",
+        placeholders: { count: "How many tracks go into the new folder; it also selects the plural form." },
+      },
+      "editor.timeline.trackLeaveFolderCount": {
+        description:
+          "Menu item that returns the selected timeline tracks to the top " +
+          "level, out of whatever folders they are in. The tracks are not " +
+          "deleted or changed in any other way.",
+        placeholders: { count: "How many tracks leave their folder; it also selects the plural form." },
+      },
+      "editor.timeline.trackDeleteCount": {
+        description:
+          "Menu item that deletes several selected timeline tracks at once. " +
+          "The count is how many of the selection can be deleted — the rows a " +
+          "file derives cannot — so it may be fewer than are selected. A " +
+          "confirmation follows.",
+        placeholders: { count: "How many tracks will be deleted; it also selects the plural form." },
+      },
+      "editor.timeline.deleteTrackTakes": {
+        description:
+          "The warning line in that confirmation, counting the recordings that " +
+          "will be deleted along with the track. Stated plainly because it is " +
+          "the fact the person is being asked to accept.",
+        placeholders: {
+          count:
+            "How many recordings are on the track; it also selects which plural form is used.",
+        },
+      },
+      "editor.timeline.deleteFolderMembers": {
+        description:
+          "Shown instead when the thing being deleted is a FOLDER. The tracks " +
+          "inside are not deleted with it — they return to the top level — and " +
+          "saying so is what stops the confirmation reading as a threat to them.",
+        placeholders: {
+          count:
+            "How many tracks are inside the folder; it also selects which plural form is used.",
+        },
+      },
+      "editor.timeline.addTrackAlignHint": {
+        description:
+          "Help text under the 'Line it up with' picker in the add-track " +
+          "dialog. The new track's chips are positioned against the chosen " +
+          "track's lines, and that choice is made once, at creation.",
+      },
+      "editor.timeline.gutterCollapseAria": {
+        description:
+          "Screen-reader name and tooltip of the button that narrows the " +
+          "timeline's whole track-name column to a strip of icons, giving the " +
+          "space to the tracks themselves. Affects every row at once. Doubles " +
+          "as the button's hover tooltip, so it is read as well as heard.",
+      },
+      "editor.timeline.gutterExpandAria": {
+        description:
+          "Screen-reader name and tooltip of the button that widens the " +
+          "timeline's track-name column back out, so every track's full name " +
+          "and description are readable again. Affects every row at once. " +
+          "Doubles as the button's hover tooltip.",
+      },
+      "editor.timeline.folderExpandAria": {
+        description:
+          "Screen-reader name of the triangle that opens a timeline folder and " +
+          "shows the tracks inside it. Never visible — the control is an icon.",
+        placeholders: { name: "The folder's name, as the user set it." },
+      },
+      "editor.timeline.folderCollapseAria": {
+        description:
+          "Screen-reader name of the triangle that closes a timeline folder. " +
+          "The tracks inside are hidden and the folder's own row shows a " +
+          "summary of where their audio falls. Never visible — an icon.",
+        placeholders: { name: "The folder's name, as the user set it." },
       },
       "editor.timeline.rowsShorterAria": {
         description:

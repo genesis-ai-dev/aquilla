@@ -207,6 +207,29 @@ describe("TargetAudioLane — trimmed geometry (round 7)", () => {
     expect(parseFloat(chip.style.width)).toBeCloseTo(3 * 40) // 4 - 1
   })
 
+  // AQU-646 stage 2, and a REGRESSION TEST FOR A LIVE BUG: before the guard, a
+  // right-press started a real move, so a right-drag across a take chip
+  // re-anchored it. See the twin in TimelineCard.test.tsx.
+  it("does not begin a drag on the secondary button", () => {
+    const onRetimeTarget = vi.fn()
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onRetimeTarget={onRetimeTarget} />)
+    const chip = screen.getByTestId("tl-target-c1")
+    fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1, button: 2 })
+    fireEvent.pointerMove(window, { clientX: 320 })
+    fireEvent.pointerUp(window, { clientX: 320 })
+    expect(onRetimeTarget).not.toHaveBeenCalled()
+  })
+
+  it("does not begin a drag on a macOS ctrl+click, which is button 0", () => {
+    const onRetimeTarget = vi.fn()
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onRetimeTarget={onRetimeTarget} />)
+    const chip = screen.getByTestId("tl-target-c1")
+    fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1, button: 0, ctrlKey: true })
+    fireEvent.pointerMove(window, { clientX: 320 })
+    fireEvent.pointerUp(window, { clientX: 320 })
+    expect(onRetimeTarget).not.toHaveBeenCalled()
+  })
+
   it("END-based bounds: a chip can slide back into the previous section's space", () => {
     const onRetimeTarget = vi.fn()
     render(<TargetAudioLane {...base} items={[item({}, 4000)]} onRetimeTarget={onRetimeTarget} />)
@@ -1090,5 +1113,127 @@ describe("TargetAudioLane — chip corners", () => {
     const narrow = parseFloat(screen.getByTestId("tl-target-c1").style.borderRadius)
     expect(narrow).toBeCloseTo(chipRadiusPx(16, 6), 3)
     expect(narrow).toBeLessThan(6)
+  })
+})
+
+// ── AQU-646 stage 2: the track's colour, and the sparkle that makes close
+// tones safe ──────────────────────────────────────────────────────────────
+//
+// These two are one design, not two features. The palette's pairs are
+// deliberately near neighbours in hue — they say "same track", not "different
+// kind of clip" — which only works because the sparkle carries the
+// recorded/generated distinction the tones no longer can.
+
+describe("TargetAudioLane — the track's colour", () => {
+  const classesOf = (id = "c1") => screen.getByTestId(`tl-target-${id}`).className
+
+  it("draws the shipped emerald/violet pair when the track has no colour", () => {
+    const { unmount } = render(<TargetAudioLane {...base} items={[item({}, 4000)]} />)
+    expect(classesOf()).toContain("bg-emerald-100/80")
+    unmount()
+    const generated = { ...item({}, 4000), kind: "generated" as const }
+    render(<TargetAudioLane {...base} items={[generated]} />)
+    expect(classesOf()).toContain("bg-violet-100/80")
+  })
+
+  // A colour is TWO INDEPENDENT HUES, `"{primary}-{secondary}"`, and the roles
+  // are told apart by WEIGHT rather than by hue — which is what makes
+  // green-on-green a legal choice.
+  it("draws the track's two tones, weight by clip kind", () => {
+    const { unmount } = render(<TargetAudioLane {...base} color="violet-green" items={[item({}, 4000)]} />)
+    expect(classesOf()).toContain("bg-violet-50")
+    unmount()
+    const generated = { ...item({}, 4000), kind: "generated" as const }
+    render(<TargetAudioLane {...base} color="violet-green" items={[generated]} />)
+    expect(classesOf()).toContain("bg-emerald-300/80")
+  })
+
+  it("still tells the two apart when one hue was picked for both", () => {
+    const { unmount } = render(<TargetAudioLane {...base} color="green-green" items={[item({}, 4000)]} />)
+    expect(classesOf()).toContain("bg-emerald-100/80")
+    unmount()
+    const generated = { ...item({}, 4000), kind: "generated" as const }
+    render(<TargetAudioLane {...base} color="green-green" items={[generated]} />)
+    expect(classesOf()).toContain("bg-emerald-300/80")
+  })
+
+  // The server validates `color` as a PATTERN, not an enum, so that a newer
+  // client's palette entry round-trips through an older one. This is the other
+  // half of that bargain: the old client draws the default rather than nothing.
+  it("falls back to the default pair for an id this build cannot name", () => {
+    render(<TargetAudioLane {...base} color="ultramarine-2" items={[item({}, 4000)]} />)
+    expect(classesOf()).toContain("bg-emerald-100/80")
+  })
+
+  // THE ONE THAT MATTERS MOST. `cn` resolves last-wins per utility group, and
+  // the warning layers only beat the palette by sitting after it in the class
+  // list. A palette applied at the wrong position — or one that introduced a
+  // utility group the warnings do not also set — would leave a coloured track's
+  // overlaps looking exactly like a track at rest.
+  it("lets the at-fault red beat every palette entry", () => {
+    for (const color of [undefined, "teal", "indigo", "fuchsia", "lime", "slate", "default"]) {
+      // c1 runs to 22.5, into c2's chip at 20 — the shape the overflow suite
+      // above already pins, so this case is testing the COLOUR and nothing else.
+      const first = item({}, 12500)
+      const second = item({ startTime: 20, endTime: 30 } as Partial<CellData>, 4000, "c2")
+      const { unmount } = render(<TargetAudioLane {...base} color={color} items={[first, second]} />)
+      const atFault = screen.getByTestId("tl-target-c1")
+      expect(atFault, `palette ${String(color)}`).toHaveAttribute("data-overflow", "overlap")
+      expect(atFault.className, `palette ${String(color)}`).toContain("bg-red-100/80")
+      unmount()
+    }
+  })
+
+  it("lets the selection ring survive every palette entry", () => {
+    for (const color of [undefined, "teal", "indigo", "fuchsia", "lime", "slate"]) {
+      const { unmount } = render(
+        <TargetAudioLane {...base} color={color} selectedId="c1" items={[item({}, 4000)]} />,
+      )
+      expect(classesOf(), `palette ${String(color)}`).toContain("ring-sky-500")
+      unmount()
+    }
+  })
+})
+
+describe("TargetAudioLane — the sparkle on generated chips", () => {
+  const generated = (over: Partial<CellData> = {}, durationMs = 4000) => ({
+    ...item(over, durationMs),
+    kind: "generated" as const,
+  })
+
+  it("marks a generated voice and leaves a recorded take unmarked", () => {
+    const { unmount } = render(<TargetAudioLane {...base} items={[generated()]} />)
+    expect(screen.getByTestId("tl-target-c1-generated")).toBeTruthy()
+    unmount()
+    // Recorded is the default; generated is the exception worth marking.
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} />)
+    expect(screen.queryByTestId("tl-target-c1-generated")).toBeNull()
+  })
+
+  // Sam, 2026-08-22: "we'd just move the sparkles over to the right so that it
+  // doesn't collide with the left trim handle." The handle is the leftmost 7px
+  // and is the control you reach for.
+  it("sits clear of the left trim handle, vertically centred", () => {
+    render(<TargetAudioLane {...base} items={[generated()]} />)
+    const glyph = screen.getByTestId("tl-target-c1-generated")
+    expect(glyph.className).toContain("left-2")
+    expect(glyph.className).toContain("top-1/2")
+    expect(glyph.className).toContain("-translate-y-1/2")
+  })
+
+  // They occupy the same pixels: the corner badge is 14px tall at top-1, so at
+  // any height where it renders it covers the vertical centre. A missing take
+  // is a STATE; "this one is synthetic" is an identity the colour still says.
+  it("gives way to the corner state badge", () => {
+    render(
+      <TargetAudioLane {...base} items={[generated()]} missingCellIds={new Set(["c1"])} />,
+    )
+    expect(screen.getByTestId("tl-target-c1-missing")).toBeTruthy()
+    expect(screen.queryByTestId("tl-target-c1-generated")).toBeNull()
+  })
+
+  it("is withheld from a chip too narrow to hold it", () => {
+    render(<TargetAudioLane {...base} pxPerSec={2} items={[generated()]} />)
+    expect(screen.queryByTestId("tl-target-c1-generated")).toBeNull()
   })
 })

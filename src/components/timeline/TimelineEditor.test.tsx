@@ -635,11 +635,11 @@ describe("TimelineEditor", () => {
     expect(screen.getByTestId("tl-untimed-u9")).toBeInTheDocument()
   })
 
-  it("renames the lane headers to Subtitles / Source audio / Target audio", () => {
+  it("renames the lane headers to Source text / Source audio / Target audio", () => {
     render(
       <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={mediaCells} onRetimeSubtitle={() => {}} />,
     )
-    expect(screen.getByText("Subtitles")).toBeInTheDocument()
+    expect(screen.getByText("Source text")).toBeInTheDocument()
     expect(screen.getByText("Source audio")).toBeInTheDocument()
     expect(screen.getByText("Target audio")).toBeInTheDocument()
   })
@@ -1588,12 +1588,30 @@ describe("TimelineEditor — rows come from the track model", () => {
       screen.getByTestId("tl-scroll").previousElementSibling!.querySelectorAll("span.font-semibold"),
     ).map((el) => el.textContent)
 
+  // AQU-646 stage 2: THE PREFIX SELECTORS ARE LOAD-BEARING, NOT TIDINESS. A
+  // folder row and an added audio track each render a lane whose testid carries
+  // the track's id, so an exact-match list would not see them — and this is the
+  // one assertion that catches the gutter and the lanes falling out of step,
+  // which is precisely the failure a new kind of row causes. Miss them here and
+  // the guard goes blind at the exact moment the thing it guards becomes
+  // possible.
   const laneRows = () =>
     Array.from(
       screen
         .getByTestId("tl-scroll")
-        .querySelectorAll('[data-testid="tl-lane"],[data-testid="tl-target-lane"],[data-testid="tl-source-regions"]'),
-    ).map((el) => el.getAttribute("data-variant") ?? el.getAttribute("data-testid"))
+        .querySelectorAll(
+          '[data-testid="tl-lane"],[data-testid^="tl-target-lane"],[data-testid="tl-source-regions"],[data-testid^="tl-folder-lane-"]',
+        ),
+    ).map((el) => {
+      const variant = el.getAttribute("data-variant")
+      if (variant) return variant
+      const id = el.getAttribute("data-testid") ?? ""
+      // Collapse the namespaced ids back to a kind, so a case can assert the
+      // SHAPE of the column without hard-coding generated track ids.
+      if (id.startsWith("tl-folder-lane-")) return "folder"
+      if (id.startsWith("tl-target-lane-")) return "added-audio"
+      return id
+    })
 
   // THE DUBBING GUARD. Stage 2 renamed every track kind and made derivation
   // file-aware; a project that imports mp3s must see none of it. This case is
@@ -1602,7 +1620,7 @@ describe("TimelineEditor — rows come from the track model", () => {
     render(
       <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}} />,
     )
-    expect(gutterNames()).toEqual(["Subtitles", "Source audio", "Target audio"])
+    expect(gutterNames()).toEqual(["Source text", "Source audio", "Target audio"])
     expect(laneRows()).toEqual(["subtitle", "dialogue", "tl-target-lane"])
   })
 
@@ -1617,7 +1635,7 @@ describe("TimelineEditor — rows come from the track model", () => {
         })}
       />,
     )
-    expect(gutterNames()).toEqual(["Armenian dub", "Subtitles", "Source audio"])
+    expect(gutterNames()).toEqual(["Armenian dub", "Source text", "Source audio"])
     expect(laneRows()).toEqual(["tl-target-lane", "subtitle", "dialogue"])
   })
 
@@ -1636,11 +1654,11 @@ describe("TimelineEditor — rows come from the track model", () => {
         tracks={subtitleTracks(false)} onRetimeSubtitle={() => {}}
       />,
     )
-    expect(gutterNames()).toEqual(["Source subtitles", "Target subtitles", "Target audio"])
+    expect(gutterNames()).toEqual(["Source text", "Target text", "Target audio"])
     expect(laneRows()).toEqual(["subtitle", "target-subtitle", "tl-target-lane"])
   })
 
-  // Stage 3 reseated Target subtitles from 2 to 1 (Sam: the translation belongs
+  // Stage 3 reseated Target text from 2 to 1 (Sam: the translation belongs
   // directly under the cue it translates), so the imported audio row now lands
   // BELOW both text rows rather than between them.
   it("importing an audio VTT drops the Source-audio row into its own seat", () => {
@@ -1652,7 +1670,7 @@ describe("TimelineEditor — rows come from the track model", () => {
         onRetimeSubtitle={() => {}}
       />,
     )
-    expect(gutterNames()).toEqual(["Source subtitles", "Target subtitles", "Source audio", "Target audio"])
+    expect(gutterNames()).toEqual(["Source text", "Target text", "Source audio", "Target audio"])
     expect(laneRows()).toEqual(["subtitle", "target-subtitle", "source-audio-cues", "tl-target-lane"])
   })
 
@@ -1697,7 +1715,537 @@ describe("TimelineEditor — rows come from the track model", () => {
     expect(onReorderTrack).toHaveBeenCalledWith("source-subtitles", 2.5)
     // And the editor does not move the row itself: the order is project-wide
     // data, so the optimistic overlay belongs to the workspace that persists it.
-    expect(gutterNames()).toEqual(["Subtitles", "Source audio", "Target audio"])
+    expect(gutterNames()).toEqual(["Source text", "Source audio", "Target audio"])
+  })
+
+  // ── Stage 2: folders, and the two things they can silently break ──
+
+  // Collapse state is PERSONAL and persisted per file, so it survives a
+  // re-render — and would survive from one test into the next, since they all
+  // mount the same fileId. Clearing it here is what keeps a case that collapses
+  // a folder from silently deciding what the next case starts from.
+  beforeEach(() => {
+    try {
+      localStorage.removeItem("aquilla:tlFoldersClosed:f1")
+    } catch {
+      /* private mode in some environment — nothing was persisted either */
+    }
+  })
+
+  /** A file whose Target-audio row has been folded into a group, with one added
+   *  audio track beside it. Built through the real merge, from the deltas a
+   *  file would actually carry. */
+  const foldedTracks = () =>
+    deriveTracksForFile({
+      trackOverrides: {
+        grp: { kind: "folder", name: "Dubs", order: 4 },
+        "target-audio": { groupId: "grp", order: 0 },
+        "trk-es": { kind: "audio", name: "Spanish", groupId: "grp", order: 1, sourceTrackId: "source-subtitles" },
+      },
+    })
+
+  // THE PARITY GUARD, WITH A FOLDER IN IT. The gutter and the lanes are two
+  // `.map`s over one array, and this is the assertion that says so. A row kind
+  // that renders a label and no lane — which is what a missing `laneForTrack`
+  // case does, silently, because `undefined` is a valid ReactNode — shifts
+  // every row below it out of line with its own label and takes the drag's
+  // hit-testing with it.
+  it("draws a folder and its members in both columns, in the same order", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={foldedTracks()} onRetimeSubtitle={() => {}}
+      />,
+    )
+    expect(gutterNames()).toEqual(["Source text", "Source audio", "Dubs", "Target audio", "Spanish"])
+    expect(laneRows()).toEqual(["subtitle", "dialogue", "folder", "tl-target-lane", "added-audio"])
+    expect(gutterNames()).toHaveLength(laneRows().length)
+  })
+
+  it("collapsing a folder takes its members out of BOTH columns together", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={foldedTracks()} onRetimeSubtitle={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-folder-toggle-grp"))
+    expect(gutterNames()).toEqual(["Source text", "Source audio", "Dubs"])
+    expect(laneRows()).toEqual(["subtitle", "dialogue", "folder"])
+    // …and the folder's own lane says it is standing in for them.
+    expect(screen.getByTestId("tl-folder-lane-grp")).toHaveAttribute("data-collapsed")
+  })
+
+  // THE OTHER SILENT KILL SWITCH. `beginTrackDrag` bails when the rendered row
+  // count disagrees with what it expects, and a collapsed folder makes that
+  // true against `tracks.length`. It fails with no error and no partial
+  // behaviour — the handle simply stops working — so nothing else would catch
+  // it. The keyboard path shares the wiring, which is what makes it testable
+  // here at all (happy-dom gives every element a 0x0 rect).
+  it("keeps reordering working while a folder is collapsed", () => {
+    const onReorderTrack = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={foldedTracks()} onRetimeSubtitle={() => {}} onReorderTrack={onReorderTrack}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-folder-toggle-grp"))
+    const gutter = screen.getByTestId("tl-scroll").previousElementSibling!
+    const labels = gutter.querySelectorAll<HTMLElement>("[data-tl-track-row]")
+    expect(labels).toHaveLength(3)
+    labels[0].focus()
+    fireEvent.keyDown(labels[0], { key: "ArrowDown", altKey: true })
+    expect(onReorderTrack).toHaveBeenCalledTimes(1)
+  })
+
+  // A DRAG REORDERS WITHIN ONE SCOPE AND NEVER ACROSS. Crossing a folder
+  // boundary means writing `groupId`, which is a gated operation and a menu
+  // command — and it is what keeps the ungated bare-`{order}` write from being
+  // able to restructure the tree with track editing switched off.
+  it("moves a folder member among its siblings, not out of the folder", () => {
+    const onReorderTrack = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={foldedTracks()} onRetimeSubtitle={() => {}} onReorderTrack={onReorderTrack}
+      />,
+    )
+    const gutter = screen.getByTestId("tl-scroll").previousElementSibling!
+    const labels = gutter.querySelectorAll<HTMLElement>("[data-tl-track-row]")
+    // Row 3 is Target audio, the first member of "Dubs".
+    labels[3].focus()
+    fireEvent.keyDown(labels[3], { key: "ArrowDown", altKey: true })
+    // Past "Spanish" (order 1) inside the folder — NOT out of it, and the patch
+    // carries an order alone, so it stays ungated.
+    expect(onReorderTrack).toHaveBeenCalledWith("target-audio", 2)
+  })
+
+  it("Alt+ArrowUp on a folder's FIRST member does nothing, rather than ejecting it", () => {
+    const onReorderTrack = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={foldedTracks()} onRetimeSubtitle={() => {}} onReorderTrack={onReorderTrack}
+      />,
+    )
+    const gutter = screen.getByTestId("tl-scroll").previousElementSibling!
+    const labels = gutter.querySelectorAll<HTMLElement>("[data-tl-track-row]")
+    labels[3].focus()
+    fireEvent.keyDown(labels[3], { key: "ArrowUp", altKey: true })
+    expect(onReorderTrack).not.toHaveBeenCalled()
+  })
+
+  // A folder's colour would say nothing, and its open/closed state says
+  // everything — so its disclosure control stands where every other row's
+  // colour dot stands, and the column of glyphs stays a column.
+  // ── Stage 2: the two gates, seen from the UI ──
+  //
+  // The setting is the SECOND gate, on top of the maintainer floor, and what it
+  // controls is whether a project's timelines can be RESTRUCTURED. What it must
+  // never control is rename and drag-to-reorder, which already ship: a new
+  // setting defaulting to off must not silently take an existing capability
+  // away from every project that has one.
+
+  const editingActions = () => ({
+    onAdd: vi.fn((_spec: { kind: string; name: string }) => "new-track-id"),
+    onSetColor: vi.fn(),
+    onLeaveFolder: vi.fn(),
+    onMoveToScope: vi.fn(),
+    onCreateFolderFrom: vi.fn((_ids: readonly string[]) => "new-folder-id"),
+    onDelete: vi.fn(),
+  })
+
+  it("with the setting off, the Add-track button does not exist", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+        onReorderTrack={vi.fn()} onRenameTrack={vi.fn()}
+      />,
+    )
+    // ABSENT, not disabled (Sam, 2026-08-22). A greyed-out control advertises a
+    // capability the project has switched off and invites a hunt for why it
+    // will not click.
+    expect(screen.queryByTestId("tl-add-track")).toBeNull()
+  })
+
+  it("with the setting on, the Add-track button is there", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+        onReorderTrack={vi.fn()} onRenameTrack={vi.fn()} trackEditing={editingActions()}
+      />,
+    )
+    expect(screen.getByTestId("tl-add-track")).toBeTruthy()
+  })
+
+  it("offers rename only with the setting off, and the full menu with it on", () => {
+    const { unmount } = render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+        onReorderTrack={vi.fn()} onRenameTrack={vi.fn()}
+      />,
+    )
+    // A pointer's own ctrl-click → `contextmenu` synthesis is the BROWSER's, so
+    // happy-dom will not produce one either; the event is dispatched directly.
+    fireEvent.contextMenu(screen.getByTestId("tl-scroll").previousElementSibling!
+      .querySelectorAll<HTMLElement>("[data-tl-track-row]")[0])
+    expect(screen.getByText("Rename")).toBeTruthy()
+    expect(screen.queryByText("Colour")).toBeNull()
+    expect(screen.queryByText("New folder from this track")).toBeNull()
+    unmount()
+
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+        onReorderTrack={vi.fn()} onRenameTrack={vi.fn()} trackEditing={editingActions()}
+      />,
+    )
+    fireEvent.contextMenu(screen.getByTestId("tl-scroll").previousElementSibling!
+      .querySelectorAll<HTMLElement>("[data-tl-track-row]")[0])
+    expect(screen.getByText("Rename")).toBeTruthy()
+    expect(screen.getByText("New folder from this track")).toBeTruthy()
+  })
+
+  // The whole row of new machinery is withheld from someone who can do neither:
+  // no trigger, no `⋯`, no `select-none` the trigger would add. The row a
+  // viewer sees is the row that shipped.
+  it("adds nothing at all to a row when the person can do neither", () => {
+    render(
+      <TimelineEditor fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}} />,
+    )
+    expect(screen.queryByTestId("tl-track-menu-target-audio")).toBeNull()
+    expect(screen.queryByTestId("tl-add-track")).toBeNull()
+  })
+
+  // Deleting really deletes, so it asks — and it asks with the NUMBER, which is
+  // the fact the person is being asked to accept.
+  it("asks before deleting, naming the track", () => {
+    const editing = editingActions()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+        tracks={deriveTracksForFile({
+          trackOverrides: { "trk-es": { kind: "audio", name: "Spanish", order: 5 } },
+        })}
+        onReorderTrack={vi.fn()} onRenameTrack={vi.fn()} trackEditing={editing}
+      />,
+    )
+    const rows = screen.getByTestId("tl-scroll").previousElementSibling!
+      .querySelectorAll<HTMLElement>("[data-tl-track-row]")
+    fireEvent.contextMenu(rows[rows.length - 1])
+    fireEvent.click(screen.getByText("Delete track"))
+    // The menu opens the QUESTION; nothing is deleted until it is answered.
+    expect(editing.onDelete).not.toHaveBeenCalled()
+    expect(screen.getByTestId("tl-delete-track-dialog")).toHaveTextContent("Spanish")
+    fireEvent.click(screen.getByTestId("tl-delete-track-confirm"))
+    expect(editing.onDelete).toHaveBeenCalledWith(["trk-es"])
+  })
+
+  // Only a track someone MADE. A derived row is a fact about the file — its
+  // subtitles, its source audio, its dub — so "delete" could only mean "hide
+  // it", which there is no state for.
+  it("does not offer to delete a derived row", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+        onReorderTrack={vi.fn()} onRenameTrack={vi.fn()} trackEditing={editingActions()}
+      />,
+    )
+    fireEvent.contextMenu(screen.getByTestId("tl-scroll").previousElementSibling!
+      .querySelectorAll<HTMLElement>("[data-tl-track-row]")[0])
+    expect(screen.queryByText("Delete track")).toBeNull()
+  })
+
+  it("renames in place, and commits only a changed, non-empty name", () => {
+    const onRenameTrack = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+        onReorderTrack={vi.fn()} onRenameTrack={onRenameTrack}
+      />,
+    )
+    fireEvent.contextMenu(screen.getByTestId("tl-scroll").previousElementSibling!
+      .querySelectorAll<HTMLElement>("[data-tl-track-row]")[0])
+    fireEvent.click(screen.getByText("Rename"))
+    const input = screen.getByTestId("tl-track-rename-source-subtitles") as HTMLInputElement
+    fireEvent.change(input, { target: { value: "  " } })
+    fireEvent.keyDown(input, { key: "Enter" })
+    // An empty name is not a name — it would store an invisible label with no
+    // way to tell it from a bug.
+    expect(onRenameTrack).not.toHaveBeenCalled()
+
+    fireEvent.contextMenu(screen.getByTestId("tl-scroll").previousElementSibling!
+      .querySelectorAll<HTMLElement>("[data-tl-track-row]")[0])
+    fireEvent.click(screen.getByText("Rename"))
+    const again = screen.getByTestId("tl-track-rename-source-subtitles") as HTMLInputElement
+    fireEvent.change(again, { target: { value: "Captions" } })
+    fireEvent.keyDown(again, { key: "Enter" })
+    expect(onRenameTrack).toHaveBeenCalledWith("source-subtitles", "Captions")
+  })
+
+  // A REGRESSION TEST FOR A BUG THIS ROUND SHIPPED AND FIXED. The rename starts
+  // from a menu item, and Base UI hands focus back to the menu's trigger when
+  // the menu closes — which lands after the input has mounted. With `autoFocus`
+  // and an unguarded `onBlur`, the field focused, immediately blurred as the
+  // row took focus back, and committed the untouched name: the editor vanished
+  // the instant it appeared, with nothing on screen to say why.
+  it("keeps the rename field open when the menu hands focus back", () => {
+    const onRenameTrack = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+        onReorderTrack={vi.fn()} onRenameTrack={onRenameTrack}
+      />,
+    )
+    const row = screen.getByTestId("tl-scroll").previousElementSibling!
+      .querySelectorAll<HTMLElement>("[data-tl-track-row]")[0]
+    fireEvent.contextMenu(row)
+    fireEvent.click(screen.getByText("Rename"))
+    // The field is still there…
+    const input = screen.getByTestId("tl-track-rename-source-subtitles")
+    // …and a blur it never actually held focus for commits nothing.
+    fireEvent.blur(input)
+    expect(screen.getByTestId("tl-track-rename-source-subtitles")).toBeTruthy()
+    expect(onRenameTrack).not.toHaveBeenCalled()
+  })
+
+  // ── Stage 2b: a track is something you select ──
+
+  const gutter = () => screen.getByTestId("tl-scroll").previousElementSibling!
+  const rows = () => gutter().querySelectorAll<HTMLElement>("[data-tl-track-row]")
+  const selectedRows = () =>
+    Array.from(gutter().querySelectorAll<HTMLElement>("[data-selected]")).map(
+      (el) => el.querySelector("span.truncate")?.textContent,
+    )
+
+  const selectable = (extra: Record<string, unknown> = {}) => (
+    <TimelineEditor
+      fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+      onReorderTrack={vi.fn()} onRenameTrack={vi.fn()} {...extra}
+    />
+  )
+
+  it("selects one track on a plain click, and replaces the selection on the next", () => {
+    render(selectable())
+    fireEvent.click(rows()[0])
+    expect(selectedRows()).toEqual(["Source text"])
+    fireEvent.click(rows()[2])
+    expect(selectedRows()).toEqual(["Target audio"])
+  })
+
+  it("adds and removes with ⌘, and takes the run with shift", () => {
+    render(selectable())
+    fireEvent.click(rows()[0])
+    fireEvent.click(rows()[2], { metaKey: true })
+    expect(selectedRows()).toEqual(["Source text", "Target audio"])
+    // ⌘ on one already in the selection takes it back out.
+    fireEvent.click(rows()[2], { metaKey: true })
+    expect(selectedRows()).toEqual(["Source text"])
+    fireEvent.click(rows()[2], { shiftKey: true })
+    expect(selectedRows()).toEqual(["Source text", "Source audio", "Target audio"])
+  })
+
+  // FOLDERS ARE NOT TRACKS (Sam, 2026-08-24). Clicking one opens and closes it;
+  // it never joins a selection, so no bulk operation can ever be handed one.
+  it("toggles a folder open and closed instead of selecting it", () => {
+    render(selectable({ tracks: foldedTracks() }))
+    const folderRow = Array.from(rows()).find((r) => r.textContent?.includes("Dubs"))!
+    expect(gutterNames()).toContain("Spanish")
+    fireEvent.click(folderRow)
+    expect(gutterNames()).not.toContain("Spanish")
+    expect(selectedRows()).toEqual([])
+    fireEvent.click(folderRow)
+    expect(gutterNames()).toContain("Spanish")
+  })
+
+  it("steps a shift-range over a folder rather than swallowing it", () => {
+    render(selectable({ tracks: foldedTracks() }))
+    // Subtitles … then shift to the last real track, across the "Dubs" row.
+    fireEvent.click(rows()[0])
+    const spanish = Array.from(rows()).find((r) => r.textContent?.includes("Spanish"))!
+    fireEvent.click(spanish, { shiftKey: true })
+    expect(selectedRows()).not.toContain("Dubs")
+    expect(selectedRows()).toContain("Spanish")
+  })
+
+  it("does not select on a click that was really a drag", () => {
+    render(selectable())
+    const row = rows()[0]
+    fireEvent.pointerDown(row, { clientY: 100, pointerId: 1, button: 0 })
+    fireEvent.pointerMove(window, { clientY: 160 })
+    fireEvent.pointerUp(window, { clientY: 160 })
+    fireEvent.click(row)
+    expect(selectedRows()).toEqual([])
+  })
+
+  it("leaves the speaker button's own click alone", () => {
+    render(selectable())
+    // The Source-audio row carries the speaker; pressing it must mute, not select.
+    fireEvent.click(screen.getByTestId("tl-speaker-source"))
+    expect(selectedRows()).toEqual([])
+  })
+
+  // ── Stage 2b: the menu acts on the selection ──
+
+  it("right-clicking outside the selection makes that row the selection", () => {
+    render(selectable({ trackEditing: editingActions() }))
+    fireEvent.click(rows()[0])
+    fireEvent.contextMenu(rows()[2])
+    expect(selectedRows()).toEqual(["Target audio"])
+  })
+
+  it("recolours every selected track in one call, one value each", () => {
+    const editing = editingActions()
+    render(selectable({ trackEditing: editing, tracks: foldedTracks() }))
+    const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
+    fireEvent.click(named("Target audio"))
+    fireEvent.click(named("Spanish"), { metaKey: true })
+    fireEvent.contextMenu(named("Spanish"))
+    fireEvent.click(screen.getByText("Colour 2 tracks"))
+    // Two axes, so EVERY hue appears twice — once in each column — and the
+    // swatch has to be picked by the column it belongs to. That is also the
+    // assertion: clicking Teal under "Primary" must set the PRIMARY
+    // and leave each track's own secondary exactly as it was.
+    const recorded = screen.getByText("Primary:").parentElement!
+    fireEvent.click(within(recorded).getByText("Teal"))
+    expect(editing.onSetColor).toHaveBeenCalledTimes(1)
+    // ONE CALL, ONE VALUE PER TRACK — each keeps its own other axis, so the
+    // payload is a list of pairs and not a list plus a colour.
+    const [updates] = editing.onSetColor.mock.calls[0] as [{ trackId: string; color: string }[]]
+    expect([...updates].sort((a, b) => a.trackId.localeCompare(b.trackId))).toEqual([
+      // Teal on the primary axis; the secondary stays the violet each track
+      // already had, which is the half the call must NOT disturb.
+      { trackId: "target-audio", color: "teal-violet" },
+      { trackId: "trk-es", color: "teal-violet" },
+    ])
+  })
+
+  // Stage 3c, Sam's revision: ALL of them or none. Colouring "the two of these
+  // five that can take one" is a partial success the menu cannot describe.
+  it("offers a colour only when EVERY selected track can take one", () => {
+    const editing = editingActions()
+    render(selectable({ trackEditing: editing, tracks: foldedTracks() }))
+    const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
+    // Two colourable rows on their own: offered.
+    fireEvent.click(named("Target audio"))
+    fireEvent.click(named("Spanish"), { metaKey: true })
+    fireEvent.contextMenu(named("Spanish"))
+    expect(screen.getByText("Colour 2 tracks")).toBeInTheDocument()
+    fireEvent.keyDown(document.body, { key: "Escape" })
+
+    // Add the Source text row, which is not colourable — grey is deliberate
+    // (Sam) — and the whole item goes rather than silently acting on two.
+    fireEvent.click(named("Source text"), { metaKey: true })
+    fireEvent.contextMenu(named("Source text"))
+    expect(screen.queryByText(/^Colour/)).toBeNull()
+  })
+
+  it("offers no colour on a single row that cannot take one", () => {
+    render(selectable({ trackEditing: editingActions() }))
+    fireEvent.contextMenu(rows()[0])
+    expect(screen.queryByText("Colour")).toBeNull()
+  })
+
+  // Stage 3c (Sam, 2026-08-24): the verb used to eject the track from the
+  // folder it was in and make a fresh top-level folder at the BOTTOM of the
+  // list — not what "new folder from this track" says it does. He chose
+  // withholding it over allowing subfolders, which one level is enforced by
+  // construction throughout track-groups anyway.
+  it("does not offer a new folder for a track that is already in one", () => {
+    render(selectable({ trackEditing: editingActions(), tracks: foldedTracks() }))
+    const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
+    fireEvent.contextMenu(named("Spanish"))
+    expect(screen.queryByText(/^New folder/)).toBeNull()
+    // The honest route out is right there instead.
+    expect(screen.getByText("Take out of folder")).toBeInTheDocument()
+  })
+
+  // Sam, 2026-08-25: with tracks both inside and outside a folder selected, the
+  // menu offered BOTH verbs, each quietly scoped to its own half — "make a
+  // folder out of two of these" next to "eject the other three", with nothing
+  // saying which was which. They are opposites; a selection that could take
+  // either is one the user has not finished making.
+  it("offers NEITHER foldering verb on a selection that straddles a folder", () => {
+    render(selectable({ trackEditing: editingActions(), tracks: foldedTracks() }))
+    const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
+    // Spanish is inside the folder; Source audio is not.
+    fireEvent.click(named("Spanish"))
+    fireEvent.click(named("Source audio"), { metaKey: true })
+    fireEvent.contextMenu(named("Source audio"))
+    expect(screen.queryByText(/^New folder/)).toBeNull()
+    expect(screen.queryByText(/^Take out of folder/)).toBeNull()
+  })
+
+  it("still offers each verb when the selection is all one way", () => {
+    const editing = editingActions()
+    render(selectable({ trackEditing: editing, tracks: foldedTracks() }))
+    const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
+    // All inside → eject, no new-folder.
+    fireEvent.click(named("Target audio"))
+    fireEvent.click(named("Spanish"), { metaKey: true })
+    fireEvent.contextMenu(named("Spanish"))
+    expect(screen.getByText(/^Take 2 tracks out of/)).toBeInTheDocument()
+    expect(screen.queryByText(/^New folder/)).toBeNull()
+    fireEvent.keyDown(document.body, { key: "Escape" })
+
+    // All outside → new-folder, no eject.
+    fireEvent.click(named("Source audio"))
+    fireEvent.contextMenu(named("Source audio"))
+    expect(screen.getByText(/^New folder/)).toBeInTheDocument()
+    expect(screen.queryByText(/^Take out of folder/)).toBeNull()
+  })
+
+  it("makes a folder FROM the selection, and there is no move-to-folder", () => {
+    const editing = editingActions()
+    render(selectable({ trackEditing: editing }))
+    fireEvent.click(rows()[1])
+    fireEvent.click(rows()[2], { metaKey: true })
+    fireEvent.contextMenu(rows()[2])
+    expect(screen.queryByText(/move to folder/i)).toBeNull()
+    fireEvent.click(screen.getByText("New folder from 2 tracks"))
+    expect(editing.onCreateFolderFrom).toHaveBeenCalledTimes(1)
+    expect((editing.onCreateFolderFrom.mock.calls[0][0] as string[]).sort()).toEqual([
+      "source-audio",
+      "target-audio",
+    ])
+  })
+
+  it("deletes a whole selection behind one confirmation", () => {
+    const editing = editingActions()
+    render(
+      selectable({
+        trackEditing: editing,
+        tracks: deriveTracksForFile({
+          trackOverrides: {
+            "trk-a": { kind: "audio", name: "One", order: 5 },
+            "trk-b": { kind: "audio", name: "Two", order: 6 },
+          },
+        }),
+      }),
+    )
+    const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
+    fireEvent.click(named("One"))
+    fireEvent.click(named("Two"), { metaKey: true })
+    fireEvent.contextMenu(named("Two"))
+    fireEvent.click(screen.getByText("Delete 2 tracks"))
+    expect(editing.onDelete).not.toHaveBeenCalled()
+    expect(screen.getByTestId("tl-delete-track-dialog")).toHaveTextContent("Delete 2 tracks?")
+    fireEvent.click(screen.getByTestId("tl-delete-track-confirm"))
+    expect((editing.onDelete.mock.calls[0][0] as string[]).sort()).toEqual(["trk-a", "trk-b"])
+  })
+
+  it("gives a folder a disclosure control instead of a colour dot", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={foldedTracks()} onRetimeSubtitle={() => {}}
+      />,
+    )
+    const toggle = screen.getByTestId("tl-folder-toggle-grp")
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
+    fireEvent.click(toggle)
+    expect(screen.getByTestId("tl-folder-toggle-grp")).toHaveAttribute("aria-expanded", "false")
   })
 })
 
@@ -2090,7 +2638,7 @@ describe("the Sources menu disappears when nothing in it is yours", () => {
 //
 // It said "Dialogue" — a word of the app's own invention sitting between two
 // labels it kept being confused with: the track gutter directly above already
-// says "Subtitles" for the same cells, and the heard lines from the audio
+// says "Source text" for the same cells, and the heard lines from the audio
 // sibling are "Audio cues" a few inches away. These cells are the subtitles,
 // so they say so.
 
@@ -2101,9 +2649,9 @@ describe("the heading over the text column", () => {
     />
   )
 
-  it("says Subtitles for a file imported as subtitles", () => {
+  it("says Source text for a file imported as subtitles", () => {
     render(editor({ isSubtitleImport: true }))
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Subtitles")
+    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Source text")
   })
 
   it("says it with no video linked, which is where it used to say Dialogue", () => {
@@ -2117,14 +2665,14 @@ describe("the heading over the text column", () => {
 
   it("says it with a video linked too", () => {
     render(editor({ isSubtitleImport: true, coreMediaUrl: "https://example.test/master.m3u8" }))
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Subtitles")
+    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Source text")
   })
 
   it("leaves every other kind of project deriving its own word", () => {
     // An audio-first project has real media cells and no subtitle import; its
     // header keeps changing with the selection, which is what it should do.
     render(editor({}))
-    expect(screen.getByTestId("tl-dialogue-header")).not.toHaveTextContent("Subtitles")
+    expect(screen.getByTestId("tl-dialogue-header")).not.toHaveTextContent("Source text")
   })
 })
 
@@ -2328,5 +2876,442 @@ describe("confirming a pairing", () => {
     expect(dialog).toHaveTextContent("Andrew, look.")
     expect(dialog).toHaveTextContent("Heard")
     expect(dialog).toHaveTextContent("Subtitle")
+  })
+})
+
+// ── AQU-646 stage 3b: the gutter collapses ───────────────────────────────────
+//
+// Sam, 2026-08-24: "make the gutter collapsible, and when it's expanded it
+// should be fully expanded so that you can see the full name and all the
+// information… they would all do so at once."
+//
+// The last clause is the requirement these cases exist for. A per-row version
+// of this would look almost identical in a screenshot and be the wrong feature,
+// so "every row together" is asserted directly rather than inferred from one.
+describe("TimelineEditor — the track gutter collapses and expands", () => {
+  beforeEach(() => {
+    topOwner.value = 1
+    localStorage.clear()
+  })
+
+  const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
+
+  const gutter = () => screen.getByTestId("tl-scroll").previousElementSibling as HTMLElement
+  const names = () =>
+    Array.from(gutter().querySelectorAll("span.font-semibold")).map((el) => el.textContent)
+  const toggle = () => screen.getByTestId("tl-gutter-toggle")
+
+  // `onReorderTrack` throughout, because that is the gate on `data-tl-track-row`
+  // — a viewer's rows carry no attribute at all, and asserting over them would
+  // pass by finding nothing.
+  const editor = (props: Record<string, unknown> = {}) => (
+    <TimelineEditor
+      fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+      onReorderTrack={() => {}} {...props}
+    />
+  )
+
+  it("hides EVERY track's name at once, and brings them all back at once", () => {
+    render(editor())
+    expect(names()).toEqual(["Source text", "Source audio", "Target audio"])
+
+    fireEvent.click(toggle())
+    // Three rows, three blanks — not "fewer names", and not fewer ROWS either.
+    // One row keeping its label would be the per-row feature Sam explicitly did
+    // not ask for; a row disappearing would desync the gutter from the lanes.
+    expect(names()).toEqual(["", "", ""])
+
+    fireEvent.click(toggle())
+    expect(names()).toEqual(["Source text", "Source audio", "Target audio"])
+  })
+
+  it("narrows the column itself, not just its contents", () => {
+    render(editor())
+    const grid = gutter().parentElement as HTMLElement
+    expect(grid.style.gridTemplateColumns).toBe("240px 1fr")
+    fireEvent.click(toggle())
+    expect(grid.style.gridTemplateColumns).toBe("56px 1fr")
+  })
+
+  it("leaves every collapsed row still able to say which track it is", () => {
+    // The names are the only thing a collapsed row loses, and losing them
+    // outright would make the strip unusable — there would be no way to tell
+    // track 2 from track 3 without expanding. The tooltip is that recovery,
+    // and it is also the accessible name of a row that would otherwise
+    // announce as its speaker button alone.
+    render(editor())
+    fireEvent.click(toggle())
+    const rows = Array.from(gutter().querySelectorAll("[data-tl-track-row]"))
+    expect(rows.map((r) => r.getAttribute("title"))).toEqual([
+      "Source text",
+      "Source audio",
+      "Target audio",
+    ])
+    expect(rows.map((r) => r.getAttribute("aria-label"))).toEqual([
+      "Source text",
+      "Source audio",
+      "Target audio",
+    ])
+  })
+
+  it("says nothing extra while the names are on screen", () => {
+    // A tooltip that repeats visible text is noise, and an aria-label there
+    // would override the row's real content for a screen reader.
+    render(editor())
+    const rows = Array.from(gutter().querySelectorAll("[data-tl-track-row]"))
+    expect(rows.every((r) => !r.hasAttribute("title"))).toBe(true)
+    expect(rows.every((r) => !r.hasAttribute("aria-label"))).toBe(true)
+  })
+
+  it("keeps the rows countable, so dragging still works collapsed", () => {
+    // `beginTrackDrag` bails outright when the `[data-tl-track-row]` count
+    // disagrees with the rendered tracks — no error, no partial behaviour, just
+    // a dead drag. Collapsing takes the GRIP away (there is no room for it) but
+    // the whole row is the handle, so the count must not move with it.
+    render(editor())
+    const before = gutter().querySelectorAll("[data-tl-track-row]").length
+    expect(before).toBe(3)
+    fireEvent.click(toggle())
+    expect(gutter().querySelectorAll("[data-tl-track-row]").length).toBe(before)
+  })
+
+  it("puts its button outside the layout, where the ruler's height is set", () => {
+    // The gutter's header and the ruler beside it are both h-7, and that shared
+    // height IS the vertical coordinate frame every drop line and lift offset
+    // is measured in. A button in the normal flow would grow the header and put
+    // all of them out by its height.
+    render(editor())
+    expect(toggle().className).toContain("absolute")
+    expect((toggle().parentElement as HTMLElement).className).toContain("h-7")
+  })
+
+  it("remembers the choice against the file it was made on", () => {
+    const { rerender } = render(editor())
+    fireEvent.click(toggle())
+    expect(names()).toEqual(["", "", ""])
+
+    // A different file: this component is NOT remounted on a file switch, so a
+    // preference that only lived in state would follow the user across — which
+    // is the bug the zoom carried for months before stage 3 caught it.
+    rerender(editor({ fileId: "f2" }))
+    expect(names()).toEqual(["Source text", "Source audio", "Target audio"])
+
+    rerender(editor({ fileId: "f1" }))
+    expect(names()).toEqual(["", "", ""])
+  })
+
+  it("stores nothing for a file left expanded", () => {
+    render(editor())
+    fireEvent.click(toggle())
+    fireEvent.click(toggle())
+    expect(localStorage.getItem("aquilla:tlGutterCollapsed:f1")).toBeNull()
+  })
+})
+
+// ── AQU-646 stage 3c: the drop line has to move WHILE you drag ───────────────
+//
+// Sam, 2026-08-24: "technically based on mouse positioning it works correctly
+// but it doesn't actually visually adapt while I'm dragging — it lines itself up
+// correctly once I let go and then I find out if I dragged far enough."
+//
+// That defeats the whole point of the indent, which exists so the two possible
+// outcomes of one gesture are distinguishable BEFORE release. The drop resolves
+// on `pointermove` and the indicator is pure state, so this is testable without
+// a browser — the only thing happy-dom cannot supply is geometry, and geometry
+// is exactly what `vi.spyOn(el, "getBoundingClientRect")` can hand it.
+describe("TimelineEditor — the drop indicator during a track drag", () => {
+  beforeEach(() => { topOwner.value = 1 })
+
+  const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
+
+  /** Three 40px rows stacked from the origin. The gutter's own rect stays
+   *  happy-dom's 0-origin default, and scrollTop is 0, so `gutterContentY` is
+   *  the identity and a clientY IS a content-y — which keeps the arithmetic in
+   *  this test readable. */
+  const stubRows = (rows: Element[]) => {
+    rows.forEach((row, i) => {
+      vi.spyOn(row, "getBoundingClientRect").mockReturnValue({
+        top: i * 40, bottom: i * 40 + 40, left: 0, right: 128, width: 128, height: 40, x: 0, y: i * 40,
+        toJSON: () => ({}),
+      } as DOMRect)
+    })
+  }
+
+  /** Where the line is, as "<row index>:<edge>" — the EDGE matters as much as
+   *  the row, because sliding from below row 1 to below row 2 keeps the same
+   *  row element and moves the line from its top to its bottom. */
+  const dropLineAt = () =>
+    Array.from(document.querySelectorAll('[data-testid="tl-track-drop-line"]')).map((el) => {
+      const row = el.closest("[data-tl-track-row]")!
+      const index = Array.from(document.querySelectorAll("[data-tl-track-row]")).indexOf(row)
+      return `${index}:${el.className.includes("top-0") ? "top" : "bottom"}`
+    })
+
+  it("draws the line as the pointer moves, and moves it — not only on release", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+      />,
+    )
+    const gutter = screen.getByTestId("tl-scroll").previousElementSibling as HTMLElement
+    const rows = Array.from(gutter.querySelectorAll("[data-tl-track-row]"))
+    expect(rows).toHaveLength(3)
+    stubRows(rows)
+
+    // Grab the top row and drag it down past the second.
+    fireEvent.pointerDown(rows[0], { button: 0, pointerId: 1, clientX: 8, clientY: 10 })
+    // Nothing yet — under the 3px threshold a drag has not been intended.
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 12 })
+    expect(dropLineAt()).toEqual([])
+
+    // Into the second row's lower half.
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 70 })
+    const first = dropLineAt()
+    expect(first).not.toEqual([])
+
+    // …and on down into the third. THE LINE MUST FOLLOW. This is the assertion
+    // Sam's report is about: a line that only appears once is a line that told
+    // you nothing while you were deciding.
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 8, clientY: 110 })
+    const second = dropLineAt()
+    expect(second).not.toEqual([])
+    expect(second).not.toEqual(first)
+
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 8, clientY: 110 })
+    // The gesture is over, so the line goes with it.
+    expect(dropLineAt()).toEqual([])
+  })
+})
+
+// ── AQU-646 stage 3c ─────────────────────────────────────────────────────────
+describe("TimelineEditor — an added track finds its takes where they actually live", () => {
+  beforeEach(() => { topOwner.value = 1 })
+
+  // THE BLOCKER (Sam, 2026-08-24): "I could record it… but then when I saved
+  // it, it just would disappear."
+  //
+  // On a file with an audio-cue sibling a take NEVER lands on a subtitle cell —
+  // `openRecordingTarget` redirects the mic to the cue that performs the line
+  // and the take is written against that cue. An added track aligned to a
+  // subtitle row was drawing over the subtitle cells, so its chips could never
+  // appear however much audio it held. The data was on disk and correct; two
+  // surfaces simply disagreed about where to look.
+  const subtitleCells = [
+    cell({ id: "s1", original: "One", translated: "Uno", medium: "text", startTime: 0, endTime: 4 }),
+  ]
+  /** The heard lines that perform them, in the sibling file. The first carries
+   *  a take on the added track; the second is bare, so the mic belongs on it. */
+  const cueCells = [
+    cell({
+      id: "cue1", fileId: "f1-cues", original: "One", medium: "media", startTime: 0, endTime: 4,
+      selectedBySlot: { "trk-extra": "aud-extra" },
+      attachments: {
+        "aud-extra": { audioId: "aud-extra", slot: "trk-extra", url: "frontier-audio://aud-extra" },
+      },
+    } as unknown as Partial<CellData>),
+    cell({ id: "cue2", fileId: "f1-cues", original: "Two", medium: "media", startTime: 5, endTime: 9 }),
+  ]
+  const withAddedTrack = deriveTracksForFile(
+    {
+      trackOverrides: {
+        "trk-extra": { kind: "audio", name: "Extra", order: 9, sourceTrackId: "source-subtitles" },
+      },
+    },
+    { isSubtitleImport: true, hasMediaCells: false, hasAudioCues: true },
+  )
+
+  it("draws a subtitle-aligned track's chip from the CUE that carries it", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={subtitleCells}
+        audioCues={cueCells}
+        targetCells={cueCells}
+        tracks={withAddedTrack}
+        onRetimeSubtitle={() => {}}
+      />,
+    )
+    const lane = screen.getByTestId("tl-target-lane-trk-extra")
+    // Before the fix this lane resolved over `subtitleCells`, which hold no
+    // attachment at this slot, and rendered no chip at all.
+    expect(within(lane).getByTestId("tl-target-cue1")).toBeInTheDocument()
+  })
+
+  // The other half of the same rule, and the one that silently breaks if only
+  // `items` is fixed: the hover mic is drawn over the cells with NO take, so if
+  // `empty` still came from the subtitle list the mic would offer to record a
+  // line that already has audio.
+  it("offers the mic over the cue cells too, not the subtitle cells", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={subtitleCells}
+        audioCues={cueCells}
+        targetCells={cueCells}
+        tracks={withAddedTrack}
+        onRetimeSubtitle={() => {}}
+        onOpenRecording={() => {}}
+      />,
+    )
+    const lane = screen.getByTestId("tl-target-lane-trk-extra")
+    // The bare CUE gets the mic…
+    expect(within(lane).getByTestId("tl-target-empty-cue2")).toBeInTheDocument()
+    // …the one that already has a take does not…
+    expect(within(lane).queryByTestId("tl-target-empty-cue1")).toBeNull()
+    // …and the subtitle cell gets nothing at all, because recording there is
+    // redirected to a cue and a slot over it would be an offer the app cannot
+    // keep.
+    expect(within(lane).queryByTestId("tl-target-empty-s1")).toBeNull()
+  })
+})
+
+describe("TimelineEditor — a menu with nothing in it does not open", () => {
+  beforeEach(() => { topOwner.value = 1 })
+
+  const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
+  const gutterRows = () =>
+    Array.from(
+      (screen.getByTestId("tl-scroll").previousElementSibling as HTMLElement)
+        .querySelectorAll("[data-tl-track-row]"),
+    )
+
+  // Sam, 2026-08-24: "right clicking only opens up an empty drop down thing…
+  // technically we shouldn't even have a drop down thingy show up in the first
+  // place." With several derived tracks selected there is genuinely nothing to
+  // offer — Rename is single-track only and none of them can be coloured,
+  // foldered from, or deleted with the setting off.
+  it("stays shut on a multi-selection of derived tracks with editing off", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}} onRenameTrack={() => {}}
+      />,
+    )
+    const rows = gutterRows()
+    fireEvent.click(rows[0])
+    fireEvent.click(rows[1], { metaKey: true })
+    fireEvent.contextMenu(rows[1])
+    expect(screen.queryByRole("menu")).toBeNull()
+    // …and the `⋯` goes with it, rather than advertising a menu that will not open.
+    expect(screen.queryByTestId("tl-track-menu-source-audio")).toBeNull()
+  })
+
+  it("still opens on ONE of them, where Rename applies", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}} onRenameTrack={() => {}}
+      />,
+    )
+    fireEvent.contextMenu(gutterRows()[0])
+    expect(screen.getByText("Rename")).toBeInTheDocument()
+  })
+})
+
+describe("TimelineEditor — the gutter's trailing controls sit in one column", () => {
+  beforeEach(() => { topOwner.value = 1 })
+
+  const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
+
+  // Sam, 2026-08-24: "the mute button icons seem to be left justified with some
+  // sort of a gap from the text… differently named tracks are leading to
+  // differently aligned mute/unmute buttons."
+  //
+  // `trailing` is a FRAGMENT — the speaker and the `⋯` — and a fragment spreads
+  // into the parent's flex as separate children. With `justify-between` the free
+  // space then landed BETWEEN them, so the speaker sat wherever the track's name
+  // happened to end. Wrapping the pair makes it one child pinned to the right
+  // wall, which is what puts every row's speaker in the same column.
+  it("wraps the speaker and the menu button as a single flex child", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}} onRenameTrack={() => {}}
+      />,
+    )
+    const speaker = screen.getByTestId("tl-speaker-source")
+    const row = speaker.closest("[data-tl-track-row]")!
+    // Exactly two: the name block, and the controls. Three is the bug.
+    expect(row.children).toHaveLength(2)
+    const controls = row.children[1]
+    expect(controls).toContainElement(speaker as HTMLElement)
+    expect(controls).toContainElement(screen.getByTestId("tl-track-menu-source-audio"))
+    // Pinned right, and not allowed to be squeezed by a long name.
+    expect(controls.className).toContain("shrink-0")
+  })
+})
+
+// AQU-646 stage 3c — the row you are dragging re-indents as you aim.
+//
+// Sam, 2026-08-25: "the blue line is either all the way at the edge or indented
+// but the contents of the track that is being dragged are indented in both
+// cases… it should be realigning dynamically as well." The line already told
+// you which outcome a release would pick; the row under the pointer did not,
+// so for the whole gesture the thing being moved and the promise about where it
+// lands disagreed.
+describe("TimelineEditor — the lifted row follows the drop it is aiming at", () => {
+  beforeEach(() => { topOwner.value = 1 })
+
+  const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
+  const folded = () =>
+    deriveTracksForFile({
+      trackOverrides: {
+        grp: { kind: "folder", name: "Dubs", order: 4 },
+        "target-audio": { groupId: "grp", order: 0 },
+      },
+    })
+
+  /** 40px rows from the origin; the gutter keeps happy-dom's 0-origin rect, so
+   *  a clientY is a content-y and a clientX is an indent-x. */
+  const stubRows = (rows: Element[]) =>
+    rows.forEach((row, i) => {
+      vi.spyOn(row, "getBoundingClientRect").mockReturnValue({
+        top: i * 40, bottom: i * 40 + 40, left: 0, right: 240, width: 240, height: 40, x: 0, y: i * 40,
+        toJSON: () => ({}),
+      } as DOMRect)
+    })
+
+  /** Is the dragged row's CONTENT drawn indented? The indent is on the content
+   *  block, not the row, so the drop line and the lift still span the gutter. */
+  const contentIndented = (row: Element) =>
+    (row.firstElementChild as HTMLElement).className.includes("pl-3.5")
+
+  it("indents while aiming inside the folder and flattens while aiming outside", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={folded()}
+        onRetimeSubtitle={() => {}} onReorderTrack={() => {}} onRenameTrack={() => {}}
+        trackEditing={{
+          onAdd: () => "x", onSetColor: () => {}, onLeaveFolder: () => {},
+          onMoveToScope: () => {}, onCreateFolderFrom: () => "y", onDelete: () => {},
+        }}
+      />,
+    )
+    const gutter = screen.getByTestId("tl-scroll").previousElementSibling as HTMLElement
+    const rows = Array.from(gutter.querySelectorAll("[data-tl-track-row]"))
+    stubRows(rows)
+
+    // Grab a loose row and drag it down over the folder's block.
+    const dragged = rows[0]
+    expect(contentIndented(dragged)).toBe(false)
+    fireEvent.pointerDown(dragged, { button: 0, pointerId: 1, clientX: 8, clientY: 10 })
+
+    // Well to the RIGHT — past half the 240px gutter — means "drop inside".
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 200, clientY: 150 })
+    const indentedWhileReachingIn = contentIndented(rows[0])
+
+    // …and back to the LEFT means "just reorder", at the same height.
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 4, clientY: 150 })
+    const indentedWhileOutside = contentIndented(rows[0])
+
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 4, clientY: 150 })
+
+    // THE ASSERTION IS THE DIFFERENCE, not either value on its own: the same Y
+    // with a different X has to change how the travelling row is drawn, which
+    // is exactly what was missing.
+    expect(indentedWhileReachingIn).toBe(true)
+    expect(indentedWhileOutside).toBe(false)
   })
 })

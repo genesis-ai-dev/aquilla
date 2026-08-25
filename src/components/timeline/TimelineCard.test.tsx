@@ -73,6 +73,33 @@ describe("TimelineCard", () => {
     expect(onRetime).toHaveBeenCalledWith("c1", 2, 4)
   })
 
+  // AQU-646 stage 2. This is a REGRESSION TEST FOR A LIVE BUG, not hardening:
+  // before the guard, a right-press began a real drag and `pointerup` emitted,
+  // so right-dragging across a card rewrote its timing. It surfaced because
+  // right-click now has to reach a context-menu trigger instead of being
+  // swallowed by a drag that was never meant to start.
+  it("does not begin a drag on the secondary button", () => {
+    const onRetime = vi.fn()
+    render(<TimelineCard cell={cell()} {...base} variant="subtitle" selected onSelect={() => {}} onRetime={onRetime} />)
+    const el = screen.getByTestId("tl-card-c1")
+    fireEvent.pointerDown(el, { clientX: 100, pointerId: 1, button: 2 })
+    fireEvent.pointerMove(window, { clientX: 140 })
+    fireEvent.pointerUp(window, { clientX: 140 })
+    expect(onRetime).not.toHaveBeenCalled()
+  })
+
+  // A macOS ctrl+click is BUTTON 0, so the button check alone does not catch
+  // it — and it is the gesture that opens the context menu.
+  it("does not begin a drag on a macOS ctrl+click, which is button 0", () => {
+    const onRetime = vi.fn()
+    render(<TimelineCard cell={cell()} {...base} variant="subtitle" selected onSelect={() => {}} onRetime={onRetime} />)
+    const el = screen.getByTestId("tl-card-c1")
+    fireEvent.pointerDown(el, { clientX: 100, pointerId: 1, button: 0, ctrlKey: true })
+    fireEvent.pointerMove(window, { clientX: 140 })
+    fireEvent.pointerUp(window, { clientX: 140 })
+    expect(onRetime).not.toHaveBeenCalled()
+  })
+
   // ── SUB-11: live millisecond readout while dragging ───────────────────────
 
   it("shows a live drag chip with the exact times release would commit", () => {

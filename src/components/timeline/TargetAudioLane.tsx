@@ -12,7 +12,7 @@
 
 import { useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, VolumeX } from "lucide-react"
+import { ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Sparkles, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
@@ -39,6 +39,7 @@ import {
 } from "@/lib/timeline/lane-timing"
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
+import { trackChipTint } from "@/lib/timeline/track-colors"
 import { DragTimeChip } from "./DragTimeChip"
 import { TargetChipWaveform } from "./TargetChipWaveform"
 import { useTargetChipPeaks } from "./useTargetChipPeaks"
@@ -82,8 +83,12 @@ export interface TargetAudioLaneProps {
   onSelect(id: string): void
   /** Clean chip click navigates playback to the section (same as a card). */
   onSeek?(id: string): void
-  /** Round 6/7: move a chip — the dub's new CLIP-ZERO ANCHOR (file seconds). */
-  onRetimeTarget?(cellId: string, anchorSec: number): void
+  /** Round 6/7: move a chip — the dub's new CLIP-ZERO ANCHOR (file seconds).
+   *
+   *  AQU-646 stage 3: it also carries the TAKE being moved, not just its line. Placement is
+   *  stored per take now — two tracks share a line, and a per-cell anchor
+   *  would make dragging one chip move the other. */
+  onRetimeTarget?(cellId: string, anchorSec: number, audioId: string): void
   /** Round 7: trim a chip — the COMPLETE desired trim state (both keys
    *  resolved; undefined clears a key back to the clip edge). */
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
@@ -105,6 +110,24 @@ export interface TargetAudioLaneProps {
   /** Test/story seam: supplied peaks bypass the loader entirely, so a test can
    *  assert the drawing without mocking OPFS, the network or AudioContext. */
   peaksByAudioId?: ReadonlyMap<string, Float32Array>
+  /** AQU-646 stage 2: the palette id this track has been given, if any. Absent
+   *  or unknown draws the shipped emerald/violet pair — see track-colors. */
+  color?: string | null
+  /**
+   * AQU-646 stage 2: this lane's root testid.
+   *
+   * DEFAULTS TO THE ONE THAT SHIPPED, and the default is the point: a file can
+   * now hold more than one of these, so a single fixed id would give
+   * `getByTestId` two matches and throw — in tests that have nothing to do with
+   * the new track. The DERIVED dub row keeps `tl-target-lane` byte for byte,
+   * so every existing test and browser pass is untouched, and only the added
+   * tracks carry a namespaced one.
+   *
+   * Stage 3 note: the CHIPS still use `tl-target-<cellId>`, which is unique
+   * only while one lane holds chips. When added tracks start holding takes,
+   * those need namespacing the same way.
+   */
+  laneTestId?: string
 }
 
 type ChipDragMode = "move" | "resize-l" | "resize-r"
@@ -140,8 +163,11 @@ function TargetAudioChip({
   onTrimTarget,
   onOpenRecording,
   peaks,
+  color,
 }: {
   chip: ChipGeometry
+  /** The track's palette id. */
+  color?: string | null
   /** AQU-646: this clip's whole-clip peaks, once they have arrived. Absent
    *  means the chip draws as it always did. */
   peaks?: Float32Array
@@ -170,7 +196,10 @@ function TargetAudioChip({
   snap: { enabled: boolean; candidates: number[] }
   onSelect(id: string): void
   onSeek?(id: string): void
-  onRetimeTarget?(cellId: string, anchorSec: number): void
+  /** AQU-646 stage 3: the TAKE being moved, not just its line. Placement is
+   *  stored per take now — two tracks share a line, and a per-cell anchor
+   *  would make dragging one chip move the other. */
+  onRetimeTarget?(cellId: string, anchorSec: number, audioId: string): void
   onTrimTarget?(cellId: string, audioId: string, trims: { trimStartMs?: number; trimEndMs?: number }): void
   onOpenRecording?(cellId: string): void
 }) {
@@ -308,6 +337,10 @@ function TargetAudioChip({
 
   function beginDrag(mode: ChipDragMode, e: React.PointerEvent) {
     if (mode === "move" ? !canMove : !canResize) return
+    // Primary button only, and not a macOS context-click — see the identical
+    // guard in TimelineCard.beginDrag for why this is a real bug and not
+    // hardening. A right-drag on a take chip moves or trims it today.
+    if (e.button !== 0 || e.ctrlKey) return
     e.stopPropagation()
     const startX = e.clientX
     try {
@@ -328,7 +361,7 @@ function TargetAudioChip({
       const s = proposeSpan(mode, pxToSec(ev.clientX - startX, pxPerSec))
       if (mode === "move") {
         const anchor = s.start - geom.trimStartSec
-        if (Math.abs(s.start - geom.start) > 0.0005) onRetimeTarget?.(cell.id, anchor)
+        if (Math.abs(s.start - geom.start) > 0.0005) onRetimeTarget?.(cell.id, anchor, chip.item.audioId)
         return
       }
       // Resize = trim. Commit the COMPLETE trim state; at-the-edge clears.
@@ -507,6 +540,22 @@ function TargetAudioChip({
       onPointerLeave={() => setHovered(false)}
       onFocus={() => setHovered(true)}
       onBlur={() => setHovered(false)}
+      // AQU-646 stage 2: A RIGHT-CLICK ON A CHIP OPENS NOTHING, DELIBERATELY.
+      // `contextmenu` bubbles, and the lane behind this chip is now a
+      // context-menu trigger for its TRACK — so without this, right-clicking a
+      // take would offer to rename or delete the track it sits on, which is
+      // not what the pointer is over. The track menu is for the track; the chip
+      // has its own affordances on it already.
+      //
+      // The result really is nothing at all: the trigger's own document-level
+      // listener suppresses the browser's native menu anywhere inside it, and
+      // this stops the custom one. That is the intended outcome, not an
+      // oversight — noted here because "nothing happened" is otherwise a
+      // reasonable thing to file a bug about.
+      onContextMenu={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
+      }}
       onPointerDown={(e) => beginDrag("move", e)}
       style={{
         left: `${secToPx(paintedStart, pxPerSec)}px`,
@@ -523,9 +572,14 @@ function TargetAudioChip({
         drag ? "overflow-visible" : "overflow-hidden",
         // The row's live geometry, or 10-46-10 outside a timeline.
         TL_CHIP_BOX_CLASS,
-        chip.item.kind === "take"
-          ? "border-emerald-500/60 bg-emerald-100/80 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300"
-          : "border-violet-500/60 bg-violet-100/80 text-violet-800 dark:bg-violet-950/70 dark:text-violet-300",
+        // AQU-646 stage 2: THE IDENTITY TINT, AND ITS POSITION IN THIS LIST IS
+        // PART OF THE DESIGN. `cn` resolves last-wins per utility group, so
+        // every state layer below — dashed fallback, amber soft-overflow,
+        // full-body red at-fault, the selection ring — beats the track's
+        // colour by sitting after it. Injecting the palette anywhere else, or
+        // letting a palette entry introduce a group the warnings do not also
+        // set, would let a colour quietly win over an alarm.
+        trackChipTint(color, chip.item.kind),
         // An unmeasurable clip spans its section, so say so rather than
         // letting a placeholder width pass for the real thing.
         geom.usingFallback && "border-dashed",
@@ -574,6 +628,45 @@ function TargetAudioChip({
           className="absolute inset-y-0 left-0 flex w-[7px] cursor-col-resize items-center justify-center opacity-0 transition-opacity group-hover/chip:opacity-100 bg-background/70"
         >
           <span className="h-4 w-0.5 rounded bg-current" />
+        </span>
+      )}
+      {/* AQU-646 stage 2: THE SPARKLE COMES BACK, ON GENERATED CHIPS ONLY.
+          Stage 1b removed both kind glyphs because they sat dead centre, which
+          is exactly where speech waveforms peak. It returns because the palette
+          landed: a track's two tones are deliberately CLOSE in hue — near
+          neighbours saying "same track" — and something has to carry the
+          recorded/generated distinction that the tones no longer can. The two
+          decisions are complementary, which is why this is not a revert.
+
+          Left, not centre, so the waveform keeps its middle. Inset past the
+          7px trim handle rather than sitting on it (Sam, 2026-08-22: "we'd just
+          move the sparkles over to the right so that it doesn't collide with
+          the left trim handle") — that handle is the control you reach for.
+
+          It inherits `currentColor`, so it is the chip's own text colour in
+          both themes and turns red with the body when this chip is the one at
+          fault.
+
+          WITHHELD WHEN THE CORNER GLYPH IS SHOWING, because they occupy the
+          same pixels: the badge sits at left-1.5/top-1 and is 14px tall, so at
+          any height where it renders at all it covers the vertical centre. A
+          missing take or a parked transport is a state; "this one is
+          synthetic" is an identity the chip's colour still carries. State wins.
+          No recorded-take glyph either way: recorded is the default, generated
+          is the exception worth marking. */}
+      {/* i18n-exempt "generated" is a TargetAudioItem kind, not copy */}
+      {chip.item.kind === "generated" && !showLeftGlyph && chipH >= MIN_CHIP_GRIP_H_PX && paintedPx >= 24 && (
+        <span
+          aria-hidden
+          data-testid={`tl-target-${cell.id}-generated`}
+          className="pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2"
+        >
+          {/* THE SAME GLYPH THAT USED TO SIT DEAD CENTRE, byte for byte
+              (Sam, 2026-08-24) — same lucide icon, same 3.5 size, same outline
+              rendering inheriting `currentColor`. Only where it sits changed.
+              A briefly-tried filled variant read as a blob at this size and is
+              gone. */}
+          <Sparkles className="h-3.5 w-3.5 shrink-0" />
         </span>
       )}
       {/* SUB-48: an unmeasurable clip says so instead of quietly borrowing
@@ -714,6 +807,8 @@ export function TargetAudioLane({
   fileId,
   session,
   peaksByAudioId,
+  color,
+  laneTestId = "tl-target-lane",
 }: TargetAudioLaneProps) {
   const t = useT()
   const audioFirst = layout?.mode === "audioFirst"
@@ -841,7 +936,7 @@ export function TargetAudioLane({
 
   return (
     // `isolate`: chip z-indexes stack within the lane — never over the playhead.
-    <div data-testid="tl-target-lane" className={`isolate relative ${TL_ROW_H_CLASS} border-b border-border`}>
+    <div data-testid={laneTestId} className={`isolate relative ${TL_ROW_H_CLASS} border-b border-border`}>
       {(emptySpans ?? []).map((span) => {
         const leftPx = secToPx(span.startSec, pxPerSec)
         const widthPx = secToPx(span.endSec - span.startSec, pxPerSec)
@@ -926,6 +1021,7 @@ export function TargetAudioLane({
             loading={loadingCellId === chip.item.cell.id}
             missing={missingCellIds?.has(chip.item.cell.id) ?? false}
             editable={editable}
+            color={color}
             snap={{ enabled: Boolean(snapEnabled), candidates: candidatesFor(chip.item.cell.id, chip.section) }}
             onSelect={onSelect}
             onSeek={onSeek}

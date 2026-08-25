@@ -1,0 +1,67 @@
+// AQU-646 stage 2: a folder's own lane.
+//
+// Open, it holds nothing — the tracks inside are rows of their own directly
+// beneath it, and the folder row is just their heading.
+//
+// Closed, it shows the Logic-style summary: a compressed picture of where there
+// is material on the tracks it is hiding, so closing a folder loses the detail
+// without losing the shape. That is the whole argument for folding a stack up
+// rather than deleting it.
+//
+// THE ROW IS RENDERED EITHER WAY, EMPTY OR NOT. The gutter and the lanes are
+// matched row for row, and a folder that drew no lane would shift every row
+// below it out of line with its own label — and take `beginTrackDrag`'s
+// hit-testing with it, silently.
+
+import { cn } from "@/lib/utils"
+import { TL_ROW_H_CLASS } from "@/lib/timeline/row-metrics"
+import { secToPx } from "@/lib/timeline/scale"
+import { summaryBlocks, type SummarySpan } from "@/lib/timeline/summary-band"
+
+export function TimelineFolderLane({
+  trackId,
+  collapsed,
+  spans,
+  pxPerSec,
+  viewStartSec,
+  viewEndSec,
+}: {
+  trackId: string
+  collapsed: boolean
+  /** Every span on every track inside, concatenated. Coalescing and culling
+   *  are `summaryBlocks`' job, not the caller's. */
+  spans: readonly SummarySpan[]
+  pxPerSec: number
+  viewStartSec: number
+  viewEndSec: number
+}) {
+  const blocks = collapsed ? summaryBlocks(spans, { viewStartSec, viewEndSec, pxPerSec }) : []
+  return (
+    <div
+      data-testid={`tl-folder-lane-${trackId}`}
+      data-collapsed={collapsed ? "" : undefined}
+      className={cn("relative border-b border-border", TL_ROW_H_CLASS)}
+    >
+      {blocks.map((block) => (
+        <div
+          key={block.startSec}
+          aria-hidden
+          // Muted and thin, deliberately: this is a stand-in for rows the
+          // person has said they are not looking at, so it must read as less
+          // than any real chip beside it. Vertically centred rather than
+          // filling the row, which is what stops a closed folder looking like
+          // one enormous take.
+          className="pointer-events-none absolute top-1/2 h-1.5 -translate-y-1/2 rounded-sm bg-muted-foreground/40"
+          style={{
+            left: `${secToPx(block.startSec, pxPerSec)}px`,
+            // A block narrower than a pixel still has to be visible — at a zoom
+            // where the whole file fits, a single short take is the only thing
+            // on the row and rounding it to nothing would say the folder is
+            // empty.
+            width: `${Math.max(2, secToPx(block.endSec - block.startSec, pxPerSec))}px`,
+          }}
+        />
+      ))}
+    </div>
+  )
+}

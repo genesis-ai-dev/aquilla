@@ -5,6 +5,7 @@
 // the text table as MediaVideoPane (AQU-646).
 
 import {
+  Fragment,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -12,22 +13,29 @@ import {
   useState,
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react"
 import { createPortal } from "react-dom"
 import {
   AudioLines,
+  ChevronDown,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   ChevronsDownUp,
   ChevronsUpDown,
   ClipboardCheck,
   Film,
   FolderInput,
+  FolderPlus,
   GripVertical,
   Link2,
   LocateFixed,
   Magnet,
   Minus,
+  MoreHorizontal,
   Plus,
   Users,
   Volume2,
@@ -44,11 +52,27 @@ import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { SourceRegionLane } from "./SourceRegionLane"
 import type { LaneLinkOverlay } from "./CueLinkOverlay"
 import { CueLinkConfirmDialog } from "./CueLinkConfirmDialog"
+import { AddTrackDialog } from "./AddTrackDialog"
+import { DeleteTrackDialog } from "./DeleteTrackDialog"
+import { trackMenuItems, trackMenuIsEmpty, trackMenuScopes } from "./TrackMenuItems"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { createMenuHandle } from "@/components/ui/menu-parts"
 import { EMPTY_CUE_LINK_INDEX, type CueLinkIndex } from "@/lib/sync/cell-links-read"
 import { chipOverlaps, MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { resolveCueCharacter, formatCueCharacter } from "@/lib/timeline/cue-character"
 import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
-import { deriveTracksForFile, type TimelineTrack, type TrackKind } from "@/lib/timeline/tracks"
+import { gutterWidthPx, loadGutterCollapsed, saveGutterCollapsed } from "@/lib/timeline/gutter-width"
+import {
+  deriveTracksForFile,
+  TRACK_KIND_LABELS,
+  type TimelineTrack,
+  type TrackKind,
+} from "@/lib/timeline/tracks"
 import { computeFollowScroll } from "@/lib/timeline/follow"
 import { secToPx, pxToSec, ZOOM_MIN, ZOOM_MAX, ZOOM_DEFAULT } from "@/lib/timeline/scale"
 import {
@@ -62,7 +86,23 @@ import {
   ROW_H_MIN,
   TL_ROW_H_CLASS,
 } from "@/lib/timeline/row-metrics"
-import { orderForDrop, proposeDropIndex, type RowBound } from "@/lib/timeline/track-reorder"
+import { orderForDrop, type RowBound } from "@/lib/timeline/track-reorder"
+import {
+  buildTrackRows,
+  folderIdsOf,
+  folderMembers,
+  folderReachInPx,
+  resolveDropTarget,
+  scopeSiblings,
+  trackScope,
+  type ScopeSiblings,
+  type TrackDropTarget,
+  type TrackRow,
+} from "@/lib/timeline/track-groups"
+import { loadCollapsedFolders, saveCollapsedFolders, toggleCollapsed } from "@/lib/timeline/track-collapse"
+import { isColorableKind, trackDot } from "@/lib/timeline/track-colors"
+import type { SummarySpan } from "@/lib/timeline/summary-band"
+import { TimelineFolderLane } from "./TimelineFolderLane"
 import { RowMetricsContext, useRowMetrics, type RowMetrics } from "./useRowMetrics"
 // Read-only queue subscriptions only — playback COMMANDS stay in the
 // workspace (onSeekToTime), keeping this component testable with a spy prop.
@@ -72,10 +112,12 @@ import { RowMetricsContext, useRowMetrics, type RowMetrics } from "./useRowMetri
 // mute button too now and two components each merging a toggle into their OWN
 // copy of the preference clobber one another.
 import { useQueueForFile, useMissingClipCells, queueClockIsFileTime } from "@/lib/audio/play-queue"
-import { seedAudibility, toggleAudibility, useQueueAudibility, type TrackAudibility } from "@/lib/audio/audibility"
+import { seedAudibility, toggleAudibility, useQueueAudibility } from "@/lib/audio/audibility"
+
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { resolveTargetAudio } from "@/lib/audio/track-audio"
+import { RECORDING_SLOT, slotAudible, slotForTrack } from "@/lib/timeline/track-slots"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useVideoClockSec, useVideoClockPlaying } from "@/lib/timeline/video-clock"
@@ -90,7 +132,14 @@ import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
 import { TimelinePlayhead } from "./TimelinePlayhead"
 import { MediaTextHeader, TimelineTimingRow } from "./TimelineChipStrip"
 import { TimelineTranscribeBar } from "./TimelineTranscribeBar"
-import { applySelect, selectedIdsInOrder, type SelectMods } from "./selection"
+import {
+  applySelect,
+  EMPTY_SELECTION,
+  readTrackSelectMods,
+  selectedIdsInOrder,
+  type SelectMods,
+  type TimelineSelection,
+} from "./selection"
 import { useTimelineClock } from "./useTimelineClock"
 import { armOutputLatency, displaySec, HIGH_LATENCY_SEC } from "@/lib/audio/output-latency"
 import { useOutputLatency } from "./useOutputLatency"
@@ -126,7 +175,10 @@ export interface TimelineEditorProps {
    */
   timingLocked?: boolean
   /** Round 6/7: move a section's dub chip — its clip-zero anchor (file sec). */
-  onRetimeTarget?(cellId: string, anchorSec: number): void
+  /** AQU-646 stage 3: the TAKE being moved, not just its line. Placement is
+   *  stored per take now — two tracks share a line, and a per-cell anchor
+   *  would make dragging one chip move the other. */
+  onRetimeTarget?(cellId: string, anchorSec: number, audioId: string): void
   /** Matt's QA (2026-08-21): a drag on an AUDIO-CUE chip, final bounds in
    *  seconds, fired once on pointer-up. The workspace commits it as
    *  `cell.retime` against the hidden sibling — the same event a re-import's
@@ -259,7 +311,9 @@ export interface TimelineEditorProps {
   onSeekToTime?(sec: number): void
   /** 2026-08-07: the empty-target chips' hover record button (the one
    *  detail-pane action that lives on the lanes, not in the table below). */
-  onOpenRecording?(cellId: string): void
+  /** AQU-646 stage 3: which TRACK's slot the take should land in. The default
+   *  dub row passes "recording", so its behaviour is unchanged. */
+  onOpenRecording?(cellId: string, slot: string): void
   /** AQU-646 round 3 (text→media trace): seeds selection on mount — fills the
    *  chip strip, centers the track on the clip, and cues playback (paused)
    *  at its start via onSeekToTime, same semantics as a clean card click. */
@@ -341,6 +395,50 @@ export interface TimelineEditorProps {
    * worse than no control, because you have to try it to find out.
    */
   onReorderTrack?(trackId: string, order: number): void
+  /**
+   * AQU-646 stage 2: rename one track.
+   *
+   * SEPARATE FROM `trackEditing` BELOW, AND THAT SEPARATION IS THE DESIGN.
+   * Renaming is maintainer work that already ships; the `allowTrackEditing`
+   * setting defaults OFF, and a new setting must not silently take an existing
+   * capability away from every project that has one. Splitting the callbacks is
+   * what makes the type system carry that rule instead of a comment: there is
+   * no way to withhold `trackEditing` and accidentally withhold rename too.
+   */
+  onRenameTrack?(trackId: string, name: string): void
+  /**
+   * …and everything that RESTRUCTURES the timeline. Present only when the
+   * caller has both maintainer clearance and the project's `allowTrackEditing`
+   * setting.
+   *
+   * ABSENT IS THE GATE, exactly as it is for `onReorderTrack`: no menu items,
+   * no Add-track button, nothing to find. Sam's ruling (2026-08-22) is that
+   * with the setting off the controls do not exist rather than being greyed
+   * out — a disabled row advertises a capability the project has switched off
+   * and invites someone to go hunting for why it will not click.
+   *
+   * The server refuses these independently (track-editing-authority.ts), so
+   * this is the affordance, not the permission.
+   */
+  trackEditing?: {
+    /** Returns the new track's id, so the editor can open the rename on it —
+     *  a folder called "Folder" is not a name, and asking straight away is the
+     *  difference between naming it and meaning to. */
+    onAdd(spec: { kind: "audio" | "folder"; name: string; sourceTrackId?: string | null }): string
+    // Stage 2b: every one of these takes a LIST, because the menu acts on the
+    // selection. A single right-clicked row is simply a list of one, which
+    // keeps one code path rather than a bulk path shadowing a single one.
+    /** Stage 3c: one value PER TRACK — colour is two independent axes now, so
+     *  a bulk change keeps each track's own other half. Still one write. */
+    onSetColor(updates: ReadonlyArray<{ trackId: string; color: string | null }>): void
+    onLeaveFolder(trackIds: readonly string[]): void
+    /** A DRAG that crossed a folder wall: one patch carrying both fields,
+     *  because a track arriving in a new scope needs a rank in it and its old
+     *  number ranks it somewhere else entirely. */
+    onMoveToScope(trackId: string, groupId: string | null, order: number): void
+    onCreateFolderFrom(trackIds: readonly string[]): string
+    onDelete(trackIds: readonly string[]): void
+  }
 }
 
 /** The default prop, resolved ONCE. A `deriveTracksForFile(null)` call in the
@@ -375,7 +473,7 @@ const TIMING_MODE_KEYS: Record<
 /** Each audio track's speaker-button copy. Whole sentences per track, not one
  *  frame per state with the track's name poured in — the name inflects. */
 const SPEAKER_TOGGLE_KEYS: Record<
-  keyof TrackAudibility,
+  "source" | "target",
   { mute: MessageKey; unmute: MessageKey; audibleTitle: MessageKey; mutedTitle: MessageKey }
 > = {
   source: {
@@ -439,6 +537,8 @@ interface LaneLabelReorder {
   /** Which of this row's own edges carries the 2px drop-indicator line, if
    *  either. The line is the whole readout — there is no drag chip. */
   dropEdge: "top" | "bottom" | null
+  /** Drawn short and inset, meaning "inside the folder above". */
+  dropIndent?: boolean
   onPointerDown(e: ReactPointerEvent<HTMLDivElement>): void
   onKeyDown(e: ReactKeyboardEvent<HTMLDivElement>): void
 }
@@ -449,15 +549,64 @@ function LaneLabel({
   dot,
   trailing,
   reorder,
+  folder,
+  indented,
+  renaming,
+  selected,
+  onRowClick,
+  collapsed,
+  className,
+  ...rest
 }: {
   name: string
   sub: string
   dot: string
   trailing?: ReactNode
   reorder?: LaneLabelReorder
-}) {
+  /** AQU-646 stage 2: this row's name is being edited in place. */
+  renaming?: { onCommit(name: string): void; onCancel(): void }
+  /** AQU-646 stage 2b: this track is in the selection. A TINT AND NO RING
+   *  (Sam, 2026-08-24) — the ring is the chip selection's mark, and two
+   *  different selections wearing the same one would be unreadable. */
+  selected?: boolean
+  /** A plain click on the row, with its modifiers. Withheld while renaming —
+   *  the field owns the pointer then. */
+  onRowClick?(e: ReactMouseEvent<HTMLDivElement>): void
+
+  /** AQU-646 stage 2: this row is a folder. Its dot becomes a disclosure
+   *  control, because a folder's colour says nothing and its open/closed state
+   *  says everything. `trackId` is carried here rather than read off `reorder`
+   *  — that one is withheld from anyone who cannot reorder, and the toggle is
+   *  not a reorder affordance. */
+  folder?: { trackId: string; collapsed: boolean; memberCount: number; onToggle(): void }
+  /** …and this row is inside one. */
+  indented?: boolean
+  /** AQU-646 stage 3b: the whole gutter is collapsed to a strip, so this row
+   *  keeps only the glyphs that still mean something without words. ALL ROWS
+   *  TOGETHER OR NONE (Sam) — there is no per-row version of this, which is why
+   *  it arrives as a plain prop off one piece of editor state rather than
+   *  anything the row itself owns. */
+  collapsed?: boolean
+} & Omit<React.HTMLAttributes<HTMLDivElement>, "children">) {
   const t = useT()
   const lifted = reorder?.liftPx != null
+  const renameRef = useRef<HTMLInputElement>(null)
+  const renameFocused = useRef(false)
+  const isRenaming = renaming != null
+  useEffect(() => {
+    if (!isRenaming) {
+      renameFocused.current = false
+      return
+    }
+    // A tick, not `autoFocus` — see the note on the input itself. The menu that
+    // started this rename hands focus back to its trigger on close, and it does
+    // that after the input has mounted.
+    const timer = setTimeout(() => {
+      renameRef.current?.focus()
+      renameRef.current?.select()
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [isRenaming])
   // The same ruler the chips beside this label degrade against. Stage 3 wired
   // it for them and left the gutter rendering at full size into a clip, which
   // is why the names printed over each other at the compact end.
@@ -476,6 +625,14 @@ function LaneLabel({
     // (`spacebarShouldToggle`), so a focused label would silently kill the
     // timeline's transport key.
     <div
+      // AQU-646 stage 2: `...rest` FIRST, so nothing a caller passes can
+      // overwrite the row's own contract — the drag attribute, the roles, the
+      // handlers. It exists because `ContextMenuTrigger` substitutes this
+      // element via `render=` rather than wrapping it, which is what keeps the
+      // gutter's `role="list"` owning `role="listitem"` children directly;
+      // an intervening generic element breaks that ownership for assistive
+      // tech. `className` is merged rather than spread, at the bottom.
+      {...rest}
       // How `beginTrackDrag` finds the rows to measure. A data attribute and
       // not a testid, and only on the draggable rows: the gutter's contract is
       // that it renders what the hardcoded rows did, and the untimed strip
@@ -484,10 +641,21 @@ function LaneLabel({
       role={reorder ? "listitem" : undefined}
       aria-roledescription={reorder ? t("editor.timeline.sortableTrackRole") : undefined}
       tabIndex={reorder ? 0 : undefined}
-      onPointerDown={reorder?.onPointerDown}
-      onKeyDown={reorder?.onKeyDown}
+      // While the name is being edited, the row is not a drag handle: the
+      // pointer belongs to the text field.
+      onPointerDown={renaming ? undefined : reorder?.onPointerDown}
+      onKeyDown={renaming ? undefined : reorder?.onKeyDown}
+      onClick={renaming ? undefined : onRowClick}
+      data-selected={selected ? "" : undefined}
       className={cn(
-        "flex items-center justify-between gap-1 overflow-hidden border-b border-border px-3",
+        "flex items-center gap-1 overflow-hidden border-b border-border",
+        // Collapsed, the two surviving glyphs sit CENTRED as a pair rather than
+        // pushed to opposite walls: `justify-between` across 44px would strand
+        // the dot on one edge and the speaker on the other with nothing
+        // between them, which reads as two unrelated columns instead of one
+        // track. The padding comes in to match — px-3 either side of a 44px
+        // strip leaves 20px, which the speaker alone does not fit in.
+        collapsed ? "justify-center px-1.5" : "justify-between px-3",
         TL_ROW_H_CLASS,
         // Everything on this line is withheld from a user who cannot reorder,
         // down to the `relative` — the row a viewer sees is byte-for-byte the
@@ -500,20 +668,39 @@ function LaneLabel({
         // NOT part (see the gutter's comment), so the only thing separating the
         // travelling row from the stationary one underneath is this.
         lifted && "z-10 cursor-grabbing bg-background opacity-90 shadow-lg",
+        // The selection tint. AFTER the lift, so a row being dragged keeps its
+        // opaque background and does not read as translucent over the rows it
+        // passes; before `className`, so a caller can still override.
+        selected && !lifted && "bg-accent",
+        className,
       )}
       style={lifted ? { transform: `translateY(${reorder?.liftPx}px)` } : undefined}
+      // Collapsed, the row has no visible name — so it gets one that a pointer
+      // and a screen reader can still find. `title` is the hover tooltip, which
+      // is the whole recovery path for "which track is this?" without
+      // expanding; `aria-label` names the listitem, which otherwise announces
+      // as its speaker button alone. Both are withheld when the name is
+      // actually on screen: a tooltip repeating visible text is noise, and an
+      // aria-label there would override the row's real content.
+      title={collapsed ? name : rest.title}
+      aria-label={collapsed ? name : rest["aria-label"]}
     >
       {reorder?.dropEdge && (
         <span
           aria-hidden
           data-testid="tl-track-drop-line"
           className={cn(
-            "pointer-events-none absolute inset-x-0 z-20 h-0.5 bg-sky-500",
+            "pointer-events-none absolute z-20 h-0.5 bg-sky-500",
             reorder.dropEdge === "top" ? "top-0" : "bottom-0",
+            // The indent matches the one a member row is drawn with, so the
+            // line lands exactly where the row it promises will.
+            reorder.dropIndent ? "left-3.5 right-0" : "inset-x-0",
           )}
         />
       )}
-      <div className="flex min-w-0 flex-col gap-0.5">
+      {/* The indent is on the CONTENT, not the row, so the drop line and the
+          lifted-row background still span the full gutter. */}
+      <div className={cn("flex min-w-0 flex-col gap-0.5", indented && !collapsed && "pl-3.5")}>
         <span className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-foreground">
           {/* An <svg> inside the existing name span, and it MUST NOT grow a
               `span.font-semibold` of its own: the gutter parity test reads the
@@ -521,26 +708,106 @@ function LaneLabel({
               textContent, so a wrapper here would read back as a nameless
               extra row. An icon contributes no text, so the names are
               untouched. */}
-          {reorder && (
+          {reorder && !collapsed && (
             <GripVertical
               data-testid={`tl-track-grip-${reorder.trackId}`}
               className="-ml-1.5 h-3.5 w-3.5 shrink-0 text-muted-foreground opacity-30 transition-opacity group-hover:opacity-100"
             />
           )}
-          <span className={cn("h-1.5 w-1.5 shrink-0 rounded-sm", dot)} />
+          {/* AQU-646 stage 2: a folder's disclosure control stands where every
+              other row's colour dot stands, so the column of glyphs stays a
+              column. A real <button>, which also means `beginTrackDrag`'s
+              existing `closest("button")` bail keeps a click on it from
+              starting a drag — the same way the speaker toggle is protected. */}
+          {folder ? (
+            <button
+              type="button"
+              data-testid={`tl-folder-toggle-${folder.trackId}`}
+              aria-expanded={!folder.collapsed}
+              aria-label={
+                folder.collapsed
+                  ? t("editor.timeline.folderExpandAria", { name })
+                  : t("editor.timeline.folderCollapseAria", { name })
+              }
+              onClick={folder.onToggle}
+              className="-ml-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              {folder.collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
+          ) : (
+            <span className={cn("h-1.5 w-1.5 shrink-0 rounded-sm", dot)} />
+          )}
           {/* TRUNCATE, NEVER WRAP — and this was wrong at every row height, not
-              just the short ones. "Source subtitles" does not fit the 128px
+              just the short ones. A two-word name did not fit the old 128px
               gutter beside a grip and a dot, so it wrapped to two lines; that
               is a four-line label in a row built for two, which is most of what
               made the compact end overflow so badly. A plain span, because the
-              parity test matches `span.font-semibold` and this one must not. */}
-          <span className="truncate">{name}</span>
+              parity test matches `span.font-semibold` and this one must not.
+              (Stage 3b took the expanded gutter to 240px, which is what
+              actually FIXED that name — but the truncate stays: a user can call
+              a track anything, and there is no width that fits every name.) */}
+          {collapsed ? null : renaming ? (
+            // AQU-646 stage 2: renaming in place, and the INPUT REPLACES ONLY
+            // THE NAME SPAN — the row's own root element is untouched. That is
+            // deliberate: `beginTrackDrag` counts `[data-tl-track-row]`
+            // elements and bails when the count disagrees with the rendered
+            // rows, so swapping the row's root for an editor would kill
+            // dragging for every OTHER row while one was being renamed, with
+            // no error to say why.
+            <input
+              ref={renameRef}
+              data-testid={`tl-track-rename-${folder?.trackId ?? reorder?.trackId ?? name}`}
+              defaultValue={name}
+              aria-label={name}
+              // The blur guard, and it is fixing a REAL bug rather than a test
+              // artefact. The rename is started from a menu item, and Base UI
+              // restores focus to the menu's trigger when the menu closes —
+              // which lands AFTER this input mounts. With `autoFocus` and an
+              // unguarded `onBlur`, the sequence was: input focuses, menu
+              // hands focus back to the row, input blurs, and the commit fires
+              // with the untouched name before the user has typed a character.
+              // The field vanished the instant it appeared.
+              //
+              // So focus is deferred by a tick (past the menu's restoration,
+              // exactly as the file sidebar's rename does it) and the commit is
+              // withheld until the field has actually held focus.
+              onFocus={() => { renameFocused.current = true }}
+              // The row is a drag handle and a key target; neither should see
+              // the typing.
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                e.stopPropagation()
+                if (e.key === "Enter") renaming.onCommit(e.currentTarget.value)
+                else if (e.key === "Escape") renaming.onCancel()
+              }}
+              // Clicking away KEEPS the edit, matching the file sidebar's
+              // rename and every other in-place editor in the app. Losing a
+              // typed name to a stray click is the worse mistake — Escape is
+              // right there and says "throw it away" unambiguously.
+              onBlur={(e) => { if (renameFocused.current) renaming.onCommit(e.currentTarget.value) }}
+              className="min-w-0 flex-1 rounded-sm border border-input bg-background px-1 py-0 text-xs font-semibold outline-none focus:ring-1 focus:ring-sky-500"
+            />
+          ) : (
+            <span className="truncate">{name}</span>
+          )}
         </span>
         {/* The sublabel is the first thing to go as the row shrinks — see
-            MIN_LABEL_SUB_H_PX. */}
-        {rowH >= MIN_LABEL_SUB_H_PX && <span className="truncate text-[10px] text-muted-foreground">{sub}</span>}
+            MIN_LABEL_SUB_H_PX — and it is gone outright when the gutter is a
+            strip, where even the NAME does not fit. */}
+        {!collapsed && rowH >= MIN_LABEL_SUB_H_PX && (
+          <span className="truncate text-[10px] text-muted-foreground">{sub}</span>
+        )}
       </div>
-      {trailing}
+      {/* ONE FLEX CHILD, NOT A FRAGMENT'S WORTH.
+          `trailing` carries the speaker AND the `⋯`, and a fragment spreads
+          them into the row's flex as two separate children — so
+          `justify-between` put its free space BETWEEN them and the speaker
+          drifted to wherever the name's width left it. Sam, 2026-08-24:
+          "differently named tracks are leading to differently aligned
+          mute/unmute buttons." Wrapped, the pair is a single child pinned to
+          the right wall, and every row's speaker lands in one column. */}
+      {trailing && <span className="flex shrink-0 items-center gap-0.5">{trailing}</span>}
     </div>
   )
 }
@@ -557,7 +824,16 @@ function LaneLabel({
 // anybody migrating anything.
 const TRACK_RENDER: Record<
   TrackKind,
-  { sub: string; dot: string; audibilityKey: keyof TrackAudibility | null; speakerName: string }
+  {
+    sub: string
+    dot: string
+    /** AQU-646 stage 3: a SLOT, not one of two fixed names — every audio track
+     *  can be muted now, and an added track's key is its own id, which only the
+     *  track knows. Null here means "this kind has nothing to mute"; the gutter
+     *  fills in the per-track answer. */
+    audibilityKey: string | null
+    speakerName: string
+  }
 > = {
   // No speaker button: the Subtitles row makes no sound to mute.
   "source-subtitles": { sub: "text · reading", dot: "bg-zinc-400 dark:bg-zinc-600", audibilityKey: null, speakerName: "" },
@@ -572,6 +848,32 @@ const TRACK_RENDER: Record<
   // the two subtitle-shaped rows are never mistaken for each other at a glance.
   "target-subtitles": { sub: "text · translated", dot: "bg-emerald-300 dark:bg-emerald-800", audibilityKey: null, speakerName: "" },
   "target-audio": { sub: "takes · generated", dot: "bg-emerald-600", audibilityKey: "target", speakerName: "target audio" },
+  // ── The two kinds a USER makes (stage 2) ──────────────────────────────────
+  // Neither carries a speaker button. A folder makes no sound of its own — the
+  // tracks inside it do, and each has its own — and an added audio track holds
+  // no takes until stage 3 gives it a slot, so there is nothing yet to mute.
+  //
+  // The `dot` here is only the FALLBACK. Added audio tracks resolve theirs
+  // through the palette (track-colors.ts), which is why the derived rows'
+  // entries above stay literal: source subtitles' grey and source audio's
+  // aquilla blue are deliberate and not up for recolouring (Sam, 2026-08-22).
+  folder: { sub: "group", dot: "bg-zinc-400 dark:bg-zinc-600", audibilityKey: null, speakerName: "" },
+  audio: { sub: "takes · generated", dot: "bg-emerald-600", audibilityKey: null, speakerName: "" },
+}
+
+const NO_SUMMARY_SPANS: SummarySpan[] = []
+
+/**
+ * The colour of the dot beside a track's name.
+ *
+ * The kind's own dot, unless the track is one a user may recolour AND has been.
+ * Source subtitles keeps its grey and source audio its aquilla blue — both are
+ * statements about what those rows ARE, not unassigned defaults, and Sam has
+ * ruled twice that they do not change (2026-08-22).
+ */
+function trackDotClass(track: TimelineTrack, fallback: string): string {
+  if (!track.color || !isColorableKind(track.kind)) return fallback
+  return trackDot(track.color)
 }
 
 export function TimelineEditor({
@@ -629,6 +931,8 @@ export function TimelineEditor({
   legacyMeasure,
   tracks = DEFAULT_TRACKS,
   onReorderTrack,
+  onRenameTrack,
+  trackEditing,
 }: TimelineEditorProps) {
   const t = useT()
   const audioFirst = timingMode === "audioFirst"
@@ -638,6 +942,11 @@ export function TimelineEditor({
   // value resizes the gutter, four lanes and everything drawn on them at once —
   // there is no second copy of the geometry to fall out of step.
   const [rowH, setRowH] = useState(() => loadRowHeight(fileId))
+  // AQU-646 stage 3b: the gutter is a strip or it is fully expanded, for EVERY
+  // row at once. One boolean, held here rather than in the rows, because "they
+  // would all do so at once" (Sam) is the requirement — a per-row version of
+  // this would not be a smaller feature, it would be a different one.
+  const [gutterCollapsed, setGutterCollapsed] = useState(() => loadGutterCollapsed(fileId))
   const rowMetrics = useMemo<RowMetrics>(
     () => ({ rowH, chipH: chipHeightPx(rowH), chipPad: chipPadPx(rowH) }),
     [rowH],
@@ -656,6 +965,263 @@ export function TimelineEditor({
   // through toggleAudibility, which merges against the store.
   const audibility = useQueueAudibility()
   const [snapOn, setSnapOn] = useState(loadSnapEnabled)
+  // AQU-646 stage 2: which folders this person has closed, on THIS file.
+  // Personal state — folder membership syncs, but whether a folder is open is
+  // where somebody is looking, and syncing that would fold a collaborator's
+  // timeline up under them while they worked.
+  const [collapsedFolders, setCollapsedFolders] = useState<ReadonlySet<string>>(() =>
+    loadCollapsedFolders(fileId),
+  )
+  // The editor is not remounted when the sidebar moves to another file, so the
+  // set has to be re-read: without this, file B would open with file A's
+  // folders closed — and since the ids do not match, closed on nothing, which
+  // reads as the collapse state being ignored.
+  useEffect(() => {
+    setCollapsedFolders(loadCollapsedFolders(fileId))
+  }, [fileId])
+
+  /**
+   * The rows to draw: the tracks, with folder members lifted under their
+   * folders and closed folders' members left out.
+   *
+   * NOT `useMemo`, deliberately. The React Compiler is on in this project and a
+   * hand-written memo makes it skip optimising the whole component (the lesson
+   * from TargetAudioLane in stage 1); it memoises this for us. And the work is
+   * one pass over a handful of rows, so there was never anything to save.
+   *
+   * BOTH COLUMNS MAP THIS ONE ARRAY. That is what makes "the gutter and the
+   * lanes render the same list, in the same order" a property of the code
+   * rather than a coincidence two `.map` calls have to keep agreeing on.
+   */
+  const trackRows = buildTrackRows(tracks, collapsedFolders)
+
+  function toggleFolder(folderId: string) {
+    setCollapsedFolders((prev) => {
+      const next = toggleCollapsed(prev, folderId)
+      saveCollapsedFolders(fileId, next)
+      return next
+    })
+  }
+
+  // ── AQU-646 stage 2: track editing ────────────────────────────────────────
+  /** Which track's name is being edited in place; null while none is. */
+  const [renamingTrackId, setRenamingTrackId] = useState<string | null>(null)
+  /** The add-track dialog, which has a decision to make (what to line up with)
+   *  and therefore cannot be an in-place edit the way a new folder is. */
+  const [addingTrack, setAddingTrack] = useState(false)
+  /** The track a delete has been asked about, held while the confirmation is
+   *  open — by ID, so a collaborator's edit landing mid-question cannot leave
+   *  the dialog holding a stale copy of the row. */
+  const [deletingTrackIds, setDeletingTrackIds] = useState<readonly string[]>([])
+
+  /**
+   * The menu roots, one per track, created on demand and kept for the session.
+   *
+   * A ref rather than state: creating a handle is not a render-visible change,
+   * and putting it in state would re-render the whole editor the first time
+   * anybody hovered a row.
+   */
+  const menuHandles = useRef(new Map<string, ReturnType<typeof createMenuHandle>>())
+  function menuHandleFor(trackId: string) {
+    const existing = menuHandles.current.get(trackId)
+    if (existing) return existing
+    const created = createMenuHandle()
+    menuHandles.current.set(trackId, created)
+    return created
+  }
+
+  /** Is there anything to put in a track's menu at all? With neither rename
+   *  clearance nor the editing setting there is not, and the row renders
+   *  exactly as it did before this stage — no trigger, no `⋯`, nothing. */
+  const hasTrackMenu = Boolean(onRenameTrack || trackEditing)
+
+  /**
+   * AQU-646 stage 2b: which TRACKS are selected.
+   *
+   * A SECOND, INDEPENDENT SELECTION — it has nothing to do with the chip
+   * selection above it. Clicking a track does not move the media cursor, does
+   * not fill the chip strip and does not touch playback; the two are different
+   * objects and the only thing they share is the fold that computes them.
+   *
+   * It exists to SCOPE EDITS (Sam, 2026-08-24: select several tracks, then
+   * right-click to recolour or delete them at once), so it is offered exactly
+   * where the menu is. On a row with no menu it would be a highlight that does
+   * nothing, and stage 2's rule is that such a row stays byte-identical to the
+   * one that shipped.
+   */
+  const [trackSelection, setTrackSelection] = useState<TimelineSelection>(EMPTY_SELECTION)
+  // A file change invalidates every id in it.
+  useEffect(() => {
+    setTrackSelection(EMPTY_SELECTION)
+    setRenamingTrackId(null)
+  }, [fileId])
+
+  /**
+   * The ids a track selection may contain, in the order they are drawn.
+   *
+   * FOLDERS ARE EXCLUDED, and that is the whole of "folders are not tracks"
+   * (Sam, 2026-08-24) expressed in one line: a folder cannot enter a selection,
+   * so no bulk operation can ever be handed one, and a shift-range that spans a
+   * folder simply steps over it rather than swallowing it.
+   */
+  const selectableTrackIds = trackRows
+    .filter((row) => row.track.kind !== "folder")
+    .map((row) => row.track.id)
+
+  const selectedTrackIds = selectedIdsInOrder(trackSelection, selectableTrackIds)
+  const selectedTrackIdSet = new Set(selectedTrackIds)
+
+  /** Fold a click on a track row into the selection. */
+  function selectTrack(trackId: string, mods: SelectMods | undefined) {
+    setTrackSelection((current) => applySelect(current, trackId, mods, selectableTrackIds))
+  }
+
+  /** Set by a drag that actually moved, so the `click` that follows knows not
+   *  to be read as a selection. Cleared by whoever reads it. */
+  const trackDragMovedRef = useRef(false)
+
+  /**
+   * A plain click on a gutter row.
+   *
+   * A FOLDER OPENS AND CLOSES INSTEAD OF SELECTING (Sam, 2026-08-24: "folders
+   * are not tracks"). The disclosure triangle already does this; the whole row
+   * doing it is what makes a folder feel like a heading rather than a row you
+   * failed to select.
+   */
+  function onTrackRowClick(rowIndex: number, e: ReactMouseEvent<HTMLDivElement>) {
+    // The speaker, the `⋯`, the disclosure triangle and the rename field all
+    // own their own clicks — the same carve-out `beginTrackDrag` makes.
+    if (e.target instanceof Element && e.target.closest("button, input")) return
+    if (trackDragMovedRef.current) {
+      trackDragMovedRef.current = false
+      return
+    }
+    const row = trackRows[rowIndex]
+    if (!row) return
+    if (row.track.kind === "folder") {
+      toggleFolder(row.track.id)
+      return
+    }
+    selectTrack(row.track.id, readTrackSelectMods(e))
+  }
+
+  /**
+   * The tracks a menu opened on `trackId` should act on.
+   *
+   * Right-clicking a track that is NOT in the selection makes it the selection
+   * first — Finder's and Logic's behaviour, and Sam's call. Without it, a menu
+   * opened on one row could silently delete three others.
+   */
+  function menuTargets(trackId: string): TimelineTrack[] {
+    if (!selectedTrackIdSet.has(trackId)) {
+      const single = tracks.find((tr) => tr.id === trackId)
+      return single ? [single] : []
+    }
+    const chosen = new Set(selectedTrackIds)
+    return tracks.filter((tr) => chosen.has(tr.id))
+  }
+
+  /**
+   * Would a menu opened on this row contain nothing at all? Then it must not
+   * open. (Sam, 2026-08-24: "we shouldn't even have a drop down thingy show up
+   * in the first place.")
+   *
+   * It happens for real: with several derived tracks selected there is nothing
+   * to offer — Rename is single-track only, colour needs every target
+   * colourable, and none of them can be deleted — so with track editing off the
+   * list is empty, and an empty popup appeared over the timeline.
+   *
+   * ASKED WITH `menuTargets`, THE SAME FUNCTION THE MENU ITSELF USES, so the
+   * question and the answer can never be about different rows. It is pure, so
+   * this is safe to call while rendering.
+   */
+  function trackMenuEmpty(trackId: string): boolean {
+    return trackMenuIsEmpty(
+      trackMenuScopes({
+        targets: menuTargets(trackId),
+        canRename: Boolean(onRenameTrack),
+        canEdit: Boolean(trackEditing),
+      }),
+    )
+  }
+
+  /**
+   * …and the state change that makes the rule above true rather than merely
+   * computed: right-clicking outside the selection MOVES the selection there
+   * first, so the menu you are looking at is about the rows that are lit.
+   *
+   * A FOLDER CLEARS IT. Folders are not selectable, so a menu opened on one is
+   * about that folder alone — leaving three tracks lit behind an open folder
+   * menu would say the opposite.
+   */
+  function onTrackContextMenu(trackId: string) {
+    const track = tracks.find((tr) => tr.id === trackId)
+    if (!track || track.kind === "folder") {
+      setTrackSelection(EMPTY_SELECTION)
+      return
+    }
+    if (selectedTrackIdSet.has(trackId)) return
+    setTrackSelection({ primaryId: trackId, extraIds: [] })
+  }
+  const deletingTracks = tracks.filter((tr) => deletingTrackIds.includes(tr.id))
+
+  /**
+   * How many recordings a delete would take with the track.
+   *
+   * Slot-keyed, which is the binding stage 3 will fill in: a take belongs to
+   * the DEFAULT dub row when its slot is `"recording"`, and to an added track
+   * when its slot is that track's id (see the `AudioSlot` note in
+   * audio-attachments-bus). Until stage 3 gives added tracks slots of their
+   * own, an added track honestly holds nothing and this honestly returns 0 —
+   * which is the right number, not a stub. Writing it now rather than later
+   * means the confirmation is correct the day slots exist, instead of being a
+   * dialog that has always said "0 recordings" and stops.
+   */
+  function takeCountForTrack(track: TimelineTrack): number {
+    if (track.kind === "folder") return 0
+    const slot = track.id === "target-audio" ? "recording" : track.id
+    let count = 0
+    // `audioByCellId`, NOT the `cells` prop: timeline cells carry no
+    // attachments of their own — the per-file audio read is where they live,
+    // already filtered to the live ones (`deleted = 0`) and already carrying
+    // each clip's slot.
+    for (const entry of audioByCellId?.values() ?? []) {
+      for (const att of Object.values(entry.attachments)) {
+        if (att.slot === slot) count += 1
+      }
+    }
+    return count
+  }
+
+  function trackMenu(track: TimelineTrack): ReactNode {
+    // Stage 2b: the menu acts on the SELECTION when the row it was opened on is
+    // part of one — see `menuTargets`, which also makes an outside row the
+    // selection first so the menu can never act on rows you cannot see.
+    const targets = menuTargets(track.id)
+    return trackMenuItems({
+      targets,
+      t,
+      onRename: onRenameTrack ? setRenamingTrackId : undefined,
+      editing: trackEditing
+        ? {
+            onSetColor: trackEditing.onSetColor,
+            onLeaveFolder: trackEditing.onLeaveFolder,
+            onCreateFolderFrom: (trackIds) => {
+              const folderId = trackEditing.onCreateFolderFrom(trackIds)
+              // The row does not exist until the write lands and the refresh
+              // arrives; setting this now means the field is focused the
+              // instant it does, with no second gesture.
+              setRenamingTrackId(folderId)
+              setTrackSelection(EMPTY_SELECTION)
+            },
+            // Deleting really deletes — the recordings go with the track — so
+            // it asks first (Sam, 2026-08-22). The menu opens the question; the
+            // dialog is what calls through.
+            onDelete: setDeletingTrackIds,
+          }
+        : undefined,
+    })
+  }
   const audioQuality = useAudioQualityPref()
   // Seeded by the text→media trace (AQU-646 round 3): the seed alone opens
   // the detail pane and rings the card.
@@ -691,14 +1257,33 @@ export function TimelineEditor({
    * and survives the vertical zoom being changed between two drags, which
    * dividing a pointer offset by a row height is not and does not.
    */
+  // AQU-646 stage 2: EVERY INDEX IN HERE IS A SCOPE INDEX, NOT A ROW INDEX, and
+  // conflating the two is the way this goes wrong. A drag reorders a track
+  // among its own siblings — the top-level rows, or the members of one folder —
+  // because crossing a folder boundary means writing `groupId`, which is a
+  // gated operation and a menu command. So the arithmetic runs over the SCOPE,
+  // while the lifted row and the drop line are drawn in ROW space. `rowIndexes`
+  // is the bridge between them.
   const [trackDrag, setTrackDrag] = useState<{
-    fromIndex: number
-    /** Where it would land on release — an index into `tracks`, already past
-     *  proposeDropIndex's lifted-row adjustment. */
-    toIndex: number
+    /** Which track is in the air. By id, because a row index is only valid
+     *  against the render that produced it, and a collaborator's edit can land
+     *  mid-drag. */
+    trackId: string
     /** Raw pointer travel, straight onto the row's transform. */
     dy: number
-    bounds: RowBound[]
+    /** Row-space, one per rendered row — what the drop line is measured in. */
+    rowBounds: RowBound[]
+    /**
+     * Where release would put it, or null while the drag has not moved far
+     * enough to mean anything (or would change nothing).
+     *
+     * Stage 2b: this is now the WHOLE answer, indicator included, because the
+     * drop depends on both pointer axes — Y for the position, X for whether it
+     * goes inside a folder. Keeping the resolution in one pure function is what
+     * lets the preview and the commit be the same decision rather than two that
+     * agree by inspection.
+     */
+    target: TrackDropTarget | null
   } | null>(null)
   const clock = useTimelineClock()
   const chipStripSlot = useUiSlot("media-chip-strip")
@@ -843,7 +1428,17 @@ export function TimelineEditor({
     loadedPrefsFor.current = fileId
     setPxPerSec(loadZoom(fileId))
     setRowH(loadRowHeight(fileId))
+    setGutterCollapsed(loadGutterCollapsed(fileId))
   }, [fileId])
+
+  // Writing it back. Its own effect rather than a write inside the toggle
+  // handler, so the value on disk is always the value on screen — including
+  // the one the line above just loaded, which a handler-only write would never
+  // see. `saveGutterCollapsed` no-ops on the default, so this leaves no key
+  // behind for a file nobody ever collapsed.
+  useEffect(() => {
+    saveGutterCollapsed(fileId, gutterCollapsed)
+  }, [fileId, gutterCollapsed])
 
   // Round 7 (SUB-44): transport keys while the timeline is on screen.
   // Space = play/pause the QUEUE; Cmd/Ctrl+Enter = back to the very start.
@@ -892,9 +1487,14 @@ export function TimelineEditor({
 
   /** `name` overrides the track's own sentence for a row whose button silences
    *  something else — see `editor.timeline.muteNamed`. */
-  function speakerToggle(track: keyof TrackAudibility, name?: string) {
-    const audible = audibility[track]
-    const keys = SPEAKER_TOGGLE_KEYS[track]
+  // AQU-646 stage 3: `track` is a SLOT now, so every audio track can carry one
+  // — not only the two the type used to name. The two named flags keep their
+  // own whole-sentence copy; an added track borrows the target row's, with its
+  // own name poured in via `name`, because "mute Spanish VO" is the sentence
+  // its speaker should say.
+  function speakerToggle(track: string, name?: string) {
+    const audible = track === "source" ? audibility.source : slotAudible(audibility, track)
+    const keys = SPEAKER_TOGGLE_KEYS[track === "source" ? "source" : "target"]
     const compactSpeaker = rowH < MIN_SPEAKER_FULL_H_PX
     const speakerLabel = name
       ? t(audible ? "editor.timeline.muteNamed" : "editor.timeline.unmuteNamed", { name })
@@ -987,18 +1587,23 @@ export function TimelineEditor({
   // Pinned rather than derived per-cell, because in this workflow every cell is
   // a text cell and the header would otherwise change as you clicked around.
   //
-  // "SUBTITLES", not "Dialogue" (Sam, 2026-08-20): these cells ARE the
-  // subtitles, the track gutter directly above already calls them that, and
-  // the thing they were being confused with — the heard lines from the audio
-  // sibling — is labelled "Audio cues" a few inches away. A heading of its own
-  // invention sitting between those two invited exactly that mix-up.
+  // NOT "Dialogue" (Sam, 2026-08-20): these cells ARE the file's source text,
+  // the track gutter directly above already calls them that, and the thing
+  // they were being confused with — the heard lines from the audio sibling —
+  // is labelled "Audio cues" a few inches away. A heading of its own invention
+  // sitting between those two invited exactly that mix-up.
+  //
+  // IT TRACKS THE GUTTER'S WORD, which is the whole point of it — so when the
+  // gutter's went "Subtitles" → "Source text" (2026-08-24) this followed. Two
+  // different names for one column of cells, an inch apart, is precisely the
+  // confusion the heading was rewritten to end.
   //
   // Keyed on the FILE now, not on `subtitleFileWithFootage` (a linked-video
   // heuristic). That gate left a subtitle file with no video falling through to
   // the per-cell derivation, which says "Dialogue" whenever nothing is
   // selected — the confusing case, on the one file type that can least afford
   // it.
-  const textHeadingLabel = isSubtitleImport ? "Subtitles" : undefined
+  const textHeadingLabel = isSubtitleImport ? TRACK_KIND_LABELS["source-subtitles"] : undefined
 
   // Stretches of film that no cell covers — where a line can still be added.
   // Derived from the same sweep the Source track draws, so the two can never
@@ -1322,6 +1927,67 @@ export function TimelineEditor({
     () => targetSource.filter((c) => !resolveTarget(c)),
     [targetSource, resolveTarget],
   )
+  /**
+   * The cells an ADDED track's chips line up against. (AQU-646 stage 3)
+   *
+   * Chosen at creation and fixed thereafter (Sam, 2026-08-22 — realigning a
+   * track that already holds takes would be a migration wearing a dropdown), so
+   * this is a read of what the track already said. An unset or unrecognised
+   * alignment falls back to the same cells the default dub row uses, which is
+   * the sensible answer and never an empty lane.
+   */
+  function cellsForSourceTrack(sourceTrackId: string | null | undefined): CellData[] {
+    switch (sourceTrackId) {
+      case "source-subtitles":
+      case "target-subtitles":
+        // A TAKE NEVER LANDS ON A SUBTITLE CELL WHEN THIS FILE HAS CUES, so a
+        // lane drawn over the subtitle cells is permanently empty no matter how
+        // much audio the track holds. That was the bug (Sam, 2026-08-24: "I
+        // could record it… but then when I saved it, it just would disappear").
+        //
+        // The mic is redirected: `openRecordingTarget` in ProjectWorkspace
+        // sends a subtitle row's recording to the CUE that performs the line,
+        // through `cueLinks.cuesForText`, and the take is written against that
+        // cue in the sibling file. `targetCells` is that same cue list, and its
+        // own contract above is the authority we follow here — "the cells that
+        // CARRY TARGET AUDIO, when that is not this file's own cells… Absent ⇒
+        // takes on this file's cells". Reading it means the lane and the mic
+        // can never disagree about where a take lives, which is the invariant
+        // `targetItemsForTrack` is tested against.
+        //
+        // Note the derived Target audio row has always done exactly this — it
+        // resolves over `targetSource`, which is `targetCells` when present.
+        // This is an added track catching up, not a new rule.
+        return targetCells ?? subtitle
+      case "source-audio":
+        // The same two tenants that row itself has: an imported recording's
+        // dialogue split, or the audio VTT's cues.
+        return dialogue.length > 0 ? dialogue : (audioCues ?? [])
+      default:
+        return targetSource
+    }
+  }
+
+  /**
+   * One added track's chips and its still-empty lines, resolved at ITS slot.
+   *
+   * The two are a strict partition of the same cell list — a line either has a
+   * selected take on this track or it does not — which is what makes the hover
+   * mic appear exactly where a recording is missing.
+   */
+  function targetItemsForTrack(track: TimelineTrack): { items: TargetAudioItem[]; empty: CellData[] } {
+    const slot = slotForTrack(track.id)
+    const cellList = cellsForSourceTrack(track.sourceTrackId)
+    const items: TargetAudioItem[] = []
+    const empty: CellData[] = []
+    for (const c of cellList) {
+      const target = resolveTargetAudio(c, slot)
+      if (target) items.push({ cell: c, kind: target.kind, audioId: target.audioId })
+      else empty.push(c)
+    }
+    return { items, empty }
+  }
+
   const durationSec = layout.totalSec
   const trackWidthPx = secToPx(durationSec, pxPerSec)
   // SUB-18: overscan the visibility window by ~240px each side so cards at the
@@ -1587,13 +2253,39 @@ export function TimelineEditor({
 
   /** Where the drag ends up, as a single `file.track.set` write. Shared by the
    *  pointer drop and the keyboard move — one implementation, two inputs. */
-  function commitTrackMove(fromIndex: number, toIndex: number) {
+  /** A move expressed in SCOPE indices — see the trackDrag state for why the
+   *  distinction is load-bearing. `scope.tracks` is ascending by `order` by
+   *  construction (that is what scoping buys), which is the precondition
+   *  orderForDrop's midpoint arithmetic depends on. */
+  function commitScopedMove(scope: ScopeSiblings, toIndex: number) {
     if (!onReorderTrack) return
-    const drop = orderForDrop(tracks, fromIndex, toIndex)
+    const drop = orderForDrop(scope.tracks, scope.fromIndex, toIndex)
     // null covers both "did not move" and an index off either end (which is how
     // Alt+ArrowUp on the top row resolves), so neither needs its own guard.
     if (!drop) return
     onReorderTrack(drop.trackId, drop.order)
+  }
+
+  /**
+   * …and a drop from the pointer, which may also have changed the track's
+   * FOLDER.
+   *
+   * TWO CALLBACKS, BECAUSE THEY ARE TWO PERMISSIONS. A plain reorder writes
+   * `{order}` alone and rides `onReorderTrack`, which is ungated because
+   * dragging shipped before the setting existed. A drop that lands the track in
+   * a different scope writes `groupId` too, which is gated — so it goes through
+   * `trackEditing`, and can only ever be reached when the resolver was allowed
+   * to cross in the first place.
+   */
+  function commitDrop(track: TimelineTrack, target: TrackDropTarget | null) {
+    if (!target) return
+    const folderIds = folderIdsOf(tracks)
+    const currentScope = trackScope(track, folderIds)
+    if (target.groupId === currentScope) {
+      onReorderTrack?.(track.id, target.order)
+      return
+    }
+    trackEditing?.onMoveToScope(track.id, target.groupId, target.order)
   }
 
   /**
@@ -1606,20 +2298,53 @@ export function TimelineEditor({
    * lifted forever with window listeners still attached.
    */
   function beginTrackDrag(fromIndex: number, e: ReactPointerEvent<HTMLDivElement>) {
-    if (!onReorderTrack || e.button !== 0) return
+    // `e.ctrlKey` and not just the button: a macOS ctrl+click is BUTTON 0, so
+    // it fires `pointerdown` here AND `contextmenu` at the row's menu trigger.
+    // The 3px threshold below stops the reorder from committing, but by then
+    // this handler has already set body.userSelect = "none", installed three
+    // window listeners and taken the pointer capture — and a captured pointer
+    // can swallow the `mouseup` the menu trigger is waiting for, leaving a
+    // lifted row sitting under an open menu.
+    if (!onReorderTrack || e.button !== 0 || e.ctrlKey) return
     // The speaker toggle lives INSIDE the label, and the label is the handle:
     // without this, muting a track starts a drag and the click never lands.
     if (e.target instanceof Element && e.target.closest("button")) return
     const inner = gutterInnerRef.current
     if (!inner) return
-    const rows = Array.from(inner.querySelectorAll<HTMLElement>("[data-tl-track-row]"))
-    if (rows.length !== tracks.length) return
+    const rowEls = Array.from(inner.querySelectorAll<HTMLElement>("[data-tl-track-row]"))
+    // AGAINST THE RENDERED ROWS, NOT `tracks` — a collapsed folder hides its
+    // members, so the two counts legitimately differ and comparing with
+    // `tracks.length` would make dragging stop working the moment anybody
+    // closed a folder. Silently: no error, no partial behaviour, just a dead
+    // handle. That is the failure shape that cost a debug cycle last round.
+    if (rowEls.length !== trackRows.length) return
     const originTop = gutterRef.current?.getBoundingClientRect().top ?? 0
     const scrolled = scrollRef.current?.scrollTop ?? 0
-    const bounds: RowBound[] = rows.map((row) => {
+    const rowBounds: RowBound[] = rowEls.map((row) => {
       const rect = row.getBoundingClientRect()
       return { top: rect.top - originTop + scrolled, bottom: rect.bottom - originTop + scrolled }
     })
+    // Stage 2b: the pointer's X matters now, so the gutter's left edge is the
+    // origin the indent is measured from.
+    const gutterLeft = gutterRef.current?.getBoundingClientRect().left ?? 0
+    const resolve = (ev: { clientX: number; clientY: number }) =>
+      resolveDropTarget(
+        trackRows,
+        rowBounds,
+        fromIndex,
+        { contentY: gutterContentY(ev.clientY), indentX: ev.clientX - gutterLeft },
+        {
+          // THE GATE. With track editing off a drag may not change which folder
+          // anything is in, so the resolver clamps every answer to the row's
+          // current scope and the gesture behaves exactly as it did before
+          // folders existed.
+          allowCrossing: Boolean(trackEditing),
+          // Half the column, measured live — the gutter is 56px collapsed and
+          // 240px expanded, and a fixed threshold made "into the folder" the
+          // answer almost everywhere on the wide one.
+          reachInPx: folderReachInPx(gutterWidthPx(gutterCollapsed)),
+        },
+      )
 
     const startY = e.clientY
     try {
@@ -1629,16 +2354,23 @@ export function TimelineEditor({
     }
     const restoreUserSelect = document.body.style.userSelect
     document.body.style.userSelect = "none"
-    setTrackDrag({ fromIndex, toIndex: fromIndex, dy: 0, bounds })
+    setTrackDrag({ trackId: trackRows[fromIndex].track.id, dy: 0, rowBounds, target: null })
     // Same 3px threshold TimelineCard uses: a drag has to be INTENDED. Below
     // it the row does not follow and a release commits nothing, so a click that
     // wobbles by a pixel cannot silently reorder the timeline.
     let moved = false
     const onMove = (ev: PointerEvent) => {
       const dy = ev.clientY - startY
-      if (Math.abs(dy) > 3) moved = true
-      const toIndex = moved ? proposeDropIndex(fromIndex, gutterContentY(ev.clientY), bounds) : fromIndex
-      setTrackDrag((d) => (d ? { ...d, dy, toIndex } : d))
+      if (Math.abs(dy) > 3) {
+        moved = true
+        // AQU-646 stage 2b: tell the row's `click` that this was a DRAG. The
+        // browser fires `click` after `pointerup` regardless, and without this
+        // every completed reorder would also change the selection. Same
+        // `movedRef` idiom TimelineCard uses for its own seek-vs-drag split.
+        trackDragMovedRef.current = true
+      }
+      const target = moved ? resolve(ev) : null
+      setTrackDrag((d) => (d ? { ...d, dy, target } : d))
     }
     const stop = () => {
       window.removeEventListener("pointermove", onMove)
@@ -1650,7 +2382,7 @@ export function TimelineEditor({
     const onUp = (ev: PointerEvent) => {
       stop()
       if (!moved) return
-      commitTrackMove(fromIndex, proposeDropIndex(fromIndex, gutterContentY(ev.clientY), bounds))
+      commitDrop(trackRows[fromIndex].track, resolve(ev))
     }
     // A CANCELLED drag commits nothing. The pointer was taken away, so there is
     // no release position to read as an intention.
@@ -1679,7 +2411,14 @@ export function TimelineEditor({
     if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return
     e.preventDefault()
     e.stopPropagation()
-    commitTrackMove(fromIndex, e.key === "ArrowDown" ? fromIndex + 1 : fromIndex - 1)
+    // SCOPED LIKE THE DRAG, which is the whole reason `scopeSiblings` exists
+    // apart from `dragScope`: there is no pointer here and therefore no bounds
+    // to measure, but the two inputs to one implementation have to agree about
+    // what a move MEANS. Alt+ArrowDown on a folder member steps it past its
+    // next sibling, not out of the folder.
+    const scope = scopeSiblings(trackRows, fromIndex)
+    if (!scope) return
+    commitScopedMove(scope, scope.fromIndex + (e.key === "ArrowDown" ? 1 : -1))
   }
 
   /**
@@ -1691,12 +2430,17 @@ export function TimelineEditor({
    * means above it. null while the drop would change nothing, so a drag that
    * has not left its own slot draws no promise it will not keep.
    */
-  const dropBoundary =
-    trackDrag && trackDrag.toIndex !== trackDrag.fromIndex
-      ? trackDrag.toIndex > trackDrag.fromIndex
-        ? trackDrag.toIndex + 1
-        : trackDrag.toIndex
-      : null
+  /**
+   * The drop indicator, in RENDERED-row space — which is where it is drawn and,
+   * since stage 2b, where the resolver already computes it.
+   *
+   * It used to be derived here from a scope-space boundary, which needed a
+   * bridge (`rowIndexes`) because the two spaces disagree whenever a folder is
+   * open. The resolver knows both, so it hands back the finished answer and
+   * this is a read.
+   */
+  const dropRow = trackDrag?.target?.indicator ?? null
+
   /**
    * The same line, in the LANE column, in content pixels.
    *
@@ -1707,10 +2451,10 @@ export function TimelineEditor({
    * ever changes without the other, the line will be off by the difference.
    */
   const dropLineContentY =
-    trackDrag && dropBoundary != null
-      ? dropBoundary < trackDrag.bounds.length
-        ? trackDrag.bounds[dropBoundary].top
-        : trackDrag.bounds[trackDrag.bounds.length - 1].bottom
+    trackDrag && dropRow
+      ? dropRow.edge === "top"
+        ? trackDrag.rowBounds[dropRow.rowIndex]?.top
+        : trackDrag.rowBounds[dropRow.rowIndex]?.bottom
       : null
 
   // SUB-12: cursor-centered wheel/pinch zoom (ctrl + wheel — a trackpad pinch
@@ -2064,12 +2808,63 @@ export function TimelineEditor({
     if (cue && typeof cue.startTime === "number" && Number.isFinite(cue.startTime)) seekTo(cue.startTime)
   }
 
+  /**
+   * Where a track has material, for a closed folder's summary band.
+   *
+   * AT CELL RESOLUTION, NOT CHIP RESOLUTION, and deliberately. A dub chip's
+   * true span comes from `layout.targetGeom`, which needs the attachment
+   * object and the trim state; the cell's own section is within a fraction of a
+   * second of it, and this is a stand-in drawn on a row somebody has explicitly
+   * said they are not looking at. Paying chip-geometry cost per take, for every
+   * hidden track, to move a 1.5px bar by less than a pixel is the wrong trade.
+   *
+   * An added `audio` track returns nothing: it holds no takes until stage 3
+   * gives it a slot of its own. An empty summary on a folder of empty tracks is
+   * the correct picture, not a gap.
+   */
+  function summarySpansForTrack(track: TimelineTrack): SummarySpan[] {
+    const fromCells = (cellList: readonly CellData[], lane: "subtitle" | "source"): SummarySpan[] => {
+      const out: SummarySpan[] = []
+      for (const cell of cellList) {
+        const span = layout.spanFor(cell, lane)
+        if (span) out.push({ startSec: span.start, endSec: span.end })
+      }
+      return out
+    }
+    switch (track.kind) {
+      case "source-subtitles":
+      case "target-subtitles":
+        return fromCells(subtitle, "subtitle")
+      case "source-audio":
+        // The same two tenants the lane itself has — an imported recording's
+        // dialogue split, or the audio VTT's cues.
+        return dialogue.length > 0
+          ? fromCells(dialogue, "source")
+          : (audioCues ?? []).flatMap((cue) =>
+              typeof cue.startTime === "number" &&
+              typeof cue.endTime === "number" &&
+              Number.isFinite(cue.startTime) &&
+              Number.isFinite(cue.endTime)
+                ? [{ startSec: cue.startTime, endSec: cue.endTime }]
+                : [],
+            )
+      case "target-audio":
+        return fromCells(
+          targetItems.map((item) => item.cell),
+          "source",
+        )
+      default:
+        return NO_SUMMARY_SPANS
+    }
+  }
+
   // One row of the track column. Declared HERE, in the component body, because
   // it reads the lanes, the layout, the zoom window, the snap flag and every
   // handler above — hoisting it to module scope would mean threading twenty
   // reactive values through a parameter object, and the first one anybody
   // forgot to pass would be a lane that quietly stopped updating.
-  function laneForTrack(track: TimelineTrack): ReactNode {
+  function laneForTrack(row: TrackRow): ReactNode {
+    const track = row.track
     switch (track.kind) {
       case "source-subtitles":
         // SUB-53: a subtitle span is expressed against the original's clock,
@@ -2214,7 +3009,7 @@ export function TimelineEditor({
             // is nothing to drag it to. Trimming stays — and re-flows.
             onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
             onTrimTarget={onTrimTarget}
-            onOpenRecording={onOpenRecording}
+            onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, RECORDING_SLOT) : undefined}
             emptyCells={emptyTargets}
             // AQU-646: the mic over a stretch with no cell at all creates the
             // blank line first, then opens the recorder — same line the "T"
@@ -2229,8 +3024,77 @@ export function TimelineEditor({
             projectId={project?.id ?? null}
             fileId={fileId}
             session={session ?? null}
+            color={track.color}
           />
         )
+      // ── The two kinds a USER makes (stage 2) ────────────────────────────
+      case "folder":
+        return (
+          <TimelineFolderLane
+            key={track.id}
+            trackId={track.id}
+            collapsed={row.collapsed}
+            spans={row.collapsed ? row.members.flatMap(summarySpansForTrack) : NO_SUMMARY_SPANS}
+            pxPerSec={pxPerSec}
+            viewStartSec={viewStartSec}
+            viewEndSec={viewEndSec}
+          />
+        )
+      case "audio": {
+        // An added audio track, drawing the same lane the derived dub row does
+        // — that IS the point of it — but resolved at its OWN slot.
+        //
+        // Stage 2 rendered this item-less and `editable={false}` on purpose:
+        // recording was wired to the default track's slot, so a mic here would
+        // have silently recorded onto track 1. Now that the slot exists, both
+        // withholdings come off together, and `onOpenRecording` carries the
+        // slot so the take lands where the mic was pressed.
+        //
+        // NO `emptySpans` / `onAddLineAndRecord`: those mint a SOURCE cell,
+        // which every track shares. Adding lines stays with the rows that own
+        // the segmentation.
+        const own = targetItemsForTrack(track)
+        return (
+          <TargetAudioLane
+            key={track.id}
+            items={own.items}
+            layout={layout}
+            pxPerSec={pxPerSec}
+            viewStartSec={viewStartSec}
+            viewEndSec={viewEndSec}
+            selectedId={selectedId}
+            loadingCellId={loadingCellId}
+            missingCellIds={missingCellIds}
+            editable={editable}
+            externalMaster={Boolean(coreMediaUrl)}
+            snapEnabled={snapOn && !audioFirst}
+            onSelect={selectFromChip}
+            onSeek={laneProps.onSeek}
+            onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
+            onTrimTarget={onTrimTarget}
+            emptyCells={own.empty}
+            onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, slotForTrack(track.id)) : undefined}
+            projectId={project?.id ?? null}
+            fileId={fileId}
+            session={session ?? null}
+            color={track.color}
+            laneTestId={`tl-target-lane-${track.id}`}
+          />
+        )
+      }
+      // AQU-646 stage 2: THIS DEFAULT IS THE POINT OF THE FUNCTION RETURNING
+      // ReactNode. `undefined` is a perfectly valid ReactNode, so without it a
+      // switch that has not learned a new kind returns nothing AND COMPILES —
+      // and the failure is not "the lane is broken", it is that the gutter row
+      // still renders while its lane does not, so every row below is one row
+      // out of alignment with its label and `beginTrackDrag`'s hit-testing
+      // silently addresses the wrong track. The `never` assignment turns that
+      // into a compile error at the moment a kind is added.
+      default: {
+        const _exhaustive: never = track.kind
+        void _exhaustive
+        return null
+      }
     }
   }
 
@@ -2403,6 +3267,44 @@ export function TimelineEditor({
               triggerIcon={FolderInput}
               testId="tl-sources-menu"
               ariaLabel={t("editor.timeline.sourcesMenuAria")}
+            />
+          )}
+          {/* AQU-646 stage 2: ADDING A TRACK IS A BUTTON, NOT A RIGHT-CLICK
+              (Sam, 2026-08-22). Right-click is for the tracks that already
+              exist; a project that has just turned track editing on has none
+              of the new ones yet, so the way in has to be somewhere you can
+              see. It renders only when the setting is on and the person is a
+              maintainer — the whole control, not a disabled one. */}
+          {trackEditing && (
+            <OverflowMenu
+              items={[
+                {
+                  id: "add-audio",
+                  label: t("editor.timeline.trackAddTrack"),
+                  icon: AudioLines,
+                  onClick: () => setAddingTrack(true),
+                },
+                {
+                  id: "add-folder",
+                  label: t("editor.timeline.trackAddFolder"),
+                  icon: FolderPlus,
+                  // A folder needs no decisions — it has no alignment and holds
+                  // nothing yet — so it is made immediately and named in place,
+                  // rather than through a dialog whose only field is a name.
+                  onClick: () => {
+                    const folderId = trackEditing.onAdd({
+                      kind: "folder",
+                      name: t("editor.timeline.trackAddFolder"),
+                    })
+                    setRenamingTrackId(folderId)
+                  },
+                },
+              ]}
+              triggerVariant="outline"
+              triggerLabel={t("editor.timeline.trackAdd")}
+              triggerIcon={Plus}
+              testId="tl-add-track"
+              ariaLabel={t("editor.timeline.trackAdd")}
             />
           )}
           {/* AQU-646: the reminder, for as long as the project is unlocked.
@@ -2614,7 +3516,17 @@ export function TimelineEditor({
           the panel, and there is NO SCROLLBAR AT ALL — a failure that looks
           exactly like the resizable panel not having taken. */}
       <RowMetricsContext.Provider value={rowMetrics}>
-        <div className="grid min-h-0 flex-1 grid-cols-[128px_1fr] grid-rows-[minmax(0,1fr)]">
+        {/* AN INLINE STYLE, NOT A CLASS, and that is forced rather than
+            chosen: Tailwind generates only the classes it can literally see in
+            the source, so a `grid-cols-[${px}px_1fr]` built at runtime produces
+            no CSS at all and the column would silently fall back to auto width.
+            The two literal alternatives (`grid-cols-[44px_1fr]` /
+            `grid-cols-[240px_1fr]`) would work, but then the widths live in two
+            places and the module that names them is no longer the authority. */}
+        <div
+          className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)]"
+          style={{ gridTemplateColumns: `${gutterWidthPx(gutterCollapsed)}px 1fr` }}
+        >
           {/* NOTHING MAY BE INSERTED BETWEEN THESE TWO COLUMNS, and the gutter
               must not grow a testid: TimelineEditor.test.tsx reads the labels
               through `tl-scroll`'s previousElementSibling, on the stated
@@ -2630,6 +3542,47 @@ export function TimelineEditor({
                 today's composite to the pixel. */}
             <div className="relative z-10 h-7 border-b border-border bg-background">
               <div className="absolute inset-0 bg-muted/20" />
+              {/* THE TOGGLE LIVES HERE, AND ITS POSITIONING IS ABSOLUTE FOR A
+                  REASON THAT IS NOT COSMETIC. This spacer is the ruler's
+                  opposite number: the two are both `h-7`, and that shared
+                  height is the whole vertical coordinate frame the drop lines,
+                  the lift offsets and `gutterContentY` are measured in. A
+                  button in the normal flow would grow this box by its own
+                  height and put every one of those out by that much. Absolute
+                  contributes no layout, so the frame is untouched.
+
+                  It sits in the header rather than in the toolbar because it
+                  acts on the column directly beneath it, and because the
+                  toolbar is already the busiest strip in the editor. */}
+              <button
+                type="button"
+                data-testid="tl-gutter-toggle"
+                aria-expanded={!gutterCollapsed}
+                aria-label={
+                  gutterCollapsed
+                    ? t("editor.timeline.gutterExpandAria")
+                    : t("editor.timeline.gutterCollapseAria")
+                }
+                title={
+                  gutterCollapsed
+                    ? t("editor.timeline.gutterExpandAria")
+                    : t("editor.timeline.gutterCollapseAria")
+                }
+                onClick={() => setGutterCollapsed((v) => !v)}
+                className={cn(
+                  "absolute inset-y-0 flex items-center justify-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500",
+                  // Collapsed it is the only thing in the strip, so it takes
+                  // the whole strip and is impossible to miss; expanded it
+                  // tucks into the right edge, against the border it moves.
+                  gutterCollapsed ? "inset-x-0" : "right-0 w-7",
+                )}
+              >
+                {gutterCollapsed ? (
+                  <ChevronsRight className="h-3.5 w-3.5" />
+                ) : (
+                  <ChevronsLeft className="h-3.5 w-3.5" />
+                )}
+              </button>
             </div>
             {/* Slaved to the track column's scrollTop by handleTrackScroll.
                 `role="list"` only when the rows can actually be reordered: it
@@ -2646,7 +3599,8 @@ export function TimelineEditor({
                   one row here per row there, in the same order, off the same
                   array. `name` comes from the track and not from the kind, which
                   is the whole seam a rename arrives through. */}
-              {tracks.map((track, index) => {
+              {trackRows.map((row, index) => {
+                const track = row.track
                 const render = TRACK_RENDER[track.kind]
                 // EVERY audible row gets its speaker, in every arrangement.
                 //
@@ -2662,39 +3616,140 @@ export function TimelineEditor({
                 // the pair should carry the same control.
                 //
                 // The playback bar's mute is the same flag, not a second one.
-                const speaker = render.audibilityKey
-                return (
+                // AQU-646 stage 3: EVERY audio track gets a speaker (Sam,
+                // 2026-08-24). The derived rows name their flag in TRACK_RENDER;
+                // an added track's is its own SLOT, which only the track knows,
+                // so the kind table cannot hold it.
+                const speaker =
+                  render.audibilityKey ?? (track.kind === "audio" ? slotForTrack(track.id) : null)
+                const renaming = renamingTrackId === track.id && onRenameTrack != null
+                const label = (
                   <LaneLabel
                     key={track.id}
                     name={track.name}
-                    sub={render.sub}
-                    dot={render.dot}
-                    trailing={
-                      speaker
-                        ? speakerToggle(
-                            speaker,
-                            // On a subtitle file this row's cues are timings over
-                            // the FILM's soundtrack, and that is what the button
-                            // silences. Saying "source audio" there would be
-                            // true and useless; the operator wants to know the
-                            // film is about to go quiet.
-                            speaker === "source" && subtitleFileWithFootage
-                              ? "the film's own sound"
-                              : render.speakerName,
-                          )
+                    // A folder says how much is inside it rather than what kind
+                    // of thing it is — "3 tracks" is the only fact about a
+                    // folder that is not already on screen, and it is the one
+                    // that matters while it is closed.
+                    sub={
+                      track.kind === "folder"
+                        ? t("editor.timeline.folderTrackCount", { count: row.members.length })
+                        : render.sub
+                    }
+                    dot={trackDotClass(track, render.dot)}
+                    folder={
+                      track.kind === "folder"
+                        ? {
+                            trackId: track.id,
+                            collapsed: row.collapsed,
+                            memberCount: row.members.length,
+                            onToggle: () => toggleFolder(track.id),
+                          }
                         : undefined
                     }
+                    // THE TRAVELLING ROW RE-INDENTS AS YOU AIM (Sam,
+                    // 2026-08-25). The drop line already showed which of the
+                    // two outcomes a release would pick, but the row under the
+                    // pointer kept whatever indent it started with — so the
+                    // thing being moved and the line promising where it lands
+                    // disagreed for the whole gesture, and you only found out
+                    // by letting go.
+                    //
+                    // Off the RESOLVED target rather than the pointer, so it
+                    // can never promise something the drop would not do: with
+                    // track editing off the resolver clamps every answer to the
+                    // row's own scope, and the indent stays put along with it.
+                    // A dragged FOLDER always resolves to the top level (a
+                    // folder is never inside another), so it never indents.
+                    indented={
+                      trackDrag?.trackId === track.id && trackDrag.target
+                        ? trackDrag.target.groupId != null
+                        : row.depth === 1
+                    }
+                    trailing={
+                      <>
+                        {speaker
+                          ? speakerToggle(
+                              speaker,
+                              // On a subtitle file this row's cues are timings over
+                              // the FILM's soundtrack, and that is what the button
+                              // silences. Saying "source audio" there would be
+                              // true and useless; the operator wants to know the
+                              // film is about to go quiet.
+                              speaker === "source" && subtitleFileWithFootage
+                                ? "the film's own sound"
+                                : track.kind === "audio"
+                                  ? track.name
+                                  : render.speakerName,
+                            )
+                          : null}
+                        {/* AQU-646 stage 2: the same items right-click offers,
+                            on a control you can SEE and TAB TO. Base UI's
+                            context menus expose no keyboard path of their own
+                            — no Shift+F10, no Menu key, and `actionsRef` does
+                            not open one (its actions are {unmount, close}) — so
+                            without a real button there would be no way to reach
+                            these items without a pointer at all. It doubles as
+                            the discoverability answer for right-click, which
+                            nothing on screen advertises.
+
+                            `beginTrackDrag` already bails on
+                            `closest("button")`, so pressing it cannot start a
+                            drag. */}
+                        {/* NOT WHILE THE GUTTER IS A STRIP. `opacity-0` hides
+                            it until hover but it still TAKES ITS WIDTH, and a
+                            dot, a speaker and this together overflow the
+                            collapsed column — which is why the mute button was
+                            being clipped out of it (Sam, 2026-08-24). The menu
+                            is not lost: right-click still opens it, and the
+                            column is one click from being wide again. */}
+                        {hasTrackMenu && !renaming && !gutterCollapsed && !trackMenuEmpty(track.id) && (
+                          <DropdownMenuTrigger
+                            handle={menuHandleFor(track.id)}
+                            data-testid={`tl-track-menu-${track.id}`}
+                            aria-label={t("editor.timeline.trackMenuAria", { name: track.name })}
+                            className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100 aria-expanded:opacity-100"
+                          >
+                            <MoreHorizontal className="h-3.5 w-3.5" />
+                          </DropdownMenuTrigger>
+                        )}
+                      </>
+                    }
+                    renaming={
+                      renamingTrackId === track.id && onRenameTrack
+                        ? {
+                            onCommit: (next) => {
+                              setRenamingTrackId(null)
+                              const trimmed = next.trim()
+                              // An empty name is not a name. Committing one
+                              // would store an invisible label with no way to
+                              // tell it from a bug; the escape hatch for "I
+                              // did not mean this" is Escape, and it is one
+                              // key away.
+                              if (trimmed && trimmed !== track.name) onRenameTrack(track.id, trimmed)
+                            },
+                            onCancel: () => setRenamingTrackId(null),
+                          }
+                        : undefined
+                    }
+                    selected={selectedTrackIdSet.has(track.id)}
+                    collapsed={gutterCollapsed}
+                    onRowClick={hasTrackMenu ? (e) => onTrackRowClick(index, e) : undefined}
                     reorder={
                       onReorderTrack
                         ? {
                             trackId: track.id,
-                            liftPx: trackDrag?.fromIndex === index ? trackDrag.dy : null,
-                            dropEdge:
-                              dropBoundary === index
-                                ? "top"
-                                : dropBoundary === tracks.length && index === tracks.length - 1
-                                  ? "bottom"
-                                  : null,
+                            // By ID, not by index: the drag runs in scope space
+                            // and the rows are in row space, so comparing
+                            // indices would lift whichever row happened to sit
+                            // at the dragged track's sibling position.
+                            liftPx: trackDrag?.trackId === track.id ? trackDrag.dy : null,
+                            dropEdge: dropRow?.rowIndex === index ? dropRow.edge : null,
+                            // Stage 2b: the line INDENTS when release would put
+                            // the track inside a folder, so the two possible
+                            // outcomes of one gesture are distinguishable
+                            // before the pointer is let go.
+                            dropIndent: Boolean(dropRow?.indent),
                             onPointerDown: (e) => beginTrackDrag(index, e),
                             onKeyDown: (e) => onTrackLabelKeyDown(index, e),
                           }
@@ -2702,13 +3757,66 @@ export function TimelineEditor({
                     }
                   />
                 )
+
+                // A row with no menu is the row that shipped, byte for byte —
+                // no trigger, no wrapper, no `select-none` the trigger adds.
+                // Same for a row whose menu would be empty: an empty popup is
+                // worse than no popup, because it reads as a broken control
+                // rather than as an inapplicable one.
+                if (!hasTrackMenu || trackMenuEmpty(track.id)) return label
+
+                return (
+                  // TWO ROOTS PER TRACK IN THIS COLUMN, and neither can contain
+                  // the other. The context menu substitutes the row element via
+                  // `render=` — NOT a wrapper, because the gutter is
+                  // `role="list"` and the row is `role="listitem"`, and a
+                  // generic element between them breaks that ownership for
+                  // assistive tech. The `⋯` has to sit INSIDE the row, while
+                  // its popup has to stay outside it (React bubbles a portal's
+                  // events along the React tree), so it reaches its own root
+                  // through a handle. Same shape as FileRow in the sidebar.
+                  <Fragment key={track.id}>
+                    {/* THE SELECTION MOVES ON OPEN, VIA THE ROOT — never via
+                        an `onContextMenu` on the trigger element. Base UI's
+                        trigger owns that handler, and one supplied alongside it
+                        REPLACES it rather than chaining, so the menu silently
+                        stops opening at all. (It did. That is why this is a
+                        root-level callback.) */}
+                    <ContextMenu onOpenChange={(open) => { if (open) onTrackContextMenu(track.id) }}>
+                      <ContextMenuTrigger render={label} />
+                      <ContextMenuContent className="w-48">{trackMenu(track)}</ContextMenuContent>
+                    </ContextMenu>
+                    <DropdownMenu handle={menuHandleFor(track.id)}>
+                      <DropdownMenuContent align="end" className="w-48">
+                        {trackMenu(track)}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </Fragment>
+                )
               })}
               {/* SUB-37: the untimed parking strip only exists when something is
                   actually untimed — an always-on empty row read as a mystery. */}
               {untimed.length > 0 && (
-                <div className="flex h-12 flex-col justify-center px-3">
-                  <span className="text-xs font-semibold text-foreground">{t("editor.timeline.laneUntimed")}</span>
-                  <span className="text-[10px] text-muted-foreground">{t("editor.timeline.laneUntimedSub")}</span>
+                // Collapsed, this one goes silent along with the track names
+                // above it — its two lines are the longest text in the column
+                // and there is nowhere for them to go. It keeps its box (the
+                // parking strip's chips are still drawn beside it and the two
+                // columns must stay in step) and its name moves to the
+                // tooltip, exactly as a track row's does.
+                <div
+                  className={cn("flex h-12 flex-col justify-center", gutterCollapsed ? "px-1.5" : "px-3")}
+                  title={gutterCollapsed ? t("editor.timeline.laneUntimed") : undefined}
+                >
+                  {!gutterCollapsed && (
+                    <>
+                      <span className="truncate text-xs font-semibold text-foreground">
+                        {t("editor.timeline.laneUntimed")}
+                      </span>
+                      <span className="truncate text-[10px] text-muted-foreground">
+                        {t("editor.timeline.laneUntimedSub")}
+                      </span>
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -2732,7 +3840,43 @@ export function TimelineEditor({
                 viewEndSec={viewEndSec}
                 onScrub={seekTo}
               />
-              {tracks.map(laneForTrack)}
+              {trackRows.map((row) => {
+                const lane = laneForTrack(row)
+                if (!hasTrackMenu || trackMenuEmpty(row.track.id)) return lane
+                return (
+                  // Sam's ruling: right-click ANYWHERE in a track that is not a
+                  // chip. So the lane gets the same menu the label does.
+                  //
+                  // THE WRAPPER MUST CREATE NO STACKING CONTEXT — no `relative`,
+                  // no `isolate`, no `z-*`, no `transform`, no `filter`.
+                  // TargetAudioLane's own root carries `isolate` specifically so
+                  // chip z-indexes stack WITHIN the lane and never over the
+                  // playhead, and a stacking context one level up would undo
+                  // exactly that. A bare block element is the whole wrapper, and
+                  // the lane inside it is a fixed row height, so it adds no
+                  // geometry either.
+                  <ContextMenu
+                    key={row.track.id}
+                    onOpenChange={(open) => { if (open) onTrackContextMenu(row.track.id) }}
+                  >
+                    {/* AQU-646 stage 2b: the selection reaches ACROSS the whole
+                        track, not just its name — otherwise selecting a track
+                        highlights a 128px label and says nothing about the
+                        thing you actually selected. Fainter than the gutter's
+                        tint because it sits under the chips rather than behind
+                        text, and `bg-*` creates no stacking context, so the
+                        rule above still holds. */}
+                    <ContextMenuTrigger
+                      render={
+                        <div className={cn(selectedTrackIdSet.has(row.track.id) && "bg-accent/40")} />
+                      }
+                    >
+                      {lane}
+                    </ContextMenuTrigger>
+                    <ContextMenuContent className="w-48">{trackMenu(row.track)}</ContextMenuContent>
+                  </ContextMenu>
+                )
+              })}
               {untimed.length > 0 && (
                 <div className="flex h-12 items-center gap-2 overflow-x-auto border-b border-border px-3">
                   {untimed.map((c) => (
@@ -2834,6 +3978,36 @@ export function TimelineEditor({
         onConfirm={commitPendingLink}
         onCancel={() => setPendingLink(null)}
       />
+      {/* AQU-646 stage 2. Both are mounted only while track editing is on —
+          not merely closed, absent — so a project that never turns the setting
+          on carries none of this in its tree. */}
+      {trackEditing && (
+        <>
+          <AddTrackDialog
+            open={addingTrack}
+            tracks={tracks}
+            defaultName={t("editor.timeline.trackNewTrackName")}
+            onCancel={() => setAddingTrack(false)}
+            onConfirm={(spec) => {
+              setAddingTrack(false)
+              trackEditing.onAdd({ kind: "audio", ...spec })
+            }}
+          />
+          <DeleteTrackDialog
+            tracks={deletingTracks}
+            // COUNTED NOW, not when the menu opened: a collaborator can attach
+            // a take in between, and a confirmation that undercounts what it is
+            // about to delete is worse than one that says nothing.
+            takeCount={deletingTracks.reduce((n, tr) => n + takeCountForTrack(tr), 0)}
+            memberCount={deletingTracks.reduce((n, tr) => n + folderMembers(tracks, tr.id).length, 0)}
+            onCancel={() => setDeletingTrackIds([])}
+            onConfirm={(trackIds) => {
+              setDeletingTrackIds([])
+              trackEditing.onDelete(trackIds)
+            }}
+          />
+        </>
+      )}
     </div>
   )
 }

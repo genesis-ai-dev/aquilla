@@ -246,6 +246,16 @@ export function TimelineCard({
 
   function beginDrag(mode: DragMode, e: React.PointerEvent) {
     if (!canRetime) return
+    // PRIMARY BUTTON ONLY, AND NOT A MACOS CONTEXT-CLICK. Without this a
+    // right-press begins a real retime: `pointerup` calls proposeSpan and
+    // EMITS if the pointer moved at all, so a right-drag across a card silently
+    // rewrites its timing. `beginTrackDrag` in the gutter has had this guard
+    // since it shipped; the two chip drags never got it.
+    //
+    // BEFORE the stopPropagation, deliberately: bailing first lets the
+    // pointerdown bubble, which is harmless (no lane root carries a pointer
+    // handler) and leaves the event free to reach a context-menu trigger above.
+    if (e.button !== 0 || e.ctrlKey) return
     e.stopPropagation()
     const startX = e.clientX
     try {
@@ -324,6 +334,22 @@ export function TimelineCard({
         else onSelect(cell.id)
         if (!movedRef.current && !mods) onSeek?.(cell.id)
         movedRef.current = false
+      }}
+      // AQU-646 stage 2: A RIGHT-CLICK ON A CHIP OPENS NOTHING, DELIBERATELY.
+      // `contextmenu` bubbles, and the lane behind this chip is now a
+      // context-menu trigger for its TRACK — so without this, right-clicking a
+      // take would offer to rename or delete the track it sits on, which is
+      // not what the pointer is over. The track menu is for the track; the chip
+      // has its own affordances on it already.
+      //
+      // The result really is nothing at all: the trigger's own document-level
+      // listener suppresses the browser's native menu anywhere inside it, and
+      // this stops the custom one. That is the intended outcome, not an
+      // oversight — noted here because "nothing happened" is otherwise a
+      // reasonable thing to file a bug about.
+      onContextMenu={(e) => {
+        e.preventDefault()
+        e.stopPropagation()
       }}
       onPointerDown={(e) => {
         // …and must not start a retime drag either, or ⌘-clicking a subtitle

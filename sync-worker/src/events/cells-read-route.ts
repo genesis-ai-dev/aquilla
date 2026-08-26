@@ -69,6 +69,7 @@
 
 import { verifyTokenForProject } from "../auth"
 import type { AiDraftProvenance } from "./types"
+import { PENDING_ALLOC_TTL_MS } from "./event-insert"
 
 export interface CellsReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -342,6 +343,12 @@ interface Watermarks {
   /** The project's incarnation marker (AQU-943): the stamp minted when the
    *  seq-counter row was created. 0 when the project has no counter row yet. */
   epoch: number
+  /** AQU-1005 fence: one below the oldest live (unsettled, unexpired) seq
+   *  allocation, null when nothing is pending. Clamps the ADVERTISED cursor
+   *  only — delivery and the ETag stay on maxSeq, so a 304 can never strand
+   *  a client: when the straggler commits, maxSeq moves, the ETag misses,
+   *  and the delta from the clamped cursor re-covers the straggler's rows. */
+  pendingFloor: number | null
 }
 
 /** The ETag / `?since=` watermark set, in one round-trip (every subquery is an
@@ -357,13 +364,16 @@ async function fetchWatermarks(
       `SELECT
          (SELECT COALESCE(MAX(server_seq), 0) FROM events WHERE project_id = ? AND file_id = ?) AS max_seq,
          (SELECT rebuilt_seq FROM project_seq_counters WHERE project_id = ?) AS rebuilt_seq,
-         (SELECT project_epoch FROM project_seq_counters WHERE project_id = ?) AS project_epoch`,
+         (SELECT project_epoch FROM project_seq_counters WHERE project_id = ?) AS project_epoch,
+         (SELECT MIN(first_seq) - 1 FROM seq_allocations
+            WHERE project_id = ? AND created_at > now() - (? * interval '1 millisecond')) AS pending_floor`,
     )
-    .bind(projectId, fileId, projectId, projectId)
+    .bind(projectId, fileId, projectId, projectId, projectId, PENDING_ALLOC_TTL_MS)
     .first<{
       max_seq: number | string | bigint
       rebuilt_seq: number | string | bigint | null
       project_epoch: number | string | bigint | null
+      pending_floor: number | string | bigint | null
     }>()
   return {
     maxSeq: Number(row?.max_seq ?? 0),
@@ -374,6 +384,8 @@ async function fetchWatermarks(
     // hold a cursor from a project that never allocated a seq, so the epoch
     // gate below is a no-op in that case rather than a forced resync.
     epoch: Number(row?.project_epoch ?? 0),
+    // NULL when no writer is mid-flight — the overwhelmingly common case.
+    pendingFloor: row?.pending_floor == null ? null : Number(row.pending_floor),
   }
 }
 
@@ -392,7 +404,8 @@ function makeEtag(fileId: string, w: Watermarks): string {
  *  event at or below rebuiltSeq can ever be minted later (the rebuild bumped
  *  the allocator to it), so no delta is skipped. */
 function advertisedSeq(w: Watermarks): number {
-  return Math.max(w.maxSeq, w.rebuiltSeq)
+  const unclamped = Math.max(w.maxSeq, w.rebuiltSeq)
+  return w.pendingFloor == null ? unclamped : Math.min(unclamped, w.pendingFloor)
 }
 
 /** Loose If-None-Match comparison: any listed value (optionally W/-prefixed)
@@ -537,6 +550,10 @@ export async function handleCellsReadRequest(
       return new Response(null, { status: 304, headers: cacheHeaders(etag) })
     }
     if (since !== null) {
+      // The resync gate must use the UNCLAMPED max: a pending-allocation
+      // clamp can legitimately sit BELOW a cursor the client already holds
+      // from an earlier response, and that is not incarnation drift.
+      const unclampedMax = Math.max(watermarks.maxSeq, watermarks.rebuiltSeq)
       // Rebuild gate (audit B5): a projection rebuild changed cells without
       // minting events, so the seq-range delta below cannot see it. Any
       // cursor minted before the rebuild finished predates rebuiltSeq —
@@ -564,7 +581,7 @@ export async function handleCellsReadRequest(
           clientEpoch !== 0 &&
           watermarks.epoch !== 0 &&
           clientEpoch !== watermarks.epoch) ||
-        since > maxServerSeq
+        since > unclampedMax
       ) {
         return Response.json(
           { resync: true, maxServerSeq, projectEpoch: watermarks.epoch },

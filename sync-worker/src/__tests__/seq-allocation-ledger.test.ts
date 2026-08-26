@@ -15,6 +15,7 @@ import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 import { handleEventsWriteRequest } from '../events/route'
 import { handleBulkImportRequest } from '../events/import-route'
+import { handleCellsReadRequest } from '../events/cells-read-route'
 import {
   allocateSeqRange,
   buildSettleSeqRangeStmt,
@@ -302,5 +303,149 @@ describe('POST /import seq allocation', () => {
       .bind(IMPORT_PROJECT)
       .first<{ n: number }>()
     expect(Number(row?.n)).toBe(0)
+  })
+})
+
+// ── Task 6: the cells-read route fences the ADVERTISED watermark ───────────
+
+const FENCE_PROJECT = 'proj-fence'
+const FENCE_FILE = 'file-fence'
+
+interface FenceCellSeed {
+  project_id: string
+  file_id: string
+  cell_id: string
+  anchor_cell_id: string | null
+  event_id: string
+  side: string
+  value: string
+  value_html: string | null
+  type: string | null
+  canonical_ref: string | null
+  last_editor: string
+  last_edit_at: number
+  validated: number
+  word_count: number
+  content_hash: string | null
+  source_event_id: string | null
+}
+
+function fenceCell(cellId: string, anchor: string | null, eventId: string): FenceCellSeed {
+  return {
+    project_id: FENCE_PROJECT,
+    file_id: FENCE_FILE,
+    cell_id: cellId,
+    anchor_cell_id: anchor,
+    event_id: eventId,
+    side: 'target',
+    value: cellId,
+    value_html: null,
+    type: null,
+    canonical_ref: null,
+    last_editor: 'alice',
+    last_edit_at: 1700000000000,
+    validated: 0,
+    word_count: 1,
+    content_hash: null,
+    source_event_id: null,
+  }
+}
+
+function fenceEvent(id: string, seq: number, cellId: string | null) {
+  return {
+    id,
+    schema_version: 1,
+    project_id: FENCE_PROJECT,
+    file_id: FENCE_FILE,
+    cell_id: cellId,
+    kind: 'target.cell.commit',
+    author: 'alice',
+    payload: '{}',
+    client_ts: 1700000000000,
+    server_ts: 1700000000000,
+    server_seq: seq,
+  }
+}
+
+/** Three settled events at seqs 1..3 over three cells. */
+async function makeFenceDb(): Promise<TestDb> {
+  return makeTestDb({
+    cells: [
+      fenceCell('c1', null, 'e1'),
+      fenceCell('c2', 'c1', 'e2'),
+      fenceCell('c3', 'c2', 'e3'),
+    ],
+    events: [
+      fenceEvent('e1', 1, 'c1'),
+      fenceEvent('e2', 2, 'c2'),
+      fenceEvent('e3', 3, 'c3'),
+    ],
+  })
+}
+
+async function getCells(t: TestDb, query: string): Promise<Response> {
+  const token = await makeTestToken(SECRET, { projectId: FENCE_PROJECT, fileId: FENCE_FILE })
+  const req = new Request(
+    `https://w/api/v1/projects/${FENCE_PROJECT}/files/${FENCE_FILE}/cells${query}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  const res = await handleCellsReadRequest(req, { AQUILLA_PG: t.db, SYNC_SECRET_KEY: SECRET })
+  expect(res).not.toBeNull()
+  return res!
+}
+
+async function plantAllocation(t: TestDb, first: number, last: number, ageMs = 0): Promise<void> {
+  await t.db
+    .prepare(
+      `INSERT INTO seq_allocations (project_id, first_seq, last_seq, created_at)
+       VALUES (?, ?, ?, now() - (? * interval '1 millisecond'))`,
+    )
+    .bind(FENCE_PROJECT, first, last, ageMs)
+    .run()
+}
+
+describe('cells-read pending-allocation fence', () => {
+  it('advertised maxServerSeq is clamped below a live allocation, rows still delivered', async () => {
+    const t3 = await makeFenceDb()
+    // An in-flight writer holds the block 3..5 and has committed only seq 3 so
+    // far. A client that took cursor 3 would never see seqs 4..5.
+    await plantAllocation(t3, 3, 5)
+    const res = await getCells(t3, '?side=target')
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { maxServerSeq: number; cells: Array<{ cellId: string }> }
+    expect(body.maxServerSeq).toBe(2)
+    // Delivery is NOT clamped — every visible row still ships.
+    expect(body.cells.map((c) => c.cellId)).toEqual(['c1', 'c2', 'c3'])
+    // The ETag stays on the raw maxSeq so the straggler's commit busts the 304.
+    expect(res.headers.get('ETag')).toBe(`"${FENCE_FILE}:0:0:3"`)
+  })
+
+  it('a cursor above a freshly clamped watermark does not force resync', async () => {
+    const t3 = await makeFenceDb()
+    // The client legitimately holds cursor 3 from an earlier response; a
+    // writer then announced 3..4 (pendingFloor = 2, below the cursor). That is
+    // not incarnation drift — the gate compares against the unclamped max.
+    await plantAllocation(t3, 3, 4)
+    const res = await getCells(t3, '?since=3')
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      delta?: boolean
+      resync?: boolean
+      maxServerSeq: number
+      changedCellIds?: string[]
+    }
+    expect(body.resync).toBeUndefined()
+    expect(body.delta).toBe(true)
+    expect(body.changedCellIds).toEqual([])
+    expect(body.maxServerSeq).toBe(2)
+  })
+
+  it('expired allocations do not clamp', async () => {
+    const t3 = await makeFenceDb()
+    await plantAllocation(t3, 3, 5, PENDING_ALLOC_TTL_MS + 1000)
+    const res = await getCells(t3, '?side=target')
+    const body = (await res.json()) as { maxServerSeq: number; cells: unknown[] }
+    expect(body.maxServerSeq).toBe(3)
+    expect(body.cells.length).toBe(3)
   })
 })

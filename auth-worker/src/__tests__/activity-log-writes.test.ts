@@ -2,6 +2,7 @@ import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
 import { jwtFor, authHeader } from "./helpers/db"
+import { sha256Hex } from "../../../db/shared/api-credentials"
 
 // [Pen test] Auth & session mgmt (2026-07-20): activity_logs existed (and
 // GET /activity-log read from it) but nothing ever wrote to it — no audit
@@ -51,13 +52,17 @@ describe("auth events populate activity_logs", () => {
 
     const u = await env.AQUILLA_PG.prepare("SELECT id FROM users WHERE username = 'act2'")
       .first<{ id: number }>()
-    const tokenRow = await env.AQUILLA_PG.prepare(
-      "SELECT token FROM password_reset_tokens WHERE user_id = ?",
+    // OPS-20 (2026-08-24): the minted token is stored as a digest, so it can
+    // no longer be read back out of the table. Re-point the row's hash at a
+    // token we know so the rest of this flow still exercises the real route.
+    const knownToken = "act2-known-reset-token"
+    await env.AQUILLA_PG.prepare(
+      "UPDATE password_reset_tokens SET token_hash = ? WHERE user_id = ?",
     )
-      .bind(u!.id)
-      .first<{ token: string }>()
+      .bind(await sha256Hex(knownToken), u!.id)
+      .run()
     await reqJson("/api/v2/auth/password-reset/reset", {
-      token: tokenRow!.token,
+      token: knownToken,
       username: "act2",
       new_password: "brand-new-pw-9",
     })

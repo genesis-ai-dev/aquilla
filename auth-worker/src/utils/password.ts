@@ -157,6 +157,38 @@ export async function verifyPasswordWerkzeugScrypt(
   return constantTimeEqual(dk, expected)
 }
 
+// [Pen test] Auth & session mgmt (2026-08-24): a login for an address with no
+// account returned after a single indexed SELECT, while a login for a real
+// account additionally paid a full scrypt derivation (N=32768 — tens to
+// hundreds of milliseconds by design). That difference is trivially
+// measurable from outside and turns POST /auth/token into a
+// username/email-enumeration oracle that needs no correct password at all.
+//
+// This is a syntactically valid werkzeug hash with the production parameters
+// whose digest matches nothing: verifying against it burns the same scrypt
+// work as a real hash and always returns false. The digest bytes are a fixed
+// filler, not a hash of any password — nothing can ever verify against it.
+const DUMMY_PASSWORD_HASH = `scrypt:${DEFAULT_SCRYPT_PARAMS.N}:${DEFAULT_SCRYPT_PARAMS.r}:${DEFAULT_SCRYPT_PARAMS.p}$aquilla-no-such-user$${"5a".repeat(64)}`
+
+/**
+ * Spend the same scrypt work a real password verification would, and discard
+ * the result. Call this on the "no such user" branch of a login so the
+ * response time doesn't reveal whether the account exists.
+ *
+ * Never throws: a failure here is a timing-equalization miss, not an auth
+ * decision, and must not turn a 401 into a 500 (which would be its own,
+ * louder oracle).
+ */
+export async function absorbPasswordVerificationCost(
+  password: string,
+): Promise<void> {
+  try {
+    await verifyPasswordWerkzeugScrypt(password, DUMMY_PASSWORD_HASH)
+  } catch (err) {
+    console.warn("[password] dummy verification failed (non-fatal):", err)
+  }
+}
+
 export type PasswordVerificationResult = {
   isValid: boolean
   /** True when the stored hash is bcrypt and should be upgraded to scrypt

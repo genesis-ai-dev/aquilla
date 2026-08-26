@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { LanguageComboboxInput, useLanguageSuggestions } from "@/components/LanguageComboboxInput"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
 import {
@@ -351,7 +352,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                         <FieldLabel htmlFor="project-create-source">{t("projectSettings.info.sourceLanguageLabel")}</FieldLabel>
                         <LanguageFieldHint />
                       </div>
-                      <Input
+                      <LanguageComboboxInput
                         id="project-create-source"
                         name="aquilla-project-source-language"
                         autoComplete="off"
@@ -361,7 +362,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                         className={FIELD_CLASS}
                         value={field.state.value}
                         onBlur={field.handleBlur}
-                        onChange={(e) => field.handleChange(e.target.value)}
+                        onValueChange={field.handleChange}
                         placeholder={t("projectSettings.create.sourceLanguagePlaceholder")}
                         aria-invalid={invalid}
                       />
@@ -403,7 +404,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                                 )}
                               />
                             ) : (
-                              <Input
+                              <LanguageComboboxInput
                                 id="project-create-target"
                                 name="aquilla-project-target-language"
                                 autoComplete="off"
@@ -413,7 +414,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                                 className={FIELD_CLASS}
                                 value={field.state.value}
                                 onBlur={field.handleBlur}
-                                onChange={(e) => field.handleChange(e.target.value)}
+                                onValueChange={field.handleChange}
                                 placeholder={t("projectSettings.create.targetLanguagePlaceholder")}
                                 aria-invalid={invalid}
                               />
@@ -807,10 +808,12 @@ function AddAsLaneRecommendation({
  * create. An uncommitted draft still counts as the primary (so create works
  * without Enter).
  *
- * Freeform tags (any label) — not a Combobox suggestion list. Combobox's
- * controlled inputValue/value dance clears the draft on Enter and raced our
- * commit, so chips never stuck in the real browser. This field keeps the
- * ComboboxChips look with plain state instead.
+ * Freeform tags (any label) stay the contract. This field is NOT a Base-UI
+ * Combobox: its controlled inputValue/value dance cleared the draft on Enter
+ * and raced our commit, so chips never stuck in the real browser. The plain
+ * state below owns the draft, and AQU-988 layers `useLanguageSuggestions` on
+ * top — a purely additive list that only writes back on an explicit pick, so
+ * Enter on free-typed text still falls through to commitValue().
  */
 function validateTargetLanguageDraft(
   candidate: string,
@@ -843,20 +846,19 @@ function TargetLanguageChips({
   const [chips, setChips] = useState<string[]>([])
   const [draft, setDraft] = useState("")
   const [error, setError] = useState<string | null>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
 
   function syncForm(nextChips: string[], nextDraft: string) {
     onPrimaryChange(nextChips[0] ?? nextDraft)
     onExtrasChange(nextChips.slice(1))
   }
 
-  function commitDraft() {
-    const validationError = validateTargetLanguageDraft(draft, chips)
+  function commitValue(candidate: string) {
+    const validationError = validateTargetLanguageDraft(candidate, chips)
     if (validationError) {
       setError(validationError)
       return
     }
-    const nextChips = [...chips, draft.trim()]
+    const nextChips = [...chips, candidate.trim()]
     setChips(nextChips)
     setDraft("")
     setError(null)
@@ -869,6 +871,14 @@ function TargetLanguageChips({
     setError(null)
     syncForm(nextChips, draft)
   }
+
+  // Picking from the dropdown commits the language as a chip outright — the
+  // partially-typed draft it replaces is discarded, same as Enter would.
+  const { getInputProps, popup, focusInput } = useLanguageSuggestions({
+    query: draft,
+    exclude: chips,
+    onSelect: commitValue,
+  })
 
   const chipInvalid = invalid || error != null
 
@@ -890,12 +900,11 @@ function TargetLanguageChips({
         onMouseDown={(event) => {
           // Clicking the field chrome focuses the input without stealing
           // clicks from chip remove buttons.
-          if (event.target !== inputRef.current) {
-            const remove = (event.target as HTMLElement).closest("button")
-            if (remove) return
-            event.preventDefault()
-            inputRef.current?.focus()
-          }
+          const el = event.target as HTMLElement
+          if (el.tagName === "INPUT") return
+          if (el.closest("button")) return
+          event.preventDefault()
+          focusInput()
         }}
       >
         {chips.map((lang) => (
@@ -919,7 +928,6 @@ function TargetLanguageChips({
           </Badge>
         ))}
         <input
-          ref={inputRef}
           id="project-create-target"
           data-testid="create-extra-lang-input"
           name="aquilla-project-target-language"
@@ -935,28 +943,31 @@ function TargetLanguageChips({
               : "Add another…"
           }
           aria-invalid={chipInvalid}
-          onBlur={onBlur}
-          onChange={(event) => {
-            const next = event.target.value
-            setDraft(next)
-            setError(null)
-            syncForm(chips, next)
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Backspace" && draft === "" && chips.length > 0) {
+          {...getInputProps({
+            onBlur,
+            onChange: (event) => {
+              const next = event.target.value
+              setDraft(next)
+              setError(null)
+              syncForm(chips, next)
+            },
+            onKeyDown: (event) => {
+              if (event.key === "Backspace" && draft === "" && chips.length > 0) {
+                event.preventDefault()
+                removeChip(chips[chips.length - 1]!)
+                return
+              }
+              if (event.key !== "Enter") return
+              // Always intercept Enter so the dialog form doesn't submit while
+              // committing (or rejecting) a chip.
               event.preventDefault()
-              removeChip(chips[chips.length - 1]!)
-              return
-            }
-            if (event.key !== "Enter") return
-            // Always intercept Enter so the dialog form doesn't submit while
-            // committing (or rejecting) a chip.
-            event.preventDefault()
-            event.stopPropagation()
-            commitDraft()
-          }}
+              event.stopPropagation()
+              commitValue(draft)
+            },
+          })}
         />
       </div>
+      {popup}
       {error && <FieldError className="text-xs">{error}</FieldError>}
     </div>
   )

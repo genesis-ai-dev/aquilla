@@ -734,11 +734,9 @@ export const editor = defineNamespace({
     "editor.timeline.sortableTrackRole": "sortable track",
     "editor.timeline.gutterReorderAria":
       "Timeline tracks — drag a name, or press Alt with the arrow keys, to reorder",
-    // AQU-646 stage 2: folders in the track gutter.
-    "editor.timeline.folderTrackCount": plural({
-      one: "{count} track",
-      other: "{count} tracks",
-    }),
+    // AQU-646 stage 2: folders in the track gutter. (Stage 4b retired the
+    // "N tracks" sublabel — a slim folder heading has no room for a second
+    // line, and the summary band says what is inside better.)
     "editor.timeline.gutterCollapseAria": "Narrow the track names",
     "editor.timeline.gutterExpandAria": "Show the track names",
     "editor.timeline.folderExpandAria": "Show the tracks in {name}",
@@ -1419,18 +1417,6 @@ export const editor = defineNamespace({
           "Screen-reader name of the timeline's track-name gutter, which is a " +
           "reorderable list. Names the list and states both ways to reorder it. " +
           "Never visible.",
-      },
-      "editor.timeline.folderTrackCount": {
-        description:
-          "The line under a timeline folder's name, saying how many tracks are " +
-          "inside it. It sits where every other track row states what KIND of " +
-          "row it is; a folder's kind is obvious from its disclosure triangle, " +
-          "so it states its size instead — the one fact about a closed folder " +
-          "that is not already on screen.",
-        placeholders: {
-          count:
-            "How many tracks the folder holds; it also selects which plural form is used.",
-        },
       },
       "editor.timeline.trackMenuAria": {
         description:

@@ -3399,3 +3399,201 @@ describe("TimelineEditor — transcribing a section whose audio lives elsewhere"
     expect(screen.getByTestId("tl-transcribe-selection")).toHaveTextContent("Transcribe section")
   })
 })
+
+// ── AQU-646 stage 4b ─────────────────────────────────────────────────────────
+describe("TimelineEditor — folders look like folders", () => {
+  beforeEach(() => {
+    topOwner.value = 1
+    // Both are personal state persisted per fileId, and every case here mounts
+    // f1 — without the clears, one case's collapse or dial value silently
+    // decides what the next one starts from.
+    try {
+      localStorage.removeItem("aquilla:tlFoldersClosed:f1")
+      localStorage.removeItem("aquilla:timelineRowHeight:f1")
+      // The pixel assertion below is in px-per-second, so the zoom another
+      // case persisted for f1 must not leak into it.
+      localStorage.setItem("aquilla:timelineZoom:f1", String(ZOOM_DEFAULT))
+    } catch {
+      /* private mode — nothing was persisted either */
+    }
+  })
+
+  const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
+  const foldedTracks = () =>
+    deriveTracksForFile({
+      trackOverrides: {
+        grp: { kind: "folder", name: "Dubs", order: 4 },
+        "target-audio": { groupId: "grp", order: 0 },
+        "trk-es": { kind: "audio", name: "Spanish", groupId: "grp", order: 1, sourceTrackId: "source-subtitles" },
+      },
+    })
+
+  /** The folder's GUTTER row — the element the height contract is on. Found
+   *  through the toggle because the gutter deliberately has no testid. */
+  const folderGutterRow = () =>
+    screen.getByTestId("tl-folder-toggle-grp").closest<HTMLElement>("[data-tl-track-row]")!
+
+  // ── Slim fixed headings ──
+
+  // FOLDERS ARE NOT TRACKS (Sam, 2026-08-24), and stage 4b makes it visible: a
+  // folder is a 28px heading, not a 66px lane-height row, so collapsing a
+  // stack actually reclaims vertical space instead of trading three tall rows
+  // for one tall row. BOTH columns, byte for byte — the gutter and the lanes
+  // are matched row for row, and a folder tall in one column would shift every
+  // row beneath it out of line with its own label and take `beginTrackDrag`'s
+  // hit-testing with it.
+  it("draws a folder as a 28px heading in BOTH columns, off the dial", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={foldedTracks()} onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+      />,
+    )
+    expect(folderGutterRow().style.height).toBe("28px")
+    expect(screen.getByTestId("tl-folder-lane-grp").style.height).toBe("28px")
+    // …and it stopped riding the dial's CSS variable: a folder at 160px is
+    // exactly the "heading pretending to be a track" this stage retires.
+    expect(folderGutterRow().className).not.toContain("--tl-row-h")
+    expect(screen.getByTestId("tl-folder-lane-grp").className).not.toContain("--tl-row-h")
+  })
+
+  it("the tracks around it keep the dial's height class", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={foldedTracks()} onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+      />,
+    )
+    const gutter = screen.getByTestId("tl-scroll").previousElementSibling!
+    const trackRows = Array.from(gutter.querySelectorAll<HTMLElement>("[data-tl-track-row]")).filter(
+      (row) => row !== folderGutterRow(),
+    )
+    expect(trackRows.length).toBeGreaterThan(0)
+    for (const row of trackRows) {
+      expect(row.className).toContain("--tl-row-h")
+      expect(row.style.height).toBe("")
+    }
+  })
+
+  // Sam's clamp ruling: the dial floor is 24px, and at that compression a fixed
+  // 28px heading would stand TALLER than the tracks it is meant to be less
+  // than. Everything gets uniformly small instead.
+  it("never stands taller than the tracks — at the 24px dial floor it is 24px too", () => {
+    localStorage.setItem("aquilla:timelineRowHeight:f1", "24")
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={foldedTracks()} onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+      />,
+    )
+    expect(folderGutterRow().style.height).toBe("24px")
+    expect(screen.getByTestId("tl-folder-lane-grp").style.height).toBe("24px")
+  })
+
+  // The "N tracks" sub-line retired with the height: two stacked lines need
+  // ~30px of type and the 28px heading's content box holds 27. Its gate reads
+  // the row's OWN height now — on the global dial value it would render the
+  // second line into the clip and cut it mid-glyph.
+  it("carries no 'N tracks' sub-line any more", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={foldedTracks()} onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+      />,
+    )
+    expect(screen.queryByText("2 tracks")).toBeNull()
+    // The kind-table fallback must not leak into its place either.
+    expect(within(folderGutterRow()).queryByText("group")).toBeNull()
+  })
+
+  // ── The collapsed summary sees every kind of member ──
+
+  // THE STALE HALF OF STAGE 3 (Sam, 2026-08-26: "the visualization of chips in
+  // the timeline does not work for added tracks"). `summarySpansForTrack` sent
+  // added tracks to a default arm returning nothing, from a comment written
+  // before stage 3 gave them slots — so a folder of recorded added tracks
+  // collapsed to a BLANK strip, and collapsing read as data loss. The arm now
+  // resolves through `targetItemsForTrack`, the same resolver the open lane
+  // uses, cue-link redirect and `selectedBySlot` included.
+  const subtitleCells = [
+    cell({ id: "s1", original: "One", translated: "Uno", medium: "text", startTime: 0, endTime: 4 }),
+  ]
+  const cueCells = [
+    cell({
+      id: "cue1", fileId: "f1-cues", original: "One", medium: "media", startTime: 0, endTime: 4,
+      selectedBySlot: { "trk-extra": "aud-extra" },
+      attachments: {
+        "aud-extra": { audioId: "aud-extra", slot: "trk-extra", url: "frontier-audio://aud-extra" },
+      },
+    } as unknown as Partial<CellData>),
+  ]
+  const foldedAddedTrack = deriveTracksForFile(
+    {
+      trackOverrides: {
+        grp: { kind: "folder", name: "Dubs", order: 9 },
+        "trk-extra": { kind: "audio", name: "Extra", groupId: "grp", order: 0, sourceTrackId: "source-subtitles" },
+      },
+    },
+    { isSubtitleImport: true, hasMediaCells: false, hasAudioCues: true },
+  )
+
+  const summaryBlocksOf = (lane: HTMLElement) =>
+    Array.from(lane.querySelectorAll<HTMLElement>("div[aria-hidden]"))
+
+  it("a collapsed folder summarises an added track's takes — from the cue file they live on", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={subtitleCells}
+        audioCues={cueCells}
+        targetCells={cueCells}
+        tracks={foldedAddedTrack}
+        onRetimeSubtitle={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-folder-toggle-grp"))
+    const lane = screen.getByTestId("tl-folder-lane-grp")
+    expect(lane).toHaveAttribute("data-collapsed")
+    // Before the fix this was [] however much audio the track held.
+    expect(summaryBlocksOf(lane).length).toBeGreaterThan(0)
+  })
+
+  // CHIP RESOLUTION, NOT CELL RESOLUTION. The old cell-span shortcut predates
+  // per-take placement: a chip dragged away from its line still summarised at
+  // its old spot, so the closed folder contradicted the open lane it stands in
+  // for. The summary reads `layout.targetGeom` now — the block sits where the
+  // CHIP sits, not where the cell is.
+  it("summarises a dragged take where the chip actually sits", () => {
+    const dragged = [
+      cell({
+        id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10,
+        selectedAudioId: "audio-m1-1700000000-take.webm",
+        attachments: {
+          "audio-m1-1700000000-take.webm": {
+            type: "audio", url: "frontier-audio://take",
+            // Placed at 15s — inside the FILE's span (the second cell carries
+            // the view out to 20s; the summary culls to the visible window,
+            // and a take parked beyond every cell would be culled with it),
+            // but nowhere near its own cell's 0–10.
+            durationMs: 2000, targetOffsetMs: 15000,
+          },
+        },
+      } as unknown as Partial<CellData>),
+      cell({ id: "m2", original: "Two", medium: "media", startTime: 10, endTime: 20 }),
+    ]
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={dragged}
+        tracks={foldedTracks()} onRetimeSubtitle={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-folder-toggle-grp"))
+    const blocks = summaryBlocksOf(screen.getByTestId("tl-folder-lane-grp"))
+    expect(blocks.length).toBeGreaterThan(0)
+    // The take was placed at 15s; its cell sits at 0s. Cell resolution drew
+    // this block at left 0 — the wrong answer this case exists to refuse.
+    const lefts = blocks.map((b) => parseFloat(b.style.left))
+    expect(lefts).toContain(15 * ZOOM_DEFAULT)
+    expect(lefts).not.toContain(0)
+  })
+})

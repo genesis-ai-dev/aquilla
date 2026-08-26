@@ -13,10 +13,10 @@
 // below it out of line with its own label — and take `beginTrackDrag`'s
 // hit-testing with it, silently.
 
-import { cn } from "@/lib/utils"
-import { TL_ROW_H_CLASS } from "@/lib/timeline/row-metrics"
+import { folderRowHPx } from "@/lib/timeline/row-metrics"
 import { secToPx } from "@/lib/timeline/scale"
 import { summaryBlocks, type SummarySpan } from "@/lib/timeline/summary-band"
+import { useRowMetrics } from "./useRowMetrics"
 
 export function TimelineFolderLane({
   trackId,
@@ -36,11 +36,18 @@ export function TimelineFolderLane({
   viewEndSec: number
 }) {
   const blocks = collapsed ? summaryBlocks(spans, { viewStartSec, viewEndSec, pxPerSec }) : []
+  // AQU-646 stage 4b: a slim fixed heading, NOT `TL_ROW_H_CLASS`. An inline
+  // style rather than a class because the height is min(28, dial) — dynamic —
+  // and it MUST match the gutter's folder row byte for byte: the two columns
+  // are matched row for row (see the header comment), so LaneLabel computes
+  // the same `folderRowHPx` on its side.
+  const { rowH } = useRowMetrics()
   return (
     <div
       data-testid={`tl-folder-lane-${trackId}`}
       data-collapsed={collapsed ? "" : undefined}
-      className={cn("relative border-b border-border", TL_ROW_H_CLASS)}
+      className="relative border-b border-border"
+      style={{ height: `${folderRowHPx(rowH)}px` }}
     >
       {blocks.map((block) => (
         <div

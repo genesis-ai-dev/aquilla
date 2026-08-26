@@ -80,6 +80,7 @@ import {
   chipHeightPx,
   chipPadPx,
   clampRowHeight,
+  folderRowHPx,
   MIN_LABEL_SUB_H_PX,
   MIN_SPEAKER_FULL_H_PX,
   ROW_H_DEFAULT,
@@ -622,6 +623,13 @@ function LaneLabel({
   // it for them and left the gutter rendering at full size into a clip, which
   // is why the names printed over each other at the compact end.
   const { rowH } = useRowMetrics()
+  // AQU-646 stage 4b: THIS row's height, which for a folder is no longer the
+  // dial's. Folders are slim fixed headings now, and every "does it fit"
+  // decision below must measure the row it is actually in — gating the
+  // sublabel on the global `rowH` would render two stacked lines (~30px) into
+  // a 27px content box and clip the second one mid-glyph, exactly the fault
+  // MIN_LABEL_SUB_H_PX exists to prevent.
+  const ownRowH = folder ? folderRowHPx(rowH) : rowH
   return (
     // `overflow-hidden` because the two lines inside are fixed-size chrome and
     // the row around them is not any more: at the compact end of the vertical
@@ -667,7 +675,12 @@ function LaneLabel({
         // track. The padding comes in to match — px-3 either side of a 44px
         // strip leaves 20px, which the speaker alone does not fit in.
         collapsed ? "justify-center px-1.5" : "justify-between px-3",
-        TL_ROW_H_CLASS,
+        // AQU-646 stage 4b: a folder row's height is min(28, dial) — dynamic,
+        // so it arrives as an inline style below rather than this class. Both
+        // columns must agree byte for byte (TimelineFolderLane computes the
+        // same `folderRowHPx`), or every row beneath the folder drifts out of
+        // line with its own lane and takes the drag hit-testing with it.
+        folder ? undefined : TL_ROW_H_CLASS,
         // Everything on this line is withheld from a user who cannot reorder,
         // down to the `relative` — the row a viewer sees is byte-for-byte the
         // row that shipped. `touch-none` for the same reason TimelineCard has
@@ -685,7 +698,10 @@ function LaneLabel({
         selected && !lifted && "bg-accent",
         className,
       )}
-      style={lifted ? { transform: `translateY(${reorder?.liftPx}px)` } : undefined}
+      style={{
+        ...(folder ? { height: `${ownRowH}px` } : undefined),
+        ...(lifted ? { transform: `translateY(${reorder?.liftPx}px)` } : undefined),
+      }}
       // Collapsed, the row has no visible name — so it gets one that a pointer
       // and a screen reader can still find. `title` is the hover tooltip, which
       // is the whole recovery path for "which track is this?" without
@@ -806,7 +822,7 @@ function LaneLabel({
         {/* The sublabel is the first thing to go as the row shrinks — see
             MIN_LABEL_SUB_H_PX — and it is gone outright when the gutter is a
             strip, where even the NAME does not fit. */}
-        {!collapsed && rowH >= MIN_LABEL_SUB_H_PX && (
+        {!collapsed && ownRowH >= MIN_LABEL_SUB_H_PX && (
           <span className="truncate text-[10px] text-muted-foreground">{sub}</span>
         )}
       </div>
@@ -2906,22 +2922,47 @@ export function TimelineEditor({
   /**
    * Where a track has material, for a closed folder's summary band.
    *
-   * AT CELL RESOLUTION, NOT CHIP RESOLUTION, and deliberately. A dub chip's
-   * true span comes from `layout.targetGeom`, which needs the attachment
-   * object and the trim state; the cell's own section is within a fraction of a
-   * second of it, and this is a stand-in drawn on a row somebody has explicitly
-   * said they are not looking at. Paying chip-geometry cost per take, for every
-   * hidden track, to move a 1.5px bar by less than a pixel is the wrong trade.
+   * TEXT ROWS AT CELL RESOLUTION, TAKE-BEARING ROWS AT CHIP RESOLUTION. The
+   * split matters, and stage 4b redrew it:
    *
-   * An added `audio` track returns nothing: it holds no takes until stage 3
-   * gives it a slot of its own. An empty summary on a folder of empty tracks is
-   * the correct picture, not a gap.
+   * - Subtitle and source-audio rows summarise their CELLS — an 800-cue
+   *   episode's material really is its cells, nothing take-placed exists
+   *   there to lie about, and per-cell `spanFor` is the cheap call the
+   *   coalescing budget was written against.
+   * - Audio-take rows read `layout.targetGeom` per take. The original
+   *   "within a fraction of a second" argument for cell resolution predates
+   *   per-take placement: a chip dragged three seconds left would still
+   *   summarise at its old spot, so a closed folder would contradict the open
+   *   lane. Take counts are bounded by cell counts and `targetChipGeom` is
+   *   pure arithmetic — no peaks, no decode — so the honest picture costs
+   *   nothing worth counting.
+   *
+   * An added `audio` track resolves through `targetItemsForTrack` — THE SAME
+   * resolver its open lane uses, cue-link redirect and `selectedBySlot`
+   * included — so the summary and the lane cannot disagree about where its
+   * takes are. That is the invariant stage 3c-1 pinned for open lanes,
+   * extended to the closed picture; the previous `default:` arm returned
+   * nothing here, from a comment written before stage 3 gave added tracks
+   * slots, and a folder of recorded tracks collapsed to a blank strip.
    */
   function summarySpansForTrack(track: TimelineTrack): SummarySpan[] {
     const fromCells = (cellList: readonly CellData[], lane: "subtitle" | "source"): SummarySpan[] => {
       const out: SummarySpan[] = []
       for (const cell of cellList) {
         const span = layout.spanFor(cell, lane)
+        if (span) out.push({ startSec: span.start, endSec: span.end })
+      }
+      return out
+    }
+    // One take's honest span. Null geometry (a cell with no finite timing)
+    // falls back to the cell's own section, and to nothing when even that is
+    // unresolvable — `summaryBlocks` treats a missing span as "draw nothing",
+    // which is also what the open lane does there.
+    const fromItems = (items: readonly TargetAudioItem[]): SummarySpan[] => {
+      const out: SummarySpan[] = []
+      for (const item of items) {
+        const geom = layout.targetGeom(item.cell, item.cell.attachments?.[item.audioId])
+        const span = geom ?? layout.spanFor(item.cell, "source")
         if (span) out.push({ startSec: span.start, endSec: span.end })
       }
       return out
@@ -2944,10 +2985,9 @@ export function TimelineEditor({
                 : [],
             )
       case "target-audio":
-        return fromCells(
-          targetItems.map((item) => item.cell),
-          "source",
-        )
+        return fromItems(targetItems)
+      case "audio":
+        return fromItems(targetItemsForTrack(track).items)
       default:
         return NO_SUMMARY_SPANS
     }
@@ -3722,15 +3762,13 @@ export function TimelineEditor({
                   <LaneLabel
                     key={track.id}
                     name={track.name}
-                    // A folder says how much is inside it rather than what kind
-                    // of thing it is — "3 tracks" is the only fact about a
-                    // folder that is not already on screen, and it is the one
-                    // that matters while it is closed.
-                    sub={
-                      track.kind === "folder"
-                        ? t("editor.timeline.folderTrackCount", { count: row.members.length })
-                        : render.sub
-                    }
+                    // AQU-646 stage 4b: a folder used to say "N tracks" here.
+                    // A slim 28px heading is below MIN_LABEL_SUB_H_PX, so no
+                    // folder row can ever render a sublabel again — what is
+                    // inside a folder is said by the indented rows when it is
+                    // open and by the summary band when it is closed. The
+                    // kind-table fallback flows through unrendered.
+                    sub={render.sub}
                     dot={trackDotClass(track, render.dot)}
                     folder={
                       track.kind === "folder"

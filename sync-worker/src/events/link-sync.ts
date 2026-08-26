@@ -40,7 +40,7 @@ import {
   fileCountersRecomputeStmt,
   type PersistedEvent,
 } from './event-projection'
-import { buildBulkEventInsertStmt, allocateSeqRange, buildSettleSeqRangeStmt, type SeqEventInsertRow } from './event-insert'
+import { buildBulkEventInsertStmt, allocateSeqRange, buildSettleSeqRangeStmt, fetchPendingFloor, type SeqEventInsertRow } from './event-insert'
 import type { EventPayloads } from './types'
 import { fullProgressRecomputeStmts } from './progress-projection'
 
@@ -784,7 +784,12 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
   // or a target-only change would never trip `head > cursor`.
   const consumes = link.source_link_consumes === 'target' ? 'target' : 'source'
   const gate = link.source_link_gate === 'head' ? 'head' : 'validated'
-  const head = await laneRelevantHeadSeq(db, upstreamProjectId, consumes)
+  let head = await laneRelevantHeadSeq(db, upstreamProjectId, consumes)
+  // AQU-1005: never advance the fold cursor past an in-flight upstream
+  // allocation — a late-committing upstream writer's events would otherwise be
+  // permanently skipped by this link's `server_seq > cursor` fold.
+  const upstreamFloor = await fetchPendingFloor(db, upstreamProjectId)
+  if (upstreamFloor != null) head = Math.min(head, upstreamFloor)
   if (head <= cursor) return NOOP_RESULT
 
   const { cells: folded, fileIds: deltaFileIds } =

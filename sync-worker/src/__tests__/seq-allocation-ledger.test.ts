@@ -22,6 +22,9 @@ import {
   fetchPendingFloor,
   PENDING_ALLOC_TTL_MS,
 } from '../events/event-insert'
+import { mirrorSync } from '../events/link-sync'
+import { buildEventProjectionStmts, type PersistedEvent } from '../events/event-projection'
+import type { AquillaStatement } from '../../../db/shim/postgres'
 
 const PROJECT = 'proj-ledger'
 
@@ -491,5 +494,134 @@ describe('cells-read rebuild gate under a pending-allocation clamp', () => {
     // The resync hands back a cursor at/above rebuiltSeq, so the client's next
     // delta passes the gate instead of looping.
     expect(body.maxServerSeq).toBeGreaterThanOrEqual(10)
+  })
+})
+
+// ── Task 7: link-sync fold head is fenced on the UPSTREAM pending floor ────
+
+describe('mirrorSync fold head fenced on upstream pending allocation', () => {
+  const LS_UPSTREAM = 'proj-ls-upstream'
+  const LS_DOWNSTREAM = 'proj-ls-downstream'
+  const LS_FILE = 'file-ls-gen'
+
+  async function seedUpstream(t: TestDb): Promise<void> {
+    await t.pg.query(`INSERT INTO projects (id, name, created_by) VALUES ($1, 'Upstream', 1)`, [LS_UPSTREAM])
+  }
+
+  async function seedDownstream(t: TestDb): Promise<void> {
+    await t.pg.query(
+      `INSERT INTO projects (id, name, created_by, source_project_id, source_link_mode, source_link_consumes, source_link_cursor)
+       VALUES ($1, 'Downstream', 1, $2, 'live', 'source', 0)`,
+      [LS_DOWNSTREAM, LS_UPSTREAM],
+    )
+  }
+
+  let lsSeq = 0
+  /** Commit an upstream event at an EXPLICIT server_seq — lets the test place
+   *  a settled event ABOVE an unsettled allocation's range, the exact
+   *  interleaving that produces a gap if the fold head isn't fenced. */
+  async function emitUpstreamCellAtSeq(t: TestDb, cellId: string, seq: number): Promise<void> {
+    lsSeq += 1
+    const id = `evt-ls-${lsSeq}`
+    const payload = { cellId, value: `value-${cellId}`, anchorCellId: null }
+    await t.pg.query(
+      `INSERT INTO events (id, schema_version, project_id, file_id, cell_id, parent_id, kind, author, payload, client_ts, server_ts, server_seq)
+       VALUES ($1, 1, $2, $3, $4, NULL, 'source.cell.create', 'importer', $5, 1, 1, $6)`,
+      [id, LS_UPSTREAM, LS_FILE, cellId, JSON.stringify(payload), seq],
+    )
+    const event: PersistedEvent = {
+      id,
+      schemaVersion: 1,
+      projectId: LS_UPSTREAM,
+      fileId: LS_FILE,
+      cellId,
+      parentId: null,
+      kind: 'source.cell.create',
+      author: 'importer',
+      payload,
+      clientTs: 1,
+      serverTs: 1,
+      serverSeq: seq,
+    }
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(t.db, event, stmts)
+    await t.db.batch(stmts)
+  }
+
+  async function seedUpstreamFile(t: TestDb): Promise<void> {
+    await t.pg.query(
+      `INSERT INTO files (id, project_id, name, event_id, meta) VALUES ($1, $2, 'Genesis', 'evt-file-ls', '{}')`,
+      [LS_FILE, LS_UPSTREAM],
+    )
+  }
+
+  async function getCursor(t: TestDb): Promise<number> {
+    const row = await t.pg.query<{ source_link_cursor: string }>(
+      `SELECT source_link_cursor FROM projects WHERE id = $1`,
+      [LS_DOWNSTREAM],
+    )
+    return Number(row.rows[0]?.source_link_cursor ?? 0)
+  }
+
+  it('does not advance the cursor past an in-flight upstream allocation, and picks it up once settled', async () => {
+    const t = await makeTestDb()
+    try {
+      await seedUpstream(t)
+      await seedDownstream(t)
+      await seedUpstreamFile(t)
+
+      // cell-1 settles at seq 1.
+      await emitUpstreamCellAtSeq(t, 'cell-1', 1)
+
+      // A straggler writer pre-allocates seqs 2..3 but has not committed its
+      // events yet — the row stays live (unsettled).
+      await t.db
+        .prepare(
+          `INSERT INTO seq_allocations (project_id, first_seq, last_seq, created_at)
+           VALUES (?, 2, 3, now())`,
+        )
+        .bind(LS_UPSTREAM)
+        .run()
+
+      // A second, faster writer races ahead and settles cell-2 at seq 4 —
+      // MAX(server_seq) (the unfenced head) is now 4, two above the
+      // straggler's still-pending first_seq (2).
+      await emitUpstreamCellAtSeq(t, 'cell-2', 4)
+
+      const result = await mirrorSync(t.db, LS_DOWNSTREAM)
+      expect(result.ranSync).toBe(true)
+      // Both already-committed cells get folded/mirrored this run (loadDelta
+      // has no upper bound — everything above the OLD cursor is delivered).
+      // The bug is what the STORED CURSOR becomes: unclamped, it would jump
+      // to the raw head (4), and the next delta query (`server_seq > cursor`)
+      // would then permanently skip the straggler's seqs 2..3 once it
+      // finally commits. The clamp must stop the cursor at the pending floor
+      // (first_seq - 1 = 1) instead.
+      expect(result.cellsMirrored).toBe(2)
+      expect(await getCursor(t)).toBe(1)
+
+      // A second run while the straggler is still pending is a no-op — the
+      // clamped head (1) is not greater than the cursor (1).
+      const result2 = await mirrorSync(t.db, LS_DOWNSTREAM)
+      expect(result2.ranSync).toBe(false)
+
+      // The straggler settles and commits its events for real.
+      await t.db
+        .prepare('DELETE FROM seq_allocations WHERE project_id = ? AND first_seq = ?')
+        .bind(LS_UPSTREAM, 2)
+        .run()
+      await emitUpstreamCellAtSeq(t, 'cell-3', 2)
+      await emitUpstreamCellAtSeq(t, 'cell-4', 3)
+
+      // No allocation pending any more — the fold can safely reach the real
+      // head (4): cell-3 and cell-4 are newly mirrored (cell-2's content is
+      // unchanged from the first run, so it hash-suppresses).
+      const result3 = await mirrorSync(t.db, LS_DOWNSTREAM)
+      expect(result3.ranSync).toBe(true)
+      expect(result3.cellsMirrored).toBe(2)
+      expect(await getCursor(t)).toBe(4)
+    } finally {
+      await t.close()
+    }
   })
 })

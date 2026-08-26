@@ -52,6 +52,11 @@ interface Props {
    *  — the pane is what registers the controller, so in Free timing the bar was
    *  claiming a transport with nothing behind it and every control went dead. */
   videoPaneOnScreen?: boolean
+  /** AQU-646 stage 3h: end of the last cue, for a file with timings and no
+   *  master. 0 (the default) means this file has a master or no timeline. */
+  timelineDurationSec?: number
+  /** The line the virtual playhead is on. Null on every other arrangement. */
+  virtualSoundingCellId?: string | null
   /** Status chips / stats nested under "now playing" so transport stays vertically centered. */
   below?: ReactNode
 }
@@ -65,7 +70,7 @@ function fmtTime(s: number): string {
 
 export function VoicePlaybackBar({
   cells: rawCells, projectId, session, settings, onActiveCell, startCellId, coreMediaUrl,
-  videoPaneOnScreen = false, below,
+  videoPaneOnScreen = false, timelineDurationSec = 0, virtualSoundingCellId = null, below,
 }: Props) {
   const t = useT()
 
@@ -92,9 +97,18 @@ export function VoicePlaybackBar({
     coreMediaUrl,
     anyCellClockIsFileTime,
     paneOnScreen: videoPaneOnScreen,
+    timelineDurationSec,
+    virtualSoundingCellId,
   })
   const videoController = useVideoController()
-  const drivesVideo = transport.source === "video"
+  // AQU-646 stage 3h: "not the queue", rather than "the video".
+  //
+  // A third engine could have meant a third arm in each of the six branches
+  // below, which is six chances to wire one to the wrong half — the exact
+  // failure `transport.ts` exists to prevent. The virtual clock registers into
+  // the SAME controller store instead, so every one of them stays two-way and
+  // this rename is the whole change.
+  const drivesVideo = transport.source !== "queue"
   const sourceAudible = useQueueAudibility().source
   const { currentTime, duration, rate, volume } = transport.progress
 

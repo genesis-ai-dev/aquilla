@@ -102,7 +102,20 @@ import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
-import { videoOwnsFile } from "@/lib/audio/transport"
+import { videoOwnsFile, virtualOwnsFile } from "@/lib/audio/transport"
+import { cellIdAtSec } from "@/lib/timeline/source-regions"
+import { clearVideoControllerIf, setVideoController } from "@/lib/timeline/video-controller"
+import {
+  getVirtualClockPlaying,
+  startVirtualClock,
+  stopVirtualClock,
+  useVirtualClockPlaying,
+  useVirtualClockSec,
+  virtualClockController,
+  virtualClockPause,
+  virtualClockPlay,
+  virtualClockSeek,
+} from "@/lib/timeline/virtual-clock"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
@@ -7837,6 +7850,70 @@ export function ProjectWorkspace() {
     setExternalDubsPlaying(videoDubPlaying)
   }, [videoDubPlaying])
 
+  // ── AQU-646 stage 3h: A TRANSPORT FOR FILES WITH NO MASTER ───────────────
+  //
+  // Sam, 2026-08-25: a VTT imported on its own has timings but no film and no
+  // imported recording, so nothing wrote the playhead and pressing play did
+  // nothing at all. The dub engine above is already clock-agnostic — the film
+  // drives it by calling `tickExternalDubs` once per tick — so what was missing
+  // was a CLOCK, not a player, and this drives the very same four calls.
+  //
+  // The duration is the end of the last cue over the cells that actually hold
+  // takes, which is also what decides whether this applies: no timings, no
+  // timeline to run a playhead along.
+  const timelineDurationSec = useMemo(
+    () =>
+      dubDriverCells.reduce(
+        (end, c) => (typeof c.endTime === "number" && Number.isFinite(c.endTime) ? Math.max(end, c.endTime) : end),
+        0,
+      ),
+    [dubDriverCells],
+  )
+  const virtualIsTransport = virtualOwnsFile(
+    videoIsTransport,
+    audioMergedCells.some((c) => queueClockIsFileTime(c)),
+    timelineDurationSec,
+  )
+  useEffect(() => {
+    if (!virtualIsTransport) {
+      stopVirtualClock()
+      return
+    }
+    startVirtualClock(timelineDurationSec)
+    return () => stopVirtualClock()
+  }, [virtualIsTransport, timelineDurationSec])
+  // REGISTERED AS THE CONTROLLER, which is what keeps the playback bar's six
+  // `drivesVideo ? controller : queue` branches two-way instead of three. That
+  // store already means "the non-queue transport currently driving" — see
+  // `transport-pause.ts`, which pauses through it when the recorder opens, so
+  // a transport that skipped registering would keep playing under a take.
+  useEffect(() => {
+    if (!virtualIsTransport) return
+    setVideoController(virtualClockController)
+    return () => clearVideoControllerIf(virtualClockController)
+  }, [virtualIsTransport])
+  const virtualSec = useVirtualClockSec()
+  const virtualPlaying = useVirtualClockPlaying()
+  // The same driver, the same cells, the same four calls the picture makes.
+  useEffect(() => {
+    if (!virtualIsTransport || !project?.id || !frontierSession) return
+    startExternalDubs({ cells: dubDriverCells, projectId: project.id, session: frontierSession })
+    return () => stopExternalDubs()
+    // Cells are refreshed by the shared effect above, not here — restarting the
+    // driver on every take would cut a dub off mid-word.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [virtualIsTransport, project?.id, frontierSession])
+  useEffect(() => {
+    if (virtualIsTransport && virtualSec != null) tickExternalDubs(virtualSec)
+  }, [virtualIsTransport, virtualSec])
+  useEffect(() => {
+    if (virtualIsTransport) setExternalDubsPlaying(virtualPlaying)
+  }, [virtualIsTransport, virtualPlaying])
+  /** Which line the playhead is on, for the bar's caption and the table follow. */
+  const virtualSoundingCellId = useMemo(
+    () => (virtualIsTransport && virtualSec != null ? cellIdAtSec(dubDriverCells, virtualSec) : null),
+    [virtualIsTransport, virtualSec, dubDriverCells],
+  )
 
   // A REMOTE mode change gets an acknowledged heads-up — deferred while the
   // user is in the text view or has the recorder open (a cell transition
@@ -8483,6 +8560,19 @@ export function ProjectWorkspace() {
   // alone.
   useEffect(() => { setVideoSeek(null); setVideoToggle(null) }, [activeFileId])
   const handleTimelineSeekToTime = useCallback((sec: number) => {
+    // AQU-646 stage 3h: A FILE WITH TIMINGS AND NO MASTER — the virtual clock
+    // is the transport, so the seek ends here, exactly as it ends at the
+    // picture below. Without this arm the call fell through to the queue,
+    // which has nothing to play on this file and quietly dropped it — so every
+    // gesture that funnels through the editor's seekTo (ruler clicks, chip
+    // clicks, selecting a cell in the table, Cmd/Ctrl+Enter) moved the
+    // editor's LOCAL clock and nothing else. Paused, that looked like it
+    // worked until play snapped the head back; playing, the next tick
+    // overwrote it within 50ms. One desync, many symptoms.
+    if (virtualIsTransport) {
+      virtualClockSeek(Math.max(0, sec))
+      return
+    }
     setVideoSeek((prev) => ({ sec: Math.max(0, sec), nonce: (prev?.nonce ?? 0) + 1 }))
     // ROUND 6 — the picture is the transport, so the seek ends here.
     //
@@ -8517,7 +8607,7 @@ export function ProjectWorkspace() {
       sec,
       { play: false },
     )
-  }, [project?.id, audioMergedCells, frontierSession, videoIsTransport])
+  }, [project?.id, audioMergedCells, frontierSession, videoIsTransport, virtualIsTransport])
 
   // Round 7 (SUB-44): Space in the media lens — the transport bar's 3-state
   // toggle against the QUEUE: playing → pause, paused → resume, idle → start
@@ -8534,6 +8624,15 @@ export function ProjectWorkspace() {
     // there and should get it.
     if (videoIsTransport) {
       setVideoToggle((prev) => ({ nonce: (prev?.nonce ?? 0) + 1 }))
+      return
+    }
+    // Stage 3h: the virtual clock gets the press the same way the picture
+    // does — toggle from wherever the head is, no special start rule. "Play
+    // from the selected cell" still happens the natural way: selecting a cell
+    // seeks the head there first, so Space plays from it.
+    if (virtualIsTransport) {
+      if (getVirtualClockPlaying()) virtualClockPause()
+      else virtualClockPlay()
       return
     }
     if (!project?.id) return
@@ -8560,7 +8659,7 @@ export function ProjectWorkspace() {
     const ctx = { cells: audioMergedCells, projectId: project.id, session: frontierSession }
     if (from >= 0) startQueue(ctx, from, true)
     else startQueueAtTime(ctx, 0, { play: true })
-  }, [project?.id, audioMergedCells, frontierSession, timelineSelectedCellId, videoIsTransport])
+  }, [project?.id, audioMergedCells, frontierSession, timelineSelectedCellId, videoIsTransport, virtualIsTransport])
 
   // AQU-654: count outstanding (non-waived) LQA/validation infractions on the
   // active file. Export never hard-blocks on these — the count only drives a
@@ -10453,6 +10552,11 @@ export function ProjectWorkspace() {
                   startCellId={timelineSelectedCellId}
                   coreMediaUrl={activeFile?.coreMediaUrl ?? null}
                   videoPaneOnScreen={showVideoPane}
+                  // AQU-646 stage 3h: what the bar reads on a file with timings
+                  // and no master. 0 everywhere else, which is every ordinary
+                  // arrangement and leaves the bar exactly as it was.
+                  timelineDurationSec={timelineDurationSec}
+                  virtualSoundingCellId={virtualSoundingCellId}
                   below={
                     <>
                       {syncStatus}

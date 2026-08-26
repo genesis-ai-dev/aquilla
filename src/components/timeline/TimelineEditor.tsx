@@ -122,6 +122,7 @@ import { RECORDING_SLOT, slotAudible, slotForTrack } from "@/lib/timeline/track-
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useVideoClockSec, useVideoClockPlaying } from "@/lib/timeline/video-clock"
+import { useVirtualClockPlaying, useVirtualClockSec } from "@/lib/timeline/virtual-clock"
 import { useVideoDurationSec } from "@/lib/timeline/video-duration"
 import { useUiSlot } from "@/lib/ui-slots"
 import { setAudioQualityPref, useAudioQualityPref } from "@/lib/store/audio-quality-pref"
@@ -1345,11 +1346,35 @@ export function TimelineEditor({
     if (!queueActive && videoClockSec != null) clock.setCurrentSec(videoClockSec)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
   }, [queueActive, videoClockSec])
+  // AQU-646 stage 3h: THE THIRD WRITER — a file with timings and no master.
+  //
+  // Sam, 2026-08-25: a VTT imported on its own never moved the playhead, and
+  // the reason was honest rather than broken — the queue only publishes a FILE
+  // position while an imported recording is the master, and there was no film
+  // either. So nothing wrote this at all.
+  //
+  // Gated on BOTH of the others being idle, for the same reason they are gated
+  // against each other: two writers on one clock is what made the playhead and
+  // the film detach, and `virtualOwnsFile` already guarantees exclusivity —
+  // this is the belt to its braces, and it is what keeps the ordering of these
+  // three effects from mattering.
+  const virtualClockSec = useVirtualClockSec()
+  const virtualPlaying = useVirtualClockPlaying()
+  useEffect(() => {
+    if (!queueActive && videoClockSec == null && virtualClockSec != null) {
+      clock.setCurrentSec(virtualClockSec)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
+  }, [queueActive, videoClockSec, virtualClockSec])
   // Whichever transport actually owns the clock. Parking (rather than merely
   // withholding seconds) matters: the playhead's rAF interpolation extrapolates
   // from its last anchor while `playing`, so leaving it running against a
   // position nobody updates draws steady, confident, wrong motion.
-  const transportPlaying = queueActive ? queuePlaying && queueClockIsFile : videoPlaying
+  const transportPlaying = queueActive
+    ? queuePlaying && queueClockIsFile
+    : videoClockSec != null
+      ? videoPlaying
+      : virtualPlaying
   const transportRate = queueActive ? queueProgress.rate : 1
   // AQU-646: how far behind the clock your EARS are, and whether to draw the
   // playhead there.

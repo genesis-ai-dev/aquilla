@@ -20,7 +20,7 @@
 import { useState, type ReactNode } from "react"
 import { Archive, ArchiveRestore, Plus, Globe } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { Badge } from "@/components/ui/badge"
 import { FieldLabel } from "@/components/ui/field"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -111,6 +111,11 @@ export function LanguagesSection({
 
   const active = activeLanes(targetLanes, archivedLanes)
   const archived = archivedRegisteredLanes(targetLanes, archivedLanes)
+
+  // AQU-988: mirror validateNewLane's dedupe set (default lane + every
+  // registered lane, active or archived) so the dropdown never offers a
+  // language that "add" would immediately reject as a duplicate.
+  const excludeFromSuggestions = [defaultTargetLanguage, ...targetLanes]
 
   async function handleAdd() {
     if (!canEdit) return
@@ -293,12 +298,15 @@ export function LanguagesSection({
           <div className="flex items-end gap-2">
             <div className="flex-1">
               <FieldLabel htmlFor="add-target-lang">{t("projectSettings.languages.addLaneLabel")}</FieldLabel>
-              <Input
+              <LanguageComboboxInput
                 id="add-target-lang"
                 data-testid="add-target-lang-input"
                 value={newLane}
-                onChange={(e) => {
-                  setNewLane(e.target.value)
+                // Suggestions skip lanes that already exist, so the list can
+                // never offer a value the duplicate check would then reject.
+                exclude={excludeFromSuggestions}
+                onValueChange={(next) => {
+                  setNewLane(next)
                   setAddError(null)
                 }}
                 onKeyDown={(e) => {

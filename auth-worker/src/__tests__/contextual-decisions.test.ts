@@ -8,6 +8,7 @@ import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import {
   raiseDecision,
+  raiseDecisionOnce,
   getDecision,
   listOpenDecisions,
   countOpenDecisions,
@@ -54,6 +55,23 @@ describe("raiseDecision", () => {
 
     const read = await getDecision(db, d.id)
     expect(read?.id).toBe(d.id)
+  })
+
+  it("reuses the open decision for the same run span after a driver replay", async () => {
+    const projectId = `proj-once-${Date.now()}`
+    const input = {
+      projectId,
+      runId: `run-once-${Date.now()}`,
+      fileId: "file-1",
+      spanId: "span-1",
+      cellIds: ["c1"],
+      reason: "Who is speaking?",
+    }
+    const first = await raiseDecisionOnce(db, input)
+    const replay = await raiseDecisionOnce(db, input)
+
+    expect(replay.id).toBe(first.id)
+    expect(await countOpenDecisions(db, projectId)).toBe(1)
   })
 
   it("rejects an empty reason rather than surfacing a blank card", async () => {

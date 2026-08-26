@@ -61,6 +61,7 @@ import {
 } from "./lib/spawn-worker"
 import {
   finalizeArtifactBindingSchema,
+  finalizeAuthTokenSchema,
   finalizeChangesetSchema,
   finalizeSourceBlobSchema,
   prepareArtifactBindingSchema,
@@ -431,6 +432,7 @@ async function reconcilePgSchema(
 
   patched.push(...await finalizeSourceBlobSchema(client, run))
   patched.push(...await finalizeChangesetSchema(client, run))
+  patched.push(...await finalizeAuthTokenSchema(client, run))
 
   if (tables.has("artifact_bindings")) {
     patched.push(...await finalizeArtifactBindingSchema(client, run))
@@ -729,6 +731,26 @@ async function main(): Promise<void> {
       streamToParent: VERBOSE,
     })
     cleanup.push(() => sync!.kill())
+  }
+
+  // Sample file + a few playable takes in `dev-project`. Identity's
+  // `/__dev__/seed` still owns only users/orgs/projects; cells and audio
+  // land through the same HTTP import/attach path the UI uses. Best-effort:
+  // an empty editor is still a usable stack if this fails.
+  if (!WITHOUT_SYNC) {
+    process.env.I18N_SHOTS_IDENTITY_BASE = `http://127.0.0.1:${IDENTITY_PORT}`
+    process.env.I18N_SHOTS_SYNC_BASE = `http://127.0.0.1:${SYNC_PORT}`
+    try {
+      const { seedDevWorkspaceContent } = await import("./i18n-shots/seed.ts")
+      const seeded = await seedDevWorkspaceContent()
+      console.log(
+        `[dev-stack] seeded ${seeded.fileName} (${seeded.cellIds.length} cells) into dev-project`,
+      )
+    } catch (err) {
+      console.warn(
+        `[dev-stack] sample content seed failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
   }
 
   // Write `.env.development.local` AFTER the Workers are reachable so a

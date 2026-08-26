@@ -160,10 +160,10 @@ export function MemberAccessDetails({
       {error && <p className="text-[10px] text-destructive">{error}</p>}
       {data && !loading && (
         <>
-          <p className="text-[10px] text-muted-foreground">
+          <p className="inline-flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
             {data.orgRole != null ? (
               <>
-                {t("org.memberAccessPanel.orgRoleLabel")} <RoleLevelLabel level={data.orgRole} as="strong" /> {t("org.memberAccessPanel.orgRoleAppliesNote")}
+                {t("org.memberAccessPanel.orgRoleLabel")} <RoleLevelLabel level={data.orgRole} /> {t("org.memberAccessPanel.orgRoleAppliesNote")}
               </>
             ) : (
               t("org.memberAccessPanel.noOrgRole")
@@ -217,24 +217,24 @@ function AccessProjectRow({
     <li className="rounded border bg-background p-2">
       <div className="flex items-center justify-between gap-2">
         <span className="truncate text-xs font-medium">{p.projectName}</span>
-        <span className="shrink-0 text-[10px] text-muted-foreground">
-          {t("org.memberAccessPanel.resolvedLabel")} <RoleLevelLabel level={p.resolved} as="strong" />
+        <span className="shrink-0 inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+          {t("org.memberAccessPanel.resolvedLabel")} <RoleLevelLabel level={p.resolved} />
         </span>
       </div>
       <div className="mt-1 flex flex-wrap gap-1">
         {p.direct != null && (
           <Badge variant="secondary" className="text-[10px]">
-            {t("org.memberAccessPanel.directLabel")} <RoleLevelLabel level={p.direct} />
+            {t("org.memberAccessPanel.directLabel")} <RoleLevelLabel level={p.direct} plain />
           </Badge>
         )}
         {p.groups.map((g) => (
           <Badge key={g.groupId} variant="secondary" className="text-[10px]">
-            {t("org.memberAccessPanel.teamGrantLabel", { name: g.name })} <RoleLevelLabel level={g.roleLevel} />
+            {t("org.memberAccessPanel.teamGrantLabel", { name: g.name })} <RoleLevelLabel level={g.roleLevel} plain />
           </Badge>
         ))}
         {p.org != null && (
           <Badge variant="secondary" className="text-[10px]">
-            {t("org.memberAccessPanel.orgGrantLabel")} <RoleLevelLabel level={p.org} />
+            {t("org.memberAccessPanel.orgGrantLabel")} <RoleLevelLabel level={p.org} plain />
           </Badge>
         )}
         {p.creator && (

@@ -67,6 +67,8 @@ export interface AdminProject {
   validatedCells: number
   wordCount: number
   lastEditAt: number | null
+  /** True when someone who is not a member of the owning org can access it. */
+  shared: boolean
 }
 
 export interface AdminActivity {

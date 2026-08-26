@@ -124,15 +124,20 @@ describe("catalog has no duplicate English strings (AQU-511 / AQU-832)", () => {
     // An exception is granted per key, not per English string: if three keys
     // share a string and only two are excused, the remaining pair is still a
     // duplicate worth flagging (via the warning above), and the exceptions
-    // file must not silently cover it.
-    const collidingKeys = ["example.first", "example.second", "example.third"]
-    const exceptions = {
-      "example.first": "A reviewed exception applies to this key alone, never to its whole string group.",
+    // file must not silently cover it. Scoped to groups the exceptions file
+    // touches: a wholly unexcused pair is the warning's business (the AQU-832
+    // relaxation above), not this hard gate's — before this scoping, the first
+    // unexcused duplicate to land anywhere in the catalog hard-failed here,
+    // re-imposing exactly the blocking behaviour AQU-832 removed.
+    const groups = groupsByEnglish()
+    for (const { keys, sample } of groups.values()) {
+      if (!keys.some((k) => k in DUPLICATE_EXCEPTIONS)) continue
+      const unexcused = keys.filter((k) => !(k in DUPLICATE_EXCEPTIONS))
+      expect(
+        unexcused.length,
+        `${JSON.stringify(sample)} leaves ${unexcused.join(", ")} colliding`,
+      ).toBeLessThan(2)
     }
-    expect(withoutExceptions(collidingKeys, exceptions)).toEqual([
-      "example.second",
-      "example.third",
-    ])
   })
 
   it("has no two namespaces claiming the same key", () => {

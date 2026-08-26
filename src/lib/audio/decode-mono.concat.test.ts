@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { concatPcm } from "./audio-by-character"
+import { concatPcm } from "./decode-mono"
 
 describe("concatPcm", () => {
   it("joins clips back-to-back in order", () => {

@@ -97,7 +97,7 @@ describe("shouldAutoStartTour", () => {
 
   it("AQU-243: independent from AQU-244 project-scoped setup flag", () => {
     // Simulate AQU-244 marking a project's setup checklist as shown.
-    localStorage.setItem("codex.setupAutoShown.some-project-id", "1")
+    localStorage.setItem("aquilla.setupAutoShown.some-project-id", "1")
     // That key must NOT affect the product tour flag.
     localStorage.setItem(ONBOARDING_DONE_KEY, "true")
     expect(shouldAutoStartTour()).toBe(true)

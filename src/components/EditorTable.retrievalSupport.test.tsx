@@ -1,7 +1,10 @@
 /**
- * Retrieval-support summary — WHY: the support percentage lives in a paragraph
- * that is deliberately muted and is the figure a reviewer is reading for. It
- * carries `font-medium text-foreground` to lift it out of the explanatory copy.
+ * Retrieval-support summary — WHY: the line "Cell estimate {p}% · local trend
+ * {p}%" lives in a paragraph that is deliberately muted, and the figures are
+ * the only things in it a reviewer is reading for. Both carry
+ * `font-medium text-foreground` to lift them out of that paragraph; an earlier
+ * i18n pass interpolated figures like these as bare text, so the numbers sank
+ * into the muted colour and the line lost its scannable content.
  */
 
 import { describe, it, expect, vi } from "vitest"
@@ -116,7 +119,7 @@ function makeStore(): CellStore {
 }
 
 describe("EditorTable retrieval-support summary", () => {
-  it("keeps the support percentage emphasised", async () => {
+  it("keeps the estimate and local-trend percentages emphasised", async () => {
     const qc = new QueryClient()
     render(
       <QueryClientProvider client={qc}>
@@ -146,15 +149,18 @@ describe("EditorTable retrieval-support summary", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open cell details" }))
     fireEvent.click(await screen.findByRole("tab", { name: "Retrieval support" }))
 
-    // Both the cell estimate and its local trend are the same for this one-cell
-    // fixture. Assert the elements and their classes; a text-only assertion
-    // would pass if the figures sank back into the muted explanatory copy.
-    const percentages = screen.getAllByText("72%")
-    expect(percentages).toHaveLength(2)
-    for (const percent of percentages) {
-      expect(percent.tagName).toBe("SPAN")
-      expect(percent).toHaveClass("font-medium")
-      expect(percent).toHaveClass("text-foreground")
+    // Assert the elements and their classes: "Cell estimate 72% · local trend
+    // 72%" reads identically flattened, so a text-only assertion would have
+    // passed on a version that lost the emphasis.
+    const figures = screen.getAllByText("72%")
+    expect(figures).toHaveLength(2)
+    for (const figure of figures) {
+      expect(figure.tagName).toBe("SPAN")
+      expect(figure).toHaveClass("font-medium")
+      expect(figure).toHaveClass("text-foreground")
     }
+    expect(figures[0].parentElement?.textContent).toBe(
+      "Cell estimate 72% · local trend 72%",
+    )
   })
 })

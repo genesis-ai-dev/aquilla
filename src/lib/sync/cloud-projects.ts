@@ -5,6 +5,7 @@
 // browser resolves instead of spinning "Loading..." forever.
 
 import type { FileType, ProjectRecord } from "@/lib/parsers/types"
+import type { PersistedTrackOverrides } from "@/lib/timeline/tracks"
 import { FRONTIER_API_URL } from "./sync-token"
 import { fetchProjectState, type ProjectStateResponse } from "./archive"
 import { UserError } from "@/lib/errors/user-error"
@@ -14,6 +15,13 @@ export interface CloudFileSummary {
   name: string
   type: string
   cellCount: number
+  /** The files-table `role`, unfolded. `type` above collapses kind ?? role, so
+   *  an audio-cue sibling (role "audio-cues", kind "vtt") is indistinguishable
+   *  from a real subtitle import through `type` alone. */
+  role?: string | null
+  /** The file this one hangs off: for an audio-cue sibling, the text file whose
+   *  timeline its cues annotate. */
+  anchorFileId?: string | null
   bookCode?: string | null
   hasScriptureContent?: boolean
   sourceLanguage?: string | null
@@ -24,8 +32,13 @@ export interface CloudFileSummary {
   targetTextDirection?: "ltr" | "rtl" | null
   /** Timeline editor: core video URL for the preview; absent/null ⇒ no video. */
   coreMediaUrl?: string | null
+  audioVttTimebase?: { fromFps?: string; toFps?: string; scale: number } | null
   /** The file's audio timing mode; absent ⇒ the project default applies. */
   timingMode?: "dubbing" | "audioFirst" | null
+  /** Per-track deltas keyed by track id; absent ⇒ the file draws the three
+   *  default tracks. NEVER the full track list — consume only through
+   *  mergeTrackOverrides. */
+  trackOverrides?: PersistedTrackOverrides | null
 }
 
 export interface CloudProjectSummary {
@@ -363,6 +376,12 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
       type: f.type as FileType,
       createdAt: now,
       cellCount: f.cellCount,
+      // Both halves of the hidden-sibling pairing. Dropping either here means a
+      // cold-loaded browser sees the audio-cue file as an ordinary VTT: listed
+      // in the sidebar, searched, exported — everything the sibling exists to
+      // avoid. `type` cannot stand in for `role` (it is kind ?? role).
+      ...(f.role ? { role: f.role } : {}),
+      ...(f.anchorFileId ? { anchorFileId: f.anchorFileId } : {}),
       ...(f.bookCode ? { bookCode: f.bookCode } : {}),
       ...(f.hasScriptureContent ? { hasScriptureContent: true } : {}),
       ...(f.sourceLanguage ? { sourceLanguage: f.sourceLanguage } : {}),
@@ -371,7 +390,14 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
       ...(f.sourceTextDirection === "ltr" || f.sourceTextDirection === "rtl" ? { sourceTextDirection: f.sourceTextDirection } : {}),
       ...(f.targetTextDirection === "ltr" || f.targetTextDirection === "rtl" ? { targetTextDirection: f.targetTextDirection } : {}),
       ...(f.coreMediaUrl ? { coreMediaUrl: f.coreMediaUrl } : {}),
+      ...(f.audioVttTimebase ? { audioVttTimebase: f.audioVttTimebase } : {}),
       ...(f.timingMode === "dubbing" || f.timingMode === "audioFirst" ? { timingMode: f.timingMode } : {}),
+      // Shape-checked despite the declared type — this is raw JSON off the
+      // wire. Entries pass through unread: mergeTrackOverrides is the only
+      // validator, and narrowing here would drop a kind a newer client wrote.
+      ...(f.trackOverrides && typeof f.trackOverrides === "object" && !Array.isArray(f.trackOverrides)
+        ? { trackOverrides: f.trackOverrides }
+        : {}),
     })),
     members: [],
     syncRole: {

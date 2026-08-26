@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   lookupUser,
   listProjectMembers,
+  fetchProjectRoster,
+  fetchPrivilegedProjectMembers,
   fetchOrgMembersMatrix,
   addProjectMember,
   addProjectMembers,
@@ -68,6 +70,34 @@ describe("listProjectMembers", () => {
     expect(err).toBeInstanceOf(Error);
     expect((err as Error).message).not.toMatch(/HTTP\s*503/);
     expect((err as Error).name).toBe("UserError");
+  });
+});
+
+describe("fetchPrivilegedProjectMembers", () => {
+  it("requests members with minRole=600 so the full roster is not required", async () => {
+    const members: ProjectMember[] = [
+      { userId: 1, username: "wendy", role: { level: 700, name: "owner", source: "creator" }, secondarySources: [] },
+    ];
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      new Response(JSON.stringify({ members }), { status: 200 })
+    );
+    const result = await fetchPrivilegedProjectMembers("jwt", "p1");
+    expect(result).toEqual({ kind: "ok", members });
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/projects\/p1\/members\?minRole=600$/),
+      expect.anything(),
+    );
+  });
+
+  it("fetchProjectRoster without minRole keeps the unfiltered members URL", async () => {
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      new Response(JSON.stringify({ members: [] }), { status: 200 })
+    );
+    await fetchProjectRoster("jwt", "p1");
+    expect(global.fetch).toHaveBeenCalledWith(
+      expect.stringMatching(/\/projects\/p1\/members$/),
+      expect.anything(),
+    );
   });
 });
 

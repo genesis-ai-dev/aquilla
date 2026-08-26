@@ -59,7 +59,7 @@ test("sparkle in a secondary lane commits the draft into that lane only", async 
 
   // Point the per-device LLM override at the spec-local mock server.
   await alice.evaluate(({ endpoint }) => {
-    localStorage.setItem("codex:userProviderOverride", JSON.stringify({
+    localStorage.setItem("aquilla:userProviderOverride", JSON.stringify({
       endpoint,
       model: "mock-model",
       apiKey: "",

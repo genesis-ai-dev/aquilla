@@ -140,6 +140,31 @@ def _post(url: str, payload: dict, secret: str) -> None:
         c.post(url, json=payload, headers={"X-Diarization-Secret": secret})
 
 
+def _validate_host_public(hostname: str, label: str) -> set[str]:
+    """Resolve `hostname` and confirm every candidate address is publicly
+    routable, returning the resolved address set. Callers that go on to make
+    the actual request (`_fetch_validated`) connect directly to one of these
+    addresses instead of letting the HTTP client re-resolve DNS a second time:
+    a validate-then-fetch pattern that re-resolves is vulnerable to DNS
+    rebinding — an attacker-controlled record can answer this lookup with a
+    public IP and the client's own lookup moments later with a cloud-metadata
+    or internal address, since nothing ties the two resolutions together."""
+    from fastapi import HTTPException
+
+    if hostname == "localhost" or hostname.endswith(".local") or hostname.endswith(".internal"):
+        raise HTTPException(status_code=400, detail=f"{label} host not allowed")
+
+    try:
+        resolved = {info[4][0] for info in socket.getaddrinfo(hostname, None)}
+    except socket.gaierror:
+        raise HTTPException(status_code=400, detail=f"{label} host does not resolve") from None
+
+    for addr in resolved:
+        if not ipaddress.ip_address(addr).is_global:
+            raise HTTPException(status_code=400, detail=f"{label} resolves to a non-public address")
+    return resolved
+
+
 def _assert_public_https_url(url: str, label: str) -> None:
     """Reject anything but a public https:// URL. `start` is only guarded by
     the shared secret (no network isolation — see admin.py's constant-time
@@ -154,33 +179,40 @@ def _assert_public_https_url(url: str, label: str) -> None:
     if parsed.scheme != "https" or not parsed.hostname:
         raise HTTPException(status_code=400, detail=f"{label} must be an https URL")
 
-    hostname = parsed.hostname.lower()
-    if hostname == "localhost" or hostname.endswith(".local") or hostname.endswith(".internal"):
-        raise HTTPException(status_code=400, detail=f"{label} host not allowed")
-
-    try:
-        resolved = {info[4][0] for info in socket.getaddrinfo(hostname, None)}
-    except socket.gaierror:
-        raise HTTPException(status_code=400, detail=f"{label} host does not resolve") from None
-
-    for addr in resolved:
-        ip = ipaddress.ip_address(addr)
-        if not ip.is_global:
-            raise HTTPException(status_code=400, detail=f"{label} resolves to a non-public address")
+    _validate_host_public(parsed.hostname.lower(), label)
 
 
 def _fetch_validated(url: str, label: str, *, max_redirects: int = 5, timeout: float = 300) -> bytes:
-    """GET url, re-validating the target host with `_assert_public_https_url` on
-    every hop instead of trusting httpx's built-in redirect follower. A pre-fetch-only
-    check would let a same-secret-authenticated caller point `audioUrl` at a public
-    https URL that 302s to an internal/cloud-metadata address; this closes that gap
-    by disabling httpx's auto-follow and re-checking each `Location` ourselves."""
+    """GET url, re-validating the target host on every hop instead of trusting
+    httpx's built-in redirect follower. A pre-fetch-only check would let a
+    same-secret-authenticated caller point `audioUrl` at a public https URL
+    that 302s to an internal/cloud-metadata address; disabling httpx's
+    auto-follow and re-checking each `Location` ourselves closes that gap.
+
+    The request itself connects directly to the IP address validated by
+    `_validate_host_public`, rather than to the hostname, with the original
+    hostname preserved via the `Host` header and TLS SNI (`sni_hostname`
+    extension). Passing the hostname straight to httpx would re-resolve DNS
+    a second time — the TOCTOU/DNS-rebinding gap `_validate_host_public`'s
+    docstring describes — since nothing guarantees the client's own lookup
+    returns the same address this function just validated."""
     import httpx
+    from fastapi import HTTPException
 
     for _ in range(max_redirects + 1):
-        _assert_public_https_url(url, label)
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or not parsed.hostname:
+            raise HTTPException(status_code=400, detail=f"{label} must be an https URL")
+        hostname = parsed.hostname.lower()
+        resolved = _validate_host_public(hostname, label)
+
+        ip = next((a for a in resolved if ipaddress.ip_address(a).version == 4), next(iter(resolved)))
+        port = parsed.port or 443
+        pinned_netloc = f"[{ip}]:{port}" if ":" in ip else f"{ip}:{port}"
+        pinned_url = parsed._replace(netloc=pinned_netloc).geturl()
+
         with httpx.Client(timeout=timeout, follow_redirects=False) as c:
-            resp = c.get(url)
+            resp = c.get(pinned_url, headers={"Host": parsed.netloc}, extensions={"sni_hostname": hostname})
         if resp.is_redirect:
             location = resp.headers.get("location")
             if not location:

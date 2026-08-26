@@ -254,7 +254,7 @@ function ProjectHeaderCell({
           </AppTooltip>
         )}
       </div>
-      <div className="mt-0.5 text-[10px] text-muted-foreground">
+      <div className="mt-0.5">
         {project.role?.name ? <RoleLabel name={project.role.name} /> : ""}
       </div>
     </TableHead>

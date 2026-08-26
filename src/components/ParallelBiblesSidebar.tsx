@@ -31,8 +31,8 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 
-const VERSIONS_STORAGE_KEY = "codex:parallel-bibles:versions"
-const OPEN_STORAGE_KEY_PREFIX = "codex:parallel-bibles:"
+const VERSIONS_STORAGE_KEY = "aquilla:parallel-bibles:versions"
+const OPEN_STORAGE_KEY_PREFIX = "aquilla:parallel-bibles:"
 
 function openStateKey(projectId: string): string {
   return `${OPEN_STORAGE_KEY_PREFIX}${projectId}:open`

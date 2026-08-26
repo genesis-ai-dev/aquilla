@@ -49,7 +49,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { toast } from "@/components/ui/toast"
-import { formatDate, formatNumber } from "@/lib/i18n/format"
+import { DateTooltip } from "@/components/ui/date-tooltip"
+import { formatNumber } from "@/lib/i18n/format"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import {
   deleteKnowledgeDocument,
@@ -347,7 +348,7 @@ export function KnowledgeBaseSurface({
                       <span className="truncate">{doc.name}</span>
                     </CardTitle>
                     <CardDescription>
-                      {doc.createdBy} · {formatDate(doc.createdAt, locale)} · {formatBytes(doc.sizeBytes, locale)}
+                      {doc.createdBy} · <DateTooltip value={doc.createdAt} label={t("common.date.created")} /> · {formatBytes(doc.sizeBytes, locale)}
                     </CardDescription>
                     <CardAction>
                       <div className="flex items-center gap-2">

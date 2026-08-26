@@ -2,8 +2,6 @@ import { defineNamespace } from "./types"
 
 export const comments = defineNamespace({
   keys: {
-    "comments.backToProject": "Back to project",
-
     // Sort picker
     "comments.sort.unresolvedFirst": "Unresolved first",
     "comments.sort.recentActivity": "Most recent activity",
@@ -49,7 +47,6 @@ export const comments = defineNamespace({
 
     // In-thread reply composer (CommentThread.tsx — no @mention hint here)
     "comments.thread.replyPlaceholder": "Reply...",
-    "comments.thread.posted": "Posted",
     "comments.thread.reply": "Reply",
     "comments.thread.closeWithReply": "Close with reply",
 
@@ -70,6 +67,7 @@ export const comments = defineNamespace({
     "comments.loadError": "Failed to load comments. Check your connection and try refreshing.",
     "comments.empty.title": "No comments yet",
     "comments.empty.body": "Comments can be added from the cell menu in the editor.",
+    "comments.empty.noneVisible": "No comments",
     "comments.noMatch.title": "No threads match your filters",
     "comments.noMatch.clear": "Clear filters",
 
@@ -91,11 +89,6 @@ export const comments = defineNamespace({
       screenshot: "comments",
     },
     keys: {
-      "comments.backToProject": {
-        description:
-          "Button at the top of the full-page thread list that navigates back to the " +
-          "project's editor.",
-      },
       "comments.sort.unresolvedFirst": {
         description: "Option in the thread-list sort picker: unresolved threads first.",
       },
@@ -252,12 +245,6 @@ export const comments = defineNamespace({
           "comments.composer.replyPlaceholder — this box has no @mention support.",
         screenshot: "cell-editor",
       },
-      "comments.thread.posted": {
-        description:
-          "Label in the date tooltip for the time a comment or thread was first " +
-          "submitted. Past-tense event label, distinct from the Post button.",
-        screenshot: "cell-editor",
-      },
       "comments.thread.reply": {
         description:
           "Button that submits the reply textarea's contents as a new reply in the " +
@@ -276,14 +263,15 @@ export const comments = defineNamespace({
       },
       "comments.filter.filtersButton": {
         description:
-          "Button that expands/collapses the advanced filter row (sort, show-resolved, " +
-          "file, author, participant). Toggles state; label doesn't change.",
+          "Tooltip and accessible name of the funnel icon button that opens the " +
+          "filter menu (sort, show-resolved, file, author, participant). The name " +
+          "does not change when the menu is open.",
       },
       "comments.filter.sortLabel": {
-        description: "Form label beside the sort-order picker in the filter row.",
+        description: "Form label beside the sort-order picker in the filter menu.",
       },
       "comments.filter.showResolved": {
-        description: "Checkbox label: include resolved threads in the visible list.",
+        description: "Switch label in the filter menu: include resolved threads in the visible list.",
       },
       "comments.filter.allFiles": {
         description: "Option in the file picker meaning no file filter is applied.",
@@ -336,10 +324,16 @@ export const comments = defineNamespace({
           "Supporting text under comments.empty.title, telling the user where to add " +
           "a first comment.",
       },
+      "comments.empty.noneVisible": {
+        description:
+          "Heading of the empty-state card when the project has comments, but none " +
+          "are visible under the default filters (resolved threads are hidden). Not " +
+          "the filtered no-match state — that uses comments.noMatch.title.",
+      },
       "comments.noMatch.title": {
         description:
           "Heading of the empty-state card shown when the project has comments, but " +
-          "the active filters exclude all of them.",
+          "user-applied (non-default) filters exclude all of them.",
       },
       "comments.noMatch.clear": {
         description:

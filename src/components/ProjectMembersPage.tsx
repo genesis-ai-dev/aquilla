@@ -2,9 +2,10 @@
 //
 // Canonical UI: `/project/:id/settings/members` (MembersSection).
 //
-// This module keeps the pieces still embedded elsewhere:
-//   - MembersTab — org-side ProjectOverview Members card
-//   - InviteLinkTab / RevokeAllDialog — settings MembersSection + MembersTab
+// This module keeps the pieces still reused elsewhere:
+//   - InviteLinkTab / RevokeAllDialog — settings MembersSection
+//   - MembersTab — still the list/add/revoke building block (settings owns
+//     the product surface; overview no longer embeds it)
 
 import { useState, useCallback, useEffect, useMemo } from "react"
 import {
@@ -42,7 +43,7 @@ import {
   roleDisplayText,
 } from "@/lib/frontier/roles"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
-import { RoleLabel } from "@/components/RoleLabel"
+import { RoleLabel, RoleLevelLabel } from "@/components/RoleLabel"
 import { RoleSelect } from "@/components/RoleSelect"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
@@ -68,9 +69,9 @@ const DEFAULT_EXPIRY_DAYS = 7
 // ──────────────────────────────────────────────────────────────────────────
 // Members tab
 //
-// Exported (AQU-335) so the org-side ProjectOverview (/projects/:id) can
-// embed the same members add/change-role/revoke surface — one implementation,
-// two surfaces (overview card + settings MembersSection helpers).
+// List / add / change-role / revoke building block. The product surface is
+// Project Settings → Team members (MembersSection). Keep this export for
+// tests and any remaining embed; overview no longer mounts it.
 // ──────────────────────────────────────────────────────────────────────────
 
 export function MembersTab({
@@ -199,7 +200,7 @@ export function MembersTab({
       >
         <UsernameWithAvatar username={m.username} />
         <SourceBadge source={m.role.source} />
-        <RoleLabel name={m.role.name} className="text-xs text-muted-foreground" />
+        <RoleLabel name={m.role.name} />
 
         {/* Secondary sources */}
         {m.secondarySources && m.secondarySources.length > 0 && (
@@ -266,8 +267,8 @@ export function MembersTab({
 
   // AQU-485: the project's org rosterViewMinRole policy hides the roster
   // from this caller. Render nothing — no "Roster hidden" copy, no empty
-  // list, no add-member form. The overview card and settings nav already
-  // omit this surface; this is defense if we still mount.
+  // list, no add-member form. Settings nav already omits this surface;
+  // this is defense if we still mount.
   if (rosterHidden) return null
 
   return (
@@ -853,7 +854,7 @@ function GrantPathRow({
         {source}
       </span>
       {/* Role LABEL only — numeric levels are internal (FRO-368). */}
-      <span className="text-muted-foreground">→ {humanRoleName(level)}</span>
+      <RoleLevelLabel level={level} />
       {removable ? (
         <span className="text-xs text-destructive/70">{t("org.membersPage.willBeRemoved")}</span>
       ) : (

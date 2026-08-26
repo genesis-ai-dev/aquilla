@@ -37,13 +37,13 @@ import { Section } from "@/components/ui/page"
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import { StaffLanePopover } from "@/components/StaffLanePopover"
 import { AssignModal } from "@/components/AssignModal"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { fetchMemberScopes, type MemberScope } from "@/lib/sync/member-scopes"
 import { ROLE } from "@/lib/frontier/roles"
 import { laneTranslatedPct, laneValidatedPct, type PortfolioLane } from "@/lib/frontier/portfolio"
-import { formatRelativeTime } from "@/lib/time/relative"
 import type { FileReference } from "@/lib/parsers/types"
 import type { ProjectMember } from "@/lib/frontier/members"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -71,8 +71,6 @@ export interface OverviewLaneTableProps {
   canAddLanguage: boolean
   /** Refresh the portfolio/workload after an assign or staff action. */
   onChanged?: () => void
-  /** Injectable clock for deterministic relative-time tests. */
-  now?: number
 }
 
 /** Stable id fragment for a lane's testids — '' (default lane) → 'default'. */
@@ -131,7 +129,6 @@ export function OverviewLaneTable({
   canManageLanes,
   canAddLanguage,
   onChanged,
-  now,
 }: OverviewLaneTableProps) {
   const t = useT()
   const navigate = useNavigate()
@@ -230,12 +227,15 @@ export function OverviewLaneTable({
         meta: { className: "min-w-[7rem]" },
         cell: ({ row }) => {
           const at = row.original.lastEditAt
-          const rel = at != null
-            ? formatRelativeTime(new Date(at).toISOString(), now)
-            : null
-          return (
+          return at != null ? (
+            <DateTooltip
+              value={at}
+              label={t("org.overviewLaneTable.lastActivityColumn")}
+              className="text-sm text-muted-foreground"
+            />
+          ) : (
             <span className="text-sm text-muted-foreground">
-              {rel ?? t("org.overviewLaneTable.noActivityYet")}
+              {t("org.overviewLaneTable.noActivityYet")}
             </span>
           )
         },
@@ -288,7 +288,6 @@ export function OverviewLaneTable({
       canManageLanes,
       defaultLanguageLabel,
       membersByLane,
-      now,
       onChanged,
       orgId,
       projectId,
@@ -310,6 +309,7 @@ export function OverviewLaneTable({
           <Button
             variant="outline"
             size="sm"
+            nativeButton={false}
             render={
               <Link
                 to={projectSettingsPath(projectId, "general")}

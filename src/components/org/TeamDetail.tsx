@@ -20,8 +20,9 @@ import { MenuItem, MenuSeparator } from "@/components/ui/menu-parts"
 import { Spinner } from "@/components/ui/spinner"
 import { toast } from "@/components/ui/toast"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
-import { Page, EmptyState } from "@/components/ui/page"
+import { Page, EmptyState, NotFoundIcon, TableEmptyState } from "@/components/ui/page"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { DisabledFieldTooltip } from "@/components/ProjectSettings/DisabledFieldTooltip"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
@@ -51,6 +52,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { RoleLabel } from "@/components/RoleLabel"
 import { RoleSelect } from "@/components/RoleSelect"
 import {
   ALL_ROLE_LEVELS,
@@ -64,6 +66,7 @@ import {
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { toUserFacingError, UserError } from "@/lib/errors/user-error"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 
 type TeamTab = "overview" | "projects" | "members"
 type TeamMember = TeamDetailType["members"][number]
@@ -77,8 +80,9 @@ function roleLabel(roleLevel: number | null | undefined): string {
     : humanRoleName(roleLevel)
 }
 
-// AQU-789: removing a team member is a maintainer+ (600) action. Non-maintainers
-// who can view a team see this on a disabled Remove control instead of nothing.
+// AQU-789: removing a team member is a maintainer+ (600) action. The row menu
+// always includes Remove; without permission the item is disabled with this
+// explanation instead of a missing control.
 const REMOVE_REQUIRES_MAINTAINER_TOOLTIP =
   "Only maintainers and org owners can remove members from a team. Ask a maintainer to remove someone."
 
@@ -379,10 +383,25 @@ export function TeamDetail() {
         accessorFn: (p) => p.grantedRoleLevel,
         header: ({ column }) => <DataTableColumnHeader column={column} title={t("common.roleLabel")} />,
         meta: { className: "w-[7.5rem] whitespace-nowrap" },
+        cell: ({ row }) => <RoleLabel name={row.original.grantedRoleLevel} />,
+      },
+      {
+        id: "added",
+        accessorFn: (p) => {
+          const ts = p.grantedAt != null ? Date.parse(p.grantedAt) : Number.NaN
+          return Number.isFinite(ts) ? ts : undefined
+        },
+        sortUndefined: SORT_MISSING_LAST,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title={t("org.teamDetail.addedColumn")} />
+        ),
+        meta: { className: "w-[7.5rem] whitespace-nowrap" },
         cell: ({ row }) => (
-          <span className="text-sm text-foreground">
-            {roleLabel(row.original.grantedRoleLevel)}
-          </span>
+          <DateTooltip
+            value={row.original.grantedAt}
+            label={t("org.teamDetail.addedColumn")}
+            className="text-sm text-muted-foreground"
+          />
         ),
       },
       {
@@ -441,11 +460,9 @@ export function TeamDetail() {
             return <span className="text-sm text-muted-foreground">{t("autopilot.evidence.status.unknown")}</span>
           }
 
-          const label = (
-            <span className="text-sm text-foreground">{roleLabel(m.roleLevel)}</span>
-          )
+          const label = <RoleLabel name={m.roleLevel} />
 
-          // Owners change roles via the actions menu dialog — text is display-only.
+          // Owners change roles via the actions menu dialog — badge is display-only.
           // Non-owners get a tooltip explaining the org-level lock.
           if (isOwner) return label
 
@@ -463,39 +480,38 @@ export function TeamDetail() {
         },
       },
       {
+        id: "added",
+        accessorFn: (m) => {
+          const ts = m.addedAt != null ? Date.parse(m.addedAt) : Number.NaN
+          return Number.isFinite(ts) ? ts : undefined
+        },
+        sortUndefined: SORT_MISSING_LAST,
+        header: ({ column }) => (
+          <DataTableColumnHeader column={column} title={t("org.teamDetail.addedColumn")} />
+        ),
+        meta: { className: "w-[7.5rem] whitespace-nowrap" },
+        cell: ({ row }) => (
+          <DateTooltip
+            value={row.original.addedAt}
+            label={t("org.teamDetail.addedColumn")}
+            className="text-sm text-muted-foreground"
+          />
+        ),
+      },
+      {
         id: "actions",
         enableSorting: false,
         header: () => <span className="sr-only">{t("org.overviewLaneTable.actionsColumn")}</span>,
         meta: { align: "right" as const, className: "w-10" },
-        cell: ({ row }) => {
-          const m = row.original
-          if (!isAdmin) {
-            /* AQU-789: removing a team member is a maintainer+ action. Show a
-               disabled control with the reason rather than omitting it, so it
-               doesn't read as a missing feature. */
-            return (
-              <AppTooltip content={REMOVE_REQUIRES_MAINTAINER_TOOLTIP} className="max-w-xs">
-                <span
-                  tabIndex={0}
-                  aria-disabled="true"
-                  aria-label={t("org.teamDetail.removeMaintainersOnlyAriaLabel", { username: m.username })}
-                  className="inline-flex cursor-not-allowed items-center text-xs text-muted-foreground/70 underline decoration-dotted"
-                >
-                  {t("org.membersPage.remove")}
-                </span>
-              </AppTooltip>
-            )
-          }
-          return (
-            <DataTableRowActionsButton
-              label={t("org.rowActionsAriaLabel", { name: m.username })}
-              revealOnHover
-            />
-          )
-        },
+        cell: ({ row }) => (
+          <DataTableRowActionsButton
+            label={t("org.rowActionsAriaLabel", { name: row.original.username })}
+            revealOnHover
+          />
+        ),
       },
     ],
-    [isAdmin, t],
+    [isOwner, t],
   )
 
   const teamDescription = team?.description?.trim() || null
@@ -506,8 +522,15 @@ export function TeamDetail() {
       header={<OrgBreadcrumb parent={{ label: "Teams", to: activeOrgId != null ? orgPath(activeOrgId, "/teams") : "/orgs/all" }} section={team?.name ?? "Team"} />}
       statusBar={null}
       main={
-        <Page size="wide">
-          <div className="space-y-6">
+        <Page size="full" className="@container/team-detail">
+          {/* Below the max-w-6xl column: same well as other org pages, logo
+              inline with the title, no extra body indent. At/above that width
+              (@6xl = 72rem container): well grows by the avatar gutter so the
+              title stays on the shared column, and tabs/tables pad to it. */}
+          <div
+            data-testid="team-detail-well"
+            className="mx-auto w-full max-w-6xl space-y-6 @6xl/team-detail:ml-[max(0px,calc((100%-72rem)/2-2.75rem))] @6xl/team-detail:w-[min(100%,calc(72rem+2.75rem))] @6xl/team-detail:max-w-[calc(72rem+2.75rem)]"
+          >
             {loading ? (
               <>
                 <div className="h-10 w-64 animate-pulse rounded-lg border bg-card" />
@@ -522,6 +545,7 @@ export function TeamDetail() {
               />
             ) : team == null ? (
               <EmptyState
+                icon={NotFoundIcon}
                 title={t("org.teamDetail.notFoundTitle")}
                 description={t("org.teamDetail.notFoundDescription")}
               />
@@ -620,50 +644,52 @@ export function TeamDetail() {
                 </Dialog>
               )}
 
-              {/* Avatar bleeds left of the max-w-6xl well so title/tabs/tables keep the same
-                  content width as the teams list. Out of flow — do not pad the Page well. */}
               <div className="space-y-3">
               <div
                 className={cn(
-                  "relative flex justify-between gap-4",
+                  "flex gap-3",
                   teamDescription ? "items-start" : "items-center",
                 )}
               >
                 <span
                   aria-hidden
                   data-testid="team-detail-avatar"
-                  className={cn(
-                    "absolute right-full mr-3",
-                    teamDescription ? "top-0 mt-0.5" : "top-1/2 -translate-y-1/2",
-                  )}
+                  className={cn("shrink-0", teamDescription && "mt-0.5")}
                 >
                   <InitialsAvatar name={team.name} size="default" />
                 </span>
-                <div className={cn("min-w-0", teamDescription && "space-y-1")}>
-                  <h1 className="font-heading text-xl font-semibold tracking-tight text-foreground">
-                    {team.name}
-                  </h1>
-                  {teamDescription ? (
-                    <p className="max-w-prose text-sm text-muted-foreground whitespace-pre-wrap">
-                      {teamDescription}
-                    </p>
+                <div
+                  className={cn(
+                    "flex min-w-0 flex-1 justify-between gap-4",
+                    teamDescription ? "items-start" : "items-center",
+                  )}
+                >
+                  <div className={cn("min-w-0", teamDescription && "space-y-1")}>
+                    <h1 className="font-heading text-xl font-semibold tracking-tight text-foreground">
+                      {team.name}
+                    </h1>
+                    {teamDescription ? (
+                      <p className="max-w-prose text-sm text-muted-foreground whitespace-pre-wrap">
+                        {teamDescription}
+                      </p>
+                    ) : null}
+                  </div>
+                  {isAdmin && activeOrgId != null && groupIdNum != null ? (
+                    <Link
+                      to={teamSettingsPath(activeOrgId, groupIdNum)}
+                      aria-label={t("org.teamDetail.teamSettingsAriaLabel")}
+                      className={cn(buttonVariants({ variant: "outline", size: "icon" }), "shrink-0")}
+                    >
+                      <Settings />
+                    </Link>
                   ) : null}
                 </div>
-                {isAdmin && activeOrgId != null && groupIdNum != null ? (
-                  <Link
-                    to={teamSettingsPath(activeOrgId, groupIdNum)}
-                    aria-label={t("org.teamDetail.teamSettingsAriaLabel")}
-                    className={cn(buttonVariants({ variant: "outline", size: "icon" }), "shrink-0")}
-                  >
-                    <Settings />
-                  </Link>
-                ) : null}
               </div>
 
               <Tabs
                 value={tab}
                 onValueChange={(v) => setTab((v as TeamTab) ?? "projects")}
-                className="gap-4"
+                className="gap-4 @6xl/team-detail:pl-11"
               >
                 <TabsList aria-label={t("org.teamDetail.sectionsAriaLabel")}>
                   <TabsTrigger value="projects">{t("nav.projects")}</TabsTrigger>
@@ -745,28 +771,7 @@ export function TeamDetail() {
                     </Dialog>
                   )}
 
-                  {team.projects.length === 0 ? (
-                    <div className="space-y-4">
-                      {isAdmin && (
-                        <div className="flex justify-end">
-                          <Button
-                            type="button"
-                            className="shrink-0"
-                            onClick={openAttachProject}
-                          >
-                            {t("org.teamDetail.attachProjectButton")}
-                          </Button>
-                        </div>
-                      )}
-                      <EmptyState
-                        variant="inline"
-                        icon={FolderGit2}
-                        title={t("org.teamDetail.noProjectsTitle")}
-                        description={isAdmin ? t("org.teamDetail.noProjectsAdminDescription") : undefined}
-                      />
-                    </div>
-                  ) : (
-                    <DataTable
+                  <DataTable
                       columns={projectColumns}
                       data={team.projects}
                       getRowId={(p) => p.id}
@@ -809,15 +814,22 @@ export function TeamDetail() {
                         ) : null
                       }
                       emptyState={
-                        <p className="py-10 text-center text-sm text-muted-foreground">
-                          {t("org.teamDetail.noProjectsMatchSearch")}
-                        </p>
+                        team.projects.length === 0 ? (
+                          <TableEmptyState
+                            icon={FolderGit2}
+                            title={t("org.teamDetail.noProjectsTitle")}
+                            description={isAdmin ? t("org.teamDetail.noProjectsAdminDescription") : undefined}
+                          />
+                        ) : (
+                          <p className="py-10 text-center text-sm text-muted-foreground">
+                            {t("org.teamDetail.noProjectsMatchSearch")}
+                          </p>
+                        )
                       }
                       testId="team-projects-table"
                       className={ADMIN_TABLE_PANEL_CLASS}
                       dense
                     />
-                  )}
                 </TabsContent>
 
                 <TabsContent value="members" className="space-y-4">
@@ -887,27 +899,7 @@ export function TeamDetail() {
                     </Dialog>
                   )}
 
-                  {team.members.length === 0 ? (
-                    <div className="space-y-4">
-                      {isAdmin && (
-                        <div className="flex justify-end">
-                          <Button
-                            type="button"
-                            onClick={() => { setAddingMember(true); setStagedUsernames([]); setAddError(null) }}
-                          >
-                            {t("org.membersPage.orgTable.addMemberTitle")}
-                          </Button>
-                        </div>
-                      )}
-                      <EmptyState
-                        variant="inline"
-                        icon={Users}
-                        title={t("org.teamDetail.noMembersTitle")}
-                        description={isAdmin ? t("org.teamDetail.noMembersAdminDescription") : undefined}
-                      />
-                    </div>
-                  ) : (
-                    <DataTable
+                  <DataTable
                       columns={memberColumns}
                       data={team.members}
                       getRowId={(m) => String(m.userId)}
@@ -933,35 +925,55 @@ export function TeamDetail() {
                         ) : null
                       }
                       rowClassName="group"
-                      renderRowMenuItems={(m) =>
-                        isAdmin ? (
-                          <>
-                            {isOwner && (
-                              <>
-                                <MenuItem onClick={() => openRoleChange(m)}>
-                                  <ShieldUser className="size-4" />
-                                  {t("org.membersPage.changeRoleAria")}
-                                </MenuItem>
-                                <MenuSeparator />
-                              </>
-                            )}
-                            <MenuItem onClick={() => void handleRemoveMember(m.userId)}>
+                      renderRowMenuItems={(m) => (
+                        <>
+                          {isOwner && (
+                            <>
+                              <MenuItem onClick={() => openRoleChange(m)}>
+                                <ShieldUser className="size-4" />
+                                {t("org.membersPage.changeRoleAria")}
+                              </MenuItem>
+                              <MenuSeparator />
+                            </>
+                          )}
+                          <DisabledFieldTooltip
+                            disabled={!isAdmin}
+                            tooltip={REMOVE_REQUIRES_MAINTAINER_TOOLTIP}
+                          >
+                            <MenuItem
+                              aria-label={
+                                isAdmin
+                                  ? undefined
+                                  : t("org.teamDetail.removeMaintainersOnlyAriaLabel", { username: m.username })
+                              }
+                              disabled={!isAdmin}
+                              onClick={() => {
+                                if (isAdmin) void handleRemoveMember(m.userId)
+                              }}
+                            >
                               <UserMinus className="size-4" />
                               {t("org.teamDetail.removeFromTeamButton")}
                             </MenuItem>
-                          </>
-                        ) : null
-                      }
+                          </DisabledFieldTooltip>
+                        </>
+                      )}
                       emptyState={
-                        <p className="py-10 text-center text-sm text-muted-foreground">
-                          {t("org.membersPage.orgTable.noSearchMatch")}
-                        </p>
+                        team.members.length === 0 ? (
+                          <TableEmptyState
+                            icon={Users}
+                            title={t("org.teamDetail.noMembersTitle")}
+                            description={isAdmin ? t("org.teamDetail.noMembersAdminDescription") : undefined}
+                          />
+                        ) : (
+                          <p className="py-10 text-center text-sm text-muted-foreground">
+                            {t("org.membersPage.orgTable.noSearchMatch")}
+                          </p>
+                        )
                       }
                       testId="team-members-table"
                       className={ADMIN_TABLE_PANEL_CLASS}
                       dense
                     />
-                  )}
                 </TabsContent>
               </Tabs>
               </div>

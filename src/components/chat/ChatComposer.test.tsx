@@ -4,7 +4,7 @@ import { createRef } from "react"
 import { ChatComposer, type ChatComposerHandle } from "./ChatComposer"
 
 describe("ChatComposer (TipTap)", () => {
-  it("uses Enter to send and Shift+Enter for a newline", () => {
+  it("sends on Enter and keeps Shift+Enter for a newline", () => {
     const onSend = vi.fn()
     const ref = createRef<ChatComposerHandle>()
     render(<ChatComposer ref={ref} isStreaming={false} isConfigured onSend={onSend} onStop={vi.fn()} />)
@@ -38,9 +38,9 @@ describe("ChatComposer (TipTap)", () => {
     expect(onStop).toHaveBeenCalled()
   })
 
-  it("shows the keyboard shortcut hint beside the send control", () => {
+  it("spells out the keyboard shortcuts next to the Send control", () => {
     render(<ChatComposer isStreaming={false} isConfigured onSend={vi.fn()} onStop={vi.fn()} />)
-    expect(screen.getByText(/Enter to send/)).toBeInTheDocument()
+    expect(screen.getByText("Enter to send · Shift+Enter for newline")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument()
     expect(screen.getByRole("textbox")).toHaveClass("min-h-9", "max-h-32", "overflow-y-auto")
   })

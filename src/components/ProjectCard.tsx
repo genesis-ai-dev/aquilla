@@ -1,5 +1,5 @@
 import { GitBranch, MoreVertical, PauseCircle, Trash2, Undo2 } from "lucide-react"
-import type { ProjectRecord } from "@/lib/parsers/types"
+import { isAudioCueFile, type ProjectRecord } from "@/lib/parsers/types"
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -14,7 +14,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { roleName } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { useI18n } from "@/lib/i18n/I18nProvider"
-import { formatDate as formatLocaleDate } from "@/lib/i18n/format"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 
 /**
  * Has this project ever lived server-side? Two signals:
@@ -64,7 +64,7 @@ export function ProjectCard({
   canToggleLifecycle,
   onToggleLifecycle,
 }: ProjectCardProps) {
-  const { locale, t } = useI18n()
+  const { t } = useI18n()
   const isGit = project.origin?.kind === "git"
   const isTrashed = variant === "trashed"
   // isActive absent or true → active; explicit false → inactive (frozen)
@@ -98,12 +98,17 @@ export function ProjectCard({
     myMember?.role.name ??
     (project.syncRole ? roleName(project.syncRole.level) : null)
 
+  // AQU-646 stage 2: audio-cue siblings are hidden cue data for one timeline
+  // row, not documents — counting them here would tell the user this project
+  // holds a file they will not find anywhere once they open it.
+  const fileCount = project.files.filter((f) => !isAudioCueFile(f)).length
+
   // While a card's workspace is opening it must not fire again — the click is
-  // swallowed and the cursor reflects the wait (AQU-737).
+  // swallowed and a spinner overlay shows the wait (AQU-737).
   const clickable = !isTrashed && !pending
   return (
     <Card
-      className={`relative ${isTrashed ? "opacity-70" : pending ? "cursor-wait" : "hover:bg-muted/50"} ${isInactive && !isTrashed ? "opacity-60" : ""} transition-colors`}
+      className={`relative ${isTrashed ? "opacity-70" : pending ? "" : "hover:bg-muted/50"} ${isInactive && !isTrashed ? "opacity-60" : ""} transition-colors`}
       onClick={clickable ? onClick : undefined}
       aria-busy={pending || undefined}
       data-testid={isInactive && !isTrashed ? "inactive-project-card" : undefined}
@@ -153,9 +158,7 @@ export function ProjectCard({
             )}
             {!isTrashed && myRoleLabel && (
               <AppTooltip content={t("workspace.projectCard.yourRoleTooltip")}>
-                <Badge variant="secondary">
-                  <RoleLabel name={myRoleLabel} />
-                </Badge>
+                <RoleLabel name={myRoleLabel} />
               </AppTooltip>
             )}
             {isGit && (
@@ -195,7 +198,7 @@ export function ProjectCard({
                       data-testid="toggle-lifecycle-button"
                     >
                       <PauseCircle className="h-4 w-4" />
-                      {isInactive ? "Mark as Active" : "Mark as Inactive"}
+                      {isInactive ? t("org.projectOverview.markAsActive") : t("org.projectOverview.markAsInactive")}
                     </button>
                   )}
                   {canTrash && onTrash && (
@@ -235,7 +238,7 @@ export function ProjectCard({
           </p>
         )}
         <p className="text-sm text-muted-foreground">
-          {t("search.expanded.fileCount", { count: project.files.length })}
+          {t("search.expanded.fileCount", { count: fileCount })}
         </p>
         {!isTrashed && members.length > 0 && (
           <div className="mt-2">
@@ -246,8 +249,16 @@ export function ProjectCard({
           <div className="mt-3 flex items-center justify-between gap-2">
             <span className="text-xs text-muted-foreground">
               {t("comments.file.deletedBadge")}
-              {project.deletedBy ? ` by ${project.deletedBy}` : ""}
-              {project.deletedAt ? ` · ${formatDate(project.deletedAt, locale)}` : ""}
+              {project.deletedBy ? t("workspace.projectCard.deletedBy", { name: project.deletedBy }) : ""}
+              {project.deletedAt ? (
+                <>
+                  {" · "}
+                  <DateTooltip
+                    value={project.deletedAt}
+                    label={t("org.archivedProjects.deletedColumnLabel")}
+                  />
+                </>
+              ) : null}
             </span>
             {onRestore && (
               <Button size="sm" variant="outline" onClick={onRestore}>
@@ -260,12 +271,4 @@ export function ProjectCard({
       </CardContent>
     </Card>
   )
-}
-
-function formatDate(iso: string, locale: string): string {
-  try {
-    return formatLocaleDate(iso, locale, { month: "short", day: "numeric", year: "numeric" })
-  } catch {
-    return iso
-  }
 }

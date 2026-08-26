@@ -19,7 +19,7 @@
  */
 
 import { Globe } from "lucide-react"
-import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,16 +42,20 @@ export function LanguageSwitcher({
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button
-            variant="ghost"
-            size="icon"
-            className={className}
+          <button
+            type="button"
             aria-label={ariaLabel ?? t("language.label")}
-          >
-            <Globe className="h-4 w-4" aria-hidden />
-          </Button>
+            className={cn(
+              // Match HelpMenu's compact trigger: muted size-4 glyph in a
+              // size-8 hit area, no bordered button chrome.
+              "flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/40 hover:text-foreground data-popup-open:bg-accent data-popup-open:text-foreground",
+              className,
+            )}
+          />
         }
-      />
+      >
+        <Globe className="size-4 shrink-0" aria-hidden />
+      </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-40">
         <DropdownMenuRadioGroup value={locale} onValueChange={setLocale}>
           {locales.map((l) => (

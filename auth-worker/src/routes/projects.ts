@@ -103,6 +103,17 @@ interface FileProjection {
   name: string
   type: string
   cellCount: number
+  /** The files-table `role` column, forwarded raw. `type` above already folds
+   *  it in as a fallback, which is lossy: a `role: "audio-cues"` sibling has
+   *  `kind: "vtt"`, so `type` reads "vtt" like any other subtitle file and the
+   *  client cannot tell the two apart. The client's isAudioCueFile needs the
+   *  unfolded value, and this endpoint is the cold load — the only place a
+   *  freshly-opened browser learns a file exists. */
+  role?: string
+  /** The file this one hangs off (`files.anchor_file_id`): for an audio-cue
+   *  sibling, the text file whose timeline its cues annotate. The sibling is
+   *  hidden from every list, so without this it is unreachable. */
+  anchorFileId?: string
   bookCode?: string
   hasScriptureContent?: boolean
   /** Timeline-segment-model order lens, read from files.meta. Omitted when
@@ -120,13 +131,39 @@ interface FileProjection {
   /** The file's audio timing mode (file.timing.set), read from files.meta.
    *  Omitted when unset → client falls back to the project-level default. */
   timingMode?: "dubbing" | "audioFirst"
+  /**
+   * What the audio-VTT import did about drift, read from
+   * `meta.aquillaImport.audioVtt.timebase`. Only ever present on an audio-cue
+   * sibling, and only when the import measured something.
+   *
+   * AQU-646 (2026-08-19): the measurement had been recorded since the timebase
+   * check shipped and NEVER SENT — the sync-worker's files-read route forwards
+   * it, but the project record's files come through here, so the project
+   * report showed "No record of a timing check" for episodes that were in fact
+   * corrected. Same class of bug as coreMediaUrl above, found the same way: a
+   * field the client mapped that no route ever produced.
+   */
+  audioVttTimebase?: { fromFps?: string; toFps?: string; scale: number }
+  /** Per-track deltas keyed by track id (file.track.set), read from files.meta
+   *  — NEVER the full track list, which the client derives. Omitted when unset
+   *  → client draws the three defaults. Shape is spelled out structurally
+   *  rather than imported from the client's tracks.ts: `kind` stays a bare
+   *  string here on purpose, so a kind persisted by a newer client survives the
+   *  round trip instead of being narrowed away. */
+  trackOverrides?: Record<string, { kind?: string; name?: string; order?: number; groupId?: string }>
 }
 
 /**
  * Pull file projections for the given project ids from codex-db, grouped by
  * project_id. Returns an empty map if the binding is absent (tests/dev).
  */
-async function loadFilesByProject(
+// Exported for its test alone. This projection has now lost two fields
+// silently — coreMediaUrl (found because the video pane was dead on every cold
+// load) and audioVttTimebase (found because the project report said "no timing
+// check" about corrected episodes) — and both had the same shape: the client
+// mapped a field no route ever produced, and nothing anywhere could notice.
+// A direct test over a seeded row is the thing that notices.
+export async function loadFilesByProject(
   env: AuthHonoEnv["Bindings"],
   projectIds: string[],
 ): Promise<Map<string, FileProjection[]>> {
@@ -135,7 +172,7 @@ async function loadFilesByProject(
 
   const placeholders = projectIds.map(() => "?").join(",")
   const rows = await env.AQUILLA_PG.prepare(
-    `SELECT id, project_id, name, kind, role, book_code, cell_count, meta
+    `SELECT id, project_id, name, kind, role, book_code, anchor_file_id, cell_count, meta
        FROM files
       WHERE project_id IN (${placeholders})
         AND deleted_at IS NULL
@@ -149,6 +186,7 @@ async function loadFilesByProject(
       kind: string | null
       role: string | null
       book_code: string | null
+      anchor_file_id: string | null
       cell_count: number | null
       meta: string | null
     }>()
@@ -164,12 +202,15 @@ async function loadFilesByProject(
     let hasScriptureContent: boolean | undefined
     let coreMediaUrl: string | undefined
     let timingMode: "dubbing" | "audioFirst" | undefined
+    let audioVttTimebase: FileProjection["audioVttTimebase"]
+    let trackOverrides: FileProjection["trackOverrides"]
     if (f.meta) {
       try {
         const m = JSON.parse(f.meta) as {
           orderedBy?: string
           coreMediaUrl?: unknown
           timingMode?: unknown
+          trackOverrides?: unknown
           source_language?: string
           target_language?: string
           sourceLanguage?: string
@@ -178,7 +219,10 @@ async function loadFilesByProject(
           target_text_direction?: string
           sourceTextDirection?: string
           targetTextDirection?: string
-          aquillaImport?: { hasScriptureContent?: unknown }
+          aquillaImport?: {
+            hasScriptureContent?: unknown
+            audioVtt?: { timebase?: unknown }
+          }
         }
         if (m.orderedBy) orderedBy = m.orderedBy
         sourceLanguage = normalizeLanguage(m.source_language ?? m.sourceLanguage)
@@ -188,6 +232,33 @@ async function loadFilesByProject(
         if (m.aquillaImport?.hasScriptureContent === true) hasScriptureContent = true
         if (typeof m.coreMediaUrl === "string" && m.coreMediaUrl.trim()) coreMediaUrl = m.coreMediaUrl
         if (m.timingMode === "dubbing" || m.timingMode === "audioFirst") timingMode = m.timingMode
+        // `scale` is the only required field: a drift measured from the words
+        // is exact even when neither frame rate could be named, so the labels
+        // are optional by design and a record without a finite scale is noise.
+        const tb = m.aquillaImport?.audioVtt?.timebase
+        if (tb && typeof tb === "object") {
+          const t = tb as { fromFps?: unknown; toFps?: unknown; scale?: unknown }
+          if (typeof t.scale === "number" && Number.isFinite(t.scale)) {
+            audioVttTimebase = {
+              ...(typeof t.fromFps === "string" ? { fromFps: t.fromFps } : {}),
+              ...(typeof t.toFps === "string" ? { toFps: t.toFps } : {}),
+              scale: t.scale,
+            }
+          }
+        }
+        // Shape-checked, not value-checked: an array is `typeof "object"` and
+        // would reach the client's merge as a map with numeric keys, and the
+        // delete projection can leave an empty map behind, which means the same
+        // thing as no key at all. Contents pass through untouched — the client's
+        // mergeTrackOverrides is the one validator.
+        if (
+          typeof m.trackOverrides === "object" &&
+          m.trackOverrides !== null &&
+          !Array.isArray(m.trackOverrides) &&
+          Object.keys(m.trackOverrides).length > 0
+        ) {
+          trackOverrides = m.trackOverrides as FileProjection["trackOverrides"]
+        }
       } catch {
         // malformed meta → leave orderedBy unset (client defaults to sequence)
       }
@@ -198,6 +269,8 @@ async function loadFilesByProject(
       // `file_type` collapsed into role + kind (0012); derive a compatible value.
       type: f.kind ?? f.role ?? "codex",
       cellCount: f.cell_count ?? 0,
+      ...(f.role ? { role: f.role } : {}),
+      ...(f.anchor_file_id ? { anchorFileId: f.anchor_file_id } : {}),
       ...(f.book_code ? { bookCode: f.book_code } : {}),
       ...(hasScriptureContent ? { hasScriptureContent: true } : {}),
       ...(orderedBy ? { orderedBy } : {}),
@@ -207,6 +280,8 @@ async function loadFilesByProject(
       ...(targetTextDirection ? { targetTextDirection } : {}),
       ...(coreMediaUrl ? { coreMediaUrl } : {}),
       ...(timingMode ? { timingMode } : {}),
+      ...(audioVttTimebase ? { audioVttTimebase } : {}),
+      ...(trackOverrides ? { trackOverrides } : {}),
     })
     byProject.set(f.project_id, list)
   }
@@ -848,12 +923,30 @@ projects.get("/:projectId/files/:fileId/chapters", authMiddleware, async (c) => 
 })
 
 /**
+ * Parse `?minRole=` for the privileged-members bypass. Only a settings-write
+ * floor (Maintainer+) is accepted — a lower floor would leak the full roster
+ * to callers the org has hidden it from. Invalid / absent → unfiltered list
+ * under the normal AQU-485 roster gate.
+ */
+function parsePrivilegedMinRole(raw: string | undefined): number | null {
+  if (raw == null || raw === "") return null
+  const n = Number.parseInt(raw, 10)
+  if (!Number.isInteger(n) || n < ROLE.MAINTAINER || n > ROLE.OWNER) return null
+  return n
+}
+
+/**
  * AQU-485: additionally gated by the project's org rosterViewMinRole
  * (default MAINTAINER=600) when the project belongs to an org. Projects with
  * no org (org_id null — personal projects) have no org policy to check
  * against and are never gated here. A caller below the floor gets a distinct
  * 403 rather than the member list — the response must not leak the roster
  * or its size.
+ *
+ * Exception: `?minRole=` at Maintainer or Owner returns only members at that
+ * floor or above, even when the full roster is hidden. That is the GitHub
+ * "view admins" contract — a contributor still needs to see who can change
+ * settings, without learning who else is on the project.
  */
 projects.get("/:projectId/members", authMiddleware, async (c) => {
   const user = c.get("user")
@@ -868,19 +961,24 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
     .first<{ created_by: number; org_id: number | null }>()
   if (!project) return c.json({ error: "project not found" }, 404)
 
-  if (project.org_id != null) {
+  const privilegedMinRole = parsePrivilegedMinRole(c.req.query("minRole"))
+
+  if (project.org_id != null && privilegedMinRole == null) {
     const rosterMinRole = await getRosterViewMinRole(c.env, project.org_id)
     if (!canViewRoster(role.level, rosterMinRole)) {
       return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
     }
   }
 
-  const members = await listEffectiveProjectMembers(
+  let members = await listEffectiveProjectMembers(
     c.env,
     projectId,
     project.org_id,
     project.created_by,
   )
+  if (privilegedMinRole != null) {
+    members = members.filter((m) => m.roleLevel >= privilegedMinRole)
+  }
 
   await bumpOrgActivity(c.env, user.id, project.org_id)
 

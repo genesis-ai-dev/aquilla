@@ -9,9 +9,9 @@ import { cn } from "@/lib/utils"
 import { useCellEditHistory } from "@/hooks/useCellEditHistory"
 import { FootnotedTextValue } from "./footnotes/FootnoteInline"
 import { RightSidebarPanel } from "./RightSidebarPanel"
-import { useT, useI18n } from "@/lib/i18n/I18nProvider"
-import { formatDateTime } from "@/lib/i18n/format"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 
 interface HistoryDrawerProps {
   cell: CellData
@@ -123,7 +123,7 @@ function commonSuffixLength(a: string, b: string, prefixLen: number): number {
 }
 
 export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFile, isSynced = false, onPromote }: HistoryDrawerProps) {
-  const { t, locale } = useI18n()
+  const t = useT()
   const enabled = !!projectId && !!fileId && !!getTokenForFile
   // Target side is the typical edit surface in this translation app, so we
   // use `targetEventId` as the AD-2 chain head when computing stale-branch
@@ -171,14 +171,6 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
     if (!hasAnyStale) return
     firstStaleGroupRef.current?.scrollIntoView({ block: "nearest" })
   }, [hasAnyStale])
-
-  function formatTimestamp(iso: string): string {
-    try {
-      return formatDateTime(iso, locale)
-    } catch {
-      return iso
-    }
-  }
 
   return (
     <RightSidebarPanel storageKey="history" defaultWidth={384} resizeLabel="Resize history panel">
@@ -256,7 +248,6 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
                     key={group.terminal.eventId ?? `${group.terminal.timestamp}-${group.startIndex}`}
                     group={group}
                     isCurrent={i === currentGroupIndex}
-                    formatTimestamp={formatTimestamp}
                     refForFirstStale={isFirstStale ? firstStaleGroupRef : null}
                     onPromote={onPromote}
                   />
@@ -274,13 +265,11 @@ export function HistoryDrawer({ cell, onClose, projectId, fileId, getTokenForFil
 function GroupItem({
   group,
   isCurrent,
-  formatTimestamp,
   refForFirstStale,
   onPromote,
 }: {
   group: EntryGroup
   isCurrent: boolean
-  formatTimestamp: (iso: string) => string
   /** Ref attached to the first stale-branch group in the list, used by
    *  HistoryDrawer to scroll the user's attention to it when the drawer
    *  opens via the F6 banner. */
@@ -356,7 +345,7 @@ function GroupItem({
           </span>
         )}
         <span className="ms-auto text-muted-foreground">
-          {formatTimestamp(terminal.timestamp)}
+          <DateTooltip value={terminal.timestamp} />
         </span>
       </div>
       <div className="text-xs text-muted-foreground">
@@ -423,7 +412,9 @@ function GroupItem({
                   key={`${entry.timestamp}-${j}`}
                   className="rounded bg-muted/20 p-1 text-[10px]"
                 >
-                  <div className="text-muted-foreground">{formatTimestamp(entry.timestamp)}</div>
+                  <div className="text-muted-foreground">
+                    <DateTooltip value={entry.timestamp} />
+                  </div>
                   <div className="mt-0.5">
                     <FootnotedTextValue value={entry.value} showFootnotes />
                   </div>

@@ -58,7 +58,8 @@ describe("OrgSwitcher", () => {
     expect(switcher).toBeInTheDocument()
     await act(async () => { switcher.click() })
     expect(screen.getByText("Come and See")).toBeInTheDocument()
-    expect(screen.getByText(/maintainer/i)).toBeInTheDocument()
+    expect(screen.getByText("Maintainer")).toBeInTheDocument()
+    expect(screen.getByText("Owner")).toBeInTheDocument()
     // Check is in-flow only on the selected row — no reserved empty slot on others.
     const selected = screen.getByRole("option", { name: /all organizations/i })
     expect(selected.querySelector(".lucide-check")).not.toBeNull()
@@ -67,6 +68,21 @@ describe("OrgSwitcher", () => {
     // Selecting an org makes it the active scope and persists it.
     await act(async () => { screen.getByRole("option", { name: /side org/i }).click() })
     await waitFor(() => expect(localStorage.getItem("org:active")).toBe("2"))
+  })
+
+  it("capitalizes the Admin chip on platform-admin orgs", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+      { id: 9, name: "Foreign Org", role: { level: 700, name: "admin" }, viaPlatformAdmin: true },
+    ])
+    render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("All organizations")).toBeInTheDocument())
+    await act(async () => {
+      screen.getByRole("combobox", { name: "Organization switcher: All organizations" }).click()
+    })
+    expect(screen.getByText("Foreign Org")).toBeInTheDocument()
+    expect(screen.getByText("Admin")).toBeInTheDocument()
+    expect(screen.queryByText("admin")).not.toBeInTheDocument()
   })
 
   it("search filters orgs and keeps Create outside the scroll list", async () => {
@@ -175,7 +191,7 @@ describe("OrgSwitcher", () => {
     await act(async () => { screen.getByRole("combobox", { name: /acme/i }).click() })
 
     expect(screen.queryByTestId("guest-orgs")).not.toBeInTheDocument()
-    expect(screen.queryByText("guest")).not.toBeInTheDocument()
+    expect(screen.queryByText("Guest")).not.toBeInTheDocument()
   })
 
   it("guest entry visible with Guest tag below member orgs", async () => {
@@ -195,7 +211,9 @@ describe("OrgSwitcher", () => {
 
     await waitFor(() => expect(screen.getByTestId("guest-orgs")).toBeInTheDocument())
     expect(screen.getByText("Guest Org")).toBeInTheDocument()
-    expect(screen.getByText("guest")).toBeInTheDocument()
+    expect(screen.getByText("Guest")).toBeInTheDocument()
+    // 1 member org + guest grants: All organizations is the home for shared rows.
+    expect(screen.getByRole("option", { name: /all organizations/i })).toBeInTheDocument()
     // Member block above guests → separator between the two sections.
     expect(screen.getByTestId("guest-orgs-separator")).toBeInTheDocument()
   })
@@ -212,13 +230,16 @@ describe("OrgSwitcher", () => {
 
     await waitFor(() => expect(screen.getByTestId("guest-orgs")).toBeInTheDocument())
     expect(screen.getByText("Guest Org")).toBeInTheDocument()
-    expect(screen.queryByTestId("guest-orgs-separator")).not.toBeInTheDocument()
+    // Guest-only: All organizations is still listed (it's the shared-grants home),
+    // so the guest section sits below a separator.
+    expect(screen.getByRole("option", { name: /all organizations/i })).toBeInTheDocument()
+    expect(screen.getByTestId("guest-orgs-separator")).toBeInTheDocument()
   })
 
   // AQU-790: clicking a guest org switches to it using the SAME path convention
   // as an owned org (`/orgs/<id>`, not the divergent `/shared?org=<id>`), and
   // reflects the selection (checkmark + trigger label).
-  it("guest org: click navigates to its /orgs/:id overview and marks it selected", async () => {
+  it("guest org: click navigates to its /orgs/:id/projects page and marks it selected", async () => {
     listMyOrgs.mockResolvedValue([
       { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
     ])
@@ -234,8 +255,8 @@ describe("OrgSwitcher", () => {
     await waitFor(() => expect(screen.getByTestId("guest-orgs")).toBeInTheDocument())
     await act(async () => { screen.getByRole("option", { name: /guest org/i }).click() })
 
-    // Lands on the guest org's path overview — same shape as an owned org…
-    await waitFor(() => expect(screen.getByTestId("loc")).toHaveTextContent("/orgs/2"))
+    // Lands on the guest org's projects table — guests have no Overview.
+    await waitFor(() => expect(screen.getByTestId("loc")).toHaveTextContent("/orgs/2/projects"))
     // …and the trigger now names the guest org as the current scope.
     expect(screen.getByRole("combobox", { name: /guest org/i })).toBeInTheDocument()
 
@@ -302,7 +323,7 @@ describe("OrgSwitcher", () => {
     fireEvent.change(search, { target: { value: "golf" } })
 
     await waitFor(() => expect(screen.getByText("Golf Guest")).toBeInTheDocument())
-    expect(screen.getByText("guest")).toBeInTheDocument()
+    expect(screen.getByText("Guest")).toBeInTheDocument()
     expect(screen.queryByText("Hotel Guest")).not.toBeInTheDocument()
     expect(screen.queryByText("Alpha Org")).not.toBeInTheDocument()
   })

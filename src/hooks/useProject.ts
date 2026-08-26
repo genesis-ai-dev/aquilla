@@ -64,11 +64,15 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   assign("validationRoleFloor", settings.validationRoleFloor)
   assign("validationNamedUsers", settings.validationNamedUsers)
   assign("allowSelfValidation", settings.allowSelfValidation)
+  assign("allowLineCreation", settings.allowLineCreation)
   assign("bibleResourcesEnabled", settings.bibleResourcesEnabled)
   assign("draftContext", settings.draftContext)
   // AQU-646 SUB-53: the Media lens reads this to decide whether to draw the
   // timeline against the imported file's clock or lay the verses out end to end.
   assign("audioTimingMode", settings.audioTimingMode)
+  // AQU-646: the timeline lock. Must reach the workspace or the chips would be
+  // draggable for everyone until someone opened Project Settings.
+  assign("timingLocked", settings.timingLocked)
   // AQU-634: USFM front-matter opt-out must reach the workspace so ImportDialog
   // and the target-import panel drop front matter when it's on.
   assign("importExcludeFrontMatter", settings.importExcludeFrontMatter)

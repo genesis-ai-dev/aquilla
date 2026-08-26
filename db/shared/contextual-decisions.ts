@@ -204,6 +204,25 @@ export async function raiseDecision(
   return mapRow(row)
 }
 
+/** Idempotent producer boundary for a run/span. The project lease guarantees
+ * one live tick driver; this lookup additionally closes the crash-replay gap
+ * between raising a decision and moving the run to `waiting`. */
+export async function raiseDecisionOnce(
+  db: AquillaDb,
+  input: RaiseDecisionInput & { runId: string; spanId: string },
+): Promise<ContextualDecision> {
+  const existing = await db
+    .prepare(
+      `SELECT ${DECISION_COLS} FROM contextual_decisions
+        WHERE run_id = ? AND span_id = ? AND status IN ('open','researching')
+        ORDER BY created_at ASC
+        LIMIT 1`,
+    )
+    .bind(input.runId, input.spanId)
+    .first<DecisionRow>()
+  return existing ? mapRow(existing) : raiseDecision(db, input)
+}
+
 export async function getDecision(
   db: AquillaDb,
   id: string,

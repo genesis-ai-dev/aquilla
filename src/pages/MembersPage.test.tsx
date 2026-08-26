@@ -114,7 +114,7 @@ vi.mock("@/hooks/useAccessibleProjects", () => ({
 beforeEach(() => {
   localStorage.clear()
   rosterSettings.canViewRoster = true
-  listMyOrgs.mockResolvedValue([
+  vi.mocked(listMyOrgs).mockResolvedValue([
     { id: 42, name: "Come and See", role: { level: 700, name: "owner" } },
   ])
 })
@@ -303,12 +303,12 @@ describe("MembersPage — Teams-style roster table", () => {
     expect(screen.getByText("anna@example.com")).toBeInTheDocument()
     expect(screen.getByText("Contributor")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: /add a member/i })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /add to projects/i })).toBeDisabled()
+    expect(screen.queryByRole("button", { name: /add to projects/i })).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: /actions for ben/i })).toBeInTheDocument()
     expect(screen.queryByText(/^remove$/i)).not.toBeInTheDocument()
   })
 
-  it("shows Remove as disabled and hides the actions menu for a non-owner", async () => {
+  it("keeps Remove in the row menu, disabled for a non-owner", async () => {
     vi.mocked(listMyOrgs).mockResolvedValue([
       { id: 42, name: "Come and See", role: { level: 400, name: "contributor" } },
     ])
@@ -336,9 +336,18 @@ describe("MembersPage — Teams-style roster table", () => {
     renderMembers()
     await waitFor(() => expect(screen.getByTestId("org-members-table")).toBeInTheDocument())
     expect(screen.queryByRole("button", { name: /add a member/i })).not.toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /add to projects/i })).toBeDisabled()
-    expect(screen.getByLabelText(/remove ben — owners only/i)).toHaveAttribute("aria-disabled", "true")
-    expect(screen.queryByRole("button", { name: /actions for ben/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /add to projects/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/^remove$/i)).not.toBeInTheDocument()
+
+    const row = screen.getByText("ben").closest("tr")!
+    fireEvent.contextMenu(row)
+    const fromContext = await screen.findByRole("menuitem", { name: /remove ben — owners only/i })
+    expect(fromContext).toHaveAttribute("aria-disabled", "true")
+    fireEvent.keyDown(document, { key: "Escape" })
+
+    fireEvent.click(screen.getByRole("button", { name: /actions for ben/i }))
+    const fromMenu = await screen.findByRole("menuitem", { name: /remove ben — owners only/i })
+    expect(fromMenu).toHaveAttribute("aria-disabled", "true")
   })
 
   it("shows Add to projects when the caller can grant membership on a project", async () => {

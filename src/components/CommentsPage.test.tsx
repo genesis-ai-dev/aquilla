@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { screen, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
+import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { CommentsPage } from "./CommentsPage"
 
 const mockComments = vi.fn<() => CommentRecord[]>(() => [])
@@ -73,7 +75,7 @@ function makeComment(overrides: Partial<CommentRecord> = {}): CommentRecord {
 }
 
 function renderPage(props: React.ComponentProps<typeof CommentsPage> = {}) {
-  return render(
+  return renderWithTooltips(
     <MemoryRouter initialEntries={["/project/proj-1/comments"]}>
       <Routes>
         <Route path="/project/:id/comments" element={<CommentsPage {...props} />} />
@@ -93,6 +95,31 @@ describe("CommentsPage chrome", () => {
 
     expect(screen.getByRole("heading", { name: /Comments/i })).toBeInTheDocument()
     expect(screen.getByText(/No comments yet/i)).toBeInTheDocument()
+    const filters = screen.getByRole("button", { name: /^Filters$/i })
+    const refresh = screen.getByRole("button", { name: /^Refresh$/i })
+    expect(filters.compareDocumentPosition(refresh) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByPlaceholderText("Search comments…").closest("[data-slot='input-group']")).toHaveClass("bg-card")
+    expect(filters).toHaveClass("bg-card")
+    expect(refresh).toHaveClass("bg-card")
+    expect(screen.queryByRole("button", { name: /Back to project/i })).not.toBeInTheDocument()
+  })
+
+  it("calls refresh from the icon button", () => {
+    renderPage()
+    fireEvent.click(screen.getByRole("button", { name: /^Refresh$/i }))
+    expect(mockRefresh).toHaveBeenCalledTimes(1)
+  })
+
+  it("centers the filters tooltip and right-aligns the refresh tooltip", async () => {
+    renderPage()
+    const user = userEvent.setup()
+
+    await expectTooltip(screen.getByRole("button", { name: /^Filters$/i }), /^Filters$/i)
+    expect(screen.getByRole("tooltip").closest("[data-align]")).toHaveAttribute("data-align", "center")
+
+    await user.unhover(screen.getByRole("button", { name: /^Filters$/i }))
+    await expectTooltip(screen.getByRole("button", { name: /^Refresh$/i }), /^Refresh$/i)
+    expect(screen.getByRole("tooltip").closest("[data-align]")).toHaveAttribute("data-align", "end")
   })
 
   it("uses the workspace-owned project without starting another project resolve", async () => {
@@ -111,18 +138,66 @@ describe("CommentsPage chrome", () => {
     }))
   })
 
-  it("expands Filters to show Sort combobox and collapses to hide it", () => {
+  it("opens the Filters menu to show Sort and Show resolved, then closes it", async () => {
+    const user = userEvent.setup()
     renderPage()
 
-    expect(screen.queryByRole("combobox")).not.toBeInTheDocument()
+    expect(screen.queryByRole("combobox", { name: /^Sort$/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole("switch", { name: /Show resolved/i })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: /^Filters$/i }))
-    const sortTrigger = screen.getByRole("combobox")
+    const filters = screen.getByRole("button", { name: /^Filters$/i })
+    expect(filters).toHaveAttribute("data-variant", "outline")
+    expect(filters).toHaveAttribute("aria-expanded", "true")
+    const sortTrigger = screen.getByRole("combobox", { name: /^Sort$/i })
     expect(sortTrigger).toBeInTheDocument()
-    expect(screen.getByText(/^Sort$/)).toBeInTheDocument()
+    expect(sortTrigger.className).toMatch(/text-foreground/)
+    await user.click(screen.getByText("Sort"))
+    expect(sortTrigger).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(sortTrigger)
+    const sortMenu = document.querySelector("[data-slot=select-content]")
+    expect(sortMenu).toHaveAttribute("data-align-trigger", "false")
+    expect(sortMenu?.closest("[data-align]")).toHaveAttribute("data-align", "end")
+    expect(sortMenu?.closest("[data-side]")).toHaveAttribute("data-side", "top")
+    expect(screen.getByText("Sort").className).toMatch(/text-muted-foreground/)
+    expect(screen.getByText("Show resolved").className).toMatch(/text-muted-foreground/)
+    expect(screen.getByRole("switch", { name: /Show resolved/i })).not.toBeChecked()
+
+    fireEvent.click(screen.getByRole("switch", { name: /Show resolved/i }))
+    const reset = screen.getByRole("button", { name: /^Reset$/i })
+    expect(reset.className).toMatch(/text-foreground/)
+    expect(reset.className).not.toMatch(/text-muted-foreground/)
+    expect(reset.parentElement).toHaveClass("justify-end")
+    expect(screen.getByTestId("comments-filters-popover").className).toMatch(/\bp-0\b/)
+    expect(screen.getByRole("separator")).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: /^Filters$/i }))
-    expect(screen.queryByRole("combobox")).not.toBeInTheDocument()
+    expect(screen.queryByRole("combobox", { name: /^Sort$/i })).not.toBeInTheDocument()
+  })
+
+  it("keeps File, Author, and Participant trigger text as selected values", () => {
+    mockComments.mockReturnValue([makeComment()])
+    renderPage()
+    fireEvent.click(screen.getByRole("button", { name: /^Filters$/i }))
+
+    for (const name of [/^Sort$/i, /^File$/i, /^Author$/i, /^Participant$/i]) {
+      const trigger = screen.getByRole("combobox", { name })
+      expect(trigger).not.toHaveAttribute("data-placeholder")
+      expect(trigger.className).toMatch(/text-foreground/)
+    }
+
+    const sortTrigger = screen.getByRole("combobox", { name: /^Sort$/i })
+    fireEvent.click(sortTrigger)
+    expect(document.querySelector("[data-slot=select-content]")?.closest("[data-side]")).toHaveAttribute(
+      "data-side",
+      "bottom",
+    )
+    fireEvent.click(sortTrigger)
+    fireEvent.click(screen.getByRole("combobox", { name: /^Participant$/i }))
+    expect(document.querySelector("[data-slot=select-content]")?.closest("[data-side]")).toHaveAttribute(
+      "data-side",
+      "top",
+    )
   })
 
   it("filters threads by search, shows filter badge and clear-filters empty state", () => {
@@ -149,5 +224,14 @@ describe("CommentsPage chrome", () => {
     expect(search).toHaveValue("")
     expect(screen.getByText("unique-search-token")).toBeInTheDocument()
     expect(screen.getByTestId("comments-count-badge")).toHaveTextContent("1")
+  })
+
+  it("shows No comments without Clear filters when only resolved threads exist", () => {
+    mockComments.mockReturnValue([makeComment({ resolved: true })])
+    renderPage()
+
+    expect(screen.getByText(/^No comments$/i)).toBeInTheDocument()
+    expect(screen.queryByText(/No threads match your filters/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /Clear filters/i })).not.toBeInTheDocument()
   })
 })

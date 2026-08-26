@@ -14,7 +14,7 @@ import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missi
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { MenuItem } from "@/components/ui/menu-parts"
 import { Button } from "@/components/ui/button"
-import { Page, PageHeader, EmptyState } from "@/components/ui/page"
+import { Page, PageHeader, EmptyState, TableEmptyState } from "@/components/ui/page"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -345,17 +345,11 @@ export function ArchivedProjects() {
               </TabsList>
 
               <TabsContent value="projects">
-                {projectsLoading ? (
-                  <div
-                    className="h-48 animate-pulse rounded-lg border bg-card"
-                    role="status"
-                    aria-busy="true"
-                    aria-label={t("org.archivedProjects.loadingLabel")}
-                  />
-                ) : (
-                  <DataTable
+                <DataTable
                     columns={projectColumns}
                     data={projects}
+                    loading={projectsLoading}
+                    loadingLabel={t("org.archivedProjects.loadingLabel")}
                     getRowId={(p) => p.id}
                     initialSorting={[{ id: "archivedAt", desc: true }]}
                     searchPlaceholder="Search archived projects…"
@@ -364,13 +358,6 @@ export function ArchivedProjects() {
                       if (!q) return true
                       return row.original.name.toLowerCase().includes(q)
                     }}
-                    toolbar={(table) => (
-                      <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                        {table.getFilteredRowModel().rows.length === projects.length
-                          ? `${projects.length}`
-                          : `${table.getFilteredRowModel().rows.length} of ${projects.length}`}
-                      </span>
-                    )}
                     renderRowMenuItems={(p) => (
                       <MenuItem
                         disabled={restoringId != null}
@@ -383,9 +370,7 @@ export function ArchivedProjects() {
                     emptyState={(table) => {
                       if (projects.length === 0) {
                         return (
-                          <EmptyState
-                            variant="inline"
-                            className="flex-none py-12"
+                          <TableEmptyState
                             icon={NAV_PAGE_ICONS.archived}
                             title={t("org.archivedProjects.emptyTitle")}
                             description={t("org.archivedProjects.emptyDescription")}
@@ -410,21 +395,14 @@ export function ArchivedProjects() {
                     className={ADMIN_TABLE_PANEL_CLASS}
                     dense
                   />
-                )}
               </TabsContent>
 
               <TabsContent value="files">
-                {filesLoading || !filesLoaded ? (
-                  <div
-                    className="h-48 animate-pulse rounded-lg border bg-card"
-                    role="status"
-                    aria-busy="true"
-                    aria-label={t("org.archivedProjects.loadingDeletedFilesLabel")}
-                  />
-                ) : (
-                  <DataTable
+                <DataTable
                     columns={fileColumns}
                     data={files}
+                    loading={filesLoading || !filesLoaded}
+                    loadingLabel={t("org.archivedProjects.loadingDeletedFilesLabel")}
                     getRowId={(f) => f.fileId}
                     initialSorting={[{ id: "deletedAt", desc: true }]}
                     searchPlaceholder="Search deleted files…"
@@ -437,13 +415,6 @@ export function ArchivedProjects() {
                         f.projectName.toLowerCase().includes(q)
                       )
                     }}
-                    toolbar={(table) => (
-                      <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                        {table.getFilteredRowModel().rows.length === files.length
-                          ? `${files.length}`
-                          : `${table.getFilteredRowModel().rows.length} of ${files.length}`}
-                      </span>
-                    )}
                     renderRowMenuItems={(f) => (
                       <MenuItem
                         disabled={restoringId != null}
@@ -456,9 +427,7 @@ export function ArchivedProjects() {
                     emptyState={(table) => {
                       if (files.length === 0) {
                         return (
-                          <EmptyState
-                            variant="inline"
-                            className="flex-none py-12"
+                          <TableEmptyState
                             icon={NAV_PAGE_ICONS.file}
                             title={t("workspace.trash.empty")}
                             description={t("org.archivedProjects.noDeletedFilesDescription")}
@@ -483,7 +452,6 @@ export function ArchivedProjects() {
                     className={ADMIN_TABLE_PANEL_CLASS}
                     dense
                   />
-                )}
               </TabsContent>
             </Tabs>
           )}

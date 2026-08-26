@@ -204,6 +204,8 @@ describe("AppShell main-content error containment", () => {
     const help = screen.getByRole("button", { name: /help & community/i })
     expect(footer).toContainElement(help)
     expect(help.nextElementSibling).toBe(trigger)
+    expect(trigger).toHaveClass("size-8", "text-muted-foreground")
+    expect(trigger).not.toHaveClass("border")
     // The picker must list endonyms, not English names — a Burmese speaker
     // looking for their language will not scan for the word "Burmese".
     await userEvent.click(trigger)
@@ -234,6 +236,8 @@ describe("AppShell main-content error containment", () => {
     const help = screen.getByRole("button", { name: /help & community/i })
     expect(footer).toContainElement(help)
     expect(help).toHaveClass("size-8")
+    expect(language).toHaveClass("size-8", "text-muted-foreground")
+    expect(language).not.toHaveClass("border")
 
     await userEvent.click(help)
     expect(await screen.findByRole("menuitem", { name: /homepage/i })).toBeInTheDocument()

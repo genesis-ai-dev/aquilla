@@ -111,6 +111,27 @@ describe("platform-admin cross-tenant access", () => {
     expect(body.orgs[0].viaPlatformAdmin).toBeUndefined()
     expect(body.orgs[1]).toMatchObject({ id: 1, name: "CAS", role: { level: 700, name: "admin" }, viaPlatformAdmin: true })
   })
+
+  it("GET /orgs omits a foreign org the admin already reaches via a project grant", async () => {
+    await seedForeignOrg()
+    await seedUser(7, "root")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (2, 'Zz root workspace', 7)",
+    ).run()
+    // Contributor grant, not org membership — this is the guest-org path.
+    // Platform 700 would otherwise win role resolution and list CAS as Admin.
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('pa', 7, 400, 1)",
+    ).run()
+
+    const res = await app.request("/api/v2/orgs", { headers: authHeader(await jwtFor("root")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      orgs: Array<{ id: number; name: string | null; viaPlatformAdmin?: boolean }>
+    }
+    expect(body.orgs.map((o) => o.id)).toEqual([2])
+    expect(body.orgs[0].viaPlatformAdmin).toBeUndefined()
+  })
 })
 
 describe("GET /api/v2/admin/admins", () => {

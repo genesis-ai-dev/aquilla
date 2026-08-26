@@ -137,7 +137,7 @@ async function appendActivitySafely(
   }
 }
 
-async function publishRunStateOutsideTick(
+export async function publishRunStateOutsideTick(
   env: Env,
   db: AquillaDb,
   projectId: string,
@@ -423,7 +423,7 @@ async function selfTickLoop(
 
 /** Kick the loop in the background. Hono throws on `c.executionCtx` when there
  *  is none (vitest) — fall back to a floating promise, tracked in _test. */
-function kickLoop(
+export function kickLoop(
   c: Context<AuthHonoEnv>,
   projectId: string,
   runId: string,

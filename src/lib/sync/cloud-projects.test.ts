@@ -6,6 +6,7 @@ import {
   minimalProjectRecord,
   renameProject,
   resolveCloudProject,
+  type CloudFileSummary,
   type CloudProjectSummary,
 } from "./cloud-projects"
 import { UserError } from "@/lib/errors/user-error"
@@ -149,6 +150,70 @@ describe("minimalProjectRecord", () => {
     // Single-project endpoint may not return files; don't crash.
     const record = minimalProjectRecord(summary)
     expect(record.files).toEqual([])
+  })
+
+  it("carries role + anchorFileId so a cold load can hide the audio-cue sibling", () => {
+    // Cold load is where a fresh browser first learns the sibling exists, and
+    // `type` is kind ?? role — "vtt" for both files here. Lose `role` and the
+    // sibling is listed, searched and exported like any other subtitle import.
+    const withSibling: CloudProjectSummary = {
+      ...summary,
+      files: [
+        { id: "f-text", name: "ep-101", type: "vtt", cellCount: 650 },
+        {
+          id: "f-cues", name: "ep-101 · audio cues", type: "vtt", cellCount: 548,
+          role: "audio-cues", anchorFileId: "f-text",
+        },
+      ],
+    }
+    const record = minimalProjectRecord(withSibling)
+    expect(record.files[0]).not.toHaveProperty("role")
+    expect(record.files[1].role).toBe("audio-cues")
+    expect(record.files[1].anchorFileId).toBe("f-text")
+  })
+
+  it("carries trackOverrides through verbatim, unknown kinds included", () => {
+    // Cold load is the only path that hydrates a file's persisted track deltas,
+    // so anything dropped here is a rename the user never sees again. Contents
+    // are NOT interpreted: mergeTrackOverrides is the sole validator, and a
+    // kind this build cannot draw still has to survive the round trip.
+    const withOverrides: CloudProjectSummary = {
+      ...summary,
+      files: [{
+        id: "f-1", name: "ep-101", type: "vtt", cellCount: 12,
+        trackOverrides: {
+          subtitles: { name: "Script" },
+          "trk-x9": { kind: "character-audio", order: 7 },
+        },
+      }],
+    }
+    const record = minimalProjectRecord(withOverrides)
+    expect(record.files[0].trackOverrides).toEqual({
+      subtitles: { name: "Script" },
+      "trk-x9": { kind: "character-audio", order: 7 },
+    })
+  })
+
+  it("omits trackOverrides when the summary has none or sends a non-object", () => {
+    // The wire is untyped JSON whatever the declared type says, and an array is
+    // `typeof "object"` — it would hydrate as a map with numeric keys.
+    expect(minimalProjectRecord({
+      ...summary,
+      files: [{ id: "f-1", name: "ep-101", type: "vtt", cellCount: 12 }],
+    }).files[0]).not.toHaveProperty("trackOverrides")
+
+    expect(minimalProjectRecord({
+      ...summary,
+      files: [{ id: "f-1", name: "ep-101", type: "vtt", cellCount: 12, trackOverrides: null }],
+    }).files[0]).not.toHaveProperty("trackOverrides")
+
+    expect(minimalProjectRecord({
+      ...summary,
+      files: [{
+        id: "f-1", name: "ep-101", type: "vtt", cellCount: 12,
+        trackOverrides: [] as unknown as NonNullable<CloudFileSummary["trackOverrides"]>,
+      }],
+    }).files[0]).not.toHaveProperty("trackOverrides")
   })
 })
 

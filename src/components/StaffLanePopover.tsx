@@ -21,7 +21,7 @@
 
 import { useMemo, useState } from "react"
 import type { ReactNode } from "react"
-import { Link } from "react-router-dom"
+import { Link, useLocation } from "react-router-dom"
 import { Search, UserPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -77,6 +77,7 @@ export function StaffLanePopover({
   anchorOnly = false,
 }: StaffLanePopoverProps) {
   const { t } = useI18n()
+  const location = useLocation()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const { members: orgMembers } = useOrgMembers(orgId)
@@ -275,6 +276,7 @@ export function StaffLanePopover({
               {t("org.staffLanePopover.searchScopeNote")}{" "}
               <Link
                 to={`/project/${projectId}/settings/members`}
+                state={{ backgroundLocation: location, projectSettingsModalDepth: 1 }}
                 className="font-medium text-foreground underline underline-offset-2"
                 onClick={() => handleOpenChange(false)}
               >

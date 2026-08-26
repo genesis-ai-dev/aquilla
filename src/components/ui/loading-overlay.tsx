@@ -85,7 +85,7 @@ function BlockingLoadingOverlay({
       aria-label={label}
       aria-live="polite"
       className={cn(
-        "fixed inset-0 z-50 flex cursor-wait items-center justify-center bg-background/20",
+        "fixed inset-0 z-50 flex items-center justify-center bg-background/20",
         className,
       )}
       {...props}

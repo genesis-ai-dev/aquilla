@@ -180,11 +180,12 @@ credentials.delete("/:id", authMiddleware, async (c) => {
     .bind(id)
     .first<{ user_id: string }>()
 
-  if (!row) return c.json({ error: "not_found", message: "Credential not found." }, 404)
-
-  // Only the owner or a platform admin may revoke.
-  if (row.user_id !== String(user.id) && !isPlatformAdmin(c)) {
-    return c.json({ error: "permission_denied", message: "You may not revoke this credential." }, 403)
+  // [Pen test] Auth & session mgmt (2026-08-24): a caller who doesn't own this
+  // credential gets the same 404 whether the id exists or not, rather than a
+  // distinguishing 403 — collapsing an existence oracle on an otherwise-opaque
+  // resource id. Only the real owner (or a platform admin) sees past this.
+  if (!row || (row.user_id !== String(user.id) && !isPlatformAdmin(c))) {
+    return c.json({ error: "not_found", message: "Credential not found." }, 404)
   }
 
   // Idempotent: COALESCE keeps the original revoked_at on a repeat revoke.

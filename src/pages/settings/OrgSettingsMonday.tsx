@@ -25,7 +25,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useI18n } from "@/lib/i18n/I18nProvider"
-import { formatDate } from "@/lib/i18n/format"
+import { fmtShortCalendarDate } from "@/lib/format-date"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import { ROLE } from "@/lib/frontier/roles"
 import {
   deleteMondayConnection,
@@ -251,9 +252,11 @@ export function OrgSettingsMonday() {
                 )}
                 {connection?.createdAt && (
                   <p className="text-xs text-muted-foreground">
-                    {t("settings.monday.connectedOnRow", {
-                      date: formatDate(connection.createdAt, locale, { month: "short", day: "numeric", year: "numeric" }),
-                    })}
+                    <DateTooltip value={connection.createdAt} label={t("common.date.created")}>
+                      {t("settings.monday.connectedOnRow", {
+                        date: fmtShortCalendarDate(connection.createdAt, undefined, locale),
+                      })}
+                    </DateTooltip>
                   </p>
                 )}
               </div>

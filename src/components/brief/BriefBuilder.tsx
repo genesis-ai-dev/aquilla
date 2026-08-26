@@ -18,7 +18,13 @@ export interface BriefBuilderProps {
   brief: TranslationBrief
   canEdit: boolean
   onSaveDraft: (draft: BriefDraft) => Promise<TranslationBrief | undefined>
-  onGenerateL1: (draft: BriefDraft) => Promise<void>
+  /**
+   * Save the draft and generate its L1 summary. Resolves `true` when a summary
+   * was generated (the dialog then closes), `false` when it wasn't — e.g. no
+   * AI provider is configured, or the LLM call failed. The handler is
+   * responsible for surfacing that outcome to the user (AQU-968).
+   */
+  onGenerateL1: (draft: BriefDraft) => Promise<boolean>
   onClose: () => void
   /** Optional: per-field LLM draft helper. Absent → "Help me write this" hidden. */
   onHelpDraft?: (fieldId: string, draft: BriefDraft) => Promise<string>
@@ -108,7 +114,12 @@ export function BriefBuilder(props: BriefBuilderProps) {
             </Button>
             {isNotesStep ? (
               <Button disabled={!canEdit || busy}
-                onClick={async () => { setBusy(true); try { await onSaveDraft(draft); await onGenerateL1(draft) } finally { setBusy(false) } }}>
+                onClick={async () => {
+                  setBusy(true)
+                  // onGenerateL1 saves the draft itself; close only when a
+                  // summary was actually generated (AQU-968).
+                  try { if (await onGenerateL1(draft)) onClose() } finally { setBusy(false) }
+                }}>
                 {t("agent.brief.saveAndGenerate")}
               </Button>
             ) : (

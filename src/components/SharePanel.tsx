@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Copy, AlertCircle, Trash2 } from "lucide-react"
-import { useI18n } from "@/lib/i18n/I18nProvider"
-import { formatDate } from "@/lib/i18n/format"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
+import { fmtShortCalendarDate } from "@/lib/format-date"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -47,7 +48,6 @@ import {
 } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { RoleSelect } from "@/components/RoleSelect"
-import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
 interface SharePanelProps {
@@ -639,11 +639,15 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
     }
   }
 
-  function formatExpiry(expiresAt: string | null): string {
+  function formatExpiry(expiresAt: string | null) {
     if (!expiresAt) return t("common.noExpiry")
-    return t("common.expiresOn", {
-      date: formatDate(expiresAt, locale, { month: "short", day: "numeric", year: "numeric" }),
-    })
+    return (
+      <DateTooltip value={expiresAt} label={t("common.date.expires")}>
+        {t("common.expiresOn", {
+          date: fmtShortCalendarDate(expiresAt, undefined, locale),
+        })}
+      </DateTooltip>
+    )
   }
 
   if (loading && !invites) {

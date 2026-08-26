@@ -100,8 +100,8 @@ export function OrgSetupChecklist({
           )}
           <span className="flex-1 text-sm">{t("org.setupChecklist.inviteTeammateStep")}</span>
           {!invitedTeammate && (
-            <Button size="sm" variant="outline" onClick={() => navigate(membersPath(orgId))}>
-              <Users className="me-1.5 h-4 w-4" /> {t("org.setupChecklist.inviteButton")}
+            <Button variant="outline" onClick={() => navigate(membersPath(orgId))}>
+              <Users data-icon="inline-start" /> {t("org.setupChecklist.inviteButton")}
             </Button>
           )}
         </li>

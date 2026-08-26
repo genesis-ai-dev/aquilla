@@ -123,7 +123,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
           </AppTooltip>
         )}
         <span className="text-muted-foreground">
-          <DateTooltip value={thread.createdAt} label={t("comments.thread.posted")} />
+          <DateTooltip value={thread.createdAt} label={t("common.date.posted")} />
         </span>
       </div>
 
@@ -133,7 +133,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
             <div className="flex items-baseline gap-1.5 text-xs">
               <span className="font-medium">{m.author}</span>
               <span className="text-muted-foreground">
-                <DateTooltip value={m.timestamp} label={t("comments.thread.posted")} />
+                <DateTooltip value={m.timestamp} label={t("common.date.posted")} />
               </span>
             </div>
             <div

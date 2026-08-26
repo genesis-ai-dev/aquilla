@@ -34,8 +34,10 @@ const MASKED_SURFACES = [
 describe("OPS-3 session-replay masking", () => {
   it("configures maskTextSelector to the attribute the surfaces actually use", () => {
     const config = read("src/lib/posthog.ts")
-    const selector = /maskTextSelector:\s*"([^"]+)"/.exec(config)?.[1]
-    expect(selector?.split(",").map((part) => part.trim())).toContain(`[${MASK_ATTRIBUTE}]`)
+    // Contains, not equals: OPS-3 broadened the selector to cover the
+    // editor's `data-cell-type` wrappers as well, and this assertion was left
+    // pinned to the single-attribute form it replaced.
+    expect(config).toMatch(new RegExp(`maskTextSelector: "[^"]*\\[${MASK_ATTRIBUTE}\\]`))
     // Inputs stay masked regardless — this guard is about the non-input text.
     expect(config).toContain("maskAllInputs: true")
   })

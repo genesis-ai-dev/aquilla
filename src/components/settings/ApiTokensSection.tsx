@@ -12,7 +12,8 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from "react"
 import { Copy } from "lucide-react"
 import { buildAgentInstructions } from "@/lib/sync/agent-instructions"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
-import { formatDate } from "@/lib/i18n/format"
+import { fmtShortCalendarDate } from "@/lib/format-date"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -71,10 +72,6 @@ function expiryToIso(preset: ExpiryPresetId): string | undefined {
   const days = EXPIRY_PRESETS.find((p) => p.id === preset)?.days
   if (!days) return undefined
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
-}
-
-function fmtDate(iso: string, locale: string): string {
-  return formatDate(iso, locale, { month: "short", day: "numeric", year: "numeric" })
 }
 
 /** Resolve a credential's org/project scope into a friendly label. Falls back
@@ -322,8 +319,23 @@ function CredentialRow({
           {credential.name} · {scopeLabel(t, credential, orgs, projects)}
         </p>
         <p className="text-[11px] text-muted-foreground">
-          {credential.expiresAt ? t("common.expiresOn", { date: fmtDate(credential.expiresAt, locale) }) : t("common.noExpiry")}
-          {credential.lastUsedAt ? ` · ${t("onboarding.apiTokens.lastUsedOn", { date: fmtDate(credential.lastUsedAt, locale) })}` : ""}
+          {credential.expiresAt ? (
+            <DateTooltip value={credential.expiresAt} label={t("common.date.expires")}>
+              {t("common.expiresOn", {
+                date: fmtShortCalendarDate(credential.expiresAt, undefined, locale),
+              })}
+            </DateTooltip>
+          ) : t("common.noExpiry")}
+          {credential.lastUsedAt ? (
+            <>
+              {" · "}
+              <DateTooltip value={credential.lastUsedAt} label={t("common.date.lastUsed")}>
+                {t("onboarding.apiTokens.lastUsedOn", {
+                  date: fmtShortCalendarDate(credential.lastUsedAt, undefined, locale),
+                })}
+              </DateTooltip>
+            </>
+          ) : null}
         </p>
       </div>
       {!revoked && (

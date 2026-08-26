@@ -9,6 +9,7 @@ import { Pause, Play, RotateCcw, Scissors } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { CellWaveform } from "@/components/CellWaveform"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { UseCellAudioResult } from "@/hooks/useCellAudio"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -38,20 +39,22 @@ export function CropButton({
   const trimmed = trim.start != null || trim.end != null
   return (
     <Popover>
-      <PopoverTrigger
-        render={
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            aria-label={t("editor.crop.open")}
-            className={cn("shrink-0", trimmed ? "text-foreground" : undefined)}
-          >
-            <Scissors className="h-3.5 w-3.5" />
-          </Button>
-        }
-      />
-      <PopoverContent align="end" side="top" className="w-80 p-3">
+      <AppTooltip content={t("editor.crop.open")}>
+        <PopoverTrigger
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              aria-label={t("editor.crop.open")}
+              className={cn("shrink-0", trimmed ? "text-foreground" : undefined)}
+            >
+              <Scissors className="h-3.5 w-3.5" />
+            </Button>
+          }
+        />
+      </AppTooltip>
+      <PopoverContent align="end" side="bottom" className="w-80 p-3">
         <CropPanel controller={controller} trim={trim} onChange={onChange} />
       </PopoverContent>
     </Popover>
@@ -110,14 +113,18 @@ function CropPanel({ controller, trim, onChange }: {
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium">{t("editor.crop.title")}</span>
-        <button
-          type="button"
-          onClick={() => onChange(null, null)}
-          aria-label={t("editor.crop.reset")}
-          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-        >
-          <RotateCcw className="h-3 w-3" /> {t("common.reset")}
-        </button>
+        <AppTooltip content={t("editor.crop.reset")}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => onChange(null, null)}
+            aria-label={t("editor.crop.reset")}
+            className="text-muted-foreground"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+          </Button>
+        </AppTooltip>
       </div>
 
       <div ref={boxRef} className="relative">

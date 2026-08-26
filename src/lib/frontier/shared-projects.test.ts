@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { partitionSharedProjects } from "./shared-projects"
+import { hasForeignOrgGrants, partitionSharedProjects, toSharedPortfolioRow } from "./shared-projects"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
 // AQU-335: a magic-link invite accept grants project_members on a project in
@@ -94,5 +94,40 @@ describe("partitionSharedProjects (all-orgs scope)", () => {
     )
     expect(inActiveOrg.map((p) => p.id).sort()).toEqual(["mine-7", "mine-9"])
     expect(sharedWithMe).toEqual([])
+  })
+})
+
+describe("hasForeignOrgGrants", () => {
+  it("is false when every project sits in a member org", () => {
+    expect(hasForeignOrgGrants([proj("mine", 7), proj("other", 9)], MY_ORGS)).toBe(false)
+  })
+
+  it("is true for a foreign-org grant or an org-less project", () => {
+    expect(hasForeignOrgGrants([proj("mine", 7), proj("guest", 503)], MY_ORGS)).toBe(true)
+    expect(hasForeignOrgGrants([proj("no-org", null)], MY_ORGS)).toBe(true)
+  })
+})
+
+describe("toSharedPortfolioRow", () => {
+  it("keeps identity and host-org labels and leaves progress empty", () => {
+    const row = toSharedPortfolioRow({
+      ...proj("p503", 503),
+      name: "Guest Gospel",
+      orgName: "Host Org",
+      grantedAt: "2026-07-20T00:00:00Z",
+      files: [{ id: "f1", name: "John", type: "usfm", cellCount: 40, sourceLanguage: "en", targetLanguage: "fr" }],
+    })
+    expect(row).toMatchObject({
+      id: "p503",
+      name: "Guest Gospel",
+      orgId: 503,
+      orgName: "Host Org",
+      origin: "shared",
+      grantedAt: "2026-07-20T00:00:00Z",
+      sourceLanguage: "en",
+      targetLanguage: "fr",
+      totalCells: 0,
+      filledCells: 0,
+    })
   })
 })

@@ -8,10 +8,10 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import type { MessageKey } from "@/lib/i18n/messages/en"
-import { formatDate } from "@/lib/i18n/format"
 import { Search, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import {
@@ -70,15 +70,8 @@ export interface DcsCatalogBrowserProps {
   defaultLang?: string
 }
 
-function formatReleased(iso: string, locale: string): string {
-  if (!iso) return ""
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ""
-  return formatDate(d, locale, { year: "numeric", month: "short", day: "numeric" })
-}
-
 export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBrowserProps) {
-  const { locale, t } = useI18n()
+  const { t } = useI18n()
   // A stable client instance across renders (real network unless injected).
   const clientRef = useRef<DcsClient>(client ?? new DcsClient())
 
@@ -282,7 +275,11 @@ export function DcsCatalogBrowser({ onPick, client, defaultLang }: DcsCatalogBro
                     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
                       {entry.subject && <span>{entry.subject}</span>}
                       {entry.language && <span>· {entry.languageTitle || entry.language}</span>}
-                      {entry.released && <span>· {formatReleased(entry.released, locale)}</span>}
+                      {entry.released && (
+                        <span>
+                          · <DateTooltip value={entry.released} label={t("common.date.released")} />
+                        </span>
+                      )}
                     </div>
                   </button>
                 </li>

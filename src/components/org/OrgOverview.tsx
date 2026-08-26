@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
-import { AlertTriangle, FolderKanban } from "lucide-react"
+import { FolderKanban } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -154,6 +154,7 @@ export function OrgOverview() {
     [portfolio.projects, portfolio.now],
   )
   const projectsExpanded = expandedProjectsOrgId === activeOrgId
+  const hiddenProjectCount = Math.max(0, projectRows.length - PROJECT_PREVIEW_LIMIT)
   const visibleProjectRows = projectsExpanded
     ? projectRows
     : projectRows.slice(0, PROJECT_PREVIEW_LIMIT)
@@ -165,20 +166,7 @@ export function OrgOverview() {
         enableSorting: false,
         header: t("common.project"),
         cell: ({ row }) => (
-          <span className="flex min-w-0 items-center gap-2 font-medium text-foreground">
-            <span className="truncate">{row.original.project.name}</span>
-            {row.original.reasons.length > 0 ? (
-              <span
-                role="img"
-                aria-label={t("org.overview.attentionAriaLabel", {
-                  reasons: row.original.reasons.map((reason) => reason.label).join(", "),
-                })}
-                className="shrink-0 text-amber-600 dark:text-amber-400"
-              >
-                <AlertTriangle className="size-3.5" aria-hidden />
-              </span>
-            ) : null}
-          </span>
+          <span className="truncate font-medium text-foreground">{row.original.project.name}</span>
         ),
       },
       {
@@ -334,23 +322,6 @@ export function OrgOverview() {
                 description={t("org.overview.projectsDescription")}
                 headerClassName={ADMIN_TABLE_SECTION_HEADER}
                 contentClassName={ADMIN_TABLE_SECTION_CONTENT}
-                action={
-                  projectRows.length > PROJECT_PREVIEW_LIMIT ? (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setExpandedProjectsOrgId(projectsExpanded ? null : activeOrgId)
-                      }
-                      aria-expanded={projectsExpanded}
-                      aria-controls="org-overview-projects-table"
-                      className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-                    >
-                      {projectsExpanded
-                        ? t("org.projectOverview.showFewer")
-                        : t("org.overview.showAllProjects", { count: projectRows.length })}
-                    </button>
-                  ) : null
-                }
               >
                 <div id="org-overview-projects-table">
                   <DataTable
@@ -361,6 +332,23 @@ export function OrgOverview() {
                     testId="org-overview-projects-table"
                     className={ADMIN_TABLE_CLASS}
                     dense
+                    footer={
+                      hiddenProjectCount > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedProjectsOrgId(projectsExpanded ? null : activeOrgId)
+                          }
+                          aria-expanded={projectsExpanded}
+                          aria-controls="org-overview-projects-table"
+                          className="w-full text-start text-sm text-muted-foreground"
+                        >
+                          {projectsExpanded
+                            ? t("org.projectOverview.showFewer")
+                            : t("org.overview.showMoreProjects", { count: hiddenProjectCount })}
+                        </button>
+                      ) : null
+                    }
                     emptyState={
                       <EmptyState
                         variant="inline"

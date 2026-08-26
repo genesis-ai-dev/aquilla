@@ -61,6 +61,20 @@ export interface OrgWideSettings {
    */
   allowSelfAssignment?: boolean
   /**
+   * AQU-581: whether a member below project_lead (500) who carries lane
+   * scopes (AQU-553) may emit `assignment.create` for OTHER people, inside
+   * the target-language lanes they are scoped to. This is how an org names a
+   * mentor/coordinator who hands out chapters in one lane without also
+   * granting org-admin rights.
+   *
+   * Default (when absent) = false. The setting alone grants nothing — the
+   * caller must also be lane-scoped, so turning it on does NOT give every
+   * contributor assignment rights. Leads/maintainers can always assign
+   * regardless. Same OWNER-only write gate as allowSelfAssignment. Enforced
+   * server-side in sync-worker (authorize.ts lane-delegate carve-out).
+   */
+  allowScopedLaneAssignment?: boolean
+  /**
    * AQU-822: Minimum role level allowed to manage a project's termbase —
    * add, edit, delete, and archive concepts. Default (when absent) =
    * PROJECT_LEAD (500), the level the terminology UI has always shown the

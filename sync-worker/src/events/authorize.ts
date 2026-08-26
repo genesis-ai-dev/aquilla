@@ -6,7 +6,7 @@
 import type { EventKind, EventClaims, RawEvent } from './types'
 import { requiredRoleFor, ROLE } from './role-policy'
 import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from '../auth'
-import { resolveAllowSelfAssignment } from './assignment-authority'
+import { resolveAllowSelfAssignment, resolveAllowScopedLaneAssignment } from './assignment-authority'
 import { isLockedTimingEvent, isUserInsertedCell, resolveTimingLocked } from './timing-authority'
 import { resolveAllowLineCreation } from './line-creation-authority'
 import { laneOfEvent } from './event-projection'
@@ -93,6 +93,52 @@ function isSelfAssignCreate(raw: RawEvent<EventKind>, callerUserId: number): boo
   if (raw.kind !== 'assignment.create') return false
   const payload = raw.payload as { assigneeUserId?: unknown } | undefined
   return typeof payload?.assigneeUserId === 'number' && payload.assigneeUserId === callerUserId
+}
+
+/**
+ * AQU-581: true when `raw` is an `assignment.create` that falls entirely
+ * inside the caller's OWN lane/file scopes — the shape the lane-delegate
+ * carve-out below permits a mentor/coordinator to emit for other people.
+ *
+ * The caller must actually be scoped: an UNSCOPED member is refused here even
+ * with the org setting on, because "who may assign in the Spanish lane" is
+ * expressed by granting that person the `es` lane scope. Without that guard,
+ * flipping the setting would hand blanket assignment rights to every
+ * contributor in the org — the opposite of what the setting is for.
+ *
+ * Composition matches `enforceScopes`: lane scopes must contain the
+ * assignment's lane (`payload.targetLang`, '' for the default lane), and if
+ * the caller also carries file scopes, EVERY file the assignment covers must
+ * be among them.
+ */
+function isInScopeLaneAssignCreate(
+  scopes: ReadonlyArray<{ kind: 'lane' | 'file'; value: string }> | undefined,
+  raw: RawEvent<EventKind>,
+): boolean {
+  if (raw.kind !== 'assignment.create') return false
+  if (!Array.isArray(scopes) || scopes.length === 0) return false
+
+  const laneScopes = scopes.filter((s) => s.kind === 'lane').map((s) => s.value)
+  if (laneScopes.length === 0) return false
+
+  const payload = raw.payload as
+    | { targetLang?: unknown; scope?: unknown }
+    | undefined
+  const lane = typeof payload?.targetLang === 'string' ? payload.targetLang : ''
+  if (!laneScopes.includes(lane)) return false
+
+  const fileScopes = scopes.filter((s) => s.kind === 'file').map((s) => s.value)
+  if (fileScopes.length > 0) {
+    const entries = Array.isArray(payload?.scope) ? payload.scope : []
+    if (entries.length === 0) return false
+    const everyFileInScope = entries.every((entry) => {
+      const fileId = (entry as { fileId?: unknown } | null)?.fileId
+      return typeof fileId === 'string' && fileScopes.includes(fileId)
+    })
+    if (!everyFileInScope) return false
+  }
+
+  return true
 }
 
 // Private symbol — NOT exported. Code outside this file cannot reproduce
@@ -233,7 +279,22 @@ export async function authorize<K extends EventKind>(
       tokenClaims.role >= ROLE.CONTRIBUTOR &&
       isSelfAssignCreate(raw as RawEvent<EventKind>, tokenClaims.userId) &&
       (await resolveAllowSelfAssignment(db, raw.projectId))
-    if (!selfAssignOk) {
+
+    // AQU-581: the lane-delegate carve-out. Unlike AQU-496's, this one admits
+    // assigning ANOTHER person — that is the whole point (a mentor hands out
+    // chapters) — but only within the lanes the org scoped this member to,
+    // and only while the org has opted into `allowScopedLaneAssignment`. It is
+    // evaluated SECOND so a self-assign under the older setting never pays for
+    // the extra settings lookup, and so an org running only AQU-496 behaves
+    // exactly as it did before.
+    const laneDelegateOk =
+      !selfAssignOk &&
+      db != null &&
+      tokenClaims.role >= ROLE.CONTRIBUTOR &&
+      isInScopeLaneAssignCreate(tokenClaims.scopes, raw as RawEvent<EventKind>) &&
+      (await resolveAllowScopedLaneAssignment(db, raw.projectId))
+
+    if (!selfAssignOk && !laneDelegateOk) {
       return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }
     }
   }

@@ -39,6 +39,8 @@ export const dialog = defineNamespace({
     "dialog.assign.error.selectMember": "Select a member.",
     "dialog.assign.error.notProjectMember": "You can only assign work to a project member.",
     "dialog.assign.error.selfOnly": "You can only assign work to yourself.",
+    "dialog.assign.error.laneOutOfScope":
+      "You can only assign work in the language lanes you've been given.",
     "dialog.assign.error.selectFile": "Select at least one book/file.",
     "dialog.assign.error.noFileOpen": "No file open.",
     "dialog.assign.error.noRouteFile": "No file available for routing.",
@@ -220,6 +222,13 @@ export const dialog = defineNamespace({
         description:
           "Inline validation error when a below-lead member (self-assign mode) tries " +
           "to submit an assignment to someone other than themselves.",
+        screenshot: "assign-modal",
+      },
+      "dialog.assign.error.laneOutOfScope": {
+        description:
+          "Inline validation error when a below-lead lane delegate (a mentor or " +
+          "coordinator the org scoped to particular target-language lanes) tries to " +
+          "submit an assignment in a lane outside those scopes.",
         screenshot: "assign-modal",
       },
       "dialog.assign.error.selectFile": {

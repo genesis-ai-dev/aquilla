@@ -142,43 +142,87 @@ export function canPerform(kind: string, roleLevel: number | null | undefined): 
 }
 
 /**
+ * AQU-581: the caller's own lane-delegate grant — the org's
+ * `allowScopedLaneAssignment` setting plus the caller's own lane/file scopes
+ * (AQU-553, `useMyScopes`). Passed as one object so the two halves can never
+ * drift apart at a call site: the setting alone grants nothing, and scopes
+ * alone grant nothing.
+ */
+export interface LaneDelegateGrant {
+  allowScopedLaneAssignment: boolean
+  scopes: ReadonlyArray<{ kind: "lane" | "file"; value: string }>
+}
+
+/**
+ * The lane values a delegate grant covers — empty when it grants nothing
+ * (setting off, or the caller carries no lane scopes). Exported so the assign
+ * UI can restrict its lane picker to exactly these, rather than offering a
+ * lane the submit check would then refuse.
+ */
+export function laneDelegateLanes(grant: LaneDelegateGrant | undefined): string[] {
+  if (!grant?.allowScopedLaneAssignment) return []
+  return grant.scopes.filter((s) => s.kind === "lane").map((s) => s.value)
+}
+
+/** True when the grant confers assignment authority in at least one lane. */
+function isLaneDelegate(grant: LaneDelegateGrant | undefined): boolean {
+  return laneDelegateLanes(grant).length > 0
+}
+
+/**
  * AQU-496: whether the assign-work UI (AssignModal / AssignWork) should be
  * offered at all, given the caller's role and the org's `allowSelfAssignment`
- * setting. Mirrors the self-assign carve-out enforced server-side in
+ * setting. AQU-581 adds a second way in: a lane-scoped delegate. Mirrors the
+ * carve-outs enforced server-side in
  * `sync-worker/src/events/authorize.ts` — UX gate only, never the security
  * boundary; the server re-checks independently on every `assignment.create`.
  *
- * Leads/maintainers (>= PROJECT_LEAD) can always open it, regardless of the
- * setting. Below that, a member (CONTRIBUTOR+) can open it ONLY when the org
- * has opted into `allowSelfAssignment` — and even then, `canSubmitAssignment`
- * below still restricts what they can submit to themselves only.
+ * Leads/maintainers (>= PROJECT_LEAD) can always open it, regardless of both
+ * settings. Below that, a member (CONTRIBUTOR+) can open it only under one of
+ * the org's two carve-outs — and opening is not submitting either way:
+ * `canSubmitAssignment` below narrows a self-assigner to themselves, and a
+ * lane delegate to the lanes their grant names.
  */
 export function canOpenAssignUi(
   roleLevel: number | null | undefined,
   allowSelfAssignment: boolean,
+  laneDelegate?: LaneDelegateGrant,
 ): boolean {
   if (roleLevel == null) return false
   if (roleLevel >= ROLE.PROJECT_LEAD) return true
-  return allowSelfAssignment && roleLevel >= ROLE.CONTRIBUTOR
+  if (roleLevel < ROLE.CONTRIBUTOR) return false
+  return allowSelfAssignment || isLaneDelegate(laneDelegate)
 }
 
 /**
- * AQU-496: whether `roleLevel` may submit `assignment.create` assigning
- * `assigneeUserId`. Leads/maintainers may assign anyone. Below-lead callers
- * may ONLY self-assign (assigneeUserId === callerUserId), and only when
- * `allowSelfAssignment` is on — mirrors the server's `isSelfAssignCreate`
- * check in `sync-worker/src/events/authorize.ts`.
+ * AQU-496 / AQU-581: whether `roleLevel` may submit `assignment.create`
+ * assigning `assigneeUserId` in lane `lane`. Leads/maintainers may assign
+ * anyone, anywhere. Below-lead callers get in one of two ways, mirroring the
+ * two server carve-outs in `sync-worker/src/events/authorize.ts`:
+ *
+ *   1. AQU-496 self-assign — `assigneeUserId === callerUserId`, while the org
+ *      has `allowSelfAssignment` on.
+ *   2. AQU-581 lane delegate — assigning ANYONE, but only in a lane the org
+ *      scoped this caller to, and only while `allowScopedLaneAssignment` is
+ *      on. `lane` is the assignment's target-language lane ('' = default);
+ *      omitting it means the default lane, matching the server's read of an
+ *      absent `payload.targetLang`.
+ *
+ * UX gate only — the server re-checks independently on every event.
  */
 export function canSubmitAssignment(
   roleLevel: number | null | undefined,
   allowSelfAssignment: boolean,
   callerUserId: number | null | undefined,
   assigneeUserId: number,
+  laneDelegate?: LaneDelegateGrant,
+  lane: string = "",
 ): boolean {
   if (roleLevel == null) return false
   if (roleLevel >= ROLE.PROJECT_LEAD) return true
-  if (!allowSelfAssignment || roleLevel < ROLE.CONTRIBUTOR) return false
-  return callerUserId != null && callerUserId === assigneeUserId
+  if (roleLevel < ROLE.CONTRIBUTOR) return false
+  if (allowSelfAssignment && callerUserId != null && callerUserId === assigneeUserId) return true
+  return laneDelegateLanes(laneDelegate).includes(lane)
 }
 
 /**

@@ -53,6 +53,12 @@ const DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE = ROLE.MAINTAINER
 const ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE = ROLE.OWNER
 const DEFAULT_ALLOW_SELF_ASSIGNMENT = false
 
+// AQU-581: allowScopedLaneAssignment rides the SAME OWNER-only write gate as
+// allowSelfAssignment above (ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE) — both are
+// the org deciding who may write `assignment.create` below the lead floor —
+// and shares its safe default of `false`.
+const DEFAULT_ALLOW_SCOPED_LANE_ASSIGNMENT = false
+
 // AQU-822: termbaseEditMinRole is the same OWNER-only permission-policy key
 // shape as the floors above, but it gates a WRITE (managing a project's
 // termbase) and its default is PROJECT_LEAD, not MAINTAINER — 500 is the level
@@ -146,6 +152,15 @@ export interface UseOrgSettings {
    * `sync-worker/src/events/assignment-authority.ts`.
    */
   allowSelfAssignment: boolean
+  /**
+   * AQU-581: effective lane-delegate assignment authority — true when a
+   * lane-scoped member below project_lead may create assignments for OTHER
+   * people inside the lanes they are scoped to. Explicit org setting, or
+   * `false` when unset. Server-enforced; see
+   * `resolveAllowScopedLaneAssignment` in
+   * `sync-worker/src/events/assignment-authority.ts`.
+   */
+  allowScopedLaneAssignment: boolean
   /**
    * AQU-822: effective termbase-edit floor — the minimum role allowed to
    * manage a project's termbase in this org. Explicit org setting, or
@@ -265,6 +280,12 @@ export function useOrgSettings(
     ? true
     : DEFAULT_ALLOW_SELF_ASSIGNMENT
 
+  // AQU-581: effective lane-delegate assignment authority — explicit org
+  // setting, or false when unset.
+  const allowScopedLaneAssignment = server?.settings?.allowScopedLaneAssignment === true
+    ? true
+    : DEFAULT_ALLOW_SCOPED_LANE_ASSIGNMENT
+
   // The effective role to check: project-resolved (AD-12 max-wins) when
   // available, falling back to org role for non-project contexts.
   const effectiveRoleLevel = projectRoleLevel ?? orgRoleLevel
@@ -375,6 +396,7 @@ export function useOrgSettings(
     canViewMemberProgress,
     memberProgressViewMinRole,
     allowSelfAssignment,
+    allowScopedLaneAssignment,
     termbaseEditMinRole,
     refresh,
     patch,

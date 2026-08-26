@@ -116,6 +116,26 @@ interface Props {
     reference?: string | null
     castName?: string | null
     cameraState?: CameraState | null
+    /**
+     * AQU-646 stage 3f: how many subtitles are behind this line. ZERO is not
+     * the same as "no text" — an unlinked cue has nothing to say and needs
+     * pairing, while a linked one just needs translating, and the TTS button
+     * used to report both with the same string.
+     */
+    linkedCount?: number
+    /** Whose cast assignment picks the voice — the first linked subtitle, since
+     *  assignments are keyed by cell id and a cue has none of its own. */
+    voiceCellId?: string | null
+    /**
+     * AQU-646 stage 3g: how many heard lines share the busiest subtitle this
+     * cue performs. 1 for ~92% of lines.
+     *
+     * Above 1 the generated voice will speak the WHOLE subtitle onto this one
+     * cue — more than this line covers — and the others stay silent. The user
+     * is told before pressing, not after: once the clip exists the warning is
+     * late.
+     */
+    sharedWith?: number
   } | null
   /**
    * AQU-646 stage 4: the file whose linked picture this recording is against.
@@ -375,6 +395,26 @@ export function AudioRecordingModal({
   const readAloudReference = readAloud?.reference ?? null
   const readAloudCast = readAloud?.castName ?? null
   const readAloudCamera = cameraLabel(readAloud?.cameraState ?? undefined)
+  /**
+   * AQU-646 stage 3f: TTS SPEAKS WHAT THE PERFORMER READS.
+   *
+   * It used to read `activeCell.translated` — the cue's own translation, which
+   * on a file with an audio-cue sibling is empty forever, because the words
+   * live on the subtitle cells the cue is linked to. So the button sat disabled
+   * over lines that were translated, saying "translate this line first"
+   * (Sam, 2026-08-25). Read-aloud had resolved this correctly all along, ten
+   * lines above; TTS simply never asked it.
+   *
+   * `readAloudText` already falls back to the cell's own translation when there
+   * is no cue arrangement, so every other file type is untouched.
+   */
+  const ttsText = readAloudText.trim()
+  /** A cue with no subtitle behind it — about ten an episode. There is nothing
+   *  to say, and it is a different problem from "not translated yet". */
+  const ttsUnlinked = readAloud?.linkedCount === 0
+  /** …and a subtitle performed by several heard lines: whatever is generated
+   *  here says the whole line, and the other heard lines get nothing from it. */
+  const ttsSharedWith = readAloud?.sharedWith ?? 1
   // Re-fit when the column's WIDTH changes (window resize) — a narrower box
   // rewraps and can need a smaller size. Width only: the box's height is what
   // the fit itself moves, and observing that would chase its own tail.
@@ -795,6 +835,12 @@ export function AudioRecordingModal({
       const ok = await generateCellVoice({
         project, cell: activeCell, session, username,
         label: nextTakeLabel(recordingTakes),
+        // The WORDS come from the subtitle this line performs, and the VOICE
+        // from that subtitle's cast assignment — neither of which the cue
+        // carries itself. Both undefined off a cue file, which is the cell's
+        // own text and its own assignment, exactly as before.
+        text: ttsText,
+        voiceCellId: readAloud?.voiceCellId ?? undefined,
         // The voice lands on the track the recorder is pointed at, not always
         // on the default row's generated-voice slot.
         slot: isDefaultTrackSlot(targetSlot) ? undefined : targetSlot,
@@ -1500,6 +1546,23 @@ export function AudioRecordingModal({
                 {readAloudReference}
               </p>
             )}
+            {/* AQU-646 stage 3g: what a GENERATED voice would do here, said
+                before it is pressed rather than after.
+                
+                Right beside the transcript above, which appears on exactly this
+                condition and for the neighbouring reason — that one tells the
+                performer which part of the line is theirs; this one says a
+                machine voice makes no such distinction. Never dismissible
+                (Sam: "lets be super safe for now"), and absent on the ~92% of
+                lines that are not shared. */}
+            {ttsSharedWith > 1 && (
+              <p
+                data-testid="rec-tts-shared-notice"
+                className="mt-1.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400"
+              >
+                {t("audio.recordingModal.ttsSharedNotice", { count: ttsSharedWith })}
+              </p>
+            )}
           </div>
 
           {/* Beside a picture the instruments sit at the BOTTOM of the column,
@@ -1735,11 +1798,13 @@ export function AudioRecordingModal({
                   content={
                     !online
                       ? OFFLINE_MESSAGE
-                      : !activeCell?.translated?.trim()
-                        ? t("audio.recordingModal.ttsNeedsTranslation")
-                        : ttsDone
-                          ? t("audio.recordingModal.ttsDoneTooltip")
-                          : t("audio.recordingModal.ttsTooltip")
+                      : ttsUnlinked
+                        ? t("audio.recordingModal.ttsNoLinkedLine")
+                        : !ttsText
+                          ? t("audio.recordingModal.ttsNeedsTranslation")
+                          : ttsDone
+                            ? t("audio.recordingModal.ttsDoneTooltip")
+                            : t("audio.recordingModal.ttsTooltip")
                   }
                 >
                   <span className="inline-flex min-w-0 flex-1">
@@ -1747,7 +1812,7 @@ export function AudioRecordingModal({
                       variant="outline"
                       size="sm"
                       data-testid="rec-generate-tts"
-                      disabled={!online || !activeCell?.translated?.trim() || ttsBusy}
+                      disabled={!online || !ttsText || ttsBusy}
                       onClick={() => void generateTts()}
                       className="h-9 w-full bg-muted/30 text-xs font-normal text-muted-foreground"
                     >

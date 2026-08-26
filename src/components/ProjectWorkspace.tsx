@@ -120,7 +120,7 @@ import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
-import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, needsSynthesis, takesNeedingMeasure, runMeasureAll } from "@/lib/audio/batch-audio"
+import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, takesNeedingMeasure, runMeasureAll, type SynthTarget } from "@/lib/audio/batch-audio"
 import { injectOptimisticAudioTrim,
   injectOptimisticAudioPlace, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { useOutbox } from "@/context/OutboxContext"
@@ -152,7 +152,7 @@ import { sequenceBetween } from "@/lib/timeline/derive"
 import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
 import { MIN_ADDABLE_SPAN_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
 import { audioIdSeededWith } from "@/lib/audio/upload"
-import { buildLinkedTakes } from "@/lib/audio/linked-takes"
+import { buildLinkedTakes, primaryAudioHome, resolveAudioHomes } from "@/lib/audio/linked-takes"
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
@@ -1290,6 +1290,19 @@ export function ProjectWorkspace() {
   /** Maps whatever id asked for the recorder onto the cell it should open on.
    *  Null ⇒ nothing to record here (a subtitle line no cue performs). */
   const openRecordingTargetRef = useRef<(cellId: string) => string | null>((id) => id)
+  /** AQU-646 stage 3f: where a row's audio belongs — the cell itself, the heard
+   *  lines performing it, or nowhere. Same dependency-ordering escape as the
+   *  resolver above: the editor-actions context is assembled long before the
+   *  cue links are built, and rows need this to be identity-stable. */
+  const audioHomeRef = useRef<(cell: CellData) => readonly CellData[] | null>((cell) => [cell])
+  /** AQU-646 stage 3f: what a bulk synth would do for one cell. Ref-wrapped for
+   *  the same dependency-ordering reason as its neighbours — the menu COUNT and
+   *  the RUN are both declared above the cue links this reads. */
+  const synthTargetsForRef = useRef<(cell: CellData) => SynthTarget[]>((cell) =>
+    cell.translated?.trim() && !cell.selectedGeneratedVoiceAudioId
+      ? [{ cell, text: cell.translated.trim() }]
+      : [],
+  )
   /** How many takes are attached to the CURRENT audio cues. Read by the import
    *  handler, which is declared above the attachment read it needs. */
   const cueTakeCountRef = useRef<() => number>(() => 0)
@@ -5868,6 +5881,8 @@ export function ProjectWorkspace() {
     ensureTargetRowForTakeRef.current(cellId)
   }, [])
 
+  /** Stable wrapper over the ref above — see `audioHomeRef`. */
+  const audioHomeFor = useCallback((cell: CellData) => audioHomeRef.current(cell), [])
   const editorActionsValue = useMemo(() => ({
     onInfractionClick: handleInfractionClick,
     onOpenComments: handleOpenComments,
@@ -5878,8 +5893,9 @@ export function ProjectWorkspace() {
     onAssignCastVoice: handleAssignCastVoice, // 2026-08-07: gutter picker (pure assignment)
     onClearCastVoice: handleClearCastVoice, // Matt's QA 2026-08-21: unassign without replacing
     onTakeSaved: handleTakeSaved, // AQU-646: a take gives a text-less line a target row
+    audioHomeFor, // AQU-646 stage 3f: where this row's audio belongs
     myScopes, // AQU-633: per-cell validate scope gate
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, myScopes])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes])
 
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
@@ -6884,7 +6900,11 @@ export function ProjectWorkspace() {
     let unsynthesized = 0
     for (const c of cells) {
       if (needsTranscription(c)) untranscribed++
-      if (needsSynthesis(c)) unsynthesized++
+      // Stage 3f: COUNT WHAT THE RUN WOULD DO, which on a cue file is one per
+      // heard line rather than one per subtitle — and zero for a line nothing
+      // performs. `needsSynthesis` alone counted subtitles, including ones the
+      // run now correctly refuses.
+      unsynthesized += synthTargetsForRef.current(c).length
     }
     return { untranscribed, unsynthesized }
   }, [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId])
@@ -7047,6 +7067,7 @@ export function ProjectWorkspace() {
         project,
         session: frontierSession ?? null,
         username: currentUsername,
+        resolveTargets: synthTargetsForRef.current,
       })
     },
     navigate,
@@ -7130,14 +7151,26 @@ export function ProjectWorkspace() {
   // mic hands over a subtitle row, which has no take of its own any more, so it
   // opens the first cue that performs that line. One rule serves both because
   // the test is "is this already a cue?" rather than "who is calling?".
-  openRecordingTargetRef.current = (cellId: string) => {
-    if (!audioCueCells) return cellId
-    if (audioCueCells.some((c) => c.id === cellId)) return cellId
-    const cues = cueLinks.cuesForText.get(cellId) ?? []
-    if (cues.length === 0) return null
-    const order = new Map(audioCueCells.map((c, i) => [c.id, i]))
-    // "First" by position on the film, not by the order the edges came back in.
-    return [...cues].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0))[0]
+  // AQU-646 stage 3f: DELEGATED, not reimplemented. This was the de-facto
+  // authority on "where does a new take go", and two other surfaces answered
+  // the same question for themselves and got it wrong — so the answer moved to
+  // one tested place and this takes the first of what it returns. Behaviour is
+  // unchanged, which `linked-takes.test.ts` pins case for case.
+  openRecordingTargetRef.current = (cellId: string) =>
+    primaryAudioHome(cellId, { cueCells: audioCueCells, cuesForText: cueLinks.cuesForText })
+
+  // The same authority, shaped for the table's per-row controls. They get the
+  // CELLS rather than ids because the voice button replays an existing clip
+  // before it generates a new one, and that lookup reads attachments which live
+  // on the cue.
+  audioHomeRef.current = (cell: CellData) => {
+    const homes = resolveAudioHomes(cell.id, {
+      cueCells: audioCueCells,
+      cuesForText: cueLinks.cuesForText,
+    })
+    if (homes.kind === "self") return [cell]
+    if (homes.kind === "none") return null
+    return homes.cells
   }
 
   /**
@@ -7279,7 +7312,19 @@ export function ProjectWorkspace() {
       // is all we can offer, and it is offered as reference rather than as
       // words to say.
       if (textIds.length === 0) {
-        return { text: "", reference: transcript, castName: null, cameraState: null }
+        // `linkedCount: 0` is what lets a caller tell "nothing is linked to this
+        // line" from "the linked subtitle isn't translated yet" — two different
+        // problems with two different fixes, which the TTS button used to
+        // report with one string.
+        return {
+          text: "",
+          reference: transcript,
+          castName: null,
+          cameraState: null,
+          linkedCount: 0,
+          voiceCellId: null,
+          sharedWith: 1,
+        }
       }
       const byId = new Map(cellSummaries.map((c) => [c.id, c]))
       const linked = textIds
@@ -7293,7 +7338,14 @@ export function ProjectWorkspace() {
       // Only worth showing the transcript when the subtitle is SHARED with
       // other cues — that is the only case where the performer has to work out
       // which part of the line in front of them belongs to this take.
-      const shared = textIds.some((id) => (cueLinks.cuesForText.get(id) ?? []).length > 1)
+      // How many heard lines share the busiest of this cue's subtitles. 1 when
+      // nothing is shared, which is ~92% of lines (measured: 7.9% of subtitles
+      // are split). `shared` below is just this asked as a yes/no.
+      const sharedWith = Math.max(
+        1,
+        ...textIds.map((id) => (cueLinks.cuesForText.get(id) ?? []).length),
+      )
+      const shared = sharedWith > 1
       // Who says this, and is the camera on them. The character sheet is keyed
       // to the SUBTITLE cells, so it reaches a cue only through these links —
       // and only off the cell VIEWS, since the summaries sorted above carry no
@@ -7313,6 +7365,21 @@ export function ProjectWorkspace() {
         reference: shared ? transcript : null,
         castName: formatCueCharacter(character.names),
         cameraState: character.cameraState ?? null,
+        linkedCount: textIds.length,
+        // AQU-646 stage 3g: a generated voice speaks the WHOLE subtitle onto
+        // this one cue, so when the subtitle is split the clip says more than
+        // this line covers and the other heard lines stay silent. The recorder
+        // says so before you press.
+        sharedWith,
+        // WHOSE VOICE SPEAKS IT. Cast assignments are keyed by cell id and are
+        // made on the SUBTITLE cells, so a cue appears in `castAssignments` only
+        // when an audio character sheet was imported — otherwise every
+        // generated dub would come out in the project default whoever is
+        // talking. The VTT export already resolves names across these links for
+        // exactly this reason. First in film order, matching the sort above and
+        // the way `primaryAudioHome` picks a cue: a two-speaker cue has to pick
+        // one voice, and picking the first is at least predictable.
+        voiceCellId: linked[0]?.id ?? null,
       }
     },
     [audioCueCells, cueLinks, cellSummaries, castByCellId],
@@ -7390,13 +7457,81 @@ export function ProjectWorkspace() {
   // per-section trim scope from AQU-782 is honoured for free. `force` because
   // the user named these sections: an existing transcript is a re-run, not a
   // no-op, which is how the per-cell Transcribe button already behaves.
+  /**
+   * AQU-646 stage 3f: WHICH CELLS HOLD THIS SECTION'S RECORDINGS.
+   *
+   * On a file with an audio-cue sibling a take hangs off the heard line that
+   * performs the subtitle, so a subtitle cell never carries one. Transcribe
+   * asked the subtitle and found nothing, which is why the button was greyed
+   * out over lines that plainly had audio.
+   *
+   * ONE FUNCTION, READ BY BOTH HALVES. The timeline decides what to ENABLE from
+   * it and this handler decides what to RUN from it, so the two cannot disagree
+   * about a section — which is the failure mode that would otherwise show up as
+   * "the button is lit and the run does nothing".
+   *
+   * `linkedTakesByCell` only holds cues that actually carry a take, which is
+   * exactly the eligibility rule; it is empty with no cue sibling, so every
+   * other arrangement falls through to the cell itself and is unchanged.
+   */
+  const takeCellsFor = useCallback(
+    (cellId: string): readonly CellData[] => {
+      const linked = linkedTakesByCell.get(cellId)
+      if (linked && linked.length > 0) return linked.map((t) => t.cell)
+      const own = audioMergedCells.find((c) => c.id === cellId)
+      return own ? [own] : []
+    },
+    [linkedTakesByCell, audioMergedCells],
+  )
+
+  /**
+   * AQU-646 stage 3f: what a bulk synth would actually do, per source cell.
+   *
+   * The words live on this cell; the audio belongs wherever `resolveAudioHomes`
+   * says — itself on an ordinary file, the heard lines performing it on a file
+   * with an audio-cue sibling. Sam's ruling: a subtitle performed by two heard
+   * lines generates onto BOTH, each speaking the whole line.
+   *
+   * SHARED WITH THE MENU COUNT, because the comment on `audioCounts` promises
+   * the number matches what the run does — and it would silently stop being
+   * true the moment these two rules diverged.
+   */
+  const synthTargetsFor = useCallback(
+    (cell: CellData): SynthTarget[] => {
+      const text = cell.translated?.trim()
+      if (!text) return []
+      const homes = resolveAudioHomes(cell.id, {
+        cueCells: audioCueCells,
+        cuesForText: cueLinks.cuesForText,
+      })
+      // Nothing performs this line — there is nowhere to put a voice, and the
+      // subtitle cell is exactly the wrong answer.
+      if (homes.kind === "none") return []
+      const cells = homes.kind === "self" ? [cell] : homes.cells
+      return cells
+        // Each home keeps its own "already voiced" test: one cue of a pair may
+        // have been generated and the other not.
+        .filter((c) => !c.selectedGeneratedVoiceAudioId)
+        .map((c) => ({ cell: c, text, voiceCellId: cell.id }))
+    },
+    [audioCueCells, cueLinks],
+  )
+  synthTargetsForRef.current = synthTargetsFor
+
   const handleTranscribeSections = useCallback(
     (cellIds: string[]) => {
       if (!activeFileId || !project || cellIds.length === 0) return
-      const wanted = new Set(cellIds)
-      const cells = audioMergedCells.filter((c) => wanted.has(c.id))
+      // Resolved, then de-duplicated by id: two subtitles performed by ONE
+      // heard line would otherwise transcribe the same take twice, racing each
+      // other for the same attachment.
+      const cells = [
+        ...new Map(cellIds.flatMap((id) => takeCellsFor(id)).map((c) => [c.id, c])).values(),
+      ]
       if (cells.length === 0) return
-      const fileId = activeFileId
+      // EVERY FILE THE RUN ACTUALLY TOUCHED, not just the one on screen. The
+      // takes live in the cue sibling, so notifying only the active file leaves
+      // the timeline showing pre-transcription state until a reload.
+      const touchedFileIds = [...new Set(cells.map((c) => c.fileId))]
       void (async () => {
         await runBatchTranscribeAll({
           cells,
@@ -7411,11 +7546,11 @@ export function ProjectWorkspace() {
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
         await refreshOutboxPending()
         revalidateCells()
-        notifyAudioAttachmentsChanged(fileId)
+        for (const id of touchedFileIds) notifyAudioAttachmentsChanged(id)
       })()
     },
     [
-      activeFileId, project, audioMergedCells, frontierSession,
+      activeFileId, project, takeCellsFor, frontierSession,
       getTokenForProjectFile, refreshOutboxPending, revalidateCells,
     ],
   )
@@ -7701,6 +7836,7 @@ export function ProjectWorkspace() {
   useEffect(() => {
     setExternalDubsPlaying(videoDubPlaying)
   }, [videoDubPlaying])
+
 
   // A REMOTE mode change gets an acknowledged heads-up — deferred while the
   // user is in the text view or has the recorder open (a cell transition
@@ -9875,6 +10011,9 @@ export function ProjectWorkspace() {
                     // a viewer/reviewer must not be offered the row at all —
                     // the same gate `legacyMeasure` uses below.
                     onTranscribeSections={isReadOnly ? undefined : handleTranscribeSections}
+                    // The SAME function the run reads, so what the button
+                    // enables and what the run touches can never disagree.
+                    takeCellsFor={takeCellsFor}
                     session={frontierSession ?? null}
                     audioByCellId={timelineAudioByCellId}
                     legacyMeasure={

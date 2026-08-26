@@ -4169,7 +4169,7 @@ function EditorRow({
   // keeps them out of MemoizedRow's React.memo compare surface.
   const {
     onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording,
-    onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, myScopes,
+    onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, audioHomeFor, myScopes,
   } = useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
   // Combine the role capability with the per-cell scope check so an out-of-scope
@@ -4307,6 +4307,15 @@ function EditorRow({
   const [expansionTab, setExpansionTab] = useState<string>("backtranslation")
   const [btAlignmentOpen, setBtAlignmentOpen] = useState(false)
   const hasSourceFootnoteMarker = (cell.original ?? "").includes("\\f")
+  // AQU-646 stage 3f: where this row's audio belongs — itself on every ordinary
+  // file, the heard lines performing it on a file with an audio-cue sibling, and
+  // NULL when a cue sibling exists but nothing performs this line. Read from
+  // context rather than a prop on purpose: MemoizedRow forwards row props one
+  // by one, so a new prop here is four edits and a silent omission away.
+  const audioHomes = audioHomeFor ? audioHomeFor(cell) : [cell]
+  /** The one the voice button plays and replays from. The rest are written too
+   *  (Sam, 2026-08-25: nothing is left silent) but only one can be heard. */
+  const audioHome = audioHomes?.[0] ?? null
   const visibleTranslated = localTargetDraft?.value ?? cell.translated
   const visibleTranslatedHtml = localTargetDraft?.valueHtml ?? cell.translatedHtml
   const idmlConfiguration = useMemo(
@@ -6517,8 +6526,17 @@ function EditorRow({
               {/* Round 5: no playOnly — generating here durably attaches the
                   voice; an untranslated line shows the button disabled with
                   the reason instead of hiding it. */}
+              {/* AQU-646 stage 3f: THE VOICE GOES WHERE THE AUDIO LIVES.
+                  The mic a few pixels away already redirects to the heard line
+                  performing this subtitle; this button did not, so a generated
+                  voice landed on the subtitle cell — which the timeline cannot
+                  draw, because it resolves takes over the cues. Two buttons in
+                  one row putting their audio in two different places.
+
+                  The WORDS are still this row's own translation, which is where
+                  they live and always did. Only the destination moves. */}
               <CellTtsButton
-                cellId={cell.id}
+                cellId={audioHome?.id ?? cell.id}
                 text={visibleTranslated}
                 original={effectiveSourceText(cell)}
                 context={cell.context}
@@ -6527,11 +6545,24 @@ function EditorRow({
                 targetLanguage={project.targetLanguage}
                 projectTtsSettings={project.ttsSettings}
                 cellTtsSettings={cell.ttsSettings}
-                generatedVoiceAudioId={cell.selectedGeneratedVoiceAudioId}
-                attachments={cell.attachments}
+                // OFF THE HOME, NOT OFF THE ROW. This is a replay button
+                // before it is a generate one, and the clip it replays lives
+                // where it was written — read these off the subtitle and it
+                // finds nothing and re-synthesizes on every press.
+                generatedVoiceAudioId={audioHome?.selectedGeneratedVoiceAudioId}
+                attachments={audioHome?.attachments ?? cell.attachments}
                 projectId={project.id}
-                fileId={cell.fileId}
-                disabled={!editable}
+                fileId={audioHome?.fileId ?? cell.fileId}
+                // Sam, 2026-08-25: a subtitle performed by two heard lines
+                // voices BOTH, so neither is left silent. Only the first is
+                // played back; the rest are generated alongside it.
+                alsoAttachTo={audioHomes
+                  ?.slice(1)
+                  .map((c) => ({ cellId: c.id, fileId: c.fileId }))}
+                // A cue sibling exists but nothing performs this line — about
+                // ten an episode. There is nowhere to put a voice, and writing
+                // it to the subtitle is exactly the bug above.
+                disabled={!editable || audioHomes === null}
               />
 
               {editable && !isLoading && (

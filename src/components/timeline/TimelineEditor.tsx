@@ -6,6 +6,7 @@
 
 import {
   Fragment,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -261,6 +262,16 @@ export interface TimelineEditorProps {
    * cues. Absent ⇒ the historic arrangement, takes on this file's cells.
    */
   targetCells?: CellData[] | null
+  /**
+   * AQU-646 stage 3f: which cells actually HOLD this section's recordings.
+   *
+   * On a file with an audio-cue sibling that is the heard lines performing the
+   * subtitle, in the cue file — never the subtitle cell itself. The workspace
+   * owns the answer because it owns the links; this component only needs to
+   * know that "does it have audio" and "what do we run over" must be asked of
+   * the same cells. Absent ⇒ the cell itself.
+   */
+  takeCellsFor?: (cellId: string) => readonly CellData[]
   /** Linking mode turned on or off here. The workspace opens its review
    *  drawer in step, so the drawer being open IS the mode. */
   onLinkingModeChange?(on: boolean): void
@@ -902,6 +913,7 @@ export function TimelineEditor({
   onReviewCharacterDisagreements,
   canCheck = true,
   targetCells,
+  takeCellsFor,
   onLinkingModeChange,
   linkingModeRequest,
   onCueActivated,
@@ -2763,13 +2775,46 @@ export function TimelineEditor({
   )
   // Only sections with audio can be transcribed; the row reports the shortfall
   // rather than silently running over a smaller set than the user selected.
-  const transcribeTargetIds = useMemo(
-    () => selectedIds.filter((id) => {
+  //
+  // AQU-646 stage 3f: "WITH AUDIO" IS NOT A QUESTION ABOUT THIS CELL. On a file
+  // with an audio-cue sibling a take hangs off the heard line that performs the
+  // subtitle, so a subtitle cell never carries one and this asked the wrong cell
+  // — the button was permanently greyed out over lines that plainly had
+  // recordings. `takeCellsFor` is the workspace's answer to "which cells hold
+  // this section's audio", and the RUN reads the same function, so eligibility
+  // and execution cannot drift apart. Absent (or no cue sibling) it is the cell
+  // itself, which is every other arrangement unchanged.
+  const takeCells = useCallback(
+    (id: string): readonly CellData[] => {
+      if (takeCellsFor) return takeCellsFor(id)
       const cell = cells.find((c) => c.id === id)
-      return cell ? canTranscribeCell(cell) : false
-    }),
-    [selectedIds, cells],
+      return cell ? [cell] : []
+    },
+    [takeCellsFor, cells],
   )
+  const transcribeTargetIds = useMemo(
+    () => selectedIds.filter((id) => takeCells(id).some(canTranscribeCell)),
+    [selectedIds, takeCells],
+  )
+  /**
+   * AQU-646 stage 3g: HOW MANY RECORDINGS THAT ACTUALLY IS.
+   *
+   * One heard line can perform several subtitles — measured at 22.7% of heard
+   * lines, the most common of these collapses by some way — so three selected
+   * sections can be three sections' worth of ONE recording. The run already
+   * de-duplicates; without this the button said "Transcribe 3 sections" and ran
+   * once, which is true about the sections and misleading about the work.
+   *
+   * Equal to the section count in every ordinary arrangement, where the labels
+   * then read exactly as they always did.
+   */
+  const transcribeRecordingCount = useMemo(() => {
+    const ids = new Set<string>()
+    for (const id of transcribeTargetIds) {
+      for (const c of takeCells(id)) if (canTranscribeCell(c)) ids.add(c.id)
+    }
+    return ids.size
+  }, [transcribeTargetIds, takeCells])
 
   const mediaTextHeaderProps = {
     cell: currentCell,
@@ -2792,6 +2837,7 @@ export function TimelineEditor({
         ? {
             selectedCount: selectedIds.length,
             eligibleCount: transcribeTargetIds.length,
+            recordingCount: transcribeRecordingCount,
             busy: batchProgress != null,
             onTranscribe: () => onTranscribeSections(transcribeTargetIds),
             onClear: () => {

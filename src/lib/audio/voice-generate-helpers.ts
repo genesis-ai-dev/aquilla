@@ -29,6 +29,27 @@ export interface GenerateCellVoiceArgs {
   /** Round 8c: the TTS take's permanent name (unset → backfilled later). */
   label?: string
   diffusionSteps?: number
+  /**
+   * AQU-646 stage 3f: the words to speak, when they are not the cell's own.
+   *
+   * On a file with an audio-cue sibling the translation lives on the SUBTITLE
+   * cells — a cue carries only an English transcript of the soundtrack — so a
+   * cue's own `translated` is empty forever and the button sat disabled over
+   * lines that were, in fact, translated. The caller resolves the words across
+   * the cue links (the same value read-aloud already shows the performer) and
+   * passes them here.
+   *
+   * Absent ⇒ the cell's own text, exactly as before, so every other caller and
+   * every other file arrangement is untouched.
+   */
+  text?: string
+  /**
+   * …and whose voice says them. Cast assignments are keyed by cell id and made
+   * on the subtitle cells, so a cue has none of its own and would otherwise
+   * speak in the project default whoever the character is. Absent ⇒ the cell's
+   * own id, as before.
+   */
+  voiceCellId?: string
 }
 
 /**
@@ -38,7 +59,7 @@ export interface GenerateCellVoiceArgs {
  */
 export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<boolean> {
   const { project, cell, session, username, voiceId, label, diffusionSteps, slot } = args
-  const text = cell.translated?.trim()
+  const text = (args.text ?? cell.translated)?.trim()
   if (!text) return false
   if (!session?.jwt) return false
 
@@ -61,7 +82,16 @@ export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<bo
       // AQU-646: an explicit caller override wins; otherwise honor persisted
       // cast assignments (diarization's Speaker N → cell mapping) before the
       // cell's own voice, so batch + Voice Studio speak in the assigned voice.
-      cellVoiceId: voiceId ?? resolveCastVoice(project.ttsSettings, cell.id, cell.ttsSettings?.voiceId).id,
+      cellVoiceId:
+        voiceId ??
+        resolveCastVoice(
+          project.ttsSettings,
+          // The linked subtitle's assignment when there is one — see
+          // `voiceCellId`. Falls back to this cell's own, which is every
+          // non-cue arrangement.
+          args.voiceCellId ?? cell.id,
+          cell.ttsSettings?.voiceId,
+        ).id,
       geminiContext: {
         sourceLanguage: project.sourceLanguage,
         targetLanguage: project.targetLanguage,

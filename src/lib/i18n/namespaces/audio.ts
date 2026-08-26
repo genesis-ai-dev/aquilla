@@ -123,6 +123,7 @@ export const audio = defineNamespace({
     "audio.recordingModal.generateTtsButton": "Generate TTS",
     "audio.recordingModal.ttsTooltip": "Generate this line's voice with the project's engine",
     "audio.recordingModal.ttsNeedsTranslation": "Translate this line first to generate voice",
+    "audio.recordingModal.ttsNoLinkedLine": "No subtitle is linked to this heard line, so there are no words to speak. Pair it with a subtitle first.",
     "audio.recordingModal.ttsDoneTooltip": "Voice generated — it plays on the Target track",
     "audio.recordingModal.cancelCountdown": "Cancel countdown",
 
@@ -144,7 +145,12 @@ export const audio = defineNamespace({
     "audio.recordingModal.lineCounterWindow": "{index} / {total} · window {seconds}s",
     "audio.recordingModal.lineCounterVeryShort":
       "{index} / {total} · window {seconds}s · very short",
+    "audio.tts.voicedSeveral": "Voiced {count} heard lines",
+    "audio.tts.voicedSeveralDetail":
+      "This subtitle is performed by several heard lines, so each one was given the whole subtitle. Trim them to fit.",
     "audio.recordingModal.cueReferenceLabel": "This cue:",
+    "audio.recordingModal.ttsSharedNotice":
+      "{count} heard lines perform this subtitle. A generated voice speaks the whole subtitle onto this one, and leaves the others silent.",
     "audio.recordingModal.maxDuration": "max {minutes}m",
     "audio.recordingModal.overrunNotice": "Past the window — this will overrun the cue.",
     "audio.recordingModal.nearLimitNotice":
@@ -941,6 +947,39 @@ export const audio = defineNamespace({
           "Tooltip for that synthesize button in its ready state. 'The project's " +
           "engine' means the text-to-speech service configured for this project, so " +
           "the user knows no choice is being asked of them here.",
+      },
+      "audio.tts.voicedSeveral": {
+        description:
+          "Toast title after one press of a line's voice button generated more " +
+          "than one clip, which happens when the subtitle is performed by " +
+          "several heard lines (about 8% of lines). Only one clip can be played " +
+          "back, so without this the rest are invisible work. The count is how " +
+          "many were actually written, not how many were attempted.",
+        placeholders: { count: "How many clips were generated. Always 2 or more." },
+      },
+      "audio.tts.voicedSeveralDetail": {
+        description:
+          "Toast body for the above: why there is more than one clip, and what " +
+          "to do about it — each clip says the whole subtitle rather than just " +
+          "its own line's share, so they need trimming.",
+      },
+      "audio.recordingModal.ttsSharedNotice": {
+        description:
+          "Standing notice in the recorder, shown only when the subtitle being " +
+          "performed is split across several heard lines (about 8% of lines). " +
+          "It warns BEFORE the user generates a voice, because afterwards the " +
+          "clip already exists: the synthesized clip will say the whole " +
+          "subtitle rather than just this line's share, and the other heard " +
+          "lines performing the same subtitle get no audio from this action. " +
+          "Always at least 2, so the plural is safe.",
+        placeholders: { count: "How many heard lines perform this subtitle. Always 2 or more." },
+      },
+      "audio.recordingModal.ttsNoLinkedLine": {
+        description:
+          "Tooltip on the recorder's disabled Generate-voice button when this " +
+          "heard line is not paired with any subtitle, so there are no words " +
+          "to speak. Distinct from the untranslated case, which is a different " +
+          "problem with a different fix.",
       },
       "audio.recordingModal.ttsNeedsTranslation": {
         description:

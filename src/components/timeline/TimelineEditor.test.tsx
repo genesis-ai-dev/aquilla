@@ -3329,3 +3329,73 @@ describe("TimelineEditor — the lifted row follows the drop it is aiming at", (
     expect(indentedWhileOutside).toBe(false)
   })
 })
+
+// AQU-646 stage 3f — Transcribe asks where the audio ACTUALLY is.
+//
+// `canTranscribeCell` is `Boolean(cell.selectedAudioId)`, and on a file with an
+// audio-cue sibling a subtitle cell never carries a take — the take hangs off
+// the heard line performing it, in the other file. So the button was greyed out
+// over lines that plainly had recordings, saying nothing about why.
+//
+// The rule that matters most here is that ELIGIBILITY and the RUN read the same
+// function. A lit button that runs over nothing is worse than a dark one.
+describe("TimelineEditor — transcribing a section whose audio lives elsewhere", () => {
+  beforeEach(() => { topOwner.value = 1 })
+
+  const sub = (id: string, start: number) =>
+    cell({ id, original: `line ${id}`, medium: "text", startTime: start, endTime: start + 2 })
+  /** The heard line that performs it — another file, and the take is on it. */
+  const cueWithTake = (id: string) =>
+    cell({
+      id, fileId: "f1-cues", original: "heard", medium: "media", startTime: 0, endTime: 2,
+      selectedAudioId: `audio-${id}-1700-take.webm`,
+    } as Partial<CellData>)
+
+  const render1 = (takeCellsFor?: (id: string) => readonly CellData[]) => {
+    const onTranscribeSections = vi.fn()
+    const view = render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={[sub("s1", 0), sub("s2", 4)]}
+        onRetimeSubtitle={() => {}}
+        onTranscribeSections={onTranscribeSections}
+        takeCellsFor={takeCellsFor}
+      />,
+    )
+    return { ...view, onTranscribeSections }
+  }
+
+  it("stays disabled when the subtitle really has no audio anywhere", () => {
+    const { container } = render1()
+    fireEvent.click(container.querySelector('[data-testid="tl-card-s1"]')!)
+    expect(screen.getByTestId("tl-transcribe-selection")).toBeDisabled()
+  })
+
+  // THE BUG. The subtitle carries no take and never will; its heard line does.
+  it("enables once the linked heard line's take is what gets asked about", () => {
+    const { container } = render1((id) => (id === "s1" ? [cueWithTake("cue-1")] : []))
+    fireEvent.click(container.querySelector('[data-testid="tl-card-s1"]')!)
+    expect(screen.getByTestId("tl-transcribe-selection")).toBeEnabled()
+  })
+
+  // The run is handed the SELECTED sections; the workspace resolves them to the
+  // cells holding the audio with the same function the button was lit from.
+  it("passes the selected sections through, for the workspace to resolve", () => {
+    const { container, onTranscribeSections } = render1((id) =>
+      id === "s1" ? [cueWithTake("cue-1")] : [],
+    )
+    fireEvent.click(container.querySelector('[data-testid="tl-card-s1"]')!)
+    fireEvent.click(screen.getByTestId("tl-transcribe-selection"))
+    expect(onTranscribeSections).toHaveBeenCalledWith(["s1"])
+  })
+
+  // A section whose heard line has no recording yet must not be counted, or the
+  // button promises work that cannot happen.
+  it("counts only the sections whose audio exists", () => {
+    const { container } = render1((id) => (id === "s1" ? [cueWithTake("cue-1")] : []))
+    fireEvent.click(container.querySelector('[data-testid="tl-card-s1"]')!)
+    fireEvent.click(container.querySelector('[data-testid="tl-card-s2"]')!, { metaKey: true })
+    expect(screen.getByTestId("tl-transcribe-count")).toHaveTextContent("2 sections selected")
+    expect(screen.getByTestId("tl-transcribe-selection")).toHaveTextContent("Transcribe section")
+  })
+})

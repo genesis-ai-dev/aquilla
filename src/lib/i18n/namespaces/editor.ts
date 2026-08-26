@@ -656,11 +656,17 @@ export const editor = defineNamespace({
       one: "Transcribe {count} section",
       other: "Transcribe {count} sections",
     }),
+    "editor.timeline.transcribeSelectionRecordings": plural({
+      one: "{count} recording",
+      other: "{count} recordings",
+    }),
     "editor.timeline.transcribeSelectionClear": "Clear selection",
     "editor.timeline.transcribeSelectionHint":
       "Ctrl/⌘-click or Shift-click chips to select more sections.",
     "editor.timeline.transcribeSelectionTooltip":
       "Run speech-to-text on the selected sections' audio only — the rest of the file is left alone.",
+    "editor.timeline.transcribeSelectionSharedTooltip":
+      "Some of these sections are performed by the same heard line, so this runs {count} transcription(s) covering all of them.",
     "editor.timeline.transcribeSelectionNoAudioTooltip":
       "None of the selected sections has audio to transcribe.",
     "editor.timeline.transcribeSelectionBusyTooltip":
@@ -3784,6 +3790,22 @@ export const editor = defineNamespace({
           "Accessible name of the small X that hides the measure notice for this " +
           "visit. 'For now' is deliberate: the notice returns next time the timeline " +
           "opens while unmeasured recordings remain. Never visible.",
+      },
+      "editor.timeline.transcribeSelectionRecordings": {
+        description:
+          "Shown beside the selected-section count when the two differ: several " +
+          "subtitles can be performed by ONE heard line (22.7% of heard lines " +
+          "cover more than one), so the recording is transcribed once and " +
+          "covers all of them. Stating both numbers is how the user learns that " +
+          "before pressing, rather than wondering afterwards.",
+        placeholders: { count: "How many recordings will actually be transcribed." },
+      },
+      "editor.timeline.transcribeSelectionSharedTooltip": {
+        description:
+          "Tooltip explaining why the section count and the recording count " +
+          "differ — the sections share a heard line, and one transcription " +
+          "covers all of them.",
+        placeholders: { count: "How many recordings will actually be transcribed." },
       },
       "editor.timeline.transcribeSelectionCount": {
         description:

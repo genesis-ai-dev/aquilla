@@ -10787,6 +10787,9 @@ export function ProjectWorkspace() {
         <ExportDialog
           open={exportOpen}
           onOpenChange={setExportOpen}
+          // AQU-646 stage 4: per line writes a folder per track, and the mere
+          // existence of an added one puts a notice on the by-character option.
+          timelineTracks={timelineTracks}
           canExport={canExportByOrgPolicy}
           cells={legacyCells}
           // WHERE THE TAKES ACTUALLY ARE, and — the part the first fix got

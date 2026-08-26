@@ -28,6 +28,7 @@ import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import { assignedCastVoiceId, resolveCastVoice } from "@/lib/audio/voices"
+import { targetChipGeom } from "@/lib/timeline/lane-timing"
 import { encodeWavPcm16Chunks, quantisePcm16, type Pcm16Chunk } from "@/lib/audio/wav-encode"
 import { parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { TARGET_RATE } from "@/lib/audio/decode-mono"
@@ -170,8 +171,22 @@ export function groupAudioByCharacter(
     // concatenated three times. Placed on a timeline that would be three copies
     // stacked on themselves. The earliest covering cue is where it starts.
     const existing = group.clips.find((c) => c.audioId === audioId)
-    const startSec = cell.startTime ?? null
-    const endSec = cell.endTime ?? null
+    // WHERE THE TAKE SITS, NOT WHERE ITS LINE STARTS. (AQU-646 stage 4)
+    //
+    // This is the MIX deliverable — every clip laid on silence at its timeline
+    // second — so reading the cell's start meant a chip somebody dragged came
+    // out of the zip at the position it used to have, and the mix disagreed
+    // with the timeline on screen. `targetChipGeom` is the resolver the lane
+    // itself draws with (the take's own `targetOffsetMs`, falling back to the
+    // cell's for takes made before there was anywhere else to put one), so the
+    // two now agree by construction.
+    //
+    // Falls back to the cell when geometry cannot be resolved — an untimed
+    // line has no section to place against, and that case is already handled
+    // downstream by counting it as unplaceable.
+    const geom = targetChipGeom(cell, attachment)
+    const startSec = geom?.start ?? cell.startTime ?? null
+    const endSec = geom?.end ?? cell.endTime ?? null
     if (existing) {
       if (startSec != null && (existing.startSec == null || startSec < existing.startSec)) {
         existing.startSec = startSec

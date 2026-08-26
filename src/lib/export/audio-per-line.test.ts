@@ -14,10 +14,12 @@ import {
   exportAudioPerLine,
   perLineFileName,
   timecode,
+  trackFolderNames,
 } from "./audio-per-line"
 import { buildBextPayload, withBwfTimestamp } from "./audio-bwf"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
+import type { TimelineTrack } from "@/lib/timeline/tracks"
 
 const SETTINGS: ProjectTtsSettings = {
   voices: [{ id: "v-mary", name: "Mary" }],
@@ -356,5 +358,297 @@ describe("the test fixture", () => {
     expect(withBwfTimestamp(makeWav(), {
       description: "", originator: "", originatorRef: "", timeReferenceSamples: 0,
     })).not.toBe(makeWav())
+  })
+})
+
+// ── AQU-646 stage 4: one folder per track ────────────────────────────────────
+//
+// Sam, 2026-08-26: per line is the multi-track deliverable and the only one.
+// One folder per track, names sanitised, everything a single-track export
+// already carries carried per folder.
+
+const track = (id: string, name: string, kind: "audio" | "target-audio" = "audio") =>
+  ({ id, kind, name, order: 0 }) as unknown as TimelineTrack
+
+/** A cell with a take on an ADDED track — its slot IS the track id, and it
+ *  holds recorded and generated takes alike. */
+const withTrackTake = (
+  id: string,
+  startTime: number,
+  trackId: string,
+  over: { voiceId?: string | null; ext?: string } = {},
+) =>
+  cell({
+    id,
+    startTime,
+    endTime: startTime + 1,
+    selectedBySlot: { [trackId]: `t-${id}-${trackId}` },
+    attachments: {
+      [`t-${id}-${trackId}`]: {
+        url: `frontier-audio://t-${id}-${trackId}.${over.ext ?? "wav"}`,
+        type: "audio",
+        voiceId: over.voiceId ?? null,
+      },
+    },
+  } as Partial<CellData>)
+
+describe("the classic single-track export is untouched", () => {
+  // THE HEADLINE GUARD. Everything below adds a dimension that most projects
+  // will never use, and the price of getting it wrong is that every existing
+  // client's zip quietly changes shape. So: no tracks argument, and no tracks
+  // that contribute, must both produce exactly the flat zip and the exact CSV
+  // schema that shipped.
+  it("writes flat entries and the original manifest header with no tracks given", async () => {
+    const cells = [withTake("a", 1), withTake("b", 5)]
+    const result = await exportAudioPerLine({
+      cells, settings: SETTINGS, projectId: "p1", langCode: "es",
+      fetchBytes: async () => makeWav(),
+    })
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
+    const names = Object.keys(zip.files).sort()
+    expect(names.every((n) => !n.includes("/"))).toBe(true)
+    const csv = await zip.file("manifest.csv")!.async("string")
+    expect(csv.split("\n")[0]).toBe("file,line,character,start,end,start_seconds,end_seconds,cell_id")
+  })
+
+  // A file that HAS added tracks but nobody has recorded onto them is still a
+  // one-track export. A lone folder — or one folder beside empty siblings — is
+  // a worse deliverable than the flat zip it replaced.
+  it("stays flat when only one track actually contributed", async () => {
+    const cells = [withTake("a", 1)]
+    const result = await exportAudioPerLine({
+      cells, settings: SETTINGS, projectId: "p1", langCode: "es",
+      tracks: [track("target-audio", "Target audio", "target-audio"), track("trk-es", "Spanish")],
+      fetchBytes: async () => makeWav(),
+    })
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
+    expect(Object.keys(zip.files).every((n) => !n.includes("/"))).toBe(true)
+  })
+})
+
+describe("collecting across tracks", () => {
+  it("finds the default row's takes and each added track's own slot", () => {
+    const merged = cell({
+      id: "c1", startTime: 1, endTime: 2,
+      selectedAudioId: "a-main",
+      selectedBySlot: { "trk-es": "a-es" },
+      attachments: {
+        "a-main": { url: "frontier-audio://a-main.wav", type: "audio" },
+        "a-es": { url: "frontier-audio://a-es.wav", type: "audio" },
+      },
+    } as Partial<CellData>)
+    const clips = collectPerLineClips(
+      [merged], SETTINGS, undefined,
+      [track("target-audio", "Target audio", "target-audio"), track("trk-es", "Spanish")],
+    )
+    expect(clips.map((c) => [c.trackId, c.audioId])).toEqual([
+      ["target-audio", "a-main"],
+      ["trk-es", "a-es"],
+    ])
+  })
+
+  // L047 has to mean the forty-seventh line of the episode in EVERY folder, or
+  // the folders cannot be talked about together — "L047 in Spanish" would name
+  // a different line from "L047 in Target audio".
+  it("numbers lines per FILE, never per track", () => {
+    const clips = collectPerLineClips(
+      [withTake("a", 1), withTrackTake("b", 5, "trk-es"), withTake("c", 9)],
+      SETTINGS, undefined,
+      [track("target-audio", "Target audio", "target-audio"), track("trk-es", "Spanish")],
+    )
+    const es = clips.find((c) => c.trackId === "trk-es")!
+    expect(es.lineNumber).toBe(2)
+    expect(clips.filter((c) => c.trackId === "target-audio").map((c) => c.lineNumber)).toEqual([1, 3])
+  })
+
+  // The lossless-WAV preference asks "is this a generated voice". On the
+  // default row a pointer says so; an added track's ONE slot holds both kinds,
+  // so the take itself has to — via `voiceId`, the discriminator stage 3
+  // verified against all three synthesis paths.
+  it("reads generated-ness off the take on an added track", () => {
+    const [recorded] = collectPerLineClips(
+      [withTrackTake("a", 1, "trk-es")], SETTINGS, undefined, [track("trk-es", "Spanish")],
+    )
+    const [voiced] = collectPerLineClips(
+      [withTrackTake("b", 1, "trk-es", { voiceId: "v-mary" })], SETTINGS, undefined,
+      [track("trk-es", "Spanish")],
+    )
+    expect(recorded.generated).toBe(false)
+    expect(voiced.generated).toBe(true)
+  })
+
+  it("ignores folders and text rows — only audio tracks hold takes", () => {
+    const clips = collectPerLineClips(
+      [withTake("a", 1)], SETTINGS, undefined,
+      [
+        track("source-subtitles", "Source text", "target-audio"),
+        { id: "grp", kind: "folder", name: "Dubs", order: 1 } as unknown as TimelineTrack,
+        track("target-audio", "Target audio", "target-audio"),
+      ],
+    )
+    expect(clips).toHaveLength(1)
+    expect(clips[0].trackId).toBe("target-audio")
+  })
+})
+
+describe("folder names", () => {
+  // The SAME sanitiser character names use, deliberately — one rule for both,
+  // so a folder and a filename cannot disagree about what is safe. It is
+  // ASCII-only (`[^\w.-]`), so accents fold to underscores exactly as they
+  // already do for a character called "Nicodemús". Matching that is the point;
+  // widening it here would make track folders and character files disagree.
+  it("sanitises the way character names already are", () => {
+    const names = trackFolderNames([
+      { id: "a", name: "Español (M)" },
+      { id: "b", name: "Target audio" },
+    ])
+    expect(names.get("a")).toBe("Espa_ol_M")
+    expect(names.get("b")).toBe("Target_audio")
+  })
+
+  // Track names are free text and REPEAT in practice — the client's own test
+  // file carries two called "Audio". Without de-duplication the second would
+  // silently overwrite the first's entire folder.
+  it("de-duplicates repeated names rather than letting one eat the other", () => {
+    const names = trackFolderNames([
+      { id: "a", name: "Audio" },
+      { id: "b", name: "Audio" },
+      { id: "c", name: "Audio" },
+    ])
+    expect([...names.values()]).toEqual(["Audio", "Audio_2", "Audio_3"])
+  })
+
+  it("never produces an empty folder name", () => {
+    expect(trackFolderNames([{ id: "a", name: "///" }]).get("a")).toBeTruthy()
+  })
+})
+
+describe("the multi-track zip", () => {
+  const twoTracks = [
+    track("target-audio", "Target audio", "target-audio"),
+    track("trk-es", "Spanish"),
+  ]
+  const cells = [
+    cell({
+      id: "c1", startTime: 1, endTime: 2,
+      selectedAudioId: "a-main",
+      selectedBySlot: { "trk-es": "a-es" },
+      attachments: {
+        "a-main": { url: "frontier-audio://a-main.wav", type: "audio" },
+        "a-es": { url: "frontier-audio://a-es.wav", type: "audio" },
+      },
+    } as Partial<CellData>),
+    withTake("c2", 5),
+  ]
+
+  it("puts each track's files in its own folder", async () => {
+    const result = await exportAudioPerLine({
+      cells, settings: SETTINGS, projectId: "p1", langCode: "es", tracks: twoTracks,
+      fetchBytes: async () => makeWav(),
+    })
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
+    const audio = Object.keys(zip.files).filter((n) => n.endsWith(".wav")).sort()
+    expect(audio).toEqual([
+      "Spanish/es_L0001_NO_CHARACTER.wav",
+      "Target_audio/es_L0001_NO_CHARACTER.wav",
+      "Target_audio/es_L0002_NO_CHARACTER.wav",
+    ])
+    // The same line name in two folders is two FILES, not a collision — the
+    // dedupe suffix must not fire across folders.
+    expect(audio.some((n) => n.includes("_2."))).toBe(false)
+  })
+
+  it("writes ONE manifest at the root, naming each file's track", async () => {
+    const result = await exportAudioPerLine({
+      cells, settings: SETTINGS, projectId: "p1", langCode: "es", tracks: twoTracks,
+      fetchBytes: async () => makeWav(),
+    })
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
+    expect(Object.keys(zip.files).filter((n) => n.endsWith("manifest.csv"))).toEqual(["manifest.csv"])
+    const csv = await zip.file("manifest.csv")!.async("string")
+    const [header, ...rows] = csv.trim().split("\n")
+    expect(header).toBe("file,track,line,character,start,end,start_seconds,end_seconds,cell_id")
+    // The REAL name, not the sanitised folder — the sidecar is where a name a
+    // filesystem could not hold survives.
+    expect(rows.some((r) => r.includes("Target audio"))).toBe(true)
+    expect(rows).toHaveLength(3)
+  })
+})
+
+// ── AQU-646 stage 4: exports place a take where the take IS ──────────────────
+//
+// Stage 3 moved placement onto the take — `targetOffsetMs`, with the cell's own
+// offset as the permanent fallback for takes made before there was anywhere
+// else to put one — and both exporters went on stamping `cell.startTime`. So a
+// chip somebody dragged came out of the zip at the position it USED to have,
+// and the deliverable disagreed with the timeline that produced it. Wrong on
+// the default track today, before any of the multi-track work.
+describe("where a take is placed in the export", () => {
+  /** Read the BWF time reference back out of a written WAV. */
+  const placedSeconds = async (blob: Blob, entry: string) => {
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer())
+    const bytes = await zip.file(entry)!.async("uint8array")
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    // Walk the RIFF chunks to `bext`; its timeReference is a 64-bit sample
+    // count at offset 338 of the payload (low dword then high).
+    let at = 12
+    while (at + 8 <= bytes.length) {
+      const id = String.fromCharCode(bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3])
+      const size = view.getUint32(at + 4, true)
+      if (id === "bext") {
+        const lo = view.getUint32(at + 8 + 338, true)
+        const hi = view.getUint32(at + 8 + 342, true)
+        return (hi * 2 ** 32 + lo) / 48000
+      }
+      at += 8 + size + (size % 2)
+    }
+    return null
+  }
+
+  it("stamps the take's own placement, not the line's start", async () => {
+    // The line starts at 10s; the take was dragged to 2.5s past that.
+    const dragged = cell({
+      id: "c1", startTime: 10, endTime: 14,
+      selectedAudioId: "a1",
+      attachments: {
+        a1: {
+          url: "frontier-audio://a1.wav", type: "audio",
+          durationMs: 1000, targetOffsetMs: 2500,
+        },
+      },
+    } as Partial<CellData>)
+    const result = await exportAudioPerLine({
+      cells: [dragged], settings: SETTINGS, projectId: "p1", langCode: "es",
+      fetchBytes: async () => makeWav(),
+    })
+    expect(await placedSeconds(result.blob, "es_L0001_NO_CHARACTER.wav")).toBeCloseTo(12.5, 3)
+  })
+
+  it("falls back to the line's start for a take nobody has placed", async () => {
+    const result = await exportAudioPerLine({
+      cells: [withTake("c1", 7)], settings: SETTINGS, projectId: "p1", langCode: "es",
+      fetchBytes: async () => makeWav(),
+    })
+    expect(await placedSeconds(result.blob, "es_L0001_NO_CHARACTER.wav")).toBeCloseTo(7, 3)
+  })
+
+  // The MANIFEST keeps describing the LINE. That is what a reviewer uses to
+  // find the line in the episode; repurposing those columns to mean the take's
+  // position would silently re-document a CSV somebody is already reading.
+  it("leaves the manifest's start/end describing the line", async () => {
+    const dragged = cell({
+      id: "c1", startTime: 10, endTime: 14,
+      selectedAudioId: "a1",
+      attachments: {
+        a1: { url: "frontier-audio://a1.wav", type: "audio", durationMs: 1000, targetOffsetMs: 2500 },
+      },
+    } as Partial<CellData>)
+    const result = await exportAudioPerLine({
+      cells: [dragged], settings: SETTINGS, projectId: "p1", langCode: "es",
+      fetchBytes: async () => makeWav(),
+    })
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
+    const csv = await zip.file("manifest.csv")!.async("string")
+    expect(csv).toContain("00:00:10.000")
   })
 })

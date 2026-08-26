@@ -584,6 +584,8 @@ export const importExport = defineNamespace({
     // — Export dialog: the per-section cards a dubbing file gets —
     "importExport.dialog.audioSectionTitle": "Audio",
     "importExport.dialog.audioShapeGroupAriaLabel": "Audio export shape",
+    "importExport.dialog.audioAddedTracksNote":
+      "Only the main Target audio track is included. Export by line to get the tracks you have added.",
     "importExport.dialog.exportAudio": "Export audio",
     "importExport.dialog.srtExportSectionTitle": "SRT export",
     "importExport.dialog.vttExportSectionTitle": "VTT export",
@@ -1371,6 +1373,15 @@ export const importExport = defineNamespace({
       "importExport.dialog.audioShapeGroupAriaLabel": {
         description:
           "Accessible name for the radio group choosing the shape of an audio export — one track per character, or one file per recorded line.",
+      },
+      "importExport.dialog.audioAddedTracksNote": {
+        description:
+          "Shown under the by-character audio export option when the file has " +
+          "audio tracks beyond the four it starts with. That export writes one " +
+          "track per CHARACTER off the main dub row only, so takes recorded " +
+          "onto tracks the user added are not in it — this says so before they " +
+          "export, and points at the by-line shape, which does carry them. A " +
+          "notice, not a restriction: by character remains selectable.",
       },
       "importExport.dialog.subtitleTargetGroupAriaLabel": {
         description:

@@ -60,10 +60,26 @@ export interface GenerateCellVoiceArgs {
 export async function generateCellVoice(args: GenerateCellVoiceArgs): Promise<boolean> {
   const { project, cell, session, username, voiceId, label, diffusionSteps, slot } = args
   const text = (args.text ?? cell.translated)?.trim()
+  // Not a failure — there is simply nothing to say. Every caller already gates
+  // its control on the same emptiness, so this returns quietly, as before.
   if (!text) return false
-  if (!session?.jwt) return false
 
   const statusKey = ttsStatusKey(cell.id)
+  // AQU-646 stage 4c: A FAILURE HAS TO LEAVE A MARK. This used to return a
+  // bare `false` from ABOVE the first status write, so a signed-out session
+  // produced no status at all — the button went quiet and every surface
+  // watching this cell went on showing whatever it had. It is the same
+  // invisibility the rest of this stage is about, one branch earlier than the
+  // catch that handles it. The consent-denied path below still returns false
+  // with an IDLE status, on purpose: declining a model download is a choice,
+  // not a fault, and must never paint anything red.
+  if (!session?.jwt) {
+    setTtsStatus(statusKey, {
+      kind: "error",
+      message: "Not signed in — sign in again to generate voice.",
+    })
+    return false
+  }
   const onProgress: Parameters<typeof synthesizeForCell>[1]["onProgress"] = (p) => {
     setTtsStatus(statusKey, { kind: "loading", loaded: p.loaded, total: p.total, file: p.file })
     if (p.status === "ready" || (p.total > 0 && p.loaded >= p.total)) {

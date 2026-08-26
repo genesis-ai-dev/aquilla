@@ -125,6 +125,12 @@ export const audio = defineNamespace({
     "audio.recordingModal.ttsNeedsTranslation": "Translate this line first to generate voice",
     "audio.recordingModal.ttsNoLinkedLine": "No subtitle is linked to this heard line, so there are no words to speak. Pair it with a subtitle first.",
     "audio.recordingModal.ttsDoneTooltip": "Voice generated — it plays on the Target track",
+    // AQU-646 stage 4c: what the button says when generation failed, while it
+    // is downloading a local voice model, and while it is synthesizing.
+    "audio.recordingModal.ttsFailedButton": "TTS failed",
+    "audio.recordingModal.ttsFailedTooltip": "Generation failed: {error}",
+    "audio.recordingModal.ttsDownloadingPct": "Downloading {percent}%",
+    "audio.recordingModal.ttsSynthesizing": "Synthesizing…",
     "audio.recordingModal.cancelCountdown": "Cancel countdown",
 
     // AudioRecordingModal, AQU-646 rebuild — the film panel beside the
@@ -326,6 +332,7 @@ export const audio = defineNamespace({
     "audio.aiError.gitProjectUnsupportedTitle": "Not yet supported on git projects",
     "audio.aiError.nothingToReadTitle": "Nothing to read aloud",
     "audio.aiError.translationNotConfiguredTitle": "Translation not configured",
+    "audio.aiError.ttsNotConfiguredTitle": "Voice generation isn't set up",
     "audio.aiError.translationFailedTitle": "Translation failed",
     "audio.aiError.networkTitle": "Network error",
     "audio.aiError.modelLoadFailedTitle": "Couldn't load model",
@@ -987,6 +994,45 @@ export const audio = defineNamespace({
           "has no translated text yet — there is nothing for a voice to read. " +
           "Phrased as the action that unblocks it.",
       },
+      "audio.recordingModal.ttsFailedButton": {
+        description:
+          "Visible label of the recorder's voice button after generation " +
+          "failed. Two words on purpose: the button is about half the panel " +
+          "wide, and the actual reason is written out in full on the line " +
+          "beneath it, so this only has to say THAT it failed. 'TTS' is the " +
+          "industry abbreviation for text-to-speech; keep it if it is " +
+          "recognised in the target language, otherwise use the local short " +
+          "form.",
+        maxLength: 16,
+      },
+      "audio.recordingModal.ttsFailedTooltip": {
+        description:
+          "Hover text on that failed button, carrying the verbatim technical " +
+          "error. The user-facing explanation is the line beneath the button, " +
+          "not this — this exists so the raw text can be read and passed on to " +
+          "support without it being the first thing anyone sees.",
+        placeholders: {
+          error:
+            "The underlying error message, usually untranslated technical text " +
+            "from the browser or the voice server.",
+        },
+      },
+      "audio.recordingModal.ttsDownloadingPct": {
+        description:
+          "Label on the recorder's voice button while a local voice model is " +
+          "downloading, so a wait of tens of seconds does not read as a hang. " +
+          "Only local engines (Kokoro, MMS) report progress. Keep it short — " +
+          "the button is about half the panel wide.",
+        placeholders: { percent: "Whole-number download progress, 0 to 100, without the % sign." },
+        maxLength: 18,
+      },
+      "audio.recordingModal.ttsSynthesizing": {
+        description:
+          "Label on the recorder's voice button while the voice is actually " +
+          "being generated — after any model download has finished. Keep it " +
+          "short; the button is about half the panel wide.",
+        maxLength: 18,
+      },
       "audio.recordingModal.ttsDoneTooltip": {
         description:
           "Tooltip for the synthesize button right after it succeeded, saying where " +
@@ -1560,6 +1606,14 @@ export const audio = defineNamespace({
         description:
           "Popover heading when generating voice for an untranslated cell needs " +
           "on-the-fly translation, but the project has no completion provider set up.",
+      },
+      "audio.aiError.ttsNotConfiguredTitle": {
+        description:
+          "Popover heading when the voice service itself was never configured, " +
+          "so generating audio cannot work at all until someone sets it up. " +
+          "Distinct from a server being temporarily down: retrying will never " +
+          "help, which is why it is worded as a state ('isn't set up') rather " +
+          "than as a failure that just happened.",
       },
       "audio.aiError.translationFailedTitle": {
         description:

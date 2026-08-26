@@ -73,6 +73,8 @@ vi.mock("@/lib/audio/audio-coordinator", () => ({ pushAudioShortcutOverride: () 
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
 import { resetRecordingAutoAdvanceCacheForTests } from "@/lib/store/recording-auto-advance-pref"
+import { setTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
+import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 
 const onActiveCellChange = vi.fn((..._args: unknown[]) => {})
 
@@ -408,5 +410,134 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
     renderTwo()
     fireEvent.click(screen.getByTestId("rec-settings"))
     expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-pressed", "false")
+  })
+})
+
+// ── AQU-646 stage 4c ─────────────────────────────────────────────────────────
+//
+// Sam, 2026-08-26: "If TTS generation fails, the recording modal should reflect
+// this… the generate TTS button itself should turn red and have a little
+// warning written out on it."
+//
+// It never did. `generateCellVoice` has always written the failure into the
+// shared per-cell status store; the modal read only the boolean it returns and,
+// on false, let the button fall back to idle — so a failed generation looked
+// exactly like one that had never been pressed.
+//
+// These drive the STORE directly, because the suite mocks `generateCellVoice`
+// wholesale and its real status writes therefore never run.
+describe("AudioRecordingModal — a failed generation says so (stage 4c)", () => {
+  const KEY = ttsStatusKey("c1")
+  // The default engine's most likely failure, verbatim.
+  const NOT_CONFIGURED = "voice/tts failed (503): TTS not configured"
+
+  beforeEach(() => {
+    attachmentsState.byCellId = new Map()
+    generateCellVoice.mockClear()
+  })
+  // `tts.ts` has no clear function — the store is a module Map that outlives
+  // any component — so a case that leaves an error in it would hand that error
+  // to every case after it.
+  afterEach(() => setTtsStatus(KEY, { kind: "idle" }))
+
+  it("turns the button red and keeps it PRESSABLE, because pressing it is the retry", () => {
+    setTtsStatus(KEY, { kind: "error", message: NOT_CONFIGURED })
+    renderModal(cellWith("bonjour"))
+    const btn = screen.getByTestId("rec-generate-tts")
+    expect(btn).toHaveTextContent("TTS failed")
+    expect(btn.className).toContain("text-destructive")
+    // The one thing a failure must never do. Disabling it would strand the user
+    // on the error with no way out of it.
+    expect(btn).toBeEnabled()
+  })
+
+  it("writes the reason out in full, without the server's own words", () => {
+    setTtsStatus(KEY, { kind: "error", message: NOT_CONFIGURED })
+    renderModal(cellWith("bonjour"))
+    const line = screen.getByTestId("rec-tts-error")
+    // What it IS, then what to do about it — and the way out that actually
+    // works from a browser.
+    expect(line).toHaveTextContent(/Voice generation isn't set up/i)
+    expect(line).toHaveTextContent(/Kokoro|MMS/)
+    // NOT the raw fragment. That is support's text, not the performer's, and it
+    // lives in the tooltip.
+    expect(line.textContent).not.toContain("503")
+    expect(line.textContent).not.toContain("voice/tts")
+  })
+
+  it("does not repeat itself when the explanation already opens with its heading", () => {
+    // The daily-budget body is literally "Daily AI limit reached — resets at
+    // midnight UTC…" under the title "Daily AI limit reached", so a naive join
+    // says it twice.
+    setTtsStatus(KEY, {
+      kind: "error",
+      message: 'voice/tts failed (429): {"error":"tts_daily_limit_exceeded"}',
+    })
+    renderModal(cellWith("bonjour"))
+    const text = screen.getByTestId("rec-tts-error").textContent ?? ""
+    expect(text).toMatch(/Daily AI limit reached/)
+    expect(text.match(/Daily AI limit reached/g)).toHaveLength(1)
+  })
+
+  // THE GUARD THAT MATTERS MOST. `generateCellVoice` also returns false when the
+  // user DECLINED a model download, and that path deliberately sets an idle
+  // status. Reddening the button for a choice someone just made would be a
+  // worse lie than saying nothing — which is exactly why this reads the store
+  // and not the boolean.
+  it("stays quiet when a run returns false without an error — a declined download is not a fault", async () => {
+    generateCellVoice.mockImplementationOnce(async () => false)
+    renderModal(cellWith("bonjour"))
+    const btn = screen.getByTestId("rec-generate-tts")
+    fireEvent.click(btn)
+    await waitFor(() => expect(generateCellVoice).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.getByTestId("rec-generate-tts")).toBeEnabled())
+    expect(screen.getByTestId("rec-generate-tts").className).not.toContain("text-destructive")
+    expect(screen.queryByTestId("rec-tts-error")).toBeNull()
+  })
+
+  it("a retry reads as in-flight, not as the failure it is replacing", async () => {
+    setTtsStatus(KEY, { kind: "error", message: NOT_CONFIGURED })
+    // Held open so the button is observed mid-run rather than after it.
+    let release: (v: boolean) => void = () => {}
+    generateCellVoice.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => { release = resolve }),
+    )
+    renderModal(cellWith("bonjour"))
+    fireEvent.click(screen.getByTestId("rec-generate-tts"))
+    await waitFor(() => expect(screen.getByTestId("rec-generate-tts")).toBeDisabled())
+    const btn = screen.getByTestId("rec-generate-tts")
+    // Busy leads the precedence: the stale error is still sitting in the store,
+    // and a button that showed it while working would say the retry had already
+    // failed.
+    expect(btn).not.toHaveTextContent("TTS failed")
+    expect(btn.className).not.toContain("text-destructive")
+    release(true)
+  })
+
+  it("counts out a voice-model download instead of spinning anonymously", () => {
+    setTtsStatus(KEY, { kind: "loading", loaded: 5, total: 10, file: "model.onnx" })
+    renderModal(cellWith("bonjour"))
+    const btn = screen.getByTestId("rec-generate-tts")
+    expect(btn).toHaveTextContent("Downloading 50%")
+    // A run someone else started for this cell still counts as busy — two
+    // synths for one cell would fight over one status slot.
+    expect(btn).toBeDisabled()
+  })
+
+  it("says when it has stopped downloading and started speaking", () => {
+    setTtsStatus(KEY, { kind: "synthesizing" })
+    renderModal(cellWith("bonjour"))
+    expect(screen.getByTestId("rec-generate-tts")).toHaveTextContent("Synthesizing")
+  })
+
+  it("keeps the verbatim server text reachable on hover", async () => {
+    setTtsStatus(KEY, { kind: "error", message: NOT_CONFIGURED })
+    renderWithTooltips(
+      <AudioRecordingModal
+        open project={project} cells={[cellWith("bonjour")]} activeCellId="c1"
+        username="sam" onActiveCellChange={() => {}} onClose={() => {}}
+      />,
+    )
+    await expectTooltip(screen.getByTestId("rec-generate-tts"), /TTS not configured/i)
   })
 })

@@ -8,7 +8,7 @@
 // preview/retake step between stop and upload.
 
 import { type ChangeEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, RefreshCw, Settings2, Sparkles, Square, Upload, Volume2, VolumeX, X } from "lucide-react"
+import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, RefreshCw, Settings2, Sparkles, Square, Upload, Volume2, VolumeX, X } from "lucide-react"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -39,6 +39,8 @@ import { useOnline } from "@/hooks/useOnline"
 import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { probeDurationMsSafe } from "@/lib/import"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
+import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
+import { categorizeAiError } from "@/lib/audio/ai-error"
 import { COUNTDOWN_FROM, useCountdown } from "./useCountdown"
 import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
@@ -825,6 +827,72 @@ export function AudioRecordingModal({
   useEffect(() => {
     setTtsDone(false)
   }, [activeCellId])
+  /**
+   * AQU-646 stage 4c: the failure this surface has always caused and never
+   * shown (Sam, 2026-08-26).
+   *
+   * `generateCellVoice` already writes every failure into the shared per-cell
+   * status store — the same store, under the same key, that the table row's
+   * voice button reads. This modal simply never read it back: it checked the
+   * helper's boolean, and on `false` let the button fall silently to idle. So
+   * a generation that failed looked exactly like one that had never been
+   * pressed.
+   *
+   * THE STORE, NOT THE BOOLEAN, and that distinction is the whole correctness
+   * of this. `false` also means "you declined the model download", which sets
+   * an IDLE status on purpose — reddening the button for a choice the user
+   * just made would be a worse lie than saying nothing.
+   *
+   * ONE KEY FOR BOTH SURFACES. `activeCellId` is `primaryAudioHome(...)` and
+   * the row button is handed `resolveAudioHomes(...)[0]` — the same cell, so
+   * on a cue file a failure paints the recorder and the table row together
+   * rather than each keeping its own half of the story.
+   *
+   * A failure left over from before this modal opened still shows, and that is
+   * deliberate: the store is only ever overwritten by the next attempt, so an
+   * error sitting in it means the last thing that happened to this line's
+   * voice was a failure and nothing has fixed it since. Pressing the button
+   * clears it — the retry writes `loading` first.
+   */
+  const ttsStatus = useTtsStatus(activeCellId ? ttsStatusKey(activeCellId) : undefined)
+  const ttsFailure = ttsStatus.kind === "error" ? categorizeAiError(ttsStatus.message) : null
+  /**
+   * The heading and the advice, read as one sentence.
+   *
+   * SOME BODIES ALREADY OPEN WITH THEIR OWN HEADING — the daily-quota one is
+   * literally "Daily AI limit reached — resets at midnight UTC…" under the
+   * title "Daily AI limit reached" — so joining them unconditionally produces
+   * "Daily AI limit reached — Daily AI limit reached — resets at midnight".
+   * An equality guard does not catch that; the body merely STARTS with the
+   * title. Where it does, the body is already the whole sentence.
+   */
+  const ttsFailureLine = !ttsFailure
+    ? null
+    : ttsFailure.body.toLowerCase().startsWith(ttsFailure.title.toLowerCase())
+      ? ttsFailure.body
+      : `${ttsFailure.title} — ${ttsFailure.body}`
+  // Another surface generating for THIS cell counts as busy: two synths for one
+  // cell would fight over one status slot, and the row button takes the same
+  // position. Our own press is `ttsBusy`, which leads so that a retry reads as
+  // in-flight even while the previous failure is still in the store.
+  const ttsWorking = ttsBusy || ttsStatus.kind === "loading" || ttsStatus.kind === "synthesizing"
+  // Only the local engines report bytes — OmniVoice (the default) sends no
+  // progress at all and Gemini sends one event — so this appears exactly where
+  // the wait is long enough to look like a hang.
+  const ttsProgressPct =
+    ttsStatus.kind === "loading" && ttsStatus.total > 0
+      ? Math.round((ttsStatus.loaded / ttsStatus.total) * 100)
+      : null
+  /**
+   * Whether the button WEARS the failure — one flag, read by the glyph, the
+   * tone, the label and the line beneath, so those four can never disagree.
+   *
+   * They did: with each reading `ttsFailure` for itself, pressing retry over a
+   * stale error span a spinner underneath the word "failed", announcing the
+   * outcome of an attempt that was still running. An in-flight run always
+   * outranks the error it is trying to replace.
+   */
+  const ttsShowFailure = ttsFailure != null && !ttsWorking
   const generateTts = useCallback(async () => {
     if (!online) return // the disabled button + tooltip carry the message
     if (!activeCell || !session || ttsBusy) return
@@ -1793,6 +1861,11 @@ export function AudioRecordingModal({
                 place. */}
             {/* i18n-exempt "idle"/"error" are RecorderPhase union tags, not copy */}
             {(displayPhase === "idle" || displayPhase === "error") && (
+              // AQU-646 stage 4c: the row and the reason beneath it are one
+              // group, so the parent's `space-y-3` separates the GROUP from the
+              // anchor above while the explanation stays tucked under the
+              // button it belongs to.
+              <div className="space-y-1.5">
               <div className="flex gap-2">
                 <AppTooltip
                   content={
@@ -1802,9 +1875,15 @@ export function AudioRecordingModal({
                         ? t("audio.recordingModal.ttsNoLinkedLine")
                         : !ttsText
                           ? t("audio.recordingModal.ttsNeedsTranslation")
-                          : ttsDone
-                            ? t("audio.recordingModal.ttsDoneTooltip")
-                            : t("audio.recordingModal.ttsTooltip")
+                          : ttsShowFailure && ttsFailure
+                            ? // The verbatim text, which the line below
+                              // deliberately does not show: the sentence there
+                              // is for the user, this is for whoever they end
+                              // up sending it to.
+                              t("audio.recordingModal.ttsFailedTooltip", { error: ttsFailure.raw })
+                            : ttsDone
+                              ? t("audio.recordingModal.ttsDoneTooltip")
+                              : t("audio.recordingModal.ttsTooltip")
                   }
                 >
                   <span className="inline-flex min-w-0 flex-1">
@@ -1812,18 +1891,45 @@ export function AudioRecordingModal({
                       variant="outline"
                       size="sm"
                       data-testid="rec-generate-tts"
-                      disabled={!online || !ttsText || ttsBusy}
+                      // A FAILURE NEVER DISABLES THIS. Pressing it again IS the
+                      // retry, and the retry is what clears the state — the run
+                      // writes `loading` before it does anything else.
+                      disabled={!online || !ttsText || ttsWorking}
                       onClick={() => void generateTts()}
-                      className="h-9 w-full bg-muted/30 text-xs font-normal text-muted-foreground"
+                      className={cn(
+                        "h-9 w-full text-xs font-normal",
+                        // No `outline`+`destructive` variant exists, so the tone
+                        // is overridden here; `cn` is tailwind-merge, so these
+                        // win over the resting pair rather than fighting it.
+                        ttsShowFailure
+                          ? "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20"
+                          : "bg-muted/30 text-muted-foreground",
+                      )}
                     >
-                      {ttsBusy ? (
+                      {ttsWorking ? (
                         <Spinner className="mr-1.5 size-3.5" />
+                      ) : ttsShowFailure ? (
+                        <AlertCircle className="mr-1.5 h-3.5 w-3.5" />
                       ) : ttsDone ? (
                         <Check className="mr-1.5 h-3.5 w-3.5 text-emerald-500" />
                       ) : (
                         <Sparkles className="mr-1.5 h-3.5 w-3.5" />
                       )}
-                      <span className="truncate">{t("audio.recordingModal.generateButton")}</span>
+                      {/* TWO FIXED WORDS ON FAILURE (Sam, 2026-08-26), never the
+                          reason: this control is about half the panel wide, and a
+                          reason cropped to "Gemini API key requ…" is worse than
+                          one said in full on the line below. */}
+                      <span className="truncate">
+                        {ttsWorking
+                          ? ttsProgressPct != null
+                            ? t("audio.recordingModal.ttsDownloadingPct", { percent: ttsProgressPct })
+                            : ttsStatus.kind === "synthesizing"
+                              ? t("audio.recordingModal.ttsSynthesizing")
+                              : t("audio.recordingModal.generateButton")
+                          : ttsShowFailure
+                            ? t("audio.recordingModal.ttsFailedButton")
+                            : t("audio.recordingModal.generateButton")}
+                      </span>
                     </Button>
                   </span>
                 </AppTooltip>
@@ -1855,6 +1961,27 @@ export function AudioRecordingModal({
                     </Button>
                   </span>
                 </AppTooltip>
+              </div>
+              {/* THE REASON, WRITTEN OUT (Sam, 2026-08-26). Full panel width,
+                  wrapping, no hover required — the button says that it failed
+                  and this says what to do about it.
+
+                  `title` is the categorizer's translated heading and `body` its
+                  plain-language advice; the `body !== title` guard is for the
+                  branches that have no better sentence than the heading itself,
+                  where repeating it would read as a stutter. The verbatim
+                  server text is NOT here — it is in the button's tooltip, since
+                  `voice/tts failed (503): TTS not configured` is for support,
+                  not for the person trying to record a line.
+
+                  Same `text-xs font-medium text-destructive` as the recorder's
+                  own `rec-error-message` and `rec-save-error` a few elements
+                  up, so the panel has one voice for "this went wrong". */}
+              {ttsShowFailure && ttsFailureLine && (
+                <p data-testid="rec-tts-error" className="text-xs font-medium text-destructive">
+                  {ttsFailureLine}
+                </p>
+              )}
               </div>
             )}
           </div>

@@ -5552,7 +5552,42 @@ function EditorRow({
   }, [])
 
   const isMultiSelected = useIsSelected(cell.id)
-  const synthStatus = useTtsStatus(ttsStatusKey(cell.id))
+  // AQU-646 stage 4c: THE BADGE WATCHES BOTH CELLS THIS ROW CAN FILE UNDER.
+  //
+  // It used to watch only the row's own id, so on a file with an audio-cue
+  // sibling the rail's voice button — moved to `audioHome` by stage 3f, because
+  // that is where the audio belongs — wrote its failures to `synth:<cue>` while
+  // the badge listened on `synth:<subtitle>` and the two never met.
+  //
+  // MOVING IT TO `audioHome` ALONE WOULD HAVE TRADED ONE BLIND SPOT FOR THREE.
+  // Stage 3f moved the rail button and nothing else, so three producers still
+  // file under the ROW's cell: the audio lens's own CellVoicePanel (the primary
+  // per-line generate control in the lens the dubbing workflow lives in),
+  // dropping a voice from the dock onto the row, and "Voice together". None of
+  // them has an error surface of its own — CellVoicePanel reads this status
+  // only to know it is busy — so this badge is the whole of their failure
+  // reporting, and pointing it at the cue would have silenced all three.
+  //
+  // Watching both is the honest question anyway: "did anything about THIS
+  // ROW's voice fail". Where those producers should be writing is a separate
+  // question from whether the row can see them, and answering it means moving
+  // where audio LANDS, not just where a status goes.
+  const ownSynthStatus = useTtsStatus(ttsStatusKey(cell.id))
+  const homeSynthStatus = useTtsStatus(
+    audioHome && audioHome.id !== cell.id ? ttsStatusKey(audioHome.id) : undefined,
+  )
+  // A RUN IN FLIGHT OUTRANKS AN ERROR, the same precedence the recorder's
+  // button uses: with a stale failure on one key and a fresh attempt on the
+  // other, showing the failure would announce the outcome of something still
+  // running.
+  const synthStatus =
+    ownSynthStatus.kind === "loading" || ownSynthStatus.kind === "synthesizing"
+      ? ownSynthStatus
+      : homeSynthStatus.kind === "loading" || homeSynthStatus.kind === "synthesizing"
+        ? homeSynthStatus
+        : ownSynthStatus.kind === "error"
+          ? ownSynthStatus
+          : homeSynthStatus
   const isSynthBusy = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
   const isSynthError = synthStatus.kind === "error"
 

@@ -575,8 +575,19 @@ export async function handleCellsReadRequest(
       //     delete, which wants the same resync) can produce that, since
       //     server_seq is monotonic within an incarnation. Costs nothing and
       //     rescues pre-AQU-943 clients that send no epoch at all.
+      //
+      // The rebuild branch is additionally fenced by the ADVERTISED (clamped)
+      // value (AQU-1005): when a live allocation predates the rebuild, the
+      // pending floor sits BELOW rebuiltSeq, so the cursor we hand out would
+      // itself fail `since < rebuiltSeq` — every client in the project would
+      // full-refetch on every poll until the allocation settles. A cursor at
+      // or above what we are currently advertising therefore never trips the
+      // rebuild resync. Accepted cost: a stale pre-rebuild client whose cursor
+      // happens to land in [pendingFloor, rebuiltSeq) sees pre-rebuild cell
+      // state for at most PENDING_ALLOC_TTL_MS; when the floor lifts it gets
+      // exactly one final resync and self-heals.
       if (
-        since < watermarks.rebuiltSeq ||
+        (since < watermarks.rebuiltSeq && since < advertisedSeq(watermarks)) ||
         (clientEpoch !== null &&
           clientEpoch !== 0 &&
           watermarks.epoch !== 0 &&

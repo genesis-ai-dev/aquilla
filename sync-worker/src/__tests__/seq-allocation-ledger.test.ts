@@ -449,3 +449,47 @@ describe('cells-read pending-allocation fence', () => {
     expect(body.cells.length).toBe(3)
   })
 })
+
+// ── Task 6 review fix: the rebuild gate must not loop under a clamp ────────
+
+describe('cells-read rebuild gate under a pending-allocation clamp', () => {
+  /** rebuiltSeq = 10 with a live allocation from before the rebuild whose
+   *  first_seq is 4 — the pending floor (3) sits BELOW the rebuild marker. */
+  async function makeRebuiltFenceDb(expired: boolean): Promise<TestDb> {
+    const t3 = await makeFenceDb()
+    await t3.db
+      .prepare(
+        'INSERT INTO project_seq_counters (project_id, last_seq, rebuilt_seq, project_epoch) VALUES (?, 10, 10, 0)',
+      )
+      .bind(FENCE_PROJECT)
+      .run()
+    if (!expired) await plantAllocation(t3, 4, 6)
+    return t3
+  }
+
+  it('a cursor at the clamped advertisement gets a normal delta, not a resync loop', async () => {
+    const t3 = await makeRebuiltFenceDb(false)
+    const res = await getCells(t3, '?since=3')
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      delta?: boolean
+      resync?: boolean
+      maxServerSeq: number
+    }
+    // Without the advertisement fence this would be {resync:true} for every
+    // client on every poll until the allocation settled.
+    expect(body.resync).toBeUndefined()
+    expect(body.delta).toBe(true)
+    expect(body.maxServerSeq).toBe(3)
+  })
+
+  it('once the allocation is gone the same cursor resyncs exactly once', async () => {
+    const t3 = await makeRebuiltFenceDb(true)
+    const res = await getCells(t3, '?since=3')
+    const body = (await res.json()) as { resync?: boolean; maxServerSeq: number }
+    expect(body.resync).toBe(true)
+    // The resync hands back a cursor at/above rebuiltSeq, so the client's next
+    // delta passes the gate instead of looping.
+    expect(body.maxServerSeq).toBeGreaterThanOrEqual(10)
+  })
+})

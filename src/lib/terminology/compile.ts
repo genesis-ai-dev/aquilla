@@ -81,6 +81,7 @@ export function compileConceptsToRules(concepts: Concept[]): TranslationRule[] {
           type: "source-requires-target",
           sourcePattern,
           targetPattern,
+          ...(concept.caseSensitive ? { caseSensitive: true } : {}),
         },
       })
     }
@@ -112,6 +113,7 @@ export function compileConceptsToRules(concepts: Concept[]): TranslationRule[] {
         check: {
           type: "target-forbids",
           targetPattern: forbiddenPattern,
+          ...(concept.caseSensitive ? { caseSensitive: true } : {}),
         },
       })
     }

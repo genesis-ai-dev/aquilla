@@ -12,10 +12,26 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { username: "tester" }, loading: false }),
 }))
 let projectCellsEnabled = false
+let projectCellsLoading = false
+let projectCellFiles: Array<{ id: string; cells: Array<{
+  id: string
+  fileId: string
+  original: string
+  translated: string
+  context: string
+  group: string
+  type: string
+  status: string
+  validationStatus: string
+  activeValidators: string[]
+  validationHistory: unknown[]
+  history: unknown[]
+  threads: unknown[]
+}> }> = []
 vi.mock("@/hooks/useProjectCells", () => ({
   useProjectCells: ({ enabled }: { enabled?: boolean }) => {
     projectCellsEnabled = Boolean(enabled)
-    return { files: [], isLoading: false, isTruncated: false }
+    return { files: projectCellFiles, isLoading: projectCellsLoading, isTruncated: false }
   },
 }))
 
@@ -47,6 +63,8 @@ function concept(p: Partial<Concept>): Concept {
 beforeEach(() => {
   patchSettings.mockClear()
   projectCellsEnabled = false
+  projectCellsLoading = false
+  projectCellFiles = []
   mockProjectLoading = false
   mockProject = {
     id: "p1",
@@ -155,6 +173,19 @@ describe("GlossaryEditor", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Violations" }))
     expect(projectCellsEnabled).toBe(true)
+  })
+
+  it("opens a concept immediately while examples still load", () => {
+    mockProject.files = [{ id: "f1", name: "sample.md", type: "md", createdAt: "", cellCount: 1 }]
+    projectCellsLoading = true
+    renderEditor()
+
+    fireEvent.click(screen.getByRole("button", { name: /open details for grace/i }))
+
+    expect(screen.getByText("grace")).toBeInTheDocument()
+    expect(screen.getAllByText("favor").length).toBeGreaterThan(0)
+    expect(screen.queryByRole("status", { name: "Loading term details" })).not.toBeInTheDocument()
+    expect(screen.getByText(/loading examples/i)).toBeInTheDocument()
   })
 
   it("derives rapid rendering mutations from the latest optimistic glossary", async () => {

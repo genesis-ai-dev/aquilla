@@ -14,7 +14,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import type { ReactNode } from "react"
+import type { ReactNode, ComponentProps } from "react"
 import { EditorTable } from "./EditorTable"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { CellStore } from "@/hooks/useActiveCellStore"
@@ -116,7 +116,10 @@ function makeStore(cells: CellData[], projectId: string): CellStore {
   return store
 }
 
-function renderTable(project: ProjectRecord) {
+function renderTable(
+  project: ProjectRecord,
+  extra: Partial<ComponentProps<typeof EditorTable>> = {},
+) {
   const qc = new QueryClient()
   return render(
     <QueryClientProvider client={qc}>
@@ -138,6 +141,7 @@ function renderTable(project: ProjectRecord) {
           cellLabelsEnabled={false}
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
+          {...extra}
         />
       </EditorActionsProvider>
     </QueryClientProvider>,
@@ -162,5 +166,37 @@ describe("EditorTable — terminology advisory band removed (AQU-664)", () => {
     // …but the advisory band that used to accompany it is gone.
     expect(screen.queryByText(/Terminology advisory/i)).not.toBeInTheDocument()
     expect(screen.queryByText(/Forbidden rendering/i)).not.toBeInTheDocument()
+  })
+
+  it("blots the source term when a terminology infringement has a source span", async () => {
+    const approved: Concept = {
+      id: "concept-1",
+      sourceTerm: "sample",
+      status: "active",
+      createdAt: "2026-01-01T00:00:00Z",
+      renderings: [{ rendering: "muestra", status: "preferred" }],
+    }
+    const project: ProjectRecord = {
+      id: "proj-1",
+      name: "Test Project",
+      sourceLanguage: "en",
+      targetLanguage: "es",
+      createdAt: "2026-01-01T00:00:00Z",
+      files: [],
+      members: [],
+      terminology: [approved],
+    }
+    const infractions = new Map([
+      ["cell-1", [{
+        ruleId: "term:concept-1:approved",
+        cellId: "cell-1",
+        fileId: "file-1",
+        reason: "source-requires-target" as const,
+        spans: [{ side: "source" as const, start: 10, end: 16, matchedText: "sample" }],
+      }]],
+    ])
+    renderTable(project, { infractions })
+    await screen.findByText("sample")
+    expect(document.querySelector('[data-rule-id="term:concept-1:approved"]')).not.toBeNull()
   })
 })

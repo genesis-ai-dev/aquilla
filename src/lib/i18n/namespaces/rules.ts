@@ -31,7 +31,8 @@ export const rules = defineNamespace({
     // ── Infraction messages (rule-engine reason codes → predicate text) ────
     "rules.infraction.withRuleName": '"{ruleName}": {message}',
     "rules.infraction.targetForbids": "target contains forbidden pattern",
-    "rules.infraction.sourceRequiresTarget": "source matches pattern but target does not",
+    "rules.infraction.sourceRequiresTarget":
+      "This term is in the source, but the translation doesn't use a required rendering",
     "rules.infraction.sourceTargetMatch": "pattern found in source but missing in target",
     "rules.infraction.builtin.emptyTarget": "Source has content but the translation is empty",
     "rules.infraction.builtin.targetEqualsSource": "Translation is identical to the source",

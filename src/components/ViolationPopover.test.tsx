@@ -22,6 +22,24 @@ describe("ViolationPopover", () => {
     expect(screen.getByRole("button", { name: /waive/i })).toBeInTheDocument()
   })
 
+  it("explains a missing terminology rendering in plain language", () => {
+    const termInfraction: RuleInfraction = {
+      ...infraction,
+      ruleId: "term:concept-1:approved",
+      reason: "source-requires-target",
+    }
+    render(
+      <ViolationPopover
+        open infraction={termInfraction} ruleName="Term: grace" waivers={[]} anchor={null}
+        onOpenChange={() => {}} onOpenRule={() => {}} onWaive={() => {}} onUnwaive={() => {}}
+      />
+    )
+    expect(screen.getByText("Term: grace")).toBeInTheDocument()
+    expect(
+      screen.getByText("This term is in the source, but the translation doesn't use a required rendering"),
+    ).toBeInTheDocument()
+  })
+
   it("shows Unwaive when the rule is already waived", () => {
     const waivers: RuleWaiver[] = [{ ruleId: "r1", reason: "agreed", waivedAt: "2026-04-24T00:00:00Z" }]
     render(

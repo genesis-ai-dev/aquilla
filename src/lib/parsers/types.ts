@@ -91,8 +91,8 @@ export interface TranslationRule {
 }
 
 export type RuleCheck =
-  | { type: "source-requires-target"; sourcePattern: string; targetPattern: string }
-  | { type: "target-forbids"; targetPattern: string }
+  | { type: "source-requires-target"; sourcePattern: string; targetPattern: string; caseSensitive?: boolean }
+  | { type: "target-forbids"; targetPattern: string; caseSensitive?: boolean }
   | { type: "source-target-match"; pattern: string }
   | { type: "builtin"; checkId: BuiltinCheckId }
 

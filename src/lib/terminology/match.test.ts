@@ -38,9 +38,11 @@ describe("matchesTerm — inflectional wildcard", () => {
   })
 
   // WHY: experts type in mixed case; matching must be case-insensitive.
-  it("is case-insensitive", () => {
+  it("is case-insensitive by default and honors caseSensitive", () => {
     expect(matchesTerm("GRACE abounds", "grac*")).toBe(true)
     expect(matchesTerm("Grace", "GRACE")).toBe(true)
+    expect(matchesTerm("Grace", "grace", { caseSensitive: true })).toBe(false)
+    expect(matchesTerm("grace", "grace", { caseSensitive: true })).toBe(true)
   })
 
   // WHY: source/target text is non-Latin for most projects. \p{L} (not \w) is

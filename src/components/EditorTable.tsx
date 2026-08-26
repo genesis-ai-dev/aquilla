@@ -168,12 +168,11 @@ import { ViolationPopover, type ViolationAnchor } from "./ViolationPopover"
 import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
-import type { Concept } from "@/lib/terminology/types"
+import type { Concept, ConceptDraft } from "@/lib/terminology/types"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { useEditorActions } from "@/context/EditorActionsContext"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
-import { AddConceptDialog } from "./AddConceptDialog"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
@@ -780,10 +779,10 @@ interface EditorTableProps {
   // cleanup) — pure pass-through, never consumed above the row.
   /** Re-read the project record from IDB after a settings change (e.g. voice library edits). */
   onProjectChanged?: () => void
-  /** Add-from-selection: create a DRAFT concept from a selected source token. */
-  onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
-  /** Non-null when the user cannot write to the termbase (below Maintainer) —
-   *  AddConceptDialog opens blocked with this reason instead of accepting input. */
+  /** Add-from-selection: create a terminology entry from selected source text. */
+  onAddConceptFromSelection?: (draft: ConceptDraft) => void | Promise<void>
+  /** Non-null when the user cannot write terminology (below Maintainer) —
+   *  the add-term popover opens blocked with this reason instead of accepting input. */
   addConceptBlockedReason?: string | null
   onAskAiFromSelection?: (chip: ContextChip) => void
   /** Called when the user drops a voice chip onto a cell's audio area.
@@ -2990,8 +2989,8 @@ interface MemoizedRowProps {
   audioLens: AudioLensContext | null
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
-  /** Add-from-selection: create a DRAFT concept from a selected source token. */
-  onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
+  /** Add-from-selection: create a terminology entry from selected source text. */
+  onAddConceptFromSelection?: (draft: ConceptDraft) => void | Promise<void>
   addConceptBlockedReason?: string | null
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
@@ -3388,8 +3387,8 @@ interface EditorRowProps {
   audioLens: AudioLensContext | null
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
-  /** Add-from-selection: create a DRAFT concept from a selected source token. */
-  onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
+  /** Add-from-selection: create a terminology entry from selected source text. */
+  onAddConceptFromSelection?: (draft: ConceptDraft) => void | Promise<void>
   addConceptBlockedReason?: string | null
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
@@ -3516,12 +3515,27 @@ function SourceWithTermLookup({
           onApply={onTermApply}
         >
           <span className="underline decoration-dotted decoration-primary/60 underline-offset-2 hover:decoration-primary">
-            {word}
+            <HighlightedText
+              text={word}
+              highlights={EMPTY_HIGHLIGHTS}
+              ranges={clipRangesToTextSlice(ranges, start, end)}
+              showEvidence={false}
+              onRangeClick={onRangeClick}
+            />
           </span>
         </TermLookupPopover>,
       )
     } else {
-      parts.push(<React.Fragment key={`w-${i}`}>{word}</React.Fragment>)
+      parts.push(
+        <HighlightedText
+          key={`w-${i}`}
+          text={word}
+          highlights={EMPTY_HIGHLIGHTS}
+          ranges={clipRangesToTextSlice(ranges, start, end)}
+          showEvidence={false}
+          onRangeClick={onRangeClick}
+        />,
+      )
     }
     cursor = end
   }
@@ -4219,7 +4233,7 @@ function EditorRow({
   // REPLACE that selection (spec 2c) rather than append. Cleared when no selection.
   const targetSelectionTextRef = useRef("")
   // Add-from-selection (Slice 5): the source-side text the user has selected,
-  // surfaced as an "Add to termbase" affordance. Null when nothing selected.
+  // surfaced as an "Add to terminology" affordance. Null when nothing selected.
   const [sourceSelection, setSourceSelection] = useState<string | null>(null)
   // FRO-260: ref mirror of sourceSelection so onClick handlers can read the
   // captured text even if a selectionchange event already cleared the React
@@ -4231,7 +4245,7 @@ function EditorRow({
   // sourceSelection before onClick fires.
   const toolbarMouseDownRef = useRef(false)
   // Controls the confirm dialog shown before creating the draft concept.
-  const [showAddConceptDialog, setShowAddConceptDialog] = useState(false)
+  const [addTermOpen, setAddTermOpen] = useState(false)
   const pendingTargetEventIdRef = useRef<string | null>(cell.targetEventId ?? null)
   // Source-edit affordance (project_lead+ on non-live projects). Editing the
   // SOURCE lane emits source.cell.commit — the template-owner correction that
@@ -4849,43 +4863,35 @@ function EditorRow({
     })
   }, [cell, openAddFootnoteDialog])
 
-  // Add-from-selection (Slice 5): capture a source-side text selection so the
-  // translator can promote it to a DRAFT concept without leaving the editor.
+  // Add-from-selection: capture a source-side text selection so the
+  // translator can add it to terminology without leaving the editor.
   const handleSourceMouseUp = useCallback(() => {
     if (!onAddConceptFromSelection && !onAskAiFromSelection) return
     const sel = window.getSelection()
     const text = sel && !sel.isCollapsed ? sel.toString().trim() : ""
-    const captured = text.length > 0 ? text : null
-    // FRO-260: keep the ref in sync with state so onClick handlers can read
-    // the captured text even after the selectionchange race clears the state.
-    capturedSelectionRef.current = captured
-    setSourceSelection(captured)
+    // A collapsed mouseup must not wipe a prior capture. The add-term popover
+    // lives inside this source cell, so its mouseup bubbles here after focus
+    // has already collapsed the browser selection (AQU-1006 / AQU-260).
+    if (!text) return
+    capturedSelectionRef.current = text
+    setSourceSelection(text)
   }, [onAddConceptFromSelection, onAskAiFromSelection])
 
-  // Opens the confirm dialog — actual creation happens in handleAddConceptConfirm.
-  // FRO-260: read from capturedSelectionRef (not sourceSelection state) so the
-  // dialog opens even when the selectionchange event already cleared the state
-  // before this onClick fires (the mousedown-blur race).
-  const handleAddSelectionToTermbase = useCallback(() => {
-    const text = capturedSelectionRef.current
-    if (!text) return
-    // Re-sync state so AddConceptDialog receives the correct pre-fill term even
-    // if the selectionchange handler cleared it between mousedown and click.
-    setSourceSelection(text)
-    setShowAddConceptDialog(true)
+  const handleAddTermOpenChange = useCallback((open: boolean) => {
+    if (open) {
+      const text = capturedSelectionRef.current
+      if (text) setSourceSelection(text)
+    }
+    setAddTermOpen(open)
   }, [])
 
-  const handleAddConceptConfirm = useCallback(async (term: string) => {
-    await onAddConceptFromSelection?.(term)
-    setShowAddConceptDialog(false)
+  const handleCreateTerm = useCallback((draft: ConceptDraft) => {
     capturedSelectionRef.current = null
     setSourceSelection(null)
+    setAddTermOpen(false)
     window.getSelection()?.removeAllRanges()
+    void onAddConceptFromSelection?.(draft)
   }, [onAddConceptFromSelection])
-
-  const handleAddConceptCancel = useCallback(() => {
-    setShowAddConceptDialog(false)
-  }, [])
 
   // FRO-260: toolbar mouse-down/up guards used by the selectionchange handler.
   // Set when the user presses down on a SelectionTermActions button so the
@@ -4920,17 +4926,16 @@ function EditorRow({
 
   // FRO-248: clear source selection when the browser selection collapses (user
   // clicked elsewhere or selected text in a different row). This prevents the
-  // "Add to termbase" toolbar from floating over a different row's content.
+  // "Add to terminology" toolbar from floating over a different row's content.
   // FRO-260: guard — do NOT clear when the user is pressing down on a toolbar
   // button (toolbarMouseDownRef=true). The selectionchange fires before onClick
   // in the mousedown-click sequence; clearing here would make onClick see null.
   useEffect(() => {
     if (!sourceSelection) return
-    // While the AddConceptDialog is open it owns the captured term — its
-    // auto-focus collapses the browser selection, and clearing sourceSelection
-    // here would wipe the dialog's pre-fill (the dialog re-syncs its input
-    // from the prop while open).
-    if (showAddConceptDialog) return
+    // While the add-term popover is open it owns the captured term — focusing
+    // an input collapses the browser selection, and clearing sourceSelection
+    // here would unmount the toolbar (and the popover) mid-edit.
+    if (addTermOpen) return
     const handleSelectionChange = () => {
       // Suppress if the user is mid-click on the SelectionTermActions toolbar.
       if (toolbarMouseDownRef.current) return
@@ -4941,7 +4946,7 @@ function EditorRow({
     }
     document.addEventListener("selectionchange", handleSelectionChange)
     return () => document.removeEventListener("selectionchange", handleSelectionChange)
-  }, [sourceSelection, showAddConceptDialog])
+  }, [sourceSelection, addTermOpen])
 
   // FRO-204: Chip click handler for terminology chips in the target (TranslatedEditor).
   // Records whether the target editor had a non-empty text selection at click time
@@ -5474,7 +5479,7 @@ function EditorRow({
     // row still holds it; a newer focus may already own it).
     onRowFocusRelease(cell.id)
     // FRO-248: clear source-text selection when focus leaves this row so the
-    // "Add to termbase" toolbar never floats over a different row's content.
+    // "Add to terminology" toolbar never floats over a different row's content.
     capturedSelectionRef.current = null
     setSourceSelection(null)
   }
@@ -5877,14 +5882,16 @@ function EditorRow({
           >
             {/* Source-selection toolbar. Appears when source text is selected:
                 "Ask AI" pushes the selection into the agent as a context chip,
-                "Add to terms" promotes it to a DRAFT concept, and a "View term"
-                button appears when the selection matches an active concept. */}
-            {sourceSelection && (
+                "Add to terminology" opens a popover to create an entry, and a
+                "View term" button appears when the selection matches an active concept. */}
+            {(sourceSelection || addTermOpen) && (
               <SourceSelectionToolbar
-                sourceSelection={sourceSelection}
+                sourceSelection={sourceSelection ?? capturedSelectionRef.current ?? ""}
                 concepts={terminologyConcepts}
                 onAskAi={handleAskAiFromSelection}
-                onAddToTermbase={onAddConceptFromSelection ? handleAddSelectionToTermbase : undefined}
+                onAddToTermbase={onAddConceptFromSelection ? handleCreateTerm : undefined}
+                addConceptBlockedReason={addConceptBlockedReason}
+                onAddOpenChange={handleAddTermOpenChange}
                 onTermApply={handleTermApply}
                 onToolbarMouseDown={handleToolbarMouseDown}
                 onToolbarMouseUp={handleToolbarMouseUp}
@@ -6967,18 +6974,6 @@ function EditorRow({
           </Popover>
         )
       })()}
-
-      {/* Add-from-selection confirm dialog (FRO-260). Mounted per-row so it
-          is scoped to the cell whose selection triggered it. */}
-      {onAddConceptFromSelection && (
-        <AddConceptDialog
-          open={showAddConceptDialog}
-          sourceTerm={sourceSelection ?? ""}
-          blockedReason={addConceptBlockedReason}
-          onConfirm={handleAddConceptConfirm}
-          onCancel={handleAddConceptCancel}
-        />
-      )}
 
       {/* p1-paragraph-ui-wiring (Task 3): confirm before drafting the whole
           paragraph group as one unit. Always confirms — no per-preference

@@ -11,7 +11,7 @@
  * compilation (which read active concepts) need no changes.
  */
 import { useMemo, useState, useCallback, useRef, useEffect } from "react"
-import { useNavigate, useParams } from "react-router-dom"
+import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { BookOpen, Download, Upload, Sparkles, ChevronDown, ChevronRight, ShieldAlert, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -87,6 +87,7 @@ export function GlossaryEditor({
 }: GlossaryEditorProps = {}) {
   const t = useT()
   const { id } = useParams<{ id: string }>()
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const ownedProject = useProject(id!, {
     initialProject: workspaceProject,
@@ -338,6 +339,11 @@ export function GlossaryEditor({
     setSelectedConceptId(conceptId)
   }, [])
 
+  useEffect(() => {
+    const fromUrl = searchParams.get("concept")
+    if (fromUrl) handleOpenDetails(fromUrl)
+  }, [searchParams, handleOpenDetails])
+
   const handlePromoteRendering = useCallback(
     (conceptId: string, target: string) => {
       const p = guard()
@@ -379,13 +385,11 @@ export function GlossaryEditor({
   }
 
   if (selectedConcept) {
-    if (!cellDataReady) {
-      return <LoadingPanel label={t("terminology.editor.loadingTermDetails")} />
-    }
     return (
       <TerminologyTermDetail
         concept={selectedConcept}
         cells={detailCells}
+        examplesLoading={!cellDataReady}
         canEdit={!hasOrigin || (project?.syncRole?.level ?? 0) >= 400}
         projectId={id!}
         username={frontierSession?.username ?? project?.username ?? "local"}
@@ -396,6 +400,9 @@ export function GlossaryEditor({
         }}
         canManageTermbase={canManage}
         onPromoteRendering={handlePromoteRendering}
+        onJumpToCell={({ cellId, fileId }) => {
+          navigate(`/project/${id}/editor/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}`)
+        }}
       />
     )
   }

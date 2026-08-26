@@ -1541,7 +1541,7 @@ export const th: Catalog = {
   "autopilot.inspector.event.draftApplied": "นำฉบับร่างไปใช้แล้ว",
   "autopilot.inspector.event.draftSuperseded": "ฉบับร่างถูกแทนที่",
   "autopilot.inspector.event.draftRejected": "ปฏิเสธฉบับร่างแล้ว",
-  "autopilot.inspector.review.draftTitle": "ฉบับร่าง",
+  "autopilot.graph.node.draft": "ฉบับร่าง",
   "autopilot.inspector.review.noProvenance": "ไม่ได้บันทึกข้อมูลที่มาไว้",
   "autopilot.inspector.review.inEditor": "ตรวจทานในตัวแก้ไข",
   "autopilot.inspector.review.inEditorCell": "ตรวจทานในตัวแก้ไข: เซลล์ {cellId}",

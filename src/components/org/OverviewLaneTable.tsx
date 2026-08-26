@@ -309,6 +309,7 @@ export function OverviewLaneTable({
           <Button
             variant="outline"
             size="sm"
+            nativeButton={false}
             render={
               <Link
                 to={projectSettingsPath(projectId, "general")}

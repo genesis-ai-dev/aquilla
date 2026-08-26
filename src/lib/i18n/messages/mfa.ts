@@ -1538,7 +1538,7 @@ export const mfa: Catalog = {
   "autopilot.inspector.event.draftApplied": "Draf digunakan",
   "autopilot.inspector.event.draftSuperseded": "Draf digantikan",
   "autopilot.inspector.event.draftRejected": "Draf ditolak",
-  "autopilot.inspector.review.draftTitle": "Draf",
+  "autopilot.graph.node.draft": "Draf",
   "autopilot.inspector.review.noProvenance": "Tiada metadata asal usul direkodkan",
   "autopilot.inspector.review.inEditor": "Semak dalam editor",
   "autopilot.inspector.review.inEditorCell": "Semak dalam editor: sel {cellId}",

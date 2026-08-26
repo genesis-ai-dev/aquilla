@@ -27,7 +27,7 @@ function tokenAged(
   )
 }
 
-function register(username: string, email: string, password: string): Promise<Response> {
+async function register(username: string, email: string, password: string): Promise<Response> {
   return app.request(
     "/api/v2/auth/register",
     {
@@ -39,7 +39,7 @@ function register(username: string, email: string, password: string): Promise<Re
   )
 }
 
-function refresh(token: string): Promise<Response> {
+async function refresh(token: string): Promise<Response> {
   return app.request(
     "/api/v2/auth/refresh",
     { method: "POST", headers: authHeader(token) },

@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, waitFor, act } from "@testing-library/react"
 import { createElement, StrictMode, type ReactNode } from "react"
-import { useProjectSettings, describePatchFailure, type PatchOutcome } from "./useProjectSettings"
+import {
+  useProjectSettings,
+  describePatchFailure,
+  broadcastProjectSettingsUpdated,
+  type PatchOutcome,
+} from "./useProjectSettings"
 import * as restClient from "@/lib/sync/project-settings"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -655,5 +660,126 @@ describe("describePatchFailure", () => {
   it("includes the server message on error", () => {
     const msg = describePatchFailure({ kind: "error", message: "boom" })
     expect(msg).toMatch(/boom/)
+  })
+})
+
+// AQU-979: `/project/:id/settings` renders as a route-modal OVER the still-
+// mounted ProjectWorkspace (App.tsx `backgroundLocation` routes), so the dialog
+// and the workspace hold two independent useProjectSettings instances. Before
+// this fix the dialog's patch updated only its own state; the workspace's
+// instance kept the pre-save sourceLanguage/targetLanguage — and since
+// useProject.overlaySettings is the ONLY thing that puts those keys on the
+// ProjectRecord (minimalProjectRecord hard-codes them to ""), useCompletion ran
+// the next AI generation against the stale language until a manual page reload.
+// The server round-trip that used to be the only convergence path
+// (auth-worker → sync-worker notify → DO frame → workspace relay) is documented
+// as best-effort at three layers, so the writer now broadcasts locally too.
+describe("useProjectSettings — same-tab propagation after a write (AQU-979)", () => {
+  it("makes a sibling instance pick up a language change with no page reload", async () => {
+    const fetchSpy = vi.spyOn(restClient, "fetchProjectSettingsResult").mockResolvedValue({
+      ok: true,
+      value: {
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { sourceLanguage: "en", targetLanguage: "swh" },
+      },
+    })
+    vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+      kind: "ok",
+      value: {
+        version: 2, updatedAt: "y", updatedBy: null,
+        settings: { sourceLanguage: "zh", targetLanguage: "zh-Hant-x-test" },
+      },
+    })
+
+    // The workspace underneath the modal…
+    const { result: workspace } = renderHook(() => useProjectSettings("p1", 700))
+    // …and the settings dialog on top of it.
+    const { result: dialog } = renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(workspace.current.settings.targetLanguage).toBe("swh"))
+    await waitFor(() => expect(dialog.current.hasFetched).toBe(true))
+
+    // From here on, every GET answers with the saved languages.
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      value: {
+        version: 2, updatedAt: "y", updatedBy: null,
+        settings: { sourceLanguage: "zh", targetLanguage: "zh-Hant-x-test" },
+      },
+    })
+
+    await act(async () => {
+      await dialog.current.patch({ sourceLanguage: "zh", targetLanguage: "zh-Hant-x-test" })
+    })
+
+    // No reload, no tab focus, no DO frame — the workspace instance converges.
+    await waitFor(() => {
+      expect(workspace.current.settings.sourceLanguage).toBe("zh")
+      expect(workspace.current.settings.targetLanguage).toBe("zh-Hant-x-test")
+    })
+  })
+
+  it("does not re-GET on the writing instance's own broadcast", async () => {
+    const fetchSpy = vi.spyOn(restClient, "fetchProjectSettingsResult").mockResolvedValue({
+      ok: true,
+      value: {
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { sourceLanguage: "en", targetLanguage: "swh" },
+      },
+    })
+    vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+      kind: "ok",
+      value: {
+        version: 2, updatedAt: "y", updatedBy: null,
+        settings: { sourceLanguage: "zh", targetLanguage: "swh" },
+      },
+    })
+
+    const { result } = renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    // Mount fetch + the pre-write probe inside patch(); nothing beyond that.
+    const before = fetchSpy.mock.calls.length
+
+    await act(async () => {
+      await result.current.patch({ sourceLanguage: "zh" })
+    })
+
+    // The probe is the only extra GET — the writer skips its own broadcast.
+    expect(fetchSpy.mock.calls.length).toBe(before + 1)
+    expect(result.current.settings.sourceLanguage).toBe("zh")
+  })
+
+  it("still refreshes every instance for a REMOTE write (the DO relay, no origin)", async () => {
+    const fetchSpy = mockSettingsFetch({
+      version: 1, updatedAt: "x", updatedBy: null,
+      settings: { targetLanguage: "swh" },
+    })
+    const { result } = renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
+
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      value: {
+        version: 2, updatedAt: "y", updatedBy: { id: 2, username: "joy" },
+        settings: { targetLanguage: "zh-Hant-x-test" },
+      },
+    })
+    act(() => {
+      broadcastProjectSettingsUpdated({ projectId: "p1", version: 2 })
+    })
+    await waitFor(() => expect(result.current.settings.targetLanguage).toBe("zh-Hant-x-test"))
+  })
+
+  it("ignores a broadcast for a different project", async () => {
+    const fetchSpy = mockSettingsFetch({
+      version: 1, updatedAt: "x", updatedBy: null, settings: { targetLanguage: "swh" },
+    })
+    renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
+    act(() => {
+      broadcastProjectSettingsUpdated({ projectId: "p2", version: 9 })
+    })
+    // Give any errant refresh a chance to fire before asserting it did not.
+    await new Promise((r) => setTimeout(r, 0))
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 })

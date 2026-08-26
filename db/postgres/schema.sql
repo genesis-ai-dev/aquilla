@@ -763,8 +763,9 @@ CREATE INDEX idx_checkpoints_project ON checkpoints(project_id, created_at);
 CREATE INDEX comments_project_scope ON comments(project_id, scope_kind, file_id, cell_id);
 CREATE INDEX comments_thread ON comments(project_id, parent_comment_id);
 CREATE INDEX idx_diarization_jobs_file ON diarization_jobs(project_id, file_id);
-CREATE INDEX idx_events_author ON events(author, server_ts);
-CREATE INDEX idx_events_cell ON events(project_id, file_id, cell_id, server_ts);
+-- idx_events_author and idx_events_cell were dropped in migration 0081
+-- (AQU-1005): zero/near-zero reads on production, and every event INSERT paid
+-- their maintenance inside the seq-counter lock window.
 CREATE INDEX idx_events_file_seq ON events(project_id, file_id, server_seq);
 CREATE INDEX idx_events_parent_lookup ON events(project_id, file_id, cell_id, parent_id);
 CREATE INDEX idx_events_project ON events(project_id, server_ts);

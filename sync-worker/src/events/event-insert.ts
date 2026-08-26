@@ -102,27 +102,86 @@ export function buildEventInsertStmt(db: AquillaDb, e: EventInsertRow): AquillaS
 // (bulk or per-event) allocates strictly above. Replays consume a block and
 // drop the rows on ON CONFLICT (id) — seq gaps, harmless by design (see
 // header note on gaps).
+//
+// AQU-1005: the allocator also announces the block in `seq_allocations`
+// (settled by buildSettleSeqRangeStmt once the event rows land, or expired
+// after PENDING_ALLOC_TTL_MS on crash/abort) so readers can fence their
+// advertised `?since=` cursor on the oldest still-pending allocation instead
+// of racing ahead of an in-flight writer. This task only changes the bulk
+// allocator; the per-event CTE above still bumps the counter without an
+// announce — a later task retires that CTE in favor of always allocating
+// through this path.
 
-const SEQ_RANGE_ALLOC_SQL = `INSERT INTO project_seq_counters (project_id, last_seq)
-VALUES (?, COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + ?)
-ON CONFLICT (project_id) DO UPDATE SET
-  last_seq = GREATEST(project_seq_counters.last_seq + ?, excluded.last_seq)
-RETURNING last_seq`
+export const PENDING_ALLOC_TTL_MS = 5 * 60_000
+
+// Allocation = counter bump + ledger announce + expired-row purge, ONE
+// autocommit statement. The counter row lock is held only for this statement
+// (microseconds), never across the event-write batch — that hold was the
+// AQU-1005 convoy. Both self-heal arms (seeding VALUES / GREATEST on
+// conflict) are unchanged.
+const SEQ_RANGE_ALLOC_SQL = `WITH purged AS (
+  DELETE FROM seq_allocations
+   WHERE project_id = ? AND created_at <= now() - (? * interval '1 millisecond')
+), bump AS (
+  INSERT INTO project_seq_counters (project_id, last_seq)
+  VALUES (?, COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + ?)
+  ON CONFLICT (project_id) DO UPDATE SET
+    last_seq = GREATEST(project_seq_counters.last_seq + ?, excluded.last_seq)
+  RETURNING last_seq
+)
+INSERT INTO seq_allocations (project_id, first_seq, last_seq)
+SELECT ?, last_seq - ? + 1, last_seq FROM bump
+RETURNING first_seq`
 
 /** Atomically allocate `n` consecutive server_seqs for a project; returns the
- *  FIRST seq of the block (rows get base, base+1, …, base+n-1). */
+ *  FIRST seq of the block (rows get base, base+1, …, base+n-1). Also announces
+ *  the block in `seq_allocations` (settled by buildSettleSeqRangeStmt once the
+ *  event rows land) and purges any of this project's allocations older than
+ *  PENDING_ALLOC_TTL_MS (crash/abort corpses). */
 export async function allocateSeqRange(
   db: AquillaDb,
   projectId: string,
   n: number,
 ): Promise<number> {
   if (n <= 0) throw new Error(`allocateSeqRange: n must be positive, got ${n}`)
-  const last = await db
+  const first = await db
     .prepare(SEQ_RANGE_ALLOC_SQL)
-    .bind(projectId, projectId, n, n)
-    .first<number>('last_seq')
-  if (last == null) throw new Error('allocateSeqRange: counter bump returned no row')
-  return Number(last) - n + 1
+    .bind(projectId, PENDING_ALLOC_TTL_MS, projectId, projectId, n, n, projectId, n)
+    .first<number>('first_seq')
+  if (first == null) throw new Error('allocateSeqRange: counter bump returned no row')
+  return Number(first)
+}
+
+/** Settle (retire) an allocation — append to the SAME batch as the event
+ *  rows so the ledger row disappears atomically with the events becoming
+ *  visible. An unsettled row (crash/abort) simply expires after the TTL. */
+export function buildSettleSeqRangeStmt(
+  db: AquillaDb,
+  projectId: string,
+  firstSeq: number,
+): AquillaStatement {
+  return db
+    .prepare('DELETE FROM seq_allocations WHERE project_id = ? AND first_seq = ?')
+    .bind(projectId, firstSeq)
+}
+
+/** The highest server_seq safe to advertise as a `?since=` cursor: one below
+ *  the oldest live (unsettled, unexpired) allocation. `null` = no fence —
+ *  nothing is pending. Rows above the floor are still DELIVERED; only the
+ *  advertised cursor is clamped, so late-committing writers are re-covered
+ *  by the next delta instead of skipped. */
+export async function fetchPendingFloor(
+  db: AquillaDb,
+  projectId: string,
+): Promise<number | null> {
+  const row = await db
+    .prepare(
+      `SELECT MIN(first_seq) - 1 AS floor FROM seq_allocations
+        WHERE project_id = ? AND created_at > now() - (? * interval '1 millisecond')`,
+    )
+    .bind(projectId, PENDING_ALLOC_TTL_MS)
+    .first<{ floor: number | string | bigint | null }>()
+  return row?.floor == null ? null : Number(row.floor)
 }
 
 /** One pre-allocated seq per row (from allocateSeqRange). */

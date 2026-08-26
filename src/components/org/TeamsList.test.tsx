@@ -8,7 +8,9 @@ vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ sess
 const listMyOrgs = vi.fn()
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: (...a: unknown[]) => listMyOrgs(...a) }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
-vi.mock("@/lib/sync/cloud-projects", () => ({ fetchAccessibleProjects: vi.fn(async () => []) }))
+vi.mock("@/lib/sync/cloud-projects", () => ({
+  fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true as const, projects: [] })),
+}))
 const listTeams = vi.fn()
 const createTeam = vi.fn()
 vi.mock("@/lib/frontier/teams", () => ({
@@ -35,8 +37,10 @@ beforeEach(() => {
   listMyOrgs.mockResolvedValue([{ id: 7, name: "Come and See", role: { level: 700, name: "owner" } }])
 })
 afterEach(() => {
-  listTeams.mockReset()
-  createTeam.mockReset()
+  // Keep promise-returning defaults alive until Testing Library has unmounted
+  // effects from the rendered tree. beforeEach performs the full reset.
+  listTeams.mockClear()
+  createTeam.mockClear()
 })
 
 describe("TeamsList", () => {

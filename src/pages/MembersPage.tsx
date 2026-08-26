@@ -145,7 +145,11 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
   const canGovern = (activeOrg?.role.level ?? 0) >= ROLE.MAINTAINER
   const { members, isLoading: membersLoading, error: membersError, rosterHidden, add, addMany, remove, listMemberProjects, refresh } =
     useOrgMembers(orgId)
-  const { projects: accessibleProjects, refresh: refreshProjects } = useAccessibleProjects()
+  const {
+    projects: accessibleProjects,
+    error: accessibleProjectsError,
+    refresh: refreshProjects,
+  } = useAccessibleProjects()
   const [removeTarget, setRemoveTarget] = useState<{ userId: number; username: string } | null>(null)
   const [multiInviteOpen, setMultiInviteOpen] = useState(false)
 
@@ -203,6 +207,9 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
           <div className="space-y-6">
             {membersError && (
               <p className="text-xs text-destructive">{membersError}</p>
+            )}
+            {accessibleProjectsError && (
+              <p className="text-xs text-destructive">{accessibleProjectsError}</p>
             )}
 
             <OrgMembersTable

@@ -25,7 +25,10 @@ if (typeof globalThis.localStorage === "undefined") {
   })
 }
 
-const sessionState = {
+const sessionState: {
+  session: { jwt: string; username: string; createdAt: string } | null
+  loading: boolean
+} = {
   session: { jwt: "jwt", username: "anna", createdAt: "x" },
   loading: false,
 }
@@ -37,19 +40,26 @@ vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: (...a: unknown[]) => listMyO
 
 const fetchAccessibleProjects = vi.fn()
 vi.mock("@/lib/sync/cloud-projects", () => ({
-  fetchAccessibleProjects: (...a: unknown[]) => fetchAccessibleProjects(...a),
+  fetchAccessibleProjectsResult: async (...a: unknown[]) => {
+    const value = await fetchAccessibleProjects(...a)
+    return value && typeof value === "object" && "ok" in value
+      ? value
+      : { ok: true, projects: value }
+  },
 }))
 
 function Probe() {
   const {
-    orgs, activeOrg, activeGuestOrg, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs,
+    orgs, activeOrgId, activeOrg, activeGuestOrg, isAllOrgs, guestOrgs, setActiveOrg, setAllOrgs,
     error, isLoading, retryOrgLoad,
+    accessibleProjects, accessibleProjectsLoading,
     accessibleProjectsError, refreshAccessibleProjects,
   } = useActiveOrg()
   return (
     <div>
       <span data-testid="count">{orgs.length}</span>
       <span data-testid="active">{activeOrg?.id ?? "none"}</span>
+      <span data-testid="active-id">{activeOrgId ?? "none"}</span>
       <span data-testid="guest-active">{activeGuestOrg?.id ?? "none"}</span>
       <span data-testid="all">{isAllOrgs ? "yes" : "no"}</span>
       <span data-testid="guest-count">{guestOrgs.length}</span>
@@ -59,6 +69,8 @@ function Probe() {
       <span data-testid="loading">{isLoading ? "yes" : "no"}</span>
       {/* AQU-883: the project-directory failure is tracked separately. */}
       <span data-testid="projects-error">{accessibleProjectsError ?? "none"}</span>
+      <span data-testid="projects-count">{accessibleProjects.length}</span>
+      <span data-testid="projects-loading">{accessibleProjectsLoading ? "yes" : "no"}</span>
       <button onClick={() => setActiveOrg(2)}>switch</button>
       <button onClick={() => setAllOrgs()}>all</button>
       <button onClick={() => { void retryOrgLoad() }}>retry</button>
@@ -81,6 +93,7 @@ function RouteProbe() {
 beforeEach(() => {
   localStorage.clear()
   sessionState.loading = false
+  sessionState.session = { jwt: "jwt", username: "anna", createdAt: "x" }
   listMyOrgs.mockReset()
   fetchAccessibleProjects.mockReset()
   fetchAccessibleProjects.mockResolvedValue([])
@@ -121,6 +134,62 @@ describe("OrgProvider", () => {
 
     await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("2"))
     await waitFor(() => expect(fetchAccessibleProjects).toHaveBeenCalledTimes(1))
+  })
+
+  it("never exposes the previous account's directories while the next JWT resolves", async () => {
+    const oldOrgs = [{ id: 1, name: "Old Org", role: { level: 700, name: "owner" } }]
+    const oldProjects = [{
+      id: "old-project", name: "Old Project", orgId: 1,
+      role: { level: 700, name: "owner", source: "org" },
+    }]
+    let resolveNewOrgs!: (value: unknown[]) => void
+    let resolveNewProjects!: (value: unknown[]) => void
+    listMyOrgs
+      .mockResolvedValueOnce(oldOrgs)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveNewOrgs = resolve }))
+    fetchAccessibleProjects
+      .mockResolvedValueOnce(oldProjects)
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveNewProjects = resolve }))
+
+    const tree = () => <MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>
+    const view = render(tree())
+    await waitFor(() => expect(screen.getByTestId("count").textContent).toBe("1"))
+    await waitFor(() => expect(screen.getByTestId("projects-count").textContent).toBe("1"))
+
+    sessionState.session = { jwt: "new-jwt", username: "bob", createdAt: "y" }
+    view.rerender(tree())
+
+    expect(screen.getByTestId("count").textContent).toBe("0")
+    expect(screen.getByTestId("projects-count").textContent).toBe("0")
+    expect(screen.getByTestId("guest-count").textContent).toBe("0")
+    expect(screen.getByTestId("active").textContent).toBe("none")
+    expect(screen.getByTestId("active-id").textContent).toBe("none")
+    expect(screen.getByTestId("loading").textContent).toBe("yes")
+    expect(screen.getByTestId("projects-loading").textContent).toBe("yes")
+
+    await act(async () => { resolveNewOrgs([]) })
+    expect(screen.getByTestId("active-id").textContent).toBe("none")
+    expect(screen.getByTestId("projects-loading").textContent).toBe("yes")
+    await act(async () => { resolveNewProjects([]) })
+    await waitFor(() => expect(screen.getByTestId("loading").textContent).toBe("no"))
+  })
+
+  it("masks and clears the previous account's org scope when leaving signed-in mode", async () => {
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Old Org", role: { level: 700, name: "owner" } },
+    ])
+    const tree = () => <MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>
+    const view = render(tree())
+    await waitFor(() => expect(screen.getByTestId("active-id").textContent).toBe("1"))
+
+    sessionState.session = null
+    view.rerender(tree())
+
+    expect(screen.getByTestId("count").textContent).toBe("0")
+    expect(screen.getByTestId("active-id").textContent).toBe("none")
+    await waitFor(() => expect(screen.getByTestId("loading").textContent).toBe("no"))
+    await waitFor(() => expect(screen.getByTestId("projects-loading").textContent).toBe("no"))
+    expect(screen.getByTestId("active-id").textContent).toBe("none")
   })
 
   it("reuses an in-flight project directory request across same-account hydration bounces", async () => {
@@ -392,6 +461,7 @@ describe("OrgProvider", () => {
 
     it("issues no org or project-directory request, and signals session-expired", async () => {
       sessionState.session = { jwt: fakeJwt(-60), username: "anna", createdAt: "x" }
+      await saveSession(sessionState.session)
       const expired = vi.fn()
       const unsubscribe = onSessionExpired(expired)
 
@@ -402,6 +472,8 @@ describe("OrgProvider", () => {
       expect(listMyOrgs).not.toHaveBeenCalled()
       expect(fetchAccessibleProjects).not.toHaveBeenCalled()
       unsubscribe()
+      await clearSession()
+      clearSessionExpired()
     })
 
     it("still fetches normally for a valid unexpired token", async () => {
@@ -421,6 +493,36 @@ describe("OrgProvider", () => {
 // blocked/401/5xx directory read was indistinguishable from "nothing is shared
 // with you" — with no error recorded anywhere for a consumer to surface.
 describe("OrgProvider — project-directory load failure (AQU-883)", () => {
+  it("records a real discriminated network failure instead of an empty directory", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue({ ok: false, reason: "unreachable" })
+
+    render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+
+    await waitFor(() => expect(screen.getByTestId("projects-error").textContent).toBe("Failed to fetch"))
+  })
+
+  it("signals on a project-directory 401 but not on a 403", async () => {
+    await saveSession({ jwt: "jwt", username: "anna", createdAt: "x" })
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
+    const expired = vi.fn()
+    const unsubscribe = onSessionExpired(expired)
+
+    fetchAccessibleProjects.mockResolvedValueOnce({ ok: false, reason: "forbidden", status: 403 })
+    const first = render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByTestId("projects-error").textContent).not.toBe("none"))
+    expect(expired).not.toHaveBeenCalled()
+    first.unmount()
+
+    fetchAccessibleProjects.mockResolvedValueOnce({ ok: false, reason: "unauthenticated", status: 401 })
+    render(<MemoryRouter><OrgProvider><Probe /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(expired).toHaveBeenCalledWith("jwt"))
+
+    unsubscribe()
+    await clearSession()
+    clearSessionExpired()
+  })
+
   it("records a distinct error instead of reporting an empty directory", async () => {
     listMyOrgs.mockResolvedValue([{ id: 1, name: "A", role: { level: 700, name: "owner" } }])
     fetchAccessibleProjects.mockRejectedValue(new Error("Failed to fetch"))

@@ -8,7 +8,6 @@ import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
 import { InviteLinkTab } from "@/components/ProjectMembersPage"
 import { useProjectOrgId } from "@/hooks/useProjectOrgId"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { useActiveOrgOptional } from "@/context/OrgContext"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
 import { ROLE, PROJECT_ROLE_OPTIONS } from "@/lib/frontier/roles"
@@ -40,26 +39,44 @@ export function AddProjectMemberDialog({
 }) {
   const t = useT()
   const { session } = useFrontierSession()
-  const projectOrgId = useProjectOrgId(projectId)
-  const activeOrgId = useActiveOrgOptional()?.activeOrgId ?? null
-  const rosterOrgId = projectOrgId ?? activeOrgId
+  const { orgId: projectOrgId, error: projectOrgError } = useProjectOrgId(projectId)
+  const rosterOrgId = projectOrgError ? null : projectOrgId
 
-  const [orgMembers, setOrgMembers] = useState<OrgMember[]>([])
+  const [rosterLoad, setRosterLoad] = useState<{
+    key: string | null
+    members: OrgMember[]
+    error: string | null
+  }>({ key: null, members: [], error: null })
   const [addTab, setAddTab] = useState<AddDialogTab>("members")
   const [addForbidden, setAddForbidden] = useState(false)
+  const rosterKey = open && session?.username && rosterOrgId != null
+    ? `${session.username}\u0000${rosterOrgId}`
+    : null
+  const visibleOrgMembers = useMemo(
+    () => rosterLoad.key === rosterKey ? rosterLoad.members : [],
+    [rosterKey, rosterLoad],
+  )
+  const rosterError = rosterLoad.key === rosterKey ? rosterLoad.error : null
 
   useEffect(() => {
     const jwt = session?.jwt
-    if (!jwt || rosterOrgId == null) {
-      setOrgMembers((prev) => (prev.length === 0 ? prev : []))
-      return
-    }
+    if (!open || !jwt || rosterOrgId == null || rosterKey == null) return
     let alive = true
     listOrgMembers(jwt, rosterOrgId)
-      .then((ms) => { if (alive) setOrgMembers(ms) })
-      .catch(() => { /* suggestions best-effort */ })
+      .then((members) => {
+        if (!alive) return
+        setRosterLoad({ key: rosterKey, members, error: null })
+      })
+      .catch((error) => {
+        if (!alive) return
+        setRosterLoad({
+          key: rosterKey,
+          members: [],
+          error: toUserFacingError(error, "organization members").message,
+        })
+      })
     return () => { alive = false }
-  }, [session?.jwt, rosterOrgId])
+  }, [open, rosterKey, rosterOrgId, session?.jwt])
 
   const { projectMembers } = partitionMembers(members)
   const directGrantUserIds = useMemo(
@@ -68,12 +85,12 @@ export function AddProjectMemberDialog({
   )
   const eligibleOrgMembers = useMemo(
     () =>
-      orgMembers
+      visibleOrgMembers
         .filter((m) => !directGrantUserIds.has(m.userId))
         .sort((a, b) =>
           a.username.localeCompare(b.username, undefined, { sensitivity: "base" }),
         ),
-    [orgMembers, directGrantUserIds],
+    [visibleOrgMembers, directGrantUserIds],
   )
 
   const grantableRoles = PROJECT_ROLE_OPTIONS.filter((r) => r.level <= ROLE.MAINTAINER)
@@ -115,6 +132,11 @@ export function AddProjectMemberDialog({
             <TabsTrigger value="invite">{t("projectSettings.share.tabInviteLink")}</TabsTrigger>
           </TabsList>
           <TabsContent value="members" className="space-y-3">
+            {(projectOrgError ?? rosterError) && (
+              <p role="alert" className="text-xs text-destructive">
+                {projectOrgError ?? rosterError}
+              </p>
+            )}
             <MemberMultiAddRow
               roleOptions={grantableRoles}
               defaultRole={ROLE.CONTRIBUTOR}
@@ -126,7 +148,7 @@ export function AddProjectMemberDialog({
               }}
               excludedUserIds={[...directGrantUserIds]}
               suggestions={
-                orgMembers.length > 0
+                visibleOrgMembers.length > 0
                   ? eligibleOrgMembers.map((m) => ({ id: m.userId, username: m.username }))
                   : undefined
               }

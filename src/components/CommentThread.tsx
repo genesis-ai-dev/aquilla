@@ -9,6 +9,10 @@ import DOMPurify from "dompurify"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { DateTooltip } from "@/components/ui/date-tooltip"
+import {
+  ownerScopedLocalStorageKey,
+  subscribeClientLocalStorageOwner,
+} from "@/lib/frontier/client-local-storage"
 
 interface CommentThreadProps {
   thread: ThreadData
@@ -31,7 +35,14 @@ interface CommentThreadProps {
 }
 
 function draftKey(projectId: string | undefined, cellId: string | undefined, threadId: string): string {
-  return `comment-draft:${projectId ?? "unknown"}:${cellId ?? "unknown"}:${threadId}`
+  return ownerScopedLocalStorageKey(
+    `comment-draft:${projectId ?? "unknown"}:${cellId ?? "unknown"}:${threadId}`,
+  )
+}
+
+function readDraft(storageKey: string): string {
+  if (typeof window === "undefined") return ""
+  try { return localStorage.getItem(storageKey) ?? "" } catch { return "" }
 }
 
 interface ResolveActionProps {
@@ -75,19 +86,29 @@ function ResolveAction({ denied, reason, size, variant, testId, onClick, disable
 
 export function CommentThread({ thread, currentTranslated, canReply = true, canResolve = true, resolveDenialReason, onReply, onResolve, onReopen, projectId, cellId }: CommentThreadProps) {
   const { t } = useI18n()
+  const [, setOwnerRevision] = useState(0)
+  useEffect(() => subscribeClientLocalStorageOwner(() => {
+    setOwnerRevision((revision) => revision + 1)
+  }), [])
   // AQU-1000: three states, not two. Offered (enabled), refused-with-a-reason
   // (disabled + tooltip), or absent (no role context to explain).
   const showResolveDenied = !canResolve && !!resolveDenialReason
   const storageKey = draftKey(projectId, cellId, thread.id)
-  const [replyText, setReplyText] = useState(() => {
-    if (typeof window === "undefined") return ""
-    try { return localStorage.getItem(storageKey) ?? "" } catch { return "" }
-  })
+  const [draft, setDraft] = useState(() => ({ storageKey, text: readDraft(storageKey) }))
+  // Never expose the previous key's draft during the render in which an owner,
+  // project, cell, or thread changes. React restarts this render immediately,
+  // before effects can persist the old text into the new namespace.
+  if (draft.storageKey !== storageKey) {
+    setDraft({ storageKey, text: readDraft(storageKey) })
+  }
+  const replyText = draft.storageKey === storageKey ? draft.text : readDraft(storageKey)
+  const setReplyText = (text: string) => setDraft({ storageKey, text })
   const isStale = isThreadStale(thread.createdForTranslated, currentTranslated)
 
   // Persist draft to localStorage whenever it changes
   useEffect(() => {
     if (typeof window === "undefined") return
+    if (draft.storageKey !== storageKey) return
     try {
       if (replyText) {
         localStorage.setItem(storageKey, replyText)
@@ -95,7 +116,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
         localStorage.removeItem(storageKey)
       }
     } catch { /* ignore quota errors */ }
-  }, [replyText, storageKey])
+  }, [draft.storageKey, replyText, storageKey])
 
   function handleReply() {
     if (!replyText.trim()) return
@@ -165,7 +186,6 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
                 <DateTooltip value={m.timestamp} label={t("common.date.posted")} />
               </span>
             </div>
-            {/* eslint-disable-next-line react/no-danger */}
             <div
               className="mt-0.5 text-xs"
               // Session-replay mask (docs/OPSEC.md): comment bodies quote

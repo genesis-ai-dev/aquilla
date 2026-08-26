@@ -21,6 +21,8 @@ import {
   sectionTintClass,
 } from "./SectionVisibilityBadge"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
+import { UserError } from "@/lib/errors/user-error"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { ROLE } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { OrgSetupChecklist } from "./OrgSetupChecklist"
@@ -124,8 +126,13 @@ export function OrgOverview() {
       .then((list) => {
         if (!cancelled) setPendingInvites(list)
       })
-      .catch(() => {
-        if (!cancelled) setPendingInvites([])
+      .catch((err) => {
+        if (!cancelled) {
+          setPendingInvites([])
+          if (err instanceof UserError && err.category === "session-expired") {
+            void notifySessionExpiredIfCurrent(jwt)
+          }
+        }
       })
     return () => {
       cancelled = true

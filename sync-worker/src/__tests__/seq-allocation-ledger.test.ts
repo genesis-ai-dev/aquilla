@@ -14,6 +14,7 @@ vi.mock('partyserver', () => ({
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 import { handleEventsWriteRequest } from '../events/route'
+import { handleBulkImportRequest } from '../events/import-route'
 import {
   allocateSeqRange,
   buildSettleSeqRangeStmt,
@@ -262,5 +263,44 @@ describe('POST /events seq allocation', () => {
       .first<{ n: number }>()
     expect(Number(victim?.n)).toBe(0)
     expect(await pendingCount()).toBe(0)
+  })
+})
+
+// ── Task 5: bulk import settles its allocation in-batch ────────────────────
+
+describe('POST /import seq allocation', () => {
+  const IMPORT_PROJECT = 'proj-import-ledger'
+
+  it('settles its allocation after a successful bulk import', async () => {
+    const t2 = await makeTestDb()
+    const token = await makeTestToken(SECRET, {
+      projectId: IMPORT_PROJECT,
+      fileId: 'file-import-ledger',
+      role: 500,
+    })
+    const importReq = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: IMPORT_PROJECT,
+        fileId: 'file-import-ledger',
+        file: { id: 'evt-file-genesis', name: 'Genesis' },
+        cells: [
+          { id: 'evt-src-1', cellId: 'cell-1', value: 'In the beginning' },
+          { id: 'evt-src-2', cellId: 'cell-2', value: 'And the earth' },
+        ],
+      }),
+    })
+    const importRes = await handleBulkImportRequest(importReq, {
+      AQUILLA_PG: t2.db,
+      SYNC_SECRET_KEY: SECRET,
+    })
+    expect(importRes!.status).toBe(200)
+
+    const row = await t2.db
+      .prepare('SELECT COUNT(*)::int AS n FROM seq_allocations WHERE project_id = ?')
+      .bind(IMPORT_PROJECT)
+      .first<{ n: number }>()
+    expect(Number(row?.n)).toBe(0)
   })
 })

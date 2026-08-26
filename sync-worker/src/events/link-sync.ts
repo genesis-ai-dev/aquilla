@@ -40,7 +40,7 @@ import {
   fileCountersRecomputeStmt,
   type PersistedEvent,
 } from './event-projection'
-import { buildBulkEventInsertStmt, allocateSeqRange, type SeqEventInsertRow } from './event-insert'
+import { buildBulkEventInsertStmt, allocateSeqRange, buildSettleSeqRangeStmt, type SeqEventInsertRow } from './event-insert'
 import type { EventPayloads } from './types'
 import { fullProgressRecomputeStmts } from './progress-projection'
 
@@ -1011,6 +1011,10 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
         serverSeq: cursorSeq,
       },
     ]),
+  )
+  allStmts.push(
+    buildSettleSeqRangeStmt(db, downstreamProjectId, baseSeq),
+    buildSettleSeqRangeStmt(db, downstreamProjectId, cursorSeq),
   )
 
   // Batch in BATCH_LIMIT-sized chunks (same convention as route.ts/rebuild.ts).

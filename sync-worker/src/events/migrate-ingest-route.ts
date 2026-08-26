@@ -26,6 +26,7 @@ import { buildEventProjectionStmts, type PersistedEvent } from './event-projecti
 import {
   allocateSeqRange,
   buildBulkEventInsertStmt,
+  buildSettleSeqRangeStmt,
   type SeqEventInsertRow,
 } from './event-insert'
 import type { EventKind } from './types'
@@ -132,8 +133,9 @@ export async function handleMigrateIngestRequest(
   // pre-allocation the lock is held for a single round trip. Replayed ids
   // still consume their seq — gaps are harmless, seq is an ordering key.
   let nextSeq: number
+  let seqBase: number
   try {
-    nextSeq = await allocateSeqRange(db, body.projectId, body.events.length)
+    seqBase = nextSeq = await allocateSeqRange(db, body.projectId, body.events.length)
   } catch (err) {
     return Response.json({ error: `seq allocation failed: ${String(err)}` }, { status: 500 })
   }
@@ -214,6 +216,11 @@ export async function handleMigrateIngestRequest(
       stmts.push(buildBulkEventInsertStmt(db, eventsOnlyRows.slice(i, i + ROWS_PER_STMT)))
     }
   }
+
+  // Settle the allocation in the LAST batch chunk (stmts is split across
+  // multiple runBatch calls below) so the ledger row only clears once every
+  // event row has actually committed.
+  stmts.push(buildSettleSeqRangeStmt(db, body.projectId, seqBase))
 
   // Pipelined batch (postgres.js) collapses the per-statement Hyperdrive↔Neon
   // round-trips that dominated ingest (2 RTTs × thousands of stmts ≈ 21 stmts/s

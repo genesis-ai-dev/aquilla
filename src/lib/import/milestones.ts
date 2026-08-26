@@ -141,7 +141,7 @@ function biblicaMilestone(metadata: Record<string, unknown> | undefined): Import
   const opening = BIBLICA_OPENING_LABELS.has(rawChapter)
   const bookCode = string(value.bookCode)?.toUpperCase()
   const bookName = bookCode ? getBookName(bookCode) ?? bookCode : undefined
-  const shortLabel = opening ? rawChapter[0]! : rawChapter.replace("-", "–")
+  const shortLabel = opening ? rawChapter[0] : rawChapter.replace("-", "–")
   const chapterLabel = opening ? rawChapter : rawChapter.replace("-", "–")
   const kind = opening
     ? "preface"
@@ -170,7 +170,7 @@ function fillPartialMilestones(
   let current: ImportMilestone | undefined
   return explicit.map((value, index) => {
     if (value) current = value
-    return current ?? nextExplicit[index] ?? fallback[index]!
+    return current ?? nextExplicit[index] ?? fallback[index]
   })
 }
 
@@ -214,9 +214,9 @@ function scriptureMilestones(
     // Structural rows normally introduce the following chapter. Content rows
     // without a ref inherit the chapter already in effect.
     if (unit.kind === "heading" || unit.kind === "paratext") {
-      return direct[index] ?? nextDirect[index] ?? previous ?? fallback[index]!
+      return direct[index] ?? nextDirect[index] ?? previous ?? fallback[index]
     }
-    return direct[index] ?? previous ?? nextDirect[index] ?? fallback[index]!
+    return direct[index] ?? previous ?? nextDirect[index] ?? fallback[index]
   })
 }
 
@@ -267,7 +267,7 @@ function documentMemberMilestones(
   const ordinals = ordinalByFirstAppearance(members)
   const fallback = fallbackMilestones(units)
   return members.map((member, index) => {
-    if (!member) return index > 0 ? fallback[index - 1]! : fallback[index]!
+    if (!member) return index > 0 ? fallback[index - 1] : fallback[index]
     const ordinal = ordinals.get(member) ?? 1
     const slideNumber = member.match(/slide(\d+)\.xml/i)?.[1]
     const shortLabel = slideNumber ?? String(ordinal)
@@ -325,7 +325,7 @@ function idmlStoryMilestones(
   const ordinals = ordinalByFirstAppearance(stories)
   const fallback = fallbackMilestones(units)
   return stories.map((story, index) => {
-    if (!story) return index > 0 ? fallback[index - 1]! : fallback[index]!
+    if (!story) return index > 0 ? fallback[index - 1] : fallback[index]
     const ordinal = ordinals.get(story) ?? 1
     return {
       key: `story:${story}`,
@@ -414,7 +414,7 @@ function semanticGroupMilestones(
   const milestones = new Map<string, ImportMilestone>()
   const fallback = fallbackMilestones(units)
   return groups.map((group, index) => {
-    if (!group) return fallback[index]!
+    if (!group) return fallback[index]
     const existing = milestones.get(group.identity)
     if (existing) return existing
     const value: ImportMilestone = {

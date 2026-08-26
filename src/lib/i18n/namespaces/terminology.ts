@@ -325,7 +325,7 @@ export const terminology = defineNamespace({
     "terminology.compile.ruleName": "Term: {term}",
     "terminology.compile.ruleNameForbidden": "Term: {term} — forbidden rendering",
     "terminology.compile.approvedRequired":
-      '"{term}" must be rendered with an approved rendering ({renderings})',
+      'Each "{term}" in the source needs an approved rendering ({renderings})',
     "terminology.compile.forbiddenRendering":
       '"{rendering}" is a forbidden rendering for "{term}"',
 

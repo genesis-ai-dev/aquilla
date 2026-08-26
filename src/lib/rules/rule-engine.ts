@@ -117,17 +117,33 @@ function checkRule(rule: TranslationRule, cell: CellData, fileId: string): RuleI
       sourceRe.lastIndex = 0
       const sourceSpans: import("@/lib/parsers/types").InfractionSpan[] = []
       for (const m of source.matchAll(sourceRe)) {
-        if (m.index === undefined) continue
+        if (m.index === undefined || m[0].length === 0) continue
         sourceSpans.push({ side: "source", start: m.index, end: m.index + m[0].length, matchedText: m[0] })
       }
       if (sourceSpans.length === 0) return null // source pattern not present → rule doesn't apply
-      const targetRe = compile(check.targetPattern, caseFlag + uflag)
+      const targetRe = compile(check.targetPattern, "g" + caseFlag + uflag)
       if (!targetRe) return null
-      if (targetRe.test(cell.translated)) return null // target satisfies the requirement
+      targetRe.lastIndex = 0
+      const targetSpans: import("@/lib/parsers/types").InfractionSpan[] = []
+      for (const m of cell.translated.matchAll(targetRe)) {
+        if (m.index === undefined || m[0].length === 0) continue
+        targetSpans.push({ side: "target", start: m.index, end: m.index + m[0].length, matchedText: m[0] })
+      }
+      // Default assumption: instance counts add up 1:1. Too few source
+      // counterparts blot the unmatched source hits; extra renderings blot
+      // the surplus in the translation.
+      if (targetSpans.length === sourceSpans.length) return null
+      const tooFew = targetSpans.length < sourceSpans.length
       return {
         ruleId: rule.id, cellId: cell.id, fileId,
         reason: "source-requires-target",
-        spans: sourceSpans,
+        reasonParams: {
+          sourceCount: String(sourceSpans.length),
+          targetCount: String(targetSpans.length),
+        },
+        spans: tooFew
+          ? sourceSpans.slice(targetSpans.length)
+          : targetSpans.slice(sourceSpans.length),
       }
     }
     case "source-target-match": {

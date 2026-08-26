@@ -157,6 +157,8 @@ export interface RuleInfraction {
    * joined) and `count` (how many) — both are RAW content lifted from the
    * cell (via `InfractionSpan.matchedText`) and must never be routed through
    * `t()`, only interpolated as a variable.
+   * `source-requires-target`: `sourceCount` and `targetCount` (instance
+   * counts as decimal strings).
    */
   reasonParams?: Record<string, string>
   /** Triggering text spans. Empty when the violation has no identifiable

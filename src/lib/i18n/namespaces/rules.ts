@@ -33,6 +33,8 @@ export const rules = defineNamespace({
     "rules.infraction.targetForbids": "target contains forbidden pattern",
     "rules.infraction.sourceRequiresTarget":
       "This term is in the source, but the translation doesn't use a required rendering",
+    "rules.infraction.sourceRequiresTargetCount":
+      "This term doesn't add up: {sourceCount} in the source, {targetCount} in the translation",
     "rules.infraction.sourceTargetMatch": "pattern found in source but missing in target",
     "rules.infraction.builtin.emptyTarget": "Source has content but the translation is empty",
     "rules.infraction.builtin.targetEqualsSource": "Translation is identical to the source",
@@ -418,6 +420,14 @@ export const rules = defineNamespace({
         placeholders: {
           ruleName: "The user's own rule name — verbatim, never translated.",
           message: "The already-localized predicate sentence (see rules.infraction.* reason keys).",
+        },
+      },
+      "rules.infraction.sourceRequiresTargetCount": {
+        description:
+          "Blot/Issues explanation when source and translation instance counts don't match (too few or extra renderings). {sourceCount} and {targetCount} are instance counts, shown as digits.",
+        placeholders: {
+          sourceCount: "How many times the source term appears in the source cell.",
+          targetCount: "How many required renderings appear in the translation.",
         },
       },
       "rules.infraction.builtin.placeholderIntegrity": {

@@ -175,6 +175,65 @@ describe("infraction spans", () => {
     expect(inf.spans).toHaveLength(1)
     expect(inf.spans[0]).toEqual({ side: "source", start: 8, end: 9, matchedText: "5" })
   })
+
+  it("source-requires-target flags when source has more instances than the translation", () => {
+    const cells = new Map([["f1", [
+      makeCell({
+        id: "c1",
+        original: "the light and then the light again",
+        translated: "la luz and then something else",
+        status: "validated",
+      }),
+    ]]])
+    const rules = [makeRule({
+      id: "term:c1:approved",
+      check: { type: "source-requires-target", sourcePattern: "light", targetPattern: "luz" },
+    })]
+    const inf = checkRules(cells, rules).get("c1")![0]
+    expect(inf.reason).toBe("source-requires-target")
+    expect(inf.reasonParams).toEqual({ sourceCount: "2", targetCount: "1" })
+    // Blot the unmatched source instance — the extra one that has no counterpart.
+    expect(inf.spans).toHaveLength(1)
+    expect(inf.spans[0]).toMatchObject({ side: "source", matchedText: "light" })
+    expect(inf.spans[0].start).toBeGreaterThan(10)
+  })
+
+  it("source-requires-target passes when instance counts add up", () => {
+    const cells = new Map([["f1", [
+      makeCell({
+        id: "c1",
+        original: "the light and then the light again",
+        translated: "la luz and then la luz again",
+        status: "validated",
+      }),
+    ]]])
+    const rules = [makeRule({
+      id: "term:c1:approved",
+      check: { type: "source-requires-target", sourcePattern: "light", targetPattern: "luz" },
+    })]
+    expect(checkRules(cells, rules).has("c1")).toBe(false)
+  })
+
+  it("source-requires-target flags extra instances in the translation", () => {
+    const cells = new Map([["f1", [
+      makeCell({
+        id: "c1",
+        original: "the light once",
+        translated: "la luz and also luz",
+        status: "validated",
+      }),
+    ]]])
+    const rules = [makeRule({
+      id: "term:c1:approved",
+      check: { type: "source-requires-target", sourcePattern: "light", targetPattern: "luz" },
+    })]
+    const inf = checkRules(cells, rules).get("c1")![0]
+    expect(inf.reason).toBe("source-requires-target")
+    expect(inf.reasonParams).toEqual({ sourceCount: "1", targetCount: "2" })
+    expect(inf.spans).toHaveLength(1)
+    expect(inf.spans[0]).toMatchObject({ side: "target", matchedText: "luz" })
+    expect(inf.spans[0].start).toBeGreaterThan(6)
+  })
 })
 
 describe("rule engine — builtin variant", () => {

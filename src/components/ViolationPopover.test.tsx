@@ -40,6 +40,42 @@ describe("ViolationPopover", () => {
     ).toBeInTheDocument()
   })
 
+  it("explains a count mismatch when the source term appears more than once", () => {
+    const termInfraction: RuleInfraction = {
+      ...infraction,
+      ruleId: "term:concept-1:approved",
+      reason: "source-requires-target",
+      reasonParams: { sourceCount: "2", targetCount: "1" },
+    }
+    render(
+      <ViolationPopover
+        open infraction={termInfraction} ruleName="Term: grace" waivers={[]} anchor={null}
+        onOpenChange={() => {}} onOpenRule={() => {}} onWaive={() => {}} onUnwaive={() => {}}
+      />
+    )
+    expect(
+      screen.getByText("This term doesn't add up: 2 in the source, 1 in the translation"),
+    ).toBeInTheDocument()
+  })
+
+  it("explains extra renderings in the translation the same way", () => {
+    const termInfraction: RuleInfraction = {
+      ...infraction,
+      ruleId: "term:concept-1:approved",
+      reason: "source-requires-target",
+      reasonParams: { sourceCount: "1", targetCount: "2" },
+    }
+    render(
+      <ViolationPopover
+        open infraction={termInfraction} ruleName="Term: grace" waivers={[]} anchor={null}
+        onOpenChange={() => {}} onOpenRule={() => {}} onWaive={() => {}} onUnwaive={() => {}}
+      />
+    )
+    expect(
+      screen.getByText("This term doesn't add up: 1 in the source, 2 in the translation"),
+    ).toBeInTheDocument()
+  })
+
   it("shows Unwaive when the rule is already waived", () => {
     const waivers: RuleWaiver[] = [{ ruleId: "r1", reason: "agreed", waivedAt: "2026-04-24T00:00:00Z" }]
     render(

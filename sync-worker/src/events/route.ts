@@ -570,13 +570,18 @@ export async function handleEventsWriteRequest(
   // Events rejected or skipped as idempotent replays still consume their seq —
   // a gap, harmless by design (server_seq is an ordering key, not a count).
   //
-  // Project: a sync token is scoped to exactly one project (authorize()
-  // verifies the token against each event's own projectId), so every event
-  // that can survive authorization belongs to the first raw event's project.
-  // Events naming any other project are rejected before dispatch and never
-  // reach an INSERT.
-  const allocProjectId = rawEvents.find((e) => typeof e.projectId === 'string')?.projectId ?? null
-  const seqBase = allocProjectId ? await allocateSeqRange(db, allocProjectId, rawEvents.length) : 0
+  // Project: POST /events is SINGLE-PROJECT per request, and the guard in the
+  // dispatch loop below is what makes that true. The project is taken from
+  // the TOKEN CLAIMS of the first event that AUTHORIZES — never from the
+  // request body — so a body naming someone else's project can neither bump
+  // that tenant's counter nor plant a fence row in their ledger. Any later
+  // event naming a different project is rejected before dispatch, so no event
+  // is ever stamped with a seq from a foreign range.
+  //
+  // Allocation is therefore lazy: it happens once, on the first authorized
+  // event, still before any write transaction opens.
+  let allocProjectId: string | null = null
+  let seqBase = 0
 
   const accepted: AcceptedEntry[] = []
   const rejected: RejectedEntry[] = []
@@ -718,6 +723,23 @@ export async function handleEventsWriteRequest(
         id: rawEvent.id ?? '(unknown)',
         status: authResult.status,
         reason: authResult.reason,
+      })
+      continue
+    }
+
+    // Single-project guard + lazy allocation (see the allocation note above).
+    // claims.projectId is token-verified: authorize() already proved the token
+    // is scoped to this event's project, so it can never name a tenant the
+    // caller has no access to.
+    const eventProjectId = authResult.event.claims.projectId
+    if (allocProjectId === null) {
+      allocProjectId = eventProjectId
+      seqBase = await allocateSeqRange(db, allocProjectId, rawEvents.length)
+    } else if (eventProjectId !== allocProjectId) {
+      rejected.push({
+        id: rawEvent.id ?? '(unknown)',
+        status: 400,
+        reason: 'all events in one request must belong to the same project',
       })
       continue
     }

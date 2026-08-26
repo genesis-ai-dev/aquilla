@@ -205,4 +205,62 @@ describe('POST /events seq allocation', () => {
       .first<{ last_seq: number | string }>()
     expect(Number(counter?.last_seq)).toBe(2)
   })
+
+  it('a mixed-project body cannot touch the foreign tenant: no counter, no ledger row (C1)', async () => {
+    // The foreign event is FIRST — the attacker's attempt to steer the whole
+    // request's allocation at a project the token has no access to.
+    const res = await post([
+      { ...routeCommit('evt-foreign', null, 'evil'), projectId: 'victim-proj' },
+      routeCommit('evt-r1', null, 'one'),
+    ])
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      accepted: Array<{ id: string }>
+      rejected: Array<{ id: string }>
+    }
+    expect(body.rejected.map((r) => r.id)).toEqual(['evt-foreign'])
+    expect(body.accepted.map((a) => a.id)).toEqual(['evt-r1'])
+
+    // The victim tenant is untouched: no counter bump, no fence row.
+    const victimCounter = await t.db
+      .prepare('SELECT COUNT(*)::int AS n FROM project_seq_counters WHERE project_id = ?')
+      .bind('victim-proj')
+      .first<{ n: number }>()
+    expect(Number(victimCounter?.n)).toBe(0)
+    const victimAlloc = await t.db
+      .prepare('SELECT COUNT(*)::int AS n FROM seq_allocations WHERE project_id = ?')
+      .bind('victim-proj')
+      .first<{ n: number }>()
+    expect(Number(victimAlloc?.n)).toBe(0)
+    const victimEvents = await t.db
+      .prepare('SELECT COUNT(*)::int AS n FROM events WHERE project_id = ?')
+      .bind('victim-proj')
+      .first<{ n: number }>()
+    expect(Number(victimEvents?.n)).toBe(0)
+
+    // The accepted event committed with a seq from the TOKEN project's block,
+    // and that block settled.
+    expect(await pendingCount()).toBe(0)
+    const rows = await t.db
+      .prepare('SELECT id, server_seq FROM events WHERE project_id = ?')
+      .bind(ROUTE_PROJECT)
+      .all<{ id: string; server_seq: number | string }>()
+    expect(rows.results.map((r) => r.id)).toEqual(['evt-r1'])
+    expect(Number(rows.results[0].server_seq)).toBeGreaterThan(0)
+  })
+
+  it('a second event naming a different project is rejected, not written (C1)', async () => {
+    const res = await post([
+      routeCommit('evt-r1', null, 'one'),
+      { ...routeCommit('evt-foreign', 'evt-r1', 'evil'), projectId: 'victim-proj' },
+    ])
+    const body = (await res.json()) as { rejected: Array<{ id: string }> }
+    expect(body.rejected.map((r) => r.id)).toEqual(['evt-foreign'])
+    const victim = await t.db
+      .prepare('SELECT COUNT(*)::int AS n FROM project_seq_counters WHERE project_id = ?')
+      .bind('victim-proj')
+      .first<{ n: number }>()
+    expect(Number(victim?.n)).toBe(0)
+    expect(await pendingCount()).toBe(0)
+  })
 })

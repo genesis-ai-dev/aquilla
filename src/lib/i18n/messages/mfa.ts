@@ -818,20 +818,26 @@ export const mfa: Catalog = {
   "editor.expansion.lowerSupport": "Sokongan carian lebih rendah — semak istilah dan konteks dengan teliti.",
   "editor.expansion.betterSupport": "Sokongan carian lebih baik — semakan manusia masih diperlukan.",
   "editor.bt.label": "Terjemahan balik",
-  "editor.bt.explainTooltip": "Bacaan AI terhadap terjemahan anda dalam bahasa rujukan anda. Gunakannya untuk menyemak sama ada maknanya terbawa — AI boleh tersilap baca, jadi anggap ia pendapat kedua, bukan bukti.",
+  "editor.bt.explainTooltip":
+    "Terjemahan balik harfiah ke bahasa sumber anda, untuk dibandingkan dengan asal. AI boleh tersilap; glos statistik mengikut korpus anda — anggap keduanya semakan, bukan bukti.",
   "editor.bt.needsAiTooltip": "Log masuk atau tambah model AI dalam tetapan projek untuk menjana terjemahan balik",
-  "editor.bt.regenerateTooltip": "Jana semula dengan AI",
+  "editor.bt.regenerateTooltip": "Jana semula terjemahan balik",
   "editor.bt.regenerateAria": "Jana semula terjemahan balik",
   "editor.bt.editTooltip": "Sunting terjemahan balik",
   "editor.bt.contributorRequired": "Perlu Penyumbang+ untuk menyunting terjemahan balik",
   "editor.bt.failed": "Terjemahan balik gagal",
-  "editor.bt.translateFirst": "Terjemah sel ini untuk membacanya balik.",
-  "editor.bt.staleWarning": "Terjemahan anda berubah selepas ini ditulis",
-  "editor.bt.emptyPitch": "Lihat apa yang terjemahan anda sebut apabila dibaca balik, supaya anda boleh semak sama ada makna terbawa.",
-  "editor.bt.readingItBack": "Membaca balik…",
-  "editor.bt.readItBack": "Baca balik dengan AI",
-  "editor.bt.needsAiHint": "Log masuk atau tambah model AI dalam tetapan projek untuk menjana satu.",
-  "editor.bt.contributorCanGenerate": "Penyumbang boleh menjananya dengan AI.",
+  "editor.bt.translateFirst":
+    "Terjemah sel ini dahulu untuk menjana terjemahan balik.",
+  "editor.bt.staleWarning":
+    "Terjemahan balik ini menerangkan versi terjemahan yang lebih lama",
+  "editor.bt.emptyPitch":
+    "Terjemah balik sel ini secara harfiah, kemudian bandingkan hasilnya dengan sumber.",
+  "editor.bt.readingItBack": "Menjana terjemahan balik…",
+  "editor.bt.readItBack": "Jana terjemahan balik",
+  "editor.bt.needsAiHint":
+    "Log masuk atau tambah model AI dalam tetapan projek untuk menjana terjemahan balik.",
+  "editor.bt.contributorCanGenerate":
+    "Penyumbang boleh menjana terjemahan balik.",
   "editor.bt.statisticalGloss": "Glos statistik",
   "editor.bt.statisticalGlossSub": "— kata demi kata, daripada pasangan projek ini sendiri",
   "editor.bt.glossNotEnoughPairs": "Pasangan terjemahan dalam projek ini belum cukup untuk membina glos.",

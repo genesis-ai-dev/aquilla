@@ -2,6 +2,8 @@
 // voices, pick which one is active, set the narrator. Making a voice is a single
 // "New voice" button → NewVoiceModal, which carries both ways to make one
 // (TTS / Clone) behind tabs, seeded with the project's configured engine.
+// Cloning from a source cell's audio controls is hosted at the workspace root
+// (CloneVoiceModalHost) so the modal does not depend on this panel being mounted.
 //
 // Click a row to select it (the active voice — the assign target). Drag a row
 // onto a line to assign it. The row's ⋯ menu edits / sets-narrator / deletes.
@@ -21,7 +23,7 @@ import {
 } from "@/components/ui/input-group"
 import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
-import { PRESET_VOICES } from "@/lib/audio/voices"
+import { PRESET_VOICES, upsertVoice } from "@/lib/audio/voices"
 import { providerInfo, resolveTtsProvider } from "@/lib/audio/tts-providers"
 import { NewVoiceModal } from "@/components/voice/NewVoiceModal"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -50,9 +52,6 @@ interface Props {
   castStats?: Map<string, CastMemberStats>
   /** All cells, so cloning can reuse a take from a line. */
   cells?: CellData[]
-  /** The per-cell "clone from this take" seed (opens the clone workflow). */
-  seedCellId?: string | null
-  seedSignal?: number
   /**
    * AQU-365: the caller's resolved project role level (project.syncRole?.level),
    * or null/undefined for local projects with no live role (fail-open — same
@@ -68,12 +67,10 @@ type Editing =
   | { kind: "closed" }
   | { kind: "create" }
   | { kind: "edit"; voice: Voice }
-  | { kind: "clone"; seedCellId: string | null }
 
 export function VoiceLibraryPanel({
   targetLanguage, settings, onSettingsChange, projectId, fileId, session,
-  selectedVoiceId, onSelectVoice, castStats, cells, seedCellId, seedSignal,
-  roleLevel,
+  selectedVoiceId, onSelectVoice, castStats, cells, roleLevel,
 }: Props) {
   const t = useT()
   const [voices, setVoices] = useState<Voice[]>([])
@@ -90,10 +87,25 @@ export function VoiceLibraryPanel({
   const canEditVoices = roleLevel == null || roleLevel >= ROLE.MAINTAINER
   const voiceDenialReason = !canEditVoices ? denialMessage(t, ROLE.MAINTAINER, roleLevel) : null
 
-  // Seed the local library once per project.
+  // Keep the roster in sync with persisted settings so a voice created from
+  // the in-cell Clone host (which writes through tts.saveTts) appears here
+  // without a remount. First visit to a project still falls back to presets
+  // when nothing has been saved yet.
   useEffect(() => {
-    if (!projectId || seededRef.current === projectId) return
-    const seed = settings?.voices && settings.voices.length > 0 ? settings.voices : [...PRESET_VOICES]
+    if (!projectId) return
+    const projectChanged = seededRef.current !== projectId
+    const stored = settings?.voices
+    if (stored && stored.length > 0) {
+      setVoices(stored)
+      setDefaultVoiceId(settings?.defaultVoiceId ?? stored[0]?.id)
+      if (projectChanged) {
+        setLocalSelectedId(settings?.defaultVoiceId ?? stored[0]?.id ?? "")
+        seededRef.current = projectId
+      }
+      return
+    }
+    if (!projectChanged) return
+    const seed = [...PRESET_VOICES]
     const seedDefault = settings?.defaultVoiceId ?? seed[0]?.id
     setVoices(seed)
     setDefaultVoiceId(seedDefault)
@@ -124,12 +136,10 @@ export function VoiceLibraryPanel({
   // "setState during render" warning.)
   const saveVoice = useCallback((voice: Voice) => {
     if (!canEditVoices) return
-    const exists = voices.some((v) => v.id === voice.id)
-    const next = exists ? voices.map((v) => (v.id === voice.id ? voice : v)) : [...voices, voice]
-    const nextDefault = defaultVoiceId ?? next[0]?.id
-    setVoices(next)
-    setDefaultVoiceId(nextDefault)
-    void onSettingsChange({ voices: next, defaultVoiceId: nextDefault })
+    const next = upsertVoice(voices, voice, defaultVoiceId)
+    setVoices(next.voices)
+    setDefaultVoiceId(next.defaultVoiceId)
+    void onSettingsChange({ voices: next.voices, defaultVoiceId: next.defaultVoiceId })
     select(voice.id)
   }, [voices, defaultVoiceId, onSettingsChange, select, canEditVoices])
 
@@ -142,12 +152,6 @@ export function VoiceLibraryPanel({
   }, [voices, defaultVoiceId, selectedId, writeBack, select, canEditVoices])
 
   const makeDefault = useCallback((voice: Voice) => writeBack(voices, voice.id), [voices, writeBack])
-
-  // The per-cell "clone from this take" opens the clone workflow seeded.
-  useEffect(() => {
-    if (!seedSignal) return
-    setEditing({ kind: "clone", seedCellId: seedCellId ?? null })
-  }, [seedSignal, seedCellId])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -240,8 +244,7 @@ export function VoiceLibraryPanel({
           onSave={saveVoice}
           onDelete={editing.kind === "edit" && canEditVoices ? () => deleteVoice(editing.voice) : undefined}
           onMakeDefault={editing.kind === "edit" && canEditVoices ? () => makeDefault(editing.voice) : undefined}
-          initialMode={editing.kind === "clone" ? "clone" : "tts"}
-          seedCellId={editing.kind === "clone" ? editing.seedCellId : null}
+          initialMode="tts"
         />
       )}
     </div>

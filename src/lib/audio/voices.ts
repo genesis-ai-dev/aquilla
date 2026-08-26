@@ -52,6 +52,17 @@ export function getVoiceLibrary(settings: ProjectTtsSettings | undefined): Voice
   return stored
 }
 
+/** Append or replace a voice in a library. Pins a default if none is set. */
+export function upsertVoice(
+  voices: Voice[],
+  voice: Voice,
+  defaultVoiceId: string | undefined,
+): { voices: Voice[]; defaultVoiceId: string | undefined } {
+  const exists = voices.some((v) => v.id === voice.id)
+  const next = exists ? voices.map((v) => (v.id === voice.id ? voice : v)) : [...voices, voice]
+  return { voices: next, defaultVoiceId: defaultVoiceId ?? next[0]?.id }
+}
+
 export function findVoice(settings: ProjectTtsSettings | undefined, voiceId: string | undefined): Voice | undefined {
   if (!voiceId) return undefined
   return getVoiceLibrary(settings).find((v) => v.id === voiceId)

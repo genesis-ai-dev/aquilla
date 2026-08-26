@@ -99,6 +99,7 @@ import { EditorTable, type AudioLensContext, type BacktranslationActionSource } 
 import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
+import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
 import { videoOwnsFile } from "@/lib/audio/transport"
@@ -964,9 +965,9 @@ export function ProjectWorkspace() {
   /** A line that has just been created and is waiting for its row to exist so
    *  the timeline and the table can both land on it. */
   const [pendingNewCell, setPendingNewCell] = useState<{ cellId: string; thenRecord: boolean } | null>(null)
-  // "Make a character from this voice" dialog (Cast studio). Owned here so the
-  // per-cell control in the editor's source column can open it seeded to a
-  // specific line's take, and the rail's button can open it for a manual pick.
+  // "Clone voice from this take" dialog. Owned here (not inside the Voices
+  // dock tab) so the per-cell control can open NewVoiceModal in place even
+  // when the left dock is on Files or collapsed.
   const [makeCharacterOpen, setMakeCharacterOpen] = useState(false)
   const [makeCharacterSeedCellId, setMakeCharacterSeedCellId] = useState<string | null>(null)
   // FRO-192: Assign… modal
@@ -981,10 +982,11 @@ export function ProjectWorkspace() {
   // After "Voice together" synthesizes one combined clip, hold its result so
   // the manual boundary editor can open for the user to mark per-line slices.
   const [combinedEditor, setCombinedEditor] = useState<CombinedVoiceResult | null>(null)
-  // Text vs Audio lens — the same editor over the same cells. Audio mode swaps
-  // the left rail's body for the Cast studio (VoiceSidebar: cast roster + the
-  // "make a character" dialog) and replaces each cell's SOURCE column with that
-  // line's voice controls (CellVoicePanel); all other audio chrome lives there.
+  // Text vs Audio lens — the same editor over the same cells. Audio mode
+  // surfaces the Cast studio in the Voices dock tab (VoiceSidebar) and
+  // replaces each cell's SOURCE column with that line's voice controls
+  // (CellVoicePanel). Cloning from a cell opens NewVoiceModal at the
+  // workspace root, not inside the dock.
   const [lens, setLens] = useEditorLensPreference(projectId ?? "")
   // ISSUE-3 fix: /project/:id/voice deep-link activates audio lens on mount,
   // and surfaces the Voices dock tab (where the voice controls now live).
@@ -7323,6 +7325,7 @@ export function ProjectWorkspace() {
     dockTab === "voices" ||
     timelineEditorVisible ||
     lens === "audio" ||
+    makeCharacterOpen ||
     drawerRuleId !== null ||
     recordingCellId !== null ||
     exportOpen ||
@@ -8766,7 +8769,7 @@ export function ProjectWorkspace() {
               project ? (
                 <div className="flex h-full min-h-0 flex-col overflow-hidden p-2">
                   <VoiceSidebar
-                    cells={legacyCells}
+                    cells={audioMergedCells}
                     project={audioProject ?? project}
                     projectId={project.id}
                     tts={tts}
@@ -8774,12 +8777,6 @@ export function ProjectWorkspace() {
                     username={currentUsername}
                     targetLanguage={project.targetLanguage}
                     fileId={activeFileId}
-                    cloneOpen={makeCharacterOpen}
-                    onCloneOpenChange={(open) => {
-                      setMakeCharacterOpen(open)
-                      if (!open) setMakeCharacterSeedCellId(null)
-                    }}
-                    cloneSeedCellId={makeCharacterSeedCellId}
                   />
                 </div>
               ) : undefined
@@ -10129,6 +10126,23 @@ export function ProjectWorkspace() {
         onAfterReplace={rebuildSearchIndex}
         onReplaceAll={handleReplaceAll}
       />
+      {project && (
+        <CloneVoiceModalHost
+          open={makeCharacterOpen}
+          onClose={() => {
+            setMakeCharacterOpen(false)
+            setMakeCharacterSeedCellId(null)
+          }}
+          seedCellId={makeCharacterSeedCellId}
+          tts={tts}
+          projectId={project.id}
+          fileId={activeFileId}
+          session={frontierSession ?? null}
+          targetLanguage={project.targetLanguage}
+          cells={audioMergedCells}
+          roleLevel={project.syncRole?.level ?? null}
+        />
+      )}
       <SharePanel
         open={shareOpen} onOpenChange={setShareOpen}
         projectId={projectId!}

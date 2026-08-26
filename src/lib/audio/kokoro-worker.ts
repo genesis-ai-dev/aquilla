@@ -3,8 +3,25 @@
 // Returns 24kHz mono Float32 PCM that the main thread wraps into a Blob.
 
 /// <reference lib="webworker" />
-import { KokoroTTS } from "kokoro-js"
+// MUST be first: ReadableStream async-iteration + strip Node marker before
+// phonemizer's gzip unpack IIFE runs (Safari crashes without the polyfill).
+import "./phonemizer-browser-env-init"
 import { throttleModelProgress } from "./progress-throttle"
+import { friendlyKokoroError } from "./phonemizer-browser-env"
+import { DEFAULT_KOKORO_VOICE } from "./kokoro-languages"
+
+type KokoroTTS = import("kokoro-js").KokoroTTS
+type KokoroTTSCtor = typeof import("kokoro-js").KokoroTTS
+
+let KokoroTTS: KokoroTTSCtor | null = null
+
+async function loadKokoroTTS(): Promise<KokoroTTSCtor> {
+  if (!KokoroTTS) {
+    const mod = await import("kokoro-js")
+    KokoroTTS = mod.KokoroTTS
+  }
+  return KokoroTTS
+}
 
 // Same ONNX warning suppression as whisper-worker — Kokoro's bundled ORT
 // emits the same node-assignment warnings every synth call. Worker-scoped
@@ -22,7 +39,7 @@ console.warn = (...args: unknown[]) => {
 }
 
 const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX"
-const DEFAULT_VOICE = "af_heart"
+const DEFAULT_VOICE = DEFAULT_KOKORO_VOICE
 
 // HF CDN frequently omits Content-Length for LFS files, so transformers.js
 // reports total=0 and the UI can't show a percentage. These are the actual
@@ -106,13 +123,14 @@ async function getTts(requestId: string): Promise<KokoroTTS> {
   })
   // Try WebGPU first; fall back to WASM if the GPU adapter isn't usable.
   ttsPromise = (async () => {
+    const Ctor = await loadKokoroTTS()
     try {
-      return await KokoroTTS.from_pretrained(MODEL_ID, {
+      return await Ctor.from_pretrained(MODEL_ID, {
         dtype: "q8", device: "webgpu", progress_callback: progressCb,
       } as never)
     } catch (e) {
       console.warn("[kokoro-worker] WebGPU init failed, falling back to WASM:", e)
-      return await KokoroTTS.from_pretrained(MODEL_ID, {
+      return await Ctor.from_pretrained(MODEL_ID, {
         dtype: "q8", device: "wasm", progress_callback: progressCb,
       } as never)
     }
@@ -136,7 +154,7 @@ self.addEventListener("message", async (event: MessageEvent<IncomingMessage>) =>
       const out: ErrorMessage = {
         type: "error",
         requestId: msg.requestId,
-        message: e instanceof Error ? e.message : String(e),
+        message: friendlyKokoroError(e instanceof Error ? e.message : String(e)),
       }
       ;(self as unknown as Worker).postMessage(out)
     }
@@ -161,7 +179,7 @@ self.addEventListener("message", async (event: MessageEvent<IncomingMessage>) =>
     const out: ErrorMessage = {
       type: "error",
       requestId: msg.requestId,
-      message: e instanceof Error ? e.message : String(e),
+      message: friendlyKokoroError(e instanceof Error ? e.message : String(e)),
     }
     ;(self as unknown as Worker).postMessage(out)
   }

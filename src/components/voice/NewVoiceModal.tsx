@@ -1,8 +1,8 @@
 // NewVoiceModal — one modal, two ways to make a voice:
 //   • TTS voice — name it, pick the engine (OmniVoice / Gemini / Kokoro / MMS —
 //     seeded from the project's configured engine), and fill the engine's one
-//     knob (Gemini: describe how it sounds; Kokoro: voice id; MMS: language;
-//     OmniVoice: nothing). Gemini's base timbre stays a smart default (rotated
+//     knob (Gemini: describe how it sounds; Kokoro: pick a bundled speaker;
+//     MMS: language; OmniVoice: nothing). Gemini's base timbre stays a smart default (rotated
 //     so each new voice sounds distinct).
 //   • Clone voice — name it + capture a short reference clip (record, upload, or
 //     reuse a take already in the project). Generation is re-voiced to match it.
@@ -33,6 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { VoiceCloneSection } from "@/components/VoiceCloneSection"
+import { KokoroVoiceField } from "@/components/voice/KokoroVoiceField"
 import { cn } from "@/lib/utils"
 import { newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import {
@@ -312,16 +313,11 @@ function NewVoiceModalBody({
                   </Field>
                 )}
                 {activeProvider === "kokoro" && (
-                  <Field>
-                    <FieldLabel htmlFor="voice-kokoro">{t("audio.newVoice.kokoroLabel")}</FieldLabel>
-                    <Input
-                      id="voice-kokoro"
-                      value={draft.voiceName ?? ""}
-                      onChange={(e) => update({ voiceName: e.target.value || undefined })}
-                      placeholder={t("audio.newVoice.kokoroPlaceholder")}
-                      className="font-mono"
-                    />
-                  </Field>
+                  <KokoroVoiceField
+                    value={draft.voiceName ?? ""}
+                    targetLanguage={targetLanguage}
+                    onChange={(v) => update({ voiceName: v || undefined })}
+                  />
                 )}
                 {activeProvider === "mms" && (
                   <MmsLanguageField

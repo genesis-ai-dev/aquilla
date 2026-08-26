@@ -17,8 +17,16 @@ export const audio = defineNamespace({
     "audio.newVoice.engineLabel": "Engine",
     "audio.newVoice.describeLabel": "Describe the voice",
     "audio.newVoice.describePlaceholder": "e.g. a warm older man, calm and clear",
-    "audio.newVoice.kokoroLabel": "Kokoro voice id",
+    "audio.newVoice.kokoroLabel": "Voice",
     "audio.newVoice.kokoroPlaceholder": "e.g. af_bella",
+    "audio.newVoice.kokoroGroupAmerican": "American English",
+    "audio.newVoice.kokoroGroupBritish": "British English",
+    "audio.newVoice.kokoroGenderFemale": "Female",
+    "audio.newVoice.kokoroGenderMale": "Male",
+    "audio.newVoice.kokoroEnglishOnlyHint":
+      "On-device Kokoro speaks English. Pick an American or British voice, or switch this line to OmniVoice, Gemini, or MMS.",
+    "audio.newVoice.kokoroPlaySample": "Play {name} sample",
+    "audio.newVoice.kokoroStopSample": "Stop {name} sample",
     "audio.newVoice.mmsLanguageLabel": "Language",
     "audio.newVoice.singleVoiceHint":
       "{engine} uses a single neural voice. Use the Clone tab to make it sound like a specific person.",
@@ -416,15 +424,53 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.kokoroLabel": {
         description:
-          "Label for a text field, shown only when the Kokoro engine is selected, " +
-          "where the user enters Kokoro's own voice identifier code. 'Kokoro' is the " +
-          "engine's proper name — do not translate it.",
+          "Label for the voice-picker dropdown shown only when the Kokoro engine is " +
+          "selected. Lists Kokoro's built-in American and British speakers. 'Kokoro' " +
+          "is the engine's proper name — do not translate it if it appears nearby.",
       },
       "audio.newVoice.kokoroPlaceholder": {
         description:
           "Placeholder example inside the empty Kokoro voice-id field, showing the " +
           "format of a real id. The example code itself ('af_bella') is data, not " +
           "prose — keep it as-is; only 'e.g.' needs translating.",
+      },
+      "audio.newVoice.kokoroGroupAmerican": {
+        description:
+          "Section heading inside the Kokoro voice dropdown for American English speakers.",
+      },
+      "audio.newVoice.kokoroGroupBritish": {
+        description:
+          "Section heading inside the Kokoro voice dropdown for British English speakers.",
+      },
+      "audio.newVoice.kokoroGenderFemale": {
+        description:
+          "Short gender tag next to a female Kokoro speaker's name in the dropdown.",
+      },
+      "audio.newVoice.kokoroGenderMale": {
+        description:
+          "Short gender tag next to a male Kokoro speaker's name in the dropdown.",
+      },
+      "audio.newVoice.kokoroEnglishOnlyHint": {
+        description:
+          "Helper under the Kokoro voice dropdown when the project's target language " +
+          "is not English. Tells the user Kokoro only speaks English and names the " +
+          "other engines that can speak other languages. 'Kokoro', 'OmniVoice', " +
+          "'Gemini', and 'MMS' are engine names — do not translate them.",
+      },
+      "audio.newVoice.kokoroPlaySample": {
+        description:
+          "Accessible name of the play button that previews a Kokoro speaker. " +
+          "{name} is the speaker's given name (Heart, Bella, George).",
+        placeholders: {
+          name: "The Kokoro speaker's given name, e.g. Heart or Bella.",
+        },
+      },
+      "audio.newVoice.kokoroStopSample": {
+        description:
+          "Accessible name of the same button while that speaker's sample is playing.",
+        placeholders: {
+          name: "The Kokoro speaker's given name, e.g. Heart or Bella.",
+        },
       },
       "audio.newVoice.mmsLanguageLabel": {
         description:

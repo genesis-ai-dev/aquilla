@@ -1,7 +1,7 @@
 // Floating chip that surfaces background AI-model downloads kicked off from
-// the onboarding checklist. Shows live percentages while downloading; once
-// every previously-downloading model finishes, briefly displays a "Ready"
-// confirmation so the user knows the work completed before the chip hides.
+// the onboarding checklist. Each model keeps the same row (green bar, percent
+// or a right-side check) until the whole batch finishes; then a brief "Ready"
+// confirmation shows so the user knows the work completed before the chip hides.
 
 import { AlertCircle, CheckCircle2, RotateCw, X } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
@@ -19,11 +19,14 @@ function pct(loaded: number, total: number): number | null {
   return Math.round((loaded / total) * 100)
 }
 
+const MODEL_ORDER: ModelId[] = ["whisper", "kokoro", "mms"]
+
 interface ModelView {
   id: ModelId
   label: string
   loaded: number
   total: number
+  ready: boolean
 }
 
 interface ErrorView {
@@ -64,20 +67,37 @@ export function AiModelDownloadChip() {
     checkOne("mms", mms.kind)
   }, [whisper.kind, kokoro.kind, mms.kind])
 
-  // Auto-clear the flash after a few seconds.
+  // Hold completed rows in the same list until every model in the batch is
+  // done. Only then flash the all-ready confirmation and auto-hide.
   useEffect(() => {
     if (readyFlash.length === 0) return
+    const stillGoing =
+      whisper.kind === "downloading" ||
+      kokoro.kind === "downloading" ||
+      mms.kind === "downloading" ||
+      whisper.kind === "error" ||
+      kokoro.kind === "error" ||
+      mms.kind === "error"
+    if (stillGoing) return
     if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current)
     flashTimeoutRef.current = setTimeout(() => setReadyFlash([]), READY_FLASH_MS)
     return () => {
       if (flashTimeoutRef.current) clearTimeout(flashTimeoutRef.current)
     }
-  }, [readyFlash])
+  }, [readyFlash, whisper.kind, kokoro.kind, mms.kind])
 
-  const downloads: ModelView[] = []
-  if (whisper.kind === "downloading") downloads.push({ id: "whisper", label: LABELS.whisper, loaded: whisper.loaded, total: whisper.total })
-  if (kokoro.kind === "downloading") downloads.push({ id: "kokoro", label: LABELS.kokoro, loaded: kokoro.loaded, total: kokoro.total })
-  if (mms.kind === "downloading") downloads.push({ id: "mms", label: LABELS.mms, loaded: mms.loaded, total: mms.total })
+  const byId: Record<ModelId, typeof whisper> = { whisper, kokoro, mms }
+  const rows: ModelView[] = MODEL_ORDER.flatMap((id) => {
+    const status = byId[id]
+    if (status.kind === "downloading") {
+      return [{ id, label: LABELS[id], loaded: status.loaded, total: status.total, ready: false }]
+    }
+    if (readyFlash.includes(id)) {
+      return [{ id, label: LABELS[id], loaded: 1, total: 1, ready: true }]
+    }
+    return []
+  })
+  const downloads = rows.filter((r) => !r.ready)
 
   const errors: ErrorView[] = []
   if (whisper.kind === "error") errors.push({ id: "whisper", label: LABELS.whisper, message: whisper.message })
@@ -134,37 +154,31 @@ export function AiModelDownloadChip() {
         </Button>
       </div>
 
-      {downloads.length > 0 && (
+      {rows.length > 0 && (
         <ul className="space-y-1.5">
-          {downloads.map((d) => {
-            const p = pct(d.loaded, d.total)
+          {rows.map((d) => {
+            const p = d.ready ? 100 : pct(d.loaded, d.total)
             return (
               <li key={d.id} className="space-y-0.5">
                 <div className="flex items-center justify-between text-muted-foreground">
                   <span>{d.label}</span>
-                  <span className="tabular-nums">{p != null ? `${p}%` : "starting…"}</span>
+                  {d.ready ? (
+                    <span aria-label={`${d.label} ${t("workspace.aiDownloadChip.readyToUse")}`}>
+                      <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                    </span>
+                  ) : (
+                    <span className="tabular-nums">{p != null ? `${p}%` : "starting…"}</span>
+                  )}
                 </div>
                 <div className="h-1 overflow-hidden rounded-full bg-muted">
                   <div
-                    className="h-full bg-primary transition-[width] duration-150"
+                    className="h-full bg-emerald-500 transition-[width] duration-150"
                     style={{ width: `${p ?? 8}%` }}
                   />
                 </div>
               </li>
             )
           })}
-        </ul>
-      )}
-
-      {readyFlash.length > 0 && (
-        <ul className="space-y-1">
-          {readyFlash.map((id) => (
-            <li key={id} className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400">
-              <CheckCircle2 className="h-3 w-3" />
-              <span className="capitalize">{id}</span>
-              <span className="text-muted-foreground">{t("workspace.aiDownloadChip.readyToUse")}</span>
-            </li>
-          ))}
         </ul>
       )}
 

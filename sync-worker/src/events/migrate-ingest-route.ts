@@ -23,7 +23,11 @@
 // reachable by browser clients — only holders of SYNC_SECRET_KEY may call it.
 
 import { buildEventProjectionStmts, type PersistedEvent } from './event-projection'
-import { buildEventInsertStmt } from './event-insert'
+import {
+  allocateSeqRange,
+  buildBulkEventInsertStmt,
+  type SeqEventInsertRow,
+} from './event-insert'
 import type { EventKind } from './types'
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
 
@@ -115,13 +119,33 @@ export async function handleMigrateIngestRequest(
     return new Response('body must be { projectId, events[] }', { status: 400 })
   }
 
-  // serverTs is monotonic within the request; server_seq is assigned in SQL.
-  // clientTs carries the original legacy edit timestamp (preserves history
-  // ordering); it is NOT part of any deterministic id.
+  if (body.events.length === 0) {
+    return Response.json({ accepted: 0 })
+  }
+
+  // AQU-1005: allocate the whole batch's server_seqs in ONE autocommit counter
+  // bump BEFORE the write transactions. The old shape ran the bump CTE inside
+  // every event INSERT, so the first statement of each pipelined transaction
+  // took the project's seq-counter row lock and held it until COMMIT — live
+  // editors' single-event writes queued behind bulk ingest for the whole
+  // transaction (measured in minutes during the Aug 25–26 storms). With
+  // pre-allocation the lock is held for a single round trip. Replayed ids
+  // still consume their seq — gaps are harmless, seq is an ordering key.
+  let nextSeq: number
+  try {
+    nextSeq = await allocateSeqRange(db, body.projectId, body.events.length)
+  } catch (err) {
+    return Response.json({ error: `seq allocation failed: ${String(err)}` }, { status: 500 })
+  }
+
+  // serverTs is monotonic within the request; server_seq comes from the
+  // pre-allocated block. clientTs carries the original legacy edit timestamp
+  // (preserves history ordering); it is NOT part of any deterministic id.
   let serverTs = Date.now()
   const eventsOnly = body.eventsOnly === true
   const deferFileCounters = body.deferFileCounters === true
   const stmts: AquillaStatement[] = []
+  const eventsOnlyRows: SeqEventInsertRow[] = []
 
   for (const e of body.events) {
     if (typeof e.id !== 'string' || typeof e.kind !== 'string' || typeof e.author !== 'string') {
@@ -145,24 +169,28 @@ export async function handleMigrateIngestRequest(
       serverTs: serverTs++,
     }
 
-    // server_seq comes from the shared per-project allocator (event-insert.ts);
-    // id-replays are skipped via ON CONFLICT (id) DO NOTHING (a replay still
-    // consumes a seq — gaps are harmless, server_seq is an ordering key).
-    stmts.push(
-      buildEventInsertStmt(db, {
-        id: event.id,
-        schemaVersion,
-        projectId: event.projectId,
-        fileId: event.fileId,
-        cellId: event.cellId,
-        parentId: event.parentId,
-        kind: event.kind,
-        author: event.author,
-        payloadJson: JSON.stringify(event.payload),
-        clientTs: event.clientTs,
-        serverTs: event.serverTs,
-      }),
-    )
+    // Explicit seq from the pre-allocated block; id-replays are skipped via
+    // ON CONFLICT (id) DO NOTHING (their seq is consumed — harmless gap).
+    const insertRow: SeqEventInsertRow = {
+      id: event.id,
+      schemaVersion,
+      projectId: event.projectId,
+      fileId: event.fileId,
+      cellId: event.cellId,
+      parentId: event.parentId,
+      kind: event.kind,
+      author: event.author,
+      payloadJson: JSON.stringify(event.payload),
+      clientTs: event.clientTs,
+      serverTs: event.serverTs,
+      serverSeq: nextSeq++,
+    }
+    if (eventsOnly) {
+      // Firehose path: collapse into multi-row INSERTs below.
+      eventsOnlyRows.push(insertRow)
+    } else {
+      stmts.push(buildBulkEventInsertStmt(db, [insertRow]))
+    }
     if (!eventsOnly) {
       try {
         buildEventProjectionStmts(db, event, stmts, { deferFileCounters })
@@ -174,6 +202,16 @@ export async function handleMigrateIngestRequest(
           { status: 400 },
         )
       }
+    }
+  }
+
+  // Firehose (eventsOnly) rows collapse into multi-row INSERTs — same rows,
+  // ~200x fewer statements. 200 rows × 12 cols = 2,400 binds per statement,
+  // far under Postgres' 65,535-param ceiling.
+  if (eventsOnly) {
+    const ROWS_PER_STMT = 200
+    for (let i = 0; i < eventsOnlyRows.length; i += ROWS_PER_STMT) {
+      stmts.push(buildBulkEventInsertStmt(db, eventsOnlyRows.slice(i, i + ROWS_PER_STMT)))
     }
   }
 

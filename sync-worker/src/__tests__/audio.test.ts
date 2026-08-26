@@ -4,7 +4,13 @@
 
 import { describe, it, expect } from "vitest"
 import { sign } from "hono/jwt"
-import { handleAudioRequest, audioObjectKey, isPathSafeId, MAX_AUDIO_BYTES } from "../audio"
+import {
+  handleAudioRequest,
+  audioObjectKey,
+  isPathSafeId,
+  safeAudioContentType,
+  MAX_AUDIO_BYTES,
+} from "../audio"
 import { handleAdminRequest } from "../admin"
 import type { SyncTokenClaims } from "../auth"
 import { makeTestDb } from "./helpers/pg-test-db"
@@ -256,6 +262,53 @@ describe("audio R2 endpoints", () => {
     expect(get.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable")
     const out = new Uint8Array(await get.arrayBuffer())
     expect(Array.from(out)).toEqual([7, 7, 7, 7, 7])
+  })
+
+  it("coerces a declared text/html Content-Type to a safe type on PUT, and re-sanitizes on GET even for a pre-existing bad object", async () => {
+    const env = makeEnv()
+    const token = await makeToken()
+    const key = audioObjectKey(env, "p1", "f1", "evil.html")
+
+    const put = (await handleAudioRequest(
+      new Request("https://w/audio/p1/f1/evil.html", {
+        method: "PUT",
+        body: new TextEncoder().encode("<script>alert(document.cookie)</script>"),
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "text/html" },
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(put.status).toBe(200)
+
+    const get = (await handleAudioRequest(
+      new Request("https://w/audio/p1/f1/evil.html", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(get.status).toBe(200)
+    expect(get.headers.get("Content-Type")).toBe("application/octet-stream")
+    expect(get.headers.get("X-Content-Type-Options")).toBe("nosniff")
+
+    // A bad type stored before this fix (or by another path) is also
+    // sanitized on the way out, not just on the way in.
+    await env.SNAPSHOTS.put(key, new TextEncoder().encode("<script>x</script>").buffer, {
+      httpMetadata: { contentType: "text/html" },
+    })
+    const getAfterDirectWrite = (await handleAudioRequest(
+      new Request("https://w/audio/p1/f1/evil.html", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env as unknown as Parameters<typeof handleAudioRequest>[1],
+    )) as Response
+    expect(getAfterDirectWrite.headers.get("Content-Type")).toBe("application/octet-stream")
+  })
+
+  it("leaves ordinary audio Content-Types untouched", () => {
+    expect(safeAudioContentType("audio/webm;codecs=opus")).toBe("audio/webm;codecs=opus")
+    expect(safeAudioContentType("audio/wav")).toBe("audio/wav")
+    expect(safeAudioContentType(null)).toBe("application/octet-stream")
+    expect(safeAudioContentType("image/svg+xml")).toBe("application/octet-stream")
+    expect(safeAudioContentType("APPLICATION/JAVASCRIPT")).toBe("application/octet-stream")
   })
 
   it("records imported media as an immutable audio artifact and binding", async () => {

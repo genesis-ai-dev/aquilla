@@ -53,6 +53,7 @@ import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
 import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
+import { useSessionRefresh } from "@/hooks/useSessionRefresh"
 
 // Heavy workspace / admin routes — loaded only when navigated to
 const ProjectWorkspace = lazy(() =>
@@ -235,6 +236,9 @@ function OrgLazyRoute({ children }: { children: ReactNode }) {
 }
 
 export default function App() {
+  // AQU-995: roll the stored JWT forward while the session is in use, so a
+  // 30-day token never lapses under someone who is actively translating.
+  useSessionRefresh()
   const {
     active, loading, hydrated, loadError, retryLoad,
     transitionError, retryTransition,

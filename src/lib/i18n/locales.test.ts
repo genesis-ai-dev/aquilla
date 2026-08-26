@@ -48,11 +48,28 @@ describe("Simplified Chinese (AQU-978)", () => {
   it("resolves to itself rather than collapsing onto the bare `zh` subtag", () => {
     expect(normalizeLocale("zh-Hans")).toBe("zh-Hans")
   })
-  it("takes script-less and region-only Chinese while it is the only zh catalog", () => {
-    // Once zh-Hant (AQU-976) is also registered, exact matches still win and
-    // only these script-less codes fall through to the first-listed zh entry.
+  it("takes script-less and region-only Chinese as the first-listed zh entry", () => {
+    // zh-Hant (AQU-976) is also registered; exact matches win, and non-exact
+    // codes fall through on the primary subtag to the first-listed zh entry —
+    // including zh-TW, since region codes are not exact matches.
     expect(normalizeLocale("zh")).toBe("zh-Hans")
     expect(normalizeLocale("zh-CN")).toBe("zh-Hans")
+    expect(normalizeLocale("zh-TW")).toBe("zh-Hans")
+  })
+})
+
+describe("Traditional Chinese (AQU-976)", () => {
+  it("is registered as a selectable LTR locale under its script subtag", () => {
+    const zhHant = LOCALES.find((l) => l.code === "zh-Hant")
+    expect(zhHant).toBeDefined()
+    expect(zhHant?.dir).toBe("ltr")
+    expect(zhHant?.nativeName).toBe("繁體中文")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    expect(Object.keys(CATALOGS["zh-Hant"] ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("resolves to itself rather than falling through to zh-Hans", () => {
+    expect(normalizeLocale("zh-Hant")).toBe("zh-Hant")
   })
 })
 

@@ -7,17 +7,11 @@
  * Thai/Burmese/Patani-Malay/Chinese render LTR. Add a locale here + a catalog in
  * `messages/index.ts` to make it selectable.
  *
- * `zh-Hans` (AQU-978) is the first entry whose code carries a script subtag.
- * `normalizeLocale()` prefers an exact match, so `zh-Hans` resolves to itself; a
- * browser asking for a script-less or region-only Chinese (`zh`, `zh-CN`, and
- * also `zh-TW`) matches on the primary subtag and lands here. That is accepted
- * while zh-Hans is the only Chinese catalog — a Simplified UI is closer than
- * English for a Traditional reader, who can still switch explicitly.
- *
- * A `zh-Hant` catalog (AQU-976) is in flight on its own branch. When both are
- * registered, the exact-match branch gives each script its own catalog with no
- * code change here, and the primary-subtag fallback for a bare `zh` resolves to
- * whichever entry is listed FIRST — keep `zh-Hans` first, as the script the
+ * Chinese ships as two script-subtag locales: `zh-Hans` (AQU-978) and `zh-Hant`
+ * (AQU-976). `normalizeLocale()` prefers an exact match, so each script gets its
+ * own catalog (`zh-TW`/`zh-CN` region codes are not exact matches — they fall
+ * through with bare `zh` to the primary-subtag branch, which resolves to
+ * whichever `zh-*` entry is listed FIRST). Keep `zh-Hans` first: the script the
  * larger population reads and the one the partner asked for.
  */
 
@@ -41,6 +35,7 @@ export const LOCALES: readonly LocaleMeta[] = [
   { code: "mfa", englishName: "Patani Malay", nativeName: "Bahasa Melayu Patani", dir: "ltr" },
   { code: "ar", englishName: "Arabic", nativeName: "العربية", dir: "rtl" },
   { code: "zh-Hans", englishName: "Simplified Chinese", nativeName: "简体中文", dir: "ltr" },
+  { code: "zh-Hant", englishName: "Traditional Chinese", nativeName: "繁體中文", dir: "ltr" },
 ] as const
 
 export const DEFAULT_LOCALE = "en"

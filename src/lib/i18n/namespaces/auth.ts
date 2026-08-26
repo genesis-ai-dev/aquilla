@@ -47,9 +47,15 @@ export const auth = defineNamespace({
     "auth.login.createAccountLink": "Create an account",
     "auth.login.invalidCredentials": "Invalid username or password",
     "auth.login.failed": "Couldn't sign you in. Please try again.",
+    "auth.login.accountTransitionFailed":
+      "We signed you in, but couldn't safely finish switching accounts. Your previous account's data is still isolated. Retry to finish the switch.",
+    "auth.login.onboardingMigrationFailed":
+      "We couldn't check this browser's existing local workspace. Retry to continue without risking your local projects.",
     "auth.login.aquillaUsernameLabel": "Aquilla username or email",
     "auth.login.offlineNotice": "You're offline — connect to sign in",
     "auth.login.submitLoggingIn": "Logging in…",
+    "auth.login.sessionLoadFailed":
+      "We couldn't read this browser's saved session. Your accounts are still stored; try loading them again.",
 
     // --- Sign up (account creation, e.g. git-import linked-account flow) ---
     "auth.signup.failedGeneric": "Couldn't create your account. Please try again.",
@@ -471,6 +477,12 @@ export const auth = defineNamespace({
           "'Sign in' (common.logIn vs auth.login.submitDefault), and this label is " +
           "the progress form of the former — keep it consistent with whichever word " +
           "you chose for common.logIn.",
+      },
+      "auth.login.sessionLoadFailed": {
+        description:
+          "Recoverable error shown instead of the login form when IndexedDB did not " +
+          "return the browser's saved account envelope. Reassure the user that this " +
+          "does not mean their accounts were deleted; a Retry button follows it.",
       },
       "auth.resetPassword.submitSendLink": {
         description:

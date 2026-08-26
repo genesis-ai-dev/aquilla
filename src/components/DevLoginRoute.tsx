@@ -12,18 +12,21 @@
 import { useEffect, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { devLogin } from "@/lib/frontier/auth"
+import { useAccounts } from "@/hooks/useAccounts"
 
 export function DevLoginRoute() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const as = searchParams.get("as")?.trim() || "dev"
   const [error, setError] = useState<string | null>(null)
+  const { adopt, loading } = useAccounts()
 
   useEffect(() => {
     if (!import.meta.env.DEV) {
       setError("dev login is disabled in production builds")
       return
     }
+    if (loading) return
     let cancelled = false
     void (async () => {
       try {
@@ -35,6 +38,8 @@ export function DevLoginRoute() {
           )
           return
         }
+        await adopt(session)
+        if (cancelled) return
         const dest =
           as === "carol"
             ? "/project/dev-project/settings/general"
@@ -48,7 +53,7 @@ export function DevLoginRoute() {
     return () => {
       cancelled = true
     }
-  }, [as, navigate])
+  }, [adopt, as, loading, navigate])
 
   return (
     <div className="flex h-screen items-center justify-center p-6">

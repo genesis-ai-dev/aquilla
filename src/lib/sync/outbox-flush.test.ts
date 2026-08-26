@@ -23,6 +23,7 @@ import {
   peekOutboxBatch,
   peekPendingOutboxBatch,
   resetOutboxConnectionForTests,
+  setActiveOutboxOwner,
 } from "./outbox"
 import type { CqrsRawEvent } from "./outbox-types"
 import { CQRS_SCHEMA_VERSION } from "./outbox-types"
@@ -109,6 +110,27 @@ describe("flushOutboxBatch", () => {
     })
     expect(result).toMatchObject({ posted: 0, accepted: 0, networkError: false })
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("does not send a captured account's rows when the owner changes during token minting", async () => {
+    setActiveOutboxOwner("alice")
+    await enqueueOutboxEvent(makeEvent("alice-event", "f1"))
+    let resolveMint!: (result: TokenMintResult) => void
+    const mint = vi.fn(() => new Promise<TokenMintResult>((resolve) => { resolveMint = resolve }))
+    const fetchMock = vi.fn()
+
+    const flushing = flushOutboxBatch({
+      getTokenForFile: mint,
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    await vi.waitFor(() => expect(mint).toHaveBeenCalledOnce())
+    setActiveOutboxOwner("bob")
+    resolveMint({ token: "alice-token", status: 200 })
+
+    await expect(flushing).resolves.toMatchObject({ posted: 0, accepted: 0 })
+    expect(fetchMock).not.toHaveBeenCalled()
+    setActiveOutboxOwner("alice")
+    expect(await outboxPendingCount()).toBe(1)
   })
 
   // -- Happy path ------------------------------------------------------------

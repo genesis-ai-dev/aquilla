@@ -10,6 +10,20 @@ import { JwtTokenExpired } from "hono/utils/jwt/types"
 import type { Env, AuthUser, JWTPayload, UserRow } from "../types"
 
 /**
+ * AQU-994: a user lookup that FAILED (DB unreachable, query error) is not the
+ * same as a user that doesn't exist. Swallowing the error into `null` made
+ * authMiddleware answer 401 "User not found" during Postgres/Hyperdrive blips,
+ * which the SPA treated as a dead credential and force-logged users out
+ * mid-editing. Callers catch this to answer 503 (retryable) instead.
+ */
+export class UserLookupError extends Error {
+  constructor(message: string, cause: unknown) {
+    super(message, { cause })
+    this.name = "UserLookupError"
+  }
+}
+
+/**
  * Outcome of {@link JWTService.verifyTokenDetailed}. AQU-995: callers need to
  * tell a lapsed token apart from a malformed/forged one. Both are 401s, but
  * only one of them is a normal, expected event in a long-lived session — and
@@ -165,6 +179,10 @@ export class JWTService {
     return null
   }
 
+  /**
+   * Returns null ONLY when no row matches. A query failure throws
+   * UserLookupError (AQU-994) — it must never read as "user doesn't exist".
+   */
   async getUserByUsername(username: string): Promise<AuthUser | null> {
     try {
       const result = await this.env.AQUILLA_PG.prepare(
@@ -176,10 +194,11 @@ export class JWTService {
       return rowToUser(result)
     } catch (error) {
       console.error("Error fetching user by username:", error)
-      return null
+      throw new UserLookupError("user lookup by username failed", error)
     }
   }
 
+  /** Same contract as getUserByUsername: null = no row, throw = lookup failed. */
   async getUserByEmail(email: string): Promise<AuthUser | null> {
     try {
       const result = await this.env.AQUILLA_PG.prepare(
@@ -191,7 +210,7 @@ export class JWTService {
       return rowToUser(result)
     } catch (error) {
       console.error("Error fetching user by email:", error)
-      return null
+      throw new UserLookupError("user lookup by email failed", error)
     }
   }
 }

@@ -60,6 +60,7 @@ export function JoinPage() {
   // null = still loading; string = failed with that reason
   const [previewLoadState, setPreviewLoadState] = useState<PreviewLoadState>(null)
   const [authMode, setAuthMode] = useState<AuthMode>("login")
+  const [rejectedJwt, setRejectedJwt] = useState<string | null>(null)
 
   // Fetch invite preview (public). Try the multi-project endpoint first — it
   // returns 1 project for a single-project token too — and fall back to the
@@ -155,6 +156,7 @@ export function JoinPage() {
     // rejected — e.g. a session that only just finished signing up. Both
     // re-prompt sign-in instead of showing a dead-invite error.
     if (isJwtExpired(jwt) || single.reason === "unauthorized") {
+      setRejectedJwt(jwt)
       setPhase("initial")
       return
     }
@@ -175,7 +177,7 @@ export function JoinPage() {
   // An expired stored JWT is treated as signed-out: the accept endpoint would
   // 401 on it, so we re-prompt login (preserving this /join URL) rather than
   // letting the user click Accept and hit a misleading "invite invalid" error.
-  const sessionExpired = !!session?.jwt && isJwtExpired(session.jwt)
+  const sessionExpired = !!session?.jwt && (isJwtExpired(session.jwt) || rejectedJwt === session.jwt)
   const hasValidSession = !!session?.jwt && !sessionExpired
   const isSignedOut = !sessionLoading && !hasValidSession
   const showPreviewCard = isSignedOut && effectivePhase === "initial"

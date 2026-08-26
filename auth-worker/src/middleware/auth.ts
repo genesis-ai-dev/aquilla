@@ -57,7 +57,20 @@ export const authMiddleware = async (
     return c.json({ error: "Token has been revoked. Please log in again." }, 401)
   }
 
-  const user = await jwtService.getUserByUsername(payload.sub)
+  // AQU-994: hydration hitting a DB error must NOT read as an auth failure.
+  // During the 2026-08-25 Postgres/Hyperdrive blip the old code answered 401
+  // "User not found" for every authenticated request, and the SPA responded by
+  // force-logging active editors out (and revoking their still-valid tokens).
+  // 503 tells clients "retry later" without impugning the credential.
+  let user: Awaited<ReturnType<typeof jwtService.getUserByUsername>>
+  try {
+    user = await jwtService.getUserByUsername(payload.sub)
+  } catch {
+    return c.json(
+      { error: "Unable to verify session right now. Please retry." },
+      503,
+    )
+  }
   if (!user) {
     return c.json({ error: "User not found" }, 401)
   }

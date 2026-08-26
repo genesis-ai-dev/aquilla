@@ -19,7 +19,7 @@ vi.mock("@/lib/posthog", () => ({
 }))
 
 vi.mock("@/hooks/useAccounts", () => ({
-  useAccounts: () => ({ active: null, loading: false }),
+  useAccounts: () => ({ active: null, loading: false, adopt: vi.fn(async () => {}) }),
 }))
 
 vi.mock("@/lib/frontier/session-store", () => ({

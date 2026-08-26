@@ -15,6 +15,8 @@ import {
   readCellsCache,
   writeCellsCache,
   resetCellsCacheConnectionForTests,
+  setCellsCacheOwner,
+  claimLegacyCellsCache,
 } from "./cells-cache"
 
 function row(
@@ -232,6 +234,49 @@ describe("cells cache maxServerSeq cursor", () => {
     const entry = await readCellsCache("p1", "f-seq")
     expect(entry?.maxServerSeq).toBe(42)
     expect(entry?.rows).toHaveLength(1)
+  })
+
+  it("never returns another account's cached rows for the same project and file", async () => {
+    setCellsCacheOwner("alice")
+    await writeCellsCache("shared-id", "same-file", [row("alice-row", "source")], 1)
+
+    setCellsCacheOwner("bob")
+    expect(await readCellsCache("shared-id", "same-file")).toBeNull()
+    await writeCellsCache("shared-id", "same-file", [row("bob-row", "source")], 2)
+
+    setCellsCacheOwner("alice")
+    expect((await readCellsCache("shared-id", "same-file"))?.rows[0].cellId).toBe("alice-row")
+  })
+
+  it("does not collide local-only data with an account literally named local", async () => {
+    setCellsCacheOwner(null)
+    await writeCellsCache("collision", "file", [row("local-only-row", "source")], 1)
+
+    setCellsCacheOwner("local")
+    expect(await readCellsCache("collision", "file")).toBeNull()
+  })
+
+  it("moves a pre-account snapshot into the first resolved owner scope", async () => {
+    await writeCellsCache("legacy-project", "legacy-file", [row("legacy-row", "source")], 1)
+    setCellsCacheOwner("alice")
+    expect(await readCellsCache("legacy-project", "legacy-file")).toBeNull()
+
+    await claimLegacyCellsCache("alice")
+    expect((await readCellsCache("legacy-project", "legacy-file"))?.rows[0].cellId).toBe("legacy-row")
+
+    setCellsCacheOwner("bob")
+    expect(await readCellsCache("legacy-project", "legacy-file")).toBeNull()
+  })
+
+  it("does not overwrite a newer scoped snapshot while removing its legacy copy", async () => {
+    await writeCellsCache("upgrade-project", "upgrade-file", [row("legacy-row", "source")], 1)
+    setCellsCacheOwner("alice")
+    await writeCellsCache("upgrade-project", "upgrade-file", [row("scoped-row", "source")], 2)
+
+    await claimLegacyCellsCache("alice")
+    const claimed = await readCellsCache("upgrade-project", "upgrade-file")
+    expect(claimed?.rows[0].cellId).toBe("scoped-row")
+    expect(claimed?.maxServerSeq).toBe(2)
   })
 
   it("omits maxServerSeq when the server did not provide one (pre-M2-1 fallback)", async () => {

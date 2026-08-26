@@ -410,3 +410,78 @@ describe('EmitEvents — catalog coherence', () => {
     }
   })
 })
+
+// ── AQU-999: foreign-comment floors on the external emit path ──────────────
+//
+// The Agent API prepare gate must read the same FOREIGN_COMMENT_ROLE table the
+// /events perimeter does: a contributor-scoped credential can resolve/reopen a
+// thread it did not author, but still cannot edit or delete one.
+
+/** Seed a comment authored by `authorUsername` directly into the projection. */
+async function seedForeignComment(
+  tdb: TestDb,
+  commentId: string,
+  authorUsername: string,
+  resolved = false,
+): Promise<void> {
+  await tdb.pg.query(
+    `INSERT INTO comments (
+       comment_id, project_id, scope_kind, file_id, cell_id, parent_comment_id,
+       body, resolved, author_id, author_label, created_at, updated_at, deleted_at
+     ) VALUES ($1, $2, 'project', NULL, NULL, NULL, 'seeded body', $3, $4, $4, 1, 1, NULL)`,
+    [commentId, PROJECT, resolved ? 1 : 0, authorUsername],
+  )
+}
+
+describe('EmitEvents — AQU-999 foreign comment floors', () => {
+  it('contributor credential CAN stage a foreign comment.resolve', async () => {
+    const env = makeEnv(tdb.db)
+    await seedForeignComment(tdb, 'cmt-ext-res', 'someone-else')
+    const contributor = await memberToken(tdb, 400)
+    const { res, body } = await prepare(env, contributor.token, [
+      { kind: 'comment.resolve', payload: { commentId: 'cmt-ext-res', resolved: true } },
+    ])
+    expect(res.status).toBe(200)
+    expect(body.changeset.status).toBe('staged')
+  })
+
+  it('contributor credential CAN stage a foreign reopen (resolved: false)', async () => {
+    const env = makeEnv(tdb.db)
+    await seedForeignComment(tdb, 'cmt-ext-reopen', 'someone-else', true)
+    const contributor = await memberToken(tdb, 400)
+    const { res } = await prepare(env, contributor.token, [
+      { kind: 'comment.resolve', payload: { commentId: 'cmt-ext-reopen', resolved: false } },
+    ])
+    expect(res.status).toBe(200)
+  })
+
+  it('reviewer credential is still denied a foreign comment.resolve', async () => {
+    const env = makeEnv(tdb.db)
+    await seedForeignComment(tdb, 'cmt-ext-rev', 'someone-else')
+    const reviewer = await memberToken(tdb, 300)
+    const { res, body } = await prepare(env, reviewer.token, [
+      { kind: 'comment.resolve', payload: { commentId: 'cmt-ext-rev', resolved: true } },
+    ])
+    expect(res.status).toBe(403)
+    expect(body.error.message).toContain('contributor')
+  })
+
+  it('contributor credential is still denied a foreign comment.edit / comment.delete', async () => {
+    const env = makeEnv(tdb.db)
+    await seedForeignComment(tdb, 'cmt-ext-edit', 'someone-else')
+    await seedForeignComment(tdb, 'cmt-ext-del', 'someone-else')
+    const contributor = await memberToken(tdb, 400)
+
+    const { res: editRes, body: editBody } = await prepare(env, contributor.token, [
+      { kind: 'comment.edit', payload: { commentId: 'cmt-ext-edit', body: 'rewritten' } },
+    ])
+    expect(editRes.status).toBe(403)
+    expect(editBody.error.message).toContain('maintainer')
+
+    const { res: delRes, body: delBody } = await prepare(env, contributor.token, [
+      { kind: 'comment.delete', payload: { commentId: 'cmt-ext-del' } },
+    ])
+    expect(delRes.status).toBe(403)
+    expect(delBody.error.message).toContain('maintainer')
+  })
+})

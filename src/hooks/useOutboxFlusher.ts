@@ -114,6 +114,8 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
   const backoffExp = useRef(0)
   const tokenRef = useRef(options.getTokenForFile)
   tokenRef.current = options.getTokenForFile
+  const authEpochRef = useRef(options.authEpoch)
+  authEpochRef.current = options.authEpoch
   // Resolver for the lock loop's current sleep, so flushNow() can cut a long
   // backoff short and run immediately. The interval-fallback path uses tickRef.
   const wakeRef = useRef<(() => void) | null>(null)
@@ -122,9 +124,12 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
   // Last observed queue size, so an outbox notification can tell "new work
   // arrived" (wake) from "a record was acked / stamped / quarantined" (don't).
   const lastTotalRef = useRef(0)
+  const refreshRequestRef = useRef(0)
 
   const refreshPending = useCallback(async () => {
+    const request = ++refreshRequestRef.current
     const [total, failedN] = await Promise.all([outboxPendingCount(), outboxFailedCount()])
+    if (request !== refreshRequestRef.current) return lastTotalRef.current
     setPending(total)
     setFailed(failedN)
     lastTotalRef.current = total
@@ -176,11 +181,19 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
     let cancelled = false
 
     const runFlushCycle = async () => {
-      const { madeProgress, postedAny, sawAuthError } = await drainCycle(() =>
-        flushOutboxBatch({
-          getTokenForFile: (pid, fid) => tokenRef.current(pid, fid),
+      const cycleEpoch = authEpochRef.current
+      const tokenForCycle = tokenRef.current
+      const { madeProgress, postedAny, sawAuthError } = await drainCycle(() => {
+        if (cancelled || authEpochRef.current !== cycleEpoch) {
+          return Promise.resolve({
+            posted: 0, accepted: 0, networkError: false, authError: false,
+            quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0,
+          })
+        }
+        return flushOutboxBatch({
+          getTokenForFile: tokenForCycle,
           onStaleSiblings: (entries) => {
-            if (entries.length === 0) return
+            if (entries.length === 0 || cancelled || authEpochRef.current !== cycleEpoch) return
             setStaleSiblingCount((n) => n + entries.length)
             // Latest-batch wins. We deliberately don't merge with prior entries:
             // the banner shows one click-through target at a time, and stacking
@@ -189,10 +202,12 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
             setStaleSiblingEntries(entries)
           },
           onStaleSource: (entries) => {
+            if (cancelled || authEpochRef.current !== cycleEpoch) return
             setStaleSourceCount((n) => n + entries.length)
           },
-        }),
-      )
+        })
+      })
+      if (cancelled || authEpochRef.current !== cycleEpoch) return
       await refreshPending()
       // failedHard: we attempted to post something but accepted nothing.
       // An empty queue (postedAny=false) is NOT a failure — no backoff needed.
@@ -273,7 +288,7 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
       cancelled = true
       ac.abort()
     }
-  }, [options.enabled, refreshPending])
+  }, [options.enabled, options.authEpoch, refreshPending])
 
   // Network reconnect → requeue transiently-failed records + drain immediately
   // rather than waiting out the backoff. RES-2: records that failed due to

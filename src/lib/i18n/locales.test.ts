@@ -6,6 +6,7 @@ import {
   LOCALES,
   normalizeLocale,
 } from "./locales"
+import { CATALOGS } from "./messages"
 import { detectInitialLocale } from "./store"
 
 describe("locale registry", () => {
@@ -26,6 +27,49 @@ describe("locale registry", () => {
     expect(isSupportedLocale("my")).toBe(true)
     expect(isSupportedLocale("mfa")).toBe(true)
     expect(isSupportedLocale("zz")).toBe(false)
+  })
+})
+
+describe("Simplified Chinese (AQU-978)", () => {
+  it("is registered as a selectable LTR locale under its script subtag", () => {
+    const zhHans = LOCALES.find((l) => l.code === "zh-Hans")
+    expect(zhHans).toBeDefined()
+    expect(zhHans?.dir).toBe("ltr")
+    // The switcher lists locales by endonym, so this is what a Chinese reader
+    // actually scans the menu for — it must not regress to an English name.
+    expect(zhHans?.nativeName).toBe("简体中文")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    // The locale being registered is not the deliverable — the strings are. An
+    // empty catalog falls back to English per key and would look, from the
+    // switcher alone, exactly like a working locale.
+    expect(Object.keys(CATALOGS["zh-Hans"] ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("resolves to itself rather than collapsing onto the bare `zh` subtag", () => {
+    expect(normalizeLocale("zh-Hans")).toBe("zh-Hans")
+  })
+  it("takes script-less and region-only Chinese as the first-listed zh entry", () => {
+    // zh-Hant (AQU-976) is also registered; exact matches win, and non-exact
+    // codes fall through on the primary subtag to the first-listed zh entry —
+    // including zh-TW, since region codes are not exact matches.
+    expect(normalizeLocale("zh")).toBe("zh-Hans")
+    expect(normalizeLocale("zh-CN")).toBe("zh-Hans")
+    expect(normalizeLocale("zh-TW")).toBe("zh-Hans")
+  })
+})
+
+describe("Traditional Chinese (AQU-976)", () => {
+  it("is registered as a selectable LTR locale under its script subtag", () => {
+    const zhHant = LOCALES.find((l) => l.code === "zh-Hant")
+    expect(zhHant).toBeDefined()
+    expect(zhHant?.dir).toBe("ltr")
+    expect(zhHant?.nativeName).toBe("繁體中文")
+  })
+  it("ships a populated catalog, not an empty stub", () => {
+    expect(Object.keys(CATALOGS["zh-Hant"] ?? {}).length).toBeGreaterThan(4000)
+  })
+  it("resolves to itself rather than falling through to zh-Hans", () => {
+    expect(normalizeLocale("zh-Hant")).toBe("zh-Hant")
   })
 })
 

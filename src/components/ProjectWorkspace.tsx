@@ -3,7 +3,11 @@ import { useParams, useNavigate, useSearchParams, useLocation } from "react-rout
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { useProject } from "@/hooks/useProject"
-import { describePatchFailure, SETTINGS_EDIT_ROLE_FLOOR } from "@/hooks/useProjectSettings"
+import {
+  broadcastProjectSettingsUpdated,
+  describePatchFailure,
+  SETTINGS_EDIT_ROLE_FLOOR,
+} from "@/hooks/useProjectSettings"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { deriveNavTitleKey } from "@/lib/navigation/deriveTitle"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
@@ -5402,9 +5406,10 @@ export function ProjectWorkspace() {
               }
             } else if (msg.t === "project.settings.updated") {
               if (msg.project !== pid) return
-              window.dispatchEvent(new CustomEvent("aquilla:project-settings-updated", {
-                detail: { projectId: pid, version: msg.version },
-              }))
+              // No `origin` — this frame came from a remote writer, so every
+              // mounted consumer in this tab (including any that wrote earlier)
+              // must re-read the row. AQU-979.
+              broadcastProjectSettingsUpdated({ projectId: pid, version: msg.version })
               // A validation-threshold change alters every file's derived
               // validated count without mutating its progress histogram.
               invalidateProjectFileProgress(pid)

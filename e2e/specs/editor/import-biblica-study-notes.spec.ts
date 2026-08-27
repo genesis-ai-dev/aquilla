@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { applyUserProviderOverride } from "../../helpers/mock-llm-server"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { writeFile } from "node:fs/promises"
@@ -249,13 +250,7 @@ test("Biblica study Bible import brings in the notes and leaves the scripture ou
   // rebuild canonical HTML from those slots and leave the row terminal.
   const llmBase = process.env.VITE_LLM_BASE_URL ?? ""
   expect(llmBase).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
-  await alice.evaluate(({ endpoint }) => {
-    localStorage.setItem("aquilla:userProviderOverride", JSON.stringify({
-      endpoint,
-      model: "mock-model",
-      apiKey: "",
-    }))
-  }, { endpoint: `${llmBase}/v1` })
+  await applyUserProviderOverride(alice, alice.username, `${llmBase}/v1`)
   await alice.reload()
   await ws.waitForEditor()
   await ws.editCell(5, "Traduction existante.")

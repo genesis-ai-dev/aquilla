@@ -79,6 +79,17 @@ Both routes 404 unless `WRANGLER_LOCAL=1`; prod `wrangler.toml` never sets it. *
 
 For the E2E suite, prefer the existing `/__test__/reset` + alice/bob/carol helpers (`e2e/helpers/seed.ts`) — those give clean isolation per test. The `/__dev__/login` bypass is for manual browser dev and ad-hoc Playwright probes.
 
+## Slow-request logs — treat them as failures
+
+Both workers log any request that takes **≥ 5s**, even when it succeeds — as a
+`[slow-request]` console line locally and a `slow: <METHOD> <path>` warn in
+PostHog Logs in production (AQU-1005: only-error logging hid DB saturation for
+90 minutes because the SPA aborts at 15s and an aborted request produces no
+server-side error). **Dev flow rule:** a `[slow-request]` line in `pnpm dev` /
+e2e worker output is a defect to investigate before shipping, not noise — find
+the query behind it (Neon `pg_stat_statements` or an `EXPLAIN ANALYZE`) rather
+than raising the threshold.
+
 ## Issue workflow (Linear — Aquilla team)
 
 Bugs and tasks live in Linear (team `Aquilla`, key `AQU`). Move issues through the

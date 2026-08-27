@@ -52,7 +52,11 @@ vi.mock("@/lib/frontier/orgs", () => ({
 
 const fetchAccessibleProjects = vi.fn()
 vi.mock("@/lib/sync/cloud-projects", () => ({
-  fetchAccessibleProjects: (...a: unknown[]) => fetchAccessibleProjects(...a),
+  fetchAccessibleProjectsResult: async (...a: unknown[]) => ({
+    ok: true as const,
+    projects: await fetchAccessibleProjects(...a),
+  }),
+  projectsResultError: () => new Error("project load failed"),
 }))
 
 const getPortfolio = vi.fn()

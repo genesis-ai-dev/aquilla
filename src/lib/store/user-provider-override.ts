@@ -8,6 +8,8 @@
  * onboarding wizard. The happy path is "sign in to Frontier — done."
  */
 
+import { ownerScopedLocalStorageKey } from "@/lib/frontier/client-local-storage"
+
 const KEY = "aquilla:userProviderOverride"
 
 export interface UserProviderOverride {
@@ -22,7 +24,7 @@ export interface UserProviderOverride {
 export function getUserProviderOverride(): UserProviderOverride | null {
   if (typeof localStorage === "undefined") return null
   try {
-    const raw = localStorage.getItem(KEY)
+    const raw = localStorage.getItem(ownerScopedLocalStorageKey(KEY))
     if (!raw) return null
     const parsed = JSON.parse(raw) as Partial<UserProviderOverride>
     if (!parsed?.endpoint || typeof parsed.endpoint !== "string") return null
@@ -38,10 +40,10 @@ export function getUserProviderOverride(): UserProviderOverride | null {
 
 export function setUserProviderOverride(override: UserProviderOverride): void {
   if (typeof localStorage === "undefined") return
-  localStorage.setItem(KEY, JSON.stringify(override))
+  localStorage.setItem(ownerScopedLocalStorageKey(KEY), JSON.stringify(override))
 }
 
 export function clearUserProviderOverride(): void {
   if (typeof localStorage === "undefined") return
-  localStorage.removeItem(KEY)
+  localStorage.removeItem(ownerScopedLocalStorageKey(KEY))
 }

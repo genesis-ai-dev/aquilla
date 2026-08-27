@@ -142,7 +142,10 @@ const projectSchema = z
 export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppliedProjects }: ProjectCreateDialogProps) {
   const t = useT()
   const { session } = useFrontierSession()
-  const { projects: discoveredProjects } = useProjectsForNavigation(suppliedProjects == null)
+  const {
+    projects: discoveredProjects,
+    error: discoveredProjectsError,
+  } = useProjectsForNavigation(suppliedProjects == null)
   const linkableProjects = suppliedProjects ?? discoveredProjects
   const [open, setOpen] = useState(false)
   // AQU-712: one stable project id per dialog session, minted when the dialog
@@ -605,6 +608,9 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
               <FieldError role="alert">
                 {submitError}
               </FieldError>
+            )}
+            {suppliedProjects == null && discoveredProjectsError && (
+              <p className="text-sm text-destructive">{discoveredProjectsError}</p>
             )}
             {submitWarning && (
               <p role="status" className="text-xs text-amber-600" data-testid="create-extra-lang-warning">

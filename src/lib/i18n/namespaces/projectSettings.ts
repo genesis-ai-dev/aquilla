@@ -445,7 +445,7 @@ export const projectSettings = defineNamespace({
 
     // ── Terminology card ──
     "projectSettings.terminology.title": "Terminology Library",
-    "projectSettings.terminology.description": "Manage approved terms, renderings, and the project glossary (term base).",
+    "projectSettings.terminology.description": "Manage approved terms, renderings, and the project terminology (term base).",
     "projectSettings.terminology.openButton": "Open Terminology Library",
 
     // ── ValidationSettingsSection.tsx ──

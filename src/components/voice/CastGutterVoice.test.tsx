@@ -22,7 +22,7 @@ describe("CastGutterVoice", () => {
     expect(trigger.querySelector(".outline-dotted")).toBeNull()
   })
 
-  it("a default-fallback line draws an empty ring marked NC, not a faded face", () => {
+  it("a default-fallback line draws an empty rounded mark labelled NC, not a faded face", () => {
     ui(
       <CastGutterVoice voice={narrator} explicit={false} castName={null} editable voices={VOICES} onPick={() => {}} />,
     )
@@ -35,18 +35,7 @@ describe("CastGutterVoice", () => {
     // No orb at all: the fallback voice's initial appearing here is what made
     // "nobody cast this" read as a weak assignment.
     expect(trigger.textContent).toBe("NC")
-    const ring = trigger.querySelector("circle")
-    expect(ring).not.toBeNull()
-
-    // THE DASHES MUST CLOSE. Whatever the pattern is, a whole number of them
-    // has to fit the circumference — otherwise the ring ends on a half-drawn
-    // dash, which is the whole reason this is an SVG and not `border-dashed`.
-    const r = Number(ring!.getAttribute("r"))
-    const [dash, gap] = ring!.getAttribute("stroke-dasharray")!.split(" ").map(Number)
-    const segments = (2 * Math.PI * r) / (dash + gap)
-    expect(Math.abs(segments - Math.round(segments))).toBeLessThan(1e-9)
-    // Round caps would lengthen every dash by a stroke-width and undo that.
-    expect(ring!.getAttribute("stroke-linecap")).toBe("butt")
+    expect(trigger.querySelector("circle")).toBeNull()
   })
 
   it("picking a character fires PURE assignment with the apply-to-speaker choice", () => {
@@ -80,8 +69,8 @@ describe("CastGutterVoice", () => {
       )
       fireEvent.click(screen.getByTestId("gutter-voice"))
       const clear = screen.getByTestId("gutter-voice-clear")
-      // The row shows what the line becomes: the NC ring, not an icon-of-delete.
-      expect(clear.querySelector("circle")).not.toBeNull()
+      // The row shows what the line becomes: the NC mark, not an icon-of-delete.
+      expect(clear.textContent).toContain("NC")
       fireEvent.click(clear)
       expect(onClear).toHaveBeenCalledWith({ applyToSpeaker: false })
       expect(onPick).not.toHaveBeenCalled()

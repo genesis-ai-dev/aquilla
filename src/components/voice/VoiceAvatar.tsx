@@ -25,7 +25,7 @@ export function VoiceAvatar({
     <span
       aria-hidden
       className={cn(
-        "relative grid shrink-0 select-none place-items-center rounded-full font-semibold text-white shadow-sm ring-1 ring-black/10",
+        "relative grid shrink-0 select-none place-items-center rounded-md font-semibold text-white shadow-sm ring-1 ring-black/10",
         className,
       )}
       style={{
@@ -69,53 +69,16 @@ export function VoiceAvatar({
  * visual length as the circle grows instead of stretching with it.
  */
 export function NoCharacterAvatar({ size = 24, className }: { size?: number; className?: string }) {
-  const stroke = Math.max(1, size / 21)
-  // Centred stroke: the path sits half a stroke inside the box, so the ring's
-  // outer edge lands exactly on `size` and lines up with a solid avatar beside it.
-  const r = (size - stroke) / 2
-  const circumference = 2 * Math.PI * r
-  const TARGET_SEGMENT = 5
-  const segments = Math.max(6, Math.round(circumference / TARGET_SEGMENT))
-  const segment = circumference / segments
-  const dash = segment * 0.6
-
   return (
-    <svg
+    <span
       aria-hidden
-      width={size}
-      height={size}
-      viewBox={`0 0 ${size} ${size}`}
-      className={cn("shrink-0 select-none text-muted-foreground", className)}
+      className={cn(
+        "grid shrink-0 select-none place-items-center rounded-md border border-dashed border-current/55 font-semibold text-muted-foreground",
+        className,
+      )}
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.34) }}
     >
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={r}
-        fill="none"
-        stroke="currentColor"
-        strokeOpacity={0.55}
-        strokeWidth={stroke}
-        // Butt caps on purpose. A round cap adds half a stroke-width at BOTH
-        // ends of every dash, lengthening each one and putting back the seam
-        // the arithmetic above just removed.
-        strokeLinecap="butt"
-        strokeDasharray={`${dash} ${segment - dash}`}
-      />
-      <text
-        x="50%"
-        y="50%"
-        textAnchor="middle"
-        dominantBaseline="central"
-        fill="currentColor"
-        fillOpacity={0.7}
-        fontSize={Math.round(size * 0.34)}
-        fontWeight={600}
-        // The one string here is not a name or a sentence — it is a two-letter
-        // mark for "no character", and it stays the same in every language.
-        // i18n-exempt symbol, not prose
-      >
-        NC
-      </text>
-    </svg>
+      NC
+    </span>
   )
 }

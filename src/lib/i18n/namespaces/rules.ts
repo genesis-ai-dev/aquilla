@@ -273,7 +273,7 @@ export const rules = defineNamespace({
     "rules.editor.createRuleButton": "Create rule",
 
     // ── RuleImportDialog ("Import from doc" — LLM-extracted rule drafts) ───
-    "rules.importDialog.noRulesFound": "No verifiable rules found in the document. Try a style guide or glossary.",
+    "rules.importDialog.noRulesFound": "No verifiable rules found in the document. Try a style guide or terminology.",
     "rules.importDialog.extractionFailed": "Extraction failed",
     "rules.importDialog.unsupportedFileType": "Unsupported file type. Drop a .txt, .md, .pdf, or .docx file.",
     "rules.importDialog.binaryFileTooLarge": "File too large ({size} MB). Maximum is 2 MB for PDF/DOCX.",
@@ -292,7 +292,7 @@ export const rules = defineNamespace({
     }),
     "rules.importDialog.title": "Import rules from document",
     "rules.importDialog.description":
-      "Drop a style guide, glossary, or translation guidelines document and the LLM will extract structured rules you can review and accept. Supports plain text and Markdown (max 200 KB) or PDF/DOCX (max 2 MB).",
+      "Drop a style guide, terminology, or translation guidelines document and the LLM will extract structured rules you can review and accept. Supports plain text and Markdown (max 200 KB) or PDF/DOCX (max 2 MB).",
     "rules.importDialog.dropZoneText": "Drop a {txt}, {md}, {pdf}, or {docx} file here",
     "rules.importDialog.browseButton": "Browse file",
     "rules.importDialog.pasteZoneLabel": "Or paste document text:",

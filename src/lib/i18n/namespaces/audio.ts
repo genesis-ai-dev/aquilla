@@ -31,8 +31,12 @@ export const audio = defineNamespace({
     "audio.newVoice.singleVoiceHint":
       "{engine} uses a single neural voice. Use the Clone tab to make it sound like a specific person.",
     "audio.newVoice.referenceLabel": "Reference audio",
+    "audio.newVoice.tabFromLine": "From a line",
+    "audio.newVoice.referenceSourceGroupLabel": "Reference clip source",
     "audio.newVoice.referenceDescription":
-      "A short clip is enough — we generate a base voice and clone it to match.",
+      "A short clip is enough (5–15s of one clear speaker) — we generate a base voice and clone it to match.",
+    "audio.newVoice.fromLineEmpty":
+      "No line audio yet. Record or generate a take first, or use Reference audio.",
     "audio.newVoice.reuseTakeSummary": "Or reuse audio from a line",
     "audio.newVoice.takeRecorded": "Recorded",
     "audio.newVoice.takeGenerated": "AI-generated",
@@ -240,6 +244,11 @@ export const audio = defineNamespace({
     "audio.clone.stopRecordingButton": "Stop ({seconds}s)",
     "audio.clone.recordButton": "Record reference",
     "audio.clone.uploadButton": "Upload audio",
+    "audio.clone.dropzoneTitle": "Add a reference clip",
+    "audio.clone.dropzoneHint":
+      "A short clip is enough (5–15s of one clear speaker) — we generate a base voice and clone it to match.",
+    "audio.clone.dropzoneDrop": "Drop to use as the reference",
+    "audio.clone.errorNotAudio": "That file isn't audio. Use a short recording.",
     "audio.clone.errorNoContext": "No project context for upload.",
     "audio.clone.errorTooLarge": "Reference clip too large (max 8 MB). Use a few seconds.",
     "audio.clone.previewTooltip": "Preview reference clip",
@@ -407,15 +416,19 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.engineLabel": {
         description:
-          "Form label above the row of TTS engine choice cards (e.g. OmniVoice, " +
-          "Gemini, Kokoro, MMS) — 'engine' means which speech-synthesis backend " +
-          "generates this voice's audio.",
+          "Form label above the row of TTS engine choice cards. On the TTS tab " +
+          "this is all four engines (OmniVoice, Gemini, Kokoro, MMS). On the Clone " +
+          "tab it is only the cloud engines that can clone a reference clip " +
+          "(OmniVoice, Gemini) — on-device engines are omitted, not shown disabled. " +
+          "'Engine' means which speech-synthesis backend generates this voice's audio.",
       },
       "audio.newVoice.describeLabel": {
         description:
-          "Label for a free-text field, shown only when the Gemini engine is " +
-          "selected, where the user describes in plain words how the voice should " +
-          "sound (e.g. tone, age, mood). Gemini turns this description into a voice.",
+          "Label for a free-text field, shown when the Gemini engine is selected " +
+          "(TTS tab or Clone tab). The user describes in plain words how the voice " +
+          "should sound (tone, age, mood). On a clone this describes the base take " +
+          "that is then re-voiced to match the reference clip — it is not the cloned " +
+          "identity.",
       },
       "audio.newVoice.describePlaceholder": {
         description:
@@ -493,41 +506,58 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.referenceLabel": {
         description:
-          "Form label above the reference-clip recorder/uploader shown on the Clone " +
-          "tab. 'Reference audio' is the short clip the cloned voice will be made to " +
-          "sound like.",
+          "Tab label (and formerly the field label) for recording or uploading a " +
+          "fresh reference clip on the Clone tab. Paired with audio.newVoice.tabFromLine. " +
+          "'Reference audio' is the short clip the cloned voice will be made to sound like.",
+        maxLength: 22,
+      },
+      "audio.newVoice.tabFromLine": {
+        description:
+          "Tab label on the Clone tab for picking an existing take from a project " +
+          "line as the clone reference, instead of recording or uploading a new clip. " +
+          "Paired with audio.newVoice.referenceLabel.",
+        maxLength: 18,
+      },
+      "audio.newVoice.referenceSourceGroupLabel": {
+        description:
+          "Accessible group label (not visible text) for the Reference audio / From a " +
+          "line tab pair, read by screen readers to announce what the two tabs are " +
+          "choosing between.",
       },
       "audio.newVoice.referenceDescription": {
         description:
-          "One-line helper text under the reference-clip control on the Clone tab, " +
-          "explaining that a short clip is sufficient.",
+          "Same wording as audio.clone.dropzoneHint. Kept so existing translations " +
+          "do not go missing; the live UI reads dropzoneHint inside the dashed zone.",
+      },
+      "audio.newVoice.fromLineEmpty": {
+        description:
+          "Empty-state copy on the From a line tab when this file has no recorded or " +
+          "generated takes to reuse as a clone reference.",
       },
       "audio.newVoice.reuseTakeSummary": {
         description:
-          "Collapsed `<summary>` label for a disclosure panel on the Clone tab that, " +
-          "when opened, lists audio already recorded or generated elsewhere in the " +
-          "project so the user can reuse one as the clone reference instead of " +
-          "recording fresh.",
+          "Unused in the current UI (the Clone tab now uses audio.newVoice.tabFromLine). " +
+          "Kept so existing translations do not go missing. Was the collapsed summary " +
+          "label for reusing a line's audio as the clone reference.",
       },
       "audio.newVoice.takeRecorded": {
         description:
-          "Small badge on a listed take (inside the 'reuse audio from a line' " +
-          "panel) meaning this particular clip was captured by a human with a " +
-          "microphone, as opposed to generated by TTS. Paired with " +
-          "audio.newVoice.takeGenerated.",
+          "Unused in the current UI (From a line now uses a checkmark for the " +
+          "chosen take, not a Recorded badge). Kept so existing translations do " +
+          "not go missing.",
         maxLength: 16,
       },
       "audio.newVoice.takeGenerated": {
         description:
-          "Small badge on a listed take meaning this particular clip was produced " +
-          "by AI text-to-speech generation rather than recorded by a human.",
+          "Accessible name and tooltip for a sparkle icon on a listed take meaning " +
+          "this clip was produced by AI text-to-speech rather than recorded.",
         maxLength: 16,
       },
       "audio.newVoice.liftingTake": {
         description:
-          "Transient status text shown while a reused take (see " +
-          "audio.newVoice.reuseTakeSummary) is being copied over to become this " +
-          "voice's clone reference. 'Lifting' = copying that clip into place.",
+          "Accessible name on the in-row spinner shown while a reused take " +
+          "(From a line tab) is being copied into this voice's clone reference. " +
+          "Replaces the checkmark until the copy finishes.",
       },
       "audio.newVoice.errorNoProjectContext": {
         description:
@@ -1323,6 +1353,27 @@ export const audio = defineNamespace({
           "Button that opens a file picker to upload an existing audio file as the " +
           "reference clip, shown when no clip is attached yet.",
         maxLength: 20,
+      },
+      "audio.clone.dropzoneTitle": {
+        description:
+          "Heading inside the empty dashed dropzone on the Clone tab's Reference " +
+          "audio panel, inviting the user to attach a clip.",
+      },
+      "audio.clone.dropzoneHint": {
+        description:
+          "Subtitle under audio.clone.dropzoneTitle. Tells the user a 5–15 second " +
+          "clip of one speaker is enough, and that we generate a base voice then " +
+          "clone it to match. Record, upload, and drag-and-drop are the zone itself.",
+      },
+      "audio.clone.dropzoneDrop": {
+        description:
+          "Temporary subtitle shown while an audio file is dragged over the " +
+          "reference dropzone, replacing audio.clone.dropzoneHint.",
+      },
+      "audio.clone.errorNotAudio": {
+        description:
+          "Inline error when a dropped or picked file is not audio (e.g. an image " +
+          "or document), telling the user to use a short recording instead.",
       },
       "audio.clone.errorNoContext": {
         description:

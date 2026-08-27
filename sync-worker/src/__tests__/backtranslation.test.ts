@@ -223,7 +223,7 @@ describe('dispatch: cell.backtranslation.set', () => {
   it('routes to the cell handler and returns 1 stmt (events INSERT only when updateProjection=false)', async () => {
     const authResult = await makeAuthorizedBt(400)
     if (!authResult.ok) throw new Error('auth failed')
-    const outcome = dispatchEvent(makeNoOpDb(), authResult.event, 9999, { updateProjection: false })
+    const outcome = dispatchEvent(makeNoOpDb(), authResult.event, 9999, { serverSeq: 1, updateProjection: false })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     // updateProjection=false → only the events INSERT (AD-2 stale-sibling path)
@@ -233,7 +233,7 @@ describe('dispatch: cell.backtranslation.set', () => {
   it('routes to the cell handler and returns 2 stmts (events INSERT + bt upsert) when updateProjection=true', async () => {
     const authResult = await makeAuthorizedBt(400)
     if (!authResult.ok) throw new Error('auth failed')
-    const outcome = dispatchEvent(makeNoOpDb(), authResult.event, 9999, { updateProjection: true })
+    const outcome = dispatchEvent(makeNoOpDb(), authResult.event, 9999, { serverSeq: 2, updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     // events INSERT + 1 cell_backtranslations upsert = 2
@@ -245,7 +245,7 @@ describe('dispatch: cell.backtranslation.set', () => {
   it('does NOT include cells or cell_validators in dirtyTables', async () => {
     const authResult = await makeAuthorizedBt(400)
     if (!authResult.ok) throw new Error('auth failed')
-    const outcome = dispatchEvent(makeNoOpDb(), authResult.event, 9999, { updateProjection: true })
+    const outcome = dispatchEvent(makeNoOpDb(), authResult.event, 9999, { serverSeq: 3, updateProjection: true })
     if (!outcome.ok) throw new Error('unreachable')
     expect(outcome.result.dirtyTables).not.toContain('cells')
     expect(outcome.result.dirtyTables).not.toContain('cell_validators')

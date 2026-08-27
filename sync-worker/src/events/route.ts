@@ -24,6 +24,7 @@ import type { RawEvent } from './types'
 import type { RealtimeMessage, ProjectionTable } from './realtime'
 import { authorize } from './authorize'
 import { dispatchEvent, type DispatchOutcome } from './dispatch'
+import { allocateSeqRange, buildSettleSeqRangeStmt } from './event-insert'
 import {
   CHAIN_MUTATING_KINDS,
   fileCountersRecomputeStmt,
@@ -555,11 +556,32 @@ export async function handleEventsWriteRequest(
   // in the same request can't share a server_ts. Server_seq is the
   // canonical ordering key, but human-readable timestamps still benefit
   // from monotonicity within a batch.
-  //
-  // server_seq itself is no longer assigned in JS: each event INSERT bumps
-  // the per-project counter row atomically inside its statement (see
-  // events/event-insert.ts for the race-safety note).
   let nextServerTs = Date.now()
+
+  // AQU-1005: allocate every server_seq this request could need in ONE
+  // autocommit statement, BEFORE any write transaction opens. The per-project
+  // counter row lock is therefore held for microseconds instead of for the
+  // whole event batch (the lock convoy), and the `seq_allocations` ledger row
+  // fences readers' advertised `?since=` cursor below this block until it is
+  // settled (or expires after PENDING_ALLOC_TTL_MS).
+  //
+  // Count comes from the RAW event list, deliberately: allocation must happen
+  // before the async authorize/validate loop, so the block is an upper bound.
+  // Events rejected or skipped as idempotent replays still consume their seq —
+  // a gap, harmless by design (server_seq is an ordering key, not a count).
+  //
+  // Project: POST /events is SINGLE-PROJECT per request, and the guard in the
+  // dispatch loop below is what makes that true. The project is taken from
+  // the TOKEN CLAIMS of the first event that AUTHORIZES — never from the
+  // request body — so a body naming someone else's project can neither bump
+  // that tenant's counter nor plant a fence row in their ledger. Any later
+  // event naming a different project is rejected before dispatch, so no event
+  // is ever stamped with a seq from a foreign range.
+  //
+  // Allocation is therefore lazy: it happens once, on the first authorized
+  // event, still before any write transaction opens.
+  let allocProjectId: string | null = null
+  let seqBase = 0
 
   const accepted: AcceptedEntry[] = []
   const rejected: RejectedEntry[] = []
@@ -684,7 +706,7 @@ export async function handleEventsWriteRequest(
   // enforcement contract.
   const membershipCache = new Map<string, Promise<MembershipCheck>>()
   const membershipFor = (projectId: string, userId: number): Promise<MembershipCheck> => {
-    const key = `${projectId} ${userId}`
+    const key = `${projectId}\0${userId}`
     let pending = membershipCache.get(key)
     if (!pending) {
       pending = checkProjectMembership(db, projectId, userId)
@@ -693,7 +715,7 @@ export async function handleEventsWriteRequest(
     return pending
   }
 
-  for (const rawEvent of rawEvents) {
+  for (const [eventIndex, rawEvent] of rawEvents.entries()) {
     // Authorize.
     const authResult = await authorize(token, rawEvent, env.SYNC_SECRET_KEY, db)
     if (!authResult.ok) {
@@ -701,6 +723,23 @@ export async function handleEventsWriteRequest(
         id: rawEvent.id ?? '(unknown)',
         status: authResult.status,
         reason: authResult.reason,
+      })
+      continue
+    }
+
+    // Single-project guard + lazy allocation (see the allocation note above).
+    // claims.projectId is token-verified: authorize() already proved the token
+    // is scoped to this event's project, so it can never name a tenant the
+    // caller has no access to.
+    const eventProjectId = authResult.event.claims.projectId
+    if (allocProjectId === null) {
+      allocProjectId = eventProjectId
+      seqBase = await allocateSeqRange(db, allocProjectId, rawEvents.length)
+    } else if (eventProjectId !== allocProjectId) {
+      rejected.push({
+        id: rawEvent.id ?? '(unknown)',
+        status: 400,
+        reason: 'all events in one request must belong to the same project',
       })
       continue
     }
@@ -753,10 +792,10 @@ export async function handleEventsWriteRequest(
       continue
     }
 
-    // Assign server_ts (monotone within request). server_seq is assigned
-    // atomically inside the events INSERT statement (see
-    // events/event-insert.ts).
+    // Assign server_ts (monotone within request) and the pre-allocated
+    // server_seq for this event's slot in the request's block.
     const serverTs = nextServerTs++
+    const serverSeq = seqBase + eventIndex
 
     // AD-2 parent-chain decision. The candidate hasn't been INSERTed yet,
     // so `isWinningChild` looks for a prior sibling with the same
@@ -1060,6 +1099,7 @@ export async function handleEventsWriteRequest(
     let outcome: DispatchOutcome
     try {
       outcome = dispatchEvent(db, authResult.event, serverTs, {
+        serverSeq,
         updateProjection,
         deferFileCounters: true,
         validationCount: validationCountForDispatch,
@@ -1433,6 +1473,28 @@ export async function handleEventsWriteRequest(
           ),
         )
       }
+    }
+  }
+
+  // Settle the allocation. Only reached when EVERY chunk committed (the
+  // batch-failure path returns above) or when there was nothing to commit at
+  // all — in both cases no writer is still in flight for this block, so the
+  // reader fence can drop. On partial failure we deliberately skip this: the
+  // ledger row expires via PENDING_ALLOC_TTL_MS and holds the advertised
+  // cursor down meanwhile (conservative, correct).
+  if (allocProjectId) {
+    try {
+      const settled = await buildSettleSeqRangeStmt(db, allocProjectId, seqBase).run()
+      if ((settled.results?.length ?? 0) === 0) {
+        console.warn(
+          `[seq-ledger] settle found no allocation row (project=${allocProjectId}, firstSeq=${seqBase}) — ` +
+            'batch outlived PENDING_ALLOC_TTL_MS; readers may have advanced past these seqs',
+        )
+      }
+    } catch (err) {
+      // Non-fatal: the events are committed. An unsettled row only fences the
+      // advertised cursor until the TTL expires.
+      console.warn('[events/route] seq allocation settle failed:', err)
     }
   }
 

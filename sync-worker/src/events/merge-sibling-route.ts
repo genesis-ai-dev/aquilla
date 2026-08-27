@@ -31,7 +31,7 @@ import {
   fileCountersRecomputeStmt,
   type PersistedEvent,
 } from './event-projection'
-import { buildBulkEventInsertStmt, allocateSeqRange, type SeqEventInsertRow } from './event-insert'
+import { buildBulkEventInsertStmt, allocateSeqRange, buildSettleSeqRangeStmt, type SeqEventInsertRow } from './event-insert'
 import { deterministicMirrorEventId } from './link-sync'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import type { EventPayloads } from './types'
@@ -188,6 +188,7 @@ export async function mergeSibling(
   for (const event of persisted) {
     buildEventProjectionStmts(db, event, allStmts, { deferFileCounters: true })
   }
+  allStmts.push(buildSettleSeqRangeStmt(db, hostProjectId, baseSeq))
   for (let i = 0; i < allStmts.length; i += BATCH_LIMIT) {
     await db.batch(allStmts.slice(i, i + BATCH_LIMIT))
   }

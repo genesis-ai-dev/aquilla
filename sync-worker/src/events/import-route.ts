@@ -35,7 +35,7 @@ import {
   fileCountersRecomputeStmt,
   type PersistedEvent,
 } from './event-projection'
-import { allocateSeqRange, buildBulkEventInsertStmt } from './event-insert'
+import { allocateSeqRange, buildBulkEventInsertStmt, buildSettleSeqRangeStmt } from './event-insert'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { notifyProjectDoFileProgressChanged } from '../project-progress-broadcast'
 import { MAX_BUFFERED_SOURCE_ARTIFACT_BYTES } from '../../../shared/import-contract'
@@ -476,6 +476,7 @@ export async function handleBulkImportRequest(
           serverSeq: seqBase + index,
         }))))
         for (const event of finalizeEvents) buildEventProjectionStmts(db, event, finalizeStmts)
+        finalizeStmts.push(buildSettleSeqRangeStmt(db, body.projectId, seqBase))
       }
       await runImportBatch(db, finalizeStmts)
     } catch (err) {
@@ -688,6 +689,7 @@ export async function handleBulkImportRequest(
           ),
         )
       }
+      stmts.push(buildSettleSeqRangeStmt(db, body.projectId, seqBase))
     }
 
     // Cells projection, multi-row. All full-file counters are deferred to the

@@ -413,6 +413,28 @@ CREATE TABLE IF NOT EXISTS project_seq_counters (
         DEFAULT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000000)::BIGINT
 );
 
+-- AQU-1005: seq-allocation ledger.
+--
+-- Seq allocation is moving OUT of the event-write transaction (which held the
+-- project_seq_counters row lock for the whole batch — the lock convoy) into a
+-- tiny autocommit statement that bumps the counter AND announces the range
+-- here. The write batch deletes its row atomically with the event rows; a
+-- crashed/aborted writer's row expires (readers ignore rows older than the
+-- TTL; the next allocator for the project deletes them).
+--
+-- Readers use MIN(first_seq)-1 over live rows as the "pending floor": the
+-- highest server_seq that is safe to advertise as a ?since= cursor. Rows
+-- above the floor are still delivered — only the cursor is clamped — so a
+-- late-committing writer's events are re-covered by the next delta instead
+-- of being skipped.
+CREATE TABLE IF NOT EXISTS seq_allocations (
+    project_id TEXT NOT NULL,
+    first_seq  BIGINT NOT NULL,
+    last_seq   BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (project_id, first_seq)
+);
+
 -- AD-2 first-child arbitration (audit RACE-2 / M1-1). One row per chain slot
 -- (project, file, cell, parent); the first transaction to commit a claim owns
 -- the slot, atomically — replacing the check-then-act isWinningChild SELECT
@@ -763,8 +785,9 @@ CREATE INDEX idx_checkpoints_project ON checkpoints(project_id, created_at);
 CREATE INDEX comments_project_scope ON comments(project_id, scope_kind, file_id, cell_id);
 CREATE INDEX comments_thread ON comments(project_id, parent_comment_id);
 CREATE INDEX idx_diarization_jobs_file ON diarization_jobs(project_id, file_id);
-CREATE INDEX idx_events_author ON events(author, server_ts);
-CREATE INDEX idx_events_cell ON events(project_id, file_id, cell_id, server_ts);
+-- idx_events_author and idx_events_cell were dropped in migration 0081
+-- (AQU-1005): zero/near-zero reads on production, and every event INSERT paid
+-- their maintenance inside the seq-counter lock window.
 CREATE INDEX idx_events_file_seq ON events(project_id, file_id, server_seq);
 CREATE INDEX idx_events_parent_lookup ON events(project_id, file_id, cell_id, parent_id);
 CREATE INDEX idx_events_project ON events(project_id, server_ts);

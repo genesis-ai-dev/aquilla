@@ -21,12 +21,15 @@ export interface DownloadSourceArgs {
   targetLang?: string
 }
 
-function sourceExportUrl(projectId: string, fileId: string, targetLang?: string): string {
+function sourceExportUrl(projectId: string, fileId: string, targetLang?: string, mode?: "raw"): string {
   const base =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
     `/files/${encodeURIComponent(fileId)}/source`
-  if (!targetLang) return base
-  return `${base}?${new URLSearchParams({ lane: targetLang }).toString()}`
+  const params = new URLSearchParams()
+  if (targetLang) params.set("lane", targetLang)
+  if (mode) params.set("mode", mode)
+  const qs = params.toString()
+  return qs ? `${base}?${qs}` : base
 }
 
 // erasableSyntaxOnly: parameter properties (`public readonly status`) use
@@ -82,10 +85,9 @@ export async function downloadSourceFile(args: DownloadSourceArgs): Promise<Down
  * The server returns the raw binary bytes with X-Export-Mode: raw-sidecar.
  * Returns an ArrayBuffer so the caller can do client-side XML injection.
  *
- * NOTE: for USFM files the route has no raw mode — its response re-serializes
- * the stored source with current default-lane translations injected. Callers
- * that present the result as "the original upload" must say so (the egress
- * manifest records a note; a server-side raw mode is tracked as follow-up).
+ * NOTE: for USFM files this plain fetch re-serializes the stored source with
+ * current default-lane translations injected — use `fetchRawOriginalSource`
+ * when the byte-exact upload is wanted.
  */
 export async function fetchSourceSidecar(
   args: Omit<DownloadSourceArgs, "downloadName">,
@@ -106,6 +108,38 @@ export async function fetchSourceSidecar(
     )
   }
   return res.arrayBuffer()
+}
+
+/**
+ * AQU-907: Fetch the byte-exact original upload via `?mode=raw` — no
+ * translation overlay. `rawOriginal` reports whether the server actually
+ * honored raw mode (X-Export-Mode: raw-original); a sync-worker that
+ * predates the mode ignores the unknown param and returns the injected
+ * serialization instead, and callers presenting the bytes as "the original
+ * upload" must fall back to saying what they really got.
+ */
+export async function fetchRawOriginalSource(
+  args: Omit<DownloadSourceArgs, "downloadName">,
+): Promise<{ bytes: ArrayBuffer; rawOriginal: boolean }> {
+  const token = await args.getToken(args.fileId)
+  if (!token) throw new SourceExportError("Couldn't get an export token — sign in and try again.")
+  const url = sourceExportUrl(args.projectId, args.fileId, args.targetLang, "raw")
+
+  const res = await fetch(url, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "")
+    throw new SourceExportError(
+      detail || `Export failed (HTTP ${res.status})`,
+      res.status,
+    )
+  }
+  return {
+    bytes: await res.arrayBuffer(),
+    rawOriginal: res.headers.get("X-Export-Mode") === "raw-original",
+  }
 }
 
 /**

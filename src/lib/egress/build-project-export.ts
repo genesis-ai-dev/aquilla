@@ -17,6 +17,7 @@ import type { FileAudioAttachmentsResponse } from "@/lib/sync/cell-audio-read-ty
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import {
   fetchInjectedSourceText,
+  fetchRawOriginalSource,
   fetchSourceSidecar,
   SourceExportError,
 } from "@/lib/sync/source-export"
@@ -75,6 +76,7 @@ export interface BuildProjectExportDeps {
   loadCellFiles?: typeof loadProjectCellFiles
   fetchAudioAttachments?: typeof fetchFileAudioAttachments
   fetchSidecar?: typeof fetchSourceSidecar
+  fetchRawSource?: typeof fetchRawOriginalSource
   fetchInjectedText?: typeof fetchInjectedSourceText
   assembleAudio?: typeof assembleAudioEntries
   fetchAudioBytes?: AudioAssemblyArgs["fetchBytes"]
@@ -160,6 +162,7 @@ export async function buildProjectExport(
   const loadCellFiles = deps.loadCellFiles ?? loadProjectCellFiles
   const fetchAudioAttachments = deps.fetchAudioAttachments ?? fetchFileAudioAttachments
   const fetchSidecar = deps.fetchSidecar ?? fetchSourceSidecar
+  const fetchRawSource = deps.fetchRawSource ?? fetchRawOriginalSource
   const fetchInjectedText = deps.fetchInjectedText ?? fetchInjectedSourceText
   const assembleAudio = deps.assembleAudio ?? assembleAudioEntries
   const fetchAudioBytes = deps.fetchAudioBytes ?? defaultFetchAudioBytes(deps.getToken)
@@ -390,19 +393,26 @@ export async function buildProjectExport(
       throwIfAborted()
       const report = reportFor(file)
       try {
-        const raw = await fetchSidecar({
+        const fetchArgs = {
           projectId: selection.projectId,
           fileId: file.id,
           getToken: deps.getToken,
-        })
-        pushEntry(report, `source-documents/${egressSlug(file.name, "file")}`, raw)
+        }
         if (file.type === "usfm") {
-          // The /source route has no raw mode for USFM — it re-serializes the
-          // stored source with current default-lane translations injected.
-          // Say so rather than presenting the entry as the byte-exact upload.
-          ;(report.notes ??= []).push(
-            "source document is the original USFM re-serialized with current default-lane translations injected — a byte-exact raw copy needs a server raw mode (tracked as follow-up)",
-          )
+          // AQU-907: ?mode=raw returns the byte-exact original upload. A
+          // sync-worker that predates the mode ignores the param and injects
+          // current default-lane translations — the manifest must say so
+          // rather than present the entry as the original.
+          const { bytes, rawOriginal } = await fetchRawSource(fetchArgs)
+          pushEntry(report, `source-documents/${egressSlug(file.name, "file")}`, bytes)
+          if (!rawOriginal) {
+            ;(report.notes ??= []).push(
+              "source document is the original USFM re-serialized with current default-lane translations injected — the server does not support raw mode yet",
+            )
+          }
+        } else {
+          const raw = await fetchSidecar(fetchArgs)
+          pushEntry(report, `source-documents/${egressSlug(file.name, "file")}`, raw)
         }
       } catch (err) {
         rethrowIfAborted(err)

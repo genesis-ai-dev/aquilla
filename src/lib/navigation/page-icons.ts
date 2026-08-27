@@ -27,6 +27,7 @@ import {
   Bot,
   BrainCircuit,
   Building2,
+  Download,
   FileText,
   FolderOpen,
   House,

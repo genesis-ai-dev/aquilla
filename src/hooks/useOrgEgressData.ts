@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { fetchAccessibleProjectsResult, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { getPortfolio, type PortfolioLane, type PortfolioProject } from "@/lib/frontier/portfolio"
 import { displayLanes } from "@/components/org/project-lanes"
 
@@ -135,8 +136,9 @@ export function useOrgEgressData(jwt: string | null, orgId: number | null): OrgE
       ])
       if (cancelled) return
       if (!projectsRes.ok) {
+        if (projectsRes.reason === "unauthenticated") void notifySessionExpiredIfCurrent(jwt)
         setError(
-          projectsRes.reason === "unauthorized"
+          projectsRes.reason === "forbidden"
             ? "You don't have access to this organization's projects."
             : "Couldn't load the organization's files. Check your connection and retry.",
         )

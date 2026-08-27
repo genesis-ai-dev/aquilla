@@ -72,6 +72,10 @@ const makeDeps = (over: Partial<BuildProjectExportDeps> = {}): BuildProjectExpor
     projectFiles.map((f) => ({ fileId: f.id, fileName: f.name, cells: [cell({ fileId: f.id })] })),
   fetchAudioAttachments: async () => ({ cells: {} }),
   fetchSidecar: async () => new TextEncoder().encode("RAW").buffer as ArrayBuffer,
+  fetchRawSource: async () => ({
+    bytes: new TextEncoder().encode("RAW-ORIGINAL").buffer as ArrayBuffer,
+    rawOriginal: true,
+  }),
   fetchInjectedText: async ({ fileId, targetLang }) => `\\id ${fileId} lane=${targetLang ?? "default"}`,
   assembleAudio: async () => ({ entries: [], skipped: [] }),
   exportDocxFn: async () => ({ blob: new Blob(["DOCX-INJECTED"]) }),
@@ -178,13 +182,17 @@ describe("buildProjectExport — text routing", () => {
 
 describe("buildProjectExport — source docs, audio, dedupe", () => {
   it("fetches the source document ONCE per file across lanes, with no lane param", async () => {
-    const fetchSidecar = vi.fn<NonNullable<BuildProjectExportDeps["fetchSidecar"]>>(
-      async () => new TextEncoder().encode("RAW").buffer as ArrayBuffer,
+    // USFM source docs go through the raw-mode fetch (AQU-907).
+    const fetchRawSource = vi.fn<NonNullable<BuildProjectExportDeps["fetchRawSource"]>>(
+      async () => ({
+        bytes: new TextEncoder().encode("RAW-ORIGINAL").buffer as ArrayBuffer,
+        rawOriginal: true,
+      }),
     )
     const { entries, report } = await buildProjectExport(
       sel([{ id: "f1", name: "GEN.SFM", type: "usfm" }]),
       opts({ lanes: ["fr", "de"], includeSourceDocs: true }),
-      makeDeps({ fetchSidecar }),
+      makeDeps({ fetchRawSource }),
     )
     // Two lane copies of the text + one source document — not one per lane.
     expect(entries.map((e) => e.path)).toEqual([
@@ -192,8 +200,8 @@ describe("buildProjectExport — source docs, audio, dedupe", () => {
       "de/GEN.usfm",
       "source-documents/GEN.SFM",
     ])
-    expect(fetchSidecar).toHaveBeenCalledTimes(1)
-    expect(fetchSidecar.mock.calls[0]![0].targetLang).toBeUndefined()
+    expect(fetchRawSource).toHaveBeenCalledTimes(1)
+    expect(fetchRawSource.mock.calls[0]![0].targetLang).toBeUndefined()
     expect(report.files[0].entries).toHaveLength(3)
   })
 
@@ -373,7 +381,13 @@ describe("buildProjectExport — transient-failure classification (cache poisoni
 })
 
 describe("buildProjectExport — source-doc honesty & slug safety", () => {
-  it("records the injection-honesty note for USFM source documents (no server raw mode)", async () => {
+  it("fetches USFM source documents via raw mode — no honesty note when the server honors it", async () => {
+    const fetchRawSource = vi.fn<NonNullable<BuildProjectExportDeps["fetchRawSource"]>>(
+      async () => ({
+        bytes: new TextEncoder().encode("RAW-ORIGINAL").buffer as ArrayBuffer,
+        rawOriginal: true,
+      }),
+    )
     const fetchSidecar = vi.fn<NonNullable<BuildProjectExportDeps["fetchSidecar"]>>(
       async () => new TextEncoder().encode("RAW").buffer as ArrayBuffer,
     )
@@ -383,15 +397,34 @@ describe("buildProjectExport — source-doc honesty & slug safety", () => {
         { id: "f2", name: "Slides.docx", type: "docx" },
       ]),
       opts({ textMode: "none", includeSourceDocs: true }),
-      makeDeps({ fetchSidecar }),
+      makeDeps({ fetchRawSource, fetchSidecar }),
     )
-    // The /source route ignores unknown query params and has no raw mode for
-    // USFM — it injects current default-lane translations. The manifest must
-    // say so instead of presenting the entry as the byte-exact upload; docx
-    // sidecars really are the stored bytes, so they carry no note.
+    // AQU-907: USFM goes through ?mode=raw (byte-exact original — no note);
+    // docx sidecars are already the stored bytes via the plain fetch.
+    expect(fetchRawSource).toHaveBeenCalledTimes(1)
+    expect(fetchSidecar).toHaveBeenCalledTimes(1)
+    expect(report.files[0].entries).toEqual(["source-documents/GEN.SFM"])
+    expect(report.files[0].notes).toBeUndefined()
+    expect(report.files[1].notes).toBeUndefined()
+  })
+
+  it("records the injection-honesty note when the server predates raw mode", async () => {
+    // An old sync-worker ignores ?mode=raw and returns the injected
+    // serialization (no raw-original header). The manifest must say so
+    // instead of presenting the entry as the byte-exact upload.
+    const fetchRawSource = vi.fn<NonNullable<BuildProjectExportDeps["fetchRawSource"]>>(
+      async () => ({
+        bytes: new TextEncoder().encode("INJECTED").buffer as ArrayBuffer,
+        rawOriginal: false,
+      }),
+    )
+    const { report } = await buildProjectExport(
+      sel([{ id: "f1", name: "GEN.SFM", type: "usfm" }]),
+      opts({ textMode: "none", includeSourceDocs: true }),
+      makeDeps({ fetchRawSource }),
+    )
     expect(report.files[0].entries).toEqual(["source-documents/GEN.SFM"])
     expect(report.files[0].notes?.join(" ")).toMatch(/translations injected/)
-    expect(report.files[1].notes).toBeUndefined()
   })
 
   it("egressSlug rejects all-dot names that would escape the zip folder", () => {

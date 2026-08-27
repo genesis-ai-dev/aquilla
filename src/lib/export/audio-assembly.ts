@@ -14,7 +14,8 @@ import { parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { encodeWavPcm16 } from "@/lib/audio/wav-encode"
 import { TARGET_RATE } from "@/lib/audio/decode-mono"
 import { audioMimeForExt } from "@/lib/audio/mime"
-import { characterKey, concatPcm } from "@/lib/export/audio-by-character"
+import { characterKey } from "@/lib/export/audio-by-character"
+import { concatPcm } from "@/lib/audio/decode-mono"
 
 export type AudioAssemblyMode = Exclude<EgressAudioMode, "none">
 

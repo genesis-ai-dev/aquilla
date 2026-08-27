@@ -525,6 +525,69 @@ describe('changesets — member removed after prepare is denied on GET/commit/di
   })
 })
 
+// [Pen test] API security & data exposure (2026-08-27): GET and /discard had
+// no throttle at all — only prepare and commit did.
+describe('changesets — GET/discard rate limiting', () => {
+  it('throttles a credential that floods GET', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb, contributorCred())
+    const { body: prep } = await prepare(env, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hi' },
+    ])
+
+    await tdb.pg.query(
+      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
+       SELECT 'external_changeset_lifecycle', $1, 1 FROM generate_series(1, 300)`,
+      [`credential:${CRED_1}`],
+    )
+    const res = (await handleExternalChangesetsRequest(
+      new Request(`https://w/api/v1/external/projects/${PROJECT}/changesets/${prep.changeset.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env,
+    ))!
+    expect(res.status).toBe(429)
+    expect((await res.json() as any).error.code).toBe('rate_limited')
+  })
+
+  it('throttles a credential that floods /discard', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb, contributorCred())
+    const { body: prep } = await prepare(env, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hi' },
+    ])
+
+    await tdb.pg.query(
+      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
+       SELECT 'external_changeset_lifecycle', $1, 1 FROM generate_series(1, 300)`,
+      [`credential:${CRED_1}`],
+    )
+    const res = (await handleExternalChangesetsRequest(
+      new Request(`https://w/api/v1/external/projects/${PROJECT}/changesets/${prep.changeset.id}/discard`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env,
+    ))!
+    expect(res.status).toBe(429)
+  })
+
+  it('does not throttle a fresh credential on GET/discard', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb, contributorCred())
+    const { body: prep } = await prepare(env, token, [
+      { kind: 'SetTranslation', fileId: FILE, cellId: 'cell-1', value: 'hi' },
+    ])
+    const res = (await handleExternalChangesetsRequest(
+      new Request(`https://w/api/v1/external/projects/${PROJECT}/changesets/${prep.changeset.id}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env,
+    ))!
+    expect(res.status).toBe(200)
+  })
+})
+
 // ── commit replay: crash-retry idempotency (W1-B §4/§9) ─────────────────────
 // The bug this guards: pre-W1-B, commit minted event ids at commit time and
 // flipped to 'committed' only at the end, so a worker eviction mid-commit left

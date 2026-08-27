@@ -397,6 +397,9 @@ function VirtualizedMilestoneList({
   )
 }
 
+/** Keep collapsed inner borders at full strength; fade only the chevron, harder than Button's 50%. */
+const STEP_BUTTON_CLASS = "disabled:opacity-100 disabled:[&>svg]:opacity-30"
+
 export function MilestoneNavigator({
   items,
   activeKey,
@@ -525,6 +528,7 @@ export function MilestoneNavigator({
           size="icon"
           disabled={!canGoPrevious}
           aria-label={t(vocabulary.previous)}
+          className={STEP_BUTTON_CLASS}
           onClick={() => {
             const destination = destinations[activeDestinationIndex - 1]
             if (destination) choose(destination.milestoneKey, destination.subsectionKey)
@@ -660,6 +664,7 @@ export function MilestoneNavigator({
           size="icon"
           disabled={!canGoNext}
           aria-label={t(vocabulary.next)}
+          className={STEP_BUTTON_CLASS}
           onClick={() => {
             const destination = destinations[activeDestinationIndex + 1]
             if (destination) choose(destination.milestoneKey, destination.subsectionKey)

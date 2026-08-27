@@ -84,7 +84,11 @@ describe("MilestoneNavigator", () => {
     expect(screen.getByText("Verses 1–25")).toHaveClass("leading-none")
     expect(screen.getByText("Verses 1–25")).toHaveClass("hidden")
     expect(screen.getByText("Verses 1–25")).toHaveClass("xl:inline")
-    expect(screen.getByRole("button", { name: "Previous chapter" })).toBeDisabled()
+    const previous = screen.getByRole("button", { name: "Previous chapter" })
+    expect(previous).toBeDisabled()
+    expect(previous).toHaveClass("disabled:opacity-100")
+    expect(previous).toHaveClass("disabled:[&>svg]:opacity-30")
+    expect(screen.getByRole("button", { name: "Next chapter" })).toHaveClass("disabled:opacity-100")
   })
 
   it("shows the full book name and restores fixed width from xl up", () => {

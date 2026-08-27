@@ -445,7 +445,7 @@ export const projectSettings = defineNamespace({
 
     // ── Terminology card ──
     "projectSettings.terminology.title": "Terminology Library",
-    "projectSettings.terminology.description": "Manage approved terms, renderings, and the project glossary (term base).",
+    "projectSettings.terminology.description": "Manage approved terms, renderings, and the project terminology (term base).",
     "projectSettings.terminology.openButton": "Open Terminology Library",
 
     // ── ValidationSettingsSection.tsx ──
@@ -545,6 +545,7 @@ export const projectSettings = defineNamespace({
     // "Restore" button → common.restore (identical text)
     "projectSettings.languages.restoreLaneAriaLabel": "Restore lane {lane}",
     "projectSettings.languages.addLaneLabel": "Add a target lane",
+    "projectSettings.languages.suggestionsAriaLabel": "Language suggestions",
     // "e.g. fr-CA" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
     // "Adding…" busy label → common.adding (identical text)
     "projectSettings.languages.addLaneButton": "Add lane",
@@ -1097,6 +1098,15 @@ export const projectSettings = defineNamespace({
         placeholders: {
           lane: "The lane's language tag (data, not translated).",
         },
+      },
+      "projectSettings.languages.suggestionsAriaLabel": {
+        description:
+          "Accessible name of the dropdown list of languages that appears under a " +
+          "source/target language field as the user types (AQU-988). Screen-reader " +
+          "only — the list itself shows language names, so this just says what the " +
+          "list is. The field still accepts any typed text, so avoid wording that " +
+          "implies these are the only allowed values.",
+        maxLength: 30,
       },
       "projectSettings.localModels.notDownloadedBadge": {
         description: "Badge on a not-yet-downloaded local AI model row, stating its download size.",

@@ -8,7 +8,7 @@
  * not a synthetic pathname change.
  */
 
-import { describe, it, expect, afterEach } from "vitest"
+import { describe, it, expect, afterEach, vi } from "vitest"
 import { act, render, screen } from "@testing-library/react"
 import { Link, MemoryRouter, Navigate, Route, Routes } from "react-router-dom"
 import { SessionExpiredBanner } from "./SessionExpiredBanner"
@@ -16,6 +16,14 @@ import {
   clearSessionExpired,
   notifySessionExpired,
 } from "@/lib/errors/session-expired-signal"
+
+let activeJwt: string | null = "jwt-active"
+vi.mock("@/hooks/useAccounts", () => ({
+  useAccounts: () => ({
+    active: activeJwt ? { jwt: activeJwt, username: "alice", createdAt: "x" } : null,
+    loading: false,
+  }),
+}))
 
 /** Mirrors App.tsx: the banner sits above the route table, inside the router. */
 function renderApp(initialEntry = "/") {
@@ -44,6 +52,7 @@ const banner = () => screen.queryByRole("alert")
 afterEach(() => {
   // The flag is module-level state — reset it so tests stay independent.
   clearSessionExpired()
+  activeJwt = "jwt-active"
 })
 
 describe("SessionExpiredBanner", () => {
@@ -54,18 +63,18 @@ describe("SessionExpiredBanner", () => {
 
   it("appears when a fetch helper signals session expiry", () => {
     renderApp("/orgs/all")
-    act(() => notifySessionExpired())
+    act(() => notifySessionExpired("jwt-active"))
     expect(banner()).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /sign in again/i })).toHaveAttribute(
       "href",
-      "/login?next=%2Forgs%2Fall",
+      "/login?next=%2Forgs%2Fall&reauth=1",
     )
   })
 
   it("survives the boot redirect from / to /orgs/all", () => {
     renderApp("/")
     // The 401 lands as the app is redirecting — the case that regressed.
-    act(() => notifySessionExpired())
+    act(() => notifySessionExpired("jwt-active"))
     expect(screen.getByText("all orgs")).toBeInTheDocument()
     expect(banner()).toBeInTheDocument()
   })
@@ -73,14 +82,14 @@ describe("SessionExpiredBanner", () => {
   it("is visible at mount when the 401 fired before the banner mounted", () => {
     // Boot ordering: OrgContext's first fetch rejects with 401 during module
     // init, well before React renders this component.
-    notifySessionExpired()
+    notifySessionExpired("jwt-active")
     renderApp("/")
     expect(banner()).toBeInTheDocument()
   })
 
   it("stays visible while the user navigates between routes", async () => {
     renderApp("/orgs/all")
-    act(() => notifySessionExpired())
+    act(() => notifySessionExpired("jwt-active"))
     // Navigate onward the way the org switcher would.
     await act(async () => screen.getByRole("link", { name: "open org 7" }).click())
     expect(screen.getByText("org 7")).toBeInTheDocument()
@@ -89,7 +98,7 @@ describe("SessionExpiredBanner", () => {
 
   it("disappears only when dismissed", async () => {
     renderApp("/orgs/all")
-    act(() => notifySessionExpired())
+    act(() => notifySessionExpired("jwt-active"))
     const dismiss = screen.getByRole("button", { name: /dismiss/i })
     await act(async () => dismiss.click())
     expect(banner()).toBeNull()
@@ -97,10 +106,31 @@ describe("SessionExpiredBanner", () => {
 
   it("disappears when the user re-authenticates", () => {
     renderApp("/orgs/all")
-    act(() => notifySessionExpired())
+    act(() => notifySessionExpired("jwt-active"))
     expect(banner()).toBeInTheDocument()
     // finalizeSession() calls this on every successful auth.
     act(() => clearSessionExpired())
+    expect(banner()).toBeNull()
+  })
+
+  it("does not leak an expired banner onto another active account", () => {
+    notifySessionExpired("jwt-old-account")
+    renderApp("/orgs/all")
+    expect(banner()).toBeNull()
+  })
+
+  it("hides immediately when the user switches away from the expired account", () => {
+    notifySessionExpired("jwt-active")
+    const view = renderApp("/orgs/all")
+    expect(banner()).toBeInTheDocument()
+
+    activeJwt = "jwt-other"
+    view.rerender(
+      <MemoryRouter initialEntries={["/orgs/all"]}>
+        <SessionExpiredBanner />
+        <Routes><Route path="/orgs/all" element={<div>all orgs</div>} /></Routes>
+      </MemoryRouter>,
+    )
     expect(banner()).toBeNull()
   })
 })

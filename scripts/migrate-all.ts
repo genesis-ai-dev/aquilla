@@ -66,6 +66,11 @@ import {
   type GitlabIdmlOriginal,
 } from "./lib/idml-migration-artifacts"
 
+import { installMigrateRunnerHeader } from "./lib/migrate-runner-header"
+
+// AQU-1005: stamp every /migrate/* call with the runner id (fence audit).
+installMigrateRunnerHeader()
+
 const SYNC = process.env.SYNC_BASE ?? "https://api.aquilla.app/sync"
 const INGEST_CHUNK = 2500
 const FALLBACK_AUTHOR = "legacy-import"

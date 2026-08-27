@@ -5,7 +5,7 @@
 // (that's covered by MembersPanel's own concerns / manual QA).
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, waitFor } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import { SharePanel } from "./SharePanel"
 import type { MembersPanelScopeConfig } from "./MembersPanel"
 
@@ -97,6 +97,7 @@ vi.mock("@/lib/sync/project-settings", () => ({
 const mockResolveCloudProjectResult = vi.fn()
 vi.mock("@/lib/sync/cloud-projects", () => ({
   resolveCloudProjectResult: (...args: unknown[]) => mockResolveCloudProjectResult(...args),
+  projectsResultError: () => new Error("project load failed"),
 }))
 
 const mockFetchMemberScopes = vi.fn()
@@ -226,6 +227,17 @@ describe("SharePanel — member scopes wiring", () => {
       { value: "", label: "Default" },
     ])
   })
+
+  it("withholds scope editing and clears stale scope state when any member scope fails", async () => {
+    mockFetchMemberScopes.mockRejectedValue(new Error("scope service offline"))
+    renderPanel()
+
+    await waitFor(() => {
+      expect(mockFetchMemberScopes).toHaveBeenCalledWith("test-jwt", "proj-1", 2)
+      expect(lastMembersPanelProps?.scopeConfig).toBeUndefined()
+      expect(screen.getByRole("alert")).toHaveTextContent(/offline/i)
+    })
+  })
 })
 
 // AQU-672 parity in the Share modal: the Members tab offers org colleagues as
@@ -240,7 +252,10 @@ describe("SharePanel — eligible org-member suggestions", () => {
     orgMocks.activeOrgId = 7
     orgMocks.roster = []
     mockFetchProjectSettings.mockResolvedValue(null)
-    mockResolveCloudProjectResult.mockResolvedValue({ ok: false })
+    mockResolveCloudProjectResult.mockResolvedValue({
+      ok: true,
+      project: { id: "proj-1", orgId: 7, files: [] },
+    })
     mockFetchMemberScopes.mockResolvedValue([])
   })
 
@@ -261,6 +276,10 @@ describe("SharePanel — eligible org-member suggestions", () => {
 
   it("passes no suggestions without org context (personal project)", async () => {
     orgMocks.activeOrgId = null
+    mockResolveCloudProjectResult.mockResolvedValue({
+      ok: true,
+      project: { id: "proj-1", orgId: null, files: [] },
+    })
     renderPanel()
 
     await waitFor(() => {

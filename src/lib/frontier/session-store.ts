@@ -9,6 +9,9 @@ const LEGACY_KEY = "current"
 interface Envelope {
   active: string | null
   sessions: Record<string, FrontierSession>
+  /** Last account whose client data boundary was fully prepared and published.
+   * Undefined is the one-time pre-boundary upgrade state. */
+  dataOwner?: string | null
 }
 
 async function db() {
@@ -23,6 +26,15 @@ type Listener = () => void
 const listeners = new Set<Listener>()
 function notify() { for (const l of listeners) l() }
 
+// Monotonic within this tab. It advances for both local writes and cross-tab
+// pings so async auth checks can prove that no session mutation landed between
+// reading IndexedDB and acting on that result.
+let sessionRevision = 0
+
+export function getSessionRevision(): number {
+  return sessionRevision
+}
+
 // Cross-tab reconciliation (FRO-367). The session lives in IndexedDB, which
 // (unlike localStorage) emits no cross-tab events, so signing into account B
 // in one tab left every other tab showing account A — and an org switcher
@@ -34,13 +46,46 @@ function notify() { for (const l of listeners) l() }
 // notify() performs no writes, so there's no loop. Mirrors the existing
 // cross-tab pattern in lib/store/user-api-keys.ts.
 const PING_KEY = "frontier:session-ping"
+const CHANNEL_NAME = "frontier:session"
+const seenCrossTabPings = new Set<string>()
+let crossTabChannel: BroadcastChannel | null = null
+let externalReconcileQueued = false
+
+function scheduleExternalReconcile(): void {
+  if (externalReconcileQueued) return
+  externalReconcileQueued = true
+  queueMicrotask(() => {
+    externalReconcileQueued = false
+    sessionRevision += 1
+    notify()
+  })
+}
+
+function receiveCrossTabPing(ping: string | null): void {
+  if (ping) {
+    if (seenCrossTabPings.has(ping)) return
+    seenCrossTabPings.add(ping)
+    if (seenCrossTabPings.size > 64) {
+      const oldest = seenCrossTabPings.values().next().value
+      if (oldest) seenCrossTabPings.delete(oldest)
+    }
+  }
+  scheduleExternalReconcile()
+}
 
 function pingOtherTabs(): void {
+  ensureCrossTabListener()
+  const ping = `${Date.now()}:${crypto.randomUUID()}`
   try {
-    localStorage.setItem(PING_KEY, `${Date.now()}:${crypto.randomUUID()}`)
+    crossTabChannel?.postMessage(ping)
   } catch {
-    // localStorage unavailable (quota, private mode) — cross-tab sync degrades
-    // to the pre-fix behavior (reload to reconcile); this tab is unaffected.
+    // The storage ping below remains available for mixed-version/blocked BC.
+  }
+  try {
+    localStorage.setItem(PING_KEY, ping)
+  } catch {
+    // BroadcastChannel and focus/visibility reconciliation still cover modern
+    // browsers when localStorage is blocked (private or hardened profiles).
   }
 }
 
@@ -48,8 +93,26 @@ let crossTabInstalled = false
 function ensureCrossTabListener(): void {
   if (crossTabInstalled || typeof window === "undefined") return
   crossTabInstalled = true
+  try {
+    if (typeof window.BroadcastChannel === "function") {
+      crossTabChannel = new window.BroadcastChannel(CHANNEL_NAME)
+      crossTabChannel.addEventListener("message", (event) => {
+        receiveCrossTabPing(typeof event.data === "string" ? event.data : null)
+      })
+    }
+  } catch {
+    crossTabChannel = null
+  }
   window.addEventListener("storage", (e) => {
-    if (e.key === PING_KEY) notify()
+    if (e.key === PING_KEY) {
+      receiveCrossTabPing(e.newValue)
+    }
+  })
+  // Recover even when both messaging mechanisms were unavailable or a tab was
+  // suspended while events fired. The subscriber re-reads IndexedDB on resume.
+  window.addEventListener("focus", () => receiveCrossTabPing(null))
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") receiveCrossTabPing(null)
   })
 }
 
@@ -113,36 +176,54 @@ export function hasAuthHintCookie(): boolean {
 }
 // --------------------------
 
-async function writeEnvelope(env: Envelope): Promise<void> {
-  const d = await db()
-  await d.put(STORE, env, ENVELOPE_KEY)
+function publishEnvelope(env: Envelope, notifyLocal = true): void {
+  sessionRevision += 1
   if (env.active != null) {
     setAuthHint()
   } else {
     clearAuthHint()
   }
-  notify()
+  if (notifyLocal) notify()
   pingOtherTabs()
 }
 
-// Every mutation is a read-modify-write of ONE envelope record, and the read
-// and the write are separate awaits. Two overlapping mutations therefore
-// interleave, and the slower one writes back a snapshot taken before the
-// faster one landed — silently undoing it. The email backfill made this
-// reachable in practice: it runs while the account menu is open, so a logout
-// landing mid-backfill got its removal overwritten and the account came back.
-// Serialize mutations through one chain. Reads stay unserialized.
+// Every mutation is a read-modify-write of ONE envelope record. A same-tab
+// promise chain keeps calls ordered, while the IndexedDB readwrite transaction
+// below serializes that whole read-modify-write across tabs. The email backfill
+// made the old race reachable in practice: a logout landing mid-backfill could
+// be overwritten and make the removed account reappear. Reads stay unserialized.
 let mutationQueue: Promise<unknown> = Promise.resolve()
 
 /**
  * Runs `mutator` against a freshly-read envelope, with no other mutation
  * interleaving. Returning `false` skips the write (and its notify).
  */
-function mutateEnvelope(mutator: (env: Envelope) => boolean | void): Promise<void> {
+function mutateEnvelope(
+  mutator: (env: Envelope) => boolean | void,
+  options: { notifyLocal?: boolean } = {},
+): Promise<void> {
   const run = mutationQueue.then(async () => {
-    const env = await readEnvelope()
-    if (mutator(env) === false) return
-    await writeEnvelope(env)
+    const d = await db()
+    // A single readwrite transaction is serialized by IndexedDB across every
+    // connection/tab. Keeping the read and write in it prevents two tabs from
+    // committing snapshots that silently overwrite each other's account edit.
+    const tx = d.transaction(STORE, "readwrite")
+    const existing = (await tx.store.get(ENVELOPE_KEY)) as Envelope | undefined
+    const legacy = existing
+      ? undefined
+      : (await tx.store.get(LEGACY_KEY)) as FrontierSession | undefined
+    const env = existing ?? (legacy
+      ? { active: sessionKey(legacy), sessions: { [sessionKey(legacy)]: legacy } }
+      : { active: null, sessions: {} })
+
+    if (mutator(env) === false) {
+      await tx.done
+      return
+    }
+    await tx.store.put(env, ENVELOPE_KEY)
+    if (legacy) await tx.store.delete(LEGACY_KEY)
+    await tx.done
+    publishEnvelope(env, options.notifyLocal !== false)
   })
   // A rejecting mutation must not poison later ones, but still reject for its
   // own caller.
@@ -159,13 +240,47 @@ export interface SessionSummary {
   active: boolean
 }
 
-export async function listSessions(): Promise<SessionSummary[]> {
-  const env = await readEnvelope()
+function summaries(env: Envelope): SessionSummary[] {
   return Object.entries(env.sessions).map(([key, s]) => ({
     key, username: s.username,
     email: s.email,
     createdAt: s.createdAt, active: env.active === key,
   }))
+}
+
+/** One IndexedDB read for the first auth decision and account menu state. */
+export async function loadAccountsSnapshot(): Promise<{
+  active: FrontierSession | null
+  sessions: SessionSummary[]
+  dataOwner?: string | null
+}> {
+  const env = await readEnvelope()
+  return {
+    active: env.active ? env.sessions[env.active] ?? null : null,
+    sessions: summaries(env),
+    dataOwner: env.dataOwner,
+  }
+}
+
+/**
+ * Durably records that cleanup/migration for `ownerKey` completed. The active
+ * session is checked in the same serialized mutation so a superseded async
+ * transition cannot publish its owner after another tab switches again.
+ */
+export async function publishDataOwner(ownerKey: string | null): Promise<boolean> {
+  let published = false
+  await mutateEnvelope((env) => {
+    if (env.active !== ownerKey) return false
+    published = true
+    if (env.dataOwner === ownerKey) return false
+    env.dataOwner = ownerKey
+  }, { notifyLocal: false })
+  return published
+}
+
+export async function listSessions(): Promise<SessionSummary[]> {
+  const env = await readEnvelope()
+  return summaries(env)
 }
 
 /**

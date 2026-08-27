@@ -23,19 +23,26 @@ vi.mock("@/lib/sync/credentials", () => ({
   revokeCredential: vi.fn(),
 }))
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: vi.fn() }))
-vi.mock("@/lib/sync/cloud-projects", () => ({ fetchAccessibleProjects: vi.fn() }))
+vi.mock("@/lib/sync/cloud-projects", () => ({
+  fetchAccessibleProjectsResult: vi.fn(),
+  projectsResultError: vi.fn((result: { reason: string }) =>
+    result.reason === "unreachable"
+      ? new TypeError("Failed to fetch")
+      : new Error("project load failed"),
+  ),
+}))
 
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { listCredentials, mintCredential, revokeCredential } from "@/lib/sync/credentials"
 import { listMyOrgs } from "@/lib/frontier/orgs"
-import { fetchAccessibleProjects } from "@/lib/sync/cloud-projects"
+import { fetchAccessibleProjectsResult } from "@/lib/sync/cloud-projects"
 
 const mockUseFrontierSession = vi.mocked(useFrontierSession)
 const mockListCredentials = vi.mocked(listCredentials)
 const mockMintCredential = vi.mocked(mintCredential)
 const mockRevokeCredential = vi.mocked(revokeCredential)
 const mockListMyOrgs = vi.mocked(listMyOrgs)
-const mockFetchAccessibleProjects = vi.mocked(fetchAccessibleProjects)
+const mockFetchAccessibleProjects = vi.mocked(fetchAccessibleProjectsResult)
 
 const ORG: OrgSummary = { id: 1, name: "Acme Org", role: { level: 600, name: "maintainer" } }
 
@@ -101,12 +108,17 @@ beforeEach(() => {
   mockUseFrontierSession.mockReturnValue({
     session: { jwt: "test-jwt" } as ReturnType<typeof useFrontierSession>["session"],
     loading: false,
+    sessionLoadError: null,
+    retrySessionLoad: vi.fn(),
     login: vi.fn(),
     register: vi.fn(),
     logout: vi.fn(),
   })
   mockListMyOrgs.mockResolvedValue([ORG])
-  mockFetchAccessibleProjects.mockResolvedValue([PROJECT_CONTRIBUTOR, PROJECT_MAINTAINER])
+  mockFetchAccessibleProjects.mockResolvedValue({
+    ok: true,
+    projects: [PROJECT_CONTRIBUTOR, PROJECT_MAINTAINER],
+  })
   mockListCredentials.mockResolvedValue([ASK_CREDENTIAL, REVOKED_CREDENTIAL])
 })
 afterEach(() => vi.restoreAllMocks())
@@ -132,6 +144,19 @@ describe("ApiTokensSection", () => {
     mockListCredentials.mockResolvedValue([])
     render(<ApiTokensSection />)
     await waitFor(() => expect(screen.getByText(/No tokens yet/)).toBeInTheDocument())
+  })
+
+  it("surfaces a scope-directory failure and prevents minting a falsely unscoped token", async () => {
+    mockFetchAccessibleProjects.mockResolvedValue({ ok: false, reason: "unreachable" })
+    render(<ApiTokensSection />)
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/offline|connect/i)
+    expect(screen.getByRole("button", { name: "New token" })).toBeDisabled()
+
+    mockFetchAccessibleProjects.mockResolvedValue({ ok: true, projects: [] })
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    await waitFor(() => expect(mockFetchAccessibleProjects).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(screen.getByRole("button", { name: "New token" })).toBeEnabled())
   })
 
   it("mint flow: act mode stays disabled until a maintainer-level project is picked, then mints and shows the token exactly once", async () => {

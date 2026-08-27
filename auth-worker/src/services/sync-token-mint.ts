@@ -11,7 +11,7 @@
 
 import { sign } from "hono/jwt"
 import type { AuthUser, Env, RoleResolution, SyncTokenClaims } from "../types"
-import { resolveProjectRole } from "./project-permissions"
+import { resolveProjectRole, RoleLookupError } from "./project-permissions"
 
 /** 15-minute lifetime — matches docs/SYNC.md. */
 export const SYNC_TOKEN_TTL_SECONDS = 15 * 60
@@ -62,6 +62,11 @@ export type SyncTokenMintFailure =
   | "project_frozen"
   /** Project exists but AD-12 resolution found no role for the user. */
   | "no_access"
+  /** AQU-996: a role-resolution query FAILED and no grant was found — the
+   *  denial would be unreliable (DB blip, not a missing grant). Callers must
+   *  answer with a transient 5xx, never a permission 403: the SPA outbox
+   *  quarantines events on mint 403 as permanently forbidden. */
+  | "role_lookup_failed"
   /** projectId/fileId contains R2-key-unsafe characters (see isPathSafeId). */
   | "unsafe_id"
 
@@ -144,7 +149,15 @@ export async function mintSyncTokenForUser(
   // AQU-285: is_active is a BOOLEAN NOT NULL DEFAULT TRUE column (migration 0033).
   if (!project.is_active) return { ok: false, reason: "project_frozen" }
 
-  const resolved = await resolveProjectRole(env, user, projectId)
+  let resolved: RoleResolution | null
+  try {
+    resolved = await resolveProjectRole(env, user, projectId)
+  } catch (err) {
+    if (err instanceof RoleLookupError) {
+      return { ok: false, reason: "role_lookup_failed" }
+    }
+    throw err
+  }
   if (!resolved) return { ok: false, reason: "no_access" }
 
   const signed = await signSyncTokenWithRole(env, user, projectId, fileId, resolved)

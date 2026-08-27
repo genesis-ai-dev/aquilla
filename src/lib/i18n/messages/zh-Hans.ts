@@ -4082,7 +4082,6 @@ export const zh_Hans: Catalog = {
   "terminology.editor.errorBlocked": "您的角色无法变更词汇表。",
   "terminology.editor.errorSourceAndRenderingRequired": "术语必须同时有来源词与译法才能激活。",
   "terminology.editor.errorImportFailed": "导入失败",
-  "terminology.editor.title": "词汇表",
   "terminology.editor.findingTerms": "正在寻找术语…",
   "terminology.editor.suggestTerms": "推荐术语",
   "terminology.editor.exportCsv": "导出 CSV",

@@ -16,6 +16,9 @@ export function handleFileVideoSet(
   db: AquillaDb,
   authed: AuthorizedEvent<'file.video.set'>,
   serverTs: number,
+  /** Pre-allocated server_seq for this event (AQU-1005: allocation happens
+   *  once per request via allocateSeqRange, outside the write transaction). */
+  serverSeq: number,
 ): DispatchResult {
   const { event, claims } = authed
 
@@ -35,6 +38,7 @@ export function handleFileVideoSet(
     payloadJson: JSON.stringify(event.payload),
     clientTs: event.clientTs,
     serverTs,
+    serverSeq,
   })
 
   const fileUpdate = buildFileVideoSetStmt(

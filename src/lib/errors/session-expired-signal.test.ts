@@ -23,7 +23,7 @@ describe("onSessionExpired / notifySessionExpired", () => {
   it("fires a registered handler when notifySessionExpired is called", () => {
     const handler = vi.fn()
     const unsub = onSessionExpired(handler)
-    notifySessionExpired()
+    notifySessionExpired("jwt-a")
     expect(handler).toHaveBeenCalledOnce()
     unsub()
   })
@@ -32,7 +32,7 @@ describe("onSessionExpired / notifySessionExpired", () => {
     const handler = vi.fn()
     const unsub = onSessionExpired(handler)
     unsub()
-    notifySessionExpired()
+    notifySessionExpired("jwt-a")
     expect(handler).not.toHaveBeenCalled()
   })
 
@@ -41,7 +41,7 @@ describe("onSessionExpired / notifySessionExpired", () => {
     const h2 = vi.fn()
     const u1 = onSessionExpired(h1)
     const u2 = onSessionExpired(h2)
-    notifySessionExpired()
+    notifySessionExpired("jwt-a")
     expect(h1).toHaveBeenCalledOnce()
     expect(h2).toHaveBeenCalledOnce()
     u1(); u2()
@@ -50,8 +50,8 @@ describe("onSessionExpired / notifySessionExpired", () => {
   it("fires again on subsequent notifications (not one-shot at module level)", () => {
     const handler = vi.fn()
     const unsub = onSessionExpired(handler)
-    notifySessionExpired()
-    notifySessionExpired()
+    notifySessionExpired("jwt-a")
+    notifySessionExpired("jwt-a")
     expect(handler).toHaveBeenCalledTimes(2)
     unsub()
   })
@@ -62,12 +62,12 @@ describe("onSessionExpired / notifySessionExpired", () => {
 describe("latched session-expired state", () => {
   it("starts clear and latches on notify", () => {
     expect(isSessionExpired()).toBe(false)
-    notifySessionExpired()
+    notifySessionExpired("jwt-a")
     expect(isSessionExpired()).toBe(true)
   })
 
   it("stays latched until explicitly cleared", () => {
-    notifySessionExpired()
+    notifySessionExpired("jwt-a")
     expect(isSessionExpired()).toBe(true)
     clearSessionExpired()
     expect(isSessionExpired()).toBe(false)
@@ -76,9 +76,9 @@ describe("latched session-expired state", () => {
   it("hands subscribers the current value on both set and clear", () => {
     const handler = vi.fn()
     const unsub = onSessionExpired(handler)
-    notifySessionExpired()
+    notifySessionExpired("jwt-a")
     clearSessionExpired()
-    expect(handler.mock.calls).toEqual([[true], [false]])
+    expect(handler.mock.calls).toEqual([["jwt-a"], [null]])
     unsub()
   })
 

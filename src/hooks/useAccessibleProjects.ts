@@ -1,6 +1,12 @@
-import { useEffect, useRef, useState } from "react";
-import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  fetchAccessibleProjectsResult,
+  projectsResultError,
+  type CloudProjectSummary,
+} from "@/lib/sync/cloud-projects";
 import { useFrontierSession } from "./useFrontierSession";
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry";
+import { toUserFacingError } from "@/lib/errors/user-error";
 
 /**
  * Server-side projects where the current caller holds maintainer (600)+.
@@ -10,13 +16,13 @@ import { useFrontierSession } from "./useFrontierSession";
  * AQU-321: scoped to minRole=600 (maintainer) so the picker doesn't enumerate
  * every project on the instance. The server enforces the same threshold.
  *
- * `fetchAccessibleProjects` already swallows network errors and returns []
- * on any failure, so this hook never enters an "error" branch — empty list
- * just means "nothing to invite to" or "couldn't reach server."
+ * Failures stay distinct from a genuinely empty list. In particular, 401
+ * raises credential-scoped re-auth rather than making the picker look empty.
  */
 export interface UseAccessibleProjects {
   projects: CloudProjectSummary[];
   isLoading: boolean;
+  error: string | null;
   refresh: () => Promise<void>;
 }
 
@@ -25,7 +31,11 @@ export function useAccessibleProjects(): UseAccessibleProjects {
   const jwt = session?.jwt ?? null;
   const [projects, setProjects] = useState<CloudProjectSummary[]>([]);
   const [isLoading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const aliveRef = useRef(true);
+  const requestRef = useRef(0);
+  const jwtRef = useRef(jwt);
+  jwtRef.current = jwt;
 
   // Reset aliveRef on each effect run — see useOrg for the StrictMode
   // rationale (cleanup-only would permanently flip it false in dev).
@@ -34,24 +44,41 @@ export function useAccessibleProjects(): UseAccessibleProjects {
     return () => { aliveRef.current = false; };
   }, []);
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
+    const request = ++requestRef.current;
     if (!jwt) {
-      if (aliveRef.current) setProjects([]);
+      if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt) {
+        setProjects([]);
+        setError(null);
+        setLoading(false);
+      }
       return;
     }
     setLoading(true);
     try {
       // AQU-321: only fetch projects where caller >= maintainer (600)
-      const next = await fetchAccessibleProjects(jwt, undefined, undefined, 600);
-      if (aliveRef.current) setProjects(next);
+      const result = await fetchAccessibleProjectsResult(jwt, undefined, undefined, 600);
+      if (!result.ok) {
+        if (result.reason === "unauthenticated") void notifySessionExpiredIfCurrent(jwt);
+        throw projectsResultError(result);
+      }
+      if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt) {
+        setProjects(result.projects);
+        setError(null);
+      }
+    } catch (caught) {
+      if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt) {
+        setProjects([]);
+        setError(toUserFacingError(caught, "project").message);
+      }
     } finally {
-      if (aliveRef.current) setLoading(false);
+      if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt) setLoading(false);
     }
-  };
+  }, [jwt]);
 
-  useEffect(() => { void refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [jwt]);
+  useEffect(() => { void refresh(); }, [refresh]);
 
-  return { projects, isLoading, refresh };
+  return { projects, isLoading, error, refresh };
 }
 
 /**
@@ -70,31 +97,59 @@ export function useProjectsForNavigation(enabled = true): UseAccessibleProjects 
   const jwt = session?.jwt ?? null;
   const [projects, setProjects] = useState<CloudProjectSummary[]>([]);
   const [isLoading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const aliveRef = useRef(true);
+  const requestRef = useRef(0);
+  const scopeRef = useRef({ enabled, jwt });
+  scopeRef.current = { enabled, jwt };
 
   useEffect(() => {
     aliveRef.current = true;
     return () => { aliveRef.current = false; };
   }, []);
 
-  const refresh = async () => {
-    if (!enabled) return;
+  const refresh = useCallback(async () => {
+    const request = ++requestRef.current;
+    if (!enabled) {
+      if (aliveRef.current && scopeRef.current.enabled === enabled && scopeRef.current.jwt === jwt) {
+        setProjects([]);
+        setError(null);
+        setLoading(false);
+      }
+      return;
+    }
     if (!jwt) {
-      if (aliveRef.current) setProjects([]);
+      if (aliveRef.current && requestRef.current === request && scopeRef.current.enabled === enabled && scopeRef.current.jwt === jwt) {
+        setProjects([]);
+        setError(null);
+        setLoading(false);
+      }
       return;
     }
     setLoading(true);
     try {
       // No minRole — include every project the caller can access (viewer+),
       // including direct project_members grants with no org-level membership.
-      const next = await fetchAccessibleProjects(jwt);
-      if (aliveRef.current) setProjects(next);
+      const result = await fetchAccessibleProjectsResult(jwt);
+      if (!result.ok) {
+        if (result.reason === "unauthenticated") void notifySessionExpiredIfCurrent(jwt);
+        throw projectsResultError(result);
+      }
+      if (aliveRef.current && requestRef.current === request && scopeRef.current.enabled === enabled && scopeRef.current.jwt === jwt) {
+        setProjects(result.projects);
+        setError(null);
+      }
+    } catch (caught) {
+      if (aliveRef.current && requestRef.current === request && scopeRef.current.enabled === enabled && scopeRef.current.jwt === jwt) {
+        setProjects([]);
+        setError(toUserFacingError(caught, "project").message);
+      }
     } finally {
-      if (aliveRef.current) setLoading(false);
+      if (aliveRef.current && requestRef.current === request && scopeRef.current.enabled === enabled && scopeRef.current.jwt === jwt) setLoading(false);
     }
-  };
+  }, [enabled, jwt]);
 
-  useEffect(() => { void refresh(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [enabled, jwt]);
+  useEffect(() => { void refresh(); }, [refresh]);
 
-  return { projects, isLoading, refresh };
+  return { projects, isLoading, error, refresh };
 }

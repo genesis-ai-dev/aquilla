@@ -17,6 +17,14 @@ import {
   ONBOARDING_RETURNING_USER_SKIP,
 } from "@/lib/event-names"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
+import {
+  isAccountOnboardingComplete,
+  markAccountOnboardingComplete,
+  markLocalOnboardingComplete,
+} from "@/lib/onboarding/completion"
+import { listMyOrgs } from "@/lib/frontier/orgs"
+import type { FrontierSession } from "@/lib/frontier/types"
 
 // i18n-exempt: analytics discriminator, not UI copy. Sent verbatim as the
 // `step_label` property on the ONBOARDING_STEP_VIEWED PostHog event (see the
@@ -39,6 +47,10 @@ export function OnboardingWizard() {
   const t = useT()
   const navigate = useNavigate()
   const { refresh: refreshOrgs } = useActiveOrg()
+  const { session } = useFrontierSession()
+  const [authenticatedUsername, setAuthenticatedUsername] = useState<string | null>(null)
+  const [loginClassificationError, setLoginClassificationError] = useState<string | null>(null)
+  const [loginClassificationBusy, setLoginClassificationBusy] = useState(false)
   const [step, setStep] = useState(1)
   const [displayName, setDisplayName] = useState("")
   const [createdProject, setCreatedProject] = useState<ProjectRecord | null>(null)
@@ -98,21 +110,48 @@ export function OnboardingWizard() {
    * a stale closure (the `orgs` state value captured at callback creation time
    * may not reflect the post-login server state).
    */
-  const handleLoginComplete = useCallback(async () => {
-    // Force a fresh fetch; the return value is the authoritative post-login list.
-    const freshOrgs = await refreshOrgs()
-    const alreadyOnboarded = localStorage.getItem("aquilla:onboardingComplete") === "true"
+  const handleLoginComplete = useCallback(async (authenticated: FrontierSession) => {
+    setAuthenticatedUsername(authenticated.username)
+    setLoginClassificationError(null)
+    setLoginClassificationBusy(true)
+    // Use the session returned by this exact login. Waiting for OrgProvider's
+    // React state here can otherwise reuse the pre-login/null JWT closure.
+    let freshOrgs
+    try {
+      freshOrgs = await listMyOrgs(authenticated.jwt)
+    } catch {
+      // Authentication succeeded, but we cannot yet distinguish a returning
+      // account from a brand-new one. Stay on this decision point and let the
+      // user retry; guessing either way skips required setup for one cohort.
+      setLoginClassificationError(t("onboarding.step.signIn.orgCheckFailed"))
+      setLoginClassificationBusy(false)
+      return
+    }
+    const alreadyOnboarded = isAccountOnboardingComplete(authenticated.username)
     if (alreadyOnboarded || freshOrgs.length > 0) {
-      localStorage.setItem("aquilla:onboardingComplete", "true")
+      markAccountOnboardingComplete(authenticated.username)
       posthog.capture(ONBOARDING_RETURNING_USER_SKIP, {
         reason: alreadyOnboarded ? "flag" : "has-orgs",
       })
+      void refreshOrgs()
       navigate("/")
     } else {
       // Brand-new account with no orgs yet — continue the signup wizard.
       next()
     }
-  }, [refreshOrgs, navigate, next])
+    setLoginClassificationBusy(false)
+  }, [refreshOrgs, navigate, next, t])
+
+  const handleSignupComplete = useCallback((authenticated: FrontierSession) => {
+    setAuthenticatedUsername(authenticated.username)
+    next()
+  }, [next])
+
+  const markCompletion = useCallback(() => {
+    const username = authenticatedUsername ?? session?.username
+    if (username) markAccountOnboardingComplete(username)
+    else markLocalOnboardingComplete()
+  }, [authenticatedUsername, session?.username])
 
   const handleProjectCreated = useCallback((project: ProjectRecord) => {
     setCreatedProject(project)
@@ -120,7 +159,7 @@ export function OnboardingWizard() {
   }, [next])
 
   const handleFinish = useCallback(() => {
-    localStorage.setItem("aquilla:onboardingComplete", "true")
+    markCompletion()
     if (createdProject) {
       navigate(`/project/${createdProject.id}/editor`, {
         state: { openSetupChecklist: true },
@@ -128,12 +167,12 @@ export function OnboardingWizard() {
     } else {
       navigate("/")
     }
-  }, [createdProject, navigate])
+  }, [createdProject, navigate, markCompletion])
 
   const handleSkipProject = useCallback(() => {
-    localStorage.setItem("aquilla:onboardingComplete", "true")
+    markCompletion()
     navigate("/")
-  }, [navigate])
+  }, [navigate, markCompletion])
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-background p-4" aria-label={t("onboarding.wizard.setupAriaLabel")}>
@@ -162,7 +201,16 @@ export function OnboardingWizard() {
         {/* Steps */}
         {step === 1 && <WelcomeStep onNext={next} />}
         {step === 2 && <PrivacyStep onNext={next} onBack={back} />}
-        {step === 3 && <SignInStep onNext={next} onBack={back} onLoginComplete={handleLoginComplete} />}
+        {step === 3 && (
+          <SignInStep
+            onNext={next}
+            onBack={back}
+            onLoginComplete={handleLoginComplete}
+            onSignupComplete={handleSignupComplete}
+            continuationBusy={loginClassificationBusy}
+            continuationError={loginClassificationError}
+          />
+        )}
         {step === 4 && (
           <NameStep
             value={displayName}

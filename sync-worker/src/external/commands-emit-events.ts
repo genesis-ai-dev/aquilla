@@ -73,7 +73,8 @@ export interface EmitEventsCommand {
 
 /** Changeset floor = max REQUIRED_ROLE over the batch's event kinds
  *  (role-policy is the single source of truth; dynamic bumps — foreign
- *  unvalidate/comment mutation → MAINTAINER — are prepare-time checks). */
+ *  unvalidate → MAINTAINER, foreign comment mutation → FOREIGN_COMMENT_ROLE
+ *  — are prepare-time checks). */
 export function emitEventsFloor(cmd: EmitEventsCommand): number {
   let floor = 0
   for (const e of cmd.events) {

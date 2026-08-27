@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { applyUserProviderOverride } from "../../helpers/mock-llm-server"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { ensureAuthState } from "../../helpers/auth"
@@ -90,13 +91,7 @@ test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice,
   // top of project settings.
   const llmBase = process.env.VITE_LLM_BASE_URL ?? ""
   expect(llmBase).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
-  await alice.evaluate(({ endpoint }) => {
-    localStorage.setItem("aquilla:userProviderOverride", JSON.stringify({
-      endpoint,
-      model: "mock-model",
-      apiKey: "",
-    }))
-  }, { endpoint: `${llmBase}/v1` })
+  await applyUserProviderOverride(alice, alice.username, `${llmBase}/v1`)
   await alice.reload()
   const ws = new Workspace(alice)
   await ws.importFile(SAMPLE_MD)

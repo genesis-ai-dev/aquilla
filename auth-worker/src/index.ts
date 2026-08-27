@@ -165,7 +165,15 @@ const runInBackground = (c: { executionCtx: ExecutionContext }, task: Promise<vo
   }
 }
 
+// AQU-1005: requests slower than this are logged even when they SUCCEED —
+// only-4xx/5xx logging left DB saturation invisible until it collapsed (the
+// SPA aborts at 15s, and a client-aborted request produces no server error).
+// A [slow-request] line — in `pnpm dev` output or PostHog Logs — is a defect
+// to investigate, not noise.
+const SLOW_REQUEST_MS = 5_000
+
 app.use("*", async (c, next) => {
+  const startedAt = Date.now()
   try {
     await next()
   } catch (err) {
@@ -174,10 +182,26 @@ app.use("*", async (c, next) => {
       shipLog(c.env, "aquilla-identity", "error", `unhandled: ${c.req.method} ${c.req.path}`, {
         "http.method": c.req.method,
         "http.path": c.req.path,
+        "http.duration_ms": Date.now() - startedAt,
         "error.message": err instanceof Error ? err.message : String(err),
       }),
     )
     throw err
+  }
+  const durationMs = Date.now() - startedAt
+  if (durationMs >= SLOW_REQUEST_MS) {
+    console.warn(
+      `[slow-request] ${c.req.method} ${c.req.path} took ${durationMs}ms (status ${c.res.status})`,
+    )
+    runInBackground(
+      c,
+      shipLog(c.env, "aquilla-identity", "warn", `slow: ${c.req.method} ${c.req.path} (${durationMs}ms)`, {
+        "http.method": c.req.method,
+        "http.path": c.req.path,
+        "http.status": c.res.status,
+        "http.duration_ms": durationMs,
+      }),
+    )
   }
   if (c.res.status >= 400) {
     runInBackground(c, shipErrorResponse(c.env, "aquilla-identity", c.req.raw, c.res))

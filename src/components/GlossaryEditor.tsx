@@ -412,7 +412,7 @@ export function GlossaryEditor({
       {/* Header / toolbar */}
       <header className="flex items-center gap-2 border-b px-4 py-3">
         <BookOpen className="h-5 w-5 text-muted-foreground" />
-        <h1 className="flex-1 text-base font-semibold">{t("terminology.editor.title")}</h1>
+        <h1 className="flex-1 text-base font-semibold">{t("nav.sidebarSection.terminology")}</h1>
         {canManage && (
           <>
             <Button variant="outline" size="sm" onClick={handleSuggest} disabled={suggestRequested}>

@@ -9716,6 +9716,7 @@ export function ProjectWorkspace() {
                 running={checkRunning}
                 cells={legacyCells}
                 onClose={() => setCheckOpen(false)}
+                onRetry={() => { void runCheck() }}
                 onNavigateToCell={jumpToCellId}
                 onOpenComments={(cellId) => {
                   // Reuse the existing comments drawer; one aside at a time.

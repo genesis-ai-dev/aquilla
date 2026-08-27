@@ -20,5 +20,5 @@ You may use sub-headers to organize better as follows:
 ### Header 2
 - [ ] It doesn't do the other thing
 
-## Screenshots
-Only if necessary for clarity
+## Approval
+- [ ] Dev Approved

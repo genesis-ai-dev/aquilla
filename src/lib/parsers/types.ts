@@ -253,6 +253,12 @@ export interface Voice {
    * plain TTS, no conversion.
    */
   referenceAudioId?: string
+  /**
+   * When the clone reference was lifted from a line take, `${cellId}:${slot}`
+   * of that take. The Reference audio tab is filled only when `referenceAudioId`
+   * is set *without* this key (a recorded or uploaded clip).
+   */
+  referenceTakeKey?: string
 }
 
 export interface ProjectTtsSettings {

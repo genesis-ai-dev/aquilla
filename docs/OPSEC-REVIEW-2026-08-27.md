@@ -229,8 +229,9 @@ Modal calls) for an `audioObject`/`sourceAudioId` containing `../`. Every
 suite touching a changed file (`audio`, `diarization`, `voice-convert`,
 `external-reads`, `external-changesets`, `external-import`,
 `external-link-media`, `external-import-parse`, `external-mcp`,
-`external-permission-parity`, `external-discovery`, `read-routes` — 12 files)
-is green, with `tsc --noEmit` and `eslint` clean on every touched file.
+`external-permission-parity`, `external-discovery`, `read-routes` — 12 files,
+252 tests) is green, with `tsc --noEmit` and `eslint` clean on every touched
+file.
 
 ## Reviewed, no finding
 

@@ -15,6 +15,11 @@
  * hook instance in the tab stays in sync).
  */
 
+import {
+  ownerScopedLocalStorageKey,
+  subscribeClientLocalStorageOwner,
+} from "@/lib/frontier/client-local-storage"
+
 const STORAGE_KEY = "aquilla:translatorProfile"
 const CHANGE_EVENT = "aquilla:translator-profile-changed"
 
@@ -49,7 +54,7 @@ export const PROFILE_FIELDS: (keyof TranslatorProfile)[] = [
 export function getTranslatorProfile(): TranslatorProfile {
   if (typeof window === "undefined") return {}
   try {
-    const raw = window.localStorage.getItem(STORAGE_KEY)
+    const raw = window.localStorage.getItem(ownerScopedLocalStorageKey(STORAGE_KEY))
     if (!raw) return {}
     const parsed = JSON.parse(raw)
     if (!parsed || typeof parsed !== "object") return {}
@@ -63,7 +68,7 @@ export function setTranslatorProfile(profile: TranslatorProfile): void {
   if (typeof window === "undefined") return
   const clean = sanitizeProfile(profile)
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(clean))
+    window.localStorage.setItem(ownerScopedLocalStorageKey(STORAGE_KEY), JSON.stringify(clean))
   } catch {
     // Storage full/unavailable — the in-tab event below still updates live hooks.
   }
@@ -74,7 +79,11 @@ export function onTranslatorProfileChange(handler: (p: TranslatorProfile) => voi
   if (typeof window === "undefined") return () => {}
   const listener = (e: Event) => handler((e as CustomEvent<TranslatorProfile>).detail)
   window.addEventListener(CHANGE_EVENT, listener)
-  return () => window.removeEventListener(CHANGE_EVENT, listener)
+  const offOwner = subscribeClientLocalStorageOwner(() => handler(getTranslatorProfile()))
+  return () => {
+    window.removeEventListener(CHANGE_EVENT, listener)
+    offOwner()
+  }
 }
 
 /** Trim, cap, and drop empty fields. Applied on write and before any model send. */

@@ -12,13 +12,14 @@ import { Input } from "@/components/ui/input"
 import { RevealableInput } from "@/components/ui/revealable-input"
 import { Spinner } from "@/components/ui/spinner"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { FrontierAuthError } from "@/lib/frontier/auth"
-import { hasAuthHintCookie } from "@/lib/frontier/session-store"
+import { FrontierAuthError, isJwtExpired } from "@/lib/frontier/auth"
+import { safeLoginNext } from "@/lib/navigation/login-path"
 import { FrontierForgotPasswordForm } from "@/components/git-import/FrontierForgotPasswordForm"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { requiredString } from "@/lib/forms/schemas"
 import { useSubmitError } from "@/lib/forms/submit-error"
 import { useState } from "react"
+import { SessionHydrationError } from "@/components/SessionHydrationError"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 type Mode = "login" | "forgot"
@@ -35,24 +36,17 @@ const loginSchema = z.object({
 export function Login() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const { login } = useFrontierSession()
+  const { session, loading, sessionLoadError, retrySessionLoad, login } = useFrontierSession()
   const t = useT()
 
-  const rawNext = searchParams.get("next") ?? ""
-  // `/` is the marketing homepage at the edge; send returning users into the
-  // workspace entry instead. Honor an explicit in-app ?next= path.
-  const next = rawNext.startsWith("/") && rawNext !== "/" ? rawNext : "/app"
+  const next = safeLoginNext(searchParams.get("next"))
+  const forceLogin = searchParams.get("reauth") === "1" || searchParams.get("add") === "1"
 
   const [mode, setMode] = useState<Mode>("login")
   const [isMigrating, setIsMigrating] = useState(false)
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
 
-  // Already signed in (or finished local onboarding) — skip the form and go
-  // straight into the app. Same gate AppEntry uses.
-  const onboarded =
-    typeof localStorage !== "undefined" &&
-    localStorage.getItem("aquilla:onboardingComplete") === "true"
-  const alreadySignedIn = hasAuthHintCookie() || onboarded
+  const alreadySignedIn = !!session && !isJwtExpired(session.jwt)
 
   const form = useForm({
     defaultValues: { username: "", password: "" },
@@ -71,7 +65,15 @@ export function Login() {
     },
   })
 
-  if (alreadySignedIn) {
+  if (loading) {
+    return <div className="flex min-h-screen items-center justify-center"><Spinner /></div>
+  }
+
+  if (sessionLoadError && !session) {
+    return <SessionHydrationError retry={retrySessionLoad} />
+  }
+
+  if (alreadySignedIn && !forceLogin) {
     return <Navigate to={next} replace />
   }
 
@@ -188,6 +190,7 @@ export function Login() {
           </form>
         )}
 
+        {/* i18n-exempt: mode is an internal state discriminator, not visible copy. */}
         {mode === "login" && (
           <p className="text-center text-sm text-muted-foreground">
             {t("auth.login.newHerePrefix")}{" "}

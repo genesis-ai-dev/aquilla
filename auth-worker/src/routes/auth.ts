@@ -14,7 +14,7 @@ import type {
   AuthHonoEnv,
 } from "../middleware/auth"
 import { authMiddleware } from "../middleware/auth"
-import { JWTService } from "../auth/jwt"
+import { JWTService, isPastHalfLife } from "../auth/jwt"
 import { sendPasswordResetEmail, sendWelcomeEmail } from "../services/email"
 import {
   absorbPasswordVerificationCost,
@@ -556,6 +556,65 @@ auth.get("/me", authMiddleware, async (c) => {
     username: user.username,
     email: user.email,
     preferences: user.preferences,
+  })
+})
+
+// AQU-995: sliding session refresh.
+//
+// Access tokens are minted with a fixed lifetime (ACCESS_TOKEN_EXPIRE_MINUTES,
+// 30 days) and until now there was no way to extend one — every session died
+// on a silent timer regardless of how actively it was being used. That dumped
+// translators mid-edit and left stale tabs retry-looping against a dead token,
+// which is the bulk of the chronic 401 volume in the identity logs.
+//
+// Re-minting only past the token's half-life gives the behaviour we actually
+// want out of a fixed lifetime: an active client rolls its credential forward
+// indefinitely, an idle one still ages out on the full clock.
+//
+// This runs behind authMiddleware, so it is always authenticated by a *valid*
+// token — signature, expiry, the logout denylist and the password-change floor
+// have all already been enforced. That is exactly the set of checks a re-mint
+// must not bypass, which is why refresh is a plain authenticated endpoint
+// rather than a separate refresh-token grant.
+//
+// The caller's previous token is deliberately NOT revoked. Requests already in
+// flight still carry it, and denylisting it would 401 them for no reason — the
+// straggler-401 problem AQU-884 had to fix on the client side. It lapses on
+// its own schedule instead.
+auth.post("/refresh", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const payload = c.get("tokenPayload")
+  const jwtService = new JWTService(c.env)
+  const now = Math.floor(Date.now() / 1000)
+
+  // Below the half-life there is nothing to mint. Echo the caller's own token
+  // back rather than erroring: it keeps the client on one store-what-you-get
+  // path, and makes an over-eager caller cheap instead of a failure.
+  if (!isPastHalfLife(payload, now)) {
+    const current = jwtService.extractTokenFromHeader(
+      c.req.header("Authorization") ?? null,
+    )
+    if (current) {
+      return c.json({
+        access_token: current,
+        token_type: "bearer",
+        refreshed: false,
+        expires_at: payload.exp,
+      })
+    }
+  }
+
+  // user.username (not payload.sub) is the canonical record — sub may differ in
+  // case, since login resolves the user case-insensitively.
+  const { token, payload: minted } = await jwtService.createAccessTokenWithPayload(
+    user.username,
+    typeof payload.sst === "number" ? payload.sst : payload.iat,
+  )
+  return c.json({
+    access_token: token,
+    token_type: "bearer",
+    refreshed: true,
+    expires_at: minted.exp,
   })
 })
 

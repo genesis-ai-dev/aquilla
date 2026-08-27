@@ -4,6 +4,7 @@ import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { OrgProvider } from "@/context/OrgContext"
 import { TeamDetail } from "./TeamDetail"
+import { UserError } from "@/lib/errors/user-error"
 import { fmtShortCalendarDate } from "@/lib/format-date"
 
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }) }))
@@ -29,7 +30,10 @@ vi.mock("@/lib/frontier/teams", () => ({
   changeProjectRole: (...a: unknown[]) => changeProjectRole(...a),
   detachProject: (...a: unknown[]) => detachProject(...a),
 }))
-vi.mock("@/lib/sync/cloud-projects", () => ({ fetchAccessibleProjects: vi.fn(async () => []) }))
+vi.mock("@/lib/sync/cloud-projects", () => ({
+  fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true as const, projects: [] })),
+  projectsResultError: vi.fn(() => new Error("project load failed")),
+}))
 
 // Drive the shadcn (Base UI) Select: open the trigger, hover-highlight the
 // option, commit with Enter fired on the option itself. Under happy-dom
@@ -91,7 +95,10 @@ afterEach(() => {
 describe("TeamDetail project management", () => {
   it("attaches a project at a role", async () => {
     const cp = await import("@/lib/sync/cloud-projects")
-    ;(cp.fetchAccessibleProjects as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([{ id: "pa", name: "Bambara", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] }])
+    ;(cp.fetchAccessibleProjectsResult as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      projects: [{ id: "pa", name: "Bambara", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] }],
+    })
     getTeam.mockResolvedValue({ id: 10, name: "WA", members: [], projects: [] })
     renderDetail()
     await openTeamTab(/^projects$/i)
@@ -372,8 +379,8 @@ describe("TeamDetail member role editing (AQU-139)", () => {
 })
 
 describe("TeamDetail not found", () => {
-  it("shows the shared SearchX icon when the team cannot be loaded", async () => {
-    getTeam.mockRejectedValue(new Error("not found"))
+  it("shows the shared SearchX not-found state when the team cannot be loaded", async () => {
+    getTeam.mockRejectedValue(new UserError(404, "", "team"))
     renderDetail()
     await waitFor(() => expect(screen.getByText("Team not found.")).toBeInTheDocument())
     expect(document.querySelector("svg.lucide-search-x")).toBeTruthy()

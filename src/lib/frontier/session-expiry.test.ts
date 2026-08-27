@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import "fake-indexeddb/auto"
 import { notifySessionExpiredIfCurrent } from "./session-expiry"
-import { clearSession, saveSession } from "./session-store"
+import { clearSession, patchSessionEmails, saveSession, sessionKey } from "./session-store"
 import {
   clearSessionExpired,
   isSessionExpired,
@@ -35,5 +35,43 @@ describe("notifySessionExpiredIfCurrent", () => {
   it("ignores a straggler 401 when no session is stored (post-logout)", async () => {
     await notifySessionExpiredIfCurrent("jwt-dead")
     expect(isSessionExpired()).toBe(false)
+  })
+
+  it("does not relatch when login commits after the authority read starts", async () => {
+    const stale = { jwt: "jwt-dead", username: "anna", createdAt: "2026-01-01" }
+    await saveSession(stale)
+    let resolveRead!: (session: typeof stale) => void
+    const delayedRead = new Promise<typeof stale>((resolve) => { resolveRead = resolve })
+
+    const fresh = { ...stale, jwt: "jwt-fresh" }
+    let reads = 0
+    const notifying = notifySessionExpiredIfCurrent("jwt-dead", () => {
+      reads += 1
+      return reads === 1 ? delayedRead : Promise.resolve(fresh)
+    })
+    await saveSession(fresh)
+    resolveRead(stale)
+    await notifying
+
+    expect(isSessionExpired()).toBe(false)
+  })
+
+  it("rechecks after an email backfill and still signals the unchanged dead credential", async () => {
+    const stale = { jwt: "jwt-dead", username: "anna", createdAt: "2026-01-01" }
+    await saveSession(stale)
+    let resolveRead!: (session: typeof stale) => void
+    const delayedRead = new Promise<typeof stale>((resolve) => { resolveRead = resolve })
+    let reads = 0
+
+    const notifying = notifySessionExpiredIfCurrent("jwt-dead", () => {
+      reads += 1
+      return reads === 1 ? delayedRead : Promise.resolve({ ...stale, email: "anna@example.com" })
+    })
+    await patchSessionEmails({ [sessionKey(stale)]: "anna@example.com" })
+    resolveRead(stale)
+    await notifying
+
+    expect(reads).toBe(2)
+    expect(isSessionExpired()).toBe(true)
   })
 })

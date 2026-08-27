@@ -5,6 +5,7 @@
 import type { CqrsRawEvent } from "./outbox-types"
 import {
   markOutboxAttempt,
+  getActiveOutboxOwnerVersion,
   peekPendingOutboxBatch,
   quarantineOutboxEvents,
   removeOutboxEvents,
@@ -155,9 +156,10 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   staleSiblingCount: number
   staleSourceCount: number
 }> {
+  const ownerVersion = getActiveOutboxOwnerVersion()
   const fetchFn = deps.fetchImpl ?? fetch
   const records = await peekPendingOutboxBatch(MAX_BATCH * 2)
-  if (records.length === 0) {
+  if (records.length === 0 || ownerVersion !== getActiveOutboxOwnerVersion()) {
     return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
   const batch = groupOldestFileFirst(records)
@@ -185,6 +187,12 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   // comment auth). Events WITH a fileId always use their own for correct scope.
   const tokenFileId = fileId ?? '__project__'
   const mint = await deps.getTokenForFile(projectId, tokenFileId)
+  // The queue owner changed while IndexedDB/token minting was in flight. Do
+  // not send the captured rows with a credential from either side of that
+  // transition; the newly-active flusher will pick up its own queue.
+  if (ownerVersion !== getActiveOutboxOwnerVersion()) {
+    return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
+  }
   if (!mint.token) {
     // Token mint failed. Distinguish permanent from transient so a single
     // un-mintable file can't head-of-line block the rest of the queue (the

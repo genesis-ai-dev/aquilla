@@ -18,6 +18,7 @@ import { FrontierAuthError } from "@/lib/frontier/auth"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { requiredString } from "@/lib/forms/schemas"
 import { useSubmitError } from "@/lib/forms/submit-error"
+import type { FrontierSession } from "@/lib/frontier/types"
 
 // requiredString() composes "<label> is required" inside lib/forms/schemas.ts,
 // which cannot call the t() hook (AQU-510, out of scope) — these labels stay
@@ -32,7 +33,7 @@ export function FrontierLoginForm({
   onForgotPassword,
   returnTo,
 }: {
-  onSuccess: () => void
+  onSuccess: (session: FrontierSession) => void | Promise<void>
   onForgotPassword?: () => void
   /** If provided, navigate here after a successful login. */
   returnTo?: string
@@ -53,8 +54,8 @@ export function FrontierLoginForm({
         return
       }
       try {
-        await login(value.username, value.password)
-        onSuccess()
+        const session = await login(value.username, value.password)
+        await onSuccess(session)
         if (returnTo) navigate(returnTo)
       } catch (err) {
         setSubmitError(err instanceof FrontierAuthError ? err.message : t("auth.login.failed"))

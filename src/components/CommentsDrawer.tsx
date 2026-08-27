@@ -6,9 +6,9 @@ import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, CommentThread as CommentThreadType } from "@/lib/parsers/types"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
-import { canPerform } from "@/lib/sync/role-policy"
+import { canPerform, canMutateComment, foreignRoleFor } from "@/lib/sync/role-policy"
 import { denialMessage } from "@/lib/permissions/denial"
-import { ROLE } from "@/lib/frontier/roles"
+import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
 import { CommentThread } from "./CommentThread"
 import { RightSidebarPanel } from "./RightSidebarPanel"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -23,6 +23,13 @@ interface CommentsDrawerProps {
   onReply: (threadId: string, text: string) => void
   onResolve: (threadId: string, closingMessage?: string) => void
   onReopen: (threadId: string) => void
+  /**
+   * AQU-1000: the signed-in user's username, matched against each thread's
+   * root `authorId` to tell "my thread" from "someone else's" — the two carry
+   * different resolve floors. Absent (local/git project, no session) → the
+   * per-thread gate falls open and behaves exactly as before.
+   */
+  currentUsername?: string | null
 }
 
 /** Convert flat CommentRecord[] (event-log model) → CommentThread[] (legacy cell model) */
@@ -43,6 +50,10 @@ function recordsToThreads(records: CommentRecord[]): CommentThreadType[] {
       // creation. Missing (older worker / legacy thread) → null = unknown
       // baseline, so CommentThread shows no stale badge instead of a false one.
       createdForTranslated: root.createdForTranslated ?? null,
+      // AQU-1000: carry the root author's identity, not just their display
+      // label. Resolve is gated on WHO started the thread, and `messages[].author`
+      // is `authorLabel ?? authorId` — ambiguous, and unusable for a comparison.
+      authorId: root.authorId,
       messages: [root, ...replies].map((r) => ({
         id: r.commentId,
         author: r.authorLabel ?? r.authorId,
@@ -54,7 +65,7 @@ function recordsToThreads(records: CommentRecord[]): CommentThreadType[] {
   })
 }
 
-export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThread, onReply, onResolve, onReopen }: CommentsDrawerProps) {
+export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThread, onReply, onResolve, onReopen, currentUsername }: CommentsDrawerProps) {
   const t = useT()
   const [newThreadText, setNewThreadText] = useState("")
   const permissions = useProjectPermissions(project)
@@ -72,11 +83,45 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
   const cloudCanResolve = canPerform("comment.resolve", roleLevel)
   // When a syncRole is present, let it take precedence; fall back to legacy permissions.
   const canComment = roleLevel !== null ? cloudCanComment : permissions.canEditComments
-  const canResolve = roleLevel !== null ? cloudCanResolve : permissions.canResolveComments
+  // The role floor for resolving YOUR OWN thread. Whether it also covers a
+  // given thread depends on who wrote that thread — decided per row below.
+  const canResolveOwn = roleLevel !== null ? cloudCanResolve : permissions.canResolveComments
   // Build a helpful denial message for viewers who cannot comment.
   const commentDenialReason = !canComment
     ? denialMessage(t, ROLE.COMMENTER, roleLevel)
     : null
+
+  // AQU-1000: resolve authority is per THREAD, not per user. The server
+  // re-checks the thread's author and 403s a foreign resolve below the foreign
+  // floor; because the client flips `resolved` optimistically, offering the
+  // control anyway made the thread close and then spring back open. Decide up
+  // front instead, and when the answer is no, say why.
+  const foreignResolveFloor = foreignRoleFor("comment.resolve") ?? ROLE.MAINTAINER
+  function resolveGateFor(thread: CommentThreadType): { canResolve: boolean; reason: string | null } {
+    if (roleLevel === null) {
+      // Local / git-imported project: no sync role to reason about, so keep the
+      // legacy behaviour verbatim rather than inventing a denial.
+      return { canResolve: canResolveOwn, reason: null }
+    }
+    // An unknown author (legacy thread with no authorId) is treated as foreign:
+    // the server will compare against a real author_id we cannot see, so the
+    // safe, honest answer is the higher floor.
+    const isOwnThread = currentUsername != null && thread.authorId === currentUsername
+    if (canMutateComment("comment.resolve", roleLevel, isOwnThread)) {
+      return { canResolve: true, reason: null }
+    }
+    if (!canResolveOwn) {
+      // Below even the self floor — this is the plain "your role can't do this"
+      // case, same sentence the composer denial uses.
+      return { canResolve: false, reason: denialMessage(t, ROLE.COMMENTER, roleLevel) }
+    }
+    return {
+      canResolve: false,
+      reason: t("comments.resolve.foreignDenied", {
+        minRole: resolveRoleName(t, foreignResolveFloor, { plural: true }),
+      }),
+    }
+  }
 
   function handleCreate() {
     if (!newThreadText.trim()) return
@@ -118,18 +163,22 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
         {threads.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t("comments.drawer.noComments")}</p>
         ) : (
-          threads.map((thread) => (
-            <CommentThread
-              key={thread.id}
-              thread={thread}
-              currentTranslated={cell.translated}
-              canReply={canComment}
-              canResolve={canResolve}
-              onReply={(text) => onReply(thread.id, text)}
-              onResolve={(msg) => onResolve(thread.id, msg)}
-              onReopen={() => onReopen(thread.id)}
-            />
-          ))
+          threads.map((thread) => {
+            const gate = resolveGateFor(thread)
+            return (
+              <CommentThread
+                key={thread.id}
+                thread={thread}
+                currentTranslated={cell.translated}
+                canReply={canComment}
+                canResolve={gate.canResolve}
+                resolveDenialReason={gate.reason}
+                onReply={(text) => onReply(thread.id, text)}
+                onResolve={(msg) => onResolve(thread.id, msg)}
+                onReopen={() => onReopen(thread.id)}
+              />
+            )
+          })
         )}
       </div>
 

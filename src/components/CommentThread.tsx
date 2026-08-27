@@ -9,12 +9,24 @@ import DOMPurify from "dompurify"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { DateTooltip } from "@/components/ui/date-tooltip"
+import {
+  ownerScopedLocalStorageKey,
+  subscribeClientLocalStorageOwner,
+} from "@/lib/frontier/client-local-storage"
 
 interface CommentThreadProps {
   thread: ThreadData
   currentTranslated: string
   canReply?: boolean
   canResolve?: boolean
+  /**
+   * AQU-1000: why resolve is denied on THIS thread. When present and
+   * `canResolve` is false, the resolve controls render disabled with this as
+   * their tooltip rather than vanishing — `09-design-and-ux.md` → "Never
+   * disable silently". Omit it to keep the older hide-entirely behaviour, which
+   * is what local / git-imported projects (no role, no reason to give) want.
+   */
+  resolveDenialReason?: string | null
   onReply: (text: string) => void
   onResolve: (closingMessage?: string) => void
   onReopen: () => void
@@ -23,21 +35,80 @@ interface CommentThreadProps {
 }
 
 function draftKey(projectId: string | undefined, cellId: string | undefined, threadId: string): string {
-  return `comment-draft:${projectId ?? "unknown"}:${cellId ?? "unknown"}:${threadId}`
+  return ownerScopedLocalStorageKey(
+    `comment-draft:${projectId ?? "unknown"}:${cellId ?? "unknown"}:${threadId}`,
+  )
 }
 
-export function CommentThread({ thread, currentTranslated, canReply = true, canResolve = true, onReply, onResolve, onReopen, projectId, cellId }: CommentThreadProps) {
+function readDraft(storageKey: string): string {
+  if (typeof window === "undefined") return ""
+  try { return localStorage.getItem(storageKey) ?? "" } catch { return "" }
+}
+
+interface ResolveActionProps {
+  denied: boolean
+  reason?: string | null
+  size: "sm"
+  variant: "outline" | "ghost"
+  testId: string
+  onClick: () => void
+  disabled?: boolean
+  children: React.ReactNode
+}
+
+/**
+ * AQU-1000: one resolve-family control (Resolve / Close with reply / Reopen).
+ *
+ * When `denied`, it stays on screen but inert, wrapped in the tooltip that
+ * says why — the alternative, letting the user press a button the server was
+ * always going to refuse, is what produced the flip-then-revert. `aria-disabled`
+ * rather than `disabled` keeps the button focusable so the explanation is
+ * reachable by keyboard and screen reader, per `09-design-and-ux.md` →
+ * "Never disable silently".
+ */
+function ResolveAction({ denied, reason, size, variant, testId, onClick, disabled, children }: ResolveActionProps) {
+  const button = (
+    <Button
+      size={size}
+      variant={variant}
+      data-testid={testId}
+      aria-disabled={denied || undefined}
+      className={cn(denied && "cursor-not-allowed opacity-50")}
+      onClick={denied ? undefined : onClick}
+      disabled={!denied && disabled}
+    >
+      {children}
+    </Button>
+  )
+  if (!denied) return button
+  return <AppTooltip content={reason ?? ""}>{button}</AppTooltip>
+}
+
+export function CommentThread({ thread, currentTranslated, canReply = true, canResolve = true, resolveDenialReason, onReply, onResolve, onReopen, projectId, cellId }: CommentThreadProps) {
   const { t } = useI18n()
+  const [, setOwnerRevision] = useState(0)
+  useEffect(() => subscribeClientLocalStorageOwner(() => {
+    setOwnerRevision((revision) => revision + 1)
+  }), [])
+  // AQU-1000: three states, not two. Offered (enabled), refused-with-a-reason
+  // (disabled + tooltip), or absent (no role context to explain).
+  const showResolveDenied = !canResolve && !!resolveDenialReason
   const storageKey = draftKey(projectId, cellId, thread.id)
-  const [replyText, setReplyText] = useState(() => {
-    if (typeof window === "undefined") return ""
-    try { return localStorage.getItem(storageKey) ?? "" } catch { return "" }
-  })
+  const [draft, setDraft] = useState(() => ({ storageKey, text: readDraft(storageKey) }))
+  // Never expose the previous key's draft during the render in which an owner,
+  // project, cell, or thread changes. React restarts this render immediately,
+  // before effects can persist the old text into the new namespace.
+  if (draft.storageKey !== storageKey) {
+    setDraft({ storageKey, text: readDraft(storageKey) })
+  }
+  const replyText = draft.storageKey === storageKey ? draft.text : readDraft(storageKey)
+  const setReplyText = (text: string) => setDraft({ storageKey, text })
   const isStale = isThreadStale(thread.createdForTranslated, currentTranslated)
 
   // Persist draft to localStorage whenever it changes
   useEffect(() => {
     if (typeof window === "undefined") return
+    if (draft.storageKey !== storageKey) return
     try {
       if (replyText) {
         localStorage.setItem(storageKey, replyText)
@@ -45,7 +116,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
         localStorage.removeItem(storageKey)
       }
     } catch { /* ignore quota errors */ }
-  }, [replyText, storageKey])
+  }, [draft.storageKey, replyText, storageKey])
 
   function handleReply() {
     if (!replyText.trim()) return
@@ -115,7 +186,6 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
                 <DateTooltip value={m.timestamp} label={t("common.date.posted")} />
               </span>
             </div>
-            {/* eslint-disable-next-line react/no-danger */}
             <div
               className="mt-0.5 text-xs"
               // Session-replay mask (docs/OPSEC.md): comment bodies quote
@@ -128,7 +198,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
       </ul>
 
       {thread.status === "open" ? (
-        (canReply || canResolve) && (
+        (canReply || canResolve || showResolveDenied) && (
           <div className="mt-2 space-y-1.5">
             {canReply && (
               <Textarea
@@ -146,25 +216,47 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
                   <Send className="me-1 h-3 w-3" /> {t("comments.thread.reply")}
                 </Button>
               )}
-              {canReply && canResolve && (
-                <Button size="sm" variant="outline" onClick={handleCloseWithReply} disabled={!replyText.trim()}>
+              {canReply && (canResolve || showResolveDenied) && (
+                <ResolveAction
+                  denied={showResolveDenied}
+                  reason={resolveDenialReason}
+                  size="sm"
+                  variant="outline"
+                  testId="comment-close-with-reply"
+                  onClick={handleCloseWithReply}
+                  disabled={!replyText.trim()}
+                >
                   <Check className="me-1 h-3 w-3" /> {t("comments.thread.closeWithReply")}
-                </Button>
+                </ResolveAction>
               )}
-              {canResolve && (
-                <Button size="sm" variant="ghost" onClick={() => onResolve()}>
+              {(canResolve || showResolveDenied) && (
+                <ResolveAction
+                  denied={showResolveDenied}
+                  reason={resolveDenialReason}
+                  size="sm"
+                  variant="ghost"
+                  testId="comment-resolve"
+                  onClick={() => onResolve()}
+                >
                   {t("comments.resolve")}
-                </Button>
+                </ResolveAction>
               )}
             </div>
           </div>
         )
       ) : (
-        canResolve && (
+        (canResolve || showResolveDenied) && (
           <div className="mt-2">
-            <Button size="sm" variant="ghost" onClick={onReopen}>
+            <ResolveAction
+              denied={showResolveDenied}
+              reason={resolveDenialReason}
+              size="sm"
+              variant="ghost"
+              testId="comment-reopen"
+              onClick={onReopen}
+            >
               <Undo2 className="me-1 h-3 w-3" /> {t("comments.reopen")}
-            </Button>
+            </ResolveAction>
           </div>
         )
       )}

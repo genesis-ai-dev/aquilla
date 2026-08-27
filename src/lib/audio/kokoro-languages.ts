@@ -130,12 +130,6 @@ const TAG_TO_PREFIX: Record<string, KokoroLangPrefix> = {
   mandarin: "z",
 }
 
-export function kokoroPrefixFromVoiceName(voiceName: string | undefined): KokoroLangPrefix | undefined {
-  const prefix = voiceName?.trim().charAt(0).toLowerCase()
-  if (!prefix) return undefined
-  return prefix in PREFIX_TO_PHONEMIZER ? (prefix as KokoroLangPrefix) : undefined
-}
-
 /**
  * Map a project language tag (BCP-47, ISO 639, name, or Kokoro prefix) to
  * Kokoro's single-letter language code.

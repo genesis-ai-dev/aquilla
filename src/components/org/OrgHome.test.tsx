@@ -138,6 +138,8 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   orgProviderKeys: {},
   canExport: true,
   exportMinRole: null,
+  canEgress: false,
+  egressMinRole: 700,
   canViewRoster: true,
   rosterViewMinRole: 600,
   canViewMemberProgress: true,

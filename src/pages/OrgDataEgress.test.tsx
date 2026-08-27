@@ -133,21 +133,45 @@ beforeEach(() => {
   downloadBlob.mockReset()
   useOrgSettings.mockReset()
   useOrgEgressData.mockReturnValue(egressData(ROWS))
-  useOrgSettings.mockReturnValue({ canExport: true })
+  useOrgSettings.mockReturnValue({ canExport: true, canEgress: true, hasFetched: true })
 })
 
-describe("OrgDataEgress role gate", () => {
-  it("shows the maintainer-floor EmptyState to a viewer and never fetches the inventory", () => {
+describe("OrgDataEgress role gate (AQU-907)", () => {
+  it("shows the policy EmptyState to a below-floor caller and never fetches the inventory", () => {
+    // The floor is org policy (egressMinRole, OWNER default) — the page
+    // trusts the hook's canEgress rather than hardcoding a role level.
     useActiveOrg.mockReturnValue(
-      orgContext({ activeOrg: { id: 1, name: "Acme", role: { level: 100, name: "viewer" } } }),
+      orgContext({ activeOrg: { id: 1, name: "Acme", role: { level: 600, name: "maintainer" } } }),
     )
+    useOrgSettings.mockReturnValue({ canExport: true, canEgress: false, hasFetched: true })
 
     renderPage()
 
     expect(
-      screen.getByText("Data egress is available to organization owners and maintainers."),
+      screen.getByText(
+        "Data egress is available to organization owners, and to other roles when an owner enables them in Settings.",
+      ),
     ).toBeInTheDocument()
     expect(screen.queryByTestId("egress-export-button")).not.toBeInTheDocument()
+    expect(useOrgEgressData).not.toHaveBeenCalled()
+  })
+
+  it("stays undecided (no lock flash) while org settings are still loading", () => {
+    // A maintainer the org HAS opened the surface to must not see the lock
+    // flash before the settings fetch proves it — render nothing until
+    // hasFetched.
+    useActiveOrg.mockReturnValue(
+      orgContext({ activeOrg: { id: 1, name: "Acme", role: { level: 600, name: "maintainer" } } }),
+    )
+    useOrgSettings.mockReturnValue({ canExport: true, canEgress: false, hasFetched: false })
+
+    renderPage()
+
+    expect(
+      screen.queryByText(
+        "Data egress is available to organization owners, and to other roles when an owner enables them in Settings.",
+      ),
+    ).not.toBeInTheDocument()
     expect(useOrgEgressData).not.toHaveBeenCalled()
   })
 
@@ -277,7 +301,7 @@ describe("OrgDataEgress selection + export", () => {
 describe("OrgDataEgress export policy gate (AQU-253)", () => {
   it("disables Export and shows the amber policy note when canExport is false", async () => {
     useActiveOrg.mockReturnValue(orgContext())
-    useOrgSettings.mockReturnValue({ canExport: false })
+    useOrgSettings.mockReturnValue({ canExport: false, canEgress: true, hasFetched: true })
 
     renderPage()
 

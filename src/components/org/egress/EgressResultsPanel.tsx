@@ -51,6 +51,10 @@ export function EgressResultsPanel({
 }) {
   const t = useT()
   if (state.kind === "idle") return null
+  // Hoisted so the i18n lint sees state tags, not JSX copy.
+  const running = state.kind === "running" ? state : null
+  const errored = state.kind === "error" ? state : null
+  const done = state.kind === "done" ? state : null
 
   const statusLine = (p: EgressProgressUpdate): string => {
     const phase = t(PHASE_LABEL_KEYS[p.phase])
@@ -67,13 +71,13 @@ export function EgressResultsPanel({
   return (
     <Section title={t("nav.workspaceActions.export")} contentClassName="flex flex-col gap-3">
       <div role="status" aria-live="polite" className="flex flex-col gap-3">
-        {state.kind === "running" && (
+        {running && (
           <>
             <p className="text-sm text-muted-foreground" data-testid="egress-status-line">
-              {state.progress == null ? t("org.egress.results.preparingExport") : statusLine(state.progress)}
+              {running.progress == null ? t("org.egress.results.preparingExport") : statusLine(running.progress)}
             </p>
             <Progress
-              value={state.progress == null ? null : percent(state.progress)}
+              value={running.progress == null ? null : percent(running.progress)}
               aria-label={t("org.egress.results.progress")}
             />
             <div>
@@ -83,16 +87,16 @@ export function EgressResultsPanel({
             </div>
           </>
         )}
-        {state.kind === "error" && (
-          <p className="text-sm text-destructive">{t("org.egress.results.failed", { message: state.message })}</p>
+        {errored && (
+          <p className="text-sm text-destructive">{t("org.egress.results.failed", { message: errored.message })}</p>
         )}
-        {state.kind === "done" && (
+        {done && (
           <>
             <p className="text-sm text-muted-foreground">
               {t("org.egress.results.complete")}
             </p>
             <ul className="flex flex-col gap-2">
-              {state.manifest.projects.map((proj) => {
+              {done.manifest.projects.map((proj) => {
                 const entryCount = proj.files.reduce((n, f) => n + f.entries.length, 0)
                 const skipped = proj.files.flatMap((f) => f.skipped)
                 // Transparency notes: entries that WERE written but not as
@@ -121,7 +125,7 @@ export function EgressResultsPanel({
                     {notes.length > 0 && (
                       <ul className="mt-1.5 flex flex-col gap-0.5 text-xs text-muted-foreground">
                         {notes.map((n, i) => (
-                          <li key={`${n.file}-${i}`}>{`Note: ${n.file}: ${n.note}`}</li>
+                          <li key={`${n.file}-${i}`}>{t("org.egress.results.noteLine", { file: n.file, note: n.note })}</li>
                         ))}
                       </ul>
                     )}

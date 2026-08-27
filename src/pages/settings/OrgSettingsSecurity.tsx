@@ -1,3 +1,4 @@
+import { EgressAccessSection } from "@/components/settings/EgressAccessSection"
 import { ExportPermissionsSection } from "@/components/settings/ExportPermissionsSection"
 import { AssignmentAuthoritySection } from "@/components/settings/AssignmentAuthoritySection"
 import { RosterProgressSection } from "@/components/settings/RosterProgressSection"
@@ -26,6 +27,7 @@ export function OrgSettingsSecurity() {
         description={t("org.settingsSecurity.groupDescription")}
       >
         <ExportPermissionsSection orgSettings={orgSettings} canEdit={canEdit} />
+        <EgressAccessSection orgSettings={orgSettings} canEdit={canEdit} />
         <AssignmentAuthoritySection orgSettings={orgSettings} canEdit={canEdit} />
         <TermbaseEditSection orgSettings={orgSettings} canEdit={canEdit} />
       </SettingsGroup>

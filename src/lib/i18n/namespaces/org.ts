@@ -17,7 +17,8 @@ export const org = defineNamespace({
     "org.egress.title": "Data egress",
     "org.egress.description": "Everything your organization has stored — review it, filter it, and take it with you as one zip archive.",
     "org.egress.selectOrgDescription": "Data egress is managed within a single organization.",
-    "org.egress.roleRequired": "Data egress is available to organization owners and maintainers.",
+    "org.egress.roleRequired":
+      "Data egress is available to organization owners, and to other roles when an owner enables them in Settings.",
     "org.egress.exportCount": plural({ one: "Export {count} file", other: "Export {count} files" }),
     "org.egress.loading": "Loading organization files",
     "org.egress.loadFailed": "Couldn’t load files",
@@ -71,6 +72,7 @@ export const org = defineNamespace({
     "org.egress.results.cached": "cached",
     "org.egress.results.entryCount": plural({ one: "{count} entry", other: "{count} entries" }),
     "org.egress.results.skipped": "Skipped {scope}: {reason}",
+    "org.egress.results.noteLine": "Note: {file}: {note}",
 
     // -- OrgSwitcher: sidebar dropdown that swaps the active org --
     "org.switcher.workspaceFallback": "Workspace",
@@ -559,6 +561,17 @@ export const org = defineNamespace({
     "org.exportSettings.roleOptionMaintainer": "{role} ({level}) — default",
     "org.exportSettings.roleOptionOwner": "{role} ({level}) — most restrictive",
     "org.exportSettings.saveFailedFallback": "Couldn't save the export permission.",
+
+    // -- OrgSettingsSecurity › EgressAccessSection: who may use Data egress (AQU-907) --
+    "org.egressSettings.whoCanEgressLabel": "Who can use Data egress",
+    "org.egressSettings.whoCanEgressDescription":
+      "Minimum role that can open the organization-wide Data egress page and " +
+      "download everything as one archive. Owners always can; each project's " +
+      "export permission still applies to what ends up in the archive.",
+    "org.egressSettings.ownersOnlyPolicyNote": "Only org owners can change who can use Data egress.",
+    "org.egressSettings.roleOptionViewer": "{role} ({level}) — anyone with project access",
+    "org.egressSettings.roleOptionOwner": "{role} ({level}) — default",
+    "org.egressSettings.saveFailedFallback": "Couldn't save the egress permission.",
 
     // -- AddLanguagePopover: "+ Language" quick action on an OrgHome project row --
     "org.addLanguagePopover.triggerLabel": "Language",
@@ -1216,6 +1229,14 @@ export const org = defineNamespace({
           reason: "Verbatim skip reason from the export engine or server.",
         },
       },
+      "org.egress.results.noteLine": {
+        description:
+          "Transparency line under a project's export results carrying one file's caveat — e.g. that a source document is not the byte-exact original upload. Only the leading word is translatable copy.",
+        placeholders: {
+          file: "File name — not translated.",
+          note: "Verbatim caveat from the export engine.",
+        },
+      },
       "org.switcher.triggerAriaLabel": {
         description:
           "Accessible name for the sidebar button that opens the org switcher dropdown. {org} is the currently selected organization's name (or 'All organizations'/'Workspace').",
@@ -1719,6 +1740,40 @@ export const org = defineNamespace({
       "org.exportSettings.saveFailedFallback": {
         description:
           "Error shown under the export-permission dropdown when saving the new setting failed and the server gave no explanation of its own — the setting is unchanged and the reader can simply try again. A complete sentence in the product's voice.",
+      },
+      "org.egressSettings.whoCanEgressLabel": {
+        description:
+          "Label for the dropdown that sets the lowest organization role allowed to open the Data egress page (the organization-wide bulk download), and also the name read aloud for that dropdown by screen readers. A question-shaped noun phrase with no question mark — it names the choice rather than asking one. 'Data egress' is the page's own title (org.egress.title) and must match it.",
+      },
+      "org.egressSettings.whoCanEgressDescription": {
+        description:
+          "Explanatory paragraph under the Data-egress permission dropdown, addressed to the administrator making the choice. Two statements: owners always have access regardless of the chosen floor, and each project's separate export permission still filters what the archive can contain.",
+      },
+      "org.egressSettings.ownersOnlyPolicyNote": {
+        description:
+          "Sentence explaining that the Data-egress permission dropdown is not editable by this reader, because changing it is reserved for owners of the organization. Shown as quiet helper text under the dropdown and again as an error when a save is refused for the same reason. A complete sentence stating a rule, not an instruction to the reader.",
+      },
+      "org.egressSettings.roleOptionViewer": {
+        description:
+          "The lowest entry in the Data-egress permission dropdown. Same shape as org.exportSettings.roleOptionPlain, with a note after the dash saying that choosing it lets everyone with project access use Data egress — the most permissive setting.",
+        placeholders: {
+          role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
+          level:
+            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
+        },
+      },
+      "org.egressSettings.roleOptionOwner": {
+        description:
+          "The highest entry in the Data-egress permission dropdown. Same shape as org.exportSettings.roleOptionPlain, with a one-word note after the dash marking it as the value in force unless somebody changes it — for this setting the owner level is the default, unlike the export dropdown where maintainer is.",
+        placeholders: {
+          role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
+          level:
+            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
+        },
+      },
+      "org.egressSettings.saveFailedFallback": {
+        description:
+          "Error shown under the Data-egress permission dropdown when saving the new setting failed and the server gave no explanation of its own — the setting is unchanged and the reader can simply try again. A complete sentence in the product's voice.",
       },
       "org.addLanguagePopover.triggerAriaLabel": {
         description:

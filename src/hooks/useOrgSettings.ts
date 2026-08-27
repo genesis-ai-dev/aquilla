@@ -63,6 +63,16 @@ const DEFAULT_ALLOW_SELF_ASSIGNMENT = false
 const TERMBASE_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
 const DEFAULT_TERMBASE_EDIT_MIN_ROLE = ROLE.PROJECT_LEAD
 
+// AQU-907: egressMinRole gates the org-wide Data egress surface (bulk zip of
+// everything the org has). Same OWNER-only write gate as the floors above.
+// Default is OWNER — the surface hands out the org's entire corpus in one
+// action, so nobody below owner sees it until an owner explicitly opens it
+// up in Settings → Security. The underlying per-project export routes keep
+// their own server-enforced floors (exportMinRole, default MAINTAINER)
+// regardless of this value.
+const EGRESS_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
+const DEFAULT_EGRESS_MIN_ROLE = ROLE.OWNER
+
 export interface UseOrgSettings {
   /** Current org settings (rules, etc). Always defined (empty when unloaded). */
   settings: OrgWideSettings
@@ -155,6 +165,16 @@ export interface UseOrgSettings {
    * Settings surface rather than for project-level gating.
    */
   termbaseEditMinRole: number
+  /**
+   * AQU-907: True when the caller may use the org-wide Data egress surface.
+   * Owners always may (700 meets every valid floor, so they never wait for
+   * the fetch); everyone else needs hasFetched && role >= egressMinRole —
+   * a disclosure gate like canViewRoster, with no pre-fetch escape hatch,
+   * so the surface never flashes open for a below-floor caller.
+   */
+  canEgress: boolean
+  /** Effective egress floor: explicit org setting, or the OWNER default when unset. */
+  egressMinRole: number
   /** Force a re-GET. */
   refresh: () => Promise<OrgSettingsResponse | null>
   /** Patch org settings (adds/replaces top-level keys). Blocked if !canEdit —
@@ -259,6 +279,14 @@ export function useOrgSettings(
     return DEFAULT_TERMBASE_EDIT_MIN_ROLE
   })()
 
+  // AQU-907: effective egress floor — explicit org setting, or the OWNER
+  // default when unset / out of the role ladder.
+  const egressMinRole = (() => {
+    const raw = server?.settings?.egressMinRole
+    if (typeof raw === "number" && Number.isFinite(raw) && raw >= 100 && raw <= 700) return raw
+    return DEFAULT_EGRESS_MIN_ROLE
+  })()
+
   // AQU-496: effective self-assignment authority — explicit org setting, or
   // false (leads-only) when unset.
   const allowSelfAssignment = server?.settings?.allowSelfAssignment === true
@@ -283,6 +311,15 @@ export function useOrgSettings(
     hasFetched &&
     effectiveRoleLevel != null &&
     effectiveRoleLevel >= memberProgressViewMinRole
+
+  // AQU-907: owners pass unconditionally (every valid floor is <= OWNER), so
+  // the primary persona never waits on the settings fetch; below-owner roles
+  // are disclosure-gated like the roster — closed until the fetch proves the
+  // org opened the surface to them.
+  const canEgress =
+    effectiveRoleLevel != null &&
+    (effectiveRoleLevel >= ROLE.OWNER ||
+      (hasFetched && effectiveRoleLevel >= egressMinRole))
 
   const patch = useCallback(
     async (partial: OrgWideSettings): Promise<OrgPatchResult | { kind: "blocked" }> => {
@@ -376,6 +413,8 @@ export function useOrgSettings(
     memberProgressViewMinRole,
     allowSelfAssignment,
     termbaseEditMinRole,
+    canEgress,
+    egressMinRole,
     refresh,
     patch,
     requestPromotion,
@@ -409,4 +448,14 @@ export function canEditAssignmentAuthority(callerRoleLevel: number | null | unde
  */
 export function canEditTermbaseFloor(callerRoleLevel: number | null | undefined): boolean {
   return (callerRoleLevel ?? 0) >= TERMBASE_FLOOR_WRITE_MIN_ROLE
+}
+
+/**
+ * AQU-907: True when `callerRoleLevel` is allowed to CHANGE the egressMinRole
+ * floor (OWNER-only, same rationale as the helpers above — a maintainer must
+ * not be able to open the org-wide bulk export to more roles on their own
+ * authority).
+ */
+export function canEditEgressFloor(callerRoleLevel: number | null | undefined): boolean {
+  return (callerRoleLevel ?? 0) >= EGRESS_FLOOR_WRITE_MIN_ROLE
 }

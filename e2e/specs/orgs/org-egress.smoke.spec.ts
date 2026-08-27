@@ -7,8 +7,9 @@ import JSZip from "jszip"
  * Org Data egress smoke — an org admin exports everything as one zip.
  *
  * What this covers:
- *  - The "Data egress" link renders in the OrgSidebar admin block for an org
- *    owner and routes to /orgs/:orgId/egress with the page heading.
+ *  - The "Data egress" link renders in the OrgSidebar for an org owner
+ *    (the egressMinRole default — AQU-907) and routes to /orgs/:orgId/egress
+ *    with the page heading.
  *  - The file inventory table lists the seeded file; the quick filter empties
  *    the table on a non-matching needle and restores rows when cleared.
  *  - Selection defaults to every file ("Export 1 file"); the "Select all
@@ -21,11 +22,13 @@ import JSZip from "jszip"
  * What this does NOT cover:
  *  - Audio modes, source-document sidecars, lane multi-select, and the export
  *    cache (vitest suites under src/lib/egress/ and src/lib/export/).
- *  - Role gating below maintainer (vitest: OrgDataEgress gate test).
+ *  - Role gating below the org's egressMinRole floor and the owner-only
+ *    Settings control for it (vitest: OrgDataEgress / OrgSidebar /
+ *    useOrgSettings suites; auth-worker org-settings-egress-floor).
  */
 test("org admin exports all org data as one zip from Data egress", async ({ alice }) => {
   // Server-side seed: one project with sample.md lands in alice's personal
-  // org, where she is OWNER — above the maintainer floor gating the surface.
+  // org, where she is OWNER — the egressMinRole default admits owners only.
   const seeded = await seedProjectWithFile(await jwtFor("alice"), {
     name: `Egress ${Date.now()}`,
   })

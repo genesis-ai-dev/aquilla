@@ -35,6 +35,13 @@
 // server-side in sync-worker (authorize.ts + assignment-authority.ts); this
 // route only stores/validates the setting.
 //
+// AQU-907: egressMinRole (who may use the org-wide Data egress surface —
+// the bulk zip of everything the org has) is another role-ladder
+// permission-policy key on the same OWNER-only write gate. Its effective
+// default when unset is OWNER (700) — see DEFAULT_EGRESS_MIN_ROLE in the
+// SPA's useOrgSettings; this route only stores/validates the setting, and
+// the per-project export routes keep their own server-enforced floors.
+//
 // AQU-822: termbaseEditMinRole (who may manage a project's termbase —
 // add/edit/delete/archive concepts) is another role-ladder permission-policy
 // key on the same OWNER-only write gate. Unlike the read floors above it
@@ -77,6 +84,9 @@ const PERMISSION_POLICY_KEYS: Record<string, string> = {
   // AQU-822: who may manage a project's termbase. Role-ladder valued,
   // OWNER-only on write like the rest of this table.
   termbaseEditMinRole: "termbaseEditMinRole",
+  // AQU-907: who may use the org-wide Data egress surface. Role-ladder
+  // valued, OWNER-only on write like the rest of this table.
+  egressMinRole: "egressMinRole",
 }
 
 /**

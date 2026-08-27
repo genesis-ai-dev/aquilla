@@ -19,7 +19,6 @@ import { runOrgEgress } from "@/lib/egress/org-egress"
 import type { EgressOptions, EgressProjectSelection } from "@/lib/egress/types"
 import { DEFAULT_EGRESS_OPTIONS, getEgressPrefs, setEgressPrefs } from "@/lib/store/egress-prefs"
 import { downloadBlob } from "@/lib/export/export-service"
-import { ROLE } from "@/lib/frontier/roles"
 import { Button } from "@/components/ui/button"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { EmptyState, Page, PageHeader } from "@/components/ui/page"
@@ -56,11 +55,12 @@ export function OrgDataEgress() {
   const { activeOrg, activeOrgId, isAllOrgs } = useActiveOrg()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
-  const canEgress = (activeOrg?.role.level ?? 0) >= ROLE.MAINTAINER
-  // AQU-253 export policy: an org may set exportMinRole above MAINTAINER, so
-  // the page's own >= MAINTAINER floor is necessary but not sufficient —
-  // consult the same org-settings gate ExportDialog uses.
-  const { canExport } = useOrgSettings(activeOrgId, activeOrg?.role.level)
+  // AQU-907: the surface floor is org policy — owners always pass; other
+  // roles only when an owner opened the surface to them (egressMinRole).
+  // The same hook carries the AQU-253 exportMinRole gate ExportDialog uses:
+  // egressMinRole decides who sees this page, exportMinRole decides whether
+  // exports are allowed at all — both can bind at once.
+  const { canEgress, canExport, hasFetched } = useOrgSettings(activeOrgId, activeOrg?.role.level)
 
   let body: ReactNode
   if (isAllOrgs || activeOrgId == null) {
@@ -72,12 +72,15 @@ export function OrgDataEgress() {
       />
     )
   } else if (!canEgress) {
-    body = (
+    // Below-owner callers stay undecided until the settings fetch lands —
+    // render nothing rather than flashing the lock at a maintainer the org
+    // has actually opened the surface to.
+    body = hasFetched ? (
       <EmptyState
         icon={Lock}
         title={t("org.egress.roleRequired")}
       />
-    )
+    ) : null
   } else {
     // Keyed by org so selection/options/run state reset on an org switch.
     body = (
@@ -185,6 +188,7 @@ function EgressBody({
   }, [data.rows, data.projectMeta, selected])
 
   const running = run.kind === "running"
+  const runActive = run.kind !== "idle"
 
   const handleExport = useCallback(async () => {
     if (!jwt || running) return
@@ -240,7 +244,7 @@ function EgressBody({
           </Button>
         }
       />
-      {run.kind !== "idle" && (
+      {runActive && (
         <div className="mb-6">
           <EgressResultsPanel state={run} onCancel={handleCancel} />
         </div>

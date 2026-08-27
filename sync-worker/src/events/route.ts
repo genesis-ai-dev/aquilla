@@ -706,7 +706,7 @@ export async function handleEventsWriteRequest(
   // enforcement contract.
   const membershipCache = new Map<string, Promise<MembershipCheck>>()
   const membershipFor = (projectId: string, userId: number): Promise<MembershipCheck> => {
-    const key = `${projectId} ${userId}`
+    const key = `${projectId}\0${userId}`
     let pending = membershipCache.get(key)
     if (!pending) {
       pending = checkProjectMembership(db, projectId, userId)
@@ -1485,7 +1485,13 @@ export async function handleEventsWriteRequest(
   // cursor down meanwhile (conservative, correct).
   if (allocProjectId) {
     try {
-      await buildSettleSeqRangeStmt(db, allocProjectId, seqBase).run()
+      const settled = await buildSettleSeqRangeStmt(db, allocProjectId, seqBase).run()
+      if ((settled.results?.length ?? 0) === 0) {
+        console.warn(
+          `[seq-ledger] settle found no allocation row (project=${allocProjectId}, firstSeq=${seqBase}) — ` +
+            'batch outlived PENDING_ALLOC_TTL_MS; readers may have advanced past these seqs',
+        )
+      }
     } catch (err) {
       // Non-fatal: the events are committed. An unsettled row only fences the
       // advertised cursor until the TTL expires.

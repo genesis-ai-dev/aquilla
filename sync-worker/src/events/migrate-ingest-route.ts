@@ -124,30 +124,22 @@ export async function handleMigrateIngestRequest(
     return Response.json({ accepted: 0 })
   }
 
-  // AQU-1005: allocate the whole batch's server_seqs in ONE autocommit counter
-  // bump BEFORE the write transactions. The old shape ran the bump CTE inside
-  // every event INSERT, so the first statement of each pipelined transaction
-  // took the project's seq-counter row lock and held it until COMMIT — live
-  // editors' single-event writes queued behind bulk ingest for the whole
-  // transaction (measured in minutes during the Aug 25–26 storms). With
-  // pre-allocation the lock is held for a single round trip. Replayed ids
-  // still consume their seq — gaps are harmless, seq is an ordering key.
-  let nextSeq: number
-  let seqBase: number
-  try {
-    seqBase = nextSeq = await allocateSeqRange(db, body.projectId, body.events.length)
-  } catch (err) {
-    return Response.json({ error: `seq allocation failed: ${String(err)}` }, { status: 500 })
-  }
-
   // serverTs is monotonic within the request; server_seq comes from the
-  // pre-allocated block. clientTs carries the original legacy edit timestamp
-  // (preserves history ordering); it is NOT part of any deterministic id.
+  // pre-allocated block below. clientTs carries the original legacy edit
+  // timestamp (preserves history ordering); it is NOT part of any
+  // deterministic id.
   let serverTs = Date.now()
   const eventsOnly = body.eventsOnly === true
   const deferFileCounters = body.deferFileCounters === true
   const stmts: AquillaStatement[] = []
   const eventsOnlyRows: SeqEventInsertRow[] = []
+
+  // AQU-1005 pass 1: validate + build every projection statement BEFORE taking
+  // an allocation. Projection statements don't depend on server_seq, so all of
+  // this route's 400s can be raised while the seq ledger is still untouched —
+  // a malformed body must not pin the project's advertised reader cursor on a
+  // pending allocation for the full PENDING_ALLOC_TTL_MS.
+  const prepared: { row: Omit<SeqEventInsertRow, 'serverSeq'>; projStmts: AquillaStatement[] }[] = []
 
   for (const e of body.events) {
     if (typeof e.id !== 'string' || typeof e.kind !== 'string' || typeof e.author !== 'string') {
@@ -171,31 +163,10 @@ export async function handleMigrateIngestRequest(
       serverTs: serverTs++,
     }
 
-    // Explicit seq from the pre-allocated block; id-replays are skipped via
-    // ON CONFLICT (id) DO NOTHING (their seq is consumed — harmless gap).
-    const insertRow: SeqEventInsertRow = {
-      id: event.id,
-      schemaVersion,
-      projectId: event.projectId,
-      fileId: event.fileId,
-      cellId: event.cellId,
-      parentId: event.parentId,
-      kind: event.kind,
-      author: event.author,
-      payloadJson: JSON.stringify(event.payload),
-      clientTs: event.clientTs,
-      serverTs: event.serverTs,
-      serverSeq: nextSeq++,
-    }
-    if (eventsOnly) {
-      // Firehose path: collapse into multi-row INSERTs below.
-      eventsOnlyRows.push(insertRow)
-    } else {
-      stmts.push(buildBulkEventInsertStmt(db, [insertRow]))
-    }
+    const projStmts: AquillaStatement[] = []
     if (!eventsOnly) {
       try {
-        buildEventProjectionStmts(db, event, stmts, { deferFileCounters })
+        buildEventProjectionStmts(db, event, projStmts, { deferFileCounters })
       } catch (err) {
         // Unknown kind or malformed payload — surface the offending event so the
         // CLI can pinpoint it rather than failing the whole batch opaquely.
@@ -204,6 +175,54 @@ export async function handleMigrateIngestRequest(
           { status: 400 },
         )
       }
+    }
+
+    prepared.push({
+      row: {
+        id: event.id,
+        schemaVersion,
+        projectId: event.projectId,
+        fileId: event.fileId,
+        cellId: event.cellId,
+        parentId: event.parentId,
+        kind: event.kind,
+        author: event.author,
+        payloadJson: JSON.stringify(event.payload),
+        clientTs: event.clientTs,
+        serverTs: event.serverTs,
+      },
+      projStmts,
+    })
+  }
+
+  // AQU-1005: allocate the whole batch's server_seqs in ONE autocommit counter
+  // bump BEFORE the write transactions. The old shape ran the bump CTE inside
+  // every event INSERT, so the first statement of each pipelined transaction
+  // took the project's seq-counter row lock and held it until COMMIT — live
+  // editors' single-event writes queued behind bulk ingest for the whole
+  // transaction (measured in minutes during the Aug 25–26 storms). With
+  // pre-allocation the lock is held for a single round trip. Replayed ids
+  // still consume their seq — gaps are harmless, seq is an ordering key.
+  let nextSeq: number
+  let seqBase: number
+  try {
+    seqBase = nextSeq = await allocateSeqRange(db, body.projectId, prepared.length)
+  } catch (err) {
+    return Response.json({ error: `seq allocation failed: ${String(err)}` }, { status: 500 })
+  }
+
+  // Pass 2: stamp seqs from the pre-allocated block, in body order, and emit
+  // each event's insert ahead of its own projection statements (the ordering
+  // pass 1 preserved). id-replays are skipped via ON CONFLICT (id) DO NOTHING
+  // (their seq is consumed — harmless gap).
+  for (const { row, projStmts } of prepared) {
+    const insertRow: SeqEventInsertRow = { ...row, serverSeq: nextSeq++ }
+    if (eventsOnly) {
+      // Firehose path: collapse into multi-row INSERTs below.
+      eventsOnlyRows.push(insertRow)
+    } else {
+      stmts.push(buildBulkEventInsertStmt(db, [insertRow]))
+      stmts.push(...projStmts)
     }
   }
 

@@ -788,6 +788,14 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
   // AQU-1005: never advance the fold cursor past an in-flight upstream
   // allocation — a late-committing upstream writer's events would otherwise be
   // permanently skipped by this link's `server_seq > cursor` fold.
+  //
+  // The ordering here is load-bearing: the pending floor MUST be read AFTER
+  // `head` and BEFORE loadDelta. Read before `head` and an allocation taken in
+  // between would go unfenced; read after loadDelta and the delta could already
+  // have been taken against an unclamped head. And loadDelta's unbounded upper
+  // window is safe precisely BECAUSE the cursor we store is clamped to this
+  // floor — rows it folds above the floor are simply re-folded, idempotently,
+  // on the next run.
   const upstreamFloor = await fetchPendingFloor(db, upstreamProjectId)
   if (upstreamFloor != null) head = Math.min(head, upstreamFloor)
   if (head <= cursor) return NOOP_RESULT

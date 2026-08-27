@@ -97,6 +97,12 @@ export function buildEventInsertStmt(db: AquillaDb, e: EventInsertRow): AquillaS
 // advertised `?since=` cursor on the oldest still-pending allocation instead
 // of racing ahead of an in-flight writer.
 
+// INVARIANT: the reader fence is correct only while every write batch completes
+// in under this TTL. A batch that outlives it has its ledger row purged out from
+// under it, and readers may already have advertised cursors above its seqs.
+// Server-side statement timeouts (audit fix #2, not yet landed) are what will
+// make that a provable bound — until then the settle-returned-zero warning
+// (see buildSettleSeqRangeStmt's RETURNING first_seq) is the tripwire.
 export const PENDING_ALLOC_TTL_MS = 5 * 60_000
 
 // Allocation = counter bump + ledger announce + expired-row purge, ONE
@@ -139,14 +145,20 @@ export async function allocateSeqRange(
 
 /** Settle (retire) an allocation — append to the SAME batch as the event
  *  rows so the ledger row disappears atomically with the events becoming
- *  visible. An unsettled row (crash/abort) simply expires after the TTL. */
+ *  visible. An unsettled row (crash/abort) simply expires after the TTL.
+ *
+ *  RETURNING first_seq makes the "deleted nothing" case observable: the row was
+ *  already purged as expired, i.e. this batch outlived PENDING_ALLOC_TTL_MS and
+ *  readers may have advanced their advertised cursor past its seqs. Execution
+ *  sites that can see the result log a warning — it is the tripwire for the
+ *  invariant documented at PENDING_ALLOC_TTL_MS. */
 export function buildSettleSeqRangeStmt(
   db: AquillaDb,
   projectId: string,
   firstSeq: number,
 ): AquillaStatement {
   return db
-    .prepare('DELETE FROM seq_allocations WHERE project_id = ? AND first_seq = ?')
+    .prepare('DELETE FROM seq_allocations WHERE project_id = ? AND first_seq = ? RETURNING first_seq')
     .bind(projectId, firstSeq)
 }
 

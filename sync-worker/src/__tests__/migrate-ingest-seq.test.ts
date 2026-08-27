@@ -143,4 +143,56 @@ describe("migrate-ingest seq pre-allocation (AQU-1005)", () => {
     expect((cell.rows[0] as { value: string }).value).toBe("In the beginning")
     expect((await eventSeqs()).map((r) => r.id)).toEqual(["f1", "s1"])
   })
+
+  // AQU-1005 audit M2: a rejected body must not leave a pending allocation
+  // behind. A live seq_allocations row clamps the project's advertised reader
+  // cursor (fetchPendingFloor) for the whole PENDING_ALLOC_TTL_MS, so letting a
+  // malformed request take one would stall every reader on this project for
+  // five minutes for a request that wrote nothing. Hence: validate first,
+  // allocate second.
+  async function liveAllocations(): Promise<number> {
+    const r = await t.pg.query<{ n: string }>(
+      "SELECT COUNT(*)::text AS n FROM seq_allocations WHERE project_id=$1",
+      [PROJECT],
+    )
+    return Number(r.rows[0].n)
+  }
+
+  it("a malformed event body is rejected without pinning a seq allocation", async () => {
+    const events = [
+      cellCreate("ok1", "c1", "v1"),
+      { ...cellCreate("bad1", "c2", "v2"), author: 42 as unknown as string },
+    ]
+    const res = await handleMigrateIngestRequest(ingestRequest(events), env())
+    expect(res?.status).toBe(400)
+
+    expect(await liveAllocations()).toBe(0)
+    expect(await eventSeqs()).toEqual([])
+  })
+
+  it("an unprojectable event is rejected without pinning a seq allocation", async () => {
+    const events = [
+      cellCreate("ok2", "c1", "v1"),
+      { ...cellCreate("bad2", "c2", "v2"), kind: "totally.unknown.kind" },
+    ]
+    const res = await handleMigrateIngestRequest(ingestRequest(events), env())
+    expect(res?.status).toBe(400)
+
+    expect(await liveAllocations()).toBe(0)
+    expect(await eventSeqs()).toEqual([])
+  })
+
+  it("a rejected batch leaves the next good batch's seqs unfenced", async () => {
+    const bad = [{ ...cellCreate("bad3", "c1", "v1"), schemaVersion: 99 }]
+    expect(
+      (await handleMigrateIngestRequest(ingestRequest(bad as IngestEventIn[]), env()))?.status,
+    ).toBe(400)
+
+    const good = ["g1", "g2"].map((id, i) => cellCreate(id, `c${i}`, `v${i}`))
+    const res = await handleMigrateIngestRequest(ingestRequest(good, { eventsOnly: true }), env())
+    expect(res?.status).toBe(200)
+    expect((await eventSeqs()).map((r) => r.id)).toEqual(["g1", "g2"])
+    // settled by the batch's settle statement
+    expect(await liveAllocations()).toBe(0)
+  })
 })

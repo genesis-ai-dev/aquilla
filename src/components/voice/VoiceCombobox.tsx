@@ -117,7 +117,7 @@ export function VoiceCombobox({
           <span className="relative shrink-0">
             <VoiceAvatar voice={active} size={18} />
             {busy && (
-              <span className="absolute inset-0 grid place-items-center rounded-full bg-background/75">
+              <span className="absolute inset-0 grid place-items-center rounded-md bg-background/75">
                 <Spinner className="h-3 w-3" />
               </span>
             )}

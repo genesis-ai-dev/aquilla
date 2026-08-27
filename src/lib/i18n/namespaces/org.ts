@@ -364,6 +364,7 @@ export const org = defineNamespace({
     "org.projectOverview.inactiveBadge": "Inactive",
     // "Restore" → common.restore (identical text)
     "org.projectOverview.moreActionsAria": "More actions",
+    "org.projectOverview.renameDialogTitle": "Rename project",
     "org.projectOverview.downloadDeliverable": "Download deliverable",
     "org.projectOverview.markAsActive": "Mark as Active",
     "org.projectOverview.markAsInactive": "Mark as Inactive",
@@ -1389,6 +1390,10 @@ export const org = defineNamespace({
       "org.projectOverview.moreActionsAria": {
         description:
           "Accessible name for the icon-only overflow (⋯) button in the project header that opens the archive/download/lifecycle menu.",
+      },
+      "org.projectOverview.renameDialogTitle": {
+        description:
+          "Title of the dialog (and accessible name of the pencil next to the project title) that lets a maintainer rename the project.",
       },
       "org.projectOverview.customizeStatsAria": {
         description:

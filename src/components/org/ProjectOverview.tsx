@@ -20,8 +20,9 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
+import { RenameDialog } from "@/components/RenameDialog"
 import { archiveProjectRemote, unarchiveProjectRemote } from "@/lib/sync/archive"
-import { setProjectDeadline, setProjectPm } from "@/lib/sync/cloud-projects"
+import { setProjectDeadline, setProjectPm, renameProject } from "@/lib/sync/cloud-projects"
 import { markProjectOpened } from "@/lib/frontier/opened-shared-store"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { InactiveProjectBanner } from "@/components/InactiveProjectBanner"
@@ -600,6 +601,8 @@ export function ProjectOverview() {
   // stringified userId, or "" for unassigned) while the dialog is open.
   const [pmDialogOpen, setPmDialogOpen] = useState(false)
   const [pmSelection, setPmSelection] = useState<string>("")
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false)
+  const [renameError, setRenameError] = useState<string | null>(null)
   const [showAllFiles, setShowAllFiles] = useState(false)
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
 
@@ -911,6 +914,22 @@ export function ProjectOverview() {
     }
   }
 
+  async function saveName(next: string) {
+    if (!jwt) return
+    setBusy(true)
+    setRenameError(null)
+    try {
+      await renameProject(jwt, id, next)
+      await refresh()
+      void refreshAccessibleProjects()
+      setRenameDialogOpen(false)
+    } catch (e) {
+      setRenameError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function handleDownloadBundle() {
     if (!jwt || !project) return
     const fileId = project.files[0]?.id
@@ -1035,6 +1054,17 @@ export function ProjectOverview() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <h1 className="text-xl font-semibold leading-tight truncate">{project?.name}</h1>
+                      {canManage && !isArchived && (
+                        <MetaFieldEditButton
+                          label={t("org.projectOverview.renameDialogTitle")}
+                          disabled={busy}
+                          testId="overview-rename"
+                          onClick={() => {
+                            setRenameError(null)
+                            setRenameDialogOpen(true)
+                          }}
+                        />
+                      )}
                       {/* Compact status chip next to the title */}
                       <StatusChip status={projectStatus} />
                       {isArchived && <ProjectStatusChip kind="archived" className="shrink-0" />}
@@ -1102,6 +1132,17 @@ export function ProjectOverview() {
                           }
                         />
                         <DropdownMenuContent align="end" className="min-w-40">
+                          {canManage && (
+                            <DropdownMenuItem
+                              onClick={() => {
+                                setRenameError(null)
+                                setRenameDialogOpen(true)
+                              }}
+                            >
+                              <Pencil className="size-4" />
+                              {t("fileDetails.rename")}
+                            </DropdownMenuItem>
+                          )}
                           {canManage && (
                             <DropdownMenuItem
                               onClick={handleDownloadBundle}
@@ -1332,6 +1373,20 @@ export function ProjectOverview() {
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
+
+                <RenameDialog
+                  open={renameDialogOpen}
+                  onOpenChange={(open) => {
+                    setRenameDialogOpen(open)
+                    if (!open) setRenameError(null)
+                  }}
+                  title={t("org.projectOverview.renameDialogTitle")}
+                  label={t("projectSettings.info.titleLabel")}
+                  initialValue={project?.name ?? ""}
+                  onSubmit={saveName}
+                  saving={busy}
+                  error={renameError}
+                />
 
                 <ConfirmActionDialog
                   open={archiveConfirmOpen}

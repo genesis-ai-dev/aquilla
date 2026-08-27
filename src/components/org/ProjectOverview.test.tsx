@@ -75,6 +75,7 @@ vi.mock("@/lib/sync/member-scopes", () => ({
 }))
 const setProjectPm = vi.fn(async (_jwt: string, _projectId: string, _pmUserId: number | null): Promise<{ id: number; username: string } | null> => null)
 const setProjectDeadline = vi.fn(async (_jwt: string, _projectId: string, _deadline: string | null): Promise<void> => {})
+const renameProject = vi.fn(async (_jwt: string, _projectId: string, name: string): Promise<{ id: string; name: string }> => ({ id: _projectId, name }))
 // OrgSidebar (rendered by ProjectOverview's AppShell) calls
 // useProjectsForNavigation -> fetchAccessibleProjects for the "Shared with
 // you" nav section (AQU-474), and OrgProvider fetches the same directory
@@ -90,6 +91,7 @@ vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/sync/cloud-projects")>()),
   setProjectDeadline: (jwt: string, projectId: string, deadline: string | null) => setProjectDeadline(jwt, projectId, deadline),
   setProjectPm: (jwt: string, projectId: string, pmUserId: number | null) => setProjectPm(jwt, projectId, pmUserId),
+  renameProject: (jwt: string, projectId: string, name: string) => renameProject(jwt, projectId, name),
   fetchAccessibleProjects: (jwt: string) => fetchAccessibleProjects(jwt),
   fetchAccessibleProjectsResult: async (jwt: string) => ({
     ok: true as const,
@@ -800,6 +802,25 @@ describe("ProjectOverview archive/restore", () => {
     await waitFor(() =>
       expect(downloadProjectBundle).toHaveBeenCalledWith(expect.objectContaining({ projectId: "p1", fileId: "f1" })),
     )
+  })
+
+  it("opens a rename dialog from the pencil and saves the new name", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 600, name: "John" }),
+      status: "ready",
+      refresh,
+    })
+    renameProject.mockResolvedValue({ id: "p1", name: "Acts" })
+    renderOverview()
+
+    fireEvent.click(await screen.findByTestId("overview-rename"))
+    expect(await screen.findByRole("dialog", { name: "Rename project" })).toBeInTheDocument()
+    const nameInput = screen.getByLabelText("Project title")
+    fireEvent.change(nameInput, { target: { value: "Acts" } })
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+
+    await waitFor(() => expect(renameProject).toHaveBeenCalledWith("jwt", "p1", "Acts"))
+    await waitFor(() => expect(refresh).toHaveBeenCalled())
   })
 
   it("non-maintainer does not see the overflow menu", async () => {

@@ -1,6 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
-import { MockLLMServer } from "../../helpers/mock-llm-server"
+import { MockLLMServer, applyUserProviderOverride } from "../../helpers/mock-llm-server"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -46,13 +46,7 @@ test("sparkle on a footnoted source commits translated base + reintegrated footn
 
   // Point the per-device LLM override at the spec-local mock server (checked
   // first in complete() and in useCompletion's isConfigured).
-  await alice.evaluate(({ endpoint }) => {
-    localStorage.setItem("codex:userProviderOverride", JSON.stringify({
-      endpoint,
-      model: "mock-model",
-      apiKey: "",
-    }))
-  }, { endpoint: `${mockLLM.baseUrl}/v1` })
+  await applyUserProviderOverride(alice, alice.username, `${mockLLM.baseUrl}/v1`)
   await alice.reload()
   await ws.waitForEditor()
 

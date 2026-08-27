@@ -209,7 +209,7 @@ export function MembersMatrixCellEditor({
                   >
                     {sourceBadge}
                   </TooltipTrigger>
-                  <TooltipContent side="top">
+                  <TooltipContent side="bottom">
                     {sourceHint}
                   </TooltipContent>
                 </Tooltip>
@@ -226,7 +226,7 @@ export function MembersMatrixCellEditor({
                   >
                     <GitMerge className="h-2.5 w-2.5" />
                   </TooltipTrigger>
-                  <TooltipContent side="top" className="max-w-[200px]">
+                  <TooltipContent side="bottom" className="max-w-[200px]">
                     <p className="font-medium mb-1 text-[10px]">
                       {t("org.membersMatrixCellEditor.alsoHasAccessVia")}
                     </p>
@@ -295,7 +295,7 @@ function RolePickerBody({
               }`}
             >
               <span className="text-xs font-medium capitalize">
-                <RoleLabel name={opt.name} />
+                <RoleLabel name={opt.name} plain />
                 {isCurrent && (
                   <span className="ms-1.5 text-[9px] text-muted-foreground">
                     {t("org.membersMatrixCellEditor.currentBadge")}
@@ -423,8 +423,8 @@ function ImmutableBody({
               disabled={status === "submitting"}
               className="flex w-full items-center justify-between rounded px-2 py-1 text-start text-xs hover:bg-muted disabled:opacity-60"
             >
-              <RoleLabel name={opt.name} />
-              <RoleLabel name={roleName(opt.level)} className="text-[10px] text-muted-foreground" />
+              <RoleLabel name={opt.name} plain />
+              <RoleLabel name={roleName(opt.level)} plain className="text-[10px] text-muted-foreground" />
             </button>
           ))}
         </div>

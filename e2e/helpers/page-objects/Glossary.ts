@@ -16,7 +16,7 @@ export class Glossary {
 
   async goto(projectId: string): Promise<void> {
     await this.page.goto(`/project/${projectId}/terminology`)
-    await expect(this.page.getByRole("heading", { name: "Glossary" })).toBeVisible({
+    await expect(this.page.getByRole("heading", { name: "Terminology" })).toBeVisible({
       timeout: GLOSSARY_READY_TIMEOUT_MS,
     })
   }
@@ -100,7 +100,7 @@ export class Glossary {
 
   async openViolations(): Promise<void> {
     await this.page.getByRole("button", { name: "Violations" }).click()
-    await expect(this.page.getByRole("button", { name: "Back to glossary" })).toBeVisible({ timeout: 10_000 })
+    await expect(this.page.getByRole("button", { name: "Back to terminology" })).toBeVisible({ timeout: 10_000 })
   }
 
   async archiveTerm(sourceTerm: string): Promise<void> {

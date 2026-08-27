@@ -1,8 +1,8 @@
 /**
  * AQU-293: lightweight session-expiry signal.
  *
- * When any fetch helper throws UserError(401 / session-expired), it calls
- * `notifySessionExpired()`. The top-level banner subscribes so helpers stay
+ * When an authenticated request rejects the active JWT, the guarded notifier
+ * latches that credential. The top-level banner subscribes so helpers stay
  * decoupled from the UI tree.
  *
  * Design:
@@ -15,7 +15,7 @@
  *  - The flag stays set until the user dismisses the banner or re-authenticates
  *    — `clearSessionExpired()` is the only way down. Navigation does not clear
  *    it; `finalizeSession()` calls it on every successful auth.
- *  - Fetch helpers should not call `notifySessionExpired()` directly: use
+ *  - Fetch helpers should not call `notifySessionExpired(jwt)` directly: use
  *    `notifySessionExpiredIfCurrent(failedJwt)` from lib/frontier/session-expiry,
  *    which drops 401s from a credential that re-login has since replaced. This
  *    module stays dependency-free; the guard lives there.
@@ -26,12 +26,12 @@ const SESSION_EXPIRED_EVENT = "session-expired"
 /** Module-level bus — stable across re-renders. */
 const bus = new EventTarget()
 
-/** Latched flag: true from the first 401 until dismiss / re-auth. */
-let expired = false
+/** JWT whose rejection is latched until dismiss / re-auth. */
+let expiredJwt: string | null = null
 
 /** Call from any fetch helper on 401 / UserError(session-expired). */
-export function notifySessionExpired(): void {
-  expired = true
+export function notifySessionExpired(jwt: string): void {
+  expiredJwt = jwt
   bus.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
 }
 
@@ -40,23 +40,27 @@ export function notifySessionExpired(): void {
  * successfully (see `finalizeSession` in lib/frontier/auth.ts).
  */
 export function clearSessionExpired(): void {
-  if (!expired) return
-  expired = false
+  if (expiredJwt === null) return
+  expiredJwt = null
   bus.dispatchEvent(new Event(SESSION_EXPIRED_EVENT))
 }
 
-/** Current latched state — read this at mount, before any event arrives. */
-export function isSessionExpired(): boolean {
-  return expired
+/** Rejected credential currently latched, or null. */
+export function getExpiredSessionJwt(): string | null {
+  return expiredJwt
+}
+
+/** Current latched state, optionally scoped to an active credential. */
+export function isSessionExpired(jwt?: string | null): boolean {
+  return expiredJwt !== null && (jwt === undefined || expiredJwt === jwt)
 }
 
 /**
- * Subscribe to session-expired changes. The handler receives the current
- * value, so it doubles as a "cleared" notification. Returns an unsubscribe
- * function.
+ * Subscribe to session-expired changes. The handler receives the rejected JWT
+ * or null, so it doubles as a "cleared" notification. Returns an unsubscribe.
  */
-export function onSessionExpired(handler: (expired: boolean) => void): () => void {
-  const listener = () => handler(expired)
+export function onSessionExpired(handler: (jwt: string | null) => void): () => void {
+  const listener = () => handler(expiredJwt)
   bus.addEventListener(SESSION_EXPIRED_EVENT, listener)
   return () => bus.removeEventListener(SESSION_EXPIRED_EVENT, listener)
 }

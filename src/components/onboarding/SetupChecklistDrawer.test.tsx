@@ -212,10 +212,39 @@ describe("SetupChecklistDrawer — AQU-334 role-aware read-only rows", () => {
     expect(onOpenChange).not.toHaveBeenCalled()
   })
 
+  it("opens the Add a member dialog over the setup sheet without dismissing", () => {
+    const onOpenChange = vi.fn()
+    render(
+      <SetupChecklistDrawer
+        open
+        onOpenChange={onOpenChange}
+        project={makeProject()}
+        roleLevel={ROLE.OWNER}
+        state={EMPTY_STATE}
+        onProjectUpdated={() => {}}
+        onSharesChanged={() => {}}
+        onDismiss={() => {}}
+      />,
+      { wrapper },
+    )
+
+    expandStep("Invite collaborators")
+    fireEvent.click(screen.getByRole("button", { name: /^add a member$/i }))
+
+    expect(screen.getByRole("heading", { name: /^add a member$/i })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /add members/i })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: /invite link/i })).toBeInTheDocument()
+    // Nested dialog: the sheet stays mounted (inert) underneath — it must not
+    // route through onOpenChange, which the workspace treats as a dismissal.
+    const sheet = document.querySelector('[data-slot="sheet-content"]')
+    expect(sheet).toHaveAttribute("data-nested-dialog-open")
+    expect(onOpenChange).not.toHaveBeenCalled()
+  })
+
   it("Coming Soon rows remain inactive teasers regardless of role (unaffected by this change)", () => {
     renderDrawer(ROLE.CONTRIBUTOR)
     expect(screen.getByText("Upload project standards")).toBeInTheDocument()
-    expect(screen.getByText("Import glossary / translation memory")).toBeInTheDocument()
+    expect(screen.getByText("Import terminology / translation memory")).toBeInTheDocument()
     expect(screen.getAllByText("Coming soon").length).toBe(2)
   })
 })

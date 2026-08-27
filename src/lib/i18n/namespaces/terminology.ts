@@ -47,26 +47,25 @@ export const terminology = defineNamespace({
     }),
 
     // ── GlossaryEditor.tsx ───────────────────────────────────────────────────
-    "terminology.editor.loadingGlossary": "Loading glossary",
+    "terminology.editor.loadingGlossary": "Loading terminology",
     "terminology.editor.loadingTermDetails": "Loading term details",
     "terminology.editor.errorRequiresProjectLead":
-      "Requires Project Lead role or higher to manage the glossary.",
+      "Requires Project Lead role or higher to manage the terminology.",
     "terminology.editor.errorConflict":
-      "The glossary changed elsewhere. Review the latest terms and try again.",
-    "terminology.editor.errorOffline": "Glossary changes will sync when you reconnect.",
-    "terminology.editor.errorBlocked": "Your role cannot change the glossary.",
+      "The terminology changed elsewhere. Review the latest terms and try again.",
+    "terminology.editor.errorOffline": "Terminology changes will sync when you reconnect.",
+    "terminology.editor.errorBlocked": "Your role cannot change the terminology.",
     "terminology.editor.errorSourceAndRenderingRequired":
       "A source term and rendering are required before the term can be active.",
     "terminology.editor.errorImportFailed": "Import failed",
-    "terminology.editor.title": "Glossary",
     "terminology.editor.findingTerms": "Finding terms…",
     "terminology.editor.suggestTerms": "Suggest terms",
     "terminology.editor.exportCsv": "Export CSV",
     "terminology.editor.exportTbx": "Export TBX",
-    "terminology.editor.backToGlossary": "Back to glossary",
+    "terminology.editor.backToGlossary": "Back to terminology",
     "terminology.editor.addTerm": "Add term",
     "terminology.editor.addTermDescription":
-      "Create a source term and its preferred rendering for this project glossary.",
+      "Create a source term and its preferred rendering for this project terminology.",
     "terminology.editor.sourceTermLabel": "Source term",
     "terminology.editor.sourceTermPlaceholder": "New source term…",
     "terminology.editor.renderingLabel": "Rendering",
@@ -406,6 +405,11 @@ export const terminology = defineNamespace({
     // ── TerminologyPage.tsx: main page chrome ────────────────────────────────
     "terminology.loadingLabel": "Loading terminology",
     "terminology.page.addConceptButton": "Add concept",
+    "terminology.page.editConceptTitle": "Edit concept",
+    "terminology.page.deleteConcept":
+      "Delete this concept? This removes it for everyone in the project and cannot be undone.",
+    "terminology.page.deleteNamedConcept":
+      'Delete "{term}"? This removes the concept and all its renderings for everyone in the project and cannot be undone.',
     "terminology.page.mergeDuplicatesButton": "Merge duplicates",
     "terminology.page.reviewQueueHeading": "Review queue",
     "terminology.page.candidateTermsHeading": "Candidate terms",
@@ -533,7 +537,7 @@ export const terminology = defineNamespace({
         placeholders: { count: "The validated-cell count, already locale-formatted." },
       },
       "terminology.livingMemory.goToTerminologyAria": {
-        description: "Accessible name for the toolbar button linking to the Glossary page.",
+        description: "Accessible name for the toolbar button linking to the Terminology page.",
       },
       "terminology.livingMemory.loadErrorPrefix": {
         description:
@@ -936,6 +940,16 @@ export const terminology = defineNamespace({
           "is still loading. Rendered from two places for the same surface — the " +
           "Terminology page itself and the workspace shell's Suspense fallback — " +
           "so it is worded without naming either container.",
+      },
+      "terminology.page.deleteNamedConcept": {
+        description:
+          "Body of the confirmation asked before deleting a terminology concept, " +
+          "when the concept has a source term to name. Full sentence, ends with a " +
+          "period. States the blast radius (everyone in the project) and that it " +
+          "cannot be undone — do not soften either. The term is quoted.",
+        placeholders: {
+          term: "The concept's source term, shown in quotes so it is clear which one is going.",
+        },
       },
       "terminology.page.addConceptButton": {
         description: "Header button opening the add-concept dialog.",

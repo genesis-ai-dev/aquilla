@@ -29,6 +29,7 @@ import { handleCellsReadRequest } from "./events/cells-read-route"
 import { handleCellConfidenceRequest } from "./events/cell-confidence-route"
 import { handleHealthRollupRequest } from "./events/health-rollup-route"
 import { handleCellAudioReadRequest } from "./events/cell-audio-read-route"
+import { handleCellLinksReadRequest } from "./events/cell-links-read-route"
 import { handleEventsReadRequest } from "./events/read-route"
 import { handleEventsWriteRequest } from "./events/route"
 import { handleExternalChangesetsRequest } from "./external/changesets-route"
@@ -74,6 +75,7 @@ export { ProjectSync } from "./project-do"
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
 export { FileSync } from "./file-sync-legacy"
 import { makePostgres } from "../../db/shim/postgres"
+import { migrateFenceResponse } from "./lib/migrate-fence"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
 
@@ -321,6 +323,8 @@ const worker = {
     if (healthRollupResponse) return withCors(healthRollupResponse, request)
     const cellAudioReadResponse = await handleCellAudioReadRequest(request, env)
     if (cellAudioReadResponse) return withCors(cellAudioReadResponse, request)
+    const cellLinksReadResponse = await handleCellLinksReadRequest(request, env)
+    if (cellLinksReadResponse) return withCors(cellLinksReadResponse, request)
     const cellHistoryResponse = await handleCellHistoryReadRequest(request, env)
     if (cellHistoryResponse) return withCors(cellHistoryResponse, request)
     const memberActivityResponse = await handleMemberActivityReadRequest(request, env)
@@ -356,6 +360,11 @@ const worker = {
     if (importReconcileResponse) return importReconcileResponse
     const bulkMorphImportResponse = await handleBulkMorphImportRequest(request, env)
     if (bulkMorphImportResponse) return bulkMorphImportResponse
+    // AQU-1005/AQU-1007: identification fence over the whole /migrate/*
+    // surface — blocks header-less runners (503 + source log) and gives every
+    // allowed run an audit trail. See lib/migrate-fence.ts.
+    const migrateFence = migrateFenceResponse(request, env, ctx)
+    if (migrateFence) return migrateFence
     const migrateIngestResponse = await handleMigrateIngestRequest(request, env)
     if (migrateIngestResponse) return migrateIngestResponse
     const migrateSettingsResponse = await handleMigrateSettingsRequest(request, env)
@@ -425,11 +434,21 @@ const worker = {
   },
 }
 
+// AQU-1005: requests slower than this are logged even when they SUCCEED. The
+// Aug 25–26 storms were invisible for 90 minutes because only 4xx/5xx shipped:
+// the SPA aborts at 15s and a client-aborted request produces no server-side
+// error at all, so a saturated DB looked like a clean log until it collapsed.
+// A [slow-request] line — in `pnpm dev` output or PostHog Logs — is a defect
+// to investigate, not noise.
+const SLOW_REQUEST_MS = 5_000
+
 export default {
-  // Observability wrapper: 4xx/5xx responses and unhandled throws are shipped
-  // to PostHog Logs (fire-and-forget; no-op when POSTHOG_KEY is unset) so
-  // /audio and /events failures are queryable without a repro.
+  // Observability wrapper: 4xx/5xx responses, unhandled throws, and >5s
+  // requests are shipped to PostHog Logs (fire-and-forget; no-op when
+  // POSTHOG_KEY is unset) so /audio and /events failures — and silent
+  // saturation — are queryable without a repro.
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const startedAt = Date.now()
     let response: Response
     try {
       response = await worker.fetch(request, env, ctx)
@@ -439,10 +458,26 @@ export default {
         shipLog(env, "aquilla-sync-worker", "error", `unhandled: ${request.method} ${url.pathname}`, {
           "http.method": request.method,
           "http.path": url.pathname,
+          "http.duration_ms": Date.now() - startedAt,
           "error.message": err instanceof Error ? err.message : String(err),
         }),
       )
       throw err
+    }
+    const durationMs = Date.now() - startedAt
+    if (durationMs >= SLOW_REQUEST_MS) {
+      const url = new URL(request.url)
+      console.warn(
+        `[slow-request] ${request.method} ${url.pathname} took ${durationMs}ms (status ${response.status})`,
+      )
+      ctx.waitUntil(
+        shipLog(env, "aquilla-sync-worker", "warn", `slow: ${request.method} ${url.pathname} (${durationMs}ms)`, {
+          "http.method": request.method,
+          "http.path": url.pathname,
+          "http.status": response.status,
+          "http.duration_ms": durationMs,
+        }),
+      )
     }
     if (response.status >= 400) {
       ctx.waitUntil(shipErrorResponse(env, "aquilla-sync-worker", request, response))

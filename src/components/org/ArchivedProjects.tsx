@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
 import { useLocation, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
@@ -14,13 +14,14 @@ import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missi
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { MenuItem } from "@/components/ui/menu-parts"
 import { Button } from "@/components/ui/button"
-import { Page, PageHeader, EmptyState } from "@/components/ui/page"
+import { Page, PageHeader, EmptyState, TableEmptyState } from "@/components/ui/page"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
-  fetchArchivedProjects,
-  fetchOrgDeletedFiles,
+  fetchArchivedProjectsResult,
+  fetchOrgDeletedFilesResult,
+  projectsResultError,
   type CloudProjectSummary,
   type OrgDeletedFile,
 } from "@/lib/sync/cloud-projects"
@@ -30,6 +31,7 @@ import { archivedPath } from "@/lib/navigation/org-paths"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { ArchiveRestore, Building2 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 
 type ArchivedTab = "projects" | "files"
 
@@ -48,22 +50,46 @@ export function ArchivedProjects() {
   const [files, setFiles] = useState<OrgDeletedFile[]>([])
   const [filesLoading, setFilesLoading] = useState(false)
   const [filesLoaded, setFilesLoaded] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [projectsLoadError, setProjectsLoadError] = useState<string | null>(null)
+  const [filesLoadError, setFilesLoadError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [restoringId, setRestoringId] = useState<string | null>(null)
+  const projectsRequestRef = useRef(0)
+  const filesRequestRef = useRef(0)
+  const loadScopeKey = jwt && activeOrgId != null ? `${jwt}\u0000${activeOrgId}` : null
+  const loadScopeRef = useRef(loadScopeKey)
+  loadScopeRef.current = loadScopeKey
 
   const loadProjects = useCallback(() => {
+    const request = ++projectsRequestRef.current
     if (!jwt || activeOrgId == null) {
       setProjects([])
       setProjectsLoading(false)
       return
     }
     setProjectsLoading(true)
-    fetchArchivedProjects(jwt, activeOrgId)
-      .then(setProjects)
-      .finally(() => setProjectsLoading(false))
-  }, [jwt, activeOrgId])
+    fetchArchivedProjectsResult(jwt, activeOrgId)
+      .then((result) => {
+        if (projectsRequestRef.current !== request || loadScopeRef.current !== loadScopeKey) return
+        if (!result.ok) {
+          if (result.reason === "unauthenticated") void notifySessionExpiredIfCurrent(jwt)
+          throw projectsResultError(result)
+        }
+        setProjects(result.projects)
+        setProjectsLoadError(null)
+      })
+      .catch((caught) => {
+        if (projectsRequestRef.current !== request || loadScopeRef.current !== loadScopeKey) return
+        setProjects([])
+        setProjectsLoadError(caught instanceof Error ? caught.message : String(caught))
+      })
+      .finally(() => {
+        if (projectsRequestRef.current === request && loadScopeRef.current === loadScopeKey) setProjectsLoading(false)
+      })
+  }, [jwt, activeOrgId, loadScopeKey])
 
   const loadFiles = useCallback(() => {
+    const request = ++filesRequestRef.current
     if (!jwt || activeOrgId == null) {
       setFiles([])
       setFilesLoading(false)
@@ -71,19 +97,34 @@ export function ArchivedProjects() {
       return
     }
     setFilesLoading(true)
-    fetchOrgDeletedFiles(jwt, activeOrgId)
-      .then(setFiles)
+    fetchOrgDeletedFilesResult(jwt, activeOrgId)
+      .then((result) => {
+        if (filesRequestRef.current !== request || loadScopeRef.current !== loadScopeKey) return
+        if (!result.ok) {
+          if (result.reason === "unauthenticated") void notifySessionExpiredIfCurrent(jwt)
+          throw projectsResultError(result)
+        }
+        setFiles(result.files)
+        setFilesLoadError(null)
+      })
+      .catch((caught) => {
+        if (filesRequestRef.current !== request || loadScopeRef.current !== loadScopeKey) return
+        setFiles([])
+        setFilesLoadError(caught instanceof Error ? caught.message : String(caught))
+      })
       .finally(() => {
+        if (filesRequestRef.current !== request || loadScopeRef.current !== loadScopeKey) return
         setFilesLoading(false)
         setFilesLoaded(true)
       })
-  }, [jwt, activeOrgId])
+  }, [jwt, activeOrgId, loadScopeKey])
 
   useEffect(() => {
     loadProjects()
   }, [loadProjects])
 
   useEffect(() => {
+    filesRequestRef.current += 1
     setFiles([])
     setFilesLoaded(false)
   }, [jwt, activeOrgId])
@@ -94,22 +135,23 @@ export function ArchivedProjects() {
 
   function setTab(next: ArchivedTab) {
     if (activeOrgId == null) return
+    setActionError(null)
     navigate(archivedPath(activeOrgId, next), { replace: true })
   }
 
   const handleRestoreProject = useCallback(
     async (id: string) => {
       if (!jwt || restoringId) return
-      setError(null)
+      setActionError(null)
       setRestoringId(id)
       try {
         const res = await unarchiveProjectRemote(id, jwt)
         if (res.kind === "restored" || res.kind === "local-only") {
           loadProjects()
         } else if (res.kind === "forbidden") {
-          setError(res.message ?? "Only owners can restore a project.")
+          setActionError(res.message ?? "Only owners can restore a project.")
         } else if (res.kind === "error") {
-          setError(res.message)
+          setActionError(res.message)
         }
       } finally {
         setRestoringId(null)
@@ -121,7 +163,7 @@ export function ArchivedProjects() {
   const handleRestoreFile = useCallback(
     async (file: OrgDeletedFile) => {
       if (restoringId) return
-      setError(null)
+      setActionError(null)
       setRestoringId(file.fileId)
       try {
         await emitFileRestore({
@@ -132,9 +174,9 @@ export function ArchivedProjects() {
         setFiles((current) => current.filter((f) => f.fileId !== file.fileId))
       } catch (e) {
         if (e instanceof InsufficientRoleError) {
-          setError("Only project leads and above can restore a file.")
+          setActionError("Only project leads and above can restore a file.")
         } else {
-          setError(e instanceof Error ? e.message : "Couldn't restore that file.")
+          setActionError(e instanceof Error ? e.message : "Couldn't restore that file.")
         }
       } finally {
         setRestoringId(null)
@@ -280,9 +322,9 @@ export function ArchivedProjects() {
             inset={false}
           />
 
-          {error && (
+          {(actionError ?? (tab === "files" ? filesLoadError : projectsLoadError)) && (
             <p className="mb-4 text-sm text-destructive" role="alert">
-              {error}
+              {actionError ?? (tab === "files" ? filesLoadError : projectsLoadError)}
             </p>
           )}
 
@@ -303,17 +345,11 @@ export function ArchivedProjects() {
               </TabsList>
 
               <TabsContent value="projects">
-                {projectsLoading ? (
-                  <div
-                    className="h-48 animate-pulse rounded-lg border bg-card"
-                    role="status"
-                    aria-busy="true"
-                    aria-label={t("org.archivedProjects.loadingLabel")}
-                  />
-                ) : (
-                  <DataTable
+                <DataTable
                     columns={projectColumns}
                     data={projects}
+                    loading={projectsLoading}
+                    loadingLabel={t("org.archivedProjects.loadingLabel")}
                     getRowId={(p) => p.id}
                     initialSorting={[{ id: "archivedAt", desc: true }]}
                     searchPlaceholder="Search archived projects…"
@@ -322,13 +358,6 @@ export function ArchivedProjects() {
                       if (!q) return true
                       return row.original.name.toLowerCase().includes(q)
                     }}
-                    toolbar={(table) => (
-                      <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                        {table.getFilteredRowModel().rows.length === projects.length
-                          ? `${projects.length}`
-                          : `${table.getFilteredRowModel().rows.length} of ${projects.length}`}
-                      </span>
-                    )}
                     renderRowMenuItems={(p) => (
                       <MenuItem
                         disabled={restoringId != null}
@@ -341,9 +370,7 @@ export function ArchivedProjects() {
                     emptyState={(table) => {
                       if (projects.length === 0) {
                         return (
-                          <EmptyState
-                            variant="inline"
-                            className="flex-none py-12"
+                          <TableEmptyState
                             icon={NAV_PAGE_ICONS.archived}
                             title={t("org.archivedProjects.emptyTitle")}
                             description={t("org.archivedProjects.emptyDescription")}
@@ -368,21 +395,14 @@ export function ArchivedProjects() {
                     className={ADMIN_TABLE_PANEL_CLASS}
                     dense
                   />
-                )}
               </TabsContent>
 
               <TabsContent value="files">
-                {filesLoading || !filesLoaded ? (
-                  <div
-                    className="h-48 animate-pulse rounded-lg border bg-card"
-                    role="status"
-                    aria-busy="true"
-                    aria-label={t("org.archivedProjects.loadingDeletedFilesLabel")}
-                  />
-                ) : (
-                  <DataTable
+                <DataTable
                     columns={fileColumns}
                     data={files}
+                    loading={filesLoading || !filesLoaded}
+                    loadingLabel={t("org.archivedProjects.loadingDeletedFilesLabel")}
                     getRowId={(f) => f.fileId}
                     initialSorting={[{ id: "deletedAt", desc: true }]}
                     searchPlaceholder="Search deleted files…"
@@ -395,13 +415,6 @@ export function ArchivedProjects() {
                         f.projectName.toLowerCase().includes(q)
                       )
                     }}
-                    toolbar={(table) => (
-                      <span className="ml-auto text-xs tabular-nums text-muted-foreground">
-                        {table.getFilteredRowModel().rows.length === files.length
-                          ? `${files.length}`
-                          : `${table.getFilteredRowModel().rows.length} of ${files.length}`}
-                      </span>
-                    )}
                     renderRowMenuItems={(f) => (
                       <MenuItem
                         disabled={restoringId != null}
@@ -414,9 +427,7 @@ export function ArchivedProjects() {
                     emptyState={(table) => {
                       if (files.length === 0) {
                         return (
-                          <EmptyState
-                            variant="inline"
-                            className="flex-none py-12"
+                          <TableEmptyState
                             icon={NAV_PAGE_ICONS.file}
                             title={t("workspace.trash.empty")}
                             description={t("org.archivedProjects.noDeletedFilesDescription")}
@@ -441,7 +452,6 @@ export function ArchivedProjects() {
                     className={ADMIN_TABLE_PANEL_CLASS}
                     dense
                   />
-                )}
               </TabsContent>
             </Tabs>
           )}

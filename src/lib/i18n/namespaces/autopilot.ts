@@ -390,7 +390,8 @@ export const autopilot = defineNamespace({
     "autopilot.inspector.event.draftRejected": "Draft rejected",
 
     // — Inspector: draft and scene evidence —————————————————————————
-    "autopilot.inspector.review.draftTitle": "Draft",
+    // The review card's fallback title reuses autopilot.graph.node.draft —
+    // the same drafting-stage sense, one translation.
     "autopilot.inspector.review.noProvenance": "No provenance metadata recorded",
     "autopilot.inspector.review.inEditor": "Review in editor",
     "autopilot.inspector.review.inEditorCell": "Review in editor: cell {cellId}",

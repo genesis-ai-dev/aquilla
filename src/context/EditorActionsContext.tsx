@@ -42,6 +42,18 @@ export interface EditorActionsContextValue {
     opts?: { applyToSpeaker?: boolean },
   ) => void
   /**
+   * Matt's QA (2026-08-21): the inverse — take the character OFF a line
+   * without putting another in its place. Returns the row to the NC ring.
+   * Clears the voice-map entry and the line's cast NAME only; the camera
+   * angle and the client's line number are sheet data and survive.
+   * `applyToSpeaker` mirrors the assign side's checkbox: every line in the
+   * file sharing this cell's cast name goes back to NC together.
+   */
+  onClearCastVoice?: (
+    cell: import("@/hooks/useCells").CellData,
+    opts?: { applyToSpeaker?: boolean },
+  ) => void
+  /**
    * AQU-633: the current user's own lane/file scopes (empty/undefined =
    * unscoped). Rows gate the per-cell Validate affordance on this so a scoped
    * member isn't offered a guaranteed-403 validate on an out-of-scope cell.
@@ -49,6 +61,14 @@ export interface EditorActionsContextValue {
    * (once on load) and every row reads it the same way.
    */
   myScopes?: MemberScope[]
+  /**
+   * AQU-646: a take just landed on this cell (mic or file upload). The
+   * workspace uses it to give a text-less line a target row, so a recording
+   * counts as translated work rather than an empty cell that happens to make
+   * noise. Context rather than a row prop: rows only forward it, and it is
+   * identity-stable in the workspace.
+   */
+  onTakeSaved?: (cellId: string) => void
 }
 
 const EditorActionsContext = createContext<EditorActionsContextValue>({})

@@ -140,4 +140,11 @@ describe("TeamSettingsIndex", () => {
     )
     expect(screen.queryByRole("button", { name: /delete team/i })).toBeNull()
   })
+
+  it("shows the shared SearchX icon when the team cannot be loaded", async () => {
+    getTeam.mockRejectedValue(new Error("not found"))
+    renderSettings("/orgs/1/teams/10/settings")
+    await waitFor(() => expect(screen.getByText("Team not found.")).toBeInTheDocument())
+    expect(document.querySelector("svg.lucide-search-x")).toBeTruthy()
+  })
 })

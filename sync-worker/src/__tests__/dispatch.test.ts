@@ -49,10 +49,20 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'cast.assign': { castName: 'Narrator' },
     'cell.retime': { startMs: 0, endMs: 1000 },
     'cell.audio.rename': { audioId: 'audio-1.wav', label: 'Take 3' },
+    'cell.audio.trim': { audioId: 'audio-1.wav', trimStartMs: 250, trimEndMs: 3000 },
+    'cell.link.set': {
+      kind: 'text-audio',
+      toFileId: 'file-audio-cues',
+      toCellId: 'cue-1',
+      linked: true,
+      origin: 'auto',
+      confidence: 0.92,
+    },
     'cell.audio.measure': { audioId: 'audio-1.wav', durationMs: 1000 },
     'cell.lane.retime': { subtitleStartMs: 0, subtitleEndMs: 1000 },
     'file.video.set': { coreMediaUrl: 'https://cdn/v.mp4' },
     'file.timing.set': { timingMode: 'audioFirst' },
+    'file.track.set': { trackId: 'source-subtitles', patch: { name: 'Captions' } },
     'source.cell.mirror': {
       value: 'x',
       upstream: { projectId: 'proj-up', cellId: 'cell-1', eventId: 'evt-up-1', seq: 1, side: 'source', contentHash: 'abc' },
@@ -114,7 +124,7 @@ function makeNoOpD1(): AquillaDb {
 describe('dispatchEvent', () => {
   it('target.cell.create routes to the cell handler, returns events INSERT + cells UPSERT', async () => {
     const authed = await makeAuthorized('target.cell.create', 400)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 1, updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     // 1 events INSERT + 1 chain-claim INSERT (AD-2 atomic arbitration)
@@ -128,7 +138,7 @@ describe('dispatchEvent', () => {
 
   it('cell.validate routes to the cell handler with validator UPSERT + validated recompute + endorsement_count recompute', async () => {
     const authed = await makeAuthorized('cell.validate', 300)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 2, updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     // 1 events INSERT + 1 validator UPSERT + 1 ai_drafted clear (AQU-292)
@@ -141,7 +151,7 @@ describe('dispatchEvent', () => {
 
   it('updateProjection=false produces only the events INSERT (AD-2 stale sibling)', async () => {
     const authed = await makeAuthorized('target.cell.commit', 400)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: false })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 3, updateProjection: false })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     expect(outcome.result.stmts.length).toBe(1)
@@ -150,7 +160,7 @@ describe('dispatchEvent', () => {
 
   it('file.create routes to the file handler', async () => {
     const authed = await makeAuthorized('file.create', 500)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 4, updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     expect(outcome.result.stmts.length).toBe(2) // events INSERT + files UPSERT
@@ -160,7 +170,7 @@ describe('dispatchEvent', () => {
   it('file.rename routes to the file handler, returns events INSERT + files UPDATE', async () => {
     // CONTRIBUTOR (400) — label cleanup is normal editing flow, not structural.
     const authed = await makeAuthorized('file.rename', 400)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 5, updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     expect(outcome.result.stmts.length).toBe(2) // events INSERT + files UPDATE
@@ -170,7 +180,7 @@ describe('dispatchEvent', () => {
 
   it('source.* kinds route to the cell handler (with side=source projection)', async () => {
     const authed = await makeAuthorized('source.cell.create', 500)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 6, updateProjection: true })
     expect(outcome.ok).toBe(true)
   })
 })

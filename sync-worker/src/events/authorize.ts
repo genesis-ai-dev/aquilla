@@ -7,6 +7,8 @@ import type { EventKind, EventClaims, RawEvent } from './types'
 import { requiredRoleFor, ROLE } from './role-policy'
 import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from '../auth'
 import { resolveAllowSelfAssignment } from './assignment-authority'
+import { isLockedTimingEvent, isUserInsertedCell, resolveTimingLocked } from './timing-authority'
+import { resolveAllowLineCreation } from './line-creation-authority'
 import { laneOfEvent } from './event-projection'
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
@@ -233,6 +235,74 @@ export async function authorize<K extends EventKind>(
       (await resolveAllowSelfAssignment(db, raw.projectId))
     if (!selfAssignOk) {
       return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }
+    }
+  }
+
+  // AQU-646: the project-wide timing lock raises cell.retime / cell.lane.retime
+  // from their static CONTRIBUTOR floor to MAINTAINER while a project is
+  // locked. See timing-authority.ts for why it is a raised floor rather than a
+  // flat refusal (short version: an import's retimes are indistinguishable from
+  // a drag, and re-import is maintainer-gated anyway).
+  //
+  // ORDERED SO THE COMMON PATH IS FREE. Retimes arrive in bursts while someone
+  // drags, so a maintainer never reads settings at all, and the per-cell
+  // exemption lookup runs only on an event that was otherwise about to be
+  // rejected. An absent `db` disables the lock rather than erroring, matching
+  // the self-assign carve-out above — every existing caller and test that does
+  // not pass one keeps working.
+  if (db != null && tokenClaims.role < ROLE.MAINTAINER && isLockedTimingEvent(raw.kind, raw.payload)) {
+    if (await resolveTimingLocked(db, raw.projectId)) {
+      // Sam's exemption: a line someone added here never came from the client's
+      // file, so it has no imported timing to corrupt and stays movable.
+      const exempt =
+        raw.fileId != null &&
+        raw.cellId != null &&
+        (await isUserInsertedCell(db, raw.projectId, raw.fileId, raw.cellId))
+      if (!exempt) {
+        return {
+          ok: false,
+          status: 403,
+          reason: `timing is locked for this project (${raw.kind})`,
+        }
+      }
+    }
+  }
+
+  // Sam, 2026-08-21: `source.cell.create` / `source.cell.delete` /
+  // `source.cell.reorder` dropped from their old static PROJECT_LEAD floor to
+  // CONTRIBUTOR so the "let people add new lines" project setting can mean
+  // what it says — reorder included because every add and remove BATCHES one
+  // in to keep the anchor chain matching the clock, and a floor that refused
+  // the companion killed the whole batch. The PROJECT_LEAD floor is
+  // re-imposed HERE for whoever is below it: all three pass only while the
+  // project has opted in ("that setting is enabling lines being added or
+  // removed" — the package travels together), and a delete additionally only
+  // for a line a person added by hand — an imported subtitle line stays
+  // lead-only to remove whatever the setting says. Leads and above never
+  // reach these checks; an absent `db` skips them, matching the carve-outs
+  // above.
+  if (
+    db != null &&
+    tokenClaims.role < ROLE.PROJECT_LEAD &&
+    (raw.kind === 'source.cell.create' ||
+      raw.kind === 'source.cell.delete' ||
+      raw.kind === 'source.cell.reorder')
+  ) {
+    if (!(await resolveAllowLineCreation(db, raw.projectId))) {
+      return { ok: false, status: 403, reason: 'adding lines is not enabled for this project' }
+    }
+    if (raw.kind === 'source.cell.delete') {
+      const userInserted =
+        raw.fileId != null &&
+        raw.cellId != null &&
+        (await isUserInsertedCell(db, raw.projectId, raw.fileId, raw.cellId))
+      if (!userInserted) {
+        return {
+          ok: false,
+          status: 403,
+          reason: 'only a line someone added by hand can be removed at this clearance',
+        }
+      }
     }
   }
 

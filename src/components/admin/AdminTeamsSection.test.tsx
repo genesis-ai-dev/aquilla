@@ -54,6 +54,7 @@ describe("AdminTeamsSection", () => {
     expect(screen.getByRole("columnheader", { name: /^Members$/i })).toBeInTheDocument()
     expect(screen.getByRole("columnheader", { name: /^Projects$/i })).toBeInTheDocument()
     expect(screen.getByRole("columnheader", { name: /^Created$/i })).toBeInTheDocument()
+    expect(table.previousElementSibling).toHaveTextContent(/^2$/)
   })
 
   it("filters teams by search", () => {
@@ -61,6 +62,7 @@ describe("AdminTeamsSection", () => {
     fireEvent.change(screen.getByLabelText(/search teams/i), { target: { value: "review" } })
     expect(screen.getByText("reviewers")).toBeInTheDocument()
     expect(screen.queryByText("translators")).not.toBeInTheDocument()
+    expect(screen.getByText("1 of 2")).toBeInTheDocument()
   })
 
   it("leaves Project Lead empty when none is set", () => {

@@ -1,8 +1,7 @@
 // Unit tests for project members building blocks (MembersTab / InviteLinkTab).
 //
 // Canonical route is `/project/:id/settings/members` (MembersSection tests).
-// These cover the shared MembersTab embedded on ProjectOverview and the
-// invite/revoke helpers reused by settings.
+// These cover MembersTab itself and the invite/revoke helpers reused by settings.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
@@ -106,13 +105,16 @@ vi.mock("@/lib/frontier/orgs", async (importOriginal) => {
   }
 })
 
-// useProjectOrgId resolves the project's own org; keep it offline here and
-// let the suites drive suggestions through the active-org fallback.
+// Resolve the project's own org. Tests set this to null for personal projects;
+// the production component must never borrow the active picker as a fallback.
 vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/lib/sync/cloud-projects")>()
   return {
     ...original,
-    resolveCloudProjectResult: vi.fn(async () => ({ ok: false as const, reason: "not-found" as const })),
+    resolveCloudProjectResult: vi.fn(async () => ({
+      ok: true as const,
+      project: { id: "p1", orgId: orgMocks.activeOrgId },
+    })),
   }
 })
 
@@ -162,6 +164,20 @@ function renderInvite(projectId = "proj-1") {
   )
 }
 
+beforeEach(() => {
+  mockUseProjectMembers.mockImplementation(() => ({
+    members: mockMembers,
+    isLoading: false,
+    error: null,
+    rosterHidden: false,
+    refresh: mockRefresh,
+    add: mockAdd,
+    addMany: mockAddMany,
+    remove: mockRemove,
+    changeRole: mockAdd,
+  }))
+})
+
 // ─── Tests ────────────────────────────────────────────────────────────────
 
 describe("MembersTab", () => {
@@ -170,7 +186,7 @@ describe("MembersTab", () => {
   })
 
   it("shows explicit progress while the member list is unresolved", () => {
-    mockUseProjectMembers.mockReturnValueOnce({
+    mockUseProjectMembers.mockReturnValue({
       members: [],
       isLoading: true,
       error: null,
@@ -385,9 +401,9 @@ describe("Remove needs confirmation + no numeric role leaks (FRO-368)", () => {
   it("revoke-all grant paths show role labels, not numeric levels", async () => {
     renderPage()
     fireEvent.click(screen.getAllByRole("button", { name: /^revoke all$/i })[0])
-    await waitFor(() => screen.getByText("Revoke all access"))
-    expect(screen.queryByText(/\(level \d+\)/i)).not.toBeInTheDocument()
-    expect(screen.getByText("→ Maintainer")).toBeInTheDocument()
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).queryByText(/\(level \d+\)/i)).not.toBeInTheDocument()
+    expect(within(dialog).getByText("Maintainer")).toBeInTheDocument()
   })
 })
 
@@ -460,7 +476,7 @@ describe("MembersTab — AQU-454 roster sectioning", () => {
   })
 
   it("omits the org-access section when every member has a project grant", () => {
-    mockUseProjectMembers.mockReturnValueOnce({
+    mockUseProjectMembers.mockReturnValue({
       members: [mockMembers[0], mockMembers[2]], // alice + carol, both direct
       isLoading: false,
       error: null,
@@ -487,7 +503,7 @@ describe("MembersTab — AQU-485 roster visibility", () => {
   // imply an editable roster exists) — rendering "no members" instead would
   // be a lie (the roster is hidden, not empty).
   it("renders nothing when rosterHidden is true — no list and no disclosure", async () => {
-    mockUseProjectMembers.mockReturnValueOnce({
+    mockUseProjectMembers.mockReturnValue({
       members: [],
       isLoading: false,
       error: null,

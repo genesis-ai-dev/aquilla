@@ -296,7 +296,7 @@ describe("LabelImportPanel — AQU-439 angle splitting", () => {
     )
   })
 
-  it("emits cameraState: 'mixed' for the 'group' synonym", async () => {
+  it("emits cameraState: 'group' — its own state since 2026-08-20, not folded into mixed", async () => {
     render(<LabelImportPanel {...DEFAULT_PROPS} />)
 
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
@@ -308,7 +308,7 @@ describe("LabelImportPanel — AQU-439 angle splitting", () => {
 
     await waitFor(() => expect(mockEmitCastAssign).toHaveBeenCalledTimes(1))
     expect(mockEmitCastAssign).toHaveBeenCalledWith(
-      expect.objectContaining({ castName: "Crowd", cameraState: "mixed" }),
+      expect.objectContaining({ castName: "Crowd", cameraState: "group" }),
     )
   })
 

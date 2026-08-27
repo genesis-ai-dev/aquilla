@@ -2,8 +2,6 @@ import { defineNamespace } from "./types"
 
 export const comments = defineNamespace({
   keys: {
-    "comments.backToProject": "Back to project",
-
     // Sort picker
     "comments.sort.unresolvedFirst": "Unresolved first",
     "comments.sort.recentActivity": "Most recent activity",
@@ -40,6 +38,8 @@ export const comments = defineNamespace({
     "comments.fileDeletedTooltip": "File has been deleted",
     "comments.resolve": "Resolve",
     "comments.reopen": "Reopen",
+    "comments.resolve.foreignDenied":
+      "Only {minRole} and above can resolve a thread someone else started.",
     "comments.status.open": "open",
     "comments.status.resolved": "resolved",
     "comments.stale.badge": "stale",
@@ -69,6 +69,7 @@ export const comments = defineNamespace({
     "comments.loadError": "Failed to load comments. Check your connection and try refreshing.",
     "comments.empty.title": "No comments yet",
     "comments.empty.body": "Comments can be added from the cell menu in the editor.",
+    "comments.empty.noneVisible": "No comments",
     "comments.noMatch.title": "No threads match your filters",
     "comments.noMatch.clear": "Clear filters",
 
@@ -90,11 +91,6 @@ export const comments = defineNamespace({
       screenshot: "comments",
     },
     keys: {
-      "comments.backToProject": {
-        description:
-          "Button at the top of the full-page thread list that navigates back to the " +
-          "project's editor.",
-      },
       "comments.sort.unresolvedFirst": {
         description: "Option in the thread-list sort picker: unresolved threads first.",
       },
@@ -215,6 +211,17 @@ export const comments = defineNamespace({
           "same toggle in two places: a thread card's header, and inside a resolved " +
           "thread. Imperative verb.",
       },
+      "comments.resolve.foreignDenied": {
+        description:
+          "Tooltip on the disabled Resolve / Close with reply / Reopen controls, shown " +
+          "when the reader's role is high enough to resolve their OWN threads but not " +
+          "one started by somebody else.",
+        placeholders: {
+          minRole:
+            "Plural role noun for the lowest role that may resolve another user's " +
+            "thread, already localized (e.g. 'Contributors'). Never a username.",
+        },
+      },
       "comments.status.open": {
         description:
           "Status badge on a thread showing it is still open. Lowercase, single word — " +
@@ -269,14 +276,15 @@ export const comments = defineNamespace({
       },
       "comments.filter.filtersButton": {
         description:
-          "Button that expands/collapses the advanced filter row (sort, show-resolved, " +
-          "file, author, participant). Toggles state; label doesn't change.",
+          "Tooltip and accessible name of the funnel icon button that opens the " +
+          "filter menu (sort, show-resolved, file, author, participant). The name " +
+          "does not change when the menu is open.",
       },
       "comments.filter.sortLabel": {
-        description: "Form label beside the sort-order picker in the filter row.",
+        description: "Form label beside the sort-order picker in the filter menu.",
       },
       "comments.filter.showResolved": {
-        description: "Checkbox label: include resolved threads in the visible list.",
+        description: "Switch label in the filter menu: include resolved threads in the visible list.",
       },
       "comments.filter.allFiles": {
         description: "Option in the file picker meaning no file filter is applied.",
@@ -329,10 +337,16 @@ export const comments = defineNamespace({
           "Supporting text under comments.empty.title, telling the user where to add " +
           "a first comment.",
       },
+      "comments.empty.noneVisible": {
+        description:
+          "Heading of the empty-state card when the project has comments, but none " +
+          "are visible under the default filters (resolved threads are hidden). Not " +
+          "the filtered no-match state — that uses comments.noMatch.title.",
+      },
       "comments.noMatch.title": {
         description:
           "Heading of the empty-state card shown when the project has comments, but " +
-          "the active filters exclude all of them.",
+          "user-applied (non-default) filters exclude all of them.",
       },
       "comments.noMatch.clear": {
         description:

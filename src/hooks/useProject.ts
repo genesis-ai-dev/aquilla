@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { minimalProjectRecord, resolveCloudProjectResult } from "@/lib/sync/cloud-projects"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
@@ -63,11 +64,15 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   assign("validationRoleFloor", settings.validationRoleFloor)
   assign("validationNamedUsers", settings.validationNamedUsers)
   assign("allowSelfValidation", settings.allowSelfValidation)
+  assign("allowLineCreation", settings.allowLineCreation)
   assign("bibleResourcesEnabled", settings.bibleResourcesEnabled)
   assign("draftContext", settings.draftContext)
   // AQU-646 SUB-53: the Media lens reads this to decide whether to draw the
   // timeline against the imported file's clock or lay the verses out end to end.
   assign("audioTimingMode", settings.audioTimingMode)
+  // AQU-646: the timeline lock. Must reach the workspace or the chips would be
+  // draggable for everyone until someone opened Project Settings.
+  assign("timingLocked", settings.timingLocked)
   // AQU-634: USFM front-matter opt-out must reach the workspace so ImportDialog
   // and the target-import panel drop front matter when it's on.
   assign("importExcludeFrontMatter", settings.importExcludeFrontMatter)
@@ -169,6 +174,9 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
       const result = await resolveCloudProjectResult(projectId, session.jwt)
       if (cancelled) return
       if (!result.ok) {
+        if (result.reason === "unauthenticated") {
+          void notifySessionExpiredIfCurrent(session.jwt)
+        }
         setProject(null)
         setRoleLevel(null)
         setPm(null)
@@ -178,6 +186,8 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
         setStatus(
           result.reason === "unreachable"
             ? "unreachable"
+            : result.reason === "unauthenticated"
+              ? "no-session"
             : result.reason === "forbidden"
               ? "forbidden"
               : "not-found",

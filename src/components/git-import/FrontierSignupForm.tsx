@@ -17,6 +17,7 @@ import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { FrontierAuthError } from "@/lib/frontier/auth"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { useSubmitError } from "@/lib/forms/submit-error"
+import type { FrontierSession } from "@/lib/frontier/types"
 
 /** Pure function — exported for unit testing. */
 export function checkPasswordRequirements(password: string, email: string) {
@@ -129,7 +130,7 @@ function buildSignupSchema(t: TFunction) {
 }
 
 interface FrontierSignupFormProps {
-  onSuccess: () => void
+  onSuccess: (session: FrontierSession) => void | Promise<void>
   /** Prefills invite-bound signup forms without overriding user edits. */
   initialEmail?: string | null
 }
@@ -147,8 +148,8 @@ export function FrontierSignupForm({ onSuccess, initialEmail }: FrontierSignupFo
     onSubmit: async ({ value }) => {
       clearSubmitError()
       try {
-        await register(value.username.trim(), value.email.trim(), value.password)
-        onSuccess()
+        const session = await register(value.username.trim(), value.email.trim(), value.password)
+        await onSuccess(session)
       } catch (err) {
         setSubmitError(err instanceof FrontierAuthError ? err.message : t("auth.signup.failedGeneric"))
       }

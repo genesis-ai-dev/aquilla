@@ -1,5 +1,5 @@
-const STORAGE_KEY = "codex:analyticsEnabled"
-const CHANGE_EVENT = "codex:analytics-consent-changed"
+const STORAGE_KEY = "aquilla:analyticsEnabled"
+const CHANGE_EVENT = "aquilla:analytics-consent-changed"
 
 export function isAnalyticsEnabled(): boolean {
   if (typeof window === "undefined") return false

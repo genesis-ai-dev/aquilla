@@ -68,7 +68,7 @@ describe("GlossaryEditor", () => {
     mockProjectLoading = true
     renderEditor()
 
-    const status = screen.getByRole("status", { name: "Loading glossary" })
+    const status = screen.getByRole("status", { name: "Loading terminology" })
     expect(status).toHaveAttribute("aria-busy", "true")
     expect(status.querySelector("[data-slot='spinner']")).not.toBeNull()
     expect(screen.getByTestId("loading-panel-template")).toBeInTheDocument()
@@ -91,7 +91,7 @@ describe("GlossaryEditor", () => {
     renderEditor({ project: workspaceProject, patchSettings })
 
     expect(screen.getByText("workspace-term")).toBeInTheDocument()
-    expect(screen.queryByRole("status", { name: "Loading glossary" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("status", { name: "Loading terminology" })).not.toBeInTheDocument()
     expect(vi.mocked(useProject)).toHaveBeenLastCalledWith("p1", expect.objectContaining({
       enabled: false,
       includeSettings: false,

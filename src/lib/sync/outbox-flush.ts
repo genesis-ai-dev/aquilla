@@ -5,6 +5,7 @@
 import type { CqrsRawEvent } from "./outbox-types"
 import {
   markOutboxAttempt,
+  getActiveOutboxOwnerVersion,
   peekPendingOutboxBatch,
   quarantineOutboxEvents,
   removeOutboxEvents,
@@ -72,6 +73,18 @@ export interface ForbiddenEntry {
   cellId: string | null
 }
 
+/** An event the server refused with a non-retryable 4xx inside an otherwise
+ *  successful (200) response — a shape the worker's validation would refuse
+ *  every time, so the flusher drops it. Carries the server's `reason` and the
+ *  `kind`/`fileId` the caller needs to revert the right optimistic state. */
+export interface RejectedEntry {
+  id: string
+  kind: string
+  status: number
+  reason: string
+  fileId: string | null
+}
+
 export interface FlushDeps {
   /** Mint a sync-token scoped to the EVENT's own project + file — not the
    *  workspace's current project. The outbox is a single global store shared
@@ -87,6 +100,15 @@ export interface FlushDeps {
    *  The caller passes the full entry list so the UI can deep-link the user
    *  to the first affected cell's history drawer. */
   onStaleSiblings?: (entries: StaleSiblingEntry[]) => void
+  /** Called just before non-retryable 4xx rejections are dropped from the
+   *  outbox. These arrive inside a 200 and used to disappear behind a
+   *  console.error, so a refused write's optimistic UI simply reverted with no
+   *  explanation — which reads to the user as the app randomly undoing their
+   *  work. The caller uses this to revert deliberately and say why.
+   *  Deliberately NOT routed through the 403 quarantine path: that copy is
+   *  about permissions, and a refused shape is a bug, not a permission
+   *  problem. */
+  onRejected?: (entries: RejectedEntry[]) => void
 }
 
 function groupOldestFileFirst(records: OutboxRecord[]): OutboxRecord[] {
@@ -134,9 +156,10 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   staleSiblingCount: number
   staleSourceCount: number
 }> {
+  const ownerVersion = getActiveOutboxOwnerVersion()
   const fetchFn = deps.fetchImpl ?? fetch
   const records = await peekPendingOutboxBatch(MAX_BATCH * 2)
-  if (records.length === 0) {
+  if (records.length === 0 || ownerVersion !== getActiveOutboxOwnerVersion()) {
     return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
   const batch = groupOldestFileFirst(records)
@@ -164,6 +187,12 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   // comment auth). Events WITH a fileId always use their own for correct scope.
   const tokenFileId = fileId ?? '__project__'
   const mint = await deps.getTokenForFile(projectId, tokenFileId)
+  // The queue owner changed while IndexedDB/token minting was in flight. Do
+  // not send the captured rows with a credential from either side of that
+  // transition; the newly-active flusher will pick up its own queue.
+  if (ownerVersion !== getActiveOutboxOwnerVersion()) {
+    return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
+  }
   if (!mint.token) {
     // Token mint failed. Distinguish permanent from transient so a single
     // un-mintable file can't head-of-line block the rest of the queue (the
@@ -307,6 +336,28 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       .filter((r) => r.status >= 400 && r.status < 500 && r.status !== 401 && r.status !== 403)
       .map((r) => r.id),
   )
+  if (permanentlyRejectedIds.size > 0) {
+    // Fired BEFORE the removal below, while the queued records still exist:
+    // the server's `rejected` array carries only id/status/reason, so kind and
+    // fileId have to be read back off the batch. Retrying is pointless (the
+    // same shape fails the same way forever) so the events still go — the
+    // caller just gets one chance to react before they do.
+    const recordById = new Map(batch.map((r) => [r.id, r]))
+    const rejectedEntries: RejectedEntry[] = []
+    for (const r of body.rejected ?? []) {
+      if (!permanentlyRejectedIds.has(r.id)) continue
+      const record = recordById.get(r.id)
+      rejectedEntries.push({
+        id: r.id,
+        kind: record?.event.kind ?? "unknown",
+        status: r.status,
+        reason: r.reason,
+        fileId: record?.event.fileId ?? null,
+      })
+    }
+    deps.onRejected?.(rejectedEntries)
+  }
+
   const removableIds = [...acceptedIds, ...permanentlyRejectedIds]
   if (removableIds.length > 0) {
     await removeOutboxEvents(removableIds)

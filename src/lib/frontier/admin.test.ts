@@ -29,11 +29,12 @@ describe("getAdminMe", () => {
     expect(url).toMatch(/\/api\/v2\/admin\/me$/)
   })
 
-  it("returns false (not throw) on 403 and 401", async () => {
+  it("returns false on 403 and preserves session expiry on 401", async () => {
     global.fetch = vi.fn(async () => new Response("nope", { status: 403 })) as unknown as typeof fetch
     expect(await getAdminMe("jwt")).toBe(false)
     global.fetch = vi.fn(async () => new Response("nope", { status: 401 })) as unknown as typeof fetch
-    expect(await getAdminMe("jwt")).toBe(false)
+    const err = await getAdminMe("jwt").catch((e: unknown) => e)
+    expect(err).toMatchObject({ name: "UserError", status: 401, category: "session-expired" })
   })
 
   it("throws on unexpected server error (human message, not 'HTTP 500')", async () => {

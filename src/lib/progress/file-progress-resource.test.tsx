@@ -3,7 +3,9 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   invalidateFileProgress,
+  claimLegacyFileProgressCache,
   resetFileProgressResourceForTests,
+  setFileProgressCacheOwner,
   setLocalFileProgress,
   useFileProgressResource,
   type FileProgressResponse,
@@ -36,6 +38,52 @@ afterEach(async () => {
 })
 
 describe("file progress resource", () => {
+  it("moves a pre-account snapshot into the first resolved owner scope", async () => {
+    const server = progress("legacy-progress-file", 1)
+    const getToken = async () => "token"
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(server, '"legacy"')))
+    const legacy = renderHook(() => useFileProgressResource("legacy-progress-project", "legacy-progress-file", getToken))
+    await waitFor(() => expect(legacy.result.current.progress?.file.filledCount).toBe(1))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    legacy.unmount()
+
+    await resetFileProgressResourceForTests()
+    setFileProgressCacheOwner("alice")
+    await claimLegacyFileProgressCache("alice")
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")))
+    const claimed = renderHook(() => useFileProgressResource("legacy-progress-project", "legacy-progress-file", getToken))
+    await waitFor(() => expect(claimed.result.current.progress?.file.filledCount).toBe(1))
+    expect(claimed.result.current.fromCache).toBe(true)
+    claimed.unmount()
+  })
+
+  it("preserves a newer scoped snapshot while deleting its legacy copy", async () => {
+    const getToken = async () => "token"
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(progress("upgrade-progress-file", 1, 1), '"legacy"'))
+      .mockResolvedValueOnce(jsonResponse(progress("upgrade-progress-file", 2, 2), '"scoped"'))
+    vi.stubGlobal("fetch", fetchMock)
+
+    const legacy = renderHook(() => useFileProgressResource("upgrade-progress-project", "upgrade-progress-file", getToken))
+    await waitFor(() => expect(legacy.result.current.progress?.revision).toBe(1))
+    legacy.unmount()
+    await resetFileProgressResourceForTests()
+
+    setFileProgressCacheOwner("alice")
+    const scoped = renderHook(() => useFileProgressResource("upgrade-progress-project", "upgrade-progress-file", getToken))
+    await waitFor(() => expect(scoped.result.current.progress?.revision).toBe(2))
+    scoped.unmount()
+    await resetFileProgressResourceForTests()
+
+    setFileProgressCacheOwner("alice")
+    await claimLegacyFileProgressCache("alice")
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("offline")))
+    const claimed = renderHook(() => useFileProgressResource("upgrade-progress-project", "upgrade-progress-file", getToken))
+    await waitFor(() => expect(claimed.result.current.progress?.revision).toBe(2))
+    expect(claimed.result.current.fromCache).toBe(true)
+    claimed.unmount()
+  })
+
   it("paints a persisted snapshot and revalidates it with If-None-Match", async () => {
     const server = progress("cache-file", 1)
     const getToken = async () => "token"
@@ -116,6 +164,37 @@ describe("file progress resource", () => {
     await waitFor(() => expect(hook.result.current.error).toBe(true))
     expect(hook.result.current.progress).toBeNull()
     hook.unmount()
+  })
+
+  it("keeps an in-flight response in the account namespace that started it", async () => {
+    setFileProgressCacheOwner("alice")
+    let resolveAlice!: (response: Response) => void
+    const aliceResponse = new Promise<Response>((resolve) => { resolveAlice = resolve })
+    const fetchMock = vi.fn()
+      .mockReturnValueOnce(aliceResponse)
+      .mockRejectedValueOnce(new TypeError("offline"))
+    vi.stubGlobal("fetch", fetchMock)
+    const getAliceToken = async () => "alice-token"
+    const getBobToken = async () => "bob-token"
+
+    const alice = renderHook(() => useFileProgressResource(
+      "shared-project", "shared-file", getAliceToken,
+    ))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+    setFileProgressCacheOwner("bob")
+    // Account transitions unmount account-scoped routes behind the global
+    // loading boundary before publishing the new owner.
+    alice.unmount()
+    resolveAlice(jsonResponse(progress("shared-file", 1), '"alice-progress"'))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    const bob = renderHook(() => useFileProgressResource(
+      "shared-project", "shared-file", getBobToken,
+    ))
+    await waitFor(() => expect(bob.result.current.error).toBe(true))
+    expect(bob.result.current.progress).toBeNull()
+    bob.unmount()
   })
 
   it("prefers the active store over an incomplete server rollout fallback", async () => {

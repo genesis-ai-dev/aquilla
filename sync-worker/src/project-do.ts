@@ -20,7 +20,6 @@
 import { DurableObject } from "cloudflare:workers"
 import { shouldBeReadOnly, verifyTokenForProject } from "./auth"
 import { isDeployedEnvironment } from "./environment-guard"
-import { secureCompare } from "./lib/secure-compare"
 import {
   applyDisconnect,
   applyFocusClaim,
@@ -56,6 +55,18 @@ const MEMBER_REMOVED_DENY_MS = 16 * 60 * 1000
 /** App-specific WS close code for "your membership was revoked". */
 export const MEMBER_REMOVED_CLOSE_CODE = 4403
 
+/**
+ * [Pen test 2026-08-24] App-specific WS close code for "your sync token
+ * expired". A connection's `role` is cached at handshake time and never
+ * re-checked for the socket's lifetime — a mid-session role downgrade (short
+ * of full removal, which /__member-removed already handles) previously had
+ * no path to take effect until the client happened to reconnect on its own.
+ * Forcing a close at the token's own expiry (≤ SYNC_TOKEN_TTL_SECONDS) bounds
+ * that staleness window and makes the reconnect fetch a fresh token/role via
+ * ws-reconciler's connect(), which already re-authenticates from scratch.
+ */
+export const TOKEN_EXPIRED_CLOSE_CODE = 4401
+
 interface ConnectionState {
   ws: WebSocket
   userId: string
@@ -69,6 +80,12 @@ interface ConnectionState {
    * Commenter hold every cell's edit lock and lock out Contributors.
    */
   role: number | null
+  /**
+   * [Pen test 2026-08-24] Verified token's `exp` claim in epoch ms; null in
+   * ALLOW_UNAUTHENTICATED dev (no token to expire). The lease sweep closes
+   * the socket once this passes, forcing a reconnect with a fresh token.
+   */
+  tokenExpiresAt: number | null
 }
 
 interface DOEnv {
@@ -259,11 +276,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     // deliberately does NOT close the socket (an ordinary role change,
     // including promotions, isn't itself a reason to force a reconnect).
     if (request.method === "POST" && url.pathname === "/__member-role-changed") {
-      const auth = request.headers.get("Authorization") ?? ""
-      const expected = this.env.SYNC_SECRET_KEY
-        ? `Bearer ${this.env.SYNC_SECRET_KEY}`
-        : null
-      if (!expected || !secureCompare(auth, expected)) {
+      if (!serviceBearerMatches(request.headers.get("Authorization"), this.env)) {
         return new Response("unauthorized", { status: 401 })
       }
       let body: { project?: string; userId?: number; username?: string; role?: number }
@@ -316,6 +329,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     let userId: string
     let numericUserId: number | null = null
     let role: number | null = null
+    let tokenExpiresAt: number | null = null
     if (!bypassAuth) {
       const token = url.searchParams.get("token")
       const auth = await verifyTokenForProject(token, projectId, this.env.SYNC_SECRET_KEY)
@@ -335,6 +349,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       userId = auth.claims.username ?? `user:${auth.claims.userId}`
       numericUserId = auth.claims.userId
       role = auth.claims.role
+      tokenExpiresAt = auth.claims.exp * 1000
     } else {
       userId = url.searchParams.get("user") ?? "anon"
     }
@@ -345,7 +360,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
 
     server.accept()
 
-    const conn: ConnectionState = { ws: server, userId, numericUserId, role }
+    const conn: ConnectionState = { ws: server, userId, numericUserId, role, tokenExpiresAt }
     this.connections.set(server, conn)
     this.presence.set(userId, { userId, ts: Date.now() })
     this.startLeaseSweep()
@@ -481,7 +496,31 @@ export class ProjectSync extends DurableObject<DOEnv> {
       this.presence = result.presence
       for (const m of result.emit) this.broadcastToAll(m)
       if (result.emit.length > 0) this.broadcastPresence()
+      this.sweepExpiredConnections(now)
     }, LEASE_SWEEP_INTERVAL_MS)
+  }
+
+  /**
+   * [Pen test 2026-08-24] A connection's role is resolved once at handshake
+   * and cached for the socket's life (see ConnectionState.role) — closing at
+   * the token's own expiry re-runs that resolution on reconnect instead of
+   * letting a stale role (e.g. after a mid-session downgrade) ride an
+   * indefinitely-open socket. Bounded by LEASE_SWEEP_INTERVAL_MS, well under
+   * the sync-token TTL.
+   */
+  private sweepExpiredConnections(now: number): void {
+    for (const [ws, conn] of [...this.connections]) {
+      if (conn.tokenExpiresAt === null || conn.tokenExpiresAt > now) continue
+      try {
+        ws.close(TOKEN_EXPIRED_CLOSE_CODE, "sync token expired")
+      } catch {
+        /* swallow */
+      }
+      // Server-initiated close doesn't reliably fire our own close listener —
+      // clean up presence/locks explicitly (idempotent; see the
+      // connections.has guard in handleConnectionClose).
+      this.handleConnectionClose(conn)
+    }
   }
 
   private stopLeaseSweep(): void {

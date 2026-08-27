@@ -15,6 +15,8 @@ import {
   readCellsCache,
   writeCellsCache,
   resetCellsCacheConnectionForTests,
+  setCellsCacheOwner,
+  claimLegacyCellsCache,
 } from "./cells-cache"
 
 function row(
@@ -98,6 +100,60 @@ describe("mergeCellsDelta", () => {
     expect(merged.map((r) => r.cellId)).toEqual(["a", "x", "b"])
   })
 
+  // AQU-646 round 8: inserting a line BEFORE the first cue. The pair of tests
+  // matters more than either one — the first pins the bug so it cannot come
+  // back quietly, the second proves the fix.
+  it("WITHOUT re-pointing the old head, a head insert lands at the TAIL", () => {
+    // Two rows now claim a null anchor. They bucket under the same key and
+    // tiebreak by eventId, and a fresh uuidv7 always sorts last — so the whole
+    // original chain is emitted first and the new row is appended after it.
+    const cached = chain("source", "a", "b")
+    const merged = mergeCellsDelta(cached, ["x"], [
+      row("x", "source", { anchorCellId: null, eventId: "e-zzz-newer" }),
+    ])
+    expect(merged.map((r) => r.cellId)).toEqual(["a", "b", "x"])
+  })
+
+  it("re-pointing the old head puts the new line FIRST, where it belongs", () => {
+    const cached = chain("source", "a", "b")
+    const merged = mergeCellsDelta(cached, ["x", "a"], [
+      row("x", "source", { anchorCellId: null, eventId: "e-zzz-newer" }),
+      row("a", "source", { anchorCellId: "x", eventId: "e-a2" }),
+    ])
+    expect(merged.map((r) => r.cellId)).toEqual(["x", "a", "b"])
+    // ...and the file is back to exactly one row with no cell before it.
+    expect(merged.filter((r) => r.anchorCellId == null)).toHaveLength(1)
+  })
+
+  // Round 4: the SAME bug one position along. The head fix only re-pointed the
+  // old head, so a MID-FILE insert left the successor still anchored to the
+  // cell before it — two siblings on one anchor. Invisible in the table
+  // (time-sorted) and invisible until the file is exported, which reads chain
+  // order.
+  it("WITHOUT re-pointing the successor, a mid-file insert lands at the TAIL", () => {
+    const cached = chain("source", "a", "b", "c")
+    // x inserted between a and b, but b still points at a.
+    const merged = mergeCellsDelta(cached, ["x"], [
+      row("x", "source", { anchorCellId: "a", eventId: "e-zzz-newer" }),
+    ])
+    // b (lower event id) is emitted first AND drags its whole subtree — the
+    // rest of the file — before x gets a turn.
+    expect(merged.map((r) => r.cellId)).toEqual(["a", "b", "c", "x"])
+  })
+
+  it("re-pointing the successor puts the new line where the clock says", () => {
+    const cached = chain("source", "a", "b", "c")
+    const merged = mergeCellsDelta(cached, ["x", "b"], [
+      row("x", "source", { anchorCellId: "a", eventId: "e-zzz-newer" }),
+      row("b", "source", { anchorCellId: "x", eventId: "e-b2" }),
+    ])
+    expect(merged.map((r) => r.cellId)).toEqual(["a", "x", "b", "c"])
+    // Still exactly one head, and no cell claims an anchor twice.
+    expect(merged.filter((r) => r.anchorCellId == null)).toHaveLength(1)
+    const anchors = merged.map((r) => r.anchorCellId).filter(Boolean)
+    expect(new Set(anchors).size).toBe(anchors.length)
+  })
+
   it("replaces a changed row in place without disturbing order (validate flip)", () => {
     const cached = chain("target", "a", "b", "c")
     const merged = mergeCellsDelta(cached, ["b"], [
@@ -178,6 +234,49 @@ describe("cells cache maxServerSeq cursor", () => {
     const entry = await readCellsCache("p1", "f-seq")
     expect(entry?.maxServerSeq).toBe(42)
     expect(entry?.rows).toHaveLength(1)
+  })
+
+  it("never returns another account's cached rows for the same project and file", async () => {
+    setCellsCacheOwner("alice")
+    await writeCellsCache("shared-id", "same-file", [row("alice-row", "source")], 1)
+
+    setCellsCacheOwner("bob")
+    expect(await readCellsCache("shared-id", "same-file")).toBeNull()
+    await writeCellsCache("shared-id", "same-file", [row("bob-row", "source")], 2)
+
+    setCellsCacheOwner("alice")
+    expect((await readCellsCache("shared-id", "same-file"))?.rows[0].cellId).toBe("alice-row")
+  })
+
+  it("does not collide local-only data with an account literally named local", async () => {
+    setCellsCacheOwner(null)
+    await writeCellsCache("collision", "file", [row("local-only-row", "source")], 1)
+
+    setCellsCacheOwner("local")
+    expect(await readCellsCache("collision", "file")).toBeNull()
+  })
+
+  it("moves a pre-account snapshot into the first resolved owner scope", async () => {
+    await writeCellsCache("legacy-project", "legacy-file", [row("legacy-row", "source")], 1)
+    setCellsCacheOwner("alice")
+    expect(await readCellsCache("legacy-project", "legacy-file")).toBeNull()
+
+    await claimLegacyCellsCache("alice")
+    expect((await readCellsCache("legacy-project", "legacy-file"))?.rows[0].cellId).toBe("legacy-row")
+
+    setCellsCacheOwner("bob")
+    expect(await readCellsCache("legacy-project", "legacy-file")).toBeNull()
+  })
+
+  it("does not overwrite a newer scoped snapshot while removing its legacy copy", async () => {
+    await writeCellsCache("upgrade-project", "upgrade-file", [row("legacy-row", "source")], 1)
+    setCellsCacheOwner("alice")
+    await writeCellsCache("upgrade-project", "upgrade-file", [row("scoped-row", "source")], 2)
+
+    await claimLegacyCellsCache("alice")
+    const claimed = await readCellsCache("upgrade-project", "upgrade-file")
+    expect(claimed?.rows[0].cellId).toBe("scoped-row")
+    expect(claimed?.maxServerSeq).toBe(2)
   })
 
   it("omits maxServerSeq when the server did not provide one (pre-M2-1 fallback)", async () => {

@@ -123,6 +123,70 @@ describe("runTranscribeAll", () => {
   })
 })
 
+// AQU-928: the timeline's "transcribe these sections" row passes an explicit
+// cell list, so "already transcribed" must not silently make the click a no-op
+// — the per-cell Transcribe button re-runs, and so does a chosen scope.
+describe("runTranscribeAll — force (an explicitly chosen scope)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  const withAudio = (id: string, audioId: string, extra: Partial<CellData> = {}) =>
+    makeCell({
+      id,
+      selectedAudioId: audioId,
+      attachments: {
+        [audioId]: { url: `frontier-audio://p/f/${audioId}.wav` } as unknown as import("@/lib/codex-editor/types").CodexCellAttachment,
+      },
+      ...extra,
+    })
+
+  it("re-transcribes a cell that already has timings", async () => {
+    const { transcribeCell } = await import("./transcribe")
+    const cells = [
+      withAudio("c1", "a1", { audioTimings: { a1: [{ word: "hi", start: 0, end: 2, t0: 0, t1: 0.5 }] } }),
+    ]
+    await runTranscribeAll({ cells, projectId: "proj1", session: mockSession, force: true })
+    expect(transcribeCell).toHaveBeenCalledTimes(1)
+  })
+
+  it("re-transcribes a media section that already has a transcript", async () => {
+    const { transcribeCell } = await import("./transcribe")
+    const cells = [withAudio("c1", "src-a1", { medium: "media", transcription: "already here" })]
+    await runTranscribeAll({ cells, projectId: "proj1", session: mockSession, force: true })
+    expect(transcribeCell).toHaveBeenCalledTimes(1)
+  })
+
+  it("still skips cells with no audio to transcribe", async () => {
+    const { transcribeCell } = await import("./transcribe")
+    const cells = [makeCell({ id: "c1", selectedAudioId: undefined })]
+    await runTranscribeAll({ cells, projectId: "proj1", session: mockSession, force: true })
+    expect(transcribeCell).not.toHaveBeenCalled()
+  })
+
+  it("still skips a cell whose transcription is already in flight", async () => {
+    const { transcribeCell } = await import("./transcribe")
+    const { getTranscribeStatus } = await import("./transcribe-status")
+    vi.mocked(getTranscribeStatus).mockReturnValue({ kind: "transcribing" } as ReturnType<typeof getTranscribeStatus>)
+    await runTranscribeAll({
+      cells: [withAudio("c1", "a1")], projectId: "proj1", session: mockSession, force: true,
+    })
+    expect(transcribeCell).not.toHaveBeenCalled()
+    vi.mocked(getTranscribeStatus).mockReturnValue({ kind: "idle" } as ReturnType<typeof getTranscribeStatus>)
+  })
+
+  it("runs ONLY the cells it was given — the rest of the file is untouched", async () => {
+    const { transcribeCell } = await import("./transcribe")
+    // The caller has already narrowed to the selection; the batch must not
+    // widen it back out to every cell it could find work for.
+    await runTranscribeAll({
+      cells: [withAudio("c2", "a2")], projectId: "proj1", session: mockSession, force: true,
+    })
+    expect(transcribeCell).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(transcribeCell).mock.calls[0][0].cell.id).toBe("c2")
+  })
+})
+
 describe("runSynthAll", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -248,5 +312,41 @@ describe("needsTranscription — dub take on a media cell (SUB-29)", () => {
         makeCell({ ...base, audioTimings: { [takeId]: [{ word: "hi", start: 0, end: 2, t0: 0, t1: 0.5 }] } }),
       ),
     ).toBe(false)
+  })
+})
+
+// ── Batch progress, for whoever is reporting it (AQU-646, 2026-08-18) ────
+
+describe("runTranscribeAll progress", () => {
+  it("reports the total BEFORE any work, then counts up", async () => {
+    const seen: [number, number][] = []
+    await runTranscribeAll({
+      cells: [
+        makeCell({
+          id: "c1",
+          selectedAudioId: "a1",
+          attachments: { a1: { url: "frontier-audio://p/f/a1.wav" } as unknown as import("@/lib/codex-editor/types").CodexCellAttachment },
+        }),
+        makeCell({
+          id: "c2",
+          selectedAudioId: "a2",
+          attachments: { a2: { url: "frontier-audio://p/f/a2.wav" } as unknown as import("@/lib/codex-editor/types").CodexCellAttachment },
+        }),
+      ],
+      projectId: "p1",
+      session: null,
+      onProgress: (done, total) => seen.push([done, total]),
+    })
+    // The zeroth call is the point: on a cold run the Whisper model download
+    // happens inside the first cell, so without it the screen would sit empty
+    // for most of the wait.
+    expect(seen[0]).toEqual([0, 2])
+    expect(seen[seen.length - 1]).toEqual([2, 2])
+  })
+
+  it("stays silent when nothing needs transcribing", async () => {
+    const onProgress = vi.fn()
+    await runTranscribeAll({ cells: [], projectId: "p1", session: null, onProgress })
+    expect(onProgress).not.toHaveBeenCalled()
   })
 })

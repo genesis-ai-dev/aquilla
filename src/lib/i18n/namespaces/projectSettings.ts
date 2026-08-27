@@ -21,6 +21,13 @@ export const projectSettings = defineNamespace({
     "projectSettings.permission.editSharedSettingsRequiresRole": "{roleFloor} can edit shared settings.",
     "projectSettings.permission.renameRequiresRole": "{roleFloor} can rename this project.",
     "projectSettings.permission.reconnectToEdit": "Reconnect to edit shared settings.",
+    "projectSettings.permission.onlyRoleCanModify": "Only {role} can modify",
+    "projectSettings.permission.viewPrivilegedMembers": "View {role}",
+    "projectSettings.permission.privilegedDialogTitle": "Project {role}",
+    "projectSettings.permission.privilegedDialogDescription":
+      "{role} can change shared settings, members, and other project configuration.",
+    "projectSettings.permission.privilegedDialogEmpty": "No {role} on this project.",
+    "projectSettings.permission.privilegedDialogError": "Couldn't load {role}.",
 
     // ── Project creation dialog ──
     "projectSettings.create.trigger": "New Project",
@@ -191,6 +198,19 @@ export const projectSettings = defineNamespace({
     "projectSettings.field.aiProvider": "AI provider",
     "projectSettings.field.endpoint": "endpoint",
     "projectSettings.field.apiKey": "API key",
+    // AQU-646, keyed 2026-08-20.
+    "projectSettings.field.apiKeyRequired": "API key *",
+    "projectSettings.field.apiKeyPlaceholder": "Paste your API key",
+    "projectSettings.field.apiKeyNoAuth": "Leave blank for no auth",
+    "projectSettings.advancedLlm.modelPlaceholder": "Type a model id",
+    "projectSettings.shared.lastEdited": "Last edited by {name} · {date}",
+    "projectSettings.shared.nameHint": "Shown across the workspace and project list.",
+    "projectSettings.timeline.lockLabel": "Lock the timings against dragging",
+    "projectSettings.timeline.lockHint":
+      "On by default, and on for everyone \u2014 project leads included. The timings came from the client's own file, and a dragged chip moves a line for the whole team with nothing to compare it against afterwards. While this is on, the handles are gone from every imported line and cue; a line somebody added here still moves, and recordings can still be placed against their lines as usual. Only a maintainer can turn it off, and the timeline says so for as long as it is off.",
+    "projectSettings.timeline.addLinesLabel": "Let people add new lines into the timeline's silences",
+    "projectSettings.timeline.addLinesHint":
+      "Off by default. With this on, a pencil appears over each stretch of the timeline that no line covers, and a microphone beside it that creates a line and starts recording. It is never offered on a file with imported audio cues \u2014 there the cues already say where the lines are. Deleting an empty line somebody added stays available either way, so turning this back off can never strand one.",
     // model → projectSettings.advancedLlm.modelLabel
     "projectSettings.field.temperature": "temperature",
     "projectSettings.field.healthPenalty": "health penalty",
@@ -425,7 +445,7 @@ export const projectSettings = defineNamespace({
 
     // ── Terminology card ──
     "projectSettings.terminology.title": "Terminology Library",
-    "projectSettings.terminology.description": "Manage approved terms, renderings, and the project glossary (term base).",
+    "projectSettings.terminology.description": "Manage approved terms, renderings, and the project terminology (term base).",
     "projectSettings.terminology.openButton": "Open Terminology Library",
 
     // ── ValidationSettingsSection.tsx ──
@@ -525,6 +545,7 @@ export const projectSettings = defineNamespace({
     // "Restore" button → common.restore (identical text)
     "projectSettings.languages.restoreLaneAriaLabel": "Restore lane {lane}",
     "projectSettings.languages.addLaneLabel": "Add a target lane",
+    "projectSettings.languages.suggestionsAriaLabel": "Language suggestions",
     // "e.g. fr-CA" placeholder → projectSettings.create.extraLanguagesPlaceholder (identical text)
     // "Adding…" busy label → common.adding (identical text)
     "projectSettings.languages.addLaneButton": "Add lane",
@@ -649,6 +670,16 @@ export const projectSettings = defineNamespace({
         "button text.",
     },
     keys: {
+      "projectSettings.shared.lastEdited": {
+        description:
+          "Sub-line under the project-name field recording who last changed the " +
+          "shared settings and when. Not a sentence — a provenance line, no " +
+          "period. Separated by a middle dot.",
+        placeholders: {
+          name: "Username of the person who last saved the shared settings.",
+          date: "Date of that save, already formatted for the viewer's locale.",
+        },
+      },
       "projectSettings.permission.roleOrHigher": {
         description:
           "Composes a role-floor note, e.g. 'Maintainer or higher' — used inside " +
@@ -674,6 +705,55 @@ export const projectSettings = defineNamespace({
           "account's role is below the rename floor.",
         placeholders: {
           roleFloor: "The rendered projectSettings.permission.roleOrHigher string, e.g. 'Maintainer or higher'.",
+        },
+      },
+      "projectSettings.permission.onlyRoleCanModify": {
+        description:
+          "Title of the compact per-control permission hint on a locked settings " +
+          "field (GitHub-style: 'Only admins can modify'). Names the role class " +
+          "that is allowed to edit, not the caller's current role. Short, no period.",
+        placeholders: {
+          role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
+        },
+      },
+      "projectSettings.permission.viewPrivilegedMembers": {
+        description:
+          "Next-action control under the per-control lock hint. Opens a modal of " +
+          "people who can change the setting (GitHub: 'View admins'). Short, no period.",
+        placeholders: {
+          role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
+        },
+      },
+      "projectSettings.permission.privilegedDialogTitle": {
+        description:
+          "Title of the GitHub-style 'Workspace admins' modal listing people who " +
+          "can change shared project settings. Short, no period.",
+        placeholders: {
+          role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
+        },
+      },
+      "projectSettings.permission.privilegedDialogDescription": {
+        description:
+          "One-line explanation under the privileged-members modal title. Names " +
+          "what that role class can do, not the caller's current role.",
+        placeholders: {
+          role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
+        },
+      },
+      "projectSettings.permission.privilegedDialogEmpty": {
+        description:
+          "Empty state inside the privileged-members modal when nobody on the " +
+          "project holds the write floor.",
+        placeholders: {
+          role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
+        },
+      },
+      "projectSettings.permission.privilegedDialogError": {
+        description:
+          "Error state inside the privileged-members modal when the list could " +
+          "not be loaded. Short, with a period.",
+        placeholders: {
+          role: "Plural localized role noun, e.g. 'Maintainers', already resolved via resolveRoleName().",
         },
       },
       "projectSettings.create.trigger": {
@@ -1018,6 +1098,15 @@ export const projectSettings = defineNamespace({
         placeholders: {
           lane: "The lane's language tag (data, not translated).",
         },
+      },
+      "projectSettings.languages.suggestionsAriaLabel": {
+        description:
+          "Accessible name of the dropdown list of languages that appears under a " +
+          "source/target language field as the user types (AQU-988). Screen-reader " +
+          "only — the list itself shows language names, so this just says what the " +
+          "list is. The field still accepts any typed text, so avoid wording that " +
+          "implies these are the only allowed values.",
+        maxLength: 30,
       },
       "projectSettings.localModels.notDownloadedBadge": {
         description: "Badge on a not-yet-downloaded local AI model row, stating its download size.",

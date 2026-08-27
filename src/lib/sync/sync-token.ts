@@ -118,6 +118,8 @@ export interface SyncTokenCallbacks {
    * session-expired banner instead, via
    * `notifySessionExpiredIfCurrent(failedJwt)` (lib/frontier/session-expiry),
    * which also drops stragglers from a credential re-login already replaced.
+   * This credential scoping also preserves unrelated stored accounts and
+   * offline work while the rejected account is reauthenticated.
    */
   onUnauthorized?: (failedJwt: string) => void
 }
@@ -181,7 +183,7 @@ export function makeSyncTokenMinter(
           // the next call re-fetches, and notify the caller with the JWT that
           // failed so it can raise the session-expired signal (AQU-159) —
           // without destroying the session on what may be a transient
-          // misreported 401 (AQU-994).
+          // misreported 401 (AQU-994) or clearing unrelated accounts.
           cached = null
           callbacks.onUnauthorized?.(jwt)
         }

@@ -1,6 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
-import { MockLLMServer } from "../../helpers/mock-llm-server"
+import { MockLLMServer, applyUserProviderOverride } from "../../helpers/mock-llm-server"
 
 const mockLLM = new MockLLMServer()
 
@@ -19,13 +19,7 @@ test("translate as read drafts the viewport without replacing human text", async
   })
   const ws = await openSeededProject(alice, seeded)
 
-  await alice.evaluate(({ endpoint }) => {
-    localStorage.setItem("codex:userProviderOverride", JSON.stringify({
-      endpoint,
-      model: "mock-model",
-      apiKey: "",
-    }))
-  }, { endpoint: `${mockLLM.baseUrl}/v1` })
+  await applyUserProviderOverride(alice, alice.username, `${mockLLM.baseUrl}/v1`)
   await alice.reload()
   await ws.waitForEditor()
 

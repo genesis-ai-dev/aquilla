@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { applyUserProviderOverride } from "../../helpers/mock-llm-server"
 import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
@@ -24,13 +25,7 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
   // correct). useProject reads from the server, not IDB, so IDB writes are ignored.
   const llmBase = process.env.VITE_LLM_BASE_URL ?? ""
   expect(llmBase).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
-  await alice.evaluate(({ endpoint }) => {
-    localStorage.setItem("codex:userProviderOverride", JSON.stringify({
-      endpoint,   // e.g. http://127.0.0.1:<port>/v1
-      model: "mock-model",
-      apiKey: "",
-    }))
-  }, { endpoint: `${llmBase}/v1` })
+  await applyUserProviderOverride(alice, alice.username, `${llmBase}/v1`)
 
   // Reload so React reads the patched project state.
   await alice.reload()

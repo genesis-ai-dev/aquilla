@@ -26,6 +26,7 @@ vi.mock("@/lib/sync/cloud-projects", () => ({
 beforeEach(() => {
   localStorage.clear()
   fetchAccessibleProjectsResultMock.mockReset()
+  fetchAccessibleProjectsResultMock.mockResolvedValue({ ok: true, projects: [] })
   navigate.mockClear()
   mockUseFrontierSession.mockReturnValue({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false } as { session: FakeSession; loading: boolean })
 })
@@ -169,9 +170,9 @@ describe("ProjectsList — orgs fetch failure (RES-5)", () => {
     const banner = screen.getByTestId("projects-unreachable-banner")
     expect(within(banner).getByRole("button", { name: /retry/i })).toBeInTheDocument()
     expect(screen.queryByText(/no projects in this org yet/i)).not.toBeInTheDocument()
-    // The projects fetch never ran (no org id) — and must not be needed for
-    // the banner to appear.
-    expect(fetchAccessibleProjectsResultMock).not.toHaveBeenCalled()
+    // Directory discovery is account-wide and resolves independently from the
+    // membership request; the org failure still owns the visible recovery UI.
+    expect(fetchAccessibleProjectsResultMock).toHaveBeenCalledWith("jwt")
   })
 
   it("Retry after an orgs failure re-fetches orgs and recovers to the project grid", async () => {

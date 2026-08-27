@@ -40,7 +40,7 @@ import {
   fileCountersRecomputeStmt,
   type PersistedEvent,
 } from './event-projection'
-import { buildBulkEventInsertStmt, allocateSeqRange, type SeqEventInsertRow } from './event-insert'
+import { buildBulkEventInsertStmt, allocateSeqRange, buildSettleSeqRangeStmt, fetchPendingFloor, type SeqEventInsertRow } from './event-insert'
 import type { EventPayloads } from './types'
 import { fullProgressRecomputeStmts } from './progress-projection'
 
@@ -784,7 +784,20 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
   // or a target-only change would never trip `head > cursor`.
   const consumes = link.source_link_consumes === 'target' ? 'target' : 'source'
   const gate = link.source_link_gate === 'head' ? 'head' : 'validated'
-  const head = await laneRelevantHeadSeq(db, upstreamProjectId, consumes)
+  let head = await laneRelevantHeadSeq(db, upstreamProjectId, consumes)
+  // AQU-1005: never advance the fold cursor past an in-flight upstream
+  // allocation — a late-committing upstream writer's events would otherwise be
+  // permanently skipped by this link's `server_seq > cursor` fold.
+  //
+  // The ordering here is load-bearing: the pending floor MUST be read AFTER
+  // `head` and BEFORE loadDelta. Read before `head` and an allocation taken in
+  // between would go unfenced; read after loadDelta and the delta could already
+  // have been taken against an unclamped head. And loadDelta's unbounded upper
+  // window is safe precisely BECAUSE the cursor we store is clamped to this
+  // floor — rows it folds above the floor are simply re-folded, idempotently,
+  // on the next run.
+  const upstreamFloor = await fetchPendingFloor(db, upstreamProjectId)
+  if (upstreamFloor != null) head = Math.min(head, upstreamFloor)
   if (head <= cursor) return NOOP_RESULT
 
   const { cells: folded, fileIds: deltaFileIds } =
@@ -1011,6 +1024,10 @@ export async function mirrorSync(db: AquillaDb, downstreamProjectId: string): Pr
         serverSeq: cursorSeq,
       },
     ]),
+  )
+  allStmts.push(
+    buildSettleSeqRangeStmt(db, downstreamProjectId, baseSeq),
+    buildSettleSeqRangeStmt(db, downstreamProjectId, cursorSeq),
   )
 
   // Batch in BATCH_LIMIT-sized chunks (same convention as route.ts/rebuild.ts).

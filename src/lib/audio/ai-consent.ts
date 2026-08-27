@@ -38,8 +38,8 @@ interface PendingRequest {
   resolve: (granted: boolean) => void
 }
 
-const KEY_PREFIX = "codex.aiConsent."
-const ALL_FEATURES_KEY = "codex.aiConsent.all"
+const KEY_PREFIX = "aquilla.aiConsent."
+const ALL_FEATURES_KEY = "aquilla.aiConsent.all"
 let pending: PendingRequest | null = null
 const listeners = new Set<() => void>()
 

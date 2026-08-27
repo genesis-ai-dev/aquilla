@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react"
-import { useQueryClient } from "@tanstack/react-query"
 import { Link, useLocation } from "react-router-dom"
 import { ChevronDown, LogIn, LogOut, UserPlus, Check, Settings2 } from "lucide-react"
 import { useAccounts } from "@/hooks/useAccounts"
 import { hydrateSessionEmails, logout as revokeServerSide } from "@/lib/frontier/auth"
-import { clearSession, listAllSessionJwts, removeSession, sessionKey } from "@/lib/frontier/session-store"
-import { clearAllLocalData } from "@/lib/store/project-index"
-import { outboxPendingCount } from "@/lib/sync/outbox"
+import { listAllSessionJwts, sessionKey } from "@/lib/frontier/session-store"
+import { outboxPendingCount, outboxRecordCountAllOwners } from "@/lib/sync/outbox"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog"
@@ -102,8 +100,7 @@ export function AccountSwitcher({
   compact = false,
 }: { variant?: "sidebar" | "header"; compact?: boolean } = {}) {
   const t = useT()
-  const { active, sessions, activate } = useAccounts()
-  const qc = useQueryClient()
+  const { active, sessions, activate, remove, removeAll } = useAccounts()
   const location = useLocation()
   const [open, setOpen] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
@@ -123,7 +120,9 @@ export function AccountSwitcher({
 
   async function handleLogout(scope: LogoutScope) {
     setOpen(false)
-    const count = await outboxPendingCount()
+    const count = scope === "all"
+      ? await outboxRecordCountAllOwners()
+      : await outboxPendingCount()
     if (count > 0) {
       setPendingLogout({ count, scope })
       return
@@ -140,16 +139,11 @@ export function AccountSwitcher({
     if (scope === "all") {
       const jwts = await listAllSessionJwts()
       await Promise.all(jwts.map((jwt) => revokeServerSide(jwt)))
-      await clearSession()
+      await removeAll()
     } else if (active) {
       await revokeServerSide(active.jwt)
-      await removeSession(sessionKey(active))
+      await remove(sessionKey(active))
     }
-    await clearAllLocalData()
-    // Wipe in-memory query cache so the UI reflects the new auth state —
-    // a still-signed-in account that was just promoted, or none at all —
-    // rather than rendering the logged-out account's cached data.
-    qc.clear()
   }
 
   if (!active) {
@@ -232,8 +226,8 @@ export function AccountSwitcher({
                 isHeader
                   ? "h-9 rounded-xl bg-card px-2 transition-shadow"
                   : compact
-                    ? "h-8 w-8 justify-center rounded-md p-0 hover:bg-accent"
-                    : "w-full rounded-md px-1.5 py-1.5 hover:bg-accent",
+                    ? "h-8 w-8 justify-center rounded-md p-0 hover:bg-accent/40"
+                    : "w-full rounded-md px-1.5 py-1.5 hover:bg-accent/40",
               )}
               aria-label={t("nav.account.menuLabel", { username: active.username })}
               data-account-switcher-surface={variant}

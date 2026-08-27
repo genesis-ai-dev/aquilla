@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { ShieldOff } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -6,15 +6,19 @@ import { Section } from "@/components/ui/page"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { fetchOrgMembersMatrix, removeProjectMember } from "@/lib/frontier/members"
-import { fetchAccessibleProjects } from "@/lib/sync/cloud-projects"
+import {
+  fetchAccessibleProjectsResult,
+  projectsResultError,
+} from "@/lib/sync/cloud-projects"
 import {
   deriveExternalCollaborators,
   type ExternalCollaborator,
 } from "@/lib/frontier/external-collaborators"
 import { RoleLabel } from "@/components/RoleLabel"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
-import { toUserFacingError } from "@/lib/errors/user-error"
+import { toUserFacingError, UserError } from "@/lib/errors/user-error"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 
 /**
  * AQU-326: org-level governance view of everyone who reaches this org's
@@ -41,23 +45,38 @@ export function ExternalCollaboratorsSection({
   const [externals, setExternals] = useState<ExternalCollaborator[]>([])
   const [error, setError] = useState<string | null>(null)
   const [busyGrant, setBusyGrant] = useState<string | null>(null)
+  const loadRequestRef = useRef(0)
+  const loadScopeKey = `${jwt ?? ""}\u0000${orgId}\u0000${orgMemberIds.join(",")}`
+  const loadScopeRef = useRef(loadScopeKey)
+  loadScopeRef.current = loadScopeKey
 
   const load = useCallback(async () => {
+    const request = ++loadRequestRef.current
     if (!jwt) return
     try {
-      const [matrix, projects] = await Promise.all([
+      const [matrix, projectsResult] = await Promise.all([
         fetchOrgMembersMatrix(jwt, orgId),
-        fetchAccessibleProjects(jwt, orgId),
+        fetchAccessibleProjectsResult(jwt, orgId),
       ])
+      if (loadRequestRef.current !== request || loadScopeRef.current !== loadScopeKey) return
+      if (!projectsResult.ok) {
+        if (projectsResult.reason === "unauthenticated") void notifySessionExpiredIfCurrent(jwt)
+        throw projectsResultError(projectsResult)
+      }
+      const projects = projectsResult.projects
       const names = new Map(projects.map((p) => [p.id, p.name]))
       setExternals(deriveExternalCollaborators(matrix, new Set(orgMemberIds), names))
       setError(null)
     } catch (e) {
+      if (loadRequestRef.current !== request || loadScopeRef.current !== loadScopeKey) return
+      if (e instanceof UserError && e.category === "session-expired") {
+        void notifySessionExpiredIfCurrent(jwt)
+      }
       setError(toUserFacingError(e, "org").message)
     }
     // orgMemberIds is a fresh array each render; key on its contents.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jwt, orgId, orgMemberIds.join(",")])
+  }, [jwt, orgId, loadScopeKey, orgMemberIds.join(",")])
 
   useEffect(() => { void load() }, [load])
 
@@ -96,13 +115,14 @@ export function ExternalCollaboratorsSection({
             </Badge>
             <div className="ms-auto flex flex-wrap items-center gap-1.5">
               {e.grants.map((g) => (
-                <Badge
-                  key={`${g.projectId}:${e.userId}`}
-                  variant="outline"
-                  className="gap-1 font-normal"
-                >
-                  <span className="max-w-40 truncate">{g.projectName}</span>
-                  <span className="text-muted-foreground">· <RoleLabel name={g.roleName} /></span>
+                <span key={`${g.projectId}:${e.userId}`} className="inline-flex items-center gap-1">
+                  <Badge
+                    variant="outline"
+                    className="max-w-40 truncate font-normal"
+                  >
+                    {g.projectName}
+                  </Badge>
+                  <RoleLabel name={g.roleName} />
                   {g.source === "override" ? (
                     <Button
                       size="icon"
@@ -131,7 +151,7 @@ export function ExternalCollaboratorsSection({
                       </span>
                     </AppTooltip>
                   )}
-                </Badge>
+                </span>
               ))}
             </div>
           </li>

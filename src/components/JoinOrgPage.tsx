@@ -64,6 +64,7 @@ export function JoinOrgPage() {
   const [authMode, setAuthMode] = useState<AuthMode>("login")
   const [preview, setPreview] = useState<OrgInvitePreview | null>(null)
   const [previewLoading, setPreviewLoading] = useState(true)
+  const [rejectedJwt, setRejectedJwt] = useState<string | null>(null)
 
   // Public preview — who invited you, to which org, at what role (AQU-471).
   useEffect(() => {
@@ -119,7 +120,7 @@ export function JoinOrgPage() {
     <p className="text-sm text-muted-foreground">{t("org.joinOrgPage.genericInviteFallback")}</p>
   )
 
-  const sessionExpired = !!session?.jwt && isJwtExpired(session.jwt)
+  const sessionExpired = !!session?.jwt && (isJwtExpired(session.jwt) || rejectedJwt === session.jwt)
   const hasValidSession = !!session?.jwt && !sessionExpired
 
   async function accept(jwt: string) {
@@ -140,7 +141,8 @@ export function JoinOrgPage() {
         setError("This invite link has expired or was already used. Ask the org owner for a fresh one.")
       } else if (status === 404) {
         setError("This invite link is invalid. Ask the org owner for a fresh one.")
-      } else if (isJwtExpired(jwt)) {
+      } else if (status === 401 || isJwtExpired(jwt)) {
+        setRejectedJwt(jwt)
         setPhase("initial")
         return
       } else {

@@ -13,11 +13,12 @@
 // (unencrypted) local project record.
 
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
+import { ownerScopedLocalStorageKey } from "@/lib/frontier/client-local-storage"
 
 const PREFIX = "frontier:project-tts:"
 
 function storageKey(projectId: string): string {
-  return PREFIX + projectId
+  return ownerScopedLocalStorageKey(PREFIX + projectId)
 }
 
 export function loadProjectTts(projectId: string): ProjectTtsSettings | undefined {

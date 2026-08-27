@@ -1,3 +1,4 @@
+import type { ReactNode } from "react"
 import { Input } from "@/components/ui/input"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Field, FieldDescription, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -12,7 +13,7 @@ interface DecaySettingsSectionProps {
   settings?: DecaySettings
   onChange: (next: DecaySettings) => void
   disabled?: boolean
-  disabledTooltip?: string
+  disabledTooltip?: ReactNode
 }
 
 /**

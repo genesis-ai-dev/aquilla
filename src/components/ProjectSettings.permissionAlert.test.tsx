@@ -1,20 +1,19 @@
-// AQU-623 (live-QA finding) — the permission-denied alert must be REACHABLE.
+// AQU-623 — permission denials on shared settings must be REACHABLE on the
+// locked control itself (GitHub-style), not as a page-level banner.
 //
-// The alert originally rendered only after a shared-settings PATCH came back
-// role-blocked. But a below-floor member's shared inputs are disabled up-front
-// (DisabledFieldTooltip), so that save could never fire and the alert was
-// unreachable in the normal flow — QA only ever saw the hover tooltips. These
-// tests encode the fix: on a cloud project the alert renders persistently for
-// a below-floor role (naming the role + linking the permission docs), never
-// for maintainer+, and never on an unsynced local project (whose hook also
-// reports reason "role" because roleLevel is null, but which has no
-// shared-settings permission model).
+// A below-floor member's shared inputs are disabled up-front
+// (DisabledFieldTooltip), so a role-blocked save never fires. The compact
+// hint on each locked field names who can edit and offers a next-action
+// link. These tests encode: the index has no page-level alert; hovering a
+// locked field on a settings pane shows the hint; maintainer+ and unsynced
+// local projects do not.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { screen } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { ProjectSettings } from "./ProjectSettings"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 
 const PROJECT_ID = "proj-permission-alert"
 
@@ -63,8 +62,6 @@ vi.mock("@/hooks/useOrg", () => ({
   useOrg: () => ({ org: null }),
 }))
 
-// Settings now renders inside the org appshell; the sidebar and breadcrumb
-// pull OrgProvider context these tests do not stand up.
 vi.mock("@/components/org/OrgSidebar", () => ({
   OrgSidebar: () => <div data-testid="org-sidebar">sidebar</div>,
 }))
@@ -86,9 +83,6 @@ vi.mock("@/hooks/useAccounts", () => ({
   useAccounts: () => ({ active: null, sessions: [], loading: false, add: vi.fn(), activate: vi.fn(), remove: vi.fn() }),
 }))
 
-// The alert falls back to AccountSwitcher (full auth-dialog tree) when no
-// other session exists; stub it — these tests are about reachability, not
-// the switch-user affordance (covered in PermissionDeniedAlert.test.tsx).
 vi.mock("@/components/AccountSwitcher", () => ({
   AccountSwitcher: () => <div data-testid="account-switcher" />,
 }))
@@ -99,10 +93,6 @@ vi.mock("@/hooks/useCompletionSettings", () => ({
 }))
 
 vi.mock("@/lib/completion/completion-service", async (importOriginal) => {
-  // Partial mock: ProjectSettings and other modules in its render tree read
-  // real constants from this module at module-eval time (FRONTIER_CHAT_URL via
-  // lib/ab/feedback.ts, DEFAULT_COMPLETION_MAX_TOKENS for initial state) —
-  // keep every real export and stub only the network-touching functions.
   const actual = await importOriginal<typeof import("@/lib/completion/completion-service")>()
   return {
     ...actual,
@@ -135,11 +125,12 @@ vi.mock("@/lib/metrics/use-post-edit-metrics", () => ({
   }),
 }))
 
-function renderSettings() {
-  return render(
-    <MemoryRouter initialEntries={[`/project/${PROJECT_ID}/settings`]}>
+function renderSettings(path = `/project/${PROJECT_ID}/settings`) {
+  return renderWithTooltips(
+    <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/project/:id/settings" element={<ProjectSettings />} />
+        <Route path="/project/:id/settings/:section" element={<ProjectSettings />} />
       </Routes>
     </MemoryRouter>,
   )
@@ -152,36 +143,39 @@ beforeEach(() => {
   currentReasonCannotEdit = "role"
 })
 
-describe("ProjectSettings — persistent permission-denied alert (AQU-623)", () => {
-  it("viewer on a cloud project sees the alert naming their role, without any save attempt", () => {
+describe("ProjectSettings — per-control permission hint (AQU-623)", () => {
+  it("does not show a page-level permission alert on the settings index", () => {
+    renderSettings()
+    expect(screen.queryByRole("alert")).toBeNull()
+    expect(screen.queryByText(/doesn't have permission to change shared settings/i)).toBeNull()
+  })
+
+  it("viewer on a cloud project sees the hint on a locked field, without any save attempt", async () => {
     currentProject = makeProject({ syncRole: { level: 100, source: "member" } } as Partial<ProjectRecord>)
-    renderSettings()
-    const alert = screen.getByRole("alert")
-    expect(alert).toHaveTextContent(
-      "You're signed in as tester (t@example.com) — your role on this project is Viewer, which doesn't have permission to change shared settings (needs Maintainer or higher).",
-    )
-    expect(
-      screen.getByRole("link", { name: /learn about permission levels/i }),
-    ).toHaveAttribute("target", "_blank")
+    renderSettings(`/project/${PROJECT_ID}/settings/general`)
+    const title = screen.getByLabelText(/title/i)
+    expect(title).toBeDisabled()
+    await expectTooltip(title, /Only Maintainers can modify/)
+    expect(screen.getByRole("button", { name: /view maintainers/i })).toBeTruthy()
+    expect(screen.queryByRole("link", { name: /view members/i })).toBeNull()
   })
 
-  it("contributor on a cloud project sees the alert with their role name", () => {
+  it("contributor on a cloud project sees the same per-control hint", async () => {
     currentProject = makeProject({ syncRole: { level: 400, source: "member" } } as Partial<ProjectRecord>)
-    renderSettings()
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "your role on this project is Contributor",
-    )
+    renderSettings(`/project/${PROJECT_ID}/settings/general`)
+    await expectTooltip(screen.getByLabelText(/title/i), /Only Maintainers can modify/)
   })
 
-  it("maintainer+ sees no alert", () => {
+  it("maintainer+ sees no lock hint", () => {
     currentProject = makeProject({ syncRole: { level: 600, source: "member" } } as Partial<ProjectRecord>)
     currentCanEdit = true
     currentReasonCannotEdit = null
-    renderSettings()
-    expect(screen.queryByRole("alert")).toBeNull()
+    renderSettings(`/project/${PROJECT_ID}/settings/general`)
+    expect(screen.getByLabelText(/title/i)).not.toBeDisabled()
+    expect(screen.queryByText(/Only Maintainers can modify/)).toBeNull()
   })
 
-  it("unsynced local project (hook reports reason 'role' with null level) shows no alert", () => {
+  it("unsynced local project (hook reports reason 'role' with null level) shows no page alert", () => {
     currentProject = makeProject({ syncRole: undefined } as Partial<ProjectRecord>)
     renderSettings()
     expect(screen.queryByRole("alert")).toBeNull()

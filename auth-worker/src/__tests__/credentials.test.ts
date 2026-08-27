@@ -224,7 +224,7 @@ describe("GET /api/v2/credentials", () => {
 })
 
 describe("DELETE /api/v2/credentials/:id", () => {
-  it("forbids a non-owner from revoking, and 404s an unknown id", async () => {
+  it("404s a non-owner's revoke attempt the same as an unknown id (no existence oracle)", async () => {
     await seedUser(1, "alice")
     await seedUser(2, "bob")
     const body = (await (await mint("alice", { name: "t", mode: "ask" })).json()) as CreateResponse
@@ -234,7 +234,10 @@ describe("DELETE /api/v2/credentials/:id", () => {
       { method: "DELETE", headers: authHeader(await jwtFor("bob")) },
       env,
     )
-    expect(forbidden.status).toBe(403)
+    // [Pen test] Auth & session mgmt (2026-08-24): must be indistinguishable
+    // from the "no such id" case below, or the status code itself leaks
+    // whether a given credential id exists.
+    expect(forbidden.status).toBe(404)
     // Still valid — not revoked by the failed attempt.
     expect(await validateApiCredential(env.AQUILLA_PG, body.token)).not.toBeNull()
 

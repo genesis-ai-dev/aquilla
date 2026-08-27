@@ -4,7 +4,7 @@
  * Mines candidate rule patterns from the currently-available cell snapshot.
  *
  * EDIT HISTORY AVAILABILITY NOTE:
- * Per-cell prior-value history lives in the D1 event log and is only accessible
+ * Per-cell prior-value history lives in the Postgres event log and is only accessible
  * via authenticated server calls (one round-trip per cell, requiring a sync token
  * from `getTokenForFile`). This service intentionally does NOT make those calls —
  * doing so inside a rules-suggestion flow would be slow, need a React hook, and
@@ -36,7 +36,7 @@
  *   - A batch endpoint on sync-worker: GET /projects/:pid/events?kinds=target.cell.commit&limit=N
  *     returning (cellId, eventId, value, parentId, serverTs) so we can walk the
  *     chain for each cell without N round-trips.
- *   - OR a materialized "last N target commits per project" view in D1.
+ *   - OR a materialized "last N target commits per project" view in Postgres.
  * Until then, mining is done on the current translation snapshot only.
  */
 

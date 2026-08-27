@@ -652,8 +652,12 @@ describe("Biblica study-note selection", () => {
   })
 
   it("returns nothing for a package with no note paragraphs", async () => {
+    // Scripture headings (`head:*`) are selected by design, so a package with
+    // "no note paragraphs" must shed those too, not just the `intro:*` notes.
     const parsed = await parseIdml(await makeBiblicaIdml(
-      biblicaSampleStory.filter((block) => !block.includes("intro%3a")),
+      biblicaSampleStory.filter((block) =>
+        !block.includes("intro%3a") && !block.includes("head%3a"),
+      ),
     ))
     const selection = selectBiblicaStudyNotes(parsed.units)
 

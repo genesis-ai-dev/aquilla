@@ -12,6 +12,7 @@ import {
   type ProjectAttentionKind,
   type ProjectAttentionReason,
 } from "@/lib/project-status"
+import { fmtLabeledDeadlineDate } from "@/lib/format-date"
 
 type StatusIcon = LucideIcon | ComponentType<{ className?: string }>
 type StatusTone = "success" | "danger" | "warning" | "muted"
@@ -80,24 +81,13 @@ const KIND_CONFIG: Record<
   archived: { icon: Archive, tone: "muted", label: PROJECT_STATUS_LABEL.archived },
 }
 
-function formatDeadlineDate(value: string): string {
-  const parsed = Date.parse(value)
-  if (!Number.isFinite(parsed)) return value
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(parsed))
-}
-
 /** Tooltip body matching the org projects table deadline hover — date only. */
 export function deadlineStatusTooltip(
   _status: "overdue" | "soon",
   deadlineAt: string | null | undefined,
 ): ReactNode {
   if (!deadlineAt) return null
-  return `Due ${formatDeadlineDate(deadlineAt)}`
+  return fmtLabeledDeadlineDate(deadlineAt, "Due")
 }
 
 /** Linear-style status: tinted icon orb + label (no pill). */

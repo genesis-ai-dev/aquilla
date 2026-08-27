@@ -20,13 +20,18 @@ import { Login } from "./Login"
 // ---------------------------------------------------------------------------
 
 const mockLogin = vi.fn()
+let mockSession: { jwt: string; username: string; createdAt: string } | null = null
+let mockLoading = false
+let mockSessionLoadError: Error | null = null
+const mockRetrySessionLoad = vi.fn(async () => {})
 vi.mock("@/hooks/useFrontierSession", () => ({
-  useFrontierSession: () => ({ login: mockLogin }),
-}))
-
-const mockHasAuthHintCookie = vi.fn(() => false)
-vi.mock("@/lib/frontier/session-store", () => ({
-  hasAuthHintCookie: () => mockHasAuthHintCookie(),
+  useFrontierSession: () => ({
+    session: mockSession,
+    loading: mockLoading,
+    sessionLoadError: mockSessionLoadError,
+    retrySessionLoad: mockRetrySessionLoad,
+    login: mockLogin,
+  }),
 }))
 
 // Mock FrontierForgotPasswordForm to avoid pulling in its own deps in unit tests.
@@ -47,6 +52,7 @@ vi.mock("@/lib/frontier/auth", () => ({
       this.status = status
     }
   },
+  isJwtExpired: (jwt: string) => jwt === "expired",
 }))
 
 const navigate = vi.fn()
@@ -89,8 +95,10 @@ function renderLogin(initialEntry = "/login") {
 beforeEach(() => {
   vi.clearAllMocks()
   navigate.mockReset()
-  mockHasAuthHintCookie.mockReturnValue(false)
-  localStorage.removeItem("codex:onboardingComplete")
+  mockSession = null
+  mockLoading = false
+  mockSessionLoadError = null
+  localStorage.removeItem("aquilla:onboardingComplete")
 })
 
 // ---------------------------------------------------------------------------
@@ -98,6 +106,21 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("Login page — rendering", () => {
+  it("waits for the single stored-session hydration before deciding", () => {
+    mockLoading = true
+    renderLogin()
+    expect(screen.queryByLabelText(/username or email/i)).not.toBeInTheDocument()
+    expect(screen.getByRole("status")).toBeInTheDocument()
+  })
+
+  it("shows a retry state rather than assuming signed-out when storage fails", async () => {
+    mockSessionLoadError = new Error("Session storage did not respond")
+    renderLogin()
+    expect(screen.queryByLabelText(/username or email/i)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }))
+    await waitFor(() => expect(mockRetrySessionLoad).toHaveBeenCalledOnce())
+  })
+
   it("renders username/email and password fields", () => {
     renderLogin()
     expect(screen.getByLabelText(/username or email/i)).toBeInTheDocument()
@@ -123,23 +146,35 @@ describe("Login page — rendering", () => {
 })
 
 describe("Login page — already signed in", () => {
-  it("redirects to /app when the auth-hint cookie is present", () => {
-    mockHasAuthHintCookie.mockReturnValue(true)
+  it("redirects to /app when a hydrated valid session is present", () => {
+    mockSession = { jwt: "valid", username: "alice", createdAt: "x" }
     renderLogin()
     expect(screen.getByText("App entry")).toBeInTheDocument()
     expect(screen.queryByLabelText(/username or email/i)).not.toBeInTheDocument()
   })
 
-  it("redirects to /app when local onboarding is complete", () => {
-    localStorage.setItem("codex:onboardingComplete", "true")
+  it("does not treat local onboarding as proof of authentication", () => {
+    localStorage.setItem("aquilla:onboardingComplete", "true")
     renderLogin()
-    expect(screen.getByText("App entry")).toBeInTheDocument()
+    expect(screen.getByLabelText(/username or email/i)).toBeInTheDocument()
   })
 
   it("honors ?next= when already signed in", () => {
-    mockHasAuthHintCookie.mockReturnValue(true)
+    mockSession = { jwt: "valid", username: "alice", createdAt: "x" }
     renderLogin("/login?next=%2Fprojects")
     expect(screen.getByText("Projects")).toBeInTheDocument()
+  })
+
+  it.each(["reauth", "add"])("shows the form for explicit %s intent", (intent) => {
+    mockSession = { jwt: "valid", username: "alice", createdAt: "x" }
+    renderLogin(`/login?${intent}=1`)
+    expect(screen.getByLabelText(/username or email/i)).toBeInTheDocument()
+  })
+
+  it("shows the form when the hydrated session is expired", () => {
+    mockSession = { jwt: "expired", username: "alice", createdAt: "x" }
+    renderLogin("/login?reauth=1")
+    expect(screen.getByLabelText(/username or email/i)).toBeInTheDocument()
   })
 })
 
@@ -297,4 +332,15 @@ describe("Login page — next param", () => {
     // Must NOT navigate to the external URL — falls back to /app
     expect(navigate).toHaveBeenCalledWith("/app", { replace: true })
   })
+
+  it.each(["%2F%2Fevil.example.com", "%2Flogin%3Fnext%3D%252Fprojects"])(
+    "rejects unsafe or recursive next=%s",
+    async (raw) => {
+      mockLogin.mockResolvedValue({ username: "alice", jwt: "tok" })
+      renderLogin(`/login?next=${raw}`)
+      fillLogin("alice", "secret")
+      await submitLogin()
+      expect(navigate).toHaveBeenCalledWith("/app", { replace: true })
+    },
+  )
 })

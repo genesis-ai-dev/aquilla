@@ -14,12 +14,18 @@ import type {
   AuthHonoEnv,
 } from "../middleware/auth"
 import { authMiddleware } from "../middleware/auth"
-import { JWTService } from "../auth/jwt"
+import { JWTService, isPastHalfLife } from "../auth/jwt"
 import { sendPasswordResetEmail, sendWelcomeEmail } from "../services/email"
 import {
+  absorbPasswordVerificationCost,
   hashPasswordWerkzeugScrypt,
   verifyPassword,
 } from "../utils/password"
+// Same SHA-256 primitive the Agent-API PATs are stored under
+// (db/shared/api-credentials.ts). Reused deliberately: password-reset and
+// email-verification tokens are bearer credentials of the same kind and had
+// no reason to be the only ones kept in plaintext at rest.
+import { sha256Hex } from "../../../db/shared/api-credentials"
 import {
   countRecentEvents,
   ipIdentifier,
@@ -261,11 +267,16 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
         const expiresAt = new Date(
           Date.now() + 7 * 24 * 60 * 60 * 1000,
         ).toISOString()
+        // [Pen test] Auth & session mgmt (2026-08-24): stored as a SHA-256
+        // digest, same as the reset token. This one is lower-value (it marks
+        // an address verified, it doesn't take over the account) but it lived
+        // in plaintext next to the reset token for the same reason, and the
+        // fix is identical.
         await c.env.AQUILLA_PG.prepare(
-          `INSERT INTO email_verification_tokens (user_id, token, expires_at)
-           VALUES (?, ?, ?)`,
+          `INSERT INTO email_verification_tokens (user_id, token, token_hash, expires_at)
+           VALUES (?, NULL, ?, ?)`,
         )
-          .bind(created.id, verifyToken, expiresAt)
+          .bind(created.id, await sha256Hex(verifyToken), expiresAt)
           .run()
         const baseUrl = c.env.BASE_URL || "https://aquilla.app"
         verifyUrl = `${baseUrl}/verify-email?token=${verifyToken}`
@@ -474,6 +485,14 @@ auth.post("/token", async (c) => {
       }
     }
     if (!user) {
+      // [Pen test] Auth & session mgmt (2026-08-24): without this, the
+      // no-such-account branch skipped the scrypt derivation the
+      // account-exists branch always pays, making response time a reliable
+      // enumeration oracle (the per-IP throttle caps the rate but not the
+      // signal — each probe uses a different identifier, so the
+      // per-identifier throttle never engages). See
+      // utils/password.ts absorbPasswordVerificationCost.
+      await absorbPasswordVerificationCost(password)
       await Promise.all([
         recordAuthEvent(c.env.AQUILLA_PG, "login", identifier, false),
         recordAuthEvent(c.env.AQUILLA_PG, "login", ipIdent, false),
@@ -537,6 +556,65 @@ auth.get("/me", authMiddleware, async (c) => {
     username: user.username,
     email: user.email,
     preferences: user.preferences,
+  })
+})
+
+// AQU-995: sliding session refresh.
+//
+// Access tokens are minted with a fixed lifetime (ACCESS_TOKEN_EXPIRE_MINUTES,
+// 30 days) and until now there was no way to extend one — every session died
+// on a silent timer regardless of how actively it was being used. That dumped
+// translators mid-edit and left stale tabs retry-looping against a dead token,
+// which is the bulk of the chronic 401 volume in the identity logs.
+//
+// Re-minting only past the token's half-life gives the behaviour we actually
+// want out of a fixed lifetime: an active client rolls its credential forward
+// indefinitely, an idle one still ages out on the full clock.
+//
+// This runs behind authMiddleware, so it is always authenticated by a *valid*
+// token — signature, expiry, the logout denylist and the password-change floor
+// have all already been enforced. That is exactly the set of checks a re-mint
+// must not bypass, which is why refresh is a plain authenticated endpoint
+// rather than a separate refresh-token grant.
+//
+// The caller's previous token is deliberately NOT revoked. Requests already in
+// flight still carry it, and denylisting it would 401 them for no reason — the
+// straggler-401 problem AQU-884 had to fix on the client side. It lapses on
+// its own schedule instead.
+auth.post("/refresh", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const payload = c.get("tokenPayload")
+  const jwtService = new JWTService(c.env)
+  const now = Math.floor(Date.now() / 1000)
+
+  // Below the half-life there is nothing to mint. Echo the caller's own token
+  // back rather than erroring: it keeps the client on one store-what-you-get
+  // path, and makes an over-eager caller cheap instead of a failure.
+  if (!isPastHalfLife(payload, now)) {
+    const current = jwtService.extractTokenFromHeader(
+      c.req.header("Authorization") ?? null,
+    )
+    if (current) {
+      return c.json({
+        access_token: current,
+        token_type: "bearer",
+        refreshed: false,
+        expires_at: payload.exp,
+      })
+    }
+  }
+
+  // user.username (not payload.sub) is the canonical record — sub may differ in
+  // case, since login resolves the user case-insensitively.
+  const { token, payload: minted } = await jwtService.createAccessTokenWithPayload(
+    user.username,
+    typeof payload.sst === "number" ? payload.sst : payload.iat,
+  )
+  return c.json({
+    access_token: token,
+    token_type: "bearer",
+    refreshed: true,
+    expires_at: minted.exp,
   })
 })
 
@@ -681,19 +759,25 @@ const verifyEmailSchema = z.object({ token: z.string().min(8) })
 // (deleted on success), so a second click returns 404 ("already used").
 auth.post("/verify-email", zValidator("json", verifyEmailSchema), async (c) => {
   const { token } = c.req.valid("json")
+  // Hash-first lookup with the same pre-0080 plaintext fallback the reset
+  // flow uses; these rows have a 7-day TTL, so the fallback stays live a week
+  // after deploy rather than a day.
+  const tokenHash = await sha256Hex(token)
   const row = await c.env.AQUILLA_PG.prepare(
-    "SELECT user_id, expires_at FROM email_verification_tokens WHERE token = ?",
+    `SELECT user_id, expires_at FROM email_verification_tokens
+     WHERE token_hash = ? OR (token_hash IS NULL AND token = ?)`,
   )
-    .bind(token)
+    .bind(tokenHash, token)
     .first<{ user_id: number; expires_at: string }>()
   if (!row) {
     return c.json({ error: "Invalid or already-used verification link" }, 404)
   }
   if (new Date(row.expires_at) < new Date()) {
     await c.env.AQUILLA_PG.prepare(
-      "DELETE FROM email_verification_tokens WHERE token = ?",
+      `DELETE FROM email_verification_tokens
+       WHERE token_hash = ? OR (token_hash IS NULL AND token = ?)`,
     )
-      .bind(token)
+      .bind(tokenHash, token)
       .run()
     return c.json({ error: "Verification link expired" }, 410)
   }
@@ -759,6 +843,12 @@ auth.post(
   zValidator("json", passwordResetRequestSchema),
   async (c) => {
     const { email } = c.req.valid("json")
+    // The one response every outcome below returns. Whether the address is
+    // registered, whether it was throttled, and whether the token mint or the
+    // send failed must all be indistinguishable from here — see the
+    // per-branch notes below.
+    const genericResponse = { message: "Password reset link sent to your email" }
+    let user: { id: number; username: string; email: string }
     try {
       // [Pen test] Auth & session mgmt (2026-07-20): this endpoint had no
       // limit on how many reset emails could be triggered for one address —
@@ -784,25 +874,53 @@ auth.post(
       // requester typed (common for Codex-migrated accounts, whose casing came
       // from the migration source), returning the generic 200 without ever
       // minting a token or sending the reset email.
-      const user = await c.env.AQUILLA_PG.prepare(
+      const found = await c.env.AQUILLA_PG.prepare(
         "SELECT id, username, email FROM users WHERE LOWER(email) = LOWER(?)",
       )
         .bind(email)
         .first<{ id: number; username: string; email: string }>()
-      if (!user || throttled) {
+      if (!found || throttled) {
         // Don't disclose whether the email is registered, and don't disclose
         // that the request was throttled either — same message either way.
-        return c.json({ message: "Password reset link sent to your email" })
+        return c.json(genericResponse)
       }
+      user = found
+    } catch (error) {
+      // [Pen test] Auth & session mgmt (2026-08-24): this catch used to wrap
+      // the whole handler AND echo the raw error text back
+      // (`Failed to send reset email: ${err.message}`) — the same
+      // reflect-internals bug SEC-11 fixed in /register, and, because the
+      // registered-only work below lived inside it, also the enumeration
+      // oracle the 2026-07-20 pass thought it had closed for send failures
+      // only. It now covers just the throttle count and the user lookup,
+      // which run identically for registered and unregistered addresses, and
+      // returns a fixed string.
+      console.error("Password reset request error (pre-lookup):", error)
+      return c.json({ error: "Failed to send reset email" }, 500)
+    }
 
+    // Everything below runs ONLY for a registered address, so a failure here
+    // must not change the response — otherwise the failure itself is the
+    // oracle. The cost of that choice: a caller whose token mint or send
+    // genuinely failed is told a link is coming when it isn't. Deliberate —
+    // the log line is loud, retrying is cheap, and the threat model
+    // (docs/OPSEC.md §2, D3 identity linkage) puts "is this person a user of
+    // this product" above a rare misleading success message.
+    try {
+      // [Pen test] Auth & session mgmt (2026-08-24): the token is stored as a
+      // SHA-256 digest, never in plaintext. Anyone holding a read-only copy
+      // of this table (a snapshot, a replica, a support query, a backup)
+      // previously held a 24-hour account-takeover credential for every
+      // pending reset.
       const token = crypto.randomUUID()
+      const tokenHash = await sha256Hex(token)
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
       await c.env.AQUILLA_PG.prepare(
-        `INSERT INTO password_reset_tokens (user_id, token, expires_at)
-         VALUES (?, ?, ?)
-         ON CONFLICT (token) DO UPDATE SET user_id = excluded.user_id, expires_at = excluded.expires_at`,
+        `INSERT INTO password_reset_tokens (user_id, token, token_hash, expires_at)
+         VALUES (?, NULL, ?, ?)
+         ON CONFLICT (token_hash) DO UPDATE SET user_id = excluded.user_id, expires_at = excluded.expires_at`,
       )
-        .bind(user.id, token, expiresAt.toISOString())
+        .bind(user.id, tokenHash, expiresAt.toISOString())
         .run()
 
       const encodedUsername = encodeURIComponent(user.username)
@@ -823,17 +941,11 @@ auth.post(
         console.warn("[password-reset] email send failed (non-fatal):", err)
       }
       await logActivity(c.env.AQUILLA_PG, user.id, "password_reset_requested", "Password reset email sent")
-
-      return c.json({ message: "Password reset link sent to your email" })
     } catch (error) {
-      console.error("Password reset request error:", error)
-      const errorMessage =
-        error instanceof Error ? error.message : "Unknown error"
-      return c.json(
-        { error: `Failed to send reset email: ${errorMessage}` },
-        500,
-      )
+      console.error("Password reset request error (post-lookup, response unchanged):", error)
     }
+
+    return c.json(genericResponse)
   },
 )
 
@@ -873,11 +985,17 @@ auth.post(
         return c.json({ error: "Invalid token" }, 400)
       }
 
+      // [Pen test] Auth & session mgmt (2026-08-24): match on the SHA-256
+      // digest, never on stored plaintext. The `token_hash IS NULL` arm is
+      // the rollover path for rows minted before this change; those rows
+      // expire within 24 hours of deploy, after which it can be dropped (see
+      // migration 0080).
       const resetToken = await c.env.AQUILLA_PG.prepare(
         `SELECT expires_at FROM password_reset_tokens
-         WHERE user_id = ? AND token = ?`,
+         WHERE user_id = ?
+           AND (token_hash = ? OR (token_hash IS NULL AND token = ?))`,
       )
-        .bind(user.id, token)
+        .bind(user.id, await sha256Hex(token), token)
         .first<ResetTokenRow>()
       if (!resetToken) {
         await recordAuthEvent(c.env.AQUILLA_PG, "password_reset_attempt", identifier, false)
@@ -936,11 +1054,17 @@ auth.post(
         return c.json({ error: "Invalid token" }, 400)
       }
 
+      // [Pen test] Auth & session mgmt (2026-08-24): match on the SHA-256
+      // digest, never on stored plaintext. The `token_hash IS NULL` arm is
+      // the rollover path for rows minted before this change; those rows
+      // expire within 24 hours of deploy, after which it can be dropped (see
+      // migration 0080).
       const resetToken = await c.env.AQUILLA_PG.prepare(
         `SELECT expires_at FROM password_reset_tokens
-         WHERE user_id = ? AND token = ?`,
+         WHERE user_id = ?
+           AND (token_hash = ? OR (token_hash IS NULL AND token = ?))`,
       )
-        .bind(user.id, token)
+        .bind(user.id, await sha256Hex(token), token)
         .first<ResetTokenRow>()
       if (!resetToken) {
         await recordAuthEvent(c.env.AQUILLA_PG, "password_reset_attempt", identifier, false)

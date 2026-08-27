@@ -473,7 +473,10 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
  * floor the command's compiled event(s) hit at the /events perimeter, sourced
  * from role-policy.ts (the single source of truth). SetTranslation compiles to
  * target.cell.commit (CONTRIBUTOR); PlanImport compiles to file.create +
- * source.cell.create (PROJECT_LEAD). Staging a plan you could never commit
+ * source.cell.create, and the max keeps it at file.create's PROJECT_LEAD even
+ * now that source.cell.create's static floor is CONTRIBUTOR (the app-side
+ * `allowLineCreation` carve-out — see line-creation-authority.ts — which this
+ * surface deliberately does not extend). Staging a plan you could never commit
  * leaks the server-computed effect summary, so prepare enforces this too.
  */
 export function requiredRoleForCommand(c: Command): number {

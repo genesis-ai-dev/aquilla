@@ -6,29 +6,27 @@ a later run completes.
 
 ## "D1 is the live datastore" comment drift
 
-- **Status**: `src/hooks/` and `src/components/` slice done in the 2026-08-11 run (7 files:
-  `useCellsAuditStatsWithOverlay.ts`, `useRules.ts`, `HistoryDrawer.tsx`, `EditorTable.tsx`,
-  `TerminologyTermDetail.tsx`, `ProjectWorkspace.tsx`, `RuleSuggestFromEditsDialog.tsx`) —
-  comment-only, reworded to "Postgres"/"server" instead of "D1".
-- **Remaining files**: `src/lib/` still has real hits describing D1 as the live datastore —
-  `src/lib/sync/audit-stats-overlay.ts:2,4` ("D1-backed audit stats" / "D1 is the source of
-  truth"), `src/lib/sync/project-settings.ts:50` ("Synced to D1"), `src/lib/sync/
-  file-projection.ts:18` ("the D1 rows remain"), `src/lib/sync/events-emit.ts:62`
-  ("round-tripped to D1"), `src/lib/audio/transcribe.ts:3,204,295` ("D1 event log" /
-  "Persist ... durably via D1"), `src/lib/audio/timings.ts:3`, `src/lib/rules/edit-miner.ts:
-  7,32`, `src/lib/export/export-service.ts:3`, `src/lib/frontier/members.ts:20`,
-  `src/lib/global-tm/index.ts:17`, `src/lib/migrate/group-sync.ts:5` (this last one already
-  frames it as historical — "completing the D1→Neon cutover" — verify before touching, it
-  may already be correct).
+- **Status**: `src/hooks/` and `src/components/` slice done in the 2026-08-11 run (7 files).
+  A second slice done in the 2026-08-19 run (8 files, comment-only, reworded to "Postgres"):
+  `src/lib/sync/audit-stats-overlay.ts`, `src/lib/sync/project-settings.ts`,
+  `src/lib/sync/file-projection.ts`, `src/lib/sync/events-emit.ts`,
+  `src/lib/audio/transcribe.ts`, `src/lib/audio/timings.ts`, `src/lib/rules/edit-miner.ts`,
+  `src/lib/export/export-service.ts`.
+- **Remaining files**: `src/lib/frontier/members.ts:20` ("The D1 schema has no
+  gitlab_project_id column") and `src/lib/global-tm/index.ts:17` ("the Worker can back it
+  with D1/PG" — should just say "Postgres" since no worker binds D1 anymore) — both deferred
+  past the ≤8-file budget in the 2026-08-19 run. `src/lib/migrate/group-sync.ts:5` already
+  frames it as historical ("completing the D1→Neon cutover") — confirmed correct as-is,
+  leave alone.
 - **False positives to skip** (not database D1 — a paragraph-model spec-section tag, see
   `docs/superpowers/specs/2026-06-18-paragraph-drafting-retrieval-context-design.md`):
   `src/hooks/useCells.ts:123,309`, `src/lib/parsers/paragraphs.ts`, `src/lib/parsers/types.ts:
   52`, `src/lib/sync/bulk-import.ts:67`, `src/lib/parsers/usfm-lossless.ts:31`,
-  `src/lib/parsers/text-splitter.ts:6`. Also skip `AD-2 chain pointer... entry came from D1`
-  at `src/lib/parsers/types.ts:723` only after re-reading in context (mixed usage nearby).
-- **Why deferred further**: `src/lib/` is ~50 subsystems; doing it in the same pass as
-  `src/hooks/`+`src/components/` would have exceeded the ≤8-file budget. Good candidate for
-  the next comment-drift-themed run.
+  `src/lib/parsers/text-splitter.ts:6`, `src/lib/sync/project-settings.ts:65` ("D10" spec
+  tag). Also skip `AD-2 chain pointer... entry came from D1` at `src/lib/parsers/types.ts:723`
+  only after re-reading in context (mixed usage nearby).
+- **Why deferred further**: only 2 files left, small enough to fold into the next
+  comment-drift-themed run alongside a fresh grep sweep (new drift may have landed since).
 - **Proof needed**: comment-only edits; verify each hit is genuinely describing D1 as live
   (not historical "migrated from D1" framing, not the paragraph-model tag above) before
   touching it.
@@ -67,14 +65,38 @@ spot, both deferred rather than mixed into the single-theme budget.
   `CellAudioButton.tsx` uses the icon and tooltip lookups from PR #391. Their exported
   signatures and fallback values remain unchanged.
 
-- **`src/lib/text/word-diff.ts`** (~lines 32–56) — remaining type-tightening spot: ~14
-  dense non-null assertions (`text[i]!`-style) inside a tight DP loop, same "loop
-  condition already bounds the index" story as the ones fixed in
-  `src/lib/biblica/sentence-cuts.ts`. Friction: the density of assertions in one tight
-  loop raises the risk of a transcription typo during a bulk edit for a line-count-only
-  benefit; wants a dedicated, careful pass rather than being bundled with other fixes.
-  Proof needed: `pnpm build` clean (confirms TS still infers the narrower type without
-  the assertions) plus `pnpm test` green, no test files touched.
+- **`src/lib/text/word-diff.ts`** — done in the 2026-08-24 run: all 14 non-null
+  assertions in the LCS DP loop removed (TS already infers the narrower type without
+  `noUncheckedIndexedAccess`). `pnpm test src/lib/text/word-diff.test.ts` green
+  (4/4), `pnpm test` full-suite failure list byte-identical to baseline (8 files / 10
+  tests, all pre-existing), `pnpm lint` problem count unchanged (782, both runs
+  measured twice to rule out cache noise), no test file touched.
+
+## 2026-08-24 — fresh `!`-assertion grep, more spots than fit one run's budget
+
+A repo-wide `grep -rEn "\w+\[[a-zA-Z0-9_+ ]+\]!" src` (excluding `*.test.ts`) after the
+`word-diff.ts` pass above still turns up ~29 more array-index non-null-assertion sites,
+same "redundant because there's no `noUncheckedIndexedAccess`" story (confirmed:
+`tsconfig.app.json` has `strict: true` but not `noUncheckedIndexedAccess`, so plain
+`arr[i]` already types as non-optional and the `!` is a no-op erased at compile time —
+safe to drop without changing runtime behavior). Not attempted this run to keep the
+diff to one dedicated, carefully-checked file per the queued candidate's own caution
+about bulk-edit transcription risk in dense assertion clusters. Grouped by file for a
+future pass (verify each still applies — code moves):
+  - `src/lib/import/milestones.ts` (7 sites: lines ~144, 173, 217, 219, 270×2, 328, 417)
+    — the densest cluster, same shape as word-diff.ts, good next candidate.
+  - `src/lib/milestone-navigation.ts` (5 sites: ~85, 86, 110, 114, 126)
+  - `src/lib/biblica/treasure-hunt/notes.ts:173`, `note-rules.ts` (~179, 205),
+    `reach4life/notes.ts:153`
+  - `src/lib/idml/completion.ts` (~334, 466), `src/lib/migrate/idml.ts` (~336, 417),
+    `src/lib/migrate/map.ts:245`
+  - `src/lib/export/exporters/vtt.ts` (~209, 210, 243), `src/lib/export/audio-bwf.ts:85`,
+    `src/lib/export/audio-by-character.ts:326`, `src/lib/audio/whisper-worker.ts:186`
+  - `src/hooks/useActiveCellStore.ts:1366`, `src/components/MultiProjectInviteDialog.tsx:126`,
+    `src/lib/import/normalized-manifest.ts:471`
+- **Proof needed when revisited**: same as this run — isolate with `npx tsc --noEmit -p
+  tsconfig.app.json` scoped to the touched file(s) plus full `pnpm test`/`pnpm lint`
+  byte-identical-failure-list comparison; no test files touched.
 
 ## `src/hooks/useSubscribedConcepts.ts` — looks dead, is not
 

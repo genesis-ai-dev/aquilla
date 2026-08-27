@@ -19,18 +19,21 @@ import { handleFileCreate } from './handlers/file-create'
 import { handleFileRename } from './handlers/file-rename'
 import { handleFileVideoSet } from './handlers/file-video-set'
 import { handleFileTimingSet } from './handlers/file-timing-set'
+import { handleFileTrackSet } from './handlers/file-track-set'
 import { handleFileDelete, handleFileRestore } from './handlers/file-delete-restore'
 import { handleCommentEvent, type CommentEventKind } from './handlers/comment-events'
 import { handleAssignmentEvent, type AssignmentEventKind } from './handlers/assignment-events'
-import type { DispatchResult } from './handlers/types'
+import type { DispatchOutcome } from './handlers/types'
 
-export type { DispatchResult } from './handlers/types'
-
-export type DispatchOutcome =
-  | { ok: true; result: DispatchResult }
-  | { ok: false; status: number; reason: string }
+export type { DispatchResult, DispatchOutcome } from './handlers/types'
 
 export interface DispatchOptions {
+  /**
+   * AQU-1005: pre-allocated server_seq for this event. Allocation happens
+   * once per request via allocateSeqRange, OUTSIDE the write transaction, so
+   * the per-project counter row lock is never held across the event batch.
+   */
+  serverSeq: number
   /**
    * AD-2 first-child-of-parent decision. When `false`, the projection
    * update is skipped — the event still lands in `events` (for history)
@@ -84,9 +87,11 @@ export function dispatchEvent(
     case 'cell.audio.select':
     case 'cell.audio.remove':
     case 'cell.audio.rename':
+    case 'cell.audio.trim':
     case 'cell.audio.measure':
     case 'cell.audio.validate':
     case 'cell.audio.unvalidate':
+    case 'cell.link.set':
       return {
         ok: true,
         result: handleCellEvent(
@@ -104,6 +109,7 @@ export function dispatchEvent(
           db,
           authed as AuthorizedEvent<'file.create'>,
           serverTs,
+          opts.serverSeq,
         ),
       }
 
@@ -114,6 +120,7 @@ export function dispatchEvent(
           db,
           authed as AuthorizedEvent<'file.rename'>,
           serverTs,
+          opts.serverSeq,
         ),
       }
 
@@ -124,6 +131,7 @@ export function dispatchEvent(
           db,
           authed as AuthorizedEvent<'file.delete'>,
           serverTs,
+          opts.serverSeq,
         ),
       }
 
@@ -134,6 +142,7 @@ export function dispatchEvent(
           db,
           authed as AuthorizedEvent<'file.restore'>,
           serverTs,
+          opts.serverSeq,
         ),
       }
 
@@ -144,6 +153,7 @@ export function dispatchEvent(
           db,
           authed as AuthorizedEvent<'file.video.set'>,
           serverTs,
+          opts.serverSeq,
         ),
       }
 
@@ -154,8 +164,19 @@ export function dispatchEvent(
           db,
           authed as AuthorizedEvent<'file.timing.set'>,
           serverTs,
+          opts.serverSeq,
         ),
       }
+
+    case 'file.track.set':
+      // The only handler that validates a payload shape, so the only one that
+      // can refuse — it returns the outcome itself rather than a bare result.
+      return handleFileTrackSet(
+        db,
+        authed as AuthorizedEvent<'file.track.set'>,
+        serverTs,
+        opts.serverSeq,
+      )
 
     case 'comment.create':
     case 'comment.edit':
@@ -167,6 +188,7 @@ export function dispatchEvent(
           db,
           authed as AuthorizedEvent<CommentEventKind>,
           serverTs,
+          opts.serverSeq,
         ),
       }
 
@@ -205,6 +227,7 @@ export function dispatchEvent(
           db,
           authed as AuthorizedEvent<AssignmentEventKind>,
           serverTs,
+          opts.serverSeq,
         ),
       }
 

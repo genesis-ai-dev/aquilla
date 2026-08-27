@@ -4,15 +4,15 @@ import { createRef } from "react"
 import { ChatComposer, type ChatComposerHandle } from "./ChatComposer"
 
 describe("ChatComposer (TipTap)", () => {
-  it("uses Enter for a newline and Command+Enter to send", () => {
+  it("sends on Enter and keeps Shift+Enter for a newline", () => {
     const onSend = vi.fn()
     const ref = createRef<ChatComposerHandle>()
     render(<ChatComposer ref={ref} isStreaming={false} isConfigured onSend={onSend} onStop={vi.fn()} />)
     ref.current!.insertText("First line")
     const textbox = screen.getByRole("textbox")
-    fireEvent.keyDown(textbox, { key: "Enter" })
+    fireEvent.keyDown(textbox, { key: "Enter", shiftKey: true })
     expect(onSend).not.toHaveBeenCalled()
-    fireEvent.keyDown(textbox, { key: "Enter", metaKey: true })
+    fireEvent.keyDown(textbox, { key: "Enter" })
     expect(onSend).toHaveBeenCalledTimes(1)
   })
 
@@ -38,10 +38,10 @@ describe("ChatComposer (TipTap)", () => {
     expect(onStop).toHaveBeenCalled()
   })
 
-  it("keeps keyboard shortcuts functional without permanent help copy", () => {
+  it("spells out the keyboard shortcuts next to the Send control", () => {
     render(<ChatComposer isStreaming={false} isConfigured onSend={vi.fn()} onStop={vi.fn()} />)
-    expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument()
+    expect(screen.getByText("Enter to send · Shift+Enter for newline")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument()
-    expect(screen.getByRole("textbox")).toHaveClass("min-h-10", "max-h-32", "overflow-y-auto")
+    expect(screen.getByRole("textbox")).toHaveClass("min-h-9", "max-h-32", "overflow-y-auto")
   })
 })

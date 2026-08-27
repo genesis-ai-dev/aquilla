@@ -85,6 +85,9 @@ importers:
       dompurify:
         specifier: ^3.4.13
         version: 3.4.13
+      hls.js:
+        specifier: ^1.6.19
+        version: 1.7.1
       idb:
         specifier: ^8.0.3
         version: 8.0.3
@@ -3238,8 +3241,11 @@ packages:
   hls-video-element@1.5.11:
     resolution: {integrity: sha512-tJJ65/52CDxj8XFyIve6zT9nVVdUIc6mqvKR25X0ycPKHk07rpjp4xxVteeCefDUBSf/tFLhlICFmn3KWj37xA==}
 
-  hls.js@1.6.16:
-    resolution: {integrity: sha512-VSIRpLfRwlAAdGL4wiTucx2ScRipo0ed1FBatWkyt832jC4CReKstga6yIhYVwGu9LOBjuX9wzmRMeQdBJtzEA==}
+  hls.js@1.6.19:
+    resolution: {integrity: sha512-A//aZeaAgM5rgUCbTURD4gkfyw5Uag2/4Jky7CfDOukL/DN+P5DjbgK2BYteyP3/KnCkPfkGVkbLxQG2T0AbUQ==}
+
+  hls.js@1.7.1:
+    resolution: {integrity: sha512-DlzIkeBAS9IIQ432k3BUf3HlwbsR0+trB1i2lDdN2gUkNkrehFurh0/48M5c1/EjlDkdGng1gwZIpwyPxvdZ/g==}
 
   hmac-drbg@1.0.1:
     resolution: {integrity: sha512-Tti3gMqLdZfhOQY1Mzf/AanLiqh1WTiJgEj26ZuYQ9fbkLomzGchCws4FyrSd4VkpBfiNhaE1On+lOz894jvXg==}
@@ -6096,7 +6102,7 @@ snapshots:
 
   '@mux/playback-core@0.34.1':
     dependencies:
-      hls.js: 1.6.16
+      hls.js: 1.6.19
       mux-embed: 5.18.0
 
   '@nodelib/fs.scandir@2.1.5':
@@ -8252,10 +8258,12 @@ snapshots:
   hls-video-element@1.5.11:
     dependencies:
       custom-media-element: 1.4.6
-      hls.js: 1.6.16
+      hls.js: 1.7.1
       media-tracks: 0.3.5
 
-  hls.js@1.6.16: {}
+  hls.js@1.6.19: {}
+
+  hls.js@1.7.1: {}
 
   hmac-drbg@1.0.1:
     dependencies:

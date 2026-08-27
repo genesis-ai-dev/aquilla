@@ -9,7 +9,7 @@
 // existence checks) and the compile/commit engine live in
 // emit-events-engine.ts.
 
-import { REQUIRED_ROLE } from '../events/role-policy'
+import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
 
 /**
  * Event kinds an EmitEvents changeset may stage (registry §2 v1). Everything
@@ -78,7 +78,18 @@ export interface EmitEventsCommand {
 export function emitEventsFloor(cmd: EmitEventsCommand): number {
   let floor = 0
   for (const e of cmd.events) {
-    floor = Math.max(floor, REQUIRED_ROLE[e.kind as keyof typeof REQUIRED_ROLE] ?? 0)
+    // Sam, 2026-08-21: source.cell.create/delete/reorder dropped to
+    // CONTRIBUTOR in the static table so the app's `allowLineCreation`
+    // setting can admit contributors — with authorize.ts enforcing the
+    // conditional part per event. THIS surface never runs those per-event
+    // checks, so it keeps the old PROJECT_LEAD floor: an integration adding,
+    // deleting or re-anchoring source rows is a re-import-shaped act, not
+    // the timeline affordance.
+    const kindFloor =
+      e.kind === 'source.cell.create' || e.kind === 'source.cell.delete' || e.kind === 'source.cell.reorder'
+        ? ROLE.PROJECT_LEAD
+        : (REQUIRED_ROLE[e.kind as keyof typeof REQUIRED_ROLE] ?? 0)
+    floor = Math.max(floor, kindFloor)
   }
   return floor
 }

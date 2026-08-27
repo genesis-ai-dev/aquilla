@@ -57,7 +57,7 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 }))
 
 vi.mock("@/hooks/useProjectOrgId", () => ({
-  useProjectOrgId: () => 1,
+  useProjectOrgId: () => ({ orgId: 1, isLoading: false, error: null }),
 }))
 
 vi.mock("@/context/OrgContext", async (importOriginal) => {

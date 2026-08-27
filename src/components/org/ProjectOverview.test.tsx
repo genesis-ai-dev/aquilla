@@ -5,6 +5,7 @@ import { OrgProvider } from "@/context/OrgContext"
 import { ProjectOverview, deriveProjectStatus } from "./ProjectOverview"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
+import { fmtDeadlineDate } from "@/lib/format-date"
 
 const navigate = vi.fn()
 vi.mock("react-router-dom", async (importActual) => {
@@ -17,8 +18,6 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 }))
 vi.mock("@/lib/frontier/orgs", () => ({
   listMyOrgs: vi.fn(async () => [{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }]),
-  // AQU-672: MembersTab (embedded in the overview Members card) fetches the org
-  // roster to suggest add-member candidates; stub it so the picker is empty.
   listOrgMembers: vi.fn(async () => []),
 }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
@@ -75,6 +74,7 @@ vi.mock("@/lib/sync/member-scopes", () => ({
   putMemberScopes: vi.fn(async () => []),
 }))
 const setProjectPm = vi.fn(async (_jwt: string, _projectId: string, _pmUserId: number | null): Promise<{ id: number; username: string } | null> => null)
+const setProjectDeadline = vi.fn(async (_jwt: string, _projectId: string, _deadline: string | null): Promise<void> => {})
 // OrgSidebar (rendered by ProjectOverview's AppShell) calls
 // useProjectsForNavigation -> fetchAccessibleProjects for the "Shared with
 // you" nav section (AQU-474), and OrgProvider fetches the same directory
@@ -88,10 +88,13 @@ const fetchAccessibleProjects = vi.fn(async (_jwt: string): Promise<unknown[]> =
 // "export is not defined on the mock" failure the moment a new caller appears.
 vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/sync/cloud-projects")>()),
-  setProjectDeadline: vi.fn(),
+  setProjectDeadline: (jwt: string, projectId: string, deadline: string | null) => setProjectDeadline(jwt, projectId, deadline),
   setProjectPm: (jwt: string, projectId: string, pmUserId: number | null) => setProjectPm(jwt, projectId, pmUserId),
   fetchAccessibleProjects: (jwt: string) => fetchAccessibleProjects(jwt),
-  // MembersTab → useProjectOrgId reads this; keep it quiet so overview chrome still mounts.
+  fetchAccessibleProjectsResult: async (jwt: string) => ({
+    ok: true as const,
+    projects: await fetchAccessibleProjects(jwt),
+  }),
   resolveCloudProjectResult: vi.fn(async () => ({ ok: true as const, project: { id: "p1", orgId: 1 } })),
 }))
 const downloadProjectBundle = vi.fn()
@@ -287,6 +290,63 @@ describe("deriveProjectStatus", () => {
     expect(deriveProjectStatus(makePortfolio({ deadlineAt: soonDate }), NOW)).toBe("due-soon")
     _deadlineStatusResult = "ok"
     expect(deriveProjectStatus(makePortfolio({ deadlineAt: farDate }), NOW)).toBe("on-track")
+  })
+})
+
+function portfolioWithDeadline(deadlineAt: string): PortfolioProject {
+  return {
+    id: "p1",
+    name: "John",
+    totalCells: 10,
+    filledCells: 1,
+    validatedCells: 0,
+    aiDraftedCells: 0,
+    audioCells: 0,
+    validatedAudioCells: 0,
+    recordedMs: 0,
+    lastEditAt: null,
+    deadlineAt,
+    sourceLanguage: null,
+    targetLanguage: null,
+  }
+}
+
+describe("ProjectOverview status chip placement", () => {
+  beforeEach(() => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 600 }),
+      status: "ready",
+      refresh,
+    })
+  })
+
+  it("shows On track only next to the title, not next to the deadline", async () => {
+    _deadlineStatusResult = "ok"
+    getPortfolio.mockResolvedValue([portfolioWithDeadline("2033-12-31")])
+    renderOverview()
+
+    await screen.findByText(fmtDeadlineDate("2033-12-31"))
+    expect(screen.getAllByText("On track")).toHaveLength(1)
+    expect(
+      within(screen.getByRole("heading", { name: "John" }).parentElement!).getByText("On track"),
+    ).toBeInTheDocument()
+    expect(within(screen.getByTestId("overview-project-meta")).queryByText("On track")).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ["overdue", "Overdue"],
+    ["soon", "Due soon"],
+  ] as const)("shows %s only next to the deadline, not next to the title", async (status, label) => {
+    _deadlineStatusResult = status
+    getPortfolio.mockResolvedValue([portfolioWithDeadline("2026-07-01")])
+    renderOverview()
+
+    await screen.findByText(fmtDeadlineDate("2026-07-01"))
+    expect(screen.getAllByText(label)).toHaveLength(1)
+    expect(
+      within(screen.getByRole("heading", { name: "John" }).parentElement!).queryByText(label),
+    ).not.toBeInTheDocument()
+    expect(within(screen.getByTestId("overview-project-meta")).getByText(label)).toBeInTheDocument()
   })
 })
 
@@ -775,12 +835,19 @@ describe("ProjectOverview PM assignment", () => {
     renderOverview()
 
     expect(await screen.findByTestId("overview-pm-name")).toHaveTextContent("wendi")
+    expect(screen.getByTestId("overview-project-meta")).toBeInTheDocument()
     // Let the provider's mount-time directory fetch resolve first: OrgContext
     // dedupes refreshes into an in-flight request for the same JWT, so a
     // still-pending initial fetch would absorb the post-save revalidation.
     await waitFor(() => expect(fetchAccessibleProjects).toHaveBeenCalled())
     const callsBeforeSave = fetchAccessibleProjects.mock.calls.length
 
+    const meta = screen.getByTestId("overview-project-meta")
+    expect(within(meta).queryByRole("button", { name: "Change" })).not.toBeInTheDocument()
+    expect(within(meta).queryByRole("button", { name: "Clear" })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Change project manager" }))
+    expect(screen.getByRole("heading", { name: "Change project manager" })).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Clear" }))
 
     await waitFor(() => expect(setProjectPm).toHaveBeenCalledWith("jwt", "p1", null))
@@ -788,6 +855,40 @@ describe("ProjectOverview PM assignment", () => {
     await waitFor(() =>
       expect(fetchAccessibleProjects.mock.calls.length).toBeGreaterThan(callsBeforeSave),
     )
+  })
+
+  it("clears the deadline from the edit-dialog Clear control", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 600 }),
+      status: "ready",
+      refresh,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1",
+      name: "John",
+      totalCells: 10,
+      filledCells: 1,
+      validatedCells: 0,
+      aiDraftedCells: 0,
+      audioCells: 0,
+      validatedAudioCells: 0,
+      recordedMs: 0,
+      lastEditAt: null,
+      deadlineAt: "2026-07-01",
+      sourceLanguage: null,
+      targetLanguage: null,
+    }])
+    renderOverview()
+
+    await screen.findByText(fmtDeadlineDate("2026-07-01"))
+    const meta = screen.getByTestId("overview-project-meta")
+    expect(within(meta).queryByRole("button", { name: "Change" })).not.toBeInTheDocument()
+    expect(within(meta).queryByRole("button", { name: "Clear" })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Change project deadline" }))
+    expect(screen.getByRole("heading", { name: "Change project deadline" })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }))
+    await waitFor(() => expect(setProjectDeadline).toHaveBeenCalledWith("jwt", "p1", null))
   })
 })
 
@@ -1051,81 +1152,25 @@ describe("ProjectOverview AI-drafted segment (AQU-292)", () => {
 
 // ── AQU-486: per-section visibility chrome ──────────────────────────────────
 
-describe("ProjectOverview per-section visibility (AQU-486)", () => {
-  // WHY: the Members card must be a hard gate on the AQU-485 rosterViewMinRole
-  // floor — a below-floor caller must not see the card at all (no empty
-  // placeholder leaking that a roster exists), while a permitted caller sees
-  // it, with a badge naming who can see it and (if they can edit) an inline
-  // control to change the floor without leaving the page.
+describe("ProjectOverview roster lives in project settings", () => {
+  // WHY: the overview used to embed MembersTab (add / change-role / revoke)
+  // under a visibility-gated card. That roster is now only in Project
+  // Settings → Team members. Overview still has the Team *progress* card
+  // (assignments + activity); it must not re-host the membership roster.
 
-  it("hides the Members card entirely when the org has raised the roster floor above the caller's role", async () => {
-    // WHY: canManage (project role >= 600) alone used to be the only gate on
-    // this card. AQU-486 adds a second, independent gate — the org's
-    // rosterViewMinRole floor — and the floor must win: a maintainer-level
-    // caller (canManage=true) whose role still falls short of an
-    // owner-raised floor must see nothing, not an empty card.
+  it("does not render the members roster card", async () => {
     useOrgSettingsMock.mockReturnValue({
       ...defaultOrgSettingsMock(),
-      rosterViewMinRole: 700, // org raised the floor to Owner-only
-      canViewRoster: false,
+      rosterViewMinRole: 600,
+      canViewRoster: true,
     })
-    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
     renderOverview()
 
     await screen.findByRole("button", { name: "Open project" })
     expect(screen.queryByTestId("overview-members-card")).not.toBeInTheDocument()
-  })
-
-  it("shows the Members card with a visibility badge for a caller meeting the roster floor", async () => {
-    useOrgSettingsMock.mockReturnValue({
-      ...defaultOrgSettingsMock(),
-      rosterViewMinRole: 600,
-      canViewRoster: true,
-    })
-    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
-    renderOverview()
-
-    const card = await screen.findByTestId("overview-members-card")
-    expect(within(card).getByTestId("section-visibility-badge")).toHaveTextContent(/maintainers & owners/i)
-  })
-
-  it("a maintainer can change the roster floor via the inline advanced toggle", async () => {
-    const patch = vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } }))
-    useOrgSettingsMock.mockReturnValue({
-      ...defaultOrgSettingsMock(),
-      rosterViewMinRole: 600,
-      canViewRoster: true,
-      patch,
-    })
-    canEditRosterProgressFloorMock.mockReturnValue(true)
-    useProject.mockReturnValue({ project: projectRecord({ level: 700 }), status: "ready", refresh })
-    renderOverview()
-
-    const card = await screen.findByTestId("overview-members-card")
-    fireEvent.click(within(card).getByTestId("section-visibility-badge"))
-
-    const trigger = await screen.findByRole("combobox", { name: /who can see this section/i })
-    fireEvent.click(trigger)
-    const option = await screen.findByRole("option", { name: /everyone with access/i })
-    fireEvent.pointerMove(option)
-    fireEvent.mouseMove(option)
-    fireEvent.keyDown(option, { key: "Enter" })
-
-    await waitFor(() => expect(patch).toHaveBeenCalledWith({ rosterViewMinRole: 100 }))
-  })
-
-  it("does not show the advanced toggle chevron for a caller who cannot edit the floor", async () => {
-    canEditRosterProgressFloorMock.mockReturnValue(false)
-    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
-    renderOverview()
-
-    const card = await screen.findByTestId("overview-members-card")
-    // Scoped to the badge itself, not the whole card — MembersTab's own
-    // "Add member" role picker renders an unrelated combobox in this card
-    // regardless of the visibility badge's edit state.
-    const badge = within(card).getByTestId("section-visibility-badge")
-    expect(within(badge).queryByRole("combobox")).not.toBeInTheDocument()
-    expect(badge.querySelector("svg.lucide-chevron-down")).not.toBeInTheDocument()
+    expect(screen.queryByText("Current members")).not.toBeInTheDocument()
+    expect(screen.getByTestId("overview-project-settings")).toBeInTheDocument()
   })
 })
 
@@ -1543,8 +1588,9 @@ describe("ProjectOverview CSV export (AQU-500)", () => {
 
     renderOverview()
 
-    await screen.findByTestId("export-csv-copy")
-    expect(screen.getByTestId("export-csv-download")).toBeInTheDocument()
+    const copy = await screen.findByTestId("export-csv-copy")
+    const download = screen.getByTestId("export-csv-download")
+    expect(copy.closest("[data-slot='button-group']")).toBe(download.closest("[data-slot='button-group']"))
   })
 
   it("hides the export controls when the caller is below the org's export floor", async () => {

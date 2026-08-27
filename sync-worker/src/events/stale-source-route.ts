@@ -148,6 +148,14 @@ export async function handleStaleSourceRequest(
   // the pinned event payload's value to the current projected value is the
   // equivalent content-aware check without adding a duplicated hash column to
   // every target row. A missing pinned event remains stale defensively.
+  //
+  // AQU-646: the comparison is on the cell's EFFECTIVE source text, not its
+  // stored value, because for an imported media segment `value` is the audio
+  // FILENAME and the transcript is what anyone translates. Correcting such a
+  // transcript leaves the filename identical on both sides, so a value-only
+  // comparison filtered the row out and the translator was never told the
+  // source had changed — a regression the moment those corrections stopped
+  // overwriting `value` (which is exactly what they should stop doing).
   const sql = `
     SELECT t.cell_id AS cell_id
     FROM cells t
@@ -167,7 +175,12 @@ export async function handleStaleSourceRequest(
       AND s.tombstoned_at IS NULL
       AND (
         pinned.id IS NULL
-        OR s.value IS DISTINCT FROM COALESCE((pinned.payload::jsonb)->>'value', '')
+        OR COALESCE(NULLIF(s.transcription, ''), s.value)
+             IS DISTINCT FROM COALESCE(
+               NULLIF((pinned.payload::jsonb)->>'transcription', ''),
+               (pinned.payload::jsonb)->>'value',
+               ''
+             )
       )
   `
 

@@ -17,9 +17,15 @@ import {
 import { TOUR_STEPS, filterStepsByRole, ARROW_CLASS, TOUR_ARROW_PX, type TourStep } from "./ProductTour"
 import { ROLE } from "@/lib/frontier/roles"
 import { en } from "@/lib/i18n/messages/en"
+import {
+  markAccountOnboardingComplete,
+  markLocalOnboardingComplete,
+  ONBOARDING_COMPLETE_KEY,
+  PRODUCT_TOUR_ELIGIBLE_KEY,
+} from "@/lib/onboarding/completion"
 
-const TOUR_DONE_KEY = "codex:productTourDone"
-const ONBOARDING_DONE_KEY = "codex:onboardingComplete"
+const TOUR_DONE_KEY = "aquilla:productTourDone"
+const ONBOARDING_DONE_KEY = ONBOARDING_COMPLETE_KEY
 
 /** AQU-832: steps carry MessageKeys, not raw English — resolve against the
  *  base English catalog for these content-correctness assertions. Tour step
@@ -54,6 +60,7 @@ describe("shouldAutoStartTour", () => {
   beforeEach(() => {
     localStorage.removeItem(TOUR_DONE_KEY)
     localStorage.removeItem(ONBOARDING_DONE_KEY)
+    localStorage.removeItem(PRODUCT_TOUR_ELIGIBLE_KEY)
   })
 
   it("AQU-243: returns false when onboarding is not complete", () => {
@@ -62,7 +69,13 @@ describe("shouldAutoStartTour", () => {
   })
 
   it("AQU-243: returns true when onboarding complete and tour not done", () => {
-    localStorage.setItem(ONBOARDING_DONE_KEY, "true")
+    markLocalOnboardingComplete()
+    expect(shouldAutoStartTour()).toBe(true)
+  })
+
+  it("starts after signed-account onboarding without setting local-only completion", () => {
+    markAccountOnboardingComplete("alice")
+    expect(localStorage.getItem(ONBOARDING_DONE_KEY)).toBeNull()
     expect(shouldAutoStartTour()).toBe(true)
   })
 
@@ -84,7 +97,7 @@ describe("shouldAutoStartTour", () => {
 
   it("AQU-243: independent from AQU-244 project-scoped setup flag", () => {
     // Simulate AQU-244 marking a project's setup checklist as shown.
-    localStorage.setItem("codex.setupAutoShown.some-project-id", "1")
+    localStorage.setItem("aquilla.setupAutoShown.some-project-id", "1")
     // That key must NOT affect the product tour flag.
     localStorage.setItem(ONBOARDING_DONE_KEY, "true")
     expect(shouldAutoStartTour()).toBe(true)

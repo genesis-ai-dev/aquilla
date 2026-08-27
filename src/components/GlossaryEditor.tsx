@@ -49,7 +49,7 @@ import { TerminologyTermDetail } from "@/components/TerminologyTermDetail"
 import { TerminologyViolationsInbox } from "@/components/TerminologyViolationsInbox"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useT } from "@/lib/i18n/I18nProvider"
-import type { ProjectRecord } from "@/lib/parsers/types"
+import { isAudioCueFile, type ProjectRecord } from "@/lib/parsers/types"
 
 interface GlossaryEditorProps {
   /** Workspace-authoritative files include optimistic imports before the
@@ -106,8 +106,14 @@ export function GlossaryEditor({
     jwtRef.current = frontierSession?.jwt ?? null
   }, [frontierSession?.jwt])
 
+  // AQU-646 stage 2: only the `project?.files` arm needs the audio-cue filter
+  // — the workspace passes a list that has already dropped them. Their cells
+  // are a near-verbatim transcript of a film's soundtrack, which "Suggest
+  // terms" would otherwise mine as if it were translatable text.
   const projectFiles = useMemo(
-    () => (workspaceFiles ?? project?.files ?? []).map((f) => ({ id: f.id, name: f.name, type: f.type })),
+    () =>
+      (workspaceFiles ?? (project?.files ?? []).filter((f) => !isAudioCueFile(f)))
+        .map((f) => ({ id: f.id, name: f.name, type: f.type })),
     [project?.files, workspaceFiles],
   )
   const getToken = useMemo(() => {
@@ -399,7 +405,7 @@ export function GlossaryEditor({
       {/* Header / toolbar */}
       <header className="flex items-center gap-2 border-b px-4 py-3">
         <BookOpen className="h-5 w-5 text-muted-foreground" />
-        <h1 className="flex-1 text-base font-semibold">{t("terminology.editor.title")}</h1>
+        <h1 className="flex-1 text-base font-semibold">{t("nav.sidebarSection.terminology")}</h1>
         {canManage && (
           <>
             <Button variant="outline" size="sm" onClick={handleSuggest} disabled={suggestRequested}>
@@ -449,6 +455,7 @@ export function GlossaryEditor({
             ? t("terminology.editor.backToGlossary")
             : t("terminology.violations.title")}
         </Button>
+        {/* i18n-exempt "glossary" is a view token, not copy */}
         {canManage && view === "glossary" && (
           <Button size="sm" onClick={() => setAddOpen(true)} aria-label={t("terminology.editor.addTerm")}>
             <Plus data-icon="inline-start" />

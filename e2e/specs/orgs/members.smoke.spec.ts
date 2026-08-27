@@ -15,7 +15,7 @@ import { addOrgMember, getMyOrg, listMyOrgs, ROLE } from "../../helpers/frontier
  * (admin pages iterate frequently) but the API is a stable contract.
  */
 // Fixed: injectSession now also sets aq_hint=1 cookie (belt+suspenders with
-// localStorage "codex:onboardingComplete") so App.tsx hasAuthHintCookie()
+// localStorage "aquilla:onboardingComplete") so App.tsx hasAuthHintCookie()
 // check passes even when IDB write bypasses the normal writeEnvelope path.
 test("alice adds bob to Acme via API; bob sees Acme in the org switcher", async ({ alice, bob }) => {
   // The multi-user fixture's `alice` setup ran resetBackend(), so seeded

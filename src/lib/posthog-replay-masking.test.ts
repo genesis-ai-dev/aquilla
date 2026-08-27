@@ -24,7 +24,15 @@ function read(relative: string): string {
 }
 
 const posthogSource = read("./posthog.ts")
-const editorSource = read("../components/EditorTable.tsx")
+// Both columns' wrappers, wherever they live. The target well moved out of
+// EditorTable into a shared cell surface (it is reused by the agent context
+// pane), which broke this check while the markup itself was fine — the drift
+// this test exists to catch, pointed at a file that had stopped being the
+// whole answer.
+const editorSource = [
+  read("../components/EditorTable.tsx"),
+  read("../components/cell/EditorCellSurface.tsx"),
+].join("\n")
 
 function maskTextSelector(): string {
   const match = /maskTextSelector:\s*"([^"]+)"/.exec(posthogSource)
@@ -39,7 +47,7 @@ describe("session replay masking", () => {
     expect(selectors).toContain("[data-ph-mask]")
   })
 
-  it("EditorTable still marks both columns with data-cell-type", () => {
+  it("the editor still marks both columns with data-cell-type", () => {
     expect(editorSource).toMatch(/data-cell-type="source"/)
     expect(editorSource).toMatch(/data-cell-type="target"/)
   })

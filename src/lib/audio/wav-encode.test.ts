@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { encodeWavPcm16 } from "./wav-encode"
+import { encodeWavPcm16, encodeWavPcm16Chunks, quantisePcm16 } from "./wav-encode"
 
 async function bytes(blob: Blob): Promise<DataView> {
   return new DataView(await blob.arrayBuffer())
@@ -30,5 +30,30 @@ describe("encodeWavPcm16", () => {
     expect(second).toBe(-32768) // -1.0 → min
     expect(dv.getInt16(48, true)).toBe(32767)  // +2.0 clamped
     expect(dv.getInt16(50, true)).toBe(-32768) // -2.0 clamped
+  })
+})
+
+describe("encodeWavPcm16Chunks", () => {
+  // The live capture path never sees a Float32Array — the worklet quantises on
+  // the audio thread — so this is what "equivalent input" means.
+  const samples = new Float32Array([0, 0.5, -0.5, 1, -1, 0.123, -0.987, 2, -2, NaN, 0.001])
+  const quantised = Int16Array.from(samples, quantisePcm16)
+
+  it("is byte-identical to encodeWavPcm16 for equivalent input", async () => {
+    const whole = new Uint8Array(await encodeWavPcm16(samples, 48000).arrayBuffer())
+    const streamed = new Uint8Array(
+      await encodeWavPcm16Chunks(
+        [quantised.slice(0, 3), quantised.slice(3, 4), quantised.slice(4)],
+        48000,
+      ).arrayBuffer(),
+    )
+    expect(streamed).toEqual(whole)
+  })
+
+  it("sizes the header from the total of every chunk", async () => {
+    const dv = await bytes(encodeWavPcm16Chunks([quantised.slice(0, 3), quantised.slice(3)], 44100))
+    expect(dv.getUint32(4, true)).toBe(36 + samples.length * 2) // RIFF size
+    expect(dv.getUint32(24, true)).toBe(44100)                  // the REAL context rate
+    expect(dv.getUint32(40, true)).toBe(samples.length * 2)     // data chunk size
   })
 })

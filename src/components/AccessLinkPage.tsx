@@ -19,32 +19,31 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { markAccountOnboardingComplete } from "@/lib/onboarding/completion"
+import { useAccounts } from "@/hooks/useAccounts"
 
 export function AccessLinkPage() {
   const t = useT()
   const { token } = useParams<{ token: string }>()
   const navigate = useNavigate()
+  const { adopt, loading: sessionLoading } = useAccounts()
   const [pin, setPin] = useState("")
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!token || submitting) return
+    if (!token || submitting || sessionLoading) return
     setSubmitting(true)
     setError(null)
     try {
-      const { projectId } = await redeemAccessLink(token, pin.trim())
+      const { projectId, session } = await redeemAccessLink(token, pin.trim())
+      await adopt(session)
       // Mark onboarding complete so the fresh browser is never bounced to the
       // onboarding wizard / marketing homepage — this account is already
       // provisioned; the link IS the onboarding. saveSession (inside redeem)
       // already set the aq_hint cookie.
-      try {
-        localStorage.setItem("codex:onboardingComplete", "true")
-      } catch {
-        // Private-mode / storage-blocked: navigation below still works; the
-        // RootRedirect guard only matters at "/", not the project route.
-      }
+      markAccountOnboardingComplete(session.username)
       navigate(`/project/${projectId}/editor`, { replace: true })
     } catch (err) {
       // AQU-820: redeemAccessLink() (lib/frontier/auth.ts) always throws with
@@ -87,7 +86,7 @@ export function AccessLinkPage() {
             autoFocus
             value={pin}
             onChange={(e) => setPin(e.target.value)}
-            disabled={submitting}
+            disabled={submitting || sessionLoading}
             data-testid="access-pin-input"
           />
         </div>
@@ -98,7 +97,7 @@ export function AccessLinkPage() {
           </p>
         )}
 
-        <Button type="submit" className="w-full" disabled={submitting || pin.trim().length === 0}>
+        <Button type="submit" className="w-full" disabled={sessionLoading || submitting || pin.trim().length === 0}>
           {submitting ? t("auth.accessLink.submitOpening") : t("auth.accessLink.submitDefault")}
         </Button>
       </form>

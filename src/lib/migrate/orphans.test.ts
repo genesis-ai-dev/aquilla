@@ -471,6 +471,35 @@ describe("mapAnchorRepairs", () => {
     expect(repairs.map((e) => `${e.cellId}:${e.id}`)).toEqual([`v2:${escalatedEventId(gen1, 2)}`])
   })
 
+  it("escalates when the stored anchor was written by the migration itself (Pattani Malay MAT)", () => {
+    // The second poison footprint: the stale run re-anchored v3 to v1 — a LIVE
+    // cell, so the dead-anchor rule reads it as a possible human reorder, and
+    // nothing is being resurrected (no cells were deleted). But reanchor ids
+    // are deterministic in (cell, anchor): the poison reanchor's own id
+    // (v3→v1) sits in the log, proving the stored value is migration-written —
+    // in-app reorders mint server-side ids, never this seed. Escalate.
+    const events = mapFilePairToEvents(pairOf(["v1", "v2", "v3"]), OPTS)
+    const live = liveSourceAnchorsByFile(events).get(FILE_ID)!
+    const intendedGen1 = sourceCellReanchorEventId(OPTS.projectId, FILE_ID, "v3", "v2")
+    const poisonReanchor = sourceCellReanchorEventId(OPTS.projectId, FILE_ID, "v3", "v1")
+    const repairs = mapAnchorRepairs({
+      projectId: OPTS.projectId,
+      fileId: FILE_ID,
+      intendedAnchors: live,
+      projectionCells: [anchored("v1", null), anchored("v2", "v1"), anchored("v3", "v1")],
+      existingEventIds: new Set([
+        ...migratedEventIds(["v1", "v2", "v3"]),
+        intendedGen1, // the correct repair, logged earlier — suppressed
+        poisonReanchor, // the stale run's reanchor — proves migration wrote the stored anchor
+      ]),
+      resurrectedCellIds: new Set(),
+      liveCellIds: new Set(live.keys()),
+      fallbackAuthor: OPTS.fallbackAuthor,
+      fallbackTs: OPTS.fallbackTs,
+    })
+    expect(repairs.map((e) => `${e.cellId}:${e.id}`)).toEqual([`v3:${escalatedEventId(intendedGen1, 2)}`])
+  })
+
   it("treats a missing sourceAnchorCellId (pre-AQU-931 server) as a null stored anchor", () => {
     const events = mapFilePairToEvents(pairOf(["v1", "v2"]), OPTS)
     const repairs = mapAnchorRepairs({

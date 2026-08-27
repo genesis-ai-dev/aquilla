@@ -13,10 +13,10 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 // It is deliberately NOT an auto-open flag: it is only ever *set* by the user
 // opening the checklist, so a project the user has never engaged with (or has
 // dismissed) can never reopen on load. Keyed by project, per-device
-// (localStorage), matching the pre-existing `codex.setup*.<projectId>`
+// (localStorage), matching the pre-existing `aquilla.setup*.<projectId>`
 // convention. Stored as "1".
 function setupInProgressKey(projectId: string): string {
-  return `codex.setupInProgress.${projectId}`
+  return `aquilla.setupInProgress.${projectId}`
 }
 
 export function isSetupInProgress(projectId: string): boolean {

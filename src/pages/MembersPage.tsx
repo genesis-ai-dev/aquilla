@@ -16,6 +16,8 @@ import { AppShell } from "@/components/AppShell"
 import { OrgSidebar } from "@/components/org/OrgSidebar"
 import { OrgBreadcrumb } from "@/components/org/OrgBreadcrumb"
 import { OrgMembersTable } from "@/components/org/OrgMembersTable"
+import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
+import { DataTablePanelSkeleton } from "@/components/ui/data-table"
 import { useOrgMembers } from "@/hooks/useOrg"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useAccessibleProjects } from "@/hooks/useAccessibleProjects"
@@ -51,7 +53,11 @@ export function MembersPage() {
             description={t("org.membersPage.orgPage.description")}
             inset={false}
           />
-          <div className="h-48 animate-pulse rounded-lg border bg-card" />
+          <DataTablePanelSkeleton
+            searchPlaceholder="Search by name or email"
+            loadingLabel={t("org.membersPage.loadingMembers")}
+            className={ADMIN_TABLE_PANEL_CLASS}
+          />
         </Page>
       </MembersShell>
     )
@@ -139,7 +145,11 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
   const canGovern = (activeOrg?.role.level ?? 0) >= ROLE.MAINTAINER
   const { members, isLoading: membersLoading, error: membersError, rosterHidden, add, addMany, remove, listMemberProjects, refresh } =
     useOrgMembers(orgId)
-  const { projects: accessibleProjects, refresh: refreshProjects } = useAccessibleProjects()
+  const {
+    projects: accessibleProjects,
+    error: accessibleProjectsError,
+    refresh: refreshProjects,
+  } = useAccessibleProjects()
   const [removeTarget, setRemoveTarget] = useState<{ userId: number; username: string } | null>(null)
   const [multiInviteOpen, setMultiInviteOpen] = useState(false)
 
@@ -160,7 +170,16 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
     return (
       <MembersShell>
         <Page size="wide">
-          <div className="h-48 animate-pulse rounded-lg border bg-card" />
+          <PageHeader
+            title={t("editor.navTitle.members")}
+            description={t("org.membersPage.orgPage.description")}
+            inset={false}
+          />
+          <DataTablePanelSkeleton
+            searchPlaceholder="Search by name or email"
+            loadingLabel={t("org.membersPage.loadingMembers")}
+            className={ADMIN_TABLE_PANEL_CLASS}
+          />
         </Page>
       </MembersShell>
     )
@@ -189,14 +208,14 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
             {membersError && (
               <p className="text-xs text-destructive">{membersError}</p>
             )}
+            {accessibleProjectsError && (
+              <p className="text-xs text-destructive">{accessibleProjectsError}</p>
+            )}
 
-            {membersLoading && members.length === 0 ? (
-              <div className="h-48 animate-pulse rounded-lg border bg-card" />
-            ) : (
-              <>
-                <OrgMembersTable
+            <OrgMembersTable
                   orgId={orgId}
                   members={members}
+                  loading={membersLoading && members.length === 0}
                   callerOrgRoleLevel={activeOrg?.role.level ?? null}
                   canAddToProjects={accessibleProjects.length > 0}
                   onAddToProjects={() => setMultiInviteOpen(true)}
@@ -213,8 +232,6 @@ function MembersPageContent({ orgId, orgName }: MembersPageContentProps) {
                     orgMemberIds={members.map((m) => m.userId)}
                   />
                 )}
-              </>
-            )}
           </div>
         </TabsContent>
 
@@ -336,7 +353,7 @@ function PendingInviteRow({
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="font-medium truncate">{invite.projectName}</span>
           <span className="text-muted-foreground">·</span>
-          <RoleLabel name={invite.role.name} className="text-muted-foreground" />
+          <RoleLabel name={invite.role.name} />
           {invite.email ? (
             <AppTooltip content={t("org.membersPage.orgPage.targetedInviteTooltip")}>
               <span className="rounded bg-blue-500/15 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 text-[9px] font-mono">

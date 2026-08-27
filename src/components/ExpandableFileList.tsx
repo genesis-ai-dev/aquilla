@@ -54,8 +54,6 @@ interface Props {
    * wired up org settings.
    */
   canExportByOrgPolicy?: boolean
-  /** When set, opens inline rename for the given file (sidebar + file-options menu). */
-  renameSignal?: { fileId: string; nonce: number } | null
   activeChapterHealth?: BookHealthChapter[]
 }
 
@@ -64,17 +62,14 @@ export function ExpandableFileList({
   suggestionFileIds, validationCount, getTokenForFile, onSelectFile, onShowDetails, onRename, onMove, onExport, onAssignWork, onSegmentation, onDelete,
   targetLang = "",
   onApplySuggestion, onRenameCorpus, canExportByOrgPolicy = true,
-  renameSignal, activeChapterHealth,
+  activeChapterHealth,
 }: Props) {
   const t = useT()
   const { expanded, toggle } = useSidebarExpansion(projectId)
   const { members: collapsed, toggle: toggleCollapsed } = usePersistedToggleSet(
-    `codex:sidebar:corpus-collapsed:${projectId}`,
+    `aquilla:sidebar:corpus-collapsed:${projectId}`,
   )
   const [editingFileId, setEditingFileId] = useState<string | null>(null)
-  useEffect(() => {
-    if (renameSignal?.fileId) setEditingFileId(renameSignal.fileId)
-  }, [renameSignal?.fileId, renameSignal?.nonce])
   const [filter, setFilter] = useState("")
   const [editingCorpus, setEditingCorpus] = useState<string | null>(null)
   const { requestScrollToSection } = useEditorScroll()

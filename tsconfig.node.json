@@ -4,7 +4,8 @@
     "target": "es2023",
     "lib": ["ES2023"],
     "module": "esnext",
-    "types": ["node", "vitest/config"],
+    /* vite/client: scripts pull in src/ modules that read import.meta.env */
+    "types": ["node", "vitest/config", "vite/client"],
     "skipLibCheck": true,
 
     /* Bundler mode */

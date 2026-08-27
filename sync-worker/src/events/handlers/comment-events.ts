@@ -25,11 +25,12 @@ export function handleCommentEvent(
   db: AquillaDb,
   authed: AuthorizedEvent<CommentEventKind>,
   serverTs: number,
+  /** Pre-allocated server_seq for this event (AQU-1005: allocation happens
+   *  once per request via allocateSeqRange, outside the write transaction). */
+  serverSeq: number,
 ): DispatchResult {
   const { event, claims } = authed
 
-  // server_seq is allocated by the per-project counter inside the INSERT —
-  // see events/event-insert.ts.
   const eventInsert = buildEventInsertStmt(db, {
     id: event.id,
     schemaVersion: event.schemaVersion,
@@ -42,6 +43,7 @@ export function handleCommentEvent(
     payloadJson: JSON.stringify(event.payload),
     clientTs: event.clientTs,
     serverTs,
+    serverSeq,
   })
 
   const persisted: PersistedEvent = {

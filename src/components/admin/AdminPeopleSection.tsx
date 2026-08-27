@@ -5,7 +5,7 @@ import { toast } from "@/components/ui/toast"
 import { DataTable, DataTableColumnHeader } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
 import { DateTooltip } from "@/components/ui/date-tooltip"
-import { EmptyState } from "@/components/ui/empty"
+import { TableEmptyState } from "@/components/ui/empty"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { ADMIN_TABLE_PANEL_CLASS } from "@/components/admin/shared"
 import type { AdminUser, AdminAdmin } from "@/lib/frontier/admin"
@@ -102,17 +102,6 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
     [adminEmails],
   )
 
-  if (users.length === 0) {
-    return (
-      <EmptyState
-        variant="panel"
-        icon={Users}
-        title="No users yet"
-        description="People appear here once they register."
-      />
-    )
-  }
-
   return (
     <div className="flex flex-col gap-3">
       {orphanAdmins.length > 0 && (
@@ -148,6 +137,15 @@ export function AdminPeopleSection({ users, admins }: { users: AdminUser[]; admi
               : `${table.getFilteredRowModel().rows.length} of ${users.length}`}
           </span>
         )}
+        emptyState={
+        users.length === 0 ? (
+          <TableEmptyState
+            icon={Users}
+            title="No users yet"
+            description="People appear here once they register."
+          />
+        ) : undefined
+      }
         testId="admin-people-table"
         className={ADMIN_TABLE_PANEL_CLASS}
         dense

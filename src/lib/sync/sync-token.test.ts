@@ -262,13 +262,13 @@ describe("makeSyncTokenFetcher", () => {
     // WHY: the user opened a project file and the server rejected the stored
     // session JWT. The client must detect this (401) and call `onUnauthorized`
     // with that JWT so the app can raise the session-expired signal, rather
-    // than silently failing and leaving the user stuck.
+    // than silently failing, deleting offline work, or clearing unrelated accounts.
     const result = await getToken()
     expect(result).toBeNull()
     expect(onUnauthorized).toHaveBeenCalledTimes(1)
     // AQU-994: the failing credential is passed so the caller can guard with
     // notifySessionExpiredIfCurrent (stragglers from a replaced JWT are inert).
-    expect(onUnauthorized).toHaveBeenCalledWith("expired-session-jwt")
+    expect(onUnauthorized).toHaveBeenLastCalledWith("expired-session-jwt")
 
     // A second call (e.g. from a retry) fires the callback again — each call
     // that gets a 401 notifies the caller so it can act. The cache is cleared
@@ -276,6 +276,7 @@ describe("makeSyncTokenFetcher", () => {
     const result2 = await getToken()
     expect(result2).toBeNull()
     expect(onUnauthorized).toHaveBeenCalledTimes(2)
+    expect(onUnauthorized).toHaveBeenLastCalledWith("expired-session-jwt")
     ;(console.warn as ReturnType<typeof vi.spyOn>).mockRestore()
   })
 

@@ -49,6 +49,7 @@ import {
   type CodexProjectMatch,
 } from "../src/lib/migrate/gitlab/api"
 import { dereferenceLfs } from "../src/lib/migrate/gitlab/lfs"
+import { ensureCheckoutCurrent, gitCheckoutGuardIo } from "./lib/checkout-guard"
 
 /** Sanitize a project name into a filesystem-safe directory segment. */
 function sanitizeName(name: string): string {
@@ -147,9 +148,25 @@ async function cloneProject(
   outDir: string,
 ): Promise<void> {
   if (fs.existsSync(path.join(outDir, ".git"))) {
+    // AQU-971: a reused checkout must MATCH the remote head before it is
+    // read. Silently reusing whatever is on disk is how the 2026-08-20 poison
+    // sweep mapped months-old notebooks and retracted/re-anchored live
+    // content across 30+ prod projects. The guard fast-forwards when that is
+    // trivially safe and otherwise fails loudly — it never resets or deletes,
+    // because this directory may be Codex Editor's live workspace.
     process.stderr.write(
-      `Repo already cloned at ${outDir}; reusing existing checkout.\n`,
+      `Repo already cloned at ${outDir}; verifying it matches the remote head…\n`,
     )
+    await ensureCheckoutCurrent({
+      dir: outDir,
+      io: gitCheckoutGuardIo({
+        dir: outDir,
+        url: match.httpUrlToRepo,
+        gitlabToken: creds.gitlabToken,
+        defaultBranch: match.defaultBranch,
+      }),
+      log: (line) => process.stderr.write(`${line}\n`),
+    })
     return
   }
   fs.mkdirSync(outDir, { recursive: true })

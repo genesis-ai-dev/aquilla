@@ -10,9 +10,14 @@ import {
   translatorProfilePromptBlock,
   MAX_PROFILE_FIELD_CHARS,
 } from "./translator-profile"
+import {
+  resetClientLocalStorageOwnerForTests,
+  setClientLocalStorageOwner,
+} from "./frontier/client-local-storage"
 
 afterEach(() => {
   localStorage.clear()
+  resetClientLocalStorageOwnerForTests()
 })
 
 describe("get/set", () => {
@@ -26,7 +31,7 @@ describe("get/set", () => {
   })
 
   it("survives corrupt JSON in storage", () => {
-    localStorage.setItem("codex:translatorProfile", "{not json")
+    localStorage.setItem("aquilla:translatorProfile", "{not json")
     expect(getTranslatorProfile()).toEqual({})
   })
 
@@ -36,6 +41,17 @@ describe("get/set", () => {
     setTranslatorProfile({ responseLanguage: "  Swahili  ", otherInfo: "" })
     expect(seen).toHaveBeenCalledWith({ responseLanguage: "Swahili" })
     off()
+  })
+
+  it("switches profiles atomically with the active account", () => {
+    setClientLocalStorageOwner("alice")
+    setTranslatorProfile({ responseLanguage: "Tagalog" })
+    setClientLocalStorageOwner("bob")
+    expect(getTranslatorProfile()).toEqual({})
+    setTranslatorProfile({ responseLanguage: "Swahili" })
+
+    setClientLocalStorageOwner("alice")
+    expect(getTranslatorProfile()).toEqual({ responseLanguage: "Tagalog" })
   })
 })
 

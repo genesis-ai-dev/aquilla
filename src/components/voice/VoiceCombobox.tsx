@@ -7,7 +7,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { Check, ChevronsUpDown, Search } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -97,23 +96,18 @@ export function VoiceCombobox({
   }, [open])
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      {/* MERGE 2026-08-04: dev's tooltip sweep (5b9f9664) converted this
-          trigger's title= to AppTooltip — but it edited the OLD copy of this
-          component inside CellVoicePanel, which the branch had already moved
-          here. Hand-ported so the change isn't silently lost. */}
-      <AppTooltip content={t("editor.voice.choose")}>
-        <PopoverTrigger
-          render={
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={busy}
-              aria-label={t("editor.voice.activeVoice", { name: active.name })}
-              className="w-full justify-start gap-1.5"
-            />
-          }
-        >
+      <PopoverTrigger
+        render={
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            aria-label={t("editor.voice.activeVoice", { name: active.name })}
+            className="w-full justify-start gap-1.5"
+          />
+        }
+      >
           <span className="relative shrink-0">
             <VoiceAvatar voice={active} size={18} />
             {busy && (
@@ -125,7 +119,6 @@ export function VoiceCombobox({
           <span className="min-w-0 flex-1 truncate text-start font-medium text-foreground">{active.name}</span>
           <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         </PopoverTrigger>
-      </AppTooltip>
       <PopoverContent align="start" side="bottom" className="w-60 p-2">
         <VoicePickerContent
           voices={voices}

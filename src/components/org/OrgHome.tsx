@@ -612,7 +612,13 @@ export function OrgHome() {
     let cancelled = false
     listMyPendingInvites(jwt)
       .then((list) => { if (!cancelled) setPendingInvites(list) })
-      .catch(() => { if (!cancelled) setPendingInvites([]) })
+      .catch((err) => {
+        if (cancelled) return
+        setPendingInvites([])
+        if (err instanceof UserError && err.category === "session-expired") {
+          void notifySessionExpiredIfCurrent(jwt)
+        }
+      })
     return () => { cancelled = true }
   }, [jwt])
 

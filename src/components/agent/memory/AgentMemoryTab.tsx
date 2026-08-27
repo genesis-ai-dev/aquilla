@@ -18,7 +18,7 @@
  *
  * mem-M5 (memory-notice liveness): this tab and AgentRunView's chat timeline
  * both key off `projectId`, so a review here calls straight into
- * `agentSessionStore(projectId).markMemoryReviewed/markBriefReviewed` — the
+ * `agentSessionStore(projectId, username).markMemoryReviewed/markBriefReviewed` — the
  * store already exists as the single source of truth for run state (see
  * session-store.ts), so that's the "clean channel" rather than a window
  * event: any mounted AgentRunView subscribed to the same store re-renders
@@ -84,7 +84,7 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const username = session?.username ?? null
-  const { state: agentSessionState } = useAgentSession(projectId)
+  const { state: agentSessionState } = useAgentSession(projectId, username)
 
   const [memories, setMemories] = useState<AgentMemory[]>([])
   const [brief, setBrief] = useState<ProjectBrief | null>(null)
@@ -182,7 +182,7 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
             : await reviewAgentMemory(jwt, projectId, memory.id, action)
           setMemories((cur) => cur.map((m) => (m.id === updated.id ? updated : m)))
           // mem-M5: flip the matching memory.proposed chat notice, if any.
-          agentSessionStore(projectId).markMemoryReviewed(updated.id)
+          agentSessionStore(projectId, username).markMemoryReviewed(updated.id)
         } catch (err) {
           setMemories((cur) => cur.map((m) => (m.id === original.id ? original : m)))
           if (err instanceof SupersedesHumanEditedError) {
@@ -255,7 +255,7 @@ export default function AgentMemoryTab({ projectId, roleLevel }: AgentMemoryTabP
           const updated = await reviewBriefProposal(jwt, projectId, proposal.id, action)
           setBriefProposals((cur) => cur.map((p) => (p.id === updated.id ? updated : p)))
           // mem-M5: flip the matching brief.proposed chat notice, if any.
-          agentSessionStore(projectId).markBriefReviewed(updated.id)
+          agentSessionStore(projectId, username).markBriefReviewed(updated.id)
           if (action === "approve") reloadBrief()
         } catch (err) {
           setBriefProposals((cur) => cur.map((p) => (p.id === original.id ? original : p)))

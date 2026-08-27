@@ -40,6 +40,53 @@ export function isTerminologyOnlyPatch(partial: ProjectWideSettings): boolean {
   return keys.length > 0 && keys.every((key) => key === TERMINOLOGY_KEY)
 }
 
+/**
+ * AQU-979: the same-tab convergence channel for project-wide settings.
+ *
+ * Project settings are PATCHed through auth-worker's REST API, not the sync
+ * event log, so nothing in the SPA's own state graph tells a *sibling*
+ * `useProjectSettings` instance that a write just landed. That matters because
+ * `/project/:id/settings` renders as a route-modal **over the still-mounted
+ * ProjectWorkspace** (see App.tsx `backgroundLocation` routes): the dialog owns
+ * one hook instance, the workspace owns another, and only the dialog's instance
+ * sees the patch. Before AQU-979 the workspace's instance converged only via the
+ * server round-trip (auth-worker → best-effort sync-worker notify → DO
+ * `project.settings.updated` frame → ProjectWorkspace relay) or on window focus
+ * — neither of which fires when the user closes the dialog and keeps editing in
+ * the same tab. The workspace therefore kept the OLD `sourceLanguage` /
+ * `targetLanguage`, and since `useCompletion` takes both from that record, an AI
+ * generation triggered right after a language change ran against the stale
+ * language until a manual page reload.
+ *
+ * Broadcasting locally on every successful write closes that window without
+ * waiting on (or trusting) the best-effort server notify. The DO relay keeps
+ * dispatching the same event for *remote* writers, so cross-tab and
+ * cross-collaborator convergence is unchanged.
+ */
+export const PROJECT_SETTINGS_UPDATED_EVENT = "aquilla:project-settings-updated"
+
+export interface ProjectSettingsUpdatedDetail {
+  projectId: string
+  version?: number
+  /**
+   * Instance id of the hook that performed the write, when the event came from
+   * a local patch. The originating instance already holds the authoritative
+   * response, so it skips the redundant re-GET; every other instance refreshes.
+   * Absent for the DO relay (a remote write — everyone must refresh).
+   */
+  origin?: string
+}
+
+/** Tell every other mounted settings consumer in this tab to re-read the row. */
+export function broadcastProjectSettingsUpdated(detail: ProjectSettingsUpdatedDetail): void {
+  if (typeof window === "undefined") return
+  window.dispatchEvent(
+    new CustomEvent<ProjectSettingsUpdatedDetail>(PROJECT_SETTINGS_UPDATED_EVENT, { detail }),
+  )
+}
+
+let settingsInstanceSeq = 0
+
 export type CannotEditReason = "offline" | "role" | null
 
 export type PatchOutcome =
@@ -210,6 +257,11 @@ export function useProjectSettings(
 
   const mountAtRef = useRef(performance.now())
 
+  // AQU-979: stable per-instance id so this hook can ignore the settings-updated
+  // event it broadcast itself (it already holds the authoritative response).
+  const instanceIdRef = useRef<string>("")
+  if (!instanceIdRef.current) instanceIdRef.current = `ps-${++settingsInstanceSeq}`
+
   // All server-side writes (the one-shot migration + every user `patch`) go
   // through this promise chain. Without it, the migration's PATCH and a fast
   // user blur both hit the server with `ifMatchVersion=0` against a fresh
@@ -379,17 +431,25 @@ export function useProjectSettings(
   }, [isOnline, projectId, jwt, refresh])
 
   // Project settings are written by identity, while the editor's live channel
-  // is the project Durable Object. ProjectWorkspace relays the additive DO
-  // frame here so every mounted settings consumer converges without polling.
+  // is the project Durable Object. Two producers feed this listener:
+  //   - ProjectWorkspace relays the additive DO frame (a REMOTE writer), and
+  //   - AQU-979: `patch` below broadcasts locally the moment a write lands, so
+  //     sibling instances in this tab (the settings route-modal vs. the
+  //     workspace underneath it) converge without waiting on the best-effort
+  //     server notify — or on a manual page reload.
+  // Either way every mounted settings consumer converges without polling.
   useEffect(() => {
     if (!projectId || typeof window === "undefined") return
     const onSettingsUpdated = (event: Event) => {
-      const detail = (event as CustomEvent<{ projectId?: unknown }>).detail
+      const detail = (event as CustomEvent<ProjectSettingsUpdatedDetail>).detail
       if (detail?.projectId !== projectId) return
+      // Our own write — `patch` already committed the authoritative response to
+      // `serverRef`/`server`, so a re-GET would only cost a round-trip.
+      if (detail.origin && detail.origin === instanceIdRef.current) return
       void refresh()
     }
-    window.addEventListener("aquilla:project-settings-updated", onSettingsUpdated)
-    return () => window.removeEventListener("aquilla:project-settings-updated", onSettingsUpdated)
+    window.addEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onSettingsUpdated)
+    return () => window.removeEventListener(PROJECT_SETTINGS_UPDATED_EVENT, onSettingsUpdated)
   }, [projectId, refresh])
 
   // Re-fetch on tab focus / visibility regain (AQU-349). Validation-policy
@@ -579,10 +639,26 @@ export function useProjectSettings(
 
     if (result.kind === "ok") {
       writeServer(result.value)
+      // AQU-979: the row on the server has moved; tell every other mounted
+      // consumer in this tab immediately. Without this the workspace under the
+      // settings modal keeps the pre-save sourceLanguage/targetLanguage (and
+      // useCompletion with it) until the DO notify lands or the page reloads.
+      broadcastProjectSettingsUpdated({
+        projectId,
+        version: result.value.version,
+        origin: instanceIdRef.current,
+      })
       return { kind: "ok" }
     }
     if (result.kind === "conflict") {
       writeServer(result.latest)
+      // A conflict still means the server row advanced (someone else's write
+      // won). Siblings are just as stale as they'd be after our own write.
+      broadcastProjectSettingsUpdated({
+        projectId,
+        version: result.latest.version,
+        origin: instanceIdRef.current,
+      })
       // Snap local + IDB to the conflict winner so the overlay stops lying
       // about what state we're in. Without this, `local` keeps the user's
       // doomed edit and the overlay merges it on top of the server truth.

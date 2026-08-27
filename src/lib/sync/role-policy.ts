@@ -67,6 +67,8 @@ const REQUIRED_ROLE: Record<string, number> = {
   "file.delete": ROLE.PROJECT_LEAD,
   "file.restore": ROLE.PROJECT_LEAD,
 
+  // These are the SELF floors — the bar to touch your own comment. Acting on
+  // someone else's carries a second, higher floor; see FOREIGN_COMMENT_ROLE.
   "comment.create": ROLE.COMMENTER,
   "comment.edit": ROLE.COMMENTER,
   "comment.delete": ROLE.COMMENTER,
@@ -137,6 +139,86 @@ export function requiredRoleFor(kind: string): number | null {
 export function canPerform(kind: string, roleLevel: number | null | undefined): boolean {
   if (roleLevel == null) return true
   const required = requiredRoleFor(kind)
+  if (required == null) return true
+  return roleLevel >= required
+}
+
+/**
+ * AQU-1000 — CLIENT MIRROR of the server's foreign-comment floors.
+ *
+ * `REQUIRED_ROLE` above is only half the comment policy. Every comment
+ * mutation carries a SECOND floor that applies when the target comment was
+ * written by somebody else: the server re-checks `author_id` against the
+ * caller's username at the `/events` perimeter (`sync-worker/src/events/
+ * route.ts`) and again on the external Agent API emit path
+ * (`sync-worker/src/external/emit-events-engine.ts`), and 403s below this bar.
+ *
+ * The client mirrored only the static table, so the UI offered Resolve /
+ * Close-with-reply / Reopen on threads the server was always going to refuse.
+ * Because `useComments.resolveThread` flips `resolved` optimistically, the
+ * thread visibly closed and then sprang back open — a promise the system
+ * never intended to keep. Mirroring the foreign floor is what lets the UI
+ * decide honestly, per thread, before it offers the control.
+ *
+ * `comment.resolve` sits at CONTRIBUTOR because closing a thread is
+ * bookkeeping, not a rewrite of anyone's words: the body is untouched and the
+ * act is reversible by reopening. `comment.edit` / `comment.delete` mutate
+ * what another person actually said, so they stay at MAINTAINER.
+ *
+ * DEPENDENCY: the CONTRIBUTOR floor for foreign resolve is AQU-999's change
+ * to the server (both write paths). Until that lands, the server still
+ * enforces MAINTAINER here and a contributor's foreign resolve is refused —
+ * so keep these two in lock-step, exactly as the mirror's header demands.
+ */
+export const FOREIGN_COMMENT_ROLE: Record<string, number> = {
+  "comment.resolve": ROLE.CONTRIBUTOR,
+  "comment.edit": ROLE.MAINTAINER,
+  "comment.delete": ROLE.MAINTAINER,
+}
+
+/**
+ * Minimum role to act on a comment kind that somebody ELSE authored, or null
+ * when the kind carries no foreign floor (fail-open, as `requiredRoleFor`).
+ */
+export function foreignRoleFor(kind: string): number | null {
+  return FOREIGN_COMMENT_ROLE[kind] ?? null
+}
+
+/**
+ * AQU-1000: the floor that actually applies to `kind` for this caller on this
+ * comment — the self floor when they wrote it, the (higher) foreign floor when
+ * they did not. Returns null when nothing is provably required, matching
+ * `requiredRoleFor`'s fail-open contract.
+ *
+ * `isOwnComment` is deliberately a caller-supplied boolean rather than a pair
+ * of usernames: the drawer compares a thread's root author, the Comments page
+ * compares a record's `authorId`, and both already hold the session username.
+ */
+export function effectiveCommentRoleFor(kind: string, isOwnComment: boolean): number | null {
+  const self = requiredRoleFor(kind)
+  if (isOwnComment) return self
+  const foreign = foreignRoleFor(kind)
+  if (foreign == null) return self
+  if (self == null) return foreign
+  return Math.max(self, foreign)
+}
+
+/**
+ * AQU-1000: whether `roleLevel` may perform `kind` on a comment, accounting
+ * for who wrote it.
+ *
+ * Fail-open on an unknown role (null = a local / git-imported project with no
+ * sync role), same contract as `canPerform` — we only ever return false when a
+ * 403 is certain, because the server remains the security boundary. The point
+ * here is honesty in the UI, not enforcement.
+ */
+export function canMutateComment(
+  kind: string,
+  roleLevel: number | null | undefined,
+  isOwnComment: boolean,
+): boolean {
+  if (roleLevel == null) return true
+  const required = effectiveCommentRoleFor(kind, isOwnComment)
   if (required == null) return true
   return roleLevel >= required
 }

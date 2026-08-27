@@ -10,6 +10,10 @@ import {
   readLocalBacktranslation,
   type BacktranslationRecord,
 } from "./bt-record"
+import {
+  resetClientLocalStorageOwnerForTests,
+  setClientLocalStorageOwner,
+} from "@/lib/frontier/client-local-storage"
 
 function record(over: Partial<BacktranslationRecord> = {}): BacktranslationRecord {
   return {
@@ -194,9 +198,11 @@ describe("recordFromHydrationRow", () => {
 describe("localStorage round-trip", () => {
   beforeEach(() => {
     localStorage.clear()
+    resetClientLocalStorageOwnerForTests()
   })
   afterEach(() => {
     localStorage.clear()
+    resetClientLocalStorageOwnerForTests()
   })
 
   it("round-trips forText and the polished flag", () => {
@@ -204,5 +210,16 @@ describe("localStorage round-trip", () => {
     const got = readLocalBacktranslation("p", "c1")
     expect(got?.forText).toBe("abc")
     expect(got?.polished).toBe(false)
+  })
+
+  it("does not read a previous account's local backtranslation", () => {
+    setClientLocalStorageOwner("alice")
+    writeLocalBacktranslation("p", record({ btText: "alice reading" }))
+
+    setClientLocalStorageOwner("bob")
+    expect(readLocalBacktranslation("p", "c1")).toBeUndefined()
+
+    setClientLocalStorageOwner("alice")
+    expect(readLocalBacktranslation("p", "c1")?.btText).toBe("alice reading")
   })
 })

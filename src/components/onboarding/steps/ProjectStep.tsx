@@ -9,6 +9,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { Spinner } from "@/components/ui/spinner"
 import { createProject as createLocalProject } from "@/lib/store/project-index"
 import { createRemoteProject } from "@/lib/frontier/members"
@@ -157,7 +158,7 @@ export function ProjectStep({
               return (
                 <Field data-invalid={invalid}>
                   <FieldLabel htmlFor="src-lang">{t("projectSettings.info.sourceLanguageLabel")}</FieldLabel>
-                  <Input
+                  <LanguageComboboxInput
                     id="src-lang"
                     name="aquilla-project-source-language"
                     autoComplete="off"
@@ -166,7 +167,7 @@ export function ProjectStep({
                     spellCheck={false}
                     value={field.state.value}
                     onBlur={field.handleBlur}
-                    onChange={(e) => field.handleChange(e.target.value)}
+                    onValueChange={field.handleChange}
                     placeholder={t("onboarding.step.project.sourceLanguagePlaceholder")}
                     aria-invalid={invalid}
                   />
@@ -182,7 +183,7 @@ export function ProjectStep({
               return (
                 <Field data-invalid={invalid}>
                   <FieldLabel htmlFor="tgt-lang">{t("autopilot.inspector.details.targetLanguage")}</FieldLabel>
-                  <Input
+                  <LanguageComboboxInput
                     id="tgt-lang"
                     name="aquilla-project-target-language"
                     autoComplete="off"
@@ -191,7 +192,7 @@ export function ProjectStep({
                     spellCheck={false}
                     value={field.state.value}
                     onBlur={field.handleBlur}
-                    onChange={(e) => field.handleChange(e.target.value)}
+                    onValueChange={field.handleChange}
                     placeholder={t("onboarding.step.project.targetLanguagePlaceholder")}
                     aria-invalid={invalid}
                   />

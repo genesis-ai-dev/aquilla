@@ -7,6 +7,9 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { devLogin } from "@/lib/frontier/auth"
 import { Check, ChevronLeft } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
+import type { FrontierSession } from "@/lib/frontier/types"
+import { Spinner } from "@/components/ui/spinner"
+import { useAccounts } from "@/hooks/useAccounts"
 
 type Mode = "signup" | "login" | "forgot"
 
@@ -14,6 +17,9 @@ export function SignInStep({
   onNext,
   onBack,
   onLoginComplete,
+  onSignupComplete,
+  continuationBusy = false,
+  continuationError = null,
 }: {
   onNext: () => void
   onBack: () => void
@@ -22,13 +28,21 @@ export function SignInStep({
    * signup). The wizard can inspect existing orgs/projects and skip the
    * Name + Project steps for returning users.
    */
-  onLoginComplete?: () => void
+  onLoginComplete?: (session: FrontierSession) => void | Promise<void>
+  onSignupComplete?: (session: FrontierSession) => void | Promise<void>
+  continuationBusy?: boolean
+  continuationError?: string | null
 }) {
   const t = useT()
-  const { session } = useFrontierSession()
+  const { session, loading } = useFrontierSession()
+  const { adopt } = useAccounts()
   // Default new visitors to signup; the loop's "joiner" path is rare here
   // (joiners arrive via invite links, not the onboarding wizard).
   const [mode, setMode] = useState<Mode>("signup")
+
+  if (loading) {
+    return <div className="flex min-h-40 items-center justify-center"><Spinner /></div>
+  }
 
   if (session) {
     return (
@@ -42,8 +56,21 @@ export function SignInStep({
             {t("onboarding.step.signIn.readyBlurb")}
           </p>
         </div>
-        <Button size="lg" onClick={onNext} className="w-full">
-          {t("onboarding.common.continue")}
+        {continuationError && (
+          <p role="alert" className="text-center text-sm text-destructive">
+            {continuationError}
+          </p>
+        )}
+        <Button
+          size="lg"
+          onClick={() => {
+            if (onLoginComplete) void onLoginComplete(session)
+            else onNext()
+          }}
+          className="w-full"
+          disabled={continuationBusy}
+        >
+          {continuationBusy ? t("common.loading") : t("onboarding.common.continue")}
         </Button>
       </div>
     )
@@ -67,7 +94,9 @@ export function SignInStep({
         </p>
       </div>
 
-      {mode === "signup" && <FrontierSignupForm onSuccess={onNext} />}
+      {mode === "signup" && (
+        <FrontierSignupForm onSuccess={onSignupComplete ?? (() => onNext())} />
+      )}
       {mode === "login" && (
         <FrontierLoginForm
           onSuccess={onLoginComplete ?? onNext}
@@ -105,7 +134,9 @@ export function SignInStep({
           variant="outline"
           onClick={async () => {
             const session = await devLogin()
-            if (session) onNext()
+            if (session) await adopt(session)
+            if (session && onLoginComplete) await onLoginComplete(session)
+            else if (session) onNext()
             else console.warn("[dev-login] endpoint unavailable — is WRANGLER_LOCAL=1 set on auth-worker?")
           }}
           className="w-full"

@@ -1,6 +1,6 @@
-import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from "react"
-import { useNavigate } from "react-router-dom"
+import { createContext, useContext, useMemo, type ReactNode } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { useOutboxFlusher } from "@/hooks/useOutboxFlusher"
 import { usePendingOutboxRecords } from "@/hooks/usePendingOutboxRecords"
 import { buildProjectAwareMinter } from "@/lib/sync/cqrs-bridge"
@@ -46,29 +46,26 @@ export interface OutboxContextValue {
 const OutboxContext = createContext<OutboxContextValue | null>(null)
 
 export function OutboxProvider({ children }: { children: ReactNode }) {
-  const { session, logout } = useFrontierSession()
-  const navigate = useNavigate()
+  const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
-
-  // Live JWT ref so the minter (built once) always reads the current token.
-  const jwtRef = useRef<string | null>(jwt)
-  useEffect(() => {
-    jwtRef.current = jwt
-  }, [jwt])
 
   const minter = useMemo(
     () =>
-      buildProjectAwareMinter(() => jwtRef.current, undefined, {
-        onUnauthorized: () => {
+      buildProjectAwareMinter(() => jwt, undefined, {
+        onUnauthorized: (failedJwt) => {
           // Only a /sync-token mint 401 (the session JWT itself is dead)
           // reaches here — that genuinely means re-auth. A per-event 403 does
-          // not, so the queue advances past forbidden events without logging
-          // the user out.
-          console.warn("[OutboxProvider] session JWT rejected (401) during outbox drain — clearing session")
-          void logout().then(() => navigate("/"))
+          // not. Keep the queue and every stored account intact while the
+          // rejected credential is re-authenticated.
+          console.warn("[OutboxProvider] session JWT rejected (401) during outbox drain — requesting re-auth")
+          void notifySessionExpiredIfCurrent(failedJwt)
         },
       }),
-    [logout, navigate],
+    // Rebuild the entire per-project/file minter graph at the account boundary.
+    // The inner cache also keys tokens by JWT, but discarding its closures here
+    // keeps no cross-account machinery alive and composes with authEpoch's
+    // in-flight cancellation in useOutboxFlusher.
+    [jwt],
   )
 
   const {

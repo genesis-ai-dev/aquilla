@@ -84,6 +84,8 @@ export const onboarding = defineNamespace({
     "onboarding.step.signIn.signedInAs": "Signed in as {username}",
     "onboarding.step.signIn.readyBlurb":
       "AI translations, sync, and cloud import are available.",
+    "onboarding.step.signIn.orgCheckFailed":
+      "You're signed in, but we couldn't check whether this account has finished setup. Check your connection and try again.",
     "onboarding.step.signIn.headingSignup": "Create your Frontier account",
     "onboarding.step.signIn.headingLogin": "Sign in to Frontier",
     // "Reset your password" reuses `auth.resetPassword.title`

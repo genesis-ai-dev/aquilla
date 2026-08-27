@@ -521,3 +521,132 @@ describe('projection: maintainer edit/delete ACTUALLY updates foreign comment ro
   })
 })
 
+
+// ── AQU-999: foreign RESOLVE floor is contributor(400), not maintainer ─────
+//
+// Resolving/reopening a thread you did not author is thread bookkeeping, so it
+// sits at CONTRIBUTOR. Editing/deleting another person's words stays at
+// MAINTAINER, and reviewer(300)/commenter(200) still cannot resolve a foreign
+// thread. These are the regression guards for the flip-then-revert 403.
+
+/** Build a comment.resolve RawEvent for `commentId`. */
+function resolveEvent(
+  id: string,
+  commentId: string,
+  author: string,
+  resolved: boolean,
+): RawEvent<'comment.resolve'> {
+  return {
+    id,
+    schemaVersion: 1,
+    kind: 'comment.resolve',
+    projectId: 'proj-a',
+    fileId: 'file-x',
+    cellId: undefined,
+    parentId: null,
+    author,
+    payload: { commentId, resolved },
+    clientTs: 200,
+  }
+}
+
+describe('AQU-999: contributor(400) foreign comment authority', () => {
+  it('contributor CAN resolve a foreign thread, and it persists in the projection', async () => {
+    const { db, rows } = await makeTestDb()
+    await seedComment(db, 'cmt-999-res', 'alice')
+
+    const bobToken = await makeToken(400, 'bob')
+    const res = await handleEventsWriteRequest(
+      await makeRequest([resolveEvent('evt-999-res', 'cmt-999-res', 'bob', true)], bobToken),
+      makeEnv(db),
+    )
+    const body = await res!.json() as any
+    expect(body.rejected).toHaveLength(0)
+    expect(body.accepted).toHaveLength(1)
+
+    const comments = await rows<{ comment_id: string; resolved: number }>('comments')
+    expect(comments.find((r) => r.comment_id === 'cmt-999-res')?.resolved).toBeTruthy()
+  })
+
+  it('contributor CAN reopen a foreign thread someone else resolved', async () => {
+    const { db, rows } = await makeTestDb()
+    await seedComment(db, 'cmt-999-reopen', 'alice')
+
+    const aliceToken = await makeToken(200, 'alice')
+    await handleEventsWriteRequest(
+      await makeRequest([resolveEvent('evt-999-reopen-a', 'cmt-999-reopen', 'alice', true)], aliceToken),
+      makeEnv(db),
+    )
+
+    const bobToken = await makeToken(400, 'bob')
+    const res = await handleEventsWriteRequest(
+      await makeRequest([resolveEvent('evt-999-reopen-b', 'cmt-999-reopen', 'bob', false)], bobToken),
+      makeEnv(db),
+    )
+    const body = await res!.json() as any
+    expect(body.rejected).toHaveLength(0)
+
+    const comments = await rows<{ comment_id: string; resolved: number }>('comments')
+    expect(comments.find((r) => r.comment_id === 'cmt-999-reopen')?.resolved).toBeFalsy()
+  })
+
+  it('reviewer(300) still CANNOT resolve a foreign thread → 403', async () => {
+    const { db } = await makeTestDb()
+    await seedComment(db, 'cmt-999-rev', 'alice')
+
+    const reviewerToken = await makeToken(300, 'bob')
+    const res = await handleEventsWriteRequest(
+      await makeRequest([resolveEvent('evt-999-rev', 'cmt-999-rev', 'bob', true)], reviewerToken),
+      makeEnv(db),
+    )
+    const body = await res!.json() as any
+    expect(body.rejected).toHaveLength(1)
+    expect(body.rejected[0].status).toBe(403)
+  })
+
+  it('contributor still CANNOT edit a foreign comment → 403 (unchanged)', async () => {
+    const { db } = await makeTestDb()
+    await seedComment(db, 'cmt-999-edit', 'alice')
+
+    const bobToken = await makeToken(400, 'bob')
+    const editEvt: RawEvent<'comment.edit'> = {
+      id: 'evt-999-edit',
+      schemaVersion: 1,
+      kind: 'comment.edit',
+      projectId: 'proj-a',
+      fileId: 'file-x',
+      cellId: undefined,
+      parentId: null,
+      author: 'bob',
+      payload: { commentId: 'cmt-999-edit', body: 'Rewritten by bob' },
+      clientTs: 200,
+    }
+    const res = await handleEventsWriteRequest(await makeRequest([editEvt], bobToken), makeEnv(db))
+    const body = await res!.json() as any
+    expect(body.rejected).toHaveLength(1)
+    expect(body.rejected[0].status).toBe(403)
+  })
+
+  it('contributor still CANNOT delete a foreign comment → 403 (unchanged)', async () => {
+    const { db } = await makeTestDb()
+    await seedComment(db, 'cmt-999-del', 'alice')
+
+    const bobToken = await makeToken(400, 'bob')
+    const delEvt: RawEvent<'comment.delete'> = {
+      id: 'evt-999-del',
+      schemaVersion: 1,
+      kind: 'comment.delete',
+      projectId: 'proj-a',
+      fileId: 'file-x',
+      cellId: undefined,
+      parentId: null,
+      author: 'bob',
+      payload: { commentId: 'cmt-999-del' },
+      clientTs: 200,
+    }
+    const res = await handleEventsWriteRequest(await makeRequest([delEvt], bobToken), makeEnv(db))
+    const body = await res!.json() as any
+    expect(body.rejected).toHaveLength(1)
+    expect(body.rejected[0].status).toBe(403)
+  })
+})

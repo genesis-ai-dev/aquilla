@@ -94,7 +94,7 @@ export function AgentDockView({
   onReviewMemory,
 }: AgentDockViewProps) {
   const t = useT()
-  const { state, send, stop, noteActivity } = useAgentSession(projectId)
+  const { state, send, stop, noteActivity } = useAgentSession(projectId, author)
   const [promptHintIndex, setPromptHintIndex] = useState(0)
   const composerRef = useRef<ChatComposerHandle>(null)
 

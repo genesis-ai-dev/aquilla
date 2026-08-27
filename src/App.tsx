@@ -1,6 +1,5 @@
-import { Suspense, lazy, type ReactNode } from "react"
+import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Navigate, Routes, Route, useParams, useLocation, type Location } from "react-router-dom"
-import { hasAuthHintCookie } from "@/lib/frontier/session-store"
 import { OrgHome } from "@/components/org/OrgHome"
 import { OrgHomeRoute } from "@/components/org/OrgHomeRoute"
 import { OrgOverview } from "@/components/org/OrgOverview"
@@ -38,12 +37,23 @@ import { AudioBulkProgressBanner } from "@/components/AudioBulkProgressBanner"
 import { PrivateModeBanner } from "@/components/PrivateModeBanner"
 import { SessionExpiredBanner } from "@/components/SessionExpiredBanner"
 import { ExpiredSessionGate } from "@/components/ExpiredSessionGate"
+import { useAccounts } from "@/hooks/useAccounts"
+import {
+  hasLegacyOnboardingCompletion,
+  isLocalOnboardingComplete,
+  migrateLegacyOnboardingCompletion,
+} from "@/lib/onboarding/completion"
+import { isJwtExpired } from "@/lib/frontier/auth"
+import { SessionHydrationError } from "@/components/SessionHydrationError"
+import { AccountTransitionError } from "@/components/AccountTransitionError"
+import { isSessionHydrationRequiredPath } from "@/lib/navigation/session-routes"
 import { VersionBadge } from "@/components/VersionBadge"
 import { UpdateBanner } from "@/components/UpdateBanner"
 import { hydratePrefetchStatus } from "@/lib/audio/prefetch"
 import { probeOpfsAvailability } from "@/lib/storage/opfs-availability"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { useGlobalAudioShortcuts } from "@/hooks/useGlobalAudioShortcuts"
+import { useSessionRefresh } from "@/hooks/useSessionRefresh"
 
 // Heavy workspace / admin routes — loaded only when navigated to
 const ProjectWorkspace = lazy(() =>
@@ -143,8 +153,60 @@ function SyncFreezeOverlay() {
  * Signed-in visitors resume their last org (`/orgs/$id` or `/orgs/all`).
  */
 function AppEntry() {
-  const onboarded = localStorage.getItem("aquilla:onboardingComplete") === "true"
-  if (!hasAuthHintCookie() && !onboarded) return <Navigate to="/login" replace />
+  const { active } = useAccounts()
+  const [localOnboarded, setLocalOnboarded] = useState<boolean | null>(() =>
+    isLocalOnboardingComplete() ? true : hasLegacyOnboardingCompletion() ? null : false,
+  )
+  const [migrationError, setMigrationError] = useState<Error | null>(null)
+  const migrationRequestRef = useRef(0)
+  const migrationInFlightRef = useRef(false)
+
+  const runLocalMigration = useCallback(async () => {
+    if (migrationInFlightRef.current) return
+    migrationInFlightRef.current = true
+    const request = ++migrationRequestRef.current
+    setMigrationError(null)
+    try {
+      const complete = await migrateLegacyOnboardingCompletion(null)
+      if (migrationRequestRef.current === request) setLocalOnboarded(complete)
+    } catch (error) {
+      if (migrationRequestRef.current === request) {
+        setMigrationError(error instanceof Error ? error : new Error(String(error)))
+      }
+    } finally {
+      migrationInFlightRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    if (active) {
+      void migrateLegacyOnboardingCompletion(active.username).catch(() => {})
+      return
+    }
+    if (isLocalOnboardingComplete() || localOnboarded !== null || migrationError) return
+    // Start after the effect body so the retry helper's initial state reset is
+    // not a synchronous state update from inside an effect.
+    void Promise.resolve().then(() => {
+      if (!cancelled) return runLocalMigration()
+    })
+    return () => {
+      cancelled = true
+      migrationRequestRef.current += 1
+    }
+  }, [active, localOnboarded, migrationError, runLocalMigration])
+
+  if (active && isJwtExpired(active.jwt)) return <RouteLoadingFallback />
+  if (!active && migrationError) {
+    return (
+      <SessionHydrationError
+        retry={runLocalMigration}
+        messageKey="auth.login.onboardingMigrationFailed"
+      />
+    )
+  }
+  if (!active && localOnboarded == null) return <RouteLoadingFallback />
+  if (!active && !localOnboarded) return <Navigate to="/login" replace />
   return <Navigate to={resumeOrgPath()} replace />
 }
 
@@ -174,6 +236,30 @@ function OrgLazyRoute({ children }: { children: ReactNode }) {
 }
 
 export default function App() {
+  // AQU-995: roll the stored JWT forward while the session is in use, so a
+  // 30-day token never lapses under someone who is actively translating.
+  useSessionRefresh()
+  const {
+    active, loading, hydrated, loadError, retryLoad,
+    transitionError, retryTransition,
+  } = useAccounts()
+  const location = useLocation()
+  const hydrationRequired = isSessionHydrationRequiredPath(location.pathname)
+  const offlineProjectTransition = hydrated && location.pathname.startsWith("/project/")
+  if (transitionError) {
+    return <AccountTransitionError retry={retryTransition} />
+  }
+  // Offline/public routes may render before the first IndexedDB session read,
+  // while offline project routes still need a neutral boundary during a real
+  // account switch. Public/login routes stay mounted so a pending form submit
+  // retains ownership of its exact post-auth `next` navigation.
+  if (loading && (hydrationRequired || offlineProjectTransition)) {
+    return <RouteLoadingFallback />
+  }
+  if (hydrationRequired && loadError && !active) {
+    return <SessionHydrationError retry={retryLoad} />
+  }
+
   return (
     // Single app-wide tooltip delay group: once one tooltip opens, adjacent
     // ones open instantly (Base UI grouping). `delay` only exists on the

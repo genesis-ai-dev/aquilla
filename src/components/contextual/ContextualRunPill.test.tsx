@@ -83,7 +83,7 @@ describe("ContextualRunPill", () => {
       screen.getByRole("button", { name: "Run Autopilot" }).querySelector("svg.lucide-play"),
     ).toBeNull()
     expect(
-      screen.getByRole("button", { name: "Run Autopilot" }).querySelector("svg.lucide-wand-sparkles"),
+      screen.getByRole("button", { name: "Run Autopilot" }).querySelector("svg.lucide-pencil-sparkles"),
     ).not.toBeNull()
     idle.unmount()
 
@@ -92,7 +92,7 @@ describe("ContextualRunPill", () => {
     render(<ContextualRunPill projectId="p1" fileId="file-1" canControl />)
     const resume = screen.getByRole("button", { name: "Resume drafting" })
     expect(resume.querySelector("svg.lucide-play")).toBeNull()
-    expect(resume.querySelector("svg.lucide-wand-sparkles")).not.toBeNull()
+    expect(resume.querySelector("svg.lucide-pencil-sparkles")).not.toBeNull()
   })
 
   it("keeps Pause on the pause control — only the run/resume glyphs changed (AQU-1012)", () => {

@@ -8,7 +8,7 @@
 // here are plain user words (ui-jargon-guard.test.ts bans spec ids).
 
 import { useEffect, useMemo, useState } from "react"
-import { AlertTriangle, CheckCircle2, Eye, ListTree, Pause, Sparkles, WandSparkles, X } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Eye, ListTree, Pause, PencilSparkles, Sparkles, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -214,9 +214,9 @@ function ContextualRunPillScoped({
     // Idle (no run) and terminated (run is over, can start fresh) share the
     // icon-only run affordance. It deliberately does NOT use the media Play
     // triangle — the editor's audio/video controls own that glyph, and users
-    // were clicking this expecting playback. The wand keeps the app's Sparkles
-    // AI idiom while staying distinct from the plain Sparkles drafts-ready
-    // chip rendered beside it.
+    // were clicking this expecting playback. The pencil keeps the app's
+    // Sparkles AI idiom while staying distinct from the plain Sparkles
+    // drafts-ready chip rendered beside it.
     content = canControl ? (
       <AppTooltip content={t("autopilot.action.run")}>
         <Button
@@ -244,7 +244,7 @@ function ContextualRunPillScoped({
             })()
           }}
         >
-          <WandSparkles className="h-3.5 w-3.5" />
+          <PencilSparkles className="h-3.5 w-3.5" />
         </Button>
       </AppTooltip>
     ) : status === "terminated" ? <span className="text-muted-foreground">{t("autopilot.status.stopped")}</span> : null
@@ -278,7 +278,7 @@ function ContextualRunPillScoped({
           >
             {/* Same idiom as the start button — resuming an autopilot run is
                 not media playback. */}
-            <WandSparkles className="h-3.5 w-3.5" />
+            <PencilSparkles className="h-3.5 w-3.5" />
           </Button>
         </AppTooltip>}
         <span className="text-muted-foreground">{t("autopilot.status.paused")}</span>

@@ -17,6 +17,14 @@ import {
   resolvePmFilter,
   type PmFilter,
 } from "./project-pm-filter"
+import { ProjectRoleFilter } from "./ProjectRoleFilter"
+import {
+  ROLE_FILTER_ALL,
+  filterByRole,
+  resolveRoleFilter,
+  roleFilterNames,
+  type RoleFilter,
+} from "./project-role-filter"
 import {
   useOrgPortfolio,
   type StatusFilter,
@@ -62,6 +70,8 @@ export function OrgProjectsPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   // AQU-1040: designated-PM narrowing, composed with the status filter below.
   const [pmFilter, setPmFilter] = useState<PmFilter>(PM_FILTER_ALL)
+  // AQU-1042: viewer-role narrowing, composed with both filters below.
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>(ROLE_FILTER_ALL)
   const projectLens = readProjectLens()
 
   const guestOrgId = activeGuestOrg?.id ?? null
@@ -134,7 +144,16 @@ export function OrgProjectsPage() {
   const pmUsernames = pmFilterUsernames(sourceProjects)
   const showUnassignedPm = hasUnassignedPm(sourceProjects)
   const activePmFilter = resolvePmFilter(pmFilter, pmUsernames, showUnassignedPm)
-  const visibleProjects = filterByPm(statusFilteredProjects, activePmFilter)
+  // AQU-1042: same derivation rule for the viewer-role options — every loaded
+  // row, not the filtered slice. Roleless rows ("—" in the Role column) pass
+  // only under the "all" default.
+  const roleNames = roleFilterNames(sourceProjects, portfolio.roleByProjectId)
+  const activeRoleFilter = resolveRoleFilter(roleFilter, roleNames)
+  const visibleProjects = filterByRole(
+    filterByPm(statusFilteredProjects, activePmFilter),
+    portfolio.roleByProjectId,
+    activeRoleFilter,
+  )
 
   return (
     <AppShell
@@ -188,6 +207,12 @@ export function OrgProjectsPage() {
                     onValueChange={setPmFilter}
                     className="bg-card"
                   />
+                  <ProjectRoleFilter
+                    value={activeRoleFilter}
+                    names={roleNames}
+                    onValueChange={setRoleFilter}
+                    className="bg-card"
+                  />
                 </>
               }
               toolbarTrailing={
@@ -206,9 +231,9 @@ export function OrgProjectsPage() {
                   ? isGuestOrg
                     ? t("org.guestOrgHome.emptyTitle", { orgName: guestOrgName })
                     : t("org.orgHome.projectsPanel.emptyTitle")
-                  : activePmFilter !== PM_FILTER_ALL
-                    ? // AQU-1040: a PM+status combination that matches nothing is a
-                      // filtered-empty table, not an empty org.
+                  : activePmFilter !== PM_FILTER_ALL || activeRoleFilter !== ROLE_FILTER_ALL
+                    ? // AQU-1040/AQU-1042: a filter combination that matches nothing
+                      // is a filtered-empty table, not an empty org.
                       t("org.orgHome.projectsPanel.noMatchingProjects")
                     : statusFilter === "stalled"
                       ? t("org.orgHome.emptyTitle.stalled")

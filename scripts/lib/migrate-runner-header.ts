@@ -26,14 +26,14 @@ export function migrateRunnerId(): string {
 export function installMigrateRunnerHeader(): void {
   const original = globalThis.fetch
   const runner = migrateRunnerId()
-  globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+  globalThis.fetch = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const url =
       typeof input === "string" ? input : input instanceof URL ? input.href : input.url
-    if (!url.includes("/migrate/")) return original(input as RequestInfo, init)
+    if (!url.includes("/migrate/")) return original(input, init)
     const headers = new Headers(
       init?.headers ?? (input instanceof Request ? input.headers : undefined),
     )
     if (!headers.has(MIGRATE_RUNNER_HEADER)) headers.set(MIGRATE_RUNNER_HEADER, runner)
-    return original(input as RequestInfo, { ...init, headers })
+    return original(input, { ...init, headers })
   }) as typeof fetch
 }

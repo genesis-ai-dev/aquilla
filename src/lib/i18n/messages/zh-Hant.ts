@@ -4082,7 +4082,6 @@ export const zh_Hant: Catalog = {
   "terminology.editor.errorBlocked": "您的角色無法變更詞彙表。",
   "terminology.editor.errorSourceAndRenderingRequired": "術語必須同時有來源詞與譯法才能啟用。",
   "terminology.editor.errorImportFailed": "匯入失敗",
-  "terminology.editor.title": "詞彙表",
   "terminology.editor.findingTerms": "正在尋找術語…",
   "terminology.editor.suggestTerms": "推薦術語",
   "terminology.editor.exportCsv": "匯出 CSV",

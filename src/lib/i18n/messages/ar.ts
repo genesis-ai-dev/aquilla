@@ -3663,7 +3663,6 @@ export const ar: Catalog = {
   "terminology.editor.errorBlocked": "لا يسمح دورك بتغيير قاعدة المصطلحات.",
   "terminology.editor.errorSourceAndRenderingRequired": "يلزم إدخال مصطلح مصدر ومقابل قبل أن يصبح المصطلح نشطًا.",
   "terminology.editor.errorImportFailed": "فشل الاستيراد",
-  "terminology.editor.title": "قاعدة المصطلحات",
   "terminology.editor.findingTerms": "جارٍ البحث عن المصطلحات…",
   "terminology.editor.suggestTerms": "اقتراح مصطلحات",
   "terminology.editor.exportCsv": "تصدير CSV",

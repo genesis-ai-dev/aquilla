@@ -165,3 +165,5 @@ TypeScript, no `any`. ES6+ (`const`/`let`, arrow fns, async/await, `?.`/`??`). R
 Tailwind v4 + shadcn/ui (`components.json`, primitives in `src/components/ui/`) + `@base-ui/react`;
 icons are lucide. Use the `components.json` aliases (`@/components/ui`, `@/lib/utils`).
 Target files under ~500 lines. See `AGENTS.md` for the (non-negotiable) testing rules.
+When opening a PR, structure the title and body per `.github/pull_request_template.md`
+(API-created PRs don't get GitHub's auto-fill — see AGENTS.md).

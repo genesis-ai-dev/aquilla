@@ -198,6 +198,10 @@ makes the work impossible to review or revert cleanly.
   different ticket — heed it and move the stray work to its own worktree.
 - **Untangling after the fact is expensive and lossy** — prevention (isolation at pickup)
   is the whole game.
+- **PRs follow the repo template.** GitHub only auto-fills `.github/pull_request_template.md`
+  for PRs opened in its web UI — API-created PRs (agents, Linear coding sessions, `curl`) get
+  an empty body. When opening a PR, structure the title and body per that template and fill
+  in every section, including the Test Checklist.
 
 > **Reconcile drift:** run **`/issue-audit`** to cross-check the board against `main` — it
 > flags issues whose code shipped but whose status lagged, `Deployed`/`Done` issues with no

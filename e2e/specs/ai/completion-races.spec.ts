@@ -7,7 +7,7 @@
 
 import { test, expect } from "../../helpers/multi-user"
 import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
-import { MockLLMServer } from "../../helpers/mock-llm-server"
+import { MockLLMServer, applyUserProviderOverride } from "../../helpers/mock-llm-server"
 import { ProjectSettings } from "../../helpers/page-objects/ProjectSettings"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 
@@ -20,11 +20,7 @@ const DEAD_LETTER_MSG = "was not saved"
 async function setupProject(alice: import("@playwright/test").Page, name: string) {
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name })
   const ws = await openSeededProject(alice, seeded)
-  await alice.evaluate(({ endpoint }) => {
-    localStorage.setItem("aquilla:userProviderOverride", JSON.stringify({
-      endpoint, model: "mock-model", apiKey: "",
-    }))
-  }, { endpoint: `${mockLLM.baseUrl}/v1` })
+  await applyUserProviderOverride(alice, "alice", `${mockLLM.baseUrl}/v1`)
   await alice.reload()
   await ws.waitForEditor()
   return ws

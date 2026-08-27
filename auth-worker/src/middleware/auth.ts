@@ -27,14 +27,26 @@ export const authMiddleware = async (
     return c.json({ error: "Invalid authorization header format" }, 401)
   }
 
-  const payload = await jwtService.verifyToken(token)
-  if (!payload) {
-    return c.json({ error: "Invalid or expired token" }, 401)
+  // AQU-995: expiry gets its own response body and `code`. It is by far the
+  // most common 401 here (30-day tokens, no refresh until now) and it is a
+  // normal event, not a fault — separating it lets ops read real
+  // malformed-token incidents out of the identity logs, and lets the SPA act
+  // on a lapsed session without pattern-matching a shared message.
+  const verification = await jwtService.verifyTokenDetailed(token)
+  if (!verification.ok) {
+    return verification.reason === "expired"
+      ? c.json({ error: "Token expired", code: "token_expired" }, 401)
+      : c.json({ error: "Invalid or expired token", code: "invalid_token" }, 401)
   }
+  const payload = verification.payload
 
-  const now = Math.floor(Date.now() / 1000)
-  if (payload.exp < now) {
-    return c.json({ error: "Token expired" }, 401)
+  // This replaces a `payload.exp < now` check that could never fire —
+  // hono/jwt's `verify` already throws JwtTokenExpired on a lapsed `exp`, so
+  // reaching here means expiry was checked. What it never covered, and this
+  // does, is a token carrying *no* exp claim at all: that verifies cleanly and
+  // would otherwise authenticate forever.
+  if (typeof payload.exp !== "number") {
+    return c.json({ error: "Invalid or expired token", code: "invalid_token" }, 401)
   }
 
   // [Pen test] Auth & session mgmt (2026-08-03): reject tokens the caller
@@ -45,7 +57,20 @@ export const authMiddleware = async (
     return c.json({ error: "Token has been revoked. Please log in again." }, 401)
   }
 
-  const user = await jwtService.getUserByUsername(payload.sub)
+  // AQU-994: hydration hitting a DB error must NOT read as an auth failure.
+  // During the 2026-08-25 Postgres/Hyperdrive blip the old code answered 401
+  // "User not found" for every authenticated request, and the SPA responded by
+  // force-logging active editors out (and revoking their still-valid tokens).
+  // 503 tells clients "retry later" without impugning the credential.
+  let user: Awaited<ReturnType<typeof jwtService.getUserByUsername>>
+  try {
+    user = await jwtService.getUserByUsername(payload.sub)
+  } catch {
+    return c.json(
+      { error: "Unable to verify session right now. Please retry." },
+      503,
+    )
+  }
   if (!user) {
     return c.json({ error: "User not found" }, 401)
   }

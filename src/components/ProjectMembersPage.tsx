@@ -28,7 +28,6 @@ import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useProjectOrgId } from "@/hooks/useProjectOrgId"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { useActiveOrgOptional } from "@/context/OrgContext"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
 import { MemberMultiAddRow } from "@/components/MemberMultiAddRow"
@@ -92,27 +91,46 @@ export function MembersTab({
   // AQU-672: source the org roster so the add-member field can suggest
   // colleagues instead of forcing an exact-username guess. Prefer the
   // PROJECT's own org (the active-org picker may be on "All organizations"
-  // or a different org entirely), falling back to the optional org context.
-  // Unit-rendered without a provider. A personal (org-less) project yields
-  // no suggestions and keeps working as plain free text.
-  const projectOrgId = useProjectOrgId(projectId)
-  const activeOrgId = useActiveOrgOptional()?.activeOrgId ?? null
-  const rosterOrgId = projectOrgId ?? activeOrgId
+  // or a different org entirely). A personal (org-less) project or a failed
+  // project lookup yields no suggestions and keeps working as plain free text.
+  const { orgId: projectOrgId, error: projectOrgError } = useProjectOrgId(projectId)
+  const rosterOrgId = projectOrgError ? null : projectOrgId
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([])
+  const [loadedRosterKey, setLoadedRosterKey] = useState<string | null>(null)
+  const [orgRosterError, setOrgRosterError] = useState<string | null>(null)
+  const rosterKey = session?.username && rosterOrgId != null
+    ? `${session.username}\u0000${rosterOrgId}`
+    : null
+  const visibleOrgMembers = loadedRosterKey === rosterKey ? orgMembers : []
   useEffect(() => {
     const jwt = session?.jwt
     if (!jwt || rosterOrgId == null) {
       // Bail without a state change when already empty so we don't force an
       // extra render (keeps this effect side-effect-free on org-less surfaces).
       setOrgMembers((prev) => (prev.length === 0 ? prev : []))
+      setLoadedRosterKey(null)
       return
     }
     let alive = true
+    setOrgMembers([])
+    setLoadedRosterKey(null)
+    setOrgRosterError(null)
     listOrgMembers(jwt, rosterOrgId)
-      .then((ms) => { if (alive) setOrgMembers(ms) })
-      .catch(() => { /* suggestions are best-effort; free text still works */ })
+      .then((ms) => {
+        if (alive) {
+          setOrgMembers(ms)
+          setLoadedRosterKey(rosterKey)
+        }
+      })
+      .catch((caught) => {
+        if (alive) {
+          setOrgMembers([])
+          setLoadedRosterKey(null)
+          setOrgRosterError(toUserFacingError(caught, "organization members").message)
+        }
+      })
     return () => { alive = false }
-  }, [session?.jwt, rosterOrgId])
+  }, [session?.jwt, rosterKey, rosterOrgId])
 
   // AQU-560: when the add is refused for lack of permission, surface the
   // enriched account-identity + switch-user alert instead of the bare message
@@ -157,12 +175,12 @@ export function MembersTab({
   )
   const eligibleOrgMembers = useMemo(
     () =>
-      orgMembers
+      visibleOrgMembers
         .filter((m) => !directGrantUserIds.has(m.userId))
         .sort((a, b) =>
           a.username.localeCompare(b.username, undefined, { sensitivity: "base" }),
         ),
-    [orgMembers, directGrantUserIds],
+    [visibleOrgMembers, directGrantUserIds],
   )
 
   const renderMemberRow = (m: ProjectMember) => {
@@ -269,6 +287,11 @@ export function MembersTab({
           </button>
         </div>
       )}
+      {(projectOrgError || orgRosterError) && (
+        <p role="alert" className="text-xs text-destructive">
+          {projectOrgError ?? orgRosterError}
+        </p>
+      )}
 
       {/* Members list */}
       <div>
@@ -347,7 +370,7 @@ export function MembersTab({
           onAdd={handleAddMany}
           excludedUserIds={[...directGrantUserIds]}
           suggestions={
-            orgMembers.length > 0
+            visibleOrgMembers.length > 0
               ? eligibleOrgMembers.map((m) => ({ id: m.userId, username: m.username }))
               : undefined
           }

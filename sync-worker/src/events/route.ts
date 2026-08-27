@@ -42,7 +42,7 @@ import {
 import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
 import { checkProjectMembership, type MembershipCheck } from './membership'
-import { ROLE } from './role-policy'
+import { ROLE, isForeignCommentKind, requiredRoleForForeignComment, roleLabel } from './role-policy'
 import { sendCommentNotifications, type EmailService } from '../notification-email'
 import { laneRelevantHeadSeq } from './link-sync'
 import {
@@ -906,11 +906,7 @@ export async function handleEventsWriteRequest(
     const callerRole = authResult.event.claims.roleLevel
     const callerUsername = authResult.event.claims.username
 
-    if (
-      rawEvent.kind === 'comment.edit' ||
-      rawEvent.kind === 'comment.delete' ||
-      rawEvent.kind === 'comment.resolve'
-    ) {
+    if (isForeignCommentKind(rawEvent.kind)) {
       const p = rawEvent.payload as { commentId?: string }
       if (p.commentId) {
         const commentRow = await db
@@ -921,12 +917,15 @@ export async function handleEventsWriteRequest(
           .first<{ author_id: string }>()
 
         if (commentRow && commentRow.author_id !== callerUsername) {
-          // Foreign comment mutation — requires maintainer+.
-          if (callerRole < ROLE.MAINTAINER) {
+          // Foreign comment mutation — floor per FOREIGN_COMMENT_ROLE
+          // (AQU-999): maintainer for edit/delete, contributor for resolve.
+          const foreignFloor = requiredRoleForForeignComment(rawEvent.kind)
+          if (callerRole < foreignFloor) {
+            const verb = rawEvent.kind === 'comment.resolve' ? 'resolve' : 'mutate'
             rejected.push({
               id: rawEvent.id ?? '(unknown)',
               status: 403,
-              reason: `role too low to mutate another user's comment (requires maintainer)`,
+              reason: `role too low to ${verb} another user's comment (requires ${roleLabel(foreignFloor)})`,
             })
             continue
           }

@@ -18,18 +18,20 @@
  *    `/approve/:id`, `/verify-email`, …) are reachable signed-out and already
  *    handle an expired session in place (see JoinPage / JoinOrgPage). Bouncing
  *    them would drop the token carried in the URL.
- *  - The project workspace (`/project/:id/...`) is excluded too: it supports
- *    working offline on already-synced content, and a hard redirect there would
- *    evict someone mid-edit with no way back until they can reach the server.
- *    Those surfaces keep the AQU-293 session-expired banner.
+ *  - Every route under `/project/:id/...`, including settings, stays available
+ *    offline. Project settings hydrate from IDB and deliberately permit local
+ *    edits while disconnected; these surfaces keep the expiry banner instead.
  */
 
+import { useEffect, useState } from "react"
 import { Navigate, useLocation } from "react-router-dom"
 import { useAccounts } from "@/hooks/useAccounts"
 import { isJwtExpired } from "@/lib/frontier/auth"
+import { loadActiveSession } from "@/lib/frontier/session-store"
+import { loginPath } from "@/lib/navigation/login-path"
 
-/** Signed-in shell routes whose whole purpose is server-backed org/project data. */
-const GUARDED_EXACT = new Set(["/", "/app", "/shared"])
+/** Signed-in routes whose whole purpose is server-backed account/org/project data. */
+const GUARDED_EXACT = new Set(["/", "/app", "/shared", "/admin"])
 const GUARDED_PREFIXES = ["/orgs", "/projects"]
 
 /** True for the routes {@link ExpiredSessionGate} redirects away from. */
@@ -42,11 +44,38 @@ export function ExpiredSessionGate() {
   const { active, loading } = useAccounts()
   const location = useLocation()
 
-  // Never act before the stored session has been read — a redirect on the
-  // pre-hydration null would bounce every signed-in cold load to /login.
-  if (loading || !active || !isJwtExpired(active.jwt)) return null
-  if (!isSessionGuardedPath(location.pathname)) return null
+  const candidateJwt =
+    !loading && active && isJwtExpired(active.jwt) && isSessionGuardedPath(location.pathname)
+      ? active.jwt
+      : null
 
-  const next = encodeURIComponent(location.pathname + location.search)
-  return <Navigate to={`/login?next=${next}`} replace />
+  if (!candidateJwt) return null
+  return (
+    <ConfirmedExpiredRedirect
+      jwt={candidateJwt}
+      next={location.pathname + location.search}
+    />
+  )
+}
+
+function ConfirmedExpiredRedirect({ jwt, next }: { jwt: string; next: string }) {
+  const [confirmed, setConfirmed] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    void loadActiveSession().then((stored) => {
+      if (!cancelled && stored?.jwt === jwt && isJwtExpired(stored.jwt)) {
+        setConfirmed(true)
+      }
+    }).catch(() => {
+      if (!cancelled) setConfirmed(true)
+    })
+    return () => { cancelled = true }
+  }, [jwt])
+
+  if (!confirmed) return null
+  // A locally expired JWT does not need an explicit reauth override: Login
+  // already shows the form for it. Omitting the flag lets a token refreshed by
+  // another tab between confirmation and navigation recover automatically.
+  return <Navigate to={loginPath({ next })} replace />
 }

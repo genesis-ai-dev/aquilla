@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { getAdminMe } from "@/lib/frontier/admin"
+import { UserError } from "@/lib/errors/user-error"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 
 /**
  * Resolves whether the current session is a platform operator (site-wide
@@ -18,6 +20,9 @@ export function usePlatformAdmin(): { isAdmin: boolean; loading: boolean } {
   const [isAdmin, setIsAdmin] = useState(false)
   const [loading, setLoading] = useState(true)
   const aliveRef = useRef(true)
+  const requestRef = useRef(0)
+  const jwtRef = useRef(jwt)
+  jwtRef.current = jwt
 
   useEffect(() => {
     aliveRef.current = true
@@ -27,25 +32,29 @@ export function usePlatformAdmin(): { isAdmin: boolean; loading: boolean } {
   }, [])
 
   const refresh = useCallback(async () => {
+    const request = ++requestRef.current
     if (!jwt) {
       // No JWT yet. If the session is still hydrating, stay in the loading
       // state — concluding "not admin" here would let route guards redirect a
       // real admin before their session loads. Only settle to false once the
       // session has resolved and there is genuinely no logged-in user.
-      if (aliveRef.current) {
+      if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt) {
         setIsAdmin(false)
         setLoading(sessionLoading)
       }
       return
     }
-    if (aliveRef.current) setLoading(true)
+    if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt) setLoading(true)
     try {
       const ok = await getAdminMe(jwt)
-      if (aliveRef.current) setIsAdmin(ok)
-    } catch {
-      if (aliveRef.current) setIsAdmin(false)
+      if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt) setIsAdmin(ok)
+    } catch (err) {
+      if (err instanceof UserError && err.category === "session-expired") {
+        void notifySessionExpiredIfCurrent(jwt)
+      }
+      if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt) setIsAdmin(false)
     } finally {
-      if (aliveRef.current) setLoading(false)
+      if (aliveRef.current && requestRef.current === request && jwtRef.current === jwt) setLoading(false)
     }
   }, [jwt, sessionLoading])
 

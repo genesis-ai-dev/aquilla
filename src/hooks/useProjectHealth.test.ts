@@ -32,10 +32,10 @@ vi.mock("@/lib/sync/sync-token", () => ({
   makeSyncTokenFetcher: (...args: any[]) => (makeSyncTokenFetcherMock as (...a: unknown[]) => typeof mockFetcher)(...args),
 }))
 
+let currentSession = { jwt: "raw-auth-jwt", username: "alice" }
+
 vi.mock("./useFrontierSession", () => ({
-  useFrontierSession: vi.fn(() => ({
-    session: { jwt: "raw-auth-jwt", username: "alice" },
-  })),
+  useFrontierSession: vi.fn(() => ({ session: currentSession })),
 }))
 
 // --- import after mocks ---
@@ -43,6 +43,7 @@ import { useProjectHealth } from "./useProjectHealth"
 
 describe("useProjectHealth (AQU-190)", () => {
   beforeEach(() => {
+    currentSession = { jwt: "raw-auth-jwt", username: "alice" }
     capturedGetToken = undefined
     makeSyncTokenFetcherMock.mockClear()
     mockFetcher.mockClear()
@@ -102,5 +103,24 @@ describe("useProjectHealth (AQU-190)", () => {
 
     // Still only one fetcher built — cache hit.
     expect(makeSyncTokenFetcherMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not reuse a cached JWT accessor after the active account changes", async () => {
+    const { rerender } = renderHook(() => useProjectHealth("proj-account-boundary"))
+    await waitFor(() => expect(makeSyncTokenFetcherMock).toHaveBeenCalledTimes(1))
+
+    const calls = makeSyncTokenFetcherMock.mock.calls as unknown as Array<
+      [() => string | null, string, string]
+    >
+    const aliceGetJwt = calls[0][0]
+    expect(aliceGetJwt()).toBe("raw-auth-jwt")
+
+    currentSession = { jwt: "bob-auth-jwt", username: "bob" }
+    rerender()
+
+    await waitFor(() => expect(makeSyncTokenFetcherMock).toHaveBeenCalledTimes(2))
+    const bobGetJwt = calls[1][0]
+    expect(bobGetJwt()).toBe("bob-auth-jwt")
+    expect(aliceGetJwt()).toBeNull()
   })
 })

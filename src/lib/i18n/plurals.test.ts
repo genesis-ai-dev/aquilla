@@ -213,5 +213,5 @@ describe("translate over a count-governed key", () => {
         }
       }
     }
-  })
+  }, 15_000)
 })

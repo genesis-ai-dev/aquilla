@@ -51,6 +51,9 @@ vi.mock("@/lib/analytics-consent", () => ({
 vi.mock("@/context/OrgContext", () => ({
   useActiveOrg: () => ({ orgs: [], refresh: vi.fn().mockResolvedValue([]), setActiveOrg: vi.fn() }),
 }))
+vi.mock("@/hooks/useFrontierSession", () => ({
+  useFrontierSession: () => ({ session: null }),
+}))
 vi.mock("react-router-dom", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react-router-dom")>()),
   useNavigate: () => vi.fn(),

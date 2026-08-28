@@ -202,6 +202,8 @@ import { OfflineBanner } from "./OfflineBanner"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell } from "./AppShell"
+import { SignedOutWorkspace } from "./org/SignedOutWorkspace"
+import { OrgBreadcrumb } from "./org/OrgBreadcrumb"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
@@ -8375,18 +8377,9 @@ export function ProjectWorkspace() {
   if (status === "loading") return <WorkspaceSkeleton />
   if (status === "no-session") {
     return (
-      <div className="p-8 text-muted-foreground">
-        <RichMessage
-          k="workspace.status.notOnDevice"
-          values={{
-            signIn: (
-              <button className="underline" onClick={goToProjects}>
-                {t("auth.login.submitDefault")}
-              </button>
-            ),
-          }}
-        />
-      </div>
+      <SignedOutWorkspace
+        header={<OrgBreadcrumb section={project?.name ?? t("common.project")} orgId={project?.orgId} />}
+      />
     )
   }
   // RES-5: distinguish server-unreachable from a genuinely missing project.

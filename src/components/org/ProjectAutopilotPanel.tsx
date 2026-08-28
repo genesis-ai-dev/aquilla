@@ -5,7 +5,7 @@ import {
   CircleCheck,
   CirclePause,
   LoaderCircle,
-  Play,
+  PencilSparkles,
   Sparkles,
   Square,
 } from "lucide-react"
@@ -376,7 +376,7 @@ export function ProjectAutopilotPanel({ projectId, fileNames, canStart }: Projec
           {showStart && (
             <CardAction>
               <Button type="button" size="sm" variant={state === "not-started" ? "default" : "outline"} disabled={starting} onClick={() => void handleStart()}>
-                {starting ? <LoaderCircle data-icon="inline-start" className="animate-spin motion-reduce:animate-none" aria-hidden /> : <Play data-icon="inline-start" aria-hidden />}
+                {starting ? <LoaderCircle data-icon="inline-start" className="animate-spin motion-reduce:animate-none" aria-hidden /> : <PencilSparkles data-icon="inline-start" aria-hidden />}
                 {t("autopilot.action.run")}
               </Button>
             </CardAction>

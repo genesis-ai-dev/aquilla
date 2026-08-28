@@ -135,6 +135,34 @@ export async function seedProjectWithFile(
   return { projectId, projectName, fileId, fileName, cellIds: strings.map((s) => s.id) }
 }
 
+/** The projected-row fields specs assert on; the route returns more. */
+export interface ProjectedCellRow {
+  cellId: string
+  side: "source" | "target"
+  value: string
+  validated: boolean
+  aiDrafted: boolean
+}
+
+/** Read a seeded file's cell rows straight from the sync-worker projection —
+ * the authoritative post-event state, not the DOM. Use this for provenance
+ * flags with no visible chrome (AQU-1041 removed the AI-draft tag from the
+ * cell header, but `aiDrafted` still crosses commit → projection → reads). */
+export async function readProjectedCells(
+  jwt: string,
+  seeded: Pick<SeededProject, "projectId" | "fileId">,
+  side?: "source" | "target",
+): Promise<ProjectedCellRow[]> {
+  const token = await mintSyncToken(jwt, seeded.projectId, seeded.fileId)
+  const url = new URL(
+    `${SYNC_BASE}/api/v1/projects/${seeded.projectId}/files/${seeded.fileId}/cells`,
+  )
+  if (side) url.searchParams.set("side", side)
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (!r.ok) throw new Error(`cells read failed: HTTP ${r.status} — ${await r.text()}`)
+  return ((await r.json()) as { cells: ProjectedCellRow[] }).cells
+}
+
 /** Navigate an authed page straight into the seeded file's editor and wait
  * for cells to render. Replaces createProject + openProject + importFile +
  * openFileBySubstring + waitForEditor. */

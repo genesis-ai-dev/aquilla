@@ -164,7 +164,6 @@ export const agent = defineNamespace({
     // ── Team threads view (TeamThreadsView) ──────────────────────────────
     "agent.team.tab": "Team",
     "agent.team.rosterTitle": "Your translation team",
-    "agent.team.threadsTitle": "Threads",
     "agent.team.needsYou": "Needs your expertise",
     "agent.team.loading": "Loading the team's activity…",
     "agent.team.loadFailed": "Couldn't load the team's activity.",
@@ -176,6 +175,17 @@ export const agent = defineNamespace({
     "agent.team.threadEmpty": "No detailed activity was recorded for this run.",
     "agent.team.reviewDrafts": "Review drafts",
     "agent.team.unnamedThread": "Autopilot run",
+    // v2.1 typical-chat layout: conversations list + active conversation.
+    "agent.team.teamChat": "Team chat",
+    "agent.team.teamChatPreviewEmpty": "Message the team to get started.",
+    "agent.team.viewUpdates": "View updates",
+    "agent.team.answerQuestion": "Answer",
+    "agent.team.draftsReady": plural({
+      one: "{count} draft ready for your review",
+      other: "{count} drafts ready for your review",
+    }),
+    "agent.team.hideList": "Hide the conversation list",
+    "agent.team.showList": "Show the conversation list",
     "agent.team.spanFallback": "this passage",
     "agent.team.msg.started": "Starting on {span}.",
     "agent.team.msg.reading": "Reading the situation around {span}.",
@@ -199,8 +209,6 @@ export const agent = defineNamespace({
     "agent.team.msg.dispatch": "Started work on {file}.",
     "agent.team.openThreadAriaLabel": "Open the thread for {title}",
     "agent.team.openQuestionAriaLabel": "Open this question",
-    "agent.team.closeThread": "Back to the channel",
-    "agent.team.spineAriaLabel": "Back to the channel",
     "agent.team.composer.channelPlaceholder": "Message the team…",
     "agent.team.composer.threadPlaceholder": "Message {persona}…",
     "agent.team.composer.finishedPlaceholder":
@@ -882,6 +890,12 @@ export const agent = defineNamespace({
           ref: "The row's canonical reference, a truncated cell id, or the literal fallback word 'cell' when neither is known — not translated.",
         },
       },
+      "agent.team.draftsReady": {
+        description:
+          "One-line preview on a run's row in the conversations list when staged " +
+          "drafts await the human — the row's badge shows the same count.",
+        placeholders: { count: "How many staged drafts await review." },
+      },
       "agent.team.msg.started": {
         description:
           "Team-thread message from the Coordinator persona when Autopilot picks " +
@@ -979,16 +993,6 @@ export const agent = defineNamespace({
         description:
           "Accessible name for a channel message that opens the thread where the " +
           "team's open question is answered.",
-      },
-      "agent.team.spineAriaLabel": {
-        description:
-          "Accessible name for the collapsed channel column shown beside an open " +
-          "thread; activating it restores the full-width channel.",
-      },
-      "agent.team.closeThread": {
-        description:
-          "Accessible name for the back control in a thread header, which closes " +
-          "the thread and restores the full-width channel.",
       },
       "agent.team.composer.threadPlaceholder": {
         description:

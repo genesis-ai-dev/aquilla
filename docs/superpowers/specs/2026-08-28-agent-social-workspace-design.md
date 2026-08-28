@@ -105,6 +105,21 @@ Drafter" path. Personas stay an open registry keyed to core workflow functions
 write autopilot + chat runs into it, DO broadcast — multiplayer lands here.
 (3) Thread-scoped composer wired to steering. (4) Agent cards.
 
+## v2.1 — the typical-chat refinement (2026-08-28 notes, shipped)
+
+Ryder's follow-up notes (ChatGPT/Perplexity/Signal references) pulled the
+layout onto the standard pattern: the app dock is the slim icon rail; inside
+the Team tab, a conversations LIST (Team chat pinned first, one consolidated
+"Needs your expertise" conversation, runs newest-first — each row a
+medium-weight name, one-line preview, quiet time, and the single primary
+accent reserved for counts needing the human) sits beside the ACTIVE
+conversation. The v2 collapse-spine was replaced by this persistent list;
+dispatch messages in Team chat carry a quiet inline "View updates" affordance
+(the replies-badge pattern) instead of being the only entry point; focus mode
+hides the list for a centered wide canvas. Monochrome discipline throughout:
+identity lives in the tinted avatars, names are plain foreground at medium
+weight, activity chips flattened from boxes to quiet rows.
+
 ## Testing
 
 Vitest: personas mapping totality (every region/tool kind attributes — the social

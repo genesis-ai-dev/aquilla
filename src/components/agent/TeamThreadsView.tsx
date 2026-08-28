@@ -1,25 +1,28 @@
 /**
  * TeamThreadsView.tsx — the workbench's Team tab.
  *
- * v2, the one-channel model (2026-08-28 social-workspace design): the team is
- * ONE project channel, not a thread list. The Coordinator speaks at top level
- * — a dispatch message per autopilot run, a question message per decision it
- * can't settle alone — and the live chat session continues underneath, in the
- * same shared session store the Chat tab drives. Every one of those messages
- * owns a thread; opening one gives the thread the width and collapses the
- * channel to a narrow spine of avatars in the same order, so the user keeps
- * their place in time. One composer sits at the bottom throughout: in the
- * channel it addresses the orchestrator, in a run thread it addresses that
- * subagent (steering), and in a question thread it stands down because the
- * DecisionCard carries its own Answer input.
+ * v2.1, the typical-chat layout (2026-08-28 notes): a conversations LIST
+ * beside one ACTIVE conversation, progressive disclosure instead of panels.
+ * The app's dock is the slim icon rail; inside the tab, the middle column
+ * lists conversations (bold name, one-line preview, quiet time, one accent
+ * badge for counts that need the human) and the right column hosts the
+ * active conversation. "Team chat" — the orchestrator — is pinned first and
+ * selected by default; every autopilot run is its own conversation; open
+ * questions consolidate into a single "needs your expertise" conversation.
+ * Focus mode hides the list, leaving the conversation centered on a wide
+ * canvas. One composer sits at the bottom: in Team chat it addresses the
+ * orchestrator, in a run conversation it addresses that subagent (steering,
+ * with a scope chip), and in the questions conversation it stands down
+ * because DecisionCard carries its own Answer input.
  *
  * Read-only over the same transport the activity inspector uses, polled every
  * 4s while the document is visible.
  */
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
-import { AlertTriangle } from "lucide-react"
+import { AlertTriangle, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useI18n, type TFunction } from "@/lib/i18n/I18nProvider"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
@@ -27,14 +30,19 @@ import { AGENT_PERSONA_IDS, AGENT_PERSONAS, personaForRegion } from "@/lib/agent
 import { buildRunFeed } from "@/lib/agent/social-feed"
 import { composeAgentSend } from "@/lib/agent/compose-send"
 import { useAgentSession } from "@/lib/agent/session-store"
+import type { AgentRunUi } from "@/lib/agent/run-state"
 import type { ContextChip } from "@/lib/agent/context-chip"
 import {
+  QUESTIONS_CONVERSATION,
+  TEAM_CHAT_CONVERSATION,
   buildTeamChannel,
   isSteerableStatus,
   personaForRun,
+  runThreadId,
   type TeamDispatchItem,
 } from "@/lib/agent/team-channel"
 import { normalizePhase } from "@/lib/contextual/process-graph"
+import { DecisionCard } from "@/components/contextual/DecisionCard"
 import {
   fetchContextualDecisions,
   fetchContextualRunActivity,
@@ -47,9 +55,9 @@ import { humanPassageLabel } from "../../../shared/span-label"
 import { AgentCardTrigger } from "./AgentCard"
 import { TeamChannel } from "./TeamChannel"
 import { TeamChannelComposer } from "./TeamChannelComposer"
-import { TeamChannelSpine } from "./TeamChannelSpine"
+import { TeamConversationList, type TeamConversationRow } from "./TeamConversationList"
 import { TeamThreadDetail } from "./TeamThreadDetail"
-import { isRunWorking } from "./team-run-status"
+import { isRunWorking, runStatusKey } from "./team-run-status"
 
 const POLL_MS = 4_000
 const RUN_PAGE_LIMIT = 12
@@ -68,6 +76,17 @@ export interface TeamThreadsViewProps {
   author?: string
 }
 
+/** The latest line of the shared chat session, for the Team chat list row. */
+function teamChatPreview(runs: readonly AgentRunUi[], t: TFunction): string {
+  const last = runs.at(-1)
+  if (!last) return t("agent.team.teamChatPreviewEmpty")
+  for (let i = last.items.length - 1; i >= 0; i--) {
+    const item = last.items[i]
+    if (item.kind === "text" && item.text.trim()) return item.text.trim()
+  }
+  return last.prompt
+}
+
 function TeamRoster({
   activePersonas,
   projectId,
@@ -78,8 +97,8 @@ function TeamRoster({
   t: TFunction
 }) {
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
-      <span className="text-[11px] font-semibold text-foreground/90">
+    <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-1.5">
+      <span className="text-[11px] font-medium text-foreground/90">
         {t("agent.team.rosterTitle")}
       </span>
       <ul className="flex items-center gap-1.5" data-testid="team-roster">
@@ -143,7 +162,8 @@ export function TeamThreadsView({ projectId, fileNames, jwt, author }: TeamThrea
 
   const [runs, setRuns] = useState<ContextualRunRecord[] | null>(null)
   const [decisions, setDecisions] = useState<ContextualDecisionsPage | null>(null)
-  const [openThreadId, setOpenThreadId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string>(TEAM_CHAT_CONVERSATION)
+  const [focusMode, setFocusMode] = useState(false)
   const [activity, setActivity] = useState<ContextualRunActivity | null>(null)
   const [activityLoading, setActivityLoading] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
@@ -156,7 +176,7 @@ export function TeamThreadsView({ projectId, fileNames, jwt, author }: TeamThrea
     return { runsPage, decisionsPage }
   }, [projectId])
 
-  // Channel data: initial load and a visibility-aware poll. The disposal
+  // Conversation data: initial load and a visibility-aware poll. The disposal
   // guard drops late responses after a project switch (repo read-hook idiom).
   useEffect(() => {
     let disposed = false
@@ -188,21 +208,21 @@ export function TeamThreadsView({ projectId, fileNames, jwt, author }: TeamThrea
     () => buildTeamChannel(runs ?? [], openDecisions),
     [runs, openDecisions],
   )
-  const openItem = useMemo(
-    () => channelItems.find((item) => item.threadId === openThreadId) ?? null,
-    [channelItems, openThreadId],
+
+  const openRun = useMemo(
+    () => (runs ?? []).find((run) => runThreadId(run.runId) === selectedId) ?? null,
+    [runs, selectedId],
   )
 
-  // A thread whose parent message left the channel (answered question, run
-  // paged out) has nothing left to show — fall back to the full channel
-  // rather than stranding the user on an empty pane.
+  // A conversation that left the list (answered questions, run paged out)
+  // has nothing to show — fall back to Team chat rather than a blank pane.
   useEffect(() => {
-    if (openThreadId !== null && channelItems.length > 0 && openItem === null) {
-      setOpenThreadId(null)
-    }
-  }, [openThreadId, openItem, channelItems.length])
-
-  const openRun = openItem?.kind === "dispatch" ? openItem.run : null
+    if (selectedId === TEAM_CHAT_CONVERSATION) return
+    if (selectedId === QUESTIONS_CONVERSATION && openCount > 0) return
+    if (openRun !== null) return
+    if (runs === null || decisions === null) return
+    setSelectedId(TEAM_CHAT_CONVERSATION)
+  }, [selectedId, openRun, openCount, runs, decisions])
 
   // The open run's activity, polled on the same cadence.
   useEffect(() => {
@@ -217,8 +237,8 @@ export function TeamThreadsView({ projectId, fileNames, jwt, author }: TeamThrea
         const result = await fetchContextualRunActivity(projectId, openRun.runId)
         if (!disposed) setActivity(result)
       } catch {
-        // The channel already reported reachability; a transient activity
-        // failure keeps the previous feed rather than blanking the thread.
+        // The list already reported reachability; a transient activity
+        // failure keeps the previous feed rather than blanking the pane.
       } finally {
         if (!disposed) setActivityLoading(false)
       }
@@ -234,15 +254,15 @@ export function TeamThreadsView({ projectId, fileNames, jwt, author }: TeamThrea
     }
   }, [projectId, openRun])
 
-  // Esc closes the thread — the keyboard twin of clicking the spine.
+  // Esc returns to Team chat — the keyboard way home.
   useEffect(() => {
-    if (openThreadId === null) return
+    if (selectedId === TEAM_CHAT_CONVERSATION) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpenThreadId(null)
+      if (event.key === "Escape") setSelectedId(TEAM_CHAT_CONVERSATION)
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [openThreadId])
+  }, [selectedId])
 
   const feed = useMemo(() => (activity ? buildRunFeed(activity) : []), [activity])
 
@@ -266,6 +286,51 @@ export function TeamThreadsView({ projectId, fileNames, jwt, author }: TeamThrea
     [runTitle],
   )
 
+  // The conversations list: Team chat pinned first, then questions while any
+  // are open, then runs newest-first (typical chat-list ordering).
+  const listRows = useMemo<TeamConversationRow[]>(() => {
+    const rows: TeamConversationRow[] = [
+      {
+        id: TEAM_CHAT_CONVERSATION,
+        title: t("agent.team.teamChat"),
+        preview: teamChatPreview(state.runs, t),
+        at: null,
+        badge: 0,
+        live: state.isStreaming,
+      },
+    ]
+    if (openCount > 0) {
+      rows.push({
+        id: QUESTIONS_CONVERSATION,
+        title: t("agent.team.needsYou"),
+        preview: openDecisions[0]?.reason ?? "",
+        at: null,
+        badge: openCount,
+        live: false,
+      })
+    }
+    const byNewest = [...(runs ?? [])].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    for (const run of byNewest) {
+      const drafts = run.proposedDrafts ?? 0
+      const span = humanPassageLabel(run.spanLabel)
+      const status = t(runStatusKey(run))
+      rows.push({
+        id: runThreadId(run.runId),
+        title: runTitle(run),
+        preview:
+          drafts > 0
+            ? t("agent.team.draftsReady", { count: drafts })
+            : span
+              ? `${status} — ${span}`
+              : status,
+        at: run.updatedAt,
+        badge: drafts,
+        live: isRunWorking(run),
+      })
+    }
+    return rows
+  }, [state.runs, state.isStreaming, openCount, openDecisions, runs, runTitle, t])
+
   const sendToChannel = useCallback(
     (text: string, chips: ContextChip[]) => {
       const options = composeAgentSend({ text, chips, jwt: sessionJwt, projectId })
@@ -286,13 +351,12 @@ export function TeamThreadsView({ projectId, fileNames, jwt, author }: TeamThrea
 
   const loading = runs === null && !loadFailed
   const isEmpty = channelItems.length === 0 && state.runs.length === 0
-  // A question thread hides the composer: DecisionCard owns its own Answer
-  // input, and a second box would be two ways to say one thing.
-  const showComposer = openItem?.kind !== "question"
+  // The questions conversation hides the composer: DecisionCard owns its own
+  // Answer input, and a second box would be two ways to say one thing.
+  const showComposer = selectedId !== QUESTIONS_CONVERSATION
 
-  let body: ReactNode
   if (loadFailed && runs === null) {
-    body = (
+    return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
         <AlertTriangle className="h-4 w-4 text-destructive" aria-hidden />
         <p className="text-xs text-muted-foreground">{t("agent.team.loadFailed")}</p>
@@ -315,47 +379,84 @@ export function TeamThreadsView({ projectId, fileNames, jwt, author }: TeamThrea
         </Button>
       </div>
     )
-  } else if (loading) {
-    body = (
+  }
+
+  if (loading) {
+    return (
       <div className="flex min-h-0 flex-1 flex-col gap-2 p-4" aria-label={t("agent.team.loading")}>
         <Skeleton className="h-4 w-48" />
         <Skeleton className="h-4 w-64" />
         <Skeleton className="h-4 w-56" />
       </div>
     )
-  } else if (isEmpty) {
-    body = <TeamEmptyState projectId={projectId} t={t} />
-  } else if (openItem) {
-    body = (
-      <>
-        <TeamChannelSpine
-          items={channelItems}
-          openThreadId={openItem.threadId}
-          onRestore={() => setOpenThreadId(null)}
-        />
-        <TeamThreadDetail
-          item={openItem}
-          projectId={projectId}
-          title={
-            openItem.kind === "dispatch"
-              ? runTitle(openItem.run)
-              : t("agent.team.needsYou")
-          }
-          feed={feed}
-          feedLoading={activityLoading}
-          onClose={() => setOpenThreadId(null)}
-          onDecisionResolved={() => {
-            void fetchContextualDecisions(projectId).then(setDecisions).catch(() => {})
-          }}
-        />
-      </>
+  }
+
+  if (isEmpty) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <TeamRoster activePersonas={activePersonas} projectId={projectId} t={t} />
+        <TeamEmptyState projectId={projectId} t={t} />
+        {showComposer && (
+          <TeamChannelComposer
+            thread={null}
+            isConfigured={Boolean(sessionJwt)}
+            isStreaming={state.isStreaming}
+            onStop={stop}
+            onSendToChannel={sendToChannel}
+          />
+        )}
+      </div>
+    )
+  }
+
+  const conversationTitle =
+    selectedId === TEAM_CHAT_CONVERSATION
+      ? t("agent.team.teamChat")
+      : selectedId === QUESTIONS_CONVERSATION
+        ? t("agent.team.needsYou")
+        : openRun
+          ? runTitle(openRun)
+          : ""
+
+  let conversation: ReactNode
+  if (selectedId === QUESTIONS_CONVERSATION) {
+    conversation = (
+      <ScrollArea className="min-h-0 flex-1" data-testid="team-questions">
+        <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 p-4">
+          {openDecisions.map((decision) => (
+            <DecisionCard
+              key={decision.id}
+              decision={decision}
+              projectId={projectId}
+              onResolved={() => {
+                void fetchContextualDecisions(projectId).then(setDecisions).catch(() => {})
+              }}
+            />
+          ))}
+          {openCount > openDecisions.length && (
+            <p className="text-xs text-muted-foreground">
+              {t("autopilot.decisions.held", { count: openCount - openDecisions.length })}
+            </p>
+          )}
+        </div>
+      </ScrollArea>
+    )
+  } else if (openRun) {
+    conversation = (
+      <TeamThreadDetail
+        run={openRun}
+        projectId={projectId}
+        feed={feed}
+        feedLoading={activityLoading}
+      />
     )
   } else {
-    body = (
+    conversation = (
       <TeamChannel
         items={channelItems}
         titleFor={titleFor}
-        onOpenThread={setOpenThreadId}
+        onOpenThread={setSelectedId}
+        onOpenQuestions={() => setSelectedId(QUESTIONS_CONVERSATION)}
         heldQuestions={Math.max(0, openCount - openDecisions.length)}
         conversationRuns={state.runs}
       />
@@ -365,16 +466,48 @@ export function TeamThreadsView({ projectId, fileNames, jwt, author }: TeamThrea
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <TeamRoster activePersonas={activePersonas} projectId={projectId} t={t} />
-      <div className="flex min-h-0 flex-1">{body}</div>
-      {showComposer && (
-        <TeamChannelComposer
-          thread={composerThread}
-          isConfigured={Boolean(sessionJwt)}
-          isStreaming={state.isStreaming}
-          onStop={stop}
-          onSendToChannel={sendToChannel}
-        />
-      )}
+      <div className="flex min-h-0 flex-1">
+        {!focusMode && (
+          <TeamConversationList rows={listRows} selectedId={selectedId} onSelect={setSelectedId} />
+        )}
+        <div className="flex min-w-0 flex-1 flex-col">
+          {/* Flat conversation header: focus toggle, name, quiet status. */}
+          <div className="flex shrink-0 items-center gap-1.5 border-b border-border/60 px-2 py-1.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="h-6 w-6 shrink-0 text-muted-foreground"
+              data-testid="team-focus-toggle"
+              onClick={() => setFocusMode((v) => !v)}
+              aria-label={t(focusMode ? "agent.team.showList" : "agent.team.hideList")}
+              aria-pressed={focusMode}
+            >
+              {focusMode ? (
+                <PanelLeftOpen className="h-3.5 w-3.5" />
+              ) : (
+                <PanelLeftClose className="h-3.5 w-3.5" />
+              )}
+            </Button>
+            <span className="min-w-0 truncate text-sm font-medium">{conversationTitle}</span>
+            {openRun && (
+              <span className="shrink-0 text-[11px] text-muted-foreground">
+                {t(runStatusKey(openRun))}
+              </span>
+            )}
+          </div>
+          {conversation}
+          {showComposer && (
+            <TeamChannelComposer
+              thread={composerThread}
+              isConfigured={Boolean(sessionJwt)}
+              isStreaming={state.isStreaming}
+              onStop={stop}
+              onSendToChannel={sendToChannel}
+            />
+          )}
+        </div>
+      </div>
     </div>
   )
 }

@@ -54,6 +54,17 @@ export function decisionThreadId(decisionId: string): string {
   return `decision:${decisionId}`
 }
 
+// ── Conversation selection (v2.1 "typical chat" layout) ─────────────────────
+//
+// The Team tab is a conversations LIST beside one ACTIVE conversation. Two
+// conversations are fixed: the main team chat (the orchestrator) and, while
+// open questions exist, a single "needs your expertise" conversation holding
+// every DecisionCard — one place to answer, not a thread per question. Every
+// autopilot run is its own conversation, addressed by `runThreadId`.
+
+export const TEAM_CHAT_CONVERSATION = "team-chat"
+export const QUESTIONS_CONVERSATION = "questions"
+
 /**
  * Statuses whose thread still accepts a steering message. Parked runs count:
  * waking a parked run on new steering is the server's job, not the client's

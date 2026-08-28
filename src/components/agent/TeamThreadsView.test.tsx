@@ -1,17 +1,20 @@
 /**
- * TeamThreadsView tests — the Team tab is ONE project channel (v2 of the
- * 2026-08-28 social-workspace design), so these assert the presentation
- * contract that makes that legible:
+ * TeamThreadsView tests — the Team tab is a typical chat (v2.1 of the
+ * 2026-08-28 social-workspace design): a conversations list beside one
+ * active conversation. These assert the presentation contract:
  *
- *  - the channel is time-ordered and carries every voice at top level:
- *    Coordinator dispatches, questions addressed to the human, and the live
- *    chat session underneath;
- *  - opening a thread never costs the user their place — main collapses to a
- *    spine of the SAME messages in the SAME order, with the open thread's
- *    parent highlighted, and closing restores the channel;
- *  - the one composer says where it sends. In a thread it wears a scope chip
- *    and its message goes to that RUN as steering, not to the chat; on a
- *    finished run it closes rather than silently swallowing the text.
+ *  - the list reads like a chat app: Team chat pinned first, one consolidated
+ *    questions conversation, runs newest-first, each row a name + one-line
+ *    preview, with the single accent reserved for counts that need the human;
+ *  - Team chat is the default conversation and is time-ordered: Coordinator
+ *    dispatches (with a quiet "view updates" affordance — the replies-badge
+ *    pattern), questions addressed to the human, the live session underneath;
+ *  - selecting a conversation never costs the user their place — the list
+ *    stays put (focus mode hides it deliberately), Team chat and Escape are
+ *    the ways home;
+ *  - the one composer says where it sends. In a run conversation it wears a
+ *    scope chip and its message goes to that RUN as steering, not to the
+ *    chat; on a finished run it closes rather than silently swallowing text.
  *
  * Transport and the shared session store are mocked — this is the
  * presentation contract, not the wire.
@@ -191,7 +194,7 @@ beforeEach(() => {
   sendContextualSteering.mockResolvedValue(undefined)
 })
 
-describe("TeamThreadsView — the project channel", () => {
+describe("TeamThreadsView — the typical-chat layout", () => {
   it("introduces the team when nothing has run yet", async () => {
     fetchContextualRuns.mockResolvedValue(runsPage([]))
     fetchContextualDecisions.mockResolvedValue(decisionsPage())
@@ -203,7 +206,42 @@ describe("TeamThreadsView — the project channel", () => {
     view.unmount()
   })
 
-  it("posts dispatches in time order, questions, and the live conversation in one channel", async () => {
+  it("lists conversations — Team chat pinned first, questions, then runs newest-first", async () => {
+    fetchContextualRuns.mockResolvedValue(
+      runsPage([
+        runRecord({ runId: "run-1", fileId: "file-1", updatedAt: "2026-08-28T11:30:00Z" }),
+        runRecord({
+          runId: "run-2",
+          fileId: "file-2",
+          updatedAt: "2026-08-28T13:30:00Z",
+          proposedDrafts: 0,
+          status: "done",
+          phase: null,
+        }),
+      ]),
+    )
+    fetchContextualDecisions.mockResolvedValue(
+      decisionsPage({ openCount: 1, decisions: [openQuestion] }),
+    )
+    const view = renderView()
+
+    const list = await screen.findByTestId("team-conversation-list")
+    // Pinned Team chat, the consolidated questions row, then runs by recency.
+    const rows = within(list).getAllByRole("button")
+    expect(rows).toHaveLength(4)
+    expect(rows[0]).toHaveTextContent("Team chat")
+    expect(rows[1]).toHaveTextContent("Needs your expertise")
+    expect(rows[2]).toHaveTextContent("Luke")
+    expect(rows[3]).toHaveTextContent("Mark")
+    // The only accent on the list: counts that need the human.
+    expect(within(list).getByText("1")).toBeInTheDocument() // open question
+    expect(within(list).getByText("3")).toBeInTheDocument() // staged drafts on Mark
+    // Run rows carry a one-line status preview.
+    expect(within(list).getByText("3 drafts ready for your review")).toBeInTheDocument()
+    view.unmount()
+  })
+
+  it("shows Team chat by default: dispatches in time order, questions, and the conversation", async () => {
     fetchContextualRuns.mockResolvedValue(
       // Newest first on the wire — the channel must read oldest-first.
       runsPage([
@@ -221,8 +259,6 @@ describe("TeamThreadsView — the project channel", () => {
 
     const channel = await screen.findByTestId("team-channel")
     expect(await within(channel).findByText("Started work on Mark.")).toBeInTheDocument()
-    expect(within(channel).getByText("Started work on Luke.")).toBeInTheDocument()
-    // Oldest dispatch first, then the question, then the chat conversation.
     const order = within(channel)
       .getAllByText(/Started work on|Two prior renderings|How is Mark going\?/)
       .map((node) => node.textContent)
@@ -234,12 +270,14 @@ describe("TeamThreadsView — the project channel", () => {
     ])
     // Question messages are addressed to the human, in the Coordinator's voice.
     expect(within(channel).getByText("Needs your expertise")).toBeInTheDocument()
-    // The run's staged-draft count rides its dispatch message.
-    expect(within(channel).getAllByText("3").length).toBeGreaterThan(0)
+    // The replies-badge pattern: a quiet inline affordance under the message.
+    expect(
+      within(channel).getByRole("button", { name: "Open the thread for Mark" }),
+    ).toHaveTextContent("View updates")
     view.unmount()
   })
 
-  it("opens a dispatch thread, collapses the channel to a highlighted spine, and scopes the composer", async () => {
+  it("selects a run conversation from View updates — list stays, composer scopes", async () => {
     fetchContextualRuns.mockResolvedValue(
       runsPage([
         runRecord({ runId: "run-1", fileId: "file-1", createdAt: "2026-08-28T11:00:00Z" }),
@@ -267,19 +305,15 @@ describe("TeamThreadsView — the project channel", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Open the thread for Mark" }))
 
-    // The thread takes the width and shows the subagent's play-by-play.
+    // The conversation pane shows the subagent's play-by-play…
     expect(await screen.findByText("Put 3 drafts out for your review.")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Review drafts" })).toBeInTheDocument()
-    // Main collapsed to the spine: the same two messages, same order, with
-    // the open thread's parent highlighted.
-    expect(screen.queryByTestId("team-channel")).not.toBeInTheDocument()
-    const spine = screen.getByTestId("team-channel-spine")
-    const spineItems = Array.from(spine.querySelectorAll("[data-spine-item]"))
-    expect(spineItems.map((node) => node.getAttribute("data-spine-item"))).toEqual([
-      "run:run-1",
-      "run:run-2",
-    ])
-    expect(spineItems.map((node) => node.getAttribute("data-active"))).toEqual(["true", "false"])
+    // …while the conversations list keeps the user's place (no panel takeover),
+    // with the run's row marked current.
+    const list = screen.getByTestId("team-conversation-list")
+    const current = Array.from(list.querySelectorAll("[aria-current='true']"))
+    expect(current).toHaveLength(1)
+    expect(current[0]).toHaveTextContent("Mark")
     // The composer says exactly who it is talking to.
     const scope = screen.getByTestId("team-composer-scope")
     expect(scope).toHaveTextContent("Drafter · MRK 4:1–4:8")
@@ -323,24 +357,46 @@ describe("TeamThreadsView — the project channel", () => {
     view.unmount()
   })
 
-  it("restores the full channel when the spine is clicked", async () => {
+  it("returns to Team chat from the list row and from Escape", async () => {
     fetchContextualRuns.mockResolvedValue(runsPage([runRecord()]))
     fetchContextualDecisions.mockResolvedValue(decisionsPage())
     const view = renderView()
 
     fireEvent.click(await screen.findByRole("button", { name: "Open the thread for Mark" }))
-    expect(await screen.findByTestId("team-channel-spine")).toBeInTheDocument()
+    expect(await screen.findByTestId("team-thread-detail")).toBeInTheDocument()
 
-    fireEvent.click(screen.getByTestId("team-channel-spine"))
-
+    // The pinned first row is the way home.
+    const list = screen.getByTestId("team-conversation-list")
+    fireEvent.click(within(list).getByText("Team chat"))
     expect(await screen.findByTestId("team-channel")).toBeInTheDocument()
-    expect(screen.queryByTestId("team-channel-spine")).not.toBeInTheDocument()
     // Back on the channel, the composer addresses the team, not a subagent.
     expect(screen.queryByTestId("team-composer-scope")).not.toBeInTheDocument()
     expect(screen.getByLabelText("Ask the agent")).toHaveAttribute(
       "placeholder",
       "Message the team…",
     )
+
+    // Escape is the keyboard twin.
+    fireEvent.click(within(list).getByText("Mark"))
+    expect(await screen.findByTestId("team-thread-detail")).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: "Escape" })
+    expect(await screen.findByTestId("team-channel")).toBeInTheDocument()
+    view.unmount()
+  })
+
+  it("focus mode hides the conversations list and brings it back", async () => {
+    fetchContextualRuns.mockResolvedValue(runsPage([runRecord()]))
+    fetchContextualDecisions.mockResolvedValue(decisionsPage())
+    const view = renderView()
+    await screen.findByTestId("team-channel")
+
+    expect(screen.getByTestId("team-conversation-list")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("team-focus-toggle"))
+    expect(screen.queryByTestId("team-conversation-list")).not.toBeInTheDocument()
+    // The conversation itself stays put on the wide canvas.
+    expect(screen.getByTestId("team-channel")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("team-focus-toggle"))
+    expect(screen.getByTestId("team-conversation-list")).toBeInTheDocument()
     view.unmount()
   })
 
@@ -365,16 +421,18 @@ describe("TeamThreadsView — the project channel", () => {
     view.unmount()
   })
 
-  it("opens a question thread on its decision card, with no second message box", async () => {
+  it("consolidates open questions into one conversation, with no second message box", async () => {
     fetchContextualRuns.mockResolvedValue(runsPage([]))
     fetchContextualDecisions.mockResolvedValue(
       decisionsPage({ openCount: 1, decisions: [openQuestion] }),
     )
     const view = renderView()
 
+    // Reachable from the inline Answer affordance in Team chat…
     fireEvent.click(await screen.findByRole("button", { name: "Open this question" }))
 
-    expect(await screen.findByTestId("contextual-decision-card")).toBeInTheDocument()
+    expect(await screen.findByTestId("team-questions")).toBeInTheDocument()
+    expect(screen.getByTestId("contextual-decision-card")).toBeInTheDocument()
     // DecisionCard owns its own Answer input — the channel composer stands down.
     expect(screen.queryByLabelText("Ask the agent")).not.toBeInTheDocument()
     view.unmount()

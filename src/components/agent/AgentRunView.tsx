@@ -56,13 +56,15 @@ function ToolChip({ item }: { item: ToolItem }) {
   // Other kinds carry human summaries (ref ranges, topics, "N events").
   const detail = item.tool === "sql" ? null : item.summary
   const expandable = item.resultSummary !== undefined || item.tool === "sql"
+  // Flat by design (v2.1 typical-chat notes): no box around activity — just a
+  // quiet row that tints on hover, with the raw detail one expand away.
   return (
-    <div className="rounded-md border bg-muted/30">
+    <div>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
-        className="flex w-full items-center gap-1.5 px-2 py-1 text-start text-[11px]"
+        className="flex w-full items-center gap-1.5 rounded-md px-2 py-1 text-start text-[11px] transition-colors hover:bg-accent/40"
       >
         <ChevronRight
           className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
@@ -73,13 +75,13 @@ function ToolChip({ item }: { item: ToolItem }) {
         {item.ok === undefined ? (
           <Spinner className="size-3 shrink-0 text-muted-foreground" aria-label={t("agent.run.stepRunning")} />
         ) : item.ok ? (
-          <Check className="h-3 w-3 shrink-0 text-emerald-600" aria-label={t("agent.run.stepSucceeded")} />
+          <Check className="h-3 w-3 shrink-0 text-muted-foreground" aria-label={t("agent.run.stepSucceeded")} />
         ) : (
           <X className="h-3 w-3 shrink-0 text-destructive" aria-label={t("agent.run.stepFailed")} />
         )}
       </button>
       {open && expandable && (
-        <pre className="overflow-x-auto border-t px-2 py-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
+        <pre className="ms-7 mt-0.5 overflow-x-auto rounded-md bg-muted/40 px-2 py-1.5 font-mono text-[10px] leading-relaxed text-muted-foreground">
           {item.tool === "sql" && item.summary ? `${item.summary}\n` : ""}
           {item.resultSummary ?? ""}
         </pre>
@@ -143,7 +145,9 @@ export function AgentRunView({
                   {showHeader && (
                     <div className="mb-0.5 flex items-center gap-1.5">
                       <PersonaAvatar personaId="coordinator" size="sm" />
-                      <span className={cn("text-[11px] font-medium", AGENT_PERSONAS.coordinator.textClass)}>
+                      {/* Monochrome by design: identity lives in the avatar,
+                          the name carries hierarchy through weight alone. */}
+                      <span className="text-[11px] font-medium text-foreground">
                         {t(AGENT_PERSONAS.coordinator.nameKey)}
                       </span>
                     </div>

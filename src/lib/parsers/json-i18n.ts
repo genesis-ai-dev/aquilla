@@ -24,6 +24,14 @@ function joinPath(parent: string, key: string): string {
   return `${parent}[${JSON.stringify(key)}]`
 }
 
+// [Pen test] Input validation & injection (2026-08-26): this walk previously
+// had no depth limit, so a crafted JSON file with deeply nested arrays/objects
+// (e.g. `[[[[...]]]]` thousands of levels deep) would recurse until the stack
+// overflowed. Reachable both from the client-side Import dialog and from the
+// server-side Agent API's parse endpoint. Bound it well past any real i18n
+// resource file's nesting so legitimate documents are unaffected.
+const MAX_WALK_DEPTH = 500
+
 /**
  * Depth-first walk over a parsed JSON value. Calls `visit` for every
  * NON-EMPTY leaf string; a string return value replaces the leaf in place,
@@ -34,6 +42,7 @@ function walkStringLeaves(
   node: unknown,
   path: string,
   visit: (path: string, value: string) => string | undefined,
+  depth = 0,
 ): unknown {
   if (typeof node === "string") {
     if (node.length === 0) return node
@@ -41,15 +50,21 @@ function walkStringLeaves(
     return replacement === undefined ? node : replacement
   }
   if (Array.isArray(node)) {
+    if (depth >= MAX_WALK_DEPTH) {
+      throw new Error(`JSON document nesting exceeds the maximum supported depth (${MAX_WALK_DEPTH}) at "${path}"`)
+    }
     for (let i = 0; i < node.length; i++) {
-      node[i] = walkStringLeaves(node[i], `${path}[${i}]`, visit)
+      node[i] = walkStringLeaves(node[i], `${path}[${i}]`, visit, depth + 1)
     }
     return node
   }
   if (node !== null && typeof node === "object") {
+    if (depth >= MAX_WALK_DEPTH) {
+      throw new Error(`JSON document nesting exceeds the maximum supported depth (${MAX_WALK_DEPTH}) at "${path}"`)
+    }
     const obj = node as Record<string, unknown>
     for (const key of Object.keys(obj)) {
-      obj[key] = walkStringLeaves(obj[key], joinPath(path, key), visit)
+      obj[key] = walkStringLeaves(obj[key], joinPath(path, key), visit, depth + 1)
     }
     return node
   }

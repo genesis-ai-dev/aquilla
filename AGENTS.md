@@ -149,6 +149,22 @@ Whether an agent may pick an issue up is read straight off the **status** — th
 Category is orthogonal: tag every issue **`Bug`**, **`Feature`**, or **`Improvement`** (the
 `/triage` category role).
 
+**Every new issue is created from one of the Aquilla team's issue templates** — pass
+`template` to `save_issue`: **`Bug Report`** for bugs, **`Feature Request`** for new
+user-facing capabilities, **`Task`** for everything else (chores, improvements, refactors,
+infra). The template applies the matching category label itself (`Task` carries
+`Improvement`), so don't re-pass it. Passing a `description` replaces the template's
+pre-filled body wholesale, so author the body using the template's exact section headings
+with real content — never leave placeholder text, and never invent your own top-level
+structure (extra sections go *after* the template's). ⚠️ All three templates embed status
+`Todo`: always pass `state: Triage` explicitly on create (an explicit `state` overrides the
+template's — verified 2026-08-28) and **check the create response actually says `Triage`**;
+if it came back `Todo`, immediately re-save it. **Agent-created issues are also left
+unassigned** — the team auto-assigns new issues on a rotation, which wins at create time
+even if you pass no assignee; when the create response shows an assignee, immediately
+re-save with `assignee: null` (the response omitting the assignee field confirms it's
+clear).
+
 Status pipeline:
 
 | Status | Meaning | Who/when |

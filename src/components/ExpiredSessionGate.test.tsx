@@ -13,6 +13,9 @@ let accountsValue: { active: FrontierSession | null; loading: boolean } = {
 vi.mock("@/hooks/useAccounts", () => ({
   useAccounts: () => accountsValue,
 }))
+vi.mock("@/lib/frontier/session-store", () => ({
+  loadActiveSession: () => Promise.resolve(accountsValue.active),
+}))
 
 /** Fake JWT with an `exp` claim `secondsFromNow` out. */
 function fakeJwt(secondsFromNow: number): string {
@@ -47,18 +50,18 @@ beforeEach(() => {
 })
 
 describe("ExpiredSessionGate (AQU-885)", () => {
-  it("sends a boot with an already-expired stored token to sign-in instead of the dashboard", () => {
+  it("sends a boot with an already-expired stored token to sign-in instead of the dashboard", async () => {
     accountsValue = { active: session(fakeJwt(-60)), loading: false }
     renderAt("/orgs/all")
-    expect(screen.getByText(/^login page/)).toBeInTheDocument()
+    expect(await screen.findByText(/^login page/)).toBeInTheDocument()
     expect(screen.queryByText("app shell")).not.toBeInTheDocument()
   })
 
-  it("preserves the originating route as ?next= so re-login lands back there", () => {
+  it("preserves the originating route as ?next= so re-login lands back there", async () => {
     accountsValue = { active: session(fakeJwt(-60)), loading: false }
     renderAt("/orgs/7?tab=projects")
     expect(
-      screen.getByText(`login page?next=${encodeURIComponent("/orgs/7?tab=projects")}`),
+      await screen.findByText(`login page?next=${encodeURIComponent("/orgs/7?tab=projects")}`),
     ).toBeInTheDocument()
   })
 
@@ -100,7 +103,7 @@ describe("ExpiredSessionGate (AQU-885)", () => {
 
 describe("isSessionGuardedPath", () => {
   it("guards the signed-in shell routes", () => {
-    for (const p of ["/", "/app", "/shared", "/orgs", "/orgs/all", "/orgs/7/members", "/projects", "/projects/p1"]) {
+    for (const p of ["/", "/app", "/shared", "/admin", "/orgs", "/orgs/all", "/orgs/7/members", "/projects", "/projects/p1"]) {
       expect(isSessionGuardedPath(p)).toBe(true)
     }
   })
@@ -118,6 +121,8 @@ describe("isSessionGuardedPath", () => {
       "/approve/cs1",
       "/preferences",
       "/project/p1/editor",
+      "/project/p1/settings",
+      "/project/p1/settings/audio",
       "/orgsomething",
     ]) {
       expect(isSessionGuardedPath(p)).toBe(false)

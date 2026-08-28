@@ -18,6 +18,11 @@ import {
   resolveLocalIdmlOriginal,
 } from "./lib/idml-migration-artifacts"
 
+import { installMigrateRunnerHeader } from "./lib/migrate-runner-header"
+
+// AQU-1005: stamp every /migrate/* call with the runner id (fence audit).
+installMigrateRunnerHeader()
+
 interface ReportRow {
   file: string
   fileId?: string

@@ -301,6 +301,27 @@ describe("AgentSessionStore persistence", () => {
     expect(localStoragePersistence("proj-other-test").load()).toBeNull()
   })
 
+  it("localStoragePersistence isolates the same project between accounts", () => {
+    const alice = localStoragePersistence("shared-project", "alice")
+    const bob = localStoragePersistence("shared-project", "bob")
+    const session: PersistedSession = {
+      sessionId: "alice-session",
+      runs: [],
+      decided: [],
+      activity: [],
+    }
+    alice.save(session)
+    expect(bob.load()).toBeNull()
+    expect(alice.load()).toEqual(session)
+  })
+
+  it("does not collide local-only persistence with an account literally named local", () => {
+    const localOnly = localStoragePersistence("local-name-collision", null)
+    const namedLocal = localStoragePersistence("local-name-collision", "local")
+    localOnly.save({ sessionId: "local-only", runs: [], decided: [], activity: [] })
+    expect(namedLocal.load()).toBeNull()
+  })
+
   it("markMemoryReviewed/markBriefReviewed flip the matching notice across all runs (mem-M5)", async () => {
     const { impl, calls, finish } = deferredRunAgent()
     const store = new AgentSessionStore(impl)

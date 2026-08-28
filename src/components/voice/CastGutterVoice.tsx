@@ -53,7 +53,7 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
       : voice.name
     : t("audio.castGutter.defaultTooltip", { voiceName: voice.name })
   const trigger = (
-    <span className={cn("grid place-items-center rounded-full")}>
+    <span className={cn("grid place-items-center rounded-md")}>
       {/* Nothing is drawn for a line nobody cast — no face, no colour, no
           initial. The empty dashed ring IS the state; a faded orb read as a
           weak assignment rather than as none. */}
@@ -79,7 +79,7 @@ export function CastGutterVoice({ voice, explicit, castName, editable, voices, o
               data-testid="gutter-voice"
               data-explicit={String(explicit)}
               aria-label={t("audio.castGutter.chooseCharacterAriaLabel", { tooltip })}
-              className="rounded-full opacity-90 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1"
+              className="rounded-md opacity-90 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-1"
             />
           }
         >

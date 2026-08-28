@@ -1697,29 +1697,42 @@ export async function tryAcquireContextualProjectLease(
       .first<{ id: string }>()
     if (!project) return null
 
-    await tx
-      .prepare("DELETE FROM contextual_project_leases WHERE project_id = ? AND expires_at <= now()")
-      .bind(input.projectId)
-      .run()
-    const used = await tx
-      .prepare(
-        `SELECT COALESCE(SUM(weight), 0) AS weight
-           FROM contextual_project_leases
-          WHERE project_id = ? AND expires_at > now()`,
-      )
-      .bind(input.projectId)
-      .first<{ weight: number }>()
-    if (Number(used?.weight ?? 0) + weight > limit) return null
-
+    // AQU-1005: GC + capacity check + conditional insert in ONE statement, so
+    // the project row lock above spans a single round trip + commit instead of
+    // three sequential Hyperdrive round trips (the old span queued lease
+    // acquirers for 2.5s mean of pure lock wait). `used` excludes expired rows
+    // by predicate — same-snapshot CTEs don't see gc's deletes and don't need
+    // to; gc (a data-modifying CTE) always executes, even when the insert arm
+    // returns nothing.
     const row = await tx
       .prepare(
-        `INSERT INTO contextual_project_leases
+        `WITH gc AS (
+           DELETE FROM contextual_project_leases
+            WHERE project_id = ? AND expires_at <= now()
+         ), used AS (
+           SELECT COALESCE(SUM(weight), 0) AS weight
+             FROM contextual_project_leases
+            WHERE project_id = ? AND expires_at > now()
+         )
+         INSERT INTO contextual_project_leases
             (id, project_id, run_id, weight, expires_at)
-         VALUES (?, ?, ?, ?, now() + make_interval(secs => ?))
+         SELECT ?, ?, ?, ?, now() + make_interval(secs => ?)
+           FROM used
+          WHERE used.weight + ? <= ?
          ON CONFLICT (run_id) DO NOTHING
          RETURNING id, project_id, run_id, weight, expires_at`,
       )
-      .bind(uuidv7(), input.projectId, input.runId, weight, leaseSeconds)
+      .bind(
+        input.projectId,
+        input.projectId,
+        uuidv7(),
+        input.projectId,
+        input.runId,
+        weight,
+        leaseSeconds,
+        weight,
+        limit,
+      )
       .first<ProjectLeaseRow>()
     return row ? rowToProjectLease(row) : null
   })

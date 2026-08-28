@@ -19,7 +19,7 @@
 // incremental k-NN graph. Auth: sync-token JWT scoped to `projectId`.
 
 import { verifyTokenForProject } from "../auth"
-import { makeVerifiedProjectId, querySourceNeighborsBatch } from "./scoped-search"
+import { makeVerifiedProjectId, queryFileSourceNeighbors } from "./scoped-search"
 import { lexicalConfidence } from "../lib/confidence/lexical-confidence"
 import {
   propagateHealth,
@@ -117,6 +117,10 @@ export async function handleCellConfidenceRequest(
     return new Response("missing fileId", { status: 400 })
   }
 
+  // Optional target-language lane ('' = the single-lane default). Scopes
+  // neighbor retrieval so multi-lane projects don't mix languages (AQU-1005).
+  const lane = url.searchParams.get("lane") ?? ""
+
   // Optional output filter — which cells to return. Absent → return all.
   const qCellIds = url.searchParams.get("cellIds")
   const wantCellIds = qCellIds
@@ -159,14 +163,17 @@ export async function handleCellConfidenceRequest(
   // Edges: for each unvalidated node, its top-k source-similar example cells
   // (validated or not — health flows from any neighbor). r = source similarity
   // (weights the mean), a = target consistency (gates the transfer).
-  // AQU-641: one batched LATERAL query per chunk instead of one FTS query per cell.
+  // AQU-1005: retrieval is file+lane-scoped in ONE statement — the routes only
+  // ever keep same-file neighbors, so the old project-wide LATERAL sweep was
+  // pure wasted compute (minutes per call on large projects).
   const unvalidated = nodes.filter((n) => !n.validated) // validated cells are anchors; no inbound need
-  const neighborMap = await querySourceNeighborsBatch(
-    env.AQUILLA_PG,
-    verifiedProjectId,
-    unvalidated.map((n) => ({ cellId: n.id, text: byId.get(n.id)!.sourceText })),
-    { topK, validatedOnly: false },
-  )
+  const neighborMap =
+    unvalidated.length === 0
+      ? new Map<string, never[]>()
+      : await queryFileSourceNeighbors(env.AQUILLA_PG, verifiedProjectId, fileId, {
+          topK,
+          targetLang: lane,
+        })
   const edges: PropEdges = new Map()
   for (const node of unvalidated) {
     const cell = byId.get(node.id)!

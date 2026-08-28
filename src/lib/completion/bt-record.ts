@@ -10,6 +10,8 @@
  * cannot silently present an old reading as current.
  */
 
+import { ownerScopedLocalStorageKey } from "@/lib/frontier/client-local-storage"
+
 /** Explicit user action that may persist a BT — never implied by a commit. */
 export type BacktranslationActionSource = "read-back" | "refresh" | "regenerate"
 
@@ -118,7 +120,7 @@ export function overlayBacktranslation<T extends {
 }
 
 export function localStorageKey(projectId: string, cellId: string): string {
-  return `${LS_PREFIX}${projectId}:${cellId}`
+  return ownerScopedLocalStorageKey(`${LS_PREFIX}${projectId}:${cellId}`)
 }
 
 export function readLocalBacktranslation(projectId: string, cellId: string): BacktranslationRecord | undefined {

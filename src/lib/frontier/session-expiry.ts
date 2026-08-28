@@ -16,21 +16,38 @@
  * after the re-login, they just carry the old credential.)
  */
 
-import { loadActiveSession } from "./session-store"
+import { getSessionRevision, loadActiveSession } from "./session-store"
 import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
+import type { FrontierSession } from "./types"
 
 /**
  * Raise the session-expired signal iff `failedJwt` is still the active
  * session's JWT. Call from fetch helpers on 401 with the JWT the failing
  * request actually used. Fire-and-forget safe (never rejects).
  */
-export async function notifySessionExpiredIfCurrent(failedJwt: string): Promise<void> {
-  try {
-    const active = await loadActiveSession()
-    if (active?.jwt !== failedJwt) return
-  } catch {
-    // Session store unreadable — staleness can't be proven. Prefer a
-    // possibly-redundant banner over swallowing a genuine expiry.
+export async function notifySessionExpiredIfCurrent(
+  failedJwt: string,
+  readActive: () => Promise<FrontierSession | null> = loadActiveSession,
+): Promise<void> {
+  // A revision can change for harmless metadata writes (for example the
+  // account menu's email backfill), not only for a replacement credential.
+  // Retry a moving read until one snapshot is stable; returning immediately
+  // on the first revision change can otherwise swallow a genuine one-shot 401.
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const revisionBeforeRead = getSessionRevision()
+    try {
+      const active = await readActive()
+      if (getSessionRevision() !== revisionBeforeRead) continue
+      if (active?.jwt !== failedJwt) return
+      notifySessionExpired(failedJwt)
+      return
+    } catch {
+      // Session store unreadable — staleness can't be proven. Prefer a
+      // possibly-redundant banner only when no concurrent session mutation
+      // could have replaced the failed credential.
+      if (getSessionRevision() !== revisionBeforeRead) continue
+      notifySessionExpired(failedJwt)
+      return
+    }
   }
-  notifySessionExpired()
 }

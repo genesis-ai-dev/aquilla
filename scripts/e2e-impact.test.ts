@@ -8,6 +8,7 @@ import {
 
 const specs = [
   "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",
+  "e2e/specs/auth/session-expired-banner.smoke.spec.ts",
   "e2e/specs/collab/concurrent-edit.smoke.spec.ts",
   "e2e/specs/editor/import-and-edit.smoke.spec.ts",
   "e2e/specs/editor/search.smoke.spec.ts",
@@ -35,6 +36,22 @@ describe("changed-file E2E impact selection", () => {
     expect(selectAffectedE2E(["sync-worker/src/events/commit.ts"], specs).specs).toContain(
       "e2e/specs/collab/concurrent-edit.smoke.spec.ts",
     )
+  })
+
+  it("maps auth/session changes to both login and expiry journeys", () => {
+    for (const file of [
+      "src/pages/Login.tsx",
+      "src/components/ExpiredSessionGate.tsx",
+      "src/components/SessionExpiredBanner.tsx",
+      "src/lib/frontier/session-expiry.ts",
+      "src/lib/errors/session-expired-signal.ts",
+      "src/context/OutboxContext.tsx",
+    ]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toEqual([
+        "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",
+        "e2e/specs/auth/session-expired-banner.smoke.spec.ts",
+      ])
+    }
   })
 
   it("maps Knowledge Base clients and routes to the project-settings persistence journey", () => {

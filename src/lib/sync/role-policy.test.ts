@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest"
-import { ROLE, requiredRoleFor, canPerform, canOpenAssignUi, canSubmitAssignment } from "./role-policy"
+import {
+  ROLE,
+  requiredRoleFor,
+  canPerform,
+  canOpenAssignUi,
+  canSubmitAssignment,
+  foreignRoleFor,
+  effectiveCommentRoleFor,
+  canMutateComment,
+} from "./role-policy"
 
 describe("role-policy (client mirror)", () => {
   it("mirrors the server's required roles for the kinds that broke in prod", () => {
@@ -14,6 +23,70 @@ describe("role-policy (client mirror)", () => {
 
   it("returns null for unknown kinds (fail-open, server stays authoritative)", () => {
     expect(requiredRoleFor("some.future.kind")).toBeNull()
+  })
+
+  // ── AQU-1000: the foreign-comment floor ─────────────────────────────────
+  //
+  // REGRESSION GUARD. The mirror used to carry only the self floors, so
+  // `canPerform("comment.resolve", 200)` said yes for EVERY thread — including
+  // ones the caller did not write, which the server refuses. The UI believed
+  // it, offered Resolve, flipped the thread optimistically, and the 403 flipped
+  // it back. Resolve authority is a function of (role, who wrote the thread);
+  // anything that collapses it back to role alone reintroduces the bug.
+  describe("foreign-comment floors (AQU-1000)", () => {
+    it("carries a second, higher floor for acting on someone else's comment", () => {
+      // Closing a thread is bookkeeping and is reversible, so it sits lower
+      // than rewriting or destroying what another person actually said.
+      expect(foreignRoleFor("comment.resolve")).toBe(ROLE.CONTRIBUTOR)
+      expect(foreignRoleFor("comment.edit")).toBe(ROLE.MAINTAINER)
+      expect(foreignRoleFor("comment.delete")).toBe(ROLE.MAINTAINER)
+    })
+
+    it("keeps the self floor at commenter — lowering the foreign bar never raises the self one", () => {
+      expect(effectiveCommentRoleFor("comment.resolve", true)).toBe(ROLE.COMMENTER)
+      expect(effectiveCommentRoleFor("comment.edit", true)).toBe(ROLE.COMMENTER)
+    })
+
+    it("applies the foreign floor on a thread the caller did not write", () => {
+      expect(effectiveCommentRoleFor("comment.resolve", false)).toBe(ROLE.CONTRIBUTOR)
+      expect(effectiveCommentRoleFor("comment.edit", false)).toBe(ROLE.MAINTAINER)
+    })
+
+    it("lets a commenter resolve their OWN thread but not a foreign one", () => {
+      expect(canMutateComment("comment.resolve", ROLE.COMMENTER, true)).toBe(true)
+      expect(canMutateComment("comment.resolve", ROLE.COMMENTER, false)).toBe(false)
+    })
+
+    it("denies a reviewer a foreign resolve — 300 is still below the contributor bar", () => {
+      expect(canMutateComment("comment.resolve", ROLE.REVIEWER, false)).toBe(false)
+      expect(canMutateComment("comment.resolve", ROLE.REVIEWER, true)).toBe(true)
+    })
+
+    it("lets a contributor resolve any thread", () => {
+      expect(canMutateComment("comment.resolve", ROLE.CONTRIBUTOR, true)).toBe(true)
+      expect(canMutateComment("comment.resolve", ROLE.CONTRIBUTOR, false)).toBe(true)
+    })
+
+    it("still refuses a contributor a foreign EDIT or DELETE (unchanged, no regression)", () => {
+      expect(canMutateComment("comment.edit", ROLE.CONTRIBUTOR, false)).toBe(false)
+      expect(canMutateComment("comment.delete", ROLE.CONTRIBUTOR, false)).toBe(false)
+      expect(canMutateComment("comment.edit", ROLE.MAINTAINER, false)).toBe(true)
+      expect(canMutateComment("comment.delete", ROLE.MAINTAINER, false)).toBe(true)
+    })
+
+    it("refuses a viewer either way — below even the self floor", () => {
+      expect(canMutateComment("comment.resolve", ROLE.VIEWER, true)).toBe(false)
+      expect(canMutateComment("comment.resolve", ROLE.VIEWER, false)).toBe(false)
+    })
+
+    it("fails open on an unknown role and an unmapped kind", () => {
+      // Local / git-imported projects have no sync role; the server is still
+      // authoritative, so we never block on a guess.
+      expect(canMutateComment("comment.resolve", null, false)).toBe(true)
+      expect(foreignRoleFor("some.future.kind")).toBeNull()
+      expect(effectiveCommentRoleFor("some.future.kind", false)).toBeNull()
+      expect(canMutateComment("some.future.kind", ROLE.VIEWER, false)).toBe(true)
+    })
   })
 
   it("keeps the structural file.* kinds at the maintainer floor", () => {

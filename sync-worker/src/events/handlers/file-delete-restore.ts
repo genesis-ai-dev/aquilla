@@ -14,12 +14,16 @@
 
 import type { AuthorizedEvent } from '../authorize'
 import type { RealtimeMessage, ProjectionTable } from '../realtime'
+import { buildEventInsertStmt } from '../event-insert'
 import type { DispatchResult } from './types'
 
 export function handleFileDelete(
   db: AquillaDb,
   authed: AuthorizedEvent<'file.delete'>,
   serverTs: number,
+  /** Pre-allocated server_seq for this event (AQU-1005: allocation happens
+   *  once per request via allocateSeqRange, outside the write transaction). */
+  serverSeq: number,
 ): DispatchResult {
   const { event, claims } = authed
 
@@ -27,30 +31,20 @@ export function handleFileDelete(
     throw new Error(`file.delete event ${event.id} is missing fileId`)
   }
 
-  const eventInsert = db
-    .prepare(
-      `INSERT INTO events (
-        id, schema_version, project_id, file_id, cell_id, parent_id, kind,
-        author, payload, client_ts, server_ts, server_seq
-      )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1
-        ON CONFLICT DO NOTHING`,
-    )
-    .bind(
-      event.id,
-      event.schemaVersion,
-      event.projectId,
-      event.fileId,
-      null,
-      event.parentId ?? null,
-      event.kind,
-      claims.username,
-      JSON.stringify(event.payload),
-      event.clientTs,
-      serverTs,
-      event.projectId,
-    )
+  const eventInsert = buildEventInsertStmt(db, {
+    id: event.id,
+    schemaVersion: event.schemaVersion,
+    projectId: event.projectId,
+    fileId: event.fileId,
+    cellId: null,
+    parentId: event.parentId ?? null,
+    kind: event.kind,
+    author: claims.username,
+    payloadJson: JSON.stringify(event.payload),
+    clientTs: event.clientTs,
+    serverTs,
+    serverSeq,
+  })
 
   // Stamp the tombstone. Only advances when the file is currently active
   // (deleted_at IS NULL) — idempotent on double-delete.
@@ -83,6 +77,9 @@ export function handleFileRestore(
   db: AquillaDb,
   authed: AuthorizedEvent<'file.restore'>,
   serverTs: number,
+  /** Pre-allocated server_seq for this event (AQU-1005: allocation happens
+   *  once per request via allocateSeqRange, outside the write transaction). */
+  serverSeq: number,
 ): DispatchResult {
   const { event, claims } = authed
 
@@ -90,30 +87,20 @@ export function handleFileRestore(
     throw new Error(`file.restore event ${event.id} is missing fileId`)
   }
 
-  const eventInsert = db
-    .prepare(
-      `INSERT INTO events (
-        id, schema_version, project_id, file_id, cell_id, parent_id, kind,
-        author, payload, client_ts, server_ts, server_seq
-      )
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-             COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1
-        ON CONFLICT DO NOTHING`,
-    )
-    .bind(
-      event.id,
-      event.schemaVersion,
-      event.projectId,
-      event.fileId,
-      null,
-      event.parentId ?? null,
-      event.kind,
-      claims.username,
-      JSON.stringify(event.payload),
-      event.clientTs,
-      serverTs,
-      event.projectId,
-    )
+  const eventInsert = buildEventInsertStmt(db, {
+    id: event.id,
+    schemaVersion: event.schemaVersion,
+    projectId: event.projectId,
+    fileId: event.fileId,
+    cellId: null,
+    parentId: event.parentId ?? null,
+    kind: event.kind,
+    author: claims.username,
+    payloadJson: JSON.stringify(event.payload),
+    clientTs: event.clientTs,
+    serverTs,
+    serverSeq,
+  })
 
   // Clear the tombstone. Only advances when the file is currently tombstoned
   // (deleted_at IS NOT NULL) — idempotent on double-restore.

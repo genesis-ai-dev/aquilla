@@ -387,4 +387,23 @@ describe("GET/PUT /api/v1/voice/reference/:projectId/:referenceAudioId", () => {
     const res = (await callRef(env, refReq("GET", "ref1.webm", token)))!
     expect(res.status).toBe(403)
   })
+
+  it("coerces a declared text/html Content-Type to a safe type", async () => {
+    const env = makeEnv()
+    const token = await makeToken()
+    const put = (await callRef(
+      env,
+      new Request("https://w/api/v1/voice/reference/p1/evil.html", {
+        method: "PUT",
+        body: new TextEncoder().encode("<script>alert(1)</script>"),
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "text/html" },
+      }),
+    ))!
+    expect(put.status).toBe(200)
+
+    const get = (await callRef(env, refReq("GET", "evil.html", token)))!
+    expect(get.status).toBe(200)
+    expect(get.headers.get("Content-Type")).toBe("application/octet-stream")
+    expect(get.headers.get("X-Content-Type-Options")).toBe("nosniff")
+  })
 })

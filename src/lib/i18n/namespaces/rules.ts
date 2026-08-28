@@ -108,6 +108,7 @@ export const rules = defineNamespace({
     // ── Check-file findings drawer (CheckFindingsDrawer, CheckFileButton) ──
     "rules.checkDrawer.title": "File check",
     "rules.checkDrawer.closeAriaLabel": "Close file check",
+    "rules.checkDrawer.retryAriaLabel": "Re-run file check",
     "rules.checkDrawer.emptyPrompt": "Run a check to see results for the open file.",
     "rules.checkDrawer.checkedSummary": "Checked {summary} · {time}",
     "rules.checkDrawer.checkedNoIssues": "Checked {summary} — no issues found.",
@@ -410,6 +411,10 @@ export const rules = defineNamespace({
       },
       "rules.checkDrawer.closeAriaLabel": {
         description: "Accessible label for the check-file findings drawer's close button.",
+      },
+      "rules.checkDrawer.retryAriaLabel": {
+        description:
+          "Accessible label (and tooltip) for the check-file findings drawer's retry button, to the left of close. Re-runs the open-file check without dismissing the drawer.",
       },
       "rules.infraction.withRuleName": {
         description:

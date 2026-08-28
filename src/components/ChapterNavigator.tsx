@@ -397,6 +397,9 @@ function VirtualizedMilestoneList({
   )
 }
 
+/** Keep collapsed inner borders at full strength; fade only the chevron, harder than Button's 50%. */
+const STEP_BUTTON_CLASS = "disabled:opacity-100 disabled:[&>svg]:opacity-30"
+
 export function MilestoneNavigator({
   items,
   activeKey,
@@ -525,6 +528,7 @@ export function MilestoneNavigator({
           size="icon"
           disabled={!canGoPrevious}
           aria-label={t(vocabulary.previous)}
+          className={STEP_BUTTON_CLASS}
           onClick={() => {
             const destination = destinations[activeDestinationIndex - 1]
             if (destination) choose(destination.milestoneKey, destination.subsectionKey)
@@ -588,8 +592,8 @@ export function MilestoneNavigator({
                 // button (w-8, p-0, label hidden, chevron centered). xl+: fixed
                 // width with start-aligned label regardless of squeeze.
                 className={cn(
-                  "flex h-8 min-w-8 w-auto max-w-full shrink items-center justify-center gap-2 overflow-hidden px-2.5 data-[icon-only]:w-8 data-[icon-only]:shrink-0 data-[icon-only]:gap-0 data-[icon-only]:p-0 [&>svg:last-child]:shrink-0",
-                  !compact && "xl:w-56 xl:min-w-56 xl:shrink-0 xl:justify-start xl:px-2.5 xl:data-[icon-only]:w-56 xl:data-[icon-only]:gap-2 xl:data-[icon-only]:p-2.5 xl:[&>svg:last-child]:ms-auto",
+                  "flex h-8 min-w-8 w-auto max-w-full shrink items-center justify-center gap-1 overflow-hidden px-2 data-[icon-only]:w-8 data-[icon-only]:shrink-0 data-[icon-only]:gap-0 data-[icon-only]:p-0 [&>svg:last-child]:shrink-0",
+                  !compact && "xl:w-56 xl:min-w-56 xl:shrink-0 xl:justify-start xl:gap-1.5 xl:ps-2.5 xl:pe-2 xl:data-[icon-only]:w-56 xl:data-[icon-only]:gap-1.5 xl:data-[icon-only]:ps-2.5 xl:data-[icon-only]:pe-2 xl:[&>svg:last-child]:ms-auto",
                 )}
                 aria-label={
                   activeSubsection
@@ -660,6 +664,7 @@ export function MilestoneNavigator({
           size="icon"
           disabled={!canGoNext}
           aria-label={t(vocabulary.next)}
+          className={STEP_BUTTON_CLASS}
           onClick={() => {
             const destination = destinations[activeDestinationIndex + 1]
             if (destination) choose(destination.milestoneKey, destination.subsectionKey)

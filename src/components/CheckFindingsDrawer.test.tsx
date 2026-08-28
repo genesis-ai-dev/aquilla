@@ -84,7 +84,7 @@ describe("CheckFindingsDrawer", () => {
     render(
       <CheckFindingsDrawer
         result={baseResult} running={false} cells={[]}
-        onClose={() => {}} onNavigateToCell={() => {}}
+        onClose={() => {}} onRetry={() => {}} onNavigateToCell={() => {}}
       />,
     )
     expect(
@@ -121,7 +121,7 @@ describe("CheckFindingsDrawer", () => {
     render(
       <CheckFindingsDrawer
         result={result} running={false} cells={cells}
-        onClose={() => {}} onNavigateToCell={onNavigateToCell}
+        onClose={() => {}} onRetry={() => {}} onNavigateToCell={onNavigateToCell}
       />,
     )
 
@@ -157,7 +157,7 @@ describe("CheckFindingsDrawer", () => {
     render(
       <CheckFindingsDrawer
         result={result} running={false} cells={[]}
-        onClose={() => {}} onNavigateToCell={() => {}} onOpenComments={onOpenComments}
+        onClose={() => {}} onRetry={() => {}} onNavigateToCell={() => {}} onOpenComments={onOpenComments}
       />,
     )
     fireEvent.click(screen.getByRole("button", { name: "Comment on MAT 1:16" }))
@@ -168,10 +168,35 @@ describe("CheckFindingsDrawer", () => {
     render(
       <CheckFindingsDrawer
         result={null} running cells={[]}
-        onClose={() => {}} onNavigateToCell={() => {}}
+        onClose={() => {}} onRetry={() => {}} onNavigateToCell={() => {}}
       />,
     )
     expect(screen.getByText(/Checking…/)).toBeInTheDocument()
+  })
+
+  it("puts a retry control immediately left of close and re-runs the check", () => {
+    const onRetry = vi.fn()
+    render(
+      <CheckFindingsDrawer
+        result={baseResult} running={false} cells={[]}
+        onClose={() => {}} onRetry={onRetry} onNavigateToCell={() => {}}
+      />,
+    )
+    const retry = screen.getByRole("button", { name: "Re-run file check" })
+    const close = screen.getByRole("button", { name: "Close file check" })
+    expect(retry.compareDocumentPosition(close) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    fireEvent.click(retry)
+    expect(onRetry).toHaveBeenCalledTimes(1)
+  })
+
+  it("disables retry while the check is running", () => {
+    render(
+      <CheckFindingsDrawer
+        result={null} running cells={[]}
+        onClose={() => {}} onRetry={() => {}} onNavigateToCell={() => {}}
+      />,
+    )
+    expect(screen.getByRole("button", { name: "Re-run file check" })).toBeDisabled()
   })
 })
 

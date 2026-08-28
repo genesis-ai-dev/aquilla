@@ -154,6 +154,10 @@ export const rules = defineNamespace({
     "rules.surface.createOrgRuleDialog.title": "Create org rule",
     "rules.surface.createOrgRuleDialog.description": "Create an org-scoped translation rule.",
     "rules.surface.usageTooltip": "LLM usage on this project",
+    "rules.surface.laneFilterAriaLabel": "Filter rules by lane",
+    "rules.surface.laneFilter.all": "All rules",
+    "rules.surface.laneFilter.projectWide": "Project-wide",
+    "rules.surface.laneFilterNoMatches": "No rules match this filter.",
     "rules.surface.orgRulesCardTitle": "Org Rules ({count})",
     "rules.surface.addOrgRuleButton": "Add Org Rule",
     // "Read-only" permission badge → common.readOnly (identical text)
@@ -555,6 +559,10 @@ export const rules = defineNamespace({
           fixes: "How many autofixes have been applied on this project.",
           calls: "How many LLM calls the project has made (rule suggestion, harmonization, etc).",
         },
+      },
+      "rules.surface.laneFilterAriaLabel": {
+        description:
+          "Accessible label for the lane-filter dropdown on the Project Rules card (multi-lane projects). Filters the listed rules by target-language lane.",
       },
       "rules.surface.orgRulesCardTitle": {
         description: "Card heading for the org-scoped rules list.",

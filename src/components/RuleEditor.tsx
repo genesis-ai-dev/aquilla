@@ -17,6 +17,13 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Field, FieldError, FieldLabel, OptionalMark } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { X } from "lucide-react"
 import type { TranslationRule, RuleCheck, RuleAutofix } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
@@ -387,30 +394,40 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className, la
           </div>
         </div>
 
-        {/* AQU-609: lane scope — only for multi-lane project-rule editors */}
+        {/* AQU-609: lane scope — only for multi-lane project-rule editors.
+            A dropdown, not a button row: projects can carry 150+ lanes
+            (typing in the open list jumps to a lane via typeahead). Values
+            are prefix-encoded ("scope:project" / "lane:<tag>") because the
+            default lane's tag is the empty string. */}
         {showLanePicker && (
           <div>
             <FieldLabel className="text-xs">{t("rules.editor.laneLabel")}</FieldLabel>
-            <div className="mt-1 flex flex-wrap gap-1">
-              {[null, "", ...(lanes ?? [])].map((laneOption) => (
-                <button
-                  key={laneOption === null ? " all" : `lane:${laneOption}`}
-                  type="button"
-                  onClick={() => setLaneChoice(laneOption)}
-                  className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
-                    laneChoice === laneOption
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground hover:bg-muted/80"
-                  }`}
-                >
-                  {laneOption === null
-                    ? t("rules.editor.lane.allLanes")
-                    : laneOption === ""
-                      ? defaultLaneLabel || t("rules.editor.lane.defaultLane")
-                      : laneOption}
-                </button>
-              ))}
-            </div>
+            <Select
+              items={[
+                { value: "scope:project", label: t("rules.editor.lane.allLanes") },
+                { value: "lane:", label: defaultLaneLabel || t("rules.editor.lane.defaultLane") },
+                ...(lanes ?? []).map((l) => ({ value: `lane:${l}`, label: l })),
+              ]}
+              value={laneChoice === null ? "scope:project" : `lane:${laneChoice}`}
+              onValueChange={(v) =>
+                setLaneChoice(v === "scope:project" ? null : String(v).slice("lane:".length))
+              }
+            >
+              <SelectTrigger size="sm" className="mt-1" aria-label={t("rules.editor.laneLabel")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="scope:project">{t("rules.editor.lane.allLanes")}</SelectItem>
+                <SelectItem value="lane:">
+                  {defaultLaneLabel || t("rules.editor.lane.defaultLane")}
+                </SelectItem>
+                {(lanes ?? []).map((laneOption) => (
+                  <SelectItem key={laneOption} value={`lane:${laneOption}`}>
+                    {laneOption}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         )}
 

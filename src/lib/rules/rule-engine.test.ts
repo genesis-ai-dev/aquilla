@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { checkRules, checkRulesForCell, rulesForLane } from "./rule-engine"
+import { checkRules, checkRulesForCell, rulesForLane, lanesWithRules, filterRulesForDisplay } from "./rule-engine"
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 
@@ -330,5 +330,30 @@ describe("rulesForLane", () => {
     const frForbids = makeRule({ id: "fr-ban", scope: "lane", lane: "fr", check: { type: "target-forbids", targetPattern: "malo" } })
     expect(checkRules(cells, rulesForLane([frForbids], "es")).size).toBe(0)
     expect(checkRules(cells, rulesForLane([frForbids], "fr")).get("c1")).toHaveLength(1)
+  })
+})
+
+
+// AQU-609: the Rules-surface lane filter. WHY: with up to ~150 target lanes a
+// filter over ALL project lanes would be as unusable as the unfiltered list —
+// options must derive from lanes that actually hold rules, and the filter is
+// display-only (evaluation stays with rulesForLane).
+describe("lane display filter", () => {
+  const proj = makeRule({ id: "p1", scope: "project", check: { type: "target-forbids", targetPattern: "x" } })
+  const fr1 = makeRule({ id: "fr1", scope: "lane", lane: "fr", check: { type: "target-forbids", targetPattern: "x" } })
+  const fr2 = makeRule({ id: "fr2", scope: "lane", lane: "fr", check: { type: "target-forbids", targetPattern: "y" } })
+  const def = makeRule({ id: "def", scope: "lane", lane: "", check: { type: "target-forbids", targetPattern: "z" } })
+
+  it("lanesWithRules lists each lane once, in first appearance order, ignoring non-lane rules", () => {
+    expect(lanesWithRules([proj, fr1, def, fr2])).toEqual(["fr", ""])
+    expect(lanesWithRules([proj])).toEqual([])
+  })
+
+  it("filterRulesForDisplay: all / project-wide / one lane (incl. the default lane)", () => {
+    const rules = [proj, fr1, fr2, def]
+    expect(filterRulesForDisplay(rules, "all").map((r) => r.id)).toEqual(["p1", "fr1", "fr2", "def"])
+    expect(filterRulesForDisplay(rules, "project").map((r) => r.id)).toEqual(["p1"])
+    expect(filterRulesForDisplay(rules, "lane:fr").map((r) => r.id)).toEqual(["fr1", "fr2"])
+    expect(filterRulesForDisplay(rules, "lane:").map((r) => r.id)).toEqual(["def"])
   })
 })

@@ -95,7 +95,8 @@ describe("RuleEditor toggles", () => {
 // AQU-609: lane scoping in the editor. WHY: the saved `scope`/`lane` decide
 // which lanes a rule constrains — a wrong payload here means a French-only
 // rule silently lints every lane (or an org rule degrades to project scope on
-// its next edit, which was a real latent bug this change fixed).
+// its next edit, which was a real latent bug this change fixed). The picker
+// is a dropdown, not buttons: projects can carry 150+ lanes.
 describe("RuleEditor lane scope (AQU-609)", () => {
   function fillRequired() {
     fireEvent.change(screen.getByLabelText("Rule name"), { target: { value: "R" } })
@@ -111,7 +112,8 @@ describe("RuleEditor lane scope (AQU-609)", () => {
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ scope: "project" }))
   })
 
-  it("saves scope lane + the picked lane when a lane is chosen", () => {
+  it("saves scope lane + the picked lane when a lane is chosen from the dropdown", async () => {
+    const user = userEvent.setup()
     const onSave = vi.fn()
     render(
       <RuleEditor
@@ -122,19 +124,22 @@ describe("RuleEditor lane scope (AQU-609)", () => {
         defaultLaneLabel="Spanish (base)"
       />,
     )
-    // All lanes + default lane + the two named lanes.
-    expect(screen.getByText("Applies to")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "All lanes" })).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Spanish (base)" })).toBeInTheDocument()
+    const trigger = screen.getByRole("combobox", { name: "Applies to" })
+    await user.click(trigger)
+    // All scopes are offered: every lane, the labeled default lane, both tags.
+    expect(await screen.findByRole("option", { name: "All lanes" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "Spanish (base)" })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: "es" })).toBeInTheDocument()
     fillRequired()
-    fireEvent.click(screen.getByRole("button", { name: "fr" }))
+    await user.click(screen.getByRole("option", { name: "fr" }))
     fireEvent.click(screen.getByRole("button", { name: "Create rule" }))
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({ scope: "lane", lane: "fr" }),
     )
   })
 
-  it("clears the lane pin when switching a lane rule back to All lanes", () => {
+  it("clears the lane pin when switching a lane rule back to All lanes", async () => {
+    const user = userEvent.setup()
     const onSave = vi.fn()
     const initialRule = {
       id: "r1", name: "R", description: "", severity: "minor" as const,
@@ -151,7 +156,8 @@ describe("RuleEditor lane scope (AQU-609)", () => {
         lanes={["fr", "es"]}
       />,
     )
-    fireEvent.click(screen.getByRole("button", { name: "All lanes" }))
+    await user.click(screen.getByRole("combobox", { name: "Applies to" }))
+    await user.click(await screen.findByRole("option", { name: "All lanes" }))
     fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({ scope: "project", lane: undefined }),

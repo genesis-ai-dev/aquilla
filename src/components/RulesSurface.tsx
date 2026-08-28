@@ -21,6 +21,14 @@ import {
 } from "@/components/ui/dialog"
 import { BuiltinChecksList } from "./BuiltinChecksList"
 import { RuleEditor } from "./RuleEditor"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { lanesWithRules, filterRulesForDisplay } from "@/lib/rules/rule-engine"
 import { RuleImportDialog } from "./RuleImportDialog"
 import { RuleSuggestFromEditsDialog } from "./RuleSuggestFromEditsDialog"
 import { cn } from "@/lib/utils"
@@ -121,6 +129,20 @@ export function RulesSurface({
     (rule.lane ?? "") === ""
       ? defaultLaneLabel || t("rules.editor.lane.defaultLane")
       : rule.lane ?? ""
+
+  // AQU-609: display filter for the Project Rules list. Options list only
+  // lanes that actually hold rules — a 150-lane project must not produce a
+  // 150-item dropdown. Falls back to "all" if the selected lane's last rule
+  // was deleted (its option disappears with it).
+  const [laneFilter, setLaneFilter] = useState<string>("all")
+  const laneFilterLanes = lanesWithRules(userRules)
+  const effectiveLaneFilter =
+    laneFilter === "all" || laneFilter === "project" ||
+    laneFilterLanes.includes(laneFilter.slice("lane:".length))
+      ? laneFilter
+      : "all"
+  const visibleUserRules = filterRulesForDisplay(userRules, effectiveLaneFilter)
+  const showLaneFilter = projectLanes.length > 0 || laneFilterLanes.length > 0
 
   useEffect(() => {
     const focusId = searchParams.get("ruleId")
@@ -330,7 +352,42 @@ export function RulesSurface({
         {/* Card order is most-specific scope first: project rules (incl.
             lane-scoped) → org rules → app built-ins (AQU-609 feedback). */}
         <Card>
-          <CardHeader><CardTitle>{t("rules.surface.projectRulesCardTitle", { count: userRules.length })}</CardTitle></CardHeader>
+          <CardHeader>
+            <div className="flex flex-wrap items-center gap-2">
+              <CardTitle>{t("rules.surface.projectRulesCardTitle", { count: userRules.length })}</CardTitle>
+              {showLaneFilter && (
+                <Select
+                  items={[
+                    { value: "all", label: t("rules.surface.laneFilter.all") },
+                    { value: "project", label: t("rules.surface.laneFilter.projectWide") },
+                    ...laneFilterLanes.map((lane) => ({
+                      value: `lane:${lane}`,
+                      label: lane === "" ? defaultLaneLabel || t("rules.editor.lane.defaultLane") : lane,
+                    })),
+                  ]}
+                  value={effectiveLaneFilter}
+                  onValueChange={(v) => setLaneFilter(String(v))}
+                >
+                  <SelectTrigger
+                    size="sm"
+                    className="ms-auto"
+                    aria-label={t("rules.surface.laneFilterAriaLabel")}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t("rules.surface.laneFilter.all")}</SelectItem>
+                    <SelectItem value="project">{t("rules.surface.laneFilter.projectWide")}</SelectItem>
+                    {laneFilterLanes.map((lane) => (
+                      <SelectItem key={`lane:${lane}`} value={`lane:${lane}`}>
+                        {lane === "" ? defaultLaneLabel || t("rules.editor.lane.defaultLane") : lane}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          </CardHeader>
           <CardContent>
             {userRules.length === 0 ? (
               <EmptyState
@@ -345,9 +402,13 @@ export function RulesSurface({
                   </>
                 }
               />
+            ) : visibleUserRules.length === 0 ? (
+              <p className="py-2 text-xs text-muted-foreground">
+                {t("rules.surface.laneFilterNoMatches")}
+              </p>
             ) : (
               <ul className="flex flex-col gap-2">
-                {userRules.map((rule) => {
+                {visibleUserRules.map((rule) => {
                   const expanded = expandedRuleId === rule.id
                   const laneScoped = rule.scope === "lane"
                   return (

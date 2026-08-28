@@ -38,6 +38,8 @@ export const comments = defineNamespace({
     "comments.fileDeletedTooltip": "File has been deleted",
     "comments.resolve": "Resolve",
     "comments.reopen": "Reopen",
+    "comments.resolve.foreignDenied":
+      "Only {minRole} and above can resolve a thread someone else started.",
     "comments.status.open": "open",
     "comments.status.resolved": "resolved",
     "comments.stale.badge": "stale",
@@ -208,6 +210,17 @@ export const comments = defineNamespace({
           "Button that reopens a resolved thread. Pairs with comments.resolve as the " +
           "same toggle in two places: a thread card's header, and inside a resolved " +
           "thread. Imperative verb.",
+      },
+      "comments.resolve.foreignDenied": {
+        description:
+          "Tooltip on the disabled Resolve / Close with reply / Reopen controls, shown " +
+          "when the reader's role is high enough to resolve their OWN threads but not " +
+          "one started by somebody else.",
+        placeholders: {
+          minRole:
+            "Plural role noun for the lowest role that may resolve another user's " +
+            "thread, already localized (e.g. 'Contributors'). Never a username.",
+        },
       },
       "comments.status.open": {
         description:

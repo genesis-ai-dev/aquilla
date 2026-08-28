@@ -91,6 +91,10 @@ vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => ({
   setProjectDeadline: (jwt: string, projectId: string, deadline: string | null) => setProjectDeadline(jwt, projectId, deadline),
   setProjectPm: (jwt: string, projectId: string, pmUserId: number | null) => setProjectPm(jwt, projectId, pmUserId),
   fetchAccessibleProjects: (jwt: string) => fetchAccessibleProjects(jwt),
+  fetchAccessibleProjectsResult: async (jwt: string) => ({
+    ok: true as const,
+    projects: await fetchAccessibleProjects(jwt),
+  }),
   resolveCloudProjectResult: vi.fn(async () => ({ ok: true as const, project: { id: "p1", orgId: 1 } })),
 }))
 const downloadProjectBundle = vi.fn()

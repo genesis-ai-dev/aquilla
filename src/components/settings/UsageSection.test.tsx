@@ -44,6 +44,8 @@ beforeEach(() => {
   mockUseFrontierSession.mockReturnValue({
     session: { jwt: "test-jwt" } as ReturnType<typeof useFrontierSession>["session"],
     loading: false,
+    sessionLoadError: null,
+    retrySessionLoad: vi.fn(),
     login: vi.fn(),
     register: vi.fn(),
     logout: vi.fn(),
@@ -84,6 +86,8 @@ describe("UsageSection", () => {
     mockUseFrontierSession.mockReturnValue({
       session: null,
       loading: false,
+      sessionLoadError: null,
+      retrySessionLoad: vi.fn(),
       login: vi.fn(),
       register: vi.fn(),
       logout: vi.fn(),

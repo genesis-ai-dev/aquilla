@@ -32,11 +32,13 @@ export function handleAssignmentEvent(
   db: AquillaDb,
   authed: AuthorizedEvent<AssignmentEventKind>,
   serverTs: number,
+  /** Pre-allocated server_seq for this event (AQU-1005: allocation happens
+   *  once per request via allocateSeqRange, outside the write transaction). */
+  serverSeq: number,
 ): DispatchResult {
   const { event, claims } = authed
 
-  // Canonical events row. server_seq is allocated by the per-project counter
-  // inside the INSERT — see events/event-insert.ts.
+  // Canonical events row.
   const eventInsert = buildEventInsertStmt(db, {
     id: event.id,
     schemaVersion: event.schemaVersion,
@@ -49,6 +51,7 @@ export function handleAssignmentEvent(
     payloadJson: JSON.stringify(event.payload),
     clientTs: event.clientTs,
     serverTs,
+    serverSeq,
   })
 
   const stmts: AquillaStatement[] = [eventInsert]

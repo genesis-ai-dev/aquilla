@@ -1,6 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
-import { MockLLMServer } from "../../helpers/mock-llm-server"
+import { MockLLMServer, applyUserProviderOverride } from "../../helpers/mock-llm-server"
 import { ProjectSettings } from "../../helpers/page-objects/ProjectSettings"
 
 /**
@@ -58,13 +58,7 @@ test("sparkle in a secondary lane commits the draft into that lane only", async 
   })
 
   // Point the per-device LLM override at the spec-local mock server.
-  await alice.evaluate(({ endpoint }) => {
-    localStorage.setItem("aquilla:userProviderOverride", JSON.stringify({
-      endpoint,
-      model: "mock-model",
-      apiKey: "",
-    }))
-  }, { endpoint: `${mockLLM.baseUrl}/v1` })
+  await applyUserProviderOverride(alice, alice.username, `${mockLLM.baseUrl}/v1`)
 
   // Mirror the reported flow: the default (English) lane is in active use —
   // sparkle cell 0 there FIRST, so the cell has a default-lane AI-draft chain

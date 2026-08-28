@@ -21,6 +21,12 @@
 import { resolveCredentialsFromEnv } from "../src/lib/migrate/gitlab/auth"
 import { syncGroupsToNeon } from "../src/lib/migrate/group-sync"
 
+import { installMigrateRunnerHeader } from "./lib/migrate-runner-header"
+
+// AQU-1005: stamp every /migrate/* call with the runner id (fence audit).
+installMigrateRunnerHeader()
+
+
 const SYNC = process.env.SYNC_BASE ?? "https://api.aquilla.app/sync"
 
 function authHeaders(): Record<string, string> {

@@ -3662,7 +3662,6 @@ export const th: Catalog = {
   "terminology.editor.errorBlocked": "บทบาทของคุณไม่สามารถเปลี่ยนแปลงคลังคำศัพท์ได้",
   "terminology.editor.errorSourceAndRenderingRequired": "ต้องมีคำศัพท์ต้นฉบับและคำแปลก่อนจึงจะเปิดใช้งานคำศัพท์นี้ได้",
   "terminology.editor.errorImportFailed": "นำเข้าล้มเหลว",
-  "terminology.editor.title": "คลังคำศัพท์",
   "terminology.editor.findingTerms": "กำลังค้นหาคำศัพท์…",
   "terminology.editor.suggestTerms": "แนะนำคำศัพท์",
   "terminology.editor.exportCsv": "ส่งออก CSV",

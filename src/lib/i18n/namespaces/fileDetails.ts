@@ -17,6 +17,7 @@ export const fileDetails = defineNamespace({
     "fileDetails.progress": "Progress",
     "fileDetails.progressValue": "{translated}% translated · {validated}% validated",
     "fileDetails.rename": "Rename",
+    "fileDetails.renameDialogTitle": "Rename file",
     "fileDetails.moveToCorpus": "Move to corpus…",
     "fileDetails.exportSource": "Export source (.SFM)",
     "fileDetails.exportDisabledType": "Only USFM files support round-trip source export.",
@@ -128,6 +129,10 @@ export const fileDetails = defineNamespace({
           "Action button that closes the modal and starts inline renaming of the file " +
           "in the sidebar. Imperative verb.",
         maxLength: 24,
+      },
+      "fileDetails.renameDialogTitle": {
+        description:
+          "Title of the dialog opened from the chapter-row File options menu to rename the current file.",
       },
       "fileDetails.moveToCorpus": {
         description:

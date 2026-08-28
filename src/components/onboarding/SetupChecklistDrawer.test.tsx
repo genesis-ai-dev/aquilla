@@ -247,7 +247,7 @@ describe("SetupChecklistDrawer — AQU-334 role-aware read-only rows", () => {
   it("Coming Soon rows remain inactive teasers regardless of role (unaffected by this change)", () => {
     renderDrawer(ROLE.CONTRIBUTOR)
     expect(screen.getByText("Upload project standards")).toBeInTheDocument()
-    expect(screen.getByText("Import glossary / translation memory")).toBeInTheDocument()
+    expect(screen.getByText("Import terminology / translation memory")).toBeInTheDocument()
     expect(screen.getAllByText("Coming soon").length).toBe(2)
   })
 })

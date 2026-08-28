@@ -24,6 +24,18 @@ const DB_NAME = "aquilla-cells-cache"
 const DB_VERSION = 2
 const STORE = "cells"
 
+// The database is shared by every account on this browser origin. Prefixing
+// keys with the hydrated account prevents a newly-active identity from ever
+// painting another account's rows while its authoritative fetch is in flight.
+// `undefined` preserves the legacy key shape in focused tests and before the
+// app has made its first session decision; the app sets this before rendering
+// account-scoped routes.
+let activeOwnerKey: string | null | undefined
+
+export function setCellsCacheOwner(ownerKey: string | null): void {
+  activeOwnerKey = ownerKey
+}
+
 export interface CellsCacheEntry {
   /** Composite key: `${projectId}:${fileId}`. */
   key: string
@@ -49,7 +61,20 @@ export interface CellsCacheEntry {
 let dbPromise: Promise<IDBDatabase> | null = null
 
 function cacheKey(projectId: string, fileId: string): string {
-  return `${projectId}:${fileId}`
+  const legacy = `${projectId}:${fileId}`
+  if (activeOwnerKey === undefined) return legacy
+  return scopedCacheKey(activeOwnerKey, legacy)
+}
+
+function scopedCacheKey(ownerKey: string | null, legacyKey: string): string {
+  const owner = ownerKey === null
+    ? "local"
+    : `account:${encodeURIComponent(ownerKey)}`
+  return `owner:${owner}:${legacyKey}`
+}
+
+function isScopedCacheKey(storageKey: string): boolean {
+  return storageKey.startsWith("owner:local:") || storageKey.startsWith("owner:account:")
 }
 
 async function openDb(): Promise<IDBDatabase> {
@@ -78,6 +103,7 @@ async function openDb(): Promise<IDBDatabase> {
 
 /** Closes the singleton connection (tests only). */
 export async function resetCellsCacheConnectionForTests(): Promise<void> {
+  activeOwnerKey = undefined
   if (!dbPromise) return
   try {
     const db = await dbPromise
@@ -88,16 +114,52 @@ export async function resetCellsCacheConnectionForTests(): Promise<void> {
   dbPromise = null
 }
 
+/**
+ * One-time upgrade bridge for pre-account cache keys. The first resolved data
+ * owner receives the legacy snapshots, preserving warm/offline file opens
+ * without leaving an unscoped copy another account could later claim.
+ */
+export async function claimLegacyCellsCache(ownerKey: string | null): Promise<void> {
+  const db = await openDb()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite")
+    const store = tx.objectStore(STORE)
+    const request = store.openCursor()
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error ?? new Error("legacy cells cache claim failed"))
+    tx.onabort = () => reject(tx.error ?? new Error("legacy cells cache claim aborted"))
+    request.onsuccess = () => {
+      const cursor = request.result
+      if (!cursor) return
+      const entry = cursor.value as CellsCacheEntry
+      if (!isScopedCacheKey(entry.key)) {
+        const targetKey = scopedCacheKey(ownerKey, entry.key)
+        const existing = store.get(targetKey)
+        existing.onsuccess = () => {
+          // A scoped write can race the one-time upgrade. Keep that newer,
+          // explicitly-owned snapshot and only discard the obsolete legacy key.
+          if (existing.result === undefined) store.put({ ...entry, key: targetKey })
+          cursor.delete()
+          cursor.continue()
+        }
+        return
+      }
+      cursor.continue()
+    }
+  })
+}
+
 export async function readCellsCache(
   projectId: string,
   fileId: string,
 ): Promise<CellsCacheEntry | null> {
+  const entryKey = cacheKey(projectId, fileId)
   try {
     const db = await openDb()
     return await new Promise<CellsCacheEntry | null>((resolve, reject) => {
       const tx = db.transaction(STORE, "readonly")
       const store = tx.objectStore(STORE)
-      const req = store.get(cacheKey(projectId, fileId))
+      const req = store.get(entryKey)
       req.onsuccess = () => resolve((req.result as CellsCacheEntry | undefined) ?? null)
       req.onerror = () => reject(req.error ?? new Error("IDB get failed"))
     })
@@ -113,6 +175,10 @@ export async function writeCellsCache(
   maxServerSeq?: number,
   projectEpoch?: number,
 ): Promise<void> {
+  // Capture the identity namespace before the first await. An IndexedDB open
+  // can settle after an account switch; recomputing then would write the old
+  // request's rows into the newly-active account's key.
+  const entryKey = cacheKey(projectId, fileId)
   try {
     const db = await openDb()
     let maxLastEditAt = 0
@@ -120,7 +186,7 @@ export async function writeCellsCache(
       if (r.lastEditAt > maxLastEditAt) maxLastEditAt = r.lastEditAt
     }
     const entry: CellsCacheEntry = {
-      key: cacheKey(projectId, fileId),
+      key: entryKey,
       rows,
       maxLastEditAt,
       cachedAt: Date.now(),

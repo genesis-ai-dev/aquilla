@@ -61,6 +61,40 @@ async function tamperStoredJwt(page: Page): Promise<void> {
   }))
 }
 
+/** Rewrite only the client-readable exp claim so the boot gate owns recovery. */
+async function expireStoredJwt(page: Page): Promise<void> {
+  await page.evaluate(() => new Promise<void>((resolve, reject) => {
+    const open = indexedDB.open("frontier", 1)
+    open.onerror = () => reject(open.error)
+    open.onsuccess = () => {
+      const tx = open.result.transaction("session", "readwrite")
+      const store = tx.objectStore("session")
+      const get = store.get("envelope")
+      get.onerror = () => reject(get.error)
+      get.onsuccess = () => {
+        const env = get.result as {
+          active: string | null
+          sessions: Record<string, { jwt: string }>
+        }
+        if (!env?.active) { reject(new Error("no active session to expire")); return }
+        const stored = env.sessions[env.active]
+        const parts = stored.jwt.split(".")
+        const padded = parts[1].replace(/-/g, "+").replace(/_/g, "/")
+        const payload = JSON.parse(atob(padded)) as Record<string, unknown>
+        payload.exp = Math.floor(Date.now() / 1000) - 60
+        parts[1] = btoa(JSON.stringify(payload))
+          .replace(/=/g, "")
+          .replace(/\+/g, "-")
+          .replace(/\//g, "_")
+        stored.jwt = parts.join(".")
+        store.put(env, "envelope")
+      }
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    }
+  }))
+}
+
 test.beforeEach(async () => {
   await resetBackend()
 })
@@ -92,12 +126,43 @@ test("dead credential raises the banner; it persists, dismisses, and re-login cl
   // "Sign in again" link routes to /login without a reload.
   await banner(page).getByRole("link", { name: /sign in again/i }).click()
   await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible({ timeout: 10_000 })
-  await expect(banner(page)).toBeVisible()
+  // Login is itself the recovery action, so the global banner is suppressed
+  // there rather than linking recursively back to another /login URL.
+  await expect(banner(page)).toBeHidden()
 
   // Re-login. finalizeSession() lowers the flag; the post-login render burst
   // still 401s with the replaced JWT, and the guarded notifier must drop
   // those stragglers instead of re-latching the banner.
   await loginViaUi(page)
+  await expectSignedInAsAlice(page)
+  await expect(banner(page)).toBeHidden()
+})
+
+test("naturally expired JWT redirects once and recovers without a forced reauth loop", async ({ page }) => {
+  test.setTimeout(120_000)
+  await page.goto("/login")
+  await loginViaUi(page)
+  await expectSignedInAsAlice(page)
+
+  // Single-membership alice is bounced off `/orgs/all` to her org's home
+  // (AQU-864), so `/orgs/all` cannot prove the ?next= round trip — the
+  // post-login URL there is indistinguishable from the default landing.
+  // Pin the round trip to a concrete org route that renders in place.
+  await expect(page).toHaveURL(/\/orgs\/\d+\//, { timeout: 30_000 })
+  const orgId = new URL(page.url()).pathname.match(/\/orgs\/(\d+)/)![1]
+
+  await expireStoredJwt(page)
+  await page.goto(`/orgs/${orgId}/projects`)
+  await expect(page).toHaveURL(
+    new RegExp(`/login\\?next=%2Forgs%2F${orgId}%2Fprojects$`),
+  )
+  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible()
+
+  await loginViaUi(page)
+  await expect(page).toHaveURL(
+    new RegExp(`/orgs/${orgId}/projects$`),
+    { timeout: 30_000 },
+  )
   await expectSignedInAsAlice(page)
   await expect(banner(page)).toBeHidden()
 })

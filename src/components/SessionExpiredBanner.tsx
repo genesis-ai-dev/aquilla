@@ -2,8 +2,8 @@
  * AQU-293: In-place session-expiry banner.
  *
  * Subscribes to the session-expired signal (src/lib/errors/session-expired-signal.ts).
- * When the signal fires (any fetch helper threw UserError(401)), shows a
- * fixed top banner with a direct link to /login?next=<current-path>.
+ * When the active credential is rejected, shows a fixed top banner with a
+ * direct credential-scoped re-auth link. It is suppressed on /login itself.
  *
  * AQU-884: the banner persists across navigation. It used to clear itself on
  * every `location.pathname` change, which meant the boot redirect (`/` →
@@ -20,22 +20,26 @@ import { X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   clearSessionExpired,
-  isSessionExpired,
+  getExpiredSessionJwt,
   onSessionExpired,
 } from "@/lib/errors/session-expired-signal"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useAccounts } from "@/hooks/useAccounts"
+import { loginPath } from "@/lib/navigation/login-path"
 
 export function SessionExpiredBanner() {
   const t = useT()
   // The signal module is the store; reading it through useSyncExternalStore
   // means the first render already reflects a 401 that fired during boot,
   // before this component mounted.
-  const visible = useSyncExternalStore(onSessionExpired, isSessionExpired)
+  const expiredJwt = useSyncExternalStore(onSessionExpired, getExpiredSessionJwt)
+  const { active } = useAccounts()
   const location = useLocation()
 
-  if (!visible) return null
+  const visible = expiredJwt !== null && active?.jwt === expiredJwt
+  if (!visible || location.pathname === "/login") return null
 
-  const next = encodeURIComponent(location.pathname + location.search)
+  const signInPath = loginPath({ next: location.pathname + location.search, reauth: true })
 
   return (
     <div
@@ -46,7 +50,7 @@ export function SessionExpiredBanner() {
       <span>
         {t("auth.sessionExpired.message")}{" "}
         <Link
-          to={`/login?next=${next}`}
+          to={signInPath}
           className="font-medium underline underline-offset-2 hover:text-amber-700 dark:hover:text-amber-300"
         >
           {t("auth.sessionExpired.signInAgain")}

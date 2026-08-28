@@ -3659,7 +3659,6 @@ export const my: Catalog = {
   "terminology.editor.errorBlocked": "သင့်အခန်းကဏ္ဍသည် ဝေါဟာရဘဏ်ကို မပြောင်းလဲနိုင်ပါ။",
   "terminology.editor.errorSourceAndRenderingRequired": "ဝေါဟာရတစ်ခု အသက်ဝင်နိုင်ရန် မူရင်းဝေါဟာရနှင့် ပြန်ဆိုချက် လိုအပ်သည်။",
   "terminology.editor.errorImportFailed": "တင်သွင်းမှု မအောင်မြင်ပါ",
-  "terminology.editor.title": "ဝေါဟာရဘဏ်",
   "terminology.editor.findingTerms": "ဝေါဟာရရှာနေသည်…",
   "terminology.editor.suggestTerms": "ဝေါဟာရ အကြံပြုရန်",
   "terminology.editor.exportCsv": "CSV ထုတ်ယူရန်",

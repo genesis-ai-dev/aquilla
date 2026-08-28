@@ -106,7 +106,7 @@ export interface AgentWorkbenchProps {
 
 export function AgentWorkbench({ agent, credits, onCollapse, onJumpToCell, onChooseFile, editorMode, workspace }: AgentWorkbenchProps) {
   const t = useT()
-  const { state, stop, reset, decide } = useAgentSession(agent.projectId)
+  const { state, stop, reset, decide } = useAgentSession(agent.projectId, agent.author)
   // Decisions per proposal row (key: proposalId:cellId) live in the SESSION
   // store, not here — closing/reopening the workbench must not forget what
   // was applied (that would re-offer applied drafts and drop Undo).

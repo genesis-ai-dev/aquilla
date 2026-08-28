@@ -21,10 +21,11 @@ vi.mock("./AgentDockView", async () => {
   return {
     AgentDockView: (props: {
       projectId: string
+      author: string
       renderProposalOverride?: (p: unknown) => unknown
     }) => (
       <>
-        {storeOf(props.projectId)
+        {storeOf(props.projectId, props.author)
           .getState()
           .runs.flatMap((r) => proposalsOf(r))
           .map((p) => props.renderProposalOverride?.(p) ?? null)}
@@ -213,17 +214,17 @@ function workbenchProps(): AgentWorkbenchProps {
 
 async function primeSessionWithDraftRun(): Promise<void> {
   scriptedFrames = draftRunFrames()
-  agentSessionStore(PROJECT).send({
+  agentSessionStore(PROJECT, "alice").send({
     wire: "draft this file",
     display: "draft this file",
     jwt: "jwt",
     request: { projectId: PROJECT },
   })
-  await waitFor(() => expect(agentSessionStore(PROJECT).getState().isStreaming).toBe(false))
+  await waitFor(() => expect(agentSessionStore(PROJECT, "alice").getState().isStreaming).toBe(false))
 }
 
 beforeEach(() => {
-  agentSessionStore(PROJECT).reset()
+  agentSessionStore(PROJECT, "alice").reset()
   vi.stubGlobal("matchMedia", vi.fn().mockImplementation(() => ({
     matches: true,
     addEventListener: vi.fn(),
@@ -357,8 +358,8 @@ describe("AgentWorkbench three-pane layout", () => {
       },
       { type: "done", runId: "run-r", status: "ok" },
     ]
-    agentSessionStore(PROJECT).send({ wire: "show me mark 1", display: "show me mark 1", jwt: "jwt", request: { projectId: PROJECT } })
-    await waitFor(() => expect(agentSessionStore(PROJECT).getState().isStreaming).toBe(false))
+    agentSessionStore(PROJECT, "alice").send({ wire: "show me mark 1", display: "show me mark 1", jwt: "jwt", request: { projectId: PROJECT } })
+    await waitFor(() => expect(agentSessionStore(PROJECT, "alice").getState().isStreaming).toBe(false))
 
     render(<AgentWorkbench {...workbenchProps()} />)
     expect(screen.getByLabelText("Source pane")).toHaveTextContent("The beginning")

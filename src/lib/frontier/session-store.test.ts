@@ -31,6 +31,7 @@ describe("session-store", () => {
 import {
   listSessions, addSession, activateSession, removeSession,
   loadActiveSession, sessionKey, subscribeSession, patchSessionEmails,
+  loadAccountsSnapshot, publishDataOwner,
 } from "./session-store"
 
 function mkSession(overrides: Partial<FrontierSession> = {}): FrontierSession {
@@ -100,6 +101,47 @@ describe("multi-account envelope", () => {
     expect(list).toHaveLength(1)
     const active = await loadActiveSession()
     expect(active?.jwt).toBe("new")
+  })
+
+  it("saveSession for an added account preserves the existing account and activates the new one", async () => {
+    await saveSession(mkSession({ username: "alice", jwt: "alice-jwt" }))
+    await saveSession(mkSession({ username: "bob", jwt: "bob-jwt" }))
+
+    expect((await listSessions()).map((s) => s.username).sort()).toEqual(["alice", "bob"])
+    expect((await loadActiveSession())?.username).toBe("bob")
+  })
+
+  it("keeps the last published data owner until the matching transition completes", async () => {
+    await saveSession(mkSession({ username: "alice", jwt: "alice-jwt" }))
+    expect((await loadAccountsSnapshot()).dataOwner).toBeUndefined()
+    expect(await publishDataOwner("alice")).toBe(true)
+
+    await saveSession(mkSession({ username: "bob", jwt: "bob-jwt" }))
+    const switching = await loadAccountsSnapshot()
+    expect(switching.active?.username).toBe("bob")
+    expect(switching.dataOwner).toBe("alice")
+    expect(await publishDataOwner("alice")).toBe(false)
+    expect(await publishDataOwner("bob")).toBe(true)
+    expect((await loadAccountsSnapshot()).dataOwner).toBe("bob")
+  })
+})
+
+describe("cross-tab mutation serialization", () => {
+  it("preserves simultaneous account writes from independent module connections", async () => {
+    const base = await import("./session-store")
+    await base._resetDbForTesting()
+
+    vi.resetModules()
+    const tabA = await import("./session-store")
+    vi.resetModules()
+    const tabB = await import("./session-store")
+
+    await Promise.all([
+      tabA.addSession(mkSession({ username: "alice", jwt: "alice-jwt" })),
+      tabB.addSession(mkSession({ username: "bob", jwt: "bob-jwt" })),
+    ])
+
+    expect((await tabB.listSessions()).map((s) => s.username).sort()).toEqual(["alice", "bob"])
   })
 })
 
@@ -302,11 +344,58 @@ describe("cross-tab reconciliation (FRO-367)", () => {
     seen.mockClear() // subscribe itself doesn't fire
 
     window.dispatchEvent(new StorageEvent("storage", { key: "frontier:session-ping", newValue: "x" }))
+    await Promise.resolve()
     expect(seen).toHaveBeenCalledTimes(1)
 
     window.dispatchEvent(new StorageEvent("storage", { key: "some-other-key", newValue: "y" }))
     expect(seen).toHaveBeenCalledTimes(1) // unchanged
 
     un()
+  })
+
+  it("deduplicates BroadcastChannel and storage delivery and reconciles on focus", async () => {
+    const OriginalBroadcastChannel = window.BroadcastChannel
+    const channelHarness: { dispatch?: (ping: string) => void } = {}
+    class FakeBroadcastChannel {
+      private listener: ((event: MessageEvent<string>) => void) | null = null
+      constructor(_name: string) {
+        channelHarness.dispatch = (ping) => this.dispatch(ping)
+      }
+      addEventListener(_type: string, listener: (event: MessageEvent<string>) => void) {
+        this.listener = listener
+      }
+      postMessage() {}
+      close() {}
+      dispatch(ping: string) { this.listener?.(new MessageEvent("message", { data: ping })) }
+    }
+
+    Object.defineProperty(window, "BroadcastChannel", {
+      configurable: true,
+      value: FakeBroadcastChannel,
+    })
+    try {
+      vi.resetModules()
+      const isolated = await import("./session-store")
+      const seen = vi.fn()
+      const un = isolated.subscribeSession(seen)
+
+      channelHarness.dispatch?.("same-ping")
+      window.dispatchEvent(new StorageEvent("storage", {
+        key: "frontier:session-ping",
+        newValue: "same-ping",
+      }))
+      await Promise.resolve()
+      expect(seen).toHaveBeenCalledTimes(1)
+
+      window.dispatchEvent(new Event("focus"))
+      await Promise.resolve()
+      expect(seen).toHaveBeenCalledTimes(2)
+      un()
+    } finally {
+      Object.defineProperty(window, "BroadcastChannel", {
+        configurable: true,
+        value: OriginalBroadcastChannel,
+      })
+    }
   })
 })

@@ -51,6 +51,16 @@ export async function lookupUserByUsername(
   return null
 }
 
+// [Pen test] Input validation & injection (2026-08-26): `prefix` reaches a
+// LIKE pattern only wrapped with a trailing '%' — the value itself was never
+// escaped for LIKE metacharacters, so a caller could pass '%' or '_' to widen
+// the match beyond a literal prefix (e.g. '_' matches any single char). Authz
+// scoping already bounds the blast radius (see searchUsersByScopedPrefix), but
+// the search should behave as a literal-prefix match regardless.
+function escapeLikePrefix(raw: string): string {
+  return raw.replace(/[\\%_]/g, (c) => `\\${c}`)
+}
+
 /**
  * Prefix-match users by username for the "Add member" typeahead.
  * Constraints by design:
@@ -69,11 +79,11 @@ export async function searchUsersByPrefix(
 ): Promise<LookedUpUser[]> {
   const result = await env.AQUILLA_PG.prepare(
     `SELECT id, username FROM users
-      WHERE LOWER(username) LIKE LOWER(?) || '%'
+      WHERE LOWER(username) LIKE LOWER(?) || '%' ESCAPE '\\'
       ORDER BY LOWER(username) ASC
       LIMIT ?`,
   )
-    .bind(prefix, limit)
+    .bind(escapeLikePrefix(prefix), limit)
     .all<LookedUpUser>()
   return result.results ?? []
 }
@@ -105,7 +115,7 @@ export async function searchUsersByScopedPrefix(
     `SELECT id, username FROM (
        SELECT DISTINCT u.id, u.username
          FROM users u
-        WHERE LOWER(u.username) LIKE LOWER(?) || '%'
+        WHERE LOWER(u.username) LIKE LOWER(?) || '%' ESCAPE '\\'
           AND u.id != ?
           AND (
             -- org-overlap: caller and u share at least one org
@@ -128,7 +138,7 @@ export async function searchUsersByScopedPrefix(
      ORDER BY LOWER(username) ASC
      LIMIT ?`,
   )
-    .bind(prefix, callerId, callerId, callerId, limit)
+    .bind(escapeLikePrefix(prefix), callerId, callerId, callerId, limit)
     .all<LookedUpUser>()
   return result.results ?? []
 }

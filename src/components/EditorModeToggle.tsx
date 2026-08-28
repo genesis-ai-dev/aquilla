@@ -104,7 +104,7 @@ function ModeTab({
       <TabsTrigger
         value={value}
         aria-label={label}
-        className={labeled ? "h-6 gap-1 px-1" : "size-6 p-0"}
+        className={labeled ? undefined : "size-6 p-0"}
       >
         <Icon />
         {labeled ? <span>{label}</span> : null}

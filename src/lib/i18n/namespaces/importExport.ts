@@ -572,6 +572,10 @@ export const importExport = defineNamespace({
     "importExport.dialog.stillToRecordCount": "{count} still to record",
     "importExport.dialog.untimedClipCount": "{count} untimed",
     "importExport.dialog.nothingRecordedYet": "Nothing is recorded yet, so there is nothing to export.",
+    "importExport.dialog.nothingOnMainTrack": plural({
+      one: "Nothing is recorded on the main Target audio track — {count} take is on an added track. Export by line to include it.",
+      other: "Nothing is recorded on the main Target audio track — {count} takes are on added tracks. Export by line to include them.",
+    }),
     "importExport.dialog.unrecordedCharacterCount": plural({
       one: "{count} character with nothing recorded yet",
       other: "{count} characters with nothing recorded yet",
@@ -1373,6 +1377,16 @@ export const importExport = defineNamespace({
       "importExport.dialog.audioShapeGroupAriaLabel": {
         description:
           "Accessible name for the radio group choosing the shape of an audio export — one track per character, or one file per recorded line.",
+      },
+      "importExport.dialog.nothingOnMainTrack": {
+        description:
+          "Shown in the by-character preview when the default Target audio row " +
+          "holds no recordings but added tracks do. The preview describes the " +
+          "by-character deliverable, which reads the default row only, so the " +
+          "plain 'nothing is recorded yet' was false on exactly these files — " +
+          "and sat beside an Export button that refused for the same reason. " +
+          "Names the count and where to find them.",
+        placeholders: { count: "How many takes are on added tracks. Always 1 or more." },
       },
       "importExport.dialog.audioAddedTracksNote": {
         description:

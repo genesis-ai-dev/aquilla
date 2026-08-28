@@ -35,7 +35,7 @@ import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import { parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { isDefaultTrackSlot, slotForTrack } from "@/lib/timeline/track-slots"
 import type { TimelineTrack } from "@/lib/timeline/tracks"
-import { withBwfTimestamp } from "./audio-bwf"
+import { trimWav, withBwfTimestamp } from "./audio-bwf"
 import { targetChipGeom } from "@/lib/timeline/lane-timing"
 import {
   characterFileKey,
@@ -171,19 +171,30 @@ export function collectPerLineClips(
  * practice — the client's own test file carries two tracks both called "Audio",
  * and without this the second would silently overwrite the first's whole
  * folder.
+ *
+ * THE DE-DUPLICATION FOLDS CASE; THE NAME DOES NOT (2026-08-27). A zip may hold
+ * "Spanish/" and "spanish/" quite legally, and macOS and Windows then merge
+ * them on extraction and drop one line's take per collision — the exact loss
+ * this exists to prevent, arrived at the long way round. Only the uniqueness
+ * check is case-blind: lowercasing the name itself would rename every folder
+ * that already ships and break its agreement with the character filenames,
+ * which one of these tests pins. Same shape as `sanitizeSheetNames`, which
+ * folds case for Excel's tab rule and leaves the tab name alone.
  */
 export function trackFolderNames(tracks: readonly { id: string; name: string }[]): Map<string, string> {
   const out = new Map<string, string>()
   const used = new Set<string>()
   for (const track of tracks) {
-    const base = characterFileKey(track.name) || "track"
+    // No `|| "track"` fallback: `characterKey` already ends in `|| "unnamed"`,
+    // so this cannot be empty and that arm was never reachable.
+    const base = characterFileKey(track.name)
     let name = base
     let n = 2
-    while (used.has(name)) {
+    while (used.has(name.toLowerCase())) {
       name = `${base}_${n}`
       n += 1
     }
-    used.add(name)
+    used.add(name.toLowerCase())
     out.set(track.id, name)
   }
   return out
@@ -224,12 +235,27 @@ export function timecode(sec: number | null): string {
  * it is the one artefact that survives a rename, opens in a spreadsheet, and
  * says what a folder of audio files cannot.
  */
-export function buildManifestCsv(rows: { name: string; clip: PerLineClip }[]): string {
+export function buildManifestCsv(
+  rows: { name: string; clip: PerLineClip }[],
+  /**
+   * Did the archive get folders? THE SIDECAR DESCRIBES THE ARCHIVE, so this is
+   * handed down rather than worked out again here (2026-08-27).
+   *
+   * It used to be re-derived as "does any clip name a track", which is a
+   * different question from the one the zip asks ("did more than one track
+   * contribute"), and in production the two always disagreed: the dialog always
+   * passes `tracks`, every file has a derived `target-audio` row, and every
+   * clip is stamped with its track — so an ordinary single-track project got a
+   * FLAT zip and a WIDENED nine-column manifest naming "Target audio" on every
+   * row. Exactly the silent schema change the note below forbids. Two
+   * predicates that must agree are one predicate, passed.
+   */
+  foldered: boolean,
+): string {
   // THE COLUMN APPEARS ONLY WHEN THERE ARE TRACKS TO NAME. A single-track
   // export's CSV keeps the exact schema it has always had, because something
   // downstream is reading it by position and a silently widened header is the
   // rudest possible change to a sidecar.
-  const foldered = rows.some((r) => r.clip.trackId != null)
   const header = foldered
     ? "file,track,line,character,start,end,start_seconds,end_seconds,cell_id"
     : "file,line,character,start,end,start_seconds,end_seconds,cell_id"
@@ -267,7 +293,7 @@ export interface ExportPerLineArgs {
 
 export async function exportAudioPerLine(
   args: ExportPerLineArgs,
-): Promise<{ blob: Blob; files: number; clips: number; skipped: number; untimed: number }> {
+): Promise<{ blob: Blob; files: number; clips: number; skipped: number; untimed: number; untrimmed: number }> {
   const clips = collectPerLineClips(args.cells, args.settings, args.resolveName, args.tracks)
   const zip = new JSZip()
   const manifest: { name: string; clip: PerLineClip }[] = []
@@ -283,6 +309,9 @@ export async function exportAudioPerLine(
   let done = 0
   let skipped = 0
   let untimed = 0
+  // Takes that carry a trim this exporter could not apply — every non-WAV.
+  // Reported rather than swallowed: the file is longer than the line sounds.
+  let untrimmed = 0
 
   for (const clip of clips) {
     const parsed = parseFrontierAudioUrl(clip.url)
@@ -330,10 +359,30 @@ export async function exportAudioPerLine(
         // position it USED to have. `targetChipGeom` is the same resolver the
         // lane draws with, so the DAW and the timeline now agree by
         // construction rather than by coincidence.
-        const geom = targetChipGeom(cell, cell.attachments?.[clip.audioId])
+        const attachment = cell.attachments?.[clip.audioId]
+        const geom = targetChipGeom(cell, attachment)
         const placeSec = geom?.start ?? clip.startSec
-        // Untouched audio, one chunk richer. A non-WAV comes back unchanged
-        // and travels on the manifest alone.
+        // …AND WHAT IT PLAYS, NOT EVERYTHING THAT WAS RECORDED (2026-08-27).
+        //
+        // `placeSec` is the take's AUDIBLE start — anchor plus head trim — so
+        // handing over the untrimmed bytes stamped with it put the line into a
+        // DAW late by exactly that trim, with the material the trim hides
+        // audible in front of it. And this is the ordinary case, not a rare
+        // one: `take-margins.ts` gives every recorded take a head trim at
+        // birth to undo the pre-roll anchor shift.
+        //
+        // Sam's ruling: an export contains what you hear. A PCM WAV can be cut
+        // by byte range with no decoder, which keeps this file's no-decoding
+        // charter intact. Anything else — a webm mic take, an uploaded mp3 —
+        // comes back untouched and is counted below, because those carry no
+        // embedded timestamp at all and travel on the manifest.
+        const before = bytes
+        bytes = trimWav(bytes, {
+          trimStartMs: attachment?.trimStartMs,
+          trimEndMs: attachment?.trimEndMs,
+        })
+        const wanted = attachment?.trimStartMs != null || attachment?.trimEndMs != null
+        if (wanted && bytes === before) untrimmed += 1
         bytes = withBwfTimestamp(bytes, {
           // A hyphen, not an em dash: the bext fields are Latin-1 and the
           // writer turns anything above 0xFF into "?", so the pretty dash came
@@ -353,17 +402,19 @@ export async function exportAudioPerLine(
       if (folder) name = `${folder}/${name}`
       // Two takes on one line, or two lines claiming one shared clip: keep both
       // rather than letting the second overwrite the first silently.
-      if (used.has(name)) {
+      // Case-blind, for the reason `trackFolderNames` gives: two paths that
+      // differ only by case are one path once the zip is unpacked.
+      if (used.has(name.toLowerCase())) {
         const dot = name.lastIndexOf(".")
         let n = 2
         let candidate = `${name.slice(0, dot)}_${n}${name.slice(dot)}`
-        while (used.has(candidate)) {
+        while (used.has(candidate.toLowerCase())) {
           n += 1
           candidate = `${name.slice(0, dot)}_${n}${name.slice(dot)}`
         }
         name = candidate
       }
-      used.add(name)
+      used.add(name.toLowerCase())
       zip.file(name, bytes)
       manifest.push({ name, clip })
     } catch (err) {
@@ -374,7 +425,8 @@ export async function exportAudioPerLine(
     args.onProgress?.(done, clips.length)
   }
 
-  if (manifest.length > 0) zip.file("manifest.csv", buildManifestCsv(manifest))
+  // The same `folders` the zip was built from — see `buildManifestCsv`.
+  if (manifest.length > 0) zip.file("manifest.csv", buildManifestCsv(manifest, folders.size > 0))
   const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" })
-  return { blob, files: manifest.length, clips: clips.length, skipped, untimed }
+  return { blob, files: manifest.length, clips: clips.length, skipped, untimed, untrimmed }
 }

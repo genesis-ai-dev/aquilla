@@ -50,6 +50,16 @@ function makeWav(dataBytes = 8): Uint8Array {
   const tag = (at: number, s: string) => { for (let i = 0; i < 4; i += 1) view.setUint8(at + i, s.charCodeAt(i)) }
   tag(0, "RIFF"); view.setUint32(4, bytes.length - 8, true); tag(8, "WAVE")
   tag(12, "fmt "); view.setUint32(16, 16, true)
+  // A REAL `fmt ` body. It used to be left as zeros — the tag and the size were
+  // written and the 16 bytes after them never filled — which was invisible
+  // while nothing read it, and would have made every frame-width calculation
+  // see a blockAlign of 0 the moment something did (2026-08-27).
+  view.setUint16(20, 1, true)      // audioFormat: PCM
+  view.setUint16(22, 1, true)      // channels: mono
+  view.setUint32(24, 48000, true)  // sampleRate
+  view.setUint32(28, 96000, true)  // byteRate = rate * blockAlign
+  view.setUint16(32, 2, true)      // blockAlign: 1 channel * 16 bits
+  view.setUint16(34, 16, true)     // bitsPerSample
   tag(36, "data"); view.setUint32(40, dataBytes, true)
   for (let i = 0; i < dataBytes; i += 1) view.setUint8(44 + i, i + 1)
   return bytes
@@ -106,7 +116,7 @@ describe("the manifest", () => {
         name: "ep_es_L0002_JESUS.wav",
         clip: { cellId: "q2", lineNumber: 2, character: "JESUS", startSec: 61.5, endSec: 63 } as never,
       },
-    ])
+    ], false)
     const [header, row] = csv.trim().split("\n")
     expect(header).toBe("file,line,character,start,end,start_seconds,end_seconds,cell_id")
     expect(row).toBe("ep_es_L0002_JESUS.wav,2,JESUS,00:01:01.500,00:01:03.000,61.5,63,q2")
@@ -118,14 +128,14 @@ describe("the manifest", () => {
         name: "f.wav",
         clip: { cellId: "q1", lineNumber: 1, character: "SIMON, CALLED PETER", startSec: 0, endSec: 1 } as never,
       },
-    ])
+    ], false)
     expect(csv).toContain('"SIMON, CALLED PETER"')
   })
 
   it("leaves the timing columns empty for a line that has none", () => {
     const csv = buildManifestCsv([
       { name: "f.wav", clip: { cellId: "q1", lineNumber: 1, character: "X", startSec: null, endSec: null } as never },
-    ])
+    ], false)
     expect(csv.trim().split("\n")[1]).toBe("f.wav,1,X,,,,,q1")
   })
 })
@@ -414,7 +424,14 @@ describe("the classic single-track export is untouched", () => {
   // A file that HAS added tracks but nobody has recorded onto them is still a
   // one-track export. A lone folder — or one folder beside empty siblings — is
   // a worse deliverable than the flat zip it replaced.
-  it("stays flat when only one track actually contributed", async () => {
+  // THE PRODUCTION SHAPE. The dialog ALWAYS passes tracks and every file has a
+  // derived Target audio row, so the case above — no `tracks` argument — is one
+  // this export never actually receives. This is the call that ships, and until
+  // 2026-08-27 it asserted flatness only: the zip was flat while the manifest
+  // had silently grown a ninth column naming "Target audio" on every row, which
+  // is exactly what the block header promises cannot happen. The two now travel
+  // together so they cannot drift apart again.
+  it("stays flat AND keeps the original manifest header when only one track contributed", async () => {
     const cells = [withTake("a", 1)]
     const result = await exportAudioPerLine({
       cells, settings: SETTINGS, projectId: "p1", langCode: "es",
@@ -423,6 +440,31 @@ describe("the classic single-track export is untouched", () => {
     })
     const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
     expect(Object.keys(zip.files).every((n) => !n.includes("/"))).toBe(true)
+    const csv = await zip.file("manifest.csv")!.async("string")
+    expect(csv.split("\n")[0]).toBe("file,line,character,start,end,start_seconds,end_seconds,cell_id")
+  })
+
+  // The mirror, so neither half can be satisfied alone: folders and the column
+  // arrive together or not at all.
+  it("folders AND widens the header once a second track contributes", async () => {
+    const shared = {
+      id: "c1", startTime: 1, endTime: 2,
+      selectedAudioId: "a-main",
+      selectedBySlot: { "trk-es": "a-es" },
+      attachments: {
+        "a-main": { url: "frontier-audio://a-main.wav", type: "audio" },
+        "a-es": { url: "frontier-audio://a-es.wav", type: "audio" },
+      },
+    } as unknown as CellData
+    const result = await exportAudioPerLine({
+      cells: [shared], settings: SETTINGS, projectId: "p1", langCode: "es",
+      tracks: [track("target-audio", "Target audio", "target-audio"), track("trk-es", "Spanish")],
+      fetchBytes: async () => makeWav(),
+    })
+    const zip = await JSZip.loadAsync(await result.blob.arrayBuffer())
+    expect(Object.keys(zip.files).some((n) => n.includes("/"))).toBe(true)
+    const csv = await zip.file("manifest.csv")!.async("string")
+    expect(csv.split("\n")[0]).toBe("file,track,line,character,start,end,start_seconds,end_seconds,cell_id")
   })
 })
 
@@ -481,7 +523,10 @@ describe("collecting across tracks", () => {
     const clips = collectPerLineClips(
       [withTake("a", 1)], SETTINGS, undefined,
       [
-        track("source-subtitles", "Source text", "target-audio"),
+        // A REAL text row. It used to be declared `target-audio`, so it sailed
+        // through the very kind filter this test exists to pin — delete that
+        // filter and the test stayed green (2026-08-27).
+        { id: "source-subtitles", kind: "source-subtitles", name: "Source text", order: 0 } as unknown as TimelineTrack,
         { id: "grp", kind: "folder", name: "Dubs", order: 1 } as unknown as TimelineTrack,
         track("target-audio", "Target audio", "target-audio"),
       ],
@@ -519,7 +564,34 @@ describe("folder names", () => {
   })
 
   it("never produces an empty folder name", () => {
-    expect(trackFolderNames([{ id: "a", name: "///" }]).get("a")).toBeTruthy()
+    // `characterKey` already ends in `|| "unnamed"`, so this can never be
+    // empty — which is why `trackFolderNames` no longer carries its own
+    // unreachable `|| "track"` fallback.
+    expect(trackFolderNames([{ id: "a", name: "///" }]).get("a")).toBe("unnamed")
+  })
+
+  // …AND NAMES THAT DIFFER ONLY BY CASE ARE THE SAME NAME to the filesystem
+  // doing the unpacking. A zip may legally hold "Spanish/" and "spanish/";
+  // macOS and Windows merge them on extraction and one track's take per line
+  // is silently lost — the exact loss the de-duplication above exists to
+  // prevent, reached the long way round (2026-08-27).
+  it("de-duplicates names that differ only by case", () => {
+    const names = trackFolderNames([
+      { id: "a", name: "Spanish" },
+      { id: "b", name: "spanish" },
+      { id: "c", name: "SPANISH" },
+    ])
+    expect([...names.values()]).toEqual(["Spanish", "spanish_2", "SPANISH_3"])
+    // Every folder is distinct even once the filesystem folds them.
+    const folded = [...names.values()].map((n) => n.toLowerCase())
+    expect(new Set(folded).size).toBe(3)
+  })
+
+  // The case fold belongs to the DEDUPE, not the name: lowercasing the name
+  // would rename every folder that already ships and break its agreement with
+  // the character filenames, which the test above pins.
+  it("leaves an unambiguous name's own case alone", () => {
+    expect(trackFolderNames([{ id: "a", name: "Spanish" }]).get("a")).toBe("Spanish")
   })
 })
 
@@ -622,6 +694,91 @@ describe("where a take is placed in the export", () => {
       fetchBytes: async () => makeWav(),
     })
     expect(await placedSeconds(result.blob, "es_L0001_NO_CHARACTER.wav")).toBeCloseTo(12.5, 3)
+  })
+
+  // ── The export contains what you hear (Sam, 2026-08-27) ──────────────────
+  //
+  // `placeSec` is the take's AUDIBLE start — anchor plus head trim — so
+  // exporting the untrimmed bytes stamped with it put the line into a DAW late
+  // by exactly that trim, with the material the trim hides audible in front of
+  // it. And it is the ordinary case: `take-margins.ts` gives every recorded
+  // take a head trim at birth to undo the pre-roll anchor shift. Nothing in
+  // this suite set a trim before today, which is exactly why nothing caught it.
+  const dataBytesOf = async (blob: Blob, entry: string) => {
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer())
+    const bytes = await zip.file(entry)!.async("uint8array")
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    let at = 12
+    while (at + 8 <= bytes.length) {
+      const id = String.fromCharCode(bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3])
+      const size = view.getUint32(at + 4, true)
+      if (id === "data") return size
+      at += 8 + size + (size % 2)
+    }
+    return null
+  }
+
+  /** A one-second take at 48 kHz mono 16-bit: 48,000 frames, 96,000 bytes. */
+  const secondLongWav = () => makeWav(96_000)
+
+  const trimmed = (over: Record<string, unknown>) =>
+    cell({
+      id: "c1", startTime: 10, endTime: 14,
+      selectedAudioId: "a1",
+      attachments: {
+        a1: { url: "frontier-audio://a1.wav", type: "audio", durationMs: 1000, ...over },
+      },
+    } as Partial<CellData>)
+
+  it("exports only the audible part of a trimmed take, and stamps where that part starts", async () => {
+    // 250 ms cut off the head. The take is anchored at the line's start, so
+    // the audible content begins at 10.25s — and THAT is the first sample now.
+    const result = await exportAudioPerLine({
+      cells: [trimmed({ trimStartMs: 250 })], settings: SETTINGS, projectId: "p1", langCode: "es",
+      fetchBytes: async () => secondLongWav(),
+    })
+    const entry = "es_L0001_NO_CHARACTER.wav"
+    expect(await placedSeconds(result.blob, entry)).toBeCloseTo(10.25, 3)
+    // 750 ms survives: 36,000 frames at 2 bytes each.
+    expect(await dataBytesOf(result.blob, entry)).toBe(72_000)
+    expect(result.untrimmed).toBe(0)
+  })
+
+  it("cuts the tail too", async () => {
+    const result = await exportAudioPerLine({
+      cells: [trimmed({ trimStartMs: 100, trimEndMs: 600 })], settings: SETTINGS, projectId: "p1", langCode: "es",
+      fetchBytes: async () => secondLongWav(),
+    })
+    // 500 ms of audio, starting a tenth of a second into the line.
+    expect(await dataBytesOf(result.blob, "es_L0001_NO_CHARACTER.wav")).toBe(48_000)
+    expect(await placedSeconds(result.blob, "es_L0001_NO_CHARACTER.wav")).toBeCloseTo(10.1, 3)
+  })
+
+  it("leaves an untrimmed take byte-for-byte as it was", async () => {
+    const result = await exportAudioPerLine({
+      cells: [trimmed({})], settings: SETTINGS, projectId: "p1", langCode: "es",
+      fetchBytes: async () => secondLongWav(),
+    })
+    expect(await dataBytesOf(result.blob, "es_L0001_NO_CHARACTER.wav")).toBe(96_000)
+  })
+
+  // A webm cannot be cut without the decoder this exporter refuses to have, so
+  // it goes out whole — but it is COUNTED, because a file longer than the line
+  // sounds is the sort of thing nobody notices until the mix.
+  it("reports a trimmed take it could not cut", async () => {
+    const webmTake = cell({
+      id: "c1", startTime: 10, endTime: 14,
+      selectedAudioId: "a1",
+      attachments: {
+        a1: { url: "frontier-audio://a1.webm", type: "audio", durationMs: 1000, trimStartMs: 250 },
+      },
+    } as Partial<CellData>)
+    const result = await exportAudioPerLine({
+      cells: [webmTake], settings: SETTINGS, projectId: "p1", langCode: "es",
+      fetchBytes: async () => new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3, 4]),
+    })
+    expect(result.untrimmed).toBe(1)
+    expect(result.files).toBe(1)
   })
 
   it("falls back to the line's start for a take nobody has placed", async () => {

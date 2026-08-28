@@ -13,7 +13,7 @@
 // been a promise you could not reach from the dialog.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 
 import { ExportDialog } from "./ExportDialog"
 import type { CellData } from "@/hooks/useCells"
@@ -78,6 +78,15 @@ const BASE_PROPS = {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // THE DIALOG REMEMBERS ITS MODE PER USER AND PROJECT, in localStorage, and
+  // these tests all share one project id — so without this each case inherits
+  // whatever the previous one left selected, and a test asserting the DEFAULT
+  // mode passes or fails on test order (2026-08-27).
+  try {
+    localStorage.removeItem("aq.exportdlg.v1")
+  } catch {
+    /* private mode — nothing was persisted either */
+  }
   mockProjectCells.mockReturnValue({
     files: [], isLoading: false, isTruncated: false,
   } as ReturnType<typeof useProjectCells>)
@@ -195,5 +204,38 @@ describe("a file whose recordings are ONLY on an added track", () => {
     render(<ExportDialog {...props} />)
     openAudioCard()
     expect(screen.queryByText(/1 line/)).toBeNull()
+  })
+
+  // …BUT IT MUST NOT CLAIM THE FILE IS EMPTY EITHER (2026-08-27). The preview
+  // is default-row-only, so "Nothing is recorded yet" was literally false here
+  // — sitting one line from a button that, pressed in by-character mode, then
+  // refused with "No recordings found in this file".
+  it("says what is true: nothing on the main track, takes on an added one", () => {
+    render(<ExportDialog {...props} />)
+    openAudioCard()
+    expect(screen.queryByText(/Nothing is recorded yet/)).toBeNull()
+    expect(screen.getByText(/1 take is on an added track/)).toBeInTheDocument()
+  })
+
+  // Sam, 2026-08-27: open on the mode that can see them. The remembered mode is
+  // validated against what this file can produce, the same way the remembered
+  // fold format is validated against the formats on offer.
+  it("opens on By line, the mode that can actually export them", async () => {
+    render(<ExportDialog {...props} />)
+    openAudioCard()
+    await waitFor(() => {
+      expect(screen.getByRole("radio", { name: /By line/ })).toBeChecked()
+    })
+    expect(screen.getByRole("radio", { name: /By character/ })).not.toBeChecked()
+  })
+
+  // A FALLBACK, NOT AN OVERRIDE: a file the default row CAN export keeps
+  // by character, which is the default and the right export for most files.
+  it("leaves By character alone when the main track has recordings", async () => {
+    render(<ExportDialog {...props} cells={[recorded("s1", 5), onTrack("s2", 9, "trk-es")]} />)
+    openAudioCard()
+    await waitFor(() => {
+      expect(screen.getByRole("radio", { name: /By character/ })).toBeChecked()
+    })
   })
 })

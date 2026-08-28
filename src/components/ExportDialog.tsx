@@ -626,6 +626,42 @@ export function ExportDialog({
     [timelineTracks],
   )
 
+  /**
+   * OPEN ON A MODE THAT CAN ACTUALLY PRODUCE SOMETHING. (Sam, 2026-08-27)
+   *
+   * "By character" reads the default Target audio row only, deliberately — so
+   * on a file whose takes all live on ADDED tracks it finds nothing, while the
+   * Export button beside it is enabled (its gate is an OR across both counters,
+   * blind to the mode) and refuses AFTER the press with "No recordings found in
+   * this file". Untrue of a file that plainly has recordings, and the preview
+   * beside it agreed with the lie.
+   *
+   * The same discipline `export-dialog-memory.ts` states for itself — validate
+   * on read against the live thing, not against what was stored — applied to
+   * the one field it cannot validate on its own, because only this component
+   * knows what the file holds.
+   *
+   * A FALLBACK, NOT AN OVERRIDE. It waits until the counts mean something
+   * (they are both zero while the cells are still arriving), fires at most once
+   * per opening, and never touches a mode that works — so switching back to by
+   * character afterwards stands.
+   *
+   * Its own effect rather than a line in the restore above, because a
+   * dependency array is evaluated at RENDER: naming these counts up there,
+   * where they are not yet declared, is a temporal-dead-zone crash.
+   */
+  const steeredModeRef = useRef(false)
+  useEffect(() => {
+    if (!open) {
+      steeredModeRef.current = false
+      return
+    }
+    if (steeredModeRef.current) return
+    if (recordedLines === 0 && addedTrackTakes === 0) return
+    steeredModeRef.current = true
+    if (recordedLines === 0 && addedTrackTakes > 0) setAudioMode("audio-by-line")
+  }, [open, recordedLines, addedTrackTakes])
+
   /** Which of the two audio deliverables the Audio card will produce. They are
    *  two forms of one thing — a mix track and a review folder — so they share a
    *  card and a button rather than competing as two entries in a list. */
@@ -1142,6 +1178,16 @@ export function ExportDialog({
             `${result.untimed} ${result.untimed === 1 ? "has" : "have"} no timing, so ${result.untimed === 1 ? "it carries" : "they carry"} no timestamp`,
           )
         }
+        // 2026-08-27: a trim is applied on the way out, so the file holds what
+        // the line sounds like. That is a byte-range cut on a PCM WAV and
+        // needs no decoder — but a webm or mp3 take cannot be cut that way, so
+        // it goes out whole. Said out loud, because a file longer than its
+        // line is not something anyone notices until the mix.
+        if (result.untrimmed > 0) {
+          lineNotes.push(
+            `${result.untrimmed} ${result.untrimmed === 1 ? "is" : "are"} not a WAV, so ${result.untrimmed === 1 ? "its trim" : "their trims"} could not be applied`,
+          )
+        }
         setStatus({
           kind: "ok",
           msg: lineNotes.length
@@ -1511,9 +1557,16 @@ export function ExportDialog({
                     </span>
                   </div>
                 ))}
+                {/* This preview describes the BY-CHARACTER deliverable, which
+                    reads the default row only — so on a file whose takes live
+                    on added tracks "nothing is recorded" is false, and sat one
+                    line away from a button that had just refused for the same
+                    reason (2026-08-27). Say what is actually true. */}
                 {recorded.length === 0 && (
                   <p className="text-muted-foreground">
-                    {t("importExport.dialog.nothingRecordedYet")}
+                    {addedTrackTakes > 0
+                      ? t("importExport.dialog.nothingOnMainTrack", { count: addedTrackTakes })
+                      : t("importExport.dialog.nothingRecordedYet")}
                   </p>
                 )}
                 {/* The rest, folded away — still countable at a glance, still

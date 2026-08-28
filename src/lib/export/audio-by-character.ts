@@ -25,6 +25,7 @@
 // production wires real Web Audio + sync-worker fetch.
 
 import JSZip from "jszip"
+import { resolvePcmWindow } from "@/lib/audio/pcm-window"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import { assignedCastVoiceId, resolveCastVoice } from "@/lib/audio/voices"
@@ -49,6 +50,17 @@ export interface CharacterClip {
   /** The cue's own end, when it has one. Used only to decide where a
    *  character's track stops. */
   endSec: number | null
+  /**
+   * This cell's window into the clip, in ms (2026-08-27).
+   *
+   * Carried because the mix must contain what the timeline PLAYS: `startSec`
+   * is the audible start, so laying the whole recording there put every take
+   * late by its head trim — and `take-margins.ts` gives essentially every
+   * recorded take one at birth. It is also what distinguishes two cells that
+   * share one imported clip: same `audioId`, different slice.
+   */
+  trimStartMs?: number | null
+  trimEndMs?: number | null
 }
 
 export interface CharacterGroup {
@@ -170,7 +182,19 @@ export function groupAudioByCharacter(
     // once per cell — so a line recorded together with three others was
     // concatenated three times. Placed on a timeline that would be three copies
     // stacked on themselves. The earliest covering cue is where it starts.
-    const existing = group.clips.find((c) => c.audioId === audioId)
+    // …but a shared clip is only ONE place when the cells play the SAME slice
+    // of it. An imported media file is attached to many cues under one id with
+    // a different trim window each (`attach-media.ts`), and those are
+    // genuinely different audio — collapsing them exported one cue's slice for
+    // all of them (2026-08-27).
+    const trimStartMs = attachment.trimStartMs ?? null
+    const trimEndMs = attachment.trimEndMs ?? null
+    const existing = group.clips.find(
+      (c) =>
+        c.audioId === audioId &&
+        (c.trimStartMs ?? null) === trimStartMs &&
+        (c.trimEndMs ?? null) === trimEndMs,
+    )
     // WHERE THE TAKE SITS, NOT WHERE ITS LINE STARTS. (AQU-646 stage 4)
     //
     // This is the MIX deliverable — every clip laid on silence at its timeline
@@ -186,7 +210,18 @@ export function groupAudioByCharacter(
     // downstream by counting it as unplaceable.
     const geom = targetChipGeom(cell, attachment)
     const startSec = geom?.start ?? cell.startTime ?? null
-    const endSec = geom?.end ?? cell.endTime ?? null
+    // THE CUE'S WINDOW, NOT THE TAKE'S OWN END (Sam, 2026-08-27).
+    //
+    // `trackDurationSec` runs a character's track to whichever is later: where
+    // the audio stops, or where the last line it speaks was supposed to end.
+    // The first half it computes itself from the placed audio, so this field is
+    // only ever the second half — which is what the doc on `endSec` has always
+    // said and what the code stopped supplying when it began reading
+    // `geom.end`, the take's own audible end. Handing the take's end to both
+    // halves made the comparison meaningless, and on a clip shared by several
+    // cues (whose trim window can be minutes into a long import) it ran the
+    // track minutes past the episode in silence.
+    const endSec = cell.endTime ?? null
     if (existing) {
       if (startSec != null && (existing.startSec == null || startSec < existing.startSec)) {
         existing.startSec = startSec
@@ -196,7 +231,7 @@ export function groupAudioByCharacter(
       }
       continue
     }
-    group.clips.push({ cellId: cell.id, audioId, url: attachment.url, startSec, endSec })
+    group.clips.push({ cellId: cell.id, audioId, url: attachment.url, startSec, endSec, trimStartMs, trimEndMs })
   }
   return order.map((k) => byKey.get(k)!)
 }
@@ -438,7 +473,22 @@ export async function exportAudioByCharacter(
         // export glued it on the end, which put words somewhere they were
         // never spoken.
         if (pcm && clip.startSec == null) untimed++
-        else if (pcm) placed.push({ pcm, startSec: clip.startSec!, endSec: clip.endSec })
+        else if (pcm) {
+          // WHAT THE TIMELINE PLAYS, not everything that was recorded. The
+          // decode cache is keyed on the audio id, so one decode serves every
+          // cell sharing the clip and each takes its own window out of it —
+          // which is also why the slice happens HERE rather than in the cache.
+          //
+          // `resolvePcmWindow` is the same arithmetic the transcribe path and
+          // the preview engine use, including its rule that an inverted or
+          // empty window falls back to the whole clip rather than to silence.
+          const win = resolvePcmWindow(pcm.length, TARGET_RATE, {
+            trimStartMs: clip.trimStartMs,
+            trimEndMs: clip.trimEndMs,
+          })
+          const audible = win.isFull ? pcm : pcm.subarray(win.start, win.end)
+          placed.push({ pcm: audible, startSec: clip.startSec!, endSec: clip.endSec })
+        }
       } catch (err) {
         console.warn(`[audio-by-character] skipping clip ${clip.audioId} (${clip.cellId}):`, err)
         skipped++
@@ -460,8 +510,13 @@ export async function exportAudioByCharacter(
     // codex-editor's naming, plus its disambiguator for same-named cast.
     const stem = args.fileBase ? `${characterKey(args.fileBase)}_` : ""
     const base = `${stem}${args.langCode}_${characterFileKey(group.name)}`
-    const seen = usedNames.get(base) ?? 0
-    usedNames.set(base, seen + 1)
+    // Keyed case-blind (2026-08-27): "JESUS" and "Jesus" are two characters to
+    // this sanitiser and one filename to macOS and Windows, so without the fold
+    // the second silently replaced the first on extraction. The NAME keeps its
+    // case — only the uniqueness check ignores it.
+    const key = base.toLowerCase()
+    const seen = usedNames.get(key) ?? 0
+    usedNames.set(key, seen + 1)
     const name = seen === 0 ? `${base}.wav` : `${base}_${seen + 1}.wav`
     zip.file(name, wav)
   }

@@ -49,14 +49,43 @@ export const RECORDING_SLOT = "recording"
 export const GENERATED_VOICE_SLOT = "generatedVoice"
 
 /**
+ * A track whose id IS one of the legacy slot names is quarantined behind this
+ * rather than being allowed to address the dub row's storage. (2026-08-27)
+ *
+ * The prefix is never seen by a real track: ids are uuidv7, so this is reached
+ * only by the pathological pair below.
+ */
+const QUARANTINED_SLOT_PREFIX = "track:"
+
+/**
  * The slot a track's takes are stored in.
  *
- * Added tracks use their own id, which cannot collide with the two well-known
- * names: track ids are uuidv7, and the server's `TRACK_ID_PATTERN` would not
- * accept a camel-case word as a generated id in the first place.
+ * A NON-DEFAULT TRACK MAY NOT ADDRESS A LEGACY SLOT, and the guard is not
+ * theoretical. This used to say the two namespaces "cannot" meet, because
+ * track ids are uuidv7 and the server's pattern "would not accept a camel-case
+ * word". Both halves reason only about ids THIS client mints — nothing stops
+ * another client, an older build or a hand-rolled event from sending one — and
+ * the second half is simply false: `TRACK_ID_PATTERN` is
+ * `/^[A-Za-z0-9_-]{1,64}$/`, which accepts `recording` AND `generatedVoice`.
+ *
+ * A track that got through would share the default dub row's `cell_audio`
+ * slot: the projection's sibling-deselect is per (cell, slot), so selecting on
+ * one row deselects on the other, and `trackIdForSlot` files its takes under
+ * `target-audio` in the Recording tab and in export folders. The worker now
+ * refuses those ids outright (`RESERVED_SLOT_IDS` in file-track-set.ts); this
+ * is the half that also protects a file already carrying one, which no server
+ * check can reach retroactively.
+ *
+ * Quarantining rather than throwing, because this is called while rendering:
+ * the offending track gets its own private slot and simply shows empty, which
+ * is the truth — those takes were never its own — while the dub row keeps
+ * every take it actually has.
  */
 export function slotForTrack(trackId: string): string {
-  return trackId === DEFAULT_TARGET_TRACK_ID ? RECORDING_SLOT : trackId
+  if (trackId === DEFAULT_TARGET_TRACK_ID) return RECORDING_SLOT
+  // `isDefaultTrackSlot` is a slot predicate, and that is the point: the test
+  // is whether this id spells one of the two names a slot may be called.
+  return isDefaultTrackSlot(trackId) ? `${QUARANTINED_SLOT_PREFIX}${trackId}` : trackId
 }
 
 /** Is this one of the default track's two slots? */
@@ -71,7 +100,13 @@ export function isDefaultTrackSlot(slot: string): boolean {
  * Used to group a cell's takes by track in the Recording tab.
  */
 export function trackIdForSlot(slot: string): string {
-  return isDefaultTrackSlot(slot) ? DEFAULT_TARGET_TRACK_ID : slot
+  if (isDefaultTrackSlot(slot)) return DEFAULT_TARGET_TRACK_ID
+  // The inverse of the quarantine above, so a colliding track's own takes are
+  // still grouped under IT rather than leaking back to the dub row — which is
+  // the very attribution the quarantine exists to stop.
+  return slot.startsWith(QUARANTINED_SLOT_PREFIX)
+    ? slot.slice(QUARANTINED_SLOT_PREFIX.length)
+    : slot
 }
 
 /**
@@ -85,7 +120,9 @@ export function trackIdForSlot(slot: string): string {
 export function slotsForTrack(trackId: string): string[] {
   return trackId === DEFAULT_TARGET_TRACK_ID
     ? [RECORDING_SLOT, GENERATED_VOICE_SLOT]
-    : [trackId]
+    // Through `slotForTrack`, not the raw id, so the quarantine cannot be
+    // walked around by a caller that happens to ask this one instead.
+    : [slotForTrack(trackId)]
 }
 
 /**

@@ -58,10 +58,56 @@ describe("an added track", () => {
     expect(isDefaultTrackSlot("generatedVoice")).toBe(true)
   })
 
-  // Track ids are uuidv7 and the server's id pattern would never mint a
-  // camel-case word, so the two namespaces cannot meet.
   it("cannot collide with the well-known names", () => {
     expect(slotForTrack(TRK)).not.toBe(RECORDING_SLOT)
     expect(slotForTrack(TRK)).not.toBe(GENERATED_VOICE_SLOT)
+  })
+})
+
+// ── A track id that spells a legacy slot name (2026-08-27) ─────────────────
+//
+// The case above only ever fed a uuidv7, and the comment that used to sit on
+// it explained why it could never be anything else: ids are uuidv7, and the
+// server's pattern "would not accept a camel-case word". Both halves reason
+// about ids THIS client mints, and the second is false — `TRACK_ID_PATTERN` is
+// `/^[A-Za-z0-9_-]{1,64}$/`, which accepts both names. So the test could not
+// fail no matter what the code did, and the collision it claimed to rule out
+// was reachable the whole time.
+describe("a track whose id spells a legacy slot name", () => {
+  const TRK = "019fd21a-a5a4-75d1-b8c4-3b60072a4fc2"
+
+  // The worker now refuses to CREATE these (RESERVED_SLOT_IDS in
+  // file-track-set.ts). This half is what protects a file that already carries
+  // one, which no server check can reach retroactively.
+  for (const bad of [RECORDING_SLOT, GENERATED_VOICE_SLOT]) {
+    it(`quarantines "${bad}" instead of letting it address the dub row`, () => {
+      const slot = slotForTrack(bad)
+      expect(slot).not.toBe(RECORDING_SLOT)
+      expect(slot).not.toBe(GENERATED_VOICE_SLOT)
+      expect(isDefaultTrackSlot(slot)).toBe(false)
+      // …and it is still ITS slot, so its takes group under it rather than
+      // leaking back to the dub row — the attribution bug in reverse.
+      expect(trackIdForSlot(slot)).toBe(bad)
+    })
+
+    it(`asks for one slot for "${bad}", and the quarantined one`, () => {
+      expect(slotsForTrack(bad)).toEqual([slotForTrack(bad)])
+    })
+  }
+
+  // The consequence that matters: the two rows no longer alias, so a
+  // selection on one cannot deselect the other.
+  it("leaves the default row's own slots untouched", () => {
+    expect(slotForTrack(DEFAULT_TARGET_TRACK_ID)).toBe(RECORDING_SLOT)
+    expect(slotForTrack(RECORDING_SLOT)).not.toBe(slotForTrack(DEFAULT_TARGET_TRACK_ID))
+    expect(slotsForTrack(DEFAULT_TARGET_TRACK_ID)).toEqual([RECORDING_SLOT, GENERATED_VOICE_SLOT])
+  })
+
+  // A real track must be completely unaffected — the quarantine is reached
+  // only by the pathological pair.
+  it("changes nothing for an ordinary track", () => {
+    expect(slotForTrack(TRK)).toBe(TRK)
+    expect(trackIdForSlot(TRK)).toBe(TRK)
+    expect(slotsForTrack(TRK)).toEqual([TRK])
   })
 })

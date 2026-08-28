@@ -1823,6 +1823,44 @@ describe("TimelineEditor — rows come from the track model", () => {
   // own `border-r`, which no row could paint over (a border sits outside the
   // content box), so the divider is now an overlay rule the opaque z-30
   // folder row covers on its own stretch.
+  // ── Selecting a second track must not remount the lanes (2026-08-28) ──────
+  //
+  // The lane used to be returned bare when its menu was empty, and the menu
+  // EMPTIES DURING INTERACTION: with rename-only clearance (a maintainer, the
+  // track-editing setting off) picking a second track makes the single-track
+  // rename verb inapplicable, so every selected row's menu goes empty at once.
+  // Swapping between `lane` and `ContextMenu` at the same key is a remount, and
+  // a remount of TargetAudioLane runs the chip's cleanup — which STOPS A
+  // PLAYING PREVIEW — empties the session peaks cache so every waveform
+  // refetches, and drops any in-flight drag. The identity assertion is the
+  // point; the tint is the symptom that got reported.
+  it("keeps the very same lane element when a second track joins the selection", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={foldedTracks()} onRetimeSubtitle={() => {}}
+        // Rename clearance WITHOUT the track-editing setting — the default
+        // configuration for a maintainer, and the one that empties the menu.
+        onRenameTrack={() => {}}
+        // Without this the rows carry no `data-tl-track-row` at all and the
+        // query below finds nothing — the selector is the reorder affordance's.
+        onReorderTrack={() => {}}
+      />,
+    )
+    const gutter = screen.getByTestId("tl-scroll").previousElementSibling!
+    const rows = [...gutter.querySelectorAll<HTMLElement>("[data-tl-track-row]")]
+    const laneBefore = screen.getByTestId("tl-target-lane")
+
+    fireEvent.click(rows[3])
+    const laneAfterOne = screen.getByTestId("tl-target-lane")
+    fireEvent.click(rows[4], { metaKey: true })
+    const laneAfterTwo = screen.getByTestId("tl-target-lane")
+
+    // Not "looks the same" — the SAME NODE. A remount would give a new one.
+    expect(laneAfterOne).toBe(laneBefore)
+    expect(laneAfterTwo).toBe(laneBefore)
+  })
+
   it("draws the folder row as one grey band across both columns, over the divider", () => {
     render(
       <TimelineEditor

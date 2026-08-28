@@ -4154,10 +4154,16 @@ export function TimelineEditor({
 
                 // A row with no menu is the row that shipped, byte for byte —
                 // no trigger, no wrapper, no `select-none` the trigger adds.
-                // Same for a row whose menu would be empty: an empty popup is
-                // worse than no popup, because it reads as a broken control
-                // rather than as an inapplicable one.
-                if (!hasTrackMenu || trackMenuEmpty(track.id)) return label
+                // Role-derived, so it never flips mid-session.
+                //
+                // An empty menu used to take this path too, and must not: it
+                // flips during interaction (see the lane column's note), and
+                // swapping this row between `TrackLabel` and `Fragment` at one
+                // key remounts it — which would drop focus and caret out of an
+                // open rename field. The menu stays mounted; only its content
+                // is withheld, so an empty popup still never appears.
+                if (!hasTrackMenu) return label
+                const menuEmpty = trackMenuEmpty(track.id)
 
                 return (
                   // TWO ROOTS PER TRACK IN THIS COLUMN, and neither can contain
@@ -4178,13 +4184,17 @@ export function TimelineEditor({
                         root-level callback.) */}
                     <ContextMenu onOpenChange={(open) => { if (open) onTrackContextMenu(track.id) }}>
                       <ContextMenuTrigger render={label} />
-                      <ContextMenuContent className="w-48">{trackMenu(track)}</ContextMenuContent>
+                      {!menuEmpty && (
+                        <ContextMenuContent className="w-48">{trackMenu(track)}</ContextMenuContent>
+                      )}
                     </ContextMenu>
-                    <DropdownMenu handle={menuHandleFor(track.id)}>
-                      <DropdownMenuContent align="end" className="w-48">
-                        {trackMenu(track)}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    {!menuEmpty && (
+                      <DropdownMenu handle={menuHandleFor(track.id)}>
+                        <DropdownMenuContent align="end" className="w-48">
+                          {trackMenu(track)}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </Fragment>
                 )
               })}
@@ -4239,7 +4249,31 @@ export function TimelineEditor({
               />
               {trackRows.map((row) => {
                 const lane = laneForTrack(row)
-                if (!hasTrackMenu || trackMenuEmpty(row.track.id)) return lane
+                // A row with NO MENU CAPABILITY at all — a viewer — is the row
+                // that shipped, byte for byte. That flag is role-derived and
+                // never flips mid-session, so this early return costs nothing.
+                //
+                // AN EMPTY MENU IS NOT THAT CASE, and used to share this line
+                // (2026-08-28). `trackMenuEmpty` flips DURING INTERACTION: with
+                // rename-only clearance, selecting a second track empties the
+                // menu for every selected row at once. That swapped this
+                // element between `lane` and `ContextMenu` at the same key —
+                // different type, so React unmounted and remounted every one of
+                // them. The tint vanishing was the visible half; the rest was
+                // worse. A remount runs `TargetAudioChip`'s cleanup, which
+                // STOPS A PLAYING PREVIEW; it empties `useTargetChipPeaks`'
+                // session cache, so every visible waveform refetches and
+                // redecodes; and it drops any in-flight drag. Ctrl-clicking a
+                // second track silenced audio you were listening to.
+                //
+                // So the menu stays MOUNTED and only its content is withheld.
+                // Consequence to know: a right-click on an empty-menu row now
+                // does nothing at all, where before it showed the browser's own
+                // menu (no trigger was mounted to swallow it). That is the same
+                // answer a chip already gives, and it is the price of not
+                // remounting the lane under a playing take.
+                if (!hasTrackMenu) return lane
+                const menuEmpty = trackMenuEmpty(row.track.id)
                 return (
                   // Sam's ruling: right-click ANYWHERE in a track that is not a
                   // chip. So the lane gets the same menu the label does.
@@ -4270,7 +4304,9 @@ export function TimelineEditor({
                     >
                       {lane}
                     </ContextMenuTrigger>
-                    <ContextMenuContent className="w-48">{trackMenu(row.track)}</ContextMenuContent>
+                    {!menuEmpty && (
+                      <ContextMenuContent className="w-48">{trackMenu(row.track)}</ContextMenuContent>
+                    )}
                   </ContextMenu>
                 )
               })}

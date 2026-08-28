@@ -78,6 +78,31 @@ const DEFAULT_TRACK_IDS = new Set([
   'target-audio',
 ])
 
+/**
+ * The STORAGE SLOT names the default dub row owns, which are therefore not
+ * available as track ids. (2026-08-27)
+ *
+ * A track's id IS its storage slot (`slotForTrack` returns it verbatim for
+ * anything that is not a derived row), so a track created as `recording` or
+ * `generatedVoice` addresses the same `cell_audio` slot as the default Target
+ * audio row. Nothing downstream catches it — the projection's sibling-deselect
+ * is per (cell, slot), so selecting on one row deselects on the other; and
+ * `trackIdForSlot` maps both names back to `target-audio`, so the added
+ * track's takes are attributed to the default row in the Recording tab and
+ * filed under the wrong folder on export.
+ *
+ * The client comment claimed this could not happen because ids are uuidv7 and
+ * this pattern "would not accept a camel-case word". Both halves are about ids
+ * THIS client mints, and the second is simply wrong: TRACK_ID_PATTERN is
+ * `/^[A-Za-z0-9_-]{1,64}$/`, which accepts both names.
+ *
+ * Separate from DEFAULT_TRACK_IDS because these reserve a SLOT, not a row:
+ * they are not track ids anyone may set a kind on, and they never were.
+ * HAND-MIRRORED with RECORDING_SLOT / GENERATED_VOICE_SLOT in
+ * src/lib/timeline/track-slots.ts.
+ */
+const RESERVED_SLOT_IDS = new Set(['recording', 'generatedVoice'])
+
 const PATCH_KEYS = new Set(['kind', 'name', 'order', 'groupId', 'color', 'sourceTrackId'])
 
 /**
@@ -118,6 +143,13 @@ export function handleFileTrackSet(
       ok: false,
       status: 400,
       reason: `file.track.set event ${event.id} carries an unusable trackId: ${String(trackId)}`,
+    }
+  }
+  if (RESERVED_SLOT_IDS.has(trackId)) {
+    return {
+      ok: false,
+      status: 400,
+      reason: `file.track.set event ${event.id} uses a reserved storage slot as a trackId: ${trackId}`,
     }
   }
 

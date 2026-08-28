@@ -89,7 +89,7 @@ export function PredictionPromptSection({
               </Badge>
               <ChevronDown
                 className={[
-                  "h-3.5 w-3.5 shrink-0 text-muted-foreground/60 transition-transform",
+                  "h-3.5 w-3.5 shrink-0 text-muted-foreground/60",
                   open ? "rotate-180" : "",
                 ].join(" ")}
                 aria-hidden="true"

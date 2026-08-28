@@ -19,14 +19,23 @@
 > non-constant-time compare) and OPS-12 (webhook verification during a secret rollover).
 > `docs/OPSEC-REVIEW-2026-08-20.md` covers the external Agent API's write routes,
 > artifact content types, and service-bearer drift (OPS-15…OPS-17).
-> `docs/OPSEC-REVIEW-2026-08-24.md` is the most recent pass — auth & session
-> management, adding OPS-18 (login response time as a user-enumeration oracle),
-> OPS-19 (the password-reset request handler reflecting internal error text and
+> `docs/OPSEC-REVIEW-2026-08-24.md` covers auth & session management, adding
+> OPS-18 (login response time as a user-enumeration oracle), OPS-19 (the
+> password-reset request handler reflecting internal error text and
 > re-opening the same oracle) and OPS-20 (password-reset and email-verification
 > tokens stored in plaintext at rest). It also records OPS-21 — the required
 > PR gate is red on `dev` and fails in the first of three sequential phases, so
 > the worker test suites and the SPA build never execute at all; reported with
 > patches rather than fixed, since none of it is auth/session work.
+> `docs/OPSEC-REVIEW-2026-08-27.md` is the most recent pass — the second on API
+> security & data exposure, closing the two items the first one deliberately
+> deferred: OPS-22 (rate limiting completed on every remaining external Agent
+> API route — reads, artifact meta/content/inspect, changeset GET/discard) and
+> OPS-23 (two audio-id fields that bypassed the codebase's own `isPathSafeId`
+> convention). It also records OPS-24 — a confirmed check-then-act race in
+> credit-cap enforcement across concurrent chat requests, traced to its
+> mechanics but reported rather than fixed, since a correct fix means
+> redesigning the credit-guard/ledger interaction, not a same-day patch.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)

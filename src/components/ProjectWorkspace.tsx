@@ -82,6 +82,7 @@ import type { TimebaseCorrection } from "@/lib/import/timebase"
 import { resolveActiveSourceLanguage } from "./project-workspace-source-language"
 import {
   shouldPatchSystemPrompt,
+  trackDeleteGate,
   shouldSelfHealZeroFileLink,
   shouldApplyCheckResult,
   resolveSidebarAgentClick,
@@ -194,7 +195,7 @@ import {
   type TargetPresenceSelection,
 } from "@/lib/sync/presence-store"
 import { flushOutboxBatch, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
-import { acknowledgeOutboxEvents } from "@/lib/sync/outbox"
+import { acknowledgeOutboxEvents, getOutboxRecords } from "@/lib/sync/outbox"
 import { forbiddenBannerMessage } from "@/lib/sync/forbidden-copy"
 import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
@@ -8414,12 +8415,24 @@ export function ProjectWorkspace() {
       const doomed = serverTimelineTracks.filter((t) => chosen.has(t.id))
       if (doomed.length === 0) return
 
-      // TAKES FIRST, THEN THE ROW, IN ONE ENQUEUE. One IDB transaction means
-      // one notify, one overlay rebuild and one flush — so "interrupted" means
-      // the durable outbox still holds the rest, rather than the pairing being
-      // lost. The order within the batch still matters for what a half-applied
-      // batch LOOKS like: an empty track someone can delete again beats audio
-      // with no row to reach it from.
+      // THE ROW FIRST, AND THE TAKES ONLY IF IT WENT (Sam, 2026-08-27).
+      //
+      // This used to emit both in ONE enqueue, takes first, on the reasoning
+      // that a single IDB transaction makes "interrupted" mean "the outbox
+      // still holds the rest". That is true of interruption and wrong about
+      // REFUSAL. The two halves are authorized differently: `cell.audio.remove`
+      // is contributor-level, while deleting the row is `file.track.set`, gated
+      // behind the project's `allowTrackEditing` setting. The worker authorizes
+      // each event on its own and answers with a mixed accepted/rejected list,
+      // so with that setting off the server took the removals and refused the
+      // row — the recordings were gone, the track came back on `refresh()`, and
+      // nothing said why, because the flusher quarantines a 403 BEFORE the
+      // `rejected` list that feeds `onRejected`, so the handler written for
+      // exactly this 403 could never fire.
+      //
+      // So it is two phases now, and the gated one goes first. Nothing is
+      // removed until the row's deletion is known to have landed — a refusal,
+      // or an answer we never got, costs the user nothing.
       //
       // Soft-deleted, the same way removing a take from a cell has always
       // worked — hidden from every read path and replayed as gone. Not a purge
@@ -8487,19 +8500,11 @@ export function ProjectWorkspace() {
 
       void (async () => {
         try {
-          await enqueueEvents([
-            ...removals.map((r) => ({
-              kind: "cell.audio.remove" as const,
-              projectId: project.id,
-              // The file the CELL lives in — not the active one. A take on a
-              // cue belongs to the sibling, and an event aimed at the wrong
-              // file projects onto nothing.
-              fileId: r.fileId,
-              cellId: r.cellId,
-              parentId: null,
-              author: currentUsername,
-              payload: { audioId: r.audioId },
-            })),
+          // ── PHASE 1: the structural, gated half ──────────────────────────
+          // Ejecting a folder's members writes `groupId`, and deleting a row is
+          // `patch: null` — both gated, so they stand or fall together and
+          // belong in the same phase.
+          const gated = await enqueueEvents([
             ...members.map((member, i) => ({
               kind: "file.track.set" as const,
               projectId: project.id,
@@ -8517,20 +8522,70 @@ export function ProjectWorkspace() {
               payload: { trackId: t.id, patch: null },
             })),
           ])
-          await flushOutboxBatch({
-            getTokenForFile: getTokenForProjectFile,
-            // DO NOT REVERT on a partial failure: the removes that succeeded
-            // are already gone, and there is nothing to put back. Say how far
-            // it got and refresh, so what is on screen is what is on the server.
-            onRejected: (entries) => {
-              const mine = entries.filter((r) => r.fileId === activeFileId)
-              if (mine.length === 0) return
-              toast.add({
-                type: "error",
-                title: `Some of the track couldn't be deleted: ${mine[0].reason}`,
-              })
-            },
-          })
+
+          // DID IT ACTUALLY LAND? Read the outbox back rather than the flush's
+          // counters: the flusher sends the oldest file's slice, which need not
+          // be ours, and a 403 never reaches `onRejected`. A record that is GONE
+          // was accepted; one still present was either refused (`failed`) or
+          // never sent. A couple of passes covers an unrelated batch queued
+          // ahead of ours without turning this into a spin.
+          const gatedIds = gated.map((g) => g.eventId)
+          let left = gatedIds.length > 0 ? await getOutboxRecords(gatedIds) : []
+          for (let pass = 0; pass < 3 && left.length > 0; pass += 1) {
+            if (left.every((r) => r.status === "failed")) break
+            const res = await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+            left = await getOutboxRecords(gatedIds)
+            // No progress at all means offline or auth — another pass would
+            // only repeat it.
+            if (res.accepted === 0 && res.quarantined === 0) break
+          }
+          await refreshOutboxPending()
+
+          const gate = trackDeleteGate(left)
+          if (!gate.proceed) {
+            // NOTHING IS REMOVED. The recordings are still on a track that is
+            // still there, which is a state the user can act on — unlike a
+            // silent half-delete.
+            toast.add({
+              type: "error",
+              title: gate.refused
+                ? `The track wasn't deleted: ${gate.reason ?? "not permitted"}`
+                : "The track couldn't be deleted just now — its recordings were left alone.",
+            })
+            refresh()
+            return
+          }
+
+          // ── PHASE 2: the recordings, now that the row is really gone ──────
+          if (removals.length > 0) {
+            await enqueueEvents(
+              removals.map((r) => ({
+                kind: "cell.audio.remove" as const,
+                projectId: project.id,
+                // The file the CELL lives in — not the active one. A take on a
+                // cue belongs to the sibling, and an event aimed at the wrong
+                // file projects onto nothing.
+                fileId: r.fileId,
+                cellId: r.cellId,
+                parentId: null,
+                author: currentUsername,
+                payload: { audioId: r.audioId },
+              })),
+            )
+            await flushOutboxBatch({
+              getTokenForFile: getTokenForProjectFile,
+              // The row is already gone, so there is nothing to put back. Say
+              // how far it got and refresh, so what is on screen is what is on
+              // the server.
+              onRejected: (entries) => {
+                if (entries.length === 0) return
+                toast.add({
+                  type: "error",
+                  title: `The track was deleted, but some of its recordings were not: ${entries[0].reason}`,
+                })
+              },
+            })
+          }
           refresh()
         } catch (e) {
           toast.add({
@@ -8549,6 +8604,7 @@ export function ProjectWorkspace() {
       audioCueSibling?.id,
       serverTimelineTracks,
       getTokenForProjectFile,
+      refreshOutboxPending,
       refresh,
     ],
   )

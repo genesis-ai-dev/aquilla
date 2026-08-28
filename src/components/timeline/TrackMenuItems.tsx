@@ -31,12 +31,13 @@ import type { ReactNode } from "react"
 import { FolderPlus, FolderMinus, Palette, Pencil, Trash2 } from "lucide-react"
 import {
   ContextMenuItem,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
   ContextMenuSeparator,
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
 } from "@/components/ui/context-menu"
-import { cn } from "@/lib/utils"
 import {
   TRACK_HUES,
   isColorableKind,
@@ -206,14 +207,37 @@ export function trackMenuItems({
               ? t("editor.timeline.trackColorCount", { count: colourable.length })
               : t("editor.timeline.trackColor")}
           </ContextMenuSubTrigger>
+          {/* PICK-ONE, AND IT SAYS SO (2026-08-28). These were plain menu items
+              and the current colour was a ring on an `aria-hidden` swatch — so
+              a screen reader announced six identical entries and no way to tell
+              which one the track already had, or that pressing one had taken.
+              Radio items carry `role="menuitemradio"` and `aria-checked` from
+              Base UI, which is the standard pattern for exactly this and gives
+              high-contrast mode a real selection indicator for free. Same shape
+              the language switcher already uses.
+
+              The group's value is the RESOLVED HEX rather than the palette id:
+              `parseTrackHue` normalises ids, bare hexes and the legacy
+              `green-teal` pairs to one, while a click still WRITES the id. A
+              track nobody has coloured resolves to the default hue and so
+              announces Green as current — which is honest, because Green is
+              what it is drawn in. */}
           <ContextMenuSubContent className="w-auto min-w-0 p-1">
-            {TRACK_HUES.map((hue) => {
+            <ContextMenuRadioGroup
               // "Every one of them is already this", which is the only thing a
-              // selected state could honestly mean across several tracks.
-              const current = colourable.every((tr) => parseTrackHue(tr.color) === hue.hex)
+              // selected state could honestly mean across several tracks — so a
+              // mixed selection matches no hue and nothing announces as checked.
+              value={
+                colourable.every((tr) => parseTrackHue(tr.color) === parseTrackHue(colourable[0].color))
+                  ? parseTrackHue(colourable[0].color)
+                  : ""
+              }
+            >
+            {TRACK_HUES.map((hue) => {
               return (
-                <ContextMenuItem
+                <ContextMenuRadioItem
                   key={hue.id}
+                  value={hue.hex}
                   className="gap-2"
                   onClick={() =>
                     editing.onSetColor(colourable.map((tr) => ({ trackId: tr.id, color: hue.id })))
@@ -221,16 +245,14 @@ export function trackMenuItems({
                 >
                   <span
                     aria-hidden
-                    className={cn(
-                      "h-3.5 w-3.5 shrink-0 rounded-full",
-                      current && "ring-2 ring-foreground/50 ring-offset-1 ring-offset-popover",
-                    )}
+                    className="h-3.5 w-3.5 shrink-0 rounded-full"
                     style={{ backgroundColor: hue.hex }}
                   />
                   {t(hue.labelKey as Parameters<typeof t>[0])}
-                </ContextMenuItem>
+                </ContextMenuRadioItem>
               )
             })}
+            </ContextMenuRadioGroup>
           </ContextMenuSubContent>
         </ContextMenuSub>
       )}

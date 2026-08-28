@@ -333,6 +333,11 @@ export const audio = defineNamespace({
     "audio.aiError.modelNotAvailableTitle": "Model not available",
     "audio.aiError.tooLargeTitle": "Too much text for this model",
     "audio.aiError.geminiKeyRequiredTitle": "Gemini API key required",
+    "audio.aiError.geminiFailedTitle": "Gemini TTS failed",
+    "audio.aiError.omnivoiceNotConfiguredTitle": "OmniVoice isn't configured",
+    "audio.aiError.omnivoiceFailedTitle": "OmniVoice TTS failed",
+    "audio.aiError.seedVcNotConfiguredTitle": "Voice cloning isn't configured",
+    "audio.aiError.seedVcFailedTitle": "Voice cloning failed",
     "audio.aiError.signInRequiredTitle": "Sign in required",
     "audio.aiError.gitProjectUnsupportedTitle": "Not yet supported on git projects",
     "audio.aiError.nothingToReadTitle": "Nothing to read aloud",
@@ -1598,6 +1603,33 @@ export const audio = defineNamespace({
         description:
           "Popover heading when a Gemini-voice TTS request fails because no Gemini " +
           "API key is configured for the project.",
+      },
+      "audio.aiError.geminiFailedTitle": {
+        description:
+          "Popover heading when Gemini TTS ran (a key was present) but the request " +
+          "failed or returned no audio. Distinct from geminiKeyRequiredTitle — the " +
+          "engine is named so it is not confused with an OmniVoice failure.",
+      },
+      "audio.aiError.omnivoiceNotConfiguredTitle": {
+        description:
+          "Popover heading when hosted OmniVoice TTS is not wired on this server " +
+          "(typical for local pnpm dev: missing OMNIVOICE_URL / OMNIVOICE_TOKEN). " +
+          "Must not be read as a Gemini-key problem.",
+      },
+      "audio.aiError.omnivoiceFailedTitle": {
+        description:
+          "Popover heading when OmniVoice TTS was configured but the synthesize " +
+          "call itself failed (Modal/upstream error).",
+      },
+      "audio.aiError.seedVcNotConfiguredTitle": {
+        description:
+          "Popover heading when a non-OmniVoice clone voice needs Seed-VC conversion " +
+          "and the sync-worker has no SEED_VC_URL / SEED_VC_TOKEN. Distinct from " +
+          "omnivoiceNotConfiguredTitle — OmniVoice clones skip this step.",
+      },
+      "audio.aiError.seedVcFailedTitle": {
+        description:
+          "Popover heading when Seed-VC voice conversion ran but failed after TTS.",
       },
       "audio.aiError.signInRequiredTitle": {
         description:

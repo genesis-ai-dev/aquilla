@@ -29,6 +29,12 @@ export type { DispatchResult, DispatchOutcome } from './handlers/types'
 
 export interface DispatchOptions {
   /**
+   * AQU-1005: pre-allocated server_seq for this event. Allocation happens
+   * once per request via allocateSeqRange, OUTSIDE the write transaction, so
+   * the per-project counter row lock is never held across the event batch.
+   */
+  serverSeq: number
+  /**
    * AD-2 first-child-of-parent decision. When `false`, the projection
    * update is skipped — the event still lands in `events` (for history)
    * but does not advance `cells.event_id`. The route layer evaluates the
@@ -104,6 +110,7 @@ export function dispatchEvent(
           db,
           authed as AuthorizedEvent<'file.create'>,
           serverTs,
+          opts.serverSeq,
         ),
       }
 
@@ -114,6 +121,7 @@ export function dispatchEvent(
           db,
           authed as AuthorizedEvent<'file.rename'>,
           serverTs,
+          opts.serverSeq,
         ),
       }
 
@@ -124,6 +132,7 @@ export function dispatchEvent(
           db,
           authed as AuthorizedEvent<'file.delete'>,
           serverTs,
+          opts.serverSeq,
         ),
       }
 
@@ -134,6 +143,7 @@ export function dispatchEvent(
           db,
           authed as AuthorizedEvent<'file.restore'>,
           serverTs,
+          opts.serverSeq,
         ),
       }
 
@@ -144,6 +154,7 @@ export function dispatchEvent(
           db,
           authed as AuthorizedEvent<'file.video.set'>,
           serverTs,
+          opts.serverSeq,
         ),
       }
 
@@ -154,6 +165,7 @@ export function dispatchEvent(
           db,
           authed as AuthorizedEvent<'file.timing.set'>,
           serverTs,
+          opts.serverSeq,
         ),
       }
 
@@ -164,6 +176,7 @@ export function dispatchEvent(
         db,
         authed as AuthorizedEvent<'file.track.set'>,
         serverTs,
+        opts.serverSeq,
       )
 
     case 'comment.create':
@@ -176,6 +189,7 @@ export function dispatchEvent(
           db,
           authed as AuthorizedEvent<CommentEventKind>,
           serverTs,
+          opts.serverSeq,
         ),
       }
 
@@ -214,6 +228,7 @@ export function dispatchEvent(
           db,
           authed as AuthorizedEvent<AssignmentEventKind>,
           serverTs,
+          opts.serverSeq,
         ),
       }
 

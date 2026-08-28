@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test"
-import { resetBackend } from "../../helpers/seed"
+import { resetBackend, seedUser } from "../../helpers/seed"
 
 test.beforeEach(async () => {
   await resetBackend()
@@ -59,4 +59,39 @@ test("sign-in only explains migration after the server confirms it", async ({ pa
 
   releaseMigration()
   await expect(page.getByText("Invalid username or password")).toBeVisible()
+})
+
+test("explicit add-account login preserves both accounts and activates the new one", async ({ page }) => {
+  const alice = seedUser("alice")
+  const bob = seedUser("bob")
+
+  await page.goto("/login")
+  await page.getByLabel("Username or email").fill(alice.username)
+  await page.getByRole("textbox", { name: "Password" }).fill(alice.password)
+  await page.getByRole("button", { name: "Sign in" }).click()
+  await expect(page.getByRole("button", { name: /Account menu: alice/i })).toBeVisible({ timeout: 30_000 })
+
+  await page.goto("/login?add=1&next=%2Forgs%2Fall")
+  await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible()
+  await page.getByLabel("Username or email").fill(bob.username)
+  await page.getByRole("textbox", { name: "Password" }).fill(bob.password)
+  await page.getByRole("button", { name: "Sign in" }).click()
+  await expect(page.getByRole("button", { name: /Account menu: bob/i })).toBeVisible({ timeout: 30_000 })
+
+  const envelope = await page.evaluate(() => new Promise<{
+    active: string | null
+    usernames: string[]
+  }>((resolve, reject) => {
+    const open = indexedDB.open("frontier", 1)
+    open.onerror = () => reject(open.error)
+    open.onsuccess = () => {
+      const request = open.result.transaction("session", "readonly").objectStore("session").get("envelope")
+      request.onerror = () => reject(request.error)
+      request.onsuccess = () => resolve({
+        active: request.result?.active ?? null,
+        usernames: Object.keys(request.result?.sessions ?? {}).sort(),
+      })
+    }
+  }))
+  expect(envelope).toEqual({ active: "bob", usernames: ["alice", "bob"] })
 })

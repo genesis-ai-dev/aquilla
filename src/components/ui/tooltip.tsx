@@ -34,7 +34,7 @@ function TooltipTrigger({ ...props }: TooltipPrimitive.Trigger.Props) {
 
 function TooltipContent({
   className,
-  side = "top",
+  side = "bottom",
   sideOffset = 4,
   align = "center",
   alignOffset = 0,
@@ -76,7 +76,7 @@ function TooltipContent({
 function AppTooltip({
   children,
   content,
-  side = "top",
+  side = "bottom",
   align = "center",
   delay = DEFAULT_TOOLTIP_DELAY,
   disabled = false,

@@ -1,11 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useLocation } from "react-router-dom"
 import { listMyOrgs, type OrgSummary } from "@/lib/frontier/orgs"
-import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
+import { fetchAccessibleProjectsResult, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { isJwtExpired } from "@/lib/frontier/auth"
 import { UserError } from "@/lib/errors/user-error"
-import { notifySessionExpired } from "@/lib/errors/session-expired-signal"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import {
   ALL_ORGS_PARAM,
@@ -110,6 +109,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     }
     if (!jwt) {
       setOrgs([])
+      setActiveOrgId(null)
       setResolvedOrgJwt(null)
       setLoading(false)
       return []
@@ -124,7 +124,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
       setActiveOrgId(null)
       setResolvedOrgJwt(jwt)
       setLoading(false)
-      notifySessionExpired()
+      void notifySessionExpiredIfCurrent(jwt)
       return []
     }
     setLoading(true); setError(null)
@@ -209,7 +209,17 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     setAccessibleProjectsError(null)
     const promise = (async () => {
       try {
-        const projects = await fetchAccessibleProjects(jwt)
+        const result = await fetchAccessibleProjectsResult(jwt)
+        if (!result.ok) {
+          if (result.reason === "unauthenticated") {
+            void notifySessionExpiredIfCurrent(jwt)
+            throw new UserError(401, "")
+          }
+          if (result.reason === "forbidden") throw new UserError(403, "")
+          if (result.reason === "unreachable") throw new Error("Failed to fetch")
+          throw new UserError(result.status ?? 500, "")
+        }
+        const projects = result.projects
         if (projectsRequestRef.current !== requestId) return []
         setAccessibleProjects(projects)
         return projects
@@ -306,32 +316,47 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(ORG_STORAGE_KEY, ALL_ORGS_PARAM)
   }, [])
 
-  const isAllOrgs = orgs.length > 1 && activeOrgId == null
-  const activeOrg = orgs.find((o) => o.id === activeOrgId) ?? null
+  const orgsReady = !sessionLoading && resolvedOrgJwt === jwt
+  const projectsReady = !sessionLoading && resolvedProjectsJwt === jwt
+  // A JWT change is visible during render, before the effects above can clear
+  // their previous-account state. Mask that state at the provider boundary so
+  // consumers cannot paint an old directory merely because they forgot to
+  // honor the accompanying loading flag perfectly.
+  const visibleOrgs = orgsReady ? orgs : []
+  const visibleAccessibleProjects = projectsReady ? accessibleProjects : []
+  const visibleGuestOrgs = orgsReady && projectsReady ? guestOrgs : []
+  const resolvedMemberOrg = visibleOrgs.find((org) => org.id === activeOrgId) ?? null
+  // A confirmed membership is safe as soon as the org directory resolves.
+  // Any other id may be a guest org, whose access is known only after the
+  // project directory resolves; keep that id masked in the meantime so guest
+  // pages cannot issue speculative requests during an account switch.
+  const visibleActiveOrgId = orgsReady && (resolvedMemberOrg != null || projectsReady)
+    ? activeOrgId
+    : null
+  const isAllOrgs = visibleOrgs.length > 1 && visibleActiveOrgId == null
+  const activeOrg = visibleActiveOrgId == null ? null : resolvedMemberOrg
   // AQU-790: only a guest org when the active id is not one of the caller's
   // memberships — a membership always wins (never misrepresent role).
   const activeGuestOrg =
-    activeOrgId != null && activeOrg == null
-      ? guestOrgs.find((g) => g.id === activeOrgId) ?? null
+    visibleActiveOrgId != null && activeOrg == null
+      ? visibleGuestOrgs.find((g) => g.id === visibleActiveOrgId) ?? null
       : null
-  const orgsReady = !sessionLoading && (jwt == null || resolvedOrgJwt === jwt)
-  const projectsReady = !sessionLoading && (jwt == null || resolvedProjectsJwt === jwt)
 
   return (
     <OrgContext.Provider value={{
-      orgs,
-      activeOrgId,
+      orgs: visibleOrgs,
+      activeOrgId: visibleActiveOrgId,
       activeOrg,
       activeGuestOrg,
       isAllOrgs,
-      guestOrgs,
-      accessibleProjects,
+      guestOrgs: visibleGuestOrgs,
+      accessibleProjects: visibleAccessibleProjects,
       accessibleProjectsLoading: accessibleProjectsLoading || !projectsReady,
-      accessibleProjectsError,
+      accessibleProjectsError: projectsReady ? accessibleProjectsError : null,
       setActiveOrg,
       setAllOrgs,
       isLoading: isLoading || !orgsReady,
-      error,
+      error: orgsReady ? error : null,
       refresh,
       refreshAccessibleProjects,
       retryOrgLoad,

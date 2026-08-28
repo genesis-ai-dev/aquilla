@@ -415,7 +415,7 @@ export function CellVoicePanel({
   const effDur = Math.max(0, effEnd - effStart)
   const effCurrent = Math.max(0, Math.min(currentTime - effStart, effDur))
   const fraction = effDur > 0 ? effCurrent / effDur : 0
-  const primaryTitle = isPlaying ? t("common.pause") : t("editor.voice.play")
+  const primaryLabel = isPlaying ? t("common.pause") : t("editor.audio.play")
 
   const takeTools = hasTake ? (
     <div data-slot="voice-take-tools" className="flex shrink-0 items-center">
@@ -442,18 +442,16 @@ export function CellVoicePanel({
         <div className="relative mb-2 h-12">
           <WaveScrubber fraction={fraction} onSeek={(f) => seek(effStart + f * effDur)} seed={cell.id} />
           <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-            <AppTooltip content={primaryTitle}>
-              <Button
-                type="button"
-                size="icon-lg"
-                variant="default"
-                onClick={onPrimary}
-                aria-label={primaryTitle}
-                className="shadow-md"
-              >
-                {audioLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-[1px]" />}
-              </Button>
-            </AppTooltip>
+            <Button
+              type="button"
+              size="icon-lg"
+              variant="default"
+              onClick={onPrimary}
+              aria-label={primaryLabel}
+              className="shadow-md"
+            >
+              {audioLoading ? <Spinner /> : isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 translate-x-[1px]" />}
+            </Button>
           </div>
           <span className="pointer-events-none absolute bottom-0 left-0 rounded bg-background/70 px-1 text-[10px] tabular-nums text-muted-foreground">
             {`${fmtTime(effCurrent)} / ${effDur > 0 ? fmtTime(effDur) : "–:––"}`}

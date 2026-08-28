@@ -894,6 +894,14 @@ export interface CommentThread {
    * `null` = unknown baseline (legacy thread or git-imported) → never stale.
    */
   createdForTranslated: string | null
+  /**
+   * AQU-1000: username of whoever started the thread, matching the server's
+   * `comments.author_id`. Resolve carries a higher role floor on a thread you
+   * did not write, so the UI needs the identity — not just the display label
+   * on `messages[0].author` — to decide whether to offer the control.
+   * `undefined` for git-imported / legacy threads that never carried one.
+   */
+  authorId?: string
   messages: CommentMessage[]
 }
 

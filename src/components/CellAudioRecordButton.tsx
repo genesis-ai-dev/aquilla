@@ -2,11 +2,12 @@
 // the workspace level — the modal owns the full capture flow (countdown,
 // waveform, duration bar, preview/retake/save, rapid next/prev navigation).
 
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { Mic, MicOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { Popover, PopoverContent, PopoverDescription, PopoverTitle } from "@/components/ui/popover"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 interface Props {
@@ -32,6 +33,7 @@ export function getUnsupportedReason(): string | null {
 export function CellAudioRecordButton({ onOpenRecording, disabled, micDenied }: Props) {
   const t = useT()
   const [showDeniedHelp, setShowDeniedHelp] = useState(false)
+  const helpAnchorRef = useRef<HTMLSpanElement>(null)
   const unsupportedReason = getUnsupportedReason()
   const blocked = disabled || unsupportedReason !== null || micDenied
   // `unsupportedReason` is a browser-capability diagnostic produced outside any
@@ -50,7 +52,7 @@ export function CellAudioRecordButton({ onOpenRecording, disabled, micDenied }: 
   }
 
   return (
-    <span className="relative inline-flex">
+    <span ref={helpAnchorRef} className="relative inline-flex">
       <AppTooltip content={tooltip}>
         <Button
           type="button"
@@ -74,24 +76,29 @@ export function CellAudioRecordButton({ onOpenRecording, disabled, micDenied }: 
         </Button>
       </AppTooltip>
 
-      {/* Mic-denied help popover — shown when micDenied and user clicked */}
       {micDenied && showDeniedHelp && (
-        <span
-          role="tooltip"
-          className="absolute bottom-full left-1/2 z-50 mb-1 w-52 -translate-x-1/2 rounded-md border bg-popover px-3 py-2 text-[11px] leading-snug text-popover-foreground shadow-md"
-        >
-          <strong className="block font-semibold">{t("editor.audio.micBlockedTitle")}</strong>
-          <span className="mt-0.5 block text-muted-foreground">
-            {t("editor.audio.micBlockedHelp")}
-          </span>
-          <button
-            type="button"
-            onClick={() => setShowDeniedHelp(false)}
-            className="mt-1.5 text-[10px] underline text-muted-foreground hover:text-foreground"
+        <Popover open onOpenChange={(open) => { if (!open) setShowDeniedHelp(false) }}>
+          <PopoverContent
+            anchor={helpAnchorRef}
+            side="bottom"
+            align="center"
+            className="w-52 gap-1 p-3 text-[11px] leading-snug"
           >
-            {t("common.dismiss")}
-          </button>
-        </span>
+            <PopoverTitle className="text-[11px] font-semibold">
+              {t("editor.audio.micBlockedTitle")}
+            </PopoverTitle>
+            <PopoverDescription className="text-[11px] leading-snug">
+              {t("editor.audio.micBlockedHelp")}
+            </PopoverDescription>
+            <button
+              type="button"
+              onClick={() => setShowDeniedHelp(false)}
+              className="mt-1 self-start text-[10px] underline text-muted-foreground hover:text-foreground"
+            >
+              {t("common.dismiss")}
+            </button>
+          </PopoverContent>
+        </Popover>
       )}
     </span>
   )

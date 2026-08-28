@@ -116,6 +116,16 @@ syncToken.post(
       }
       case "no_access":
         return c.json({ error: "No access to project" }, 403)
+      // AQU-996: a role-resolution query failed with no grant found — the
+      // denial would be unreliable. 503 (transient) rather than 403: the SPA
+      // outbox quarantines events as permanently forbidden on a mint 403,
+      // which is how a DB blip turned a contributor's comment into a bogus
+      // "no permission" error on 2026-08-25.
+      case "role_lookup_failed":
+        return c.json(
+          { error: "Unable to verify project access right now. Please retry." },
+          503,
+        )
       // Unreachable via this route (safeId already rejected at validation),
       // but the mint core's union requires the case.
       case "unsafe_id":

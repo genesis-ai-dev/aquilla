@@ -25,7 +25,7 @@
 // the dashboard do not cause a token-mint stampede — each distinct projectId
 // shares one in-flight fetcher/cache across all cards.
 
-import { useRef, useMemo } from "react"
+import { useEffect, useMemo } from "react"
 import { useFrontierSession } from "./useFrontierSession"
 import { useHealthRollup } from "./useHealthRollup"
 import { makeSyncTokenFetcher } from "@/lib/sync/sync-token"
@@ -36,11 +36,22 @@ import { makeSyncTokenFetcher } from "@/lib/sync/sync-token"
 // does not validate fileId — it only checks projectId and role.
 const HEALTH_SENTINEL_FILE_ID = "__project__"
 
-// Module-level token fetcher cache keyed by projectId.
+// Module-level token fetcher cache keyed by account + projectId.
 // Survives re-renders across all ProjectCard instances so a dashboard with
 // many cards shares one in-flight mint per project rather than stampeding.
-// The JWT accessor is held by ref so card remounts don't invalidate the cache.
-const fetcherCache = new Map<string, () => Promise<string | null>>()
+// Entries are reference-counted and discarded when the last card unmounts so
+// a signed-out account's raw JWT is not retained in module memory.
+interface CachedFetcher {
+  jwt: string | null
+  fetcher: () => Promise<string | null>
+  consumers: number
+}
+
+const fetcherCache = new Map<string, CachedFetcher>()
+
+function cacheKey(owner: string, projectId: string): string {
+  return `${encodeURIComponent(owner)}:${encodeURIComponent(projectId)}`
+}
 
 export interface UseProjectHealthResult {
   /** Overall project health 0-100. null = not yet loaded or unavailable. */
@@ -50,40 +61,68 @@ export interface UseProjectHealthResult {
 
 export function useProjectHealth(projectId: string | null): UseProjectHealthResult {
   const { session } = useFrontierSession()
-
-  // Keep a ref to the latest JWT so the module-level fetcher (which closes
-  // over this ref) always uses the freshest session token without needing a
-  // new fetcher per render.
-  const jwtRef = useRef<string | null>(null)
-  jwtRef.current = session?.jwt ?? null
+  const owner = session?.username ?? null
 
   // Build (or retrieve from module-level cache) a token fetcher for this
   // projectId. The fetcher wraps makeSyncTokenFetcher which:
   //  1. Calls POST /api/v2/sync-token with the auth JWT → receives a sync JWT
   //     with aud=sync and the projectId embedded.
   //  2. Caches the sync JWT in-memory, auto-refreshing 30 s before expiry.
-  // We only build a new fetcher when projectId changes and is non-null.
-  const getToken = useMemo<(() => Promise<string | null>) | undefined>(() => {
-    if (!projectId) return undefined
+  // We only build a new fetcher when the account/project pair changes. The
+  // cached entry's JWT is refreshed on every credential change, so a normal
+  // token rotation does not discard the shared in-flight/cache machinery.
+  const cached = useMemo<CachedFetcher | undefined>(() => {
+    if (!projectId || !owner) return undefined
 
-    let fetcher = fetcherCache.get(projectId)
-    if (!fetcher) {
-      fetcher = makeSyncTokenFetcher(
-        () => jwtRef.current,
+    const key = cacheKey(owner, projectId)
+    let entry = fetcherCache.get(key)
+    if (!entry) {
+      entry = {
+        jwt: session?.jwt ?? null,
+        consumers: 0,
+        fetcher: () => Promise.resolve(null),
+      }
+      entry.fetcher = makeSyncTokenFetcher(
+        () => entry?.jwt ?? null,
         projectId,
         HEALTH_SENTINEL_FILE_ID,
       )
-      fetcherCache.set(projectId, fetcher)
+      fetcherCache.set(key, entry)
     }
-    return fetcher
-  }, [projectId])
+    entry.jwt = session?.jwt ?? null
+    return entry
+  }, [owner, projectId, session?.jwt])
+
+  useEffect(() => {
+    if (!projectId || !owner) return
+    const key = cacheKey(owner, projectId)
+    const entry = fetcherCache.get(key)
+    if (!entry) return
+    entry.consumers += 1
+    return () => {
+      entry.consumers -= 1
+      if (entry.consumers === 0) {
+        // React Strict Mode replays effect setup immediately after cleanup.
+        // Defer disposal one microtask so that replay can retain the shared
+        // entry instead of manufacturing a second fetcher for the same card.
+        queueMicrotask(() => {
+          if (entry.consumers === 0 && fetcherCache.get(key) === entry) {
+            entry.jwt = null
+            fetcherCache.delete(key)
+          }
+        })
+      }
+    }
+  }, [owner, projectId])
+
+  const getToken = cached?.fetcher
 
   const { projectHealth, loading } = useHealthRollup({
     projectId: projectId ?? undefined,
     getToken,
     // No cells on the dashboard — the refetch key is purely projectId.
     cells: [],
-    enabled: projectId !== null && session?.jwt !== undefined,
+    enabled: projectId !== null && Boolean(owner && session?.jwt),
   })
 
   return { projectHealth, loading }

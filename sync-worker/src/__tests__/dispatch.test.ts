@@ -125,7 +125,7 @@ function makeNoOpD1(): AquillaDb {
 describe('dispatchEvent', () => {
   it('target.cell.create routes to the cell handler, returns events INSERT + cells UPSERT', async () => {
     const authed = await makeAuthorized('target.cell.create', 400)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 1, updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     // 1 events INSERT + 1 chain-claim INSERT (AD-2 atomic arbitration)
@@ -139,7 +139,7 @@ describe('dispatchEvent', () => {
 
   it('cell.validate routes to the cell handler with validator UPSERT + validated recompute + endorsement_count recompute', async () => {
     const authed = await makeAuthorized('cell.validate', 300)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 2, updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     // 1 events INSERT + 1 validator UPSERT + 1 ai_drafted clear (AQU-292)
@@ -152,7 +152,7 @@ describe('dispatchEvent', () => {
 
   it('updateProjection=false produces only the events INSERT (AD-2 stale sibling)', async () => {
     const authed = await makeAuthorized('target.cell.commit', 400)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: false })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 3, updateProjection: false })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     expect(outcome.result.stmts.length).toBe(1)
@@ -161,7 +161,7 @@ describe('dispatchEvent', () => {
 
   it('file.create routes to the file handler', async () => {
     const authed = await makeAuthorized('file.create', 500)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 4, updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     expect(outcome.result.stmts.length).toBe(2) // events INSERT + files UPSERT
@@ -171,7 +171,7 @@ describe('dispatchEvent', () => {
   it('file.rename routes to the file handler, returns events INSERT + files UPDATE', async () => {
     // CONTRIBUTOR (400) — label cleanup is normal editing flow, not structural.
     const authed = await makeAuthorized('file.rename', 400)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 5, updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     expect(outcome.result.stmts.length).toBe(2) // events INSERT + files UPDATE
@@ -181,7 +181,7 @@ describe('dispatchEvent', () => {
 
   it('source.* kinds route to the cell handler (with side=source projection)', async () => {
     const authed = await makeAuthorized('source.cell.create', 500)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 6, updateProjection: true })
     expect(outcome.ok).toBe(true)
   })
 })

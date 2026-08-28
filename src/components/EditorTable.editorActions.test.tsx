@@ -518,7 +518,7 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     })
     fireEvent.click(micButton)
 
-    expect(screen.getByRole("tooltip", { name: /microphone blocked/i })).toBeInTheDocument()
+    expect(screen.getByText("Microphone blocked")).toBeInTheDocument()
     expect(micButton.closest("[data-grid-row]")).toHaveClass("z-30", "overflow-visible")
   })
   // ── 2026-08-07 (wire b): a plain row click points the timeline at the cell ──

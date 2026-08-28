@@ -4,7 +4,6 @@ import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { OrgProvider } from "@/context/OrgContext"
 import { MembersPage } from "./MembersPage"
-import { listMyOrgs } from "@/lib/frontier/orgs"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({
@@ -47,10 +46,11 @@ vi.mock("@/hooks/useOrgSettings", () => ({
 // The test asserts "Come and See" appears, which only happens if MembersPage
 // reads from the active org (useActiveOrg / listMyOrgs), not the owned org
 // (useOrg / getOrCreateMyOrg).
+const listMyOrgs = vi.fn(async (_jwt?: string) => [
+  { id: 42, name: "Come and See", role: { level: 700, name: "owner" } },
+])
 vi.mock("@/lib/frontier/orgs", () => ({
-  listMyOrgs: vi.fn(async () => [
-    { id: 42, name: "Come and See", role: { level: 700, name: "owner" } },
-  ]),
+  listMyOrgs: (jwt?: string) => listMyOrgs(jwt),
   listOrgMembers: vi.fn(async () => []),
   addOrgMember: vi.fn(async () => null),
   addOrgMembers: vi.fn(async () => []),
@@ -362,6 +362,7 @@ describe("MembersPage — Teams-style roster table", () => {
         },
       ],
       isLoading: false,
+      error: null,
       refresh: vi.fn(async () => {}),
     })
     const { useOrgMembers } = await import("@/hooks/useOrg")
@@ -406,6 +407,7 @@ describe("MembersPage — Teams-style roster table", () => {
         },
       ],
       isLoading: false,
+      error: null,
       refresh: vi.fn(async () => {}),
     })
     const { useOrgMembers } = await import("@/hooks/useOrg")

@@ -67,7 +67,7 @@ function makeNoOpD1(): AquillaDb {
 }
 
 function dispatch(authed: AuthorizedEvent<'file.track.set'>) {
-  return dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
+  return dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 1, updateProjection: true })
 }
 
 /**

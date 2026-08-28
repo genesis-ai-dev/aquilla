@@ -27,6 +27,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Switch } from "@/components/ui/switch"
 import { Input } from "@/components/ui/input"
+import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { OptionalMark } from "@/components/ui/field"
 import { Slider } from "@/components/ui/slider"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -1558,10 +1559,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 label={<label htmlFor="sl">{t("projectSettings.info.sourceLanguageLabel")}</label>}
                 control={
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
-                    <Input
+                    <LanguageComboboxInput
                       id="sl"
                       value={sourceLanguage}
-                      onChange={(e) => setSourceLanguage(e.target.value)}
+                      onValueChange={setSourceLanguage}
                       disabled={!canEditShared}
                       aria-label={t("projectSettings.info.sourceLanguageLabel")}
                       className="w-40 bg-background"
@@ -1573,10 +1574,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 label={<label htmlFor="tl">{t("projectSettings.info.targetLanguageLabel")}</label>}
                 control={
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
-                    <Input
+                    <LanguageComboboxInput
                       id="tl"
                       value={targetLanguage}
-                      onChange={(e) => setTargetLanguage(e.target.value)}
+                      onValueChange={setTargetLanguage}
                       disabled={!canEditShared}
                       aria-label={t("projectSettings.info.targetLanguageLabel")}
                       className="w-40 bg-background"

@@ -1678,9 +1678,10 @@ case 'cell.audio.attach': {
       // Server noops on a reply id per spec.
       //
       // Self path: comment author resolves their own thread — commenter(200)+.
-      // Foreign path: resolving someone else's thread — maintainer(600)+ only.
+      // Foreign path: resolving someone else's thread — contributor(400)+
+      //   (AQU-999; edit/delete stay at maintainer(600)).
       //   The route layer rejects the event before it reaches here when the
-      //   caller is not the comment author and lacks maintainer role. The
+      //   caller is not the comment author and is below that floor. The
       //   projection logic is the same either way (no author filter on resolve
       //   — ownership was already enforced upstream).
       stmts.push(

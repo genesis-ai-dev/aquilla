@@ -1,31 +1,44 @@
 // Canonical `events` INSERT — the ONLY way an event row may be written.
 //
-// server_seq allocation (audit RACE-1 / PERF-5, task M1-1):
-//   The old per-statement `COALESCE((SELECT MAX(server_seq) …), 0) + 1` was
-//   race-unsafe: two concurrent same-project transactions computed the same
-//   N+1 under READ COMMITTED, and the loser's unique-index collision on
+// server_seq allocation (audit RACE-1 / PERF-5, task M1-1; AQU-1005):
+//   The original per-statement `COALESCE((SELECT MAX(server_seq) …), 0) + 1`
+//   was race-unsafe: two concurrent same-project transactions computed the
+//   same N+1 under READ COMMITTED, and the loser's unique-index collision on
 //   idx_events_project_seq was swallowed by an UNQUALIFIED `ON CONFLICT DO
 //   NOTHING` — the event-log row silently vanished while its cells projection
 //   still committed (cells.event_id → ghost event).
 //
-//   Now every insert bumps a per-project counter row INSIDE the same
-//   statement/transaction (`bump` CTE). The first bump in a transaction takes
-//   the counter's row lock, so concurrent same-project writers serialize on
-//   it and can never allocate the same seq; different projects don't contend.
+//   M1-1 fixed that by bumping a per-project counter row inside the insert
+//   statement itself. Correct, but it took the counter's row lock inside the
+//   write transaction and held it until commit, so every same-project writer
+//   queued behind the slowest one — the AQU-1005 lock convoy.
 //
-//   - Seeding: the VALUES arm initializes the row from MAX(events.server_seq)
-//     the first time a project writes after this deploy.
-//   - Self-healing: if the counter ever falls behind the log (e.g. rows
-//     written by a pre-allocator worker during a rolling deploy), the
-//     GREATEST against the freshly computed EXCLUDED seed jumps it past the
-//     log max in one statement instead of colliding.
+//   Allocation now happens UP FRONT, outside the write transaction, via
+//   `allocateSeqRange` (one autocommit statement: bump the counter, announce
+//   the block in `seq_allocations`, purge expired corpses). Callers stamp the
+//   pre-allocated seq onto each row and every insert — single or bulk — goes
+//   through `buildBulkEventInsertStmt` with an explicit server_seq.
+//
+//   Race safety now rests on two things:
+//   - The counter row lock is still what serializes concurrent same-project
+//     allocators, but it is held for ONE tiny statement (microseconds), never
+//     across the event batch. Blocks therefore never overlap.
+//   - Cursor safety comes from the `seq_allocations` ledger fence: readers
+//     clamp their advertised `?since=` cursor below the oldest still-pending
+//     allocation (see fetchPendingFloor), so an in-flight writer's block can
+//     never be skipped past.
+//
+//   - Seeding: the VALUES arm initializes the counter from
+//     MAX(events.server_seq) the first time a project allocates.
+//   - Self-healing: if the counter ever falls behind the log, the GREATEST
+//     against the freshly computed EXCLUDED seed jumps it past the log max in
+//     one statement instead of colliding.
 //   - `ON CONFLICT (id) DO NOTHING` is qualified to the PK: only true
 //     idempotent id-replays are skipped. Any other unique violation (e.g. a
 //     seq collision, which the allocator makes impossible by construction)
-//     now fails the transaction LOUDLY instead of dropping the row.
-//   - Gaps: an id-replay still consumes a seq (the CTE runs, the row is
-//     dropped). Harmless — server_seq is an ordering key, not a count — and
-//     rare: POST /events pre-checks idempotency before building statements.
+//     fails the transaction LOUDLY instead of dropping the row.
+//   - Gaps: a rejected or replayed event still consumes its pre-allocated
+//     seq. Harmless — server_seq is an ordering key, not a count.
 
 import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
 
@@ -43,6 +56,9 @@ export interface EventInsertRow {
   payloadJson: string
   clientTs: number
   serverTs: number
+  /** Pre-allocated ordering key (from allocateSeqRange) — never computed
+   *  inside the INSERT any more. See the header note. */
+  serverSeq: number
 }
 
 // AQU-533: `events.provenance` (JSONB, nullable) is INTENTIONALLY omitted from
@@ -51,82 +67,122 @@ export interface EventInsertRow {
 // path stamps provenance, and it does so out-of-band with a targeted UPDATE
 // AFTER the events land (see sync-worker/src/external/commit.ts). Keeping it out
 // of the hot insert preserves byte-identical behaviour for every existing test.
-export const EVENT_INSERT_SQL = `WITH bump AS (
-  INSERT INTO project_seq_counters (project_id, last_seq)
-  VALUES (?, COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + 1)
-  ON CONFLICT (project_id) DO UPDATE SET
-    last_seq = GREATEST(project_seq_counters.last_seq + 1, excluded.last_seq)
-  RETURNING last_seq
-)
-INSERT INTO events (
-  id, schema_version, project_id, file_id, cell_id, parent_id, kind,
-  author, payload, client_ts, server_ts, server_seq
-)
-SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, last_seq FROM bump
-ON CONFLICT (id) DO NOTHING`
 
-/** Build the canonical events INSERT statement for one event. */
+/** Build the canonical events INSERT statement for one event. One-row
+ *  delegation to the bulk builder — identical row bytes, explicit seq. */
 export function buildEventInsertStmt(db: AquillaDb, e: EventInsertRow): AquillaStatement {
-  return db
-    .prepare(EVENT_INSERT_SQL)
-    .bind(
-      e.projectId,
-      e.projectId,
-      e.id,
-      e.schemaVersion,
-      e.projectId,
-      e.fileId,
-      e.cellId,
-      e.parentId,
-      e.kind,
-      e.author,
-      e.payloadJson,
-      e.clientTs,
-      e.serverTs,
-    )
+  return buildBulkEventInsertStmt(db, [e])
 }
 
 // ---------------------------------------------------------------------------
 // Bulk variant (POST /import fast path)
 // ---------------------------------------------------------------------------
 //
-// The per-event CTE above costs one DB round trip per event; through the
+// One statement per event costs one DB round trip per event; through the
 // Postgres shim a 1500-cell chunk became ~3000 sequential round trips
 // (~30ms each ≈ 100s/book — AQU-310 follow-up). Bulk imports instead
 // allocate the whole seq block in ONE counter bump, then write all rows in
-// multi-row INSERTs with explicit seqs.
+// multi-row INSERTs with explicit seqs. Since AQU-1005 this is the ONLY
+// events-insert builder; buildEventInsertStmt is a one-row wrapper over it.
 //
-// Race-safety is the same property as the single-row CTE: the counter row's
-// lock serializes concurrent same-project allocators, so blocks never
-// overlap, and seqs handed out here are ≤ the counter — any later writer
-// (bulk or per-event) allocates strictly above. Replays consume a block and
-// drop the rows on ON CONFLICT (id) — seq gaps, harmless by design (see
-// header note on gaps).
+// Race-safety: the counter row's lock serializes concurrent same-project
+// allocators, so blocks never overlap, and seqs handed out here are ≤ the
+// counter — any later writer allocates strictly above. Replays consume a
+// block and drop the rows on ON CONFLICT (id) — seq gaps, harmless by design
+// (see header note on gaps).
+//
+// AQU-1005: the allocator also announces the block in `seq_allocations`
+// (settled by buildSettleSeqRangeStmt once the event rows land, or expired
+// after PENDING_ALLOC_TTL_MS on crash/abort) so readers can fence their
+// advertised `?since=` cursor on the oldest still-pending allocation instead
+// of racing ahead of an in-flight writer.
 
-const SEQ_RANGE_ALLOC_SQL = `INSERT INTO project_seq_counters (project_id, last_seq)
-VALUES (?, COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + ?)
-ON CONFLICT (project_id) DO UPDATE SET
-  last_seq = GREATEST(project_seq_counters.last_seq + ?, excluded.last_seq)
-RETURNING last_seq`
+// INVARIANT: the reader fence is correct only while every write batch completes
+// in under this TTL. A batch that outlives it has its ledger row purged out from
+// under it, and readers may already have advertised cursors above its seqs.
+// Server-side statement timeouts (audit fix #2, not yet landed) are what will
+// make that a provable bound — until then the settle-returned-zero warning
+// (see buildSettleSeqRangeStmt's RETURNING first_seq) is the tripwire.
+export const PENDING_ALLOC_TTL_MS = 5 * 60_000
+
+// Allocation = counter bump + ledger announce + expired-row purge, ONE
+// autocommit statement. The counter row lock is held only for this statement
+// (microseconds), never across the event-write batch — that hold was the
+// AQU-1005 convoy. Both self-heal arms (seeding VALUES / GREATEST on
+// conflict) are unchanged.
+const SEQ_RANGE_ALLOC_SQL = `WITH purged AS (
+  DELETE FROM seq_allocations
+   WHERE project_id = ? AND created_at <= now() - (? * interval '1 millisecond')
+), bump AS (
+  INSERT INTO project_seq_counters (project_id, last_seq)
+  VALUES (?, COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = ?), 0) + ?)
+  ON CONFLICT (project_id) DO UPDATE SET
+    last_seq = GREATEST(project_seq_counters.last_seq + ?, excluded.last_seq)
+  RETURNING last_seq
+)
+INSERT INTO seq_allocations (project_id, first_seq, last_seq)
+SELECT ?, last_seq - ? + 1, last_seq FROM bump
+RETURNING first_seq`
 
 /** Atomically allocate `n` consecutive server_seqs for a project; returns the
- *  FIRST seq of the block (rows get base, base+1, …, base+n-1). */
+ *  FIRST seq of the block (rows get base, base+1, …, base+n-1). Also announces
+ *  the block in `seq_allocations` (settled by buildSettleSeqRangeStmt once the
+ *  event rows land) and purges any of this project's allocations older than
+ *  PENDING_ALLOC_TTL_MS (crash/abort corpses). */
 export async function allocateSeqRange(
   db: AquillaDb,
   projectId: string,
   n: number,
 ): Promise<number> {
   if (n <= 0) throw new Error(`allocateSeqRange: n must be positive, got ${n}`)
-  const last = await db
+  const first = await db
     .prepare(SEQ_RANGE_ALLOC_SQL)
-    .bind(projectId, projectId, n, n)
-    .first<number>('last_seq')
-  if (last == null) throw new Error('allocateSeqRange: counter bump returned no row')
-  return Number(last) - n + 1
+    .bind(projectId, PENDING_ALLOC_TTL_MS, projectId, projectId, n, n, projectId, n)
+    .first<number>('first_seq')
+  if (first == null) throw new Error('allocateSeqRange: counter bump returned no row')
+  return Number(first)
 }
 
-/** One pre-allocated seq per row (from allocateSeqRange). */
-export type SeqEventInsertRow = EventInsertRow & { serverSeq: number }
+/** Settle (retire) an allocation — append to the SAME batch as the event
+ *  rows so the ledger row disappears atomically with the events becoming
+ *  visible. An unsettled row (crash/abort) simply expires after the TTL.
+ *
+ *  RETURNING first_seq makes the "deleted nothing" case observable: the row was
+ *  already purged as expired, i.e. this batch outlived PENDING_ALLOC_TTL_MS and
+ *  readers may have advanced their advertised cursor past its seqs. Execution
+ *  sites that can see the result log a warning — it is the tripwire for the
+ *  invariant documented at PENDING_ALLOC_TTL_MS. */
+export function buildSettleSeqRangeStmt(
+  db: AquillaDb,
+  projectId: string,
+  firstSeq: number,
+): AquillaStatement {
+  return db
+    .prepare('DELETE FROM seq_allocations WHERE project_id = ? AND first_seq = ? RETURNING first_seq')
+    .bind(projectId, firstSeq)
+}
+
+/** The highest server_seq safe to advertise as a `?since=` cursor: one below
+ *  the oldest live (unsettled, unexpired) allocation. `null` = no fence —
+ *  nothing is pending. Rows above the floor are still DELIVERED; only the
+ *  advertised cursor is clamped, so late-committing writers are re-covered
+ *  by the next delta instead of skipped. */
+export async function fetchPendingFloor(
+  db: AquillaDb,
+  projectId: string,
+): Promise<number | null> {
+  const row = await db
+    .prepare(
+      `SELECT MIN(first_seq) - 1 AS floor FROM seq_allocations
+        WHERE project_id = ? AND created_at > now() - (? * interval '1 millisecond')`,
+    )
+    .bind(projectId, PENDING_ALLOC_TTL_MS)
+    .first<{ floor: number | string | bigint | null }>()
+  return row?.floor == null ? null : Number(row.floor)
+}
+
+/** Alias kept for callers; every insert row now carries its own seq. */
+export type SeqEventInsertRow = EventInsertRow
 
 const EVENT_COLS = 12
 

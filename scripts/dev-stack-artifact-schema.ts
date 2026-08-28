@@ -155,6 +155,39 @@ export async function finalizeSourceBlobSchema(
   return ["made file_source_blobs.raw_source nullable"]
 }
 
+/** Mirror migration 0080 for long-lived local databases. The generic
+ * reconciler adds the `token_hash` columns and their unique indexes, but it
+ * never rewrites an existing column, so a container created before 0080 keeps
+ * the old NOT NULL on the plaintext `token` columns. Auth routes now write
+ * `token = NULL, token_hash = sha256hex(token)`, and both failure paths are
+ * deliberately silent to callers (password-reset request returns its generic
+ * 200, registration's verification mint is best-effort) — so without this
+ * repair, local reset/verification links quietly stop being minted. */
+export async function finalizeAuthTokenSchema(
+  client: PgSchemaClient,
+  run: RunSchemaSql,
+): Promise<string[]> {
+  const patched: string[] = []
+  for (const table of ["password_reset_tokens", "email_verification_tokens"]) {
+    if (!(await tableExists(client, table))) continue
+    const { rows } = await client.query(
+      `SELECT is_nullable
+         FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = $1
+          AND column_name = 'token'`,
+      [table],
+    )
+    if (rows[0]?.is_nullable !== "NO") continue
+    await run(
+      `ALTER TABLE ${table} ALTER COLUMN token DROP NOT NULL`,
+      `allowing hashed-at-rest auth tokens in ${table} (migration 0080)`,
+    )
+    patched.push(`made ${table}.token nullable`)
+  }
+  return patched
+}
+
 /** Mirror migration 0065 for long-lived local databases. The local schema
  * reconciler adds columns but intentionally cannot infer replacements for
  * named CHECK constraints, so an older container otherwise rejects the

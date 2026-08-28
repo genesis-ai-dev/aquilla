@@ -15,6 +15,7 @@ import { useNavigate } from "react-router-dom"
 import { Spinner } from "@/components/ui/spinner"
 import { marketingLogin } from "@/lib/frontier/auth"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { useAccounts } from "@/hooks/useAccounts"
 
 // Mirrors M_PROJECT_ID in auth-worker/src/routes/marketing-seed.ts.
 const DEMO_PROJECT_ID = "demo-john"
@@ -23,8 +24,10 @@ export function MarketingLoginRoute() {
   const t = useT()
   const navigate = useNavigate()
   const [error, setError] = useState<string | null>(null)
+  const { adopt, loading } = useAccounts()
 
   useEffect(() => {
+    if (loading) return
     let cancelled = false
     void (async () => {
       try {
@@ -34,6 +37,8 @@ export function MarketingLoginRoute() {
           setError(t("auth.marketingLogin.unavailable"))
           return
         }
+        await adopt(session)
+        if (cancelled) return
         navigate(`/project/${DEMO_PROJECT_ID}/editor`, { replace: true })
       } catch (e) {
         if (cancelled) return
@@ -44,7 +49,7 @@ export function MarketingLoginRoute() {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navigate])
+  }, [adopt, loading, navigate, t])
 
   return (
     <div className="flex h-screen items-center justify-center p-6">

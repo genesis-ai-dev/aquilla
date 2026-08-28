@@ -104,7 +104,7 @@ import {
   useIsSelected,
 } from "@/lib/audio/selection"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
-import { Popover, PopoverContent } from "@/components/ui/popover"
+import { Popover, PopoverContent, PopoverDescription, PopoverTitle } from "@/components/ui/popover"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -4262,9 +4262,11 @@ function EditorRow({
   // Surfaces a compact inline message below the editor instead of swallowing.
   /** voice-chip drag-over state: the voiceId being dragged over this cell's audio area */
   const [dragOverVoiceId, setDragOverVoiceId] = useState<string | null>(null)
-  // FRO-237: mic-denied help popover state — rendered as an inline popover so
-  // the rail button stays ENABLED when mic is blocked and routes click here.
+  // FRO-237: mic-denied help popover state — the rail button stays ENABLED
+  // when mic is blocked and routes click here. Portaled so the cell's
+  // overflow clip cannot hide it.
   const [showMicDeniedHelp, setShowMicDeniedHelp] = useState(false)
+  const micHelpAnchorRef = useRef<HTMLDivElement>(null)
   // FRO-274: write-failure banner state. Set when any outbox enqueue fails
   // (cell commit, validate, waive). The message persists until dismissed so
   // the user has time to copy their text before reloading.
@@ -5913,7 +5915,7 @@ function EditorRow({
               isSynthBusy && "opacity-70",
             )}
             dir={sourceCellDirection}
-            aria-label={t("agentWorkspace.sourceText")}
+            aria-label={t("editor.source.textAria")}
             data-editor-cell-surface="source"
             data-cell-type="source"
             style={{ fontSize: `${sourceFontSize}px`, lineHeight: "1.6" }}
@@ -6521,7 +6523,7 @@ function EditorRow({
                     ? `Recording unavailable — ${unsupportedReason}`
                     : t("editor.audio.record")
                 return (
-                  <div className="relative">
+                  <div ref={micHelpAnchorRef} className="relative">
                     <RailButton
                       icon={<Mic className="h-3.5 w-3.5" />}
                       tooltip={micTooltip}
@@ -6540,25 +6542,29 @@ function EditorRow({
                       // and makes the help popover unreachable.
                       disabled={isUnsupported && !micDenied}
                     />
-                    {/* Mic-denied help popover — replicates CellAudioRecordButton's
-                        pattern so behaviour is consistent across the two surfaces. */}
                     {micDenied && showMicDeniedHelp && (
-                      <span
-                        role="tooltip"
-                        className="absolute bottom-full end-0 z-50 mb-1 w-52 rounded-md border bg-popover px-3 py-2 text-[11px] leading-snug text-popover-foreground shadow-md"
-                      >
-                        <strong className="block font-semibold">{t("editor.audio.micBlockedTitle")}</strong>
-                        <span className="mt-0.5 block text-muted-foreground">
-                          {t("editor.audio.micBlockedHelp")}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setShowMicDeniedHelp(false)}
-                          className="mt-1.5 text-[10px] underline text-muted-foreground hover:text-foreground"
+                      <Popover open onOpenChange={(open) => { if (!open) setShowMicDeniedHelp(false) }}>
+                        <PopoverContent
+                          anchor={micHelpAnchorRef}
+                          side="bottom"
+                          align="end"
+                          className="w-52 gap-1 p-3 text-[11px] leading-snug"
                         >
-                          {t("common.dismiss")}
-                        </button>
-                      </span>
+                          <PopoverTitle className="text-[11px] font-semibold">
+                            {t("editor.audio.micBlockedTitle")}
+                          </PopoverTitle>
+                          <PopoverDescription className="text-[11px] leading-snug">
+                            {t("editor.audio.micBlockedHelp")}
+                          </PopoverDescription>
+                          <button
+                            type="button"
+                            onClick={() => setShowMicDeniedHelp(false)}
+                            className="mt-1 self-start text-[10px] underline text-muted-foreground hover:text-foreground"
+                          >
+                            {t("common.dismiss")}
+                          </button>
+                        </PopoverContent>
+                      </Popover>
                     )}
                   </div>
                 )

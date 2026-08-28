@@ -19,7 +19,7 @@
 // (projectId, fileId). Reading the project-scoped reference clip is gated by the
 // verified projectId claim.
 
-import { audioObjectKey, isPathSafeId, r2KeyPrefix } from "./audio"
+import { audioObjectKey, isPathSafeId, r2KeyPrefix, safeAudioContentType } from "./audio"
 import { verifyTokenForFile, verifyTokenForProject, WRITE_ROLE_LEVEL } from "./auth"
 
 export interface VoiceConvertEnv {
@@ -83,7 +83,10 @@ export async function handleVoiceReferenceRequest(
       return new Response("insufficient role", { status: 403 })
     }
     const body = await request.arrayBuffer()
-    const contentType = request.headers.get("Content-Type") || "application/octet-stream"
+    // [Pen test] Input validation & injection (2026-08-26): same deny-list fix
+    // as /audio — this route stored the client-declared Content-Type verbatim
+    // and served it back unsanitized.
+    const contentType = safeAudioContentType(request.headers.get("Content-Type"))
     await env.SNAPSHOTS.put(key, body, { httpMetadata: { contentType } })
     return Response.json({ ok: true, referenceAudioId, bytes: body.byteLength })
   }
@@ -95,7 +98,8 @@ export async function handleVoiceReferenceRequest(
   return new Response(buf, {
     status: 200,
     headers: {
-      "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Type": safeAudioContentType(obj.httpMetadata?.contentType),
+      "X-Content-Type-Options": "nosniff",
       "Content-Length": String(buf.byteLength),
       "Cache-Control": "private, max-age=0, must-revalidate",
     },

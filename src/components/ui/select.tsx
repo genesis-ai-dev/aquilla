@@ -15,7 +15,9 @@ const SelectDropdownContext = React.createContext<{
   setDropdown: () => {},
 })
 
-function Select(props: SelectPrimitive.Root.Props) {
+function Select<Value, Multiple extends boolean | undefined = false>(
+  props: SelectPrimitive.Root.Props<Value, Multiple>,
+) {
   const [dropdown, setDropdown] = React.useState(false)
   const value = React.useMemo(
     () => ({ dropdown, setDropdown }),

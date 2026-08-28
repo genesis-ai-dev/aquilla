@@ -207,7 +207,10 @@ export function AgentDockView({
     <div className="flex min-h-0 flex-1 flex-col">
       {state.runs.length === 0 ? (
         jwt ? (
-          <AgentEmptyState onPromptSelect={(text) => composerRef.current?.insertText(text)} />
+          <AgentEmptyState
+            projectId={projectId}
+            onPromptSelect={(text) => composerRef.current?.insertText(text)}
+          />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-1.5 px-3 text-center text-muted-foreground">
             <Bot className="h-5 w-5" />

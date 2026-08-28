@@ -94,6 +94,73 @@ export const agent = defineNamespace({
     "agent.persona.coordinator.name": "Coordinator",
     "agent.persona.coordinator.tagline": "Plans the work and brings finished drafts to you for review.",
 
+    // ── Agent cards (AgentCard — what each teammate can do / reads / writes) ──
+    // The transparency layer: clicking a persona avatar opens this card, so the
+    // machinery behind a teammate is one click away instead of hidden. The
+    // writes lines carry the approval gate — keep "staged"/"proposal" for the
+    // pending state and never let a locale imply the change is already live.
+    "agent.card.triggerAriaLabel": "About {name}",
+    "agent.card.toolsTitle": "What it can do",
+    "agent.card.readsTitle": "What it reads",
+    "agent.card.writesTitle": "What it can change",
+
+    "agent.card.tool.read.label": "Read the passage",
+    "agent.card.tool.read.description":
+      "Pulls the source and the current translation for a range, aligned line by line.",
+    "agent.card.tool.examples.label": "Gather examples",
+    "agent.card.tool.examples.description":
+      "Collects already-validated translations from this project to work from.",
+    "agent.card.tool.search.label": "Search the project",
+    "agent.card.tool.search.description":
+      "Looks across source text, translations, comments, and terms.",
+    "agent.card.tool.draft.label": "Draft a translation",
+    "agent.card.tool.draft.description":
+      "Runs the drafting pipeline and stages what it writes for your review.",
+    "agent.card.tool.docs.label": "Consult the project documents",
+    "agent.card.tool.docs.description":
+      "Reads the project's own reference documents and translation guidance.",
+    "agent.card.tool.aquifer.label": "Look up Bible resources",
+    "agent.card.tool.aquifer.description":
+      "Fetches outside reference material such as notes and dictionaries.",
+    "agent.card.tool.sql.label": "Check the project records",
+    "agent.card.tool.sql.description":
+      "Read-only lookups over project data — this route cannot write anything.",
+    "agent.card.tool.emit.label": "Stage changes for review",
+    "agent.card.tool.emit.description":
+      "Prepares edits as a proposal; staging is not the same as applying.",
+    "agent.card.tool.verifyForce.label": "Force check",
+    "agent.card.tool.verifyForce.description":
+      "Asks whether the draft carries the same weight and intent as the source.",
+    "agent.card.tool.verifyAmbiguity.label": "Ambiguity check",
+    "agent.card.tool.verifyAmbiguity.description":
+      "Asks whether the draft settles a question the source leaves open.",
+    "agent.card.tool.verifyNaturalness.label": "Naturalness check",
+    "agent.card.tool.verifyNaturalness.description":
+      "Asks whether the draft reads like the target language rather than a translation.",
+    "agent.card.tool.lintRules.label": "Project rules check",
+    "agent.card.tool.lintRules.description":
+      "Runs this project's own rules over every draft before it is staged.",
+
+    "agent.card.read.brief.label": "Translation brief",
+    "agent.card.read.brief.description": "The project's purpose, audience, and standards.",
+    "agent.card.read.styleGuide.label": "Style guide",
+    "agent.card.read.styleGuide.description":
+      "The standing instructions for how this project should read.",
+    "agent.card.read.termbase.label": "Terminology",
+    "agent.card.read.termbase.description": "The agreed renderings for this project's key terms.",
+    "agent.card.read.livingMemory.label": "Living memory",
+    "agent.card.read.livingMemory.description":
+      "Notes and decisions the team has built up on this project.",
+    "agent.card.read.rules.label": "Project rules",
+    "agent.card.read.rules.description": "The quality rules every draft is checked against.",
+
+    "agent.card.writes.drafter":
+      "Its drafts are staged as proposals — nothing reaches the translation until you approve it.",
+    "agent.card.writes.reviewer":
+      "It records check results on staged drafts and approves nothing itself — the decision stays yours.",
+    "agent.card.writes.coordinator":
+      "Everything it stages waits as a proposal for you to approve or reject; it applies nothing on its own.",
+
     // ── Team threads view (TeamThreadsView) ──────────────────────────────
     "agent.team.tab": "Team",
     "agent.team.rosterTitle": "Your translation team",
@@ -866,6 +933,17 @@ export const agent = defineNamespace({
         description: "Team-thread message when a passage fails and needs a human.",
         placeholders: {
           span: "Human passage label, or the translated 'this passage' fallback.",
+        },
+      },
+      "agent.card.triggerAriaLabel": {
+        description:
+          "Accessible name for the button wrapping a teammate's avatar in the " +
+          "agent team roster. Clicking it opens that teammate's card — the tools " +
+          "it may use, the project state it reads, and the note that its writes " +
+          "are staged for human approval. Phrase it as 'about this person', the " +
+          "way a profile link reads.",
+        placeholders: {
+          name: "The persona's display name — the already-translated Drafter / Reviewer / Coordinator string.",
         },
       },
     },

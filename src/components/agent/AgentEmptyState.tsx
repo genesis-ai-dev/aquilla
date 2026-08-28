@@ -11,7 +11,7 @@ import { AGENT_PERSONA_IDS, AGENT_PERSONAS } from "@/lib/agent/personas"
 import { SLASH_COMMANDS } from "@/lib/agent/slash-commands"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
-import { PersonaAvatar } from "./PersonaAvatar"
+import { AgentCardTrigger } from "./AgentCard"
 
 const DOCS_URL =
   (import.meta.env.VITE_DOCS_URL as string | undefined)?.trim() ||
@@ -46,9 +46,16 @@ function writeDismissed() {
 export interface AgentEmptyStateProps {
   /** Prefill the composer with an example prompt. */
   onPromptSelect: (text: string) => void
+  /**
+   * Project in scope. Only used to resolve the links on a teammate's card
+   * (brief, terminology, living memory…). Optional so the guide still renders
+   * where no project is in scope; the card then names those surfaces without
+   * linking to them.
+   */
+  projectId?: string
 }
 
-export function AgentEmptyState({ onPromptSelect }: AgentEmptyStateProps) {
+export function AgentEmptyState({ onPromptSelect, projectId }: AgentEmptyStateProps) {
   const t = useT()
   const [dismissed, setDismissed] = useState(readDismissed)
 
@@ -91,7 +98,10 @@ export function AgentEmptyState({ onPromptSelect }: AgentEmptyStateProps) {
               const persona = AGENT_PERSONAS[id]
               return (
                 <li key={id} className="flex items-start gap-2">
-                  <PersonaAvatar personaId={id} size="sm" className="mt-0.5" />
+                  {/* The avatar is the way into that teammate's card — the
+                      tools it uses, what it reads, and the approval gate on
+                      what it writes. */}
+                  <AgentCardTrigger personaId={id} projectId={projectId} className="mt-0.5" />
                   <p className="text-[11px] leading-relaxed">
                     <span className="font-medium text-foreground">{t(persona.nameKey)}</span>
                     {" — "}

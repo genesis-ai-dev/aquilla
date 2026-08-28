@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
+import { jwtFor, openSeededProject, readProjectedCells, seedProjectWithFile } from "../../helpers/seed-project"
 import { MockLLMServer, applyUserProviderOverride } from "../../helpers/mock-llm-server"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -67,8 +67,12 @@ test("sparkle on a footnoted source commits translated base + reintegrated footn
   await expect(targetCell).not.toContainText("[1]")
   await expect(targetCell).not.toContainText("\\f")
 
-  // Still an AI draft requiring individual human review.
-  await expect(
-    alice.getByLabel("AI draft — individual human review required").first(),
-  ).toBeVisible({ timeout: 15_000 })
+  // Still recorded as an AI draft — AQU-1041 removed the visible tag, so
+  // assert the provenance on the authoritative projection instead.
+  await expect
+    .poll(async () => {
+      const cells = await readProjectedCells(await jwtFor("alice"), seeded, "target")
+      return cells.find((c) => c.cellId === seeded.cellIds[0])?.aiDrafted ?? false
+    }, { timeout: 15_000, intervals: [500, 1_000] })
+    .toBe(true)
 })

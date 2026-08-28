@@ -4,6 +4,24 @@ Bigger opportunities spotted during `/code-health` runs that exceeded that run's
 (one theme, ≤300 lines, ≤8 files). Not done yet — pick one up in a future run. Prune entries
 a later run completes.
 
+## `src/components/org/ArchivedProjects.test.tsx` — flaky in the full `pnpm test` run
+
+Spotted in the 2026-08-28 run's baseline (unrelated to that run's `milestones.ts` change —
+reproduced with zero diff against `dev`, twice). "lists archived projects in a table and
+restores on click" and/or "lists recently deleted files with a project column and restores
+on click" intermittently fail with `getByRole("menuitem", { name: "Restore" })` not found
+(the dropdown menu wasn't open yet when the assertion ran) when run inside the full 939-file
+suite; count varied 2–3 failing tests across repeated full-suite runs. Not reproduced by
+running the file in isolation (not attempted this run — full-suite reproduction was already
+consistent enough to treat as pre-existing and out of scope). Likely the same family of
+issue as the `TeamsList.test.tsx` full-suite-only flake filed as
+[#410](https://github.com/genesis-ai-dev/aquilla/issues/410) (test-isolation/ordering
+sensitivity under vitest's worker sharding), though this one appears without any file-count
+change, so it may be a distinct root cause (a race between the click and the menu's open
+animation/portal mount, not sharding). Needs a `/diagnose` pass or a human to add a
+`findByRole`/`waitFor` around the menu-open step in that test — out of scope here since this
+routine never modifies test files.
+
 ## "D1 is the live datastore" comment drift
 
 - **Status**: `src/hooks/` and `src/components/` slice done in the 2026-08-11 run (7 files).
@@ -72,6 +90,17 @@ spot, both deferred rather than mixed into the single-theme budget.
   tests, all pre-existing), `pnpm lint` problem count unchanged (782, both runs
   measured twice to rule out cache noise), no test file touched.
 
+- **`src/lib/import/milestones.ts`** — done in the 2026-08-28 run: all 7 non-null
+  index assertions removed (`biblicaMilestone`, `fillPartialMilestones`,
+  `scriptureMilestones`, `documentMemberMilestones`, `idmlStoryMilestones`,
+  `semanticGroupMilestones`), same no-op-`!` story. `npx tsc --noEmit -p
+  tsconfig.app.json` clean, `pnpm test src/lib/import/milestones.test.ts
+  src/lib/import/milestones.contract.test.ts` green (42/42), `pnpm test` full-suite
+  failure list byte-identical to baseline (`ArchivedProjects.test.tsx`, 2 pre-existing
+  flaky tests — see run summary), `pnpm lint` problem count unchanged (382 problems,
+  6 pre-existing errors, 376 warnings — measured twice with and without the change to
+  rule out cache noise), no test file touched.
+
 ## 2026-08-24 — fresh `!`-assertion grep, more spots than fit one run's budget
 
 A repo-wide `grep -rEn "\w+\[[a-zA-Z0-9_+ ]+\]!" src` (excluding `*.test.ts`) after the
@@ -83,8 +112,6 @@ safe to drop without changing runtime behavior). Not attempted this run to keep 
 diff to one dedicated, carefully-checked file per the queued candidate's own caution
 about bulk-edit transcription risk in dense assertion clusters. Grouped by file for a
 future pass (verify each still applies — code moves):
-  - `src/lib/import/milestones.ts` (7 sites: lines ~144, 173, 217, 219, 270×2, 328, 417)
-    — the densest cluster, same shape as word-diff.ts, good next candidate.
   - `src/lib/milestone-navigation.ts` (5 sites: ~85, 86, 110, 114, 126)
   - `src/lib/biblica/treasure-hunt/notes.ts:173`, `note-rules.ts` (~179, 205),
     `reach4life/notes.ts:153`

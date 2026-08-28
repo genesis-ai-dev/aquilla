@@ -112,6 +112,17 @@ describe("AddTrackDialog — the name", () => {
     expect(screen.getByRole("combobox", { name: "Line it up with" })).toBeInTheDocument()
   })
 
+  // The server has always refused a name over 120 characters, and nothing here
+  // did — while `onConfirm` mints a uuidv7, emits and closes without awaiting,
+  // so an over-long name produced a track id the caller treated as real for a
+  // track the server never created (2026-08-27).
+  it("will not let a name past the length the server accepts", () => {
+    open([SOURCE_AUDIO])
+    const input = screen.getByTestId("tl-add-track-name")
+    // Mirrors MAX_TRACK_NAME_LENGTH in the worker's file-track-set handler.
+    expect(input).toHaveAttribute("maxLength", "120")
+  })
+
   it("reseeds on every open", () => {
     const { rerender } = render(
       <AddTrackDialog

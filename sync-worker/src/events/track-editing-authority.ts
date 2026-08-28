@@ -54,6 +54,12 @@
  * the only thing this decides is whether an unknown key could ever slip through
  * as "ordinary maintainer work" during a version skew. It cannot.
  */
+//  was previously resolved only through sync-worker's own tsconfig,
+// which the root build does not apply. Importing the type explicitly makes the
+// module self-contained — needed the moment event-projection began importing
+// it, which pulled this file into the root graph for the first time.
+import type { AquillaDb } from '../../../db/shim/postgres'
+
 /**
  * The RESERVED track ids — a derived track's id IS its kind string.
  *

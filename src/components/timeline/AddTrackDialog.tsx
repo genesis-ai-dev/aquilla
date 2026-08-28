@@ -26,6 +26,23 @@ import {
 import type { TimelineTrack } from "@/lib/timeline/tracks"
 import { useT } from "@/lib/i18n/I18nProvider"
 
+/**
+ * The longest a track name may be, mirrored from the worker.
+ *
+ * HAND-MIRRORED with MAX_TRACK_NAME_LENGTH in
+ * sync-worker/src/events/handlers/file-track-set.ts. The server has always
+ * refused a longer name; nothing here did, and this dialog is fire-and-forget
+ * — `onConfirm` mints a uuidv7, emits and closes without awaiting — so an
+ * over-long name produced a track id the caller treated as real for a track
+ * the server never created (2026-08-27).
+ *
+ * `maxLength` rather than a validation state: it stops the name being typed at
+ * all, which needs no error copy and no new failure mode in a dialog that
+ * currently has neither.
+ */
+const MAX_TRACK_NAME_LENGTH = 120
+
+
 export function AddTrackDialog({
   open,
   candidates,
@@ -94,6 +111,7 @@ export function AddTrackDialog({
             <input
               data-testid="tl-add-track-name"
               autoFocus
+              maxLength={MAX_TRACK_NAME_LENGTH}
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => {

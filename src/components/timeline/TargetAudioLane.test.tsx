@@ -466,10 +466,19 @@ describe("TargetAudioLane — trimmed geometry (round 7)", () => {
     expect(trims.trimStartMs).toBeUndefined() // back at the clip edge = cleared
   })
 
-  it("a chip persisted entirely before its verse collapses to a reachable sliver — and its innocent neighbour does not", () => {
+  it("a chip persisted entirely before its verse still meets its neighbour inside the audio", () => {
     // 2026-08-08: c2's whole clip sits inside c1's verse, so c2 is the
-    // trespasser and the one drawn short; before the at-fault rule the SLIVER
+    // trespasser and the one drawn short; before the at-fault rule the sliver
     // landed on c1, which had merely been arrived at.
+    //
+    // 2026-08-27: and until today c2 was drawn as a 10px stub parked at 20s —
+    // FOUR SECONDS PAST THE END OF ITS OWN AUDIO, which stops at 16. The cut
+    // came from the sections' facing borders, and nothing kept that answer
+    // inside the chips it was cutting. Note the sections here merely TOUCH:
+    // this needs no overlapping cues at all, only a next chip that ends before
+    // the previous section does. The pair now meets at 13, the midpoint of the
+    // audio they actually share, so both boxes hold real audio and stay
+    // disjoint — and c2 is more reachable than the sliver ever was.
     const first = item({}, 12000) // verse [10,20], clip [10,22] — runs long
     const second = item(
       { startTime: 20, endTime: 30, metadata: { target_start_ms: 10000 } } as Partial<CellData>,
@@ -479,12 +488,14 @@ describe("TargetAudioLane — trimmed geometry (round 7)", () => {
     render(<TargetAudioLane {...base} items={[first, second]} />)
     const c2 = screen.getByTestId("tl-target-c2")
     expect(c2).toHaveAttribute("data-truncated", "start")
-    expect(parseFloat(c2.style.width)).toBe(10) // the min-width sliver
-    expect(parseFloat(c2.style.left)).toBeCloseTo(20 * 40) // parked at its verse
-    // c1 is cut only at its own verse end, never down to a sliver.
+    expect(parseFloat(c2.style.left)).toBeCloseTo(13 * 40)
+    expect(parseFloat(c2.style.width)).toBeCloseTo(3 * 40)
+    // c1 is drawn short at the same point, so the two are back to back.
     const c1 = screen.getByTestId("tl-target-c1")
     expect(c1).toHaveAttribute("data-truncated", "end")
-    expect(parseFloat(c1.style.width)).toBeCloseTo(10 * 40)
+    expect(parseFloat(c1.style.left) + parseFloat(c1.style.width)).toBeCloseTo(13 * 40)
+    // NEITHER box may sit outside the audio it represents — the whole point.
+    expect(parseFloat(c2.style.left)).toBeLessThan(16 * 40)
   })
 
   it("moving a head-trimmed chip commits the ANCHOR, not the visual left", () => {
@@ -1680,5 +1691,91 @@ describe("TargetAudioLane — grains under a trim handle (stage 5)", () => {
     fireEvent.pointerMove(window, { clientX: 140 })
     fireEvent.pointerUp(window, { clientX: 140 })
     expect(onTrimTarget).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ── A take may not be trimmed clear of its own line (2026-08-27) ────────────
+//
+// Found by Sam. `proposeSpan`'s MOVE arm has enforced end-based bounds since
+// 2026-08-05 — a chip may slide back into the previous section's space, but it
+// must keep some audible contact with the line it performs. Neither TRIM arm
+// enforced any of it, so the clamp was escapable in two moves: drag the chip as
+// far as the move clamp allows, then pull the near handle past that limit. The
+// result persists, syncs and reaches export; only the next move gesture snaps
+// it back, so it is a state you can only stay in by not touching the chip.
+//
+// Section here is [10,20], so the grip is 0.05s: an audible START may sit at
+// 19.95 at the latest, an audible END at 10.05 at the earliest.
+describe("TargetAudioLane — the trim handles cannot leave the section", () => {
+  const trimsOf = (fn: ReturnType<typeof vi.fn>) =>
+    fn.mock.calls[0]![2] as { trimStartMs?: number; trimEndMs?: number }
+
+  it("the LEFT handle stops where the chip still touches its line", () => {
+    const onTrimTarget = vi.fn()
+    // Anchored at 19 — already at the far end of its section, where the move
+    // clamp would have left it. The chip is [19, 23].
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[item({ metadata: { target_start_ms: 19_000 } }, 4000)]}
+        onTrimTarget={onTrimTarget}
+      />,
+    )
+    const handle = screen.getByTestId("tl-target-c1-handle-l")
+    fireEvent.pointerDown(handle, { clientX: 19 * 40, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 21 * 40 }) // +2s → 21, two seconds past the line
+    fireEvent.pointerUp(window, { clientX: 21 * 40 })
+
+    const trims = trimsOf(onTrimTarget)
+    // 19.95 − 19 = 950ms, not the 2000 the pointer asked for.
+    expect(trims.trimStartMs).toBe(950)
+    // The property, stated: the audible start still reaches into the section.
+    expect(19 + (trims.trimStartMs ?? 0) / 1000).toBeLessThanOrEqual(19.95)
+  })
+
+  it("the RIGHT handle stops where the chip still touches its line", () => {
+    const onTrimTarget = vi.fn()
+    // Anchored at 8 — slid back into the previous section's space, which the
+    // move clamp allows. The chip is [8, 12] and only its tail is in-section.
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[item({ metadata: { target_start_ms: 8_000 } }, 4000)]}
+        onTrimTarget={onTrimTarget}
+      />,
+    )
+    const handle = screen.getByTestId("tl-target-c1-handle-r")
+    fireEvent.pointerDown(handle, { clientX: 12 * 40, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 9 * 40 }) // −3s → 9, clear of the line
+    fireEvent.pointerUp(window, { clientX: 9 * 40 })
+
+    const trims = trimsOf(onTrimTarget)
+    // 10.05 − 8 = 2050ms, not the 1000 the pointer asked for.
+    expect(trims.trimEndMs).toBe(2050)
+    expect(8 + (trims.trimEndMs ?? 0) / 1000).toBeGreaterThanOrEqual(10.05)
+  })
+
+  // The clamp is a bound, not a pin: a trim that stays in contact is untouched.
+  it("leaves an ordinary trim alone", () => {
+    const onTrimTarget = vi.fn()
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onTrimTarget={onTrimTarget} />)
+    const handle = screen.getByTestId("tl-target-c1-handle-l")
+    fireEvent.pointerDown(handle, { clientX: 400, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 440 }) // +1s → 11, well inside [10,20]
+    fireEvent.pointerUp(window, { clientX: 440 })
+    expect(trimsOf(onTrimTarget).trimStartMs).toBe(1000)
+  })
+
+  // The move arm was rewritten in terms of the same two helpers the trim arms
+  // now use. "Provably identical" is the claim, so it gets an assertion.
+  it("the move clamp still stops at exactly the same place", () => {
+    const onRetimeTarget = vi.fn()
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onRetimeTarget={onRetimeTarget} />)
+    const chip = screen.getByTestId("tl-target-c1")
+    fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 400 + 20 * 40 }) // shove it 20s right
+    fireEvent.pointerUp(window, { clientX: 400 + 20 * 40 })
+    const [, anchorSec] = onRetimeTarget.mock.calls[0] as [string, number]
+    expect(anchorSec).toBeCloseTo(19.95, 5)
   })
 })

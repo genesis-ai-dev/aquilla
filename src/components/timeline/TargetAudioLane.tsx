@@ -37,6 +37,8 @@ import {
   chipOverlaps,
   chipTrespass,
   dualFaultMeetSec,
+  maxAudibleStartSec,
+  minAudibleEndSec,
   MIN_TARGET_LEN_SEC,
   type TargetChipGeom,
 } from "@/lib/timeline/lane-timing"
@@ -298,9 +300,13 @@ function TargetAudioChip({
       // a forward drag at the next chip's start. Hard floor last: audible
       // start ≥ trimStart ⇔ stored anchor ≥ 0, so nothing renders or persists
       // before file time zero.
-      const eps = Math.min(0.05, Math.max(0.001, (section.end - section.start) / 2))
-      start = Math.min(start, Math.max(section.start, section.end - eps), nextChipStartSec ?? Infinity)
-      start = Math.max(start, section.start + eps - len, prevChip?.start ?? -Infinity, geom.trimStartSec)
+      // `maxAudibleStartSec` / `minAudibleEndSec` ARE these two expressions,
+      // extracted (see lane-timing) so the trim arms below can enforce the same
+      // bound. Identical arithmetic — the second reads "this chip's END may not
+      // fall below `minAudibleEndSec`", which for a fixed length is a floor on
+      // its start.
+      start = Math.min(start, maxAudibleStartSec(section), nextChipStartSec ?? Infinity)
+      start = Math.max(start, minAudibleEndSec(section) - len, prevChip?.start ?? -Infinity, geom.trimStartSec)
       return { start, end: start + len }
     }
     if (mode === "resize-l") {
@@ -314,17 +320,34 @@ function TargetAudioChip({
       // timing chipSection.start === geom.anchor, so this is identical there.)
       // The previous chip's start floors it too — un-trimming a head-trimmed
       // clip must not leapfrog the neighbour the move clamp just protected.
+      //
+      // …BUT IT STILL MAY NOT LEAVE THE SECTION ALTOGETHER (2026-08-27, found
+      // by Sam). The note above defends the absence of a section FLOOR, which
+      // stands. A ceiling is the other direction, and it is the bound the move
+      // arm has always had: drag a chip to the move clamp's limit and then pull
+      // this handle past it, and the audible span ended up entirely after its
+      // own line, with no contact at all.
       const lo = Math.max(geom.anchor, prevChip?.start ?? -Infinity)
-      start = Math.min(Math.max(start, lo), geom.end - MIN_TARGET_LEN_SEC)
+      // Floored at `lo` so the clamp cannot invert on a chip whose end already
+      // sits before its section — that chip is already outside the invariant,
+      // and pinning its handle is better than sending it further out.
+      const hi = Math.max(Math.min(geom.end - MIN_TARGET_LEN_SEC, maxAudibleStartSec(section)), lo)
+      start = Math.min(Math.max(start, lo), hi)
       return { start, end: geom.end }
     }
     let end = geom.end + dxSec
     if (snap.enabled) {
       end = snapSpan({ start: geom.start, end }, "resize-r", snap.candidates, thresholdSec).end
     }
-    // trimEnd ≤ duration, len ≥ min.
+    // trimEnd ≤ duration, len ≥ min — and the mirror of the ceiling above: the
+    // audible END may not be pulled back before the section, or the take stops
+    // touching the line it performs.
     const hi = geom.durationSec != null ? geom.anchor + geom.durationSec : end
-    end = Math.max(Math.min(end, hi), geom.start + MIN_TARGET_LEN_SEC)
+    // Capped by `hi`, because the floor must never demand a LONGER clip than
+    // was actually recorded: a short take on a late-starting section cannot
+    // reach it, and asking would pin the handle at audio that does not exist.
+    const floor = Math.min(Math.max(geom.start + MIN_TARGET_LEN_SEC, minAudibleEndSec(section)), hi)
+    end = Math.max(Math.min(end, hi), floor)
     return { start: geom.start, end }
   }
 
@@ -1225,8 +1248,8 @@ export function TargetAudioLane({
     const next = chips[i + 1]
     if (!next || !trespass[i].tail || !trespass[i + 1].head) return null
     return dualFaultMeetSec(
-      { chipEndSec: c.geom.end, sectionEndSec: c.section.end },
-      { chipStartSec: next.geom.start, sectionStartSec: next.section.start },
+      { chipStartSec: c.geom.start, chipEndSec: c.geom.end, sectionEndSec: c.section.end },
+      { chipStartSec: next.geom.start, chipEndSec: next.geom.end, sectionStartSec: next.section.start },
     )
   })
 

@@ -345,35 +345,45 @@ describe("chipOverlaps", () => {
 })
 
 describe("dualFaultMeetSec — where a mutually-offending pair meets (2026-08-27)", () => {
+  /** Both chips in full, because the answer must land inside BOTH of them —
+   *  the far edges are what makes that checkable. The starts and ends here are
+   *  the ones each case's own comment already describes. */
   const meet = (
-    prevChipEnd: number, nextChipStart: number,
+    prevChip: [number, number], nextChip: [number, number],
     prevSectionEnd: number, nextSectionStart: number,
   ) =>
     dualFaultMeetSec(
-      { chipEndSec: prevChipEnd, sectionEndSec: prevSectionEnd },
-      { chipStartSec: nextChipStart, sectionStartSec: nextSectionStart },
+      { chipStartSec: prevChip[0], chipEndSec: prevChip[1], sectionEndSec: prevSectionEnd },
+      { chipStartSec: nextChip[0], chipEndSec: nextChip[1], sectionStartSec: nextSectionStart },
     )
+
+  /** The invariant, asserted as a property rather than a number, so it survives
+   *  a future retune of where inside the overlap the pair meets. */
+  const expectInsideBoth = (at: number, prevChip: [number, number], nextChip: [number, number]) => {
+    expect(at).toBeGreaterThanOrEqual(Math.max(prevChip[0], nextChip[0]))
+    expect(at).toBeLessThanOrEqual(Math.min(prevChip[1], nextChip[1]))
+  }
 
   it("touching sections collapse to the shared border — the 2026-08-08 cut, unchanged", () => {
     // Sections [10,20]/[20,30]; chips [10,24] and [17,27].
-    expect(meet(24, 17, 20, 20)).toBe(20)
+    expect(meet([10, 24], [17, 27], 20, 20)).toBe(20)
   })
 
   it("across a gap, the pair meets at the midpoint of their overlap", () => {
     // Sam's screenshots, in round seconds: sections end 83.0 / start 83.4,
     // chips end 83.3 / start 83.1 — the overlap [83.1, 83.3] sits wholly
     // inside the gap, so its own midpoint is the meet.
-    expect(meet(83.3, 83.1, 83.0, 83.4)).toBeCloseTo(83.2)
+    expect(meet([80.6, 83.3], [83.1, 85.2], 83.0, 83.4)).toBeCloseTo(83.2)
   })
 
   it("an overlap reaching outside the gap is clamped to the borders first", () => {
     // Gap [19,21]; the next chip reaches back to 18, INSIDE the previous
     // section — the meet must not follow it in there. Zone [19, 20] → 19.5.
-    expect(meet(20, 18, 19, 21)).toBeCloseTo(19.5)
+    expect(meet([10, 20], [18, 28], 19, 21)).toBeCloseTo(19.5)
     // Mirror: the previous chip reaches past the next SECTION's start.
-    expect(meet(22, 20, 19, 21)).toBeCloseTo(20.5)
+    expect(meet([10, 22], [20, 30], 19, 21)).toBeCloseTo(20.5)
     // Both ends spill past the gap: the whole gap is the zone.
-    expect(meet(22, 18, 19, 21)).toBeCloseTo(20)
+    expect(meet([10, 22], [18, 30], 19, 21)).toBeCloseTo(20)
   })
 
   it("overlapping SECTIONS meet between the crossed borders", () => {
@@ -381,6 +391,36 @@ describe("dualFaultMeetSec — where a mutually-offending pair meets (2026-08-27
     // invert (21 > 19) and the midpoint lands between the borders — one point,
     // so the painted pair stays disjoint, which the old per-border cuts
     // (end at 21, start at 19) did not.
-    expect(meet(23, 17, 21, 19)).toBeCloseTo(20)
+    expect(meet([10, 23], [17, 27], 21, 19)).toBeCloseTo(20)
+  })
+
+  // …AND WHEN THEY OVERLAP FAR ENOUGH, the border zone is not merely inverted
+  // but unusable: its midpoint lands outside the chips entirely. Sections
+  // [10,20]/[12,30] with chips [10,21]/[11,13] returned 16 — three seconds past
+  // the second chip's own end — so `paintedStart` exceeded `paintedEnd` and it
+  // rendered as a 10px stub over silence, jumping there as the pointer left.
+  it("stays inside both chips when the sections overlap past the next chip's end", () => {
+    const prevChip: [number, number] = [10, 21]
+    const nextChip: [number, number] = [11, 13]
+    const at = meet(prevChip, nextChip, 20, 12)
+    expectInsideBoth(at, prevChip, nextChip)
+    expect(at).toBeCloseTo(12)
+  })
+
+  // The property the four cases above share, stated once: wherever the borders
+  // fall, the cut is somewhere both chips actually have audio.
+  it("never answers outside the overlap, whatever the borders do", () => {
+    const cases: [[number, number], [number, number], number, number][] = [
+      [[10, 24], [17, 27], 20, 20],
+      [[80.6, 83.3], [83.1, 85.2], 83.0, 83.4],
+      [[10, 22], [18, 30], 19, 21],
+      [[10, 23], [17, 27], 21, 19],
+      [[10, 21], [11, 13], 20, 12],
+      // Sections crossed the other way, and a next chip that ends very early.
+      [[0, 30], [5, 6], 25, 1],
+    ]
+    for (const [prevChip, nextChip, prevSectionEnd, nextSectionStart] of cases) {
+      expectInsideBoth(meet(prevChip, nextChip, prevSectionEnd, nextSectionStart), prevChip, nextChip)
+    }
   })
 })

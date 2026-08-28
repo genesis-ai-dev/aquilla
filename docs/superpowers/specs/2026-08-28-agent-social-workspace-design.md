@@ -120,6 +120,30 @@ hides the list for a centered wide canvas. Monochrome discipline throughout:
 identity lives in the tinted avatars, names are plain foreground at medium
 weight, activity chips flattened from boxes to quiet rows.
 
+## v2.2 — the three-column layout (2026-08-28 follow-up, shipped)
+
+Ryder's structural observation: per-file conversations duplicated the Files
+sidebar. Resolution — `| dock | conversation | optional step inspector |`:
+
+- The conversations list lives in the LEFT DOCK's Agent tab (AgentDockPanel),
+  replacing the old compact dock chat entirely: the dock lists, the surface
+  talks. A New-conversation control sits in its header; scripture Summarize
+  quick actions hand their prompt to the surface chat (pendingPrompt).
+- The center is the ACTIVE conversation only. Selection is URL-driven
+  (`?conversation=`), so the dock and the surface share one source of truth
+  and threads are deep-linkable; a conversation param lands the workbench on
+  the Team tab. Entering the agent surface opens the dock's Agent panel (the
+  old files-scope-picker takeover and the v2.1 focus toggle are gone — dock
+  collapse plays that role).
+- Clicking a step opens the STEP INSPECTOR third column: the plain-language
+  sentence up top, then collapsed sections holding the receipts — the durable
+  event kind/details, the situation note, outcome reasons.
+- RE-OPEN BY MESSAGING: a finished run's composer no longer dead-ends for
+  CONTRIBUTOR+ viewers — sending starts a fresh run on that file
+  (startFileContextualRun) with the message as its first steering direction,
+  and selection jumps to the new conversation.
+- One shared refcounted poller (team-conversations.ts) feeds both columns.
+
 ## Testing
 
 Vitest: personas mapping totality (every region/tool kind attributes — the social

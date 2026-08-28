@@ -278,6 +278,8 @@ describe("ProjectTable", () => {
           projects={[project]}
           now={Date.now()}
           showOrg
+          // AQU-606: this map is only the per-file *hint*; the project's own
+          // targetLanguage ("French") takes precedence for the '' lane chip.
           defaultLaneLabelByProjectId={new Map([[project.id, "conversational Spanish"]])}
         />
       </MemoryRouter>,
@@ -328,14 +330,10 @@ describe("ProjectTable", () => {
     expect(languages).toHaveClass("min-w-0", "overflow-hidden")
     expect(languageChip.parentElement).toHaveClass("w-full", "min-w-0", "max-w-full")
     expect(languageChip).toHaveClass("min-w-0", "max-w-full", "overflow-hidden")
-    expect(within(languageChip).getByText("conversational Spanish")).toHaveClass(
-      "min-w-0",
-      "flex-1",
-      "truncate",
-    )
-    expect(languageChip).toHaveAccessibleName("conversational Spanish: 40% translated")
-    // The truncated label's full text stays recoverable on hover.
-    await expectTooltip(languageChip, "conversational Spanish — 40% translated")
+    expect(within(languageChip).getByText("French")).toHaveClass("min-w-0", "flex-1", "truncate")
+    expect(languageChip).toHaveAccessibleName("French: 40% translated")
+    // The (potentially truncated) label's full text stays recoverable on hover.
+    await expectTooltip(languageChip, "French — 40% translated")
     expect(screen.getByText("Language")).toBeInTheDocument()
     expect(screen.getByTestId("project-table-translated-header")).toHaveAttribute("aria-label", "Translated")
     expect(screen.getByTestId("project-table-validated-header")).toHaveAttribute("aria-label", "Validated")
@@ -346,6 +344,37 @@ describe("ProjectTable", () => {
     expect(screen.queryByText("Role")).not.toBeInTheDocument()
     expect(screen.queryByText("Updated", { exact: true })).not.toBeInTheDocument()
     expect(screen.queryByText(/Updated /)).not.toBeInTheDocument()
+  })
+
+  it("labels the default lane from the project's target language with no per-file hint (AQU-606)", async () => {
+    // The all-orgs table passes an empty hint map, and a lanes-migrated project
+    // carries no per-file targetLanguage — the chip used to read "Default".
+    renderWithTooltips(
+      <MemoryRouter>
+        <ProjectTable projects={[project]} now={Date.now()} showOrg />
+      </MemoryRouter>,
+    )
+
+    const chip = screen.getByTestId(`lane-chip-${project.id}-`)
+    expect(chip).toHaveTextContent("French")
+    expect(chip).not.toHaveTextContent("Default")
+    // A long target language still truncates but stays recoverable on hover.
+    expect(within(chip).getByText("French")).toHaveClass("min-w-0", "flex-1", "truncate")
+    await expectTooltip(chip, "French — 40% translated")
+  })
+
+  it("falls back to the neutral placeholder when no target language is set (AQU-606)", () => {
+    render(
+      <MemoryRouter>
+        <ProjectTable
+          projects={[{ ...project, id: "untargeted", targetLanguage: null }]}
+          now={Date.now()}
+          showOrg
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByTestId("lane-chip-untargeted-")).toHaveTextContent("Default")
   })
 
   it("omits the redundant organization column in a single-organization view", () => {

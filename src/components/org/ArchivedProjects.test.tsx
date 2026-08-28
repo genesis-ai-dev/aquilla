@@ -86,7 +86,13 @@ describe("ArchivedProjects", () => {
     expect(screen.getByRole("tab", { name: "Projects" })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "Recently deleted" })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "More actions for Old Project" }))
+    const moreActions = screen.getByRole("button", { name: "More actions for Old Project" })
+    // The ⋯ button wires up to its Base UI menu root a beat after the row
+    // mounts — a click before that is silently dropped. The closed trigger
+    // advertises readiness through aria-expanded="false", so wait for that
+    // accessible state rather than elapsed time.
+    await waitFor(() => expect(moreActions).toHaveAttribute("aria-expanded", "false"))
+    fireEvent.click(moreActions)
     fireEvent.click(screen.getByRole("menuitem", { name: "Restore" }))
     await waitFor(() => expect(unarchiveProjectRemote).toHaveBeenCalledWith("old", "jwt"))
   })
@@ -161,7 +167,10 @@ describe("ArchivedProjects", () => {
     expect(screen.getByRole("columnheader", { name: /Project/i })).toBeInTheDocument()
     expect(screen.getByRole("columnheader", { name: /Deleted/i })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "More actions for EXO.usfm" }))
+    const moreActions = screen.getByRole("button", { name: "More actions for EXO.usfm" })
+    // Same trigger-readiness wait as the archived-projects restore test above.
+    await waitFor(() => expect(moreActions).toHaveAttribute("aria-expanded", "false"))
+    fireEvent.click(moreActions)
     fireEvent.click(screen.getByRole("menuitem", { name: "Restore" }))
     await waitFor(() =>
       expect(emitFileRestore).toHaveBeenCalledWith({

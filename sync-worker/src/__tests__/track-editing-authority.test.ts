@@ -10,7 +10,7 @@
 // to fake a whole DB to assert a policy decision.
 
 import { describe, it, expect } from 'vitest'
-import { isGatedTrackPatch } from '../events/track-editing-authority'
+import { isGatedTrackPatch, trackPatchRequiresExisting } from '../events/track-editing-authority'
 
 /** The payload shape `file.track.set` carries on the wire. */
 const withPatch = (patch: unknown) => ({ trackId: 'trk-1', patch })
@@ -93,4 +93,52 @@ describe('isGatedTrackPatch — malformed input', () => {
       expect(isGatedTrackPatch(payload)).toBe(true)
     })
   }
+})
+
+// ── A write that cannot create a track must find one (2026-08-27) ──────────
+//
+// `{order: 1}` for an id that does not exist used to merge a kind-less entry
+// into files.meta.trackOverrides. `mergeTrackOverrides` skips it when
+// rendering (`isTrackKind(patch.kind)` fails), so it was invisible in the UI,
+// untargetable by any control, and unremovable — removal is `patch: null`,
+// which IS gated. Creation ungated, deletion gated, on a blob read on every
+// file listing.
+describe('trackPatchRequiresExisting', () => {
+  const ADDED = '019fd21a-a5a4-75d1-b8c4-3b60072a4fc2'
+
+  it('requires an existing track for a patch that cannot create one', () => {
+    // Both of the ungated keys had the same hole, not just `order`.
+    expect(trackPatchRequiresExisting(ADDED, { order: 1 })).toBe(true)
+    expect(trackPatchRequiresExisting(ADDED, { name: 'Spanish' })).toBe(true)
+    expect(trackPatchRequiresExisting(ADDED, { name: 'Spanish', order: 1 })).toBe(true)
+    // …and the gated keys could write the same junk with the setting ON.
+    expect(trackPatchRequiresExisting(ADDED, { color: 'cyan' })).toBe(true)
+    expect(trackPatchRequiresExisting(ADDED, { groupId: 'grp' })).toBe(true)
+  })
+
+  it('lets a patch carrying `kind` create the track it names', () => {
+    expect(trackPatchRequiresExisting(ADDED, { kind: 'audio', name: 'Spanish', order: 1 })).toBe(false)
+    expect(trackPatchRequiresExisting(ADDED, { kind: 'folder', name: 'Dubs' })).toBe(false)
+  })
+
+  // The derived rows have no entry until their FIRST rename or reorder, and
+  // drag-to-reorder is deliberately left working with the setting off — so
+  // requiring an entry there would take away a shipped capability.
+  it('exempts the derived rows, whose first write legitimately has no entry', () => {
+    for (const id of ['source-subtitles', 'source-audio', 'target-subtitles', 'target-audio']) {
+      expect(trackPatchRequiresExisting(id, { order: 2 }), id).toBe(false)
+    }
+  })
+
+  // A delete is gated by `isGatedTrackPatch` clause 1; it is not this rule's
+  // business, and demanding existence for it would be a second gate.
+  it('says nothing about a delete', () => {
+    expect(trackPatchRequiresExisting(ADDED, null)).toBe(false)
+    expect(trackPatchRequiresExisting(ADDED, undefined)).toBe(false)
+  })
+
+  it('ignores a patch that is not an object', () => {
+    expect(trackPatchRequiresExisting(ADDED, 'nope')).toBe(false)
+    expect(trackPatchRequiresExisting(ADDED, [1, 2])).toBe(false)
+  })
 })

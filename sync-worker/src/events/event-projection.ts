@@ -23,6 +23,7 @@ import type { EventKind, EventPayloads, CommentScope } from './types'
 import type { ChainSlot } from './chain-claims'
 import { eventQualifiedParentKey } from './chain-claims'
 import { ROLE } from './role-policy'
+import { trackPatchRequiresExisting } from './track-editing-authority'
 
 // A single event row as it lives in Postgres. JSON.parse on `payload` is the
 // caller's responsibility — `payload` here is already an object.
@@ -1947,7 +1948,12 @@ case 'cell.audio.attach': {
         throw new Error(`file.track.set event ${event.id} is missing fileId`)
       }
       stmts.push(
-        buildFileTrackSetStmt(db, event.projectId, event.fileId, event.id, p.trackId, p.patch),
+        // Same rule on replay as on the live path, or a rebuild would
+        // resurrect the kind-less junk the live path now refuses.
+        buildFileTrackSetStmt(
+          db, event.projectId, event.fileId, event.id, p.trackId, p.patch,
+          trackPatchRequiresExisting(p.trackId, p.patch),
+        ),
       )
       return ['files']
     }
@@ -2255,6 +2261,25 @@ export function buildFileTrackSetStmt(
   eventId: string,
   trackId: string,
   patch: EventPayloads['file.track.set']['patch'],
+  /**
+   * Must the track already be in `trackOverrides` for this write to apply?
+   * (2026-08-27)
+   *
+   * True for any patch that cannot bring a track into being — one carrying no
+   * `kind`. Without it, `{order: 1}` for an id that does not exist merged a
+   * kind-less entry into `files.meta`, which `mergeTrackOverrides` then skips
+   * when rendering (`isTrackKind(patch.kind)` fails): invisible in the UI,
+   * untargetable by any control, and unremovable, because removal is
+   * `patch: null` and THAT is gated. Creation ungated, deletion gated — junk
+   * that only re-enabling the setting could clear, on a blob read on every
+   * file listing.
+   *
+   * Enforced in SQL because the handler is synchronous and never loads the
+   * file's meta. A failing condition is a no-op rather than an error, which is
+   * also the right answer for the race it incidentally fixes: a reorder that
+   * arrives after someone else's delete no longer resurrects the track as junk.
+   */
+  requireExisting = false,
 ): AquillaStatement {
   const NOW = "(extract(epoch from now()) * 1000)::bigint"
   const META = "COALESCE(NULLIF(meta, ''), '{}')::jsonb"
@@ -2274,16 +2299,22 @@ export function buildFileTrackSetStmt(
   // json-bind-contract test greps the tree for exactly that mistake). trackId
   // binds twice — once as the key written, once to read the entry it merges
   // onto.
-  return db
-    .prepare(
-      `UPDATE files
-          SET meta = (${META} || jsonb_build_object('trackOverrides',
-                COALESCE(${META} -> 'trackOverrides', '{}'::jsonb) || jsonb_build_object(?::text,
-                  jsonb_strip_nulls(COALESCE(${META} -> 'trackOverrides' -> ?::text, '{}'::jsonb) || ?::text::jsonb))))::text,
-              event_id = ?, updated_at = ${NOW}
-        WHERE id = ? AND project_id = ?`,
-    )
-    .bind(trackId, trackId, JSON.stringify(patch), eventId, fileId, projectId)
+  // `jsonb_exists(...)` rather than the `?` key-exists OPERATOR: `?` is also
+  // this driver's bind placeholder, and the two cannot share a statement.
+  const existsTerm = requireExisting
+    ? ` AND jsonb_exists(COALESCE(${META} -> 'trackOverrides', '{}'::jsonb), ?::text)`
+    : ''
+  const stmt = db.prepare(
+    `UPDATE files
+        SET meta = (${META} || jsonb_build_object('trackOverrides',
+              COALESCE(${META} -> 'trackOverrides', '{}'::jsonb) || jsonb_build_object(?::text,
+                jsonb_strip_nulls(COALESCE(${META} -> 'trackOverrides' -> ?::text, '{}'::jsonb) || ?::text::jsonb))))::text,
+            event_id = ?, updated_at = ${NOW}
+      WHERE id = ? AND project_id = ?${existsTerm}`,
+  )
+  return requireExisting
+    ? stmt.bind(trackId, trackId, JSON.stringify(patch), eventId, fileId, projectId, trackId)
+    : stmt.bind(trackId, trackId, JSON.stringify(patch), eventId, fileId, projectId)
 }
 
 /**

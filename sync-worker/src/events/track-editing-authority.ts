@@ -54,6 +54,60 @@
  * the only thing this decides is whether an unknown key could ever slip through
  * as "ordinary maintainer work" during a version skew. It cannot.
  */
+/**
+ * The RESERVED track ids — a derived track's id IS its kind string.
+ *
+ * THIS USED TO BE AN ALIAS OF TRACK_KINDS AND MUST NEVER BE ONE AGAIN. The two
+ * sets were identical while every kind was derived; stage 2 added kinds a USER
+ * makes ('folder', 'audio'), which are not derived by anything and therefore
+ * reserve no id. Aliasing them now would reserve 'folder' as a track id and
+ * make a track that happened to be handed that id permanently unbuildable.
+ *
+ * Reserved rather than "default" because which of them a given file actually
+ * draws depends on the file: a dubbing file has no target-subtitles row, but
+ * the id stays spoken for.
+ *
+ * MOVED HERE from the handler (2026-08-27) so the projection can share it
+ * without importing a handler — the handler already imports the projection,
+ * and the other direction would close a cycle.
+ *
+ * HAND-MIRRORED with DEFAULT_TRACK_IDS in src/lib/timeline/tracks.ts.
+ */
+export const DEFAULT_TRACK_IDS = new Set([
+  'source-subtitles',
+  'source-audio',
+  'target-subtitles',
+  'target-audio',
+])
+
+/**
+ * Must this write find the track already there?
+ *
+ * A patch carrying `kind` is the only thing that brings a track INTO being, so
+ * every other patch is meaningless against an id that does not exist — and
+ * worse than meaningless: it merged a kind-less entry into
+ * `files.meta.trackOverrides` that `mergeTrackOverrides` then skipped when
+ * rendering, leaving something invisible in the UI, untargetable by any
+ * control, and unremovable, because removal is `patch: null` and that IS
+ * gated. Creation ungated, deletion gated, on a blob read on every file
+ * listing.
+ *
+ * The derived rows are exempt because their FIRST reorder or rename legitimately
+ * has no entry yet — and drag-to-reorder is deliberately left working when the
+ * setting is off, so requiring an entry there would take away a shipped
+ * capability.
+ *
+ * Broader than the bare `{order}` case that was reported: `{name}` is ungated
+ * too and had exactly the same hole, and the gated kind-less keys could write
+ * the same junk with the setting on. One rule covers the class.
+ */
+export function trackPatchRequiresExisting(trackId: string, patch: unknown): boolean {
+  if (patch === null || patch === undefined) return false // a delete, gated elsewhere
+  if (typeof patch !== 'object' || Array.isArray(patch)) return false
+  if ('kind' in (patch as Record<string, unknown>)) return false
+  return !DEFAULT_TRACK_IDS.has(trackId)
+}
+
 const UNGATED_PATCH_KEYS = new Set(['name', 'order'])
 
 export function isGatedTrackPatch(payload: unknown): boolean {

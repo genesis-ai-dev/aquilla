@@ -24,6 +24,7 @@ import type { AuthorizedEvent } from '../authorize'
 import type { RealtimeMessage, ProjectionTable } from '../realtime'
 import { buildEventInsertStmt } from '../event-insert'
 import { buildFileTrackSetStmt } from '../event-projection'
+import { DEFAULT_TRACK_IDS, trackPatchRequiresExisting } from '../track-editing-authority'
 import type { DispatchOutcome } from './types'
 
 /**
@@ -56,27 +57,6 @@ const TRACK_KINDS = new Set([
   'audio',
 ])
 
-/**
- * The RESERVED track ids — a derived track's id IS its kind string.
- *
- * THIS USED TO BE AN ALIAS OF TRACK_KINDS AND MUST NEVER BE ONE AGAIN. The two
- * sets were identical while every kind was derived; stage 2 added kinds a USER
- * makes ('folder', 'audio'), which are not derived by anything and therefore
- * reserve no id. Aliasing them now would reserve 'folder' as a track id and
- * make a track that happened to be handed that id permanently unbuildable.
- *
- * Reserved rather than "default" because which of them a given file actually
- * draws depends on the file: a dubbing file has no target-subtitles row, but
- * the id stays spoken for.
- *
- * HAND-MIRRORED with DEFAULT_TRACK_IDS in src/lib/timeline/tracks.ts.
- */
-const DEFAULT_TRACK_IDS = new Set([
-  'source-subtitles',
-  'source-audio',
-  'target-subtitles',
-  'target-audio',
-])
 
 /**
  * The STORAGE SLOT names the default dub row owns, which are therefore not
@@ -318,6 +298,11 @@ export function handleFileTrackSet(
     event.id,
     trackId,
     patch,
+    // A patch that cannot create a track must find one. See
+    // `trackPatchRequiresExisting` — this is what stops a bare `{order}` or
+    // `{name}` for an unknown id merging a kind-less entry into files.meta
+    // that nothing can render and only the gated delete could remove.
+    trackPatchRequiresExisting(trackId, patch),
   )
 
   const eventFrame: Extract<RealtimeMessage, { t: 'event' }> = {

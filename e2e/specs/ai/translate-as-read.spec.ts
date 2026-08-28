@@ -1,5 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
-import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
+import { jwtFor, openSeededProject, readProjectedCells, seedProjectWithFile } from "../../helpers/seed-project"
 import { MockLLMServer, applyUserProviderOverride } from "../../helpers/mock-llm-server"
 
 const mockLLM = new MockLLMServer()
@@ -27,14 +27,32 @@ test("translate as read drafts the viewport without replacing human text", async
   await ws.editCell(0, "Human translation")
   mockLLM.setNextResponse("Viewport AI draft")
 
-  let toggle = alice.getByRole("switch", { name: "Translate as read" })
+  // "Translate as read" lives in the File options ⋯ menu as a checkbox item
+  // (moved off the toolbar in 2e924890; Base UI checkbox items keep the menu
+  // open on click, so checked state is assertable in place).
+  const toggle = alice.getByRole("menuitemcheckbox", { name: "Translate as read" })
+  await ws.openFileOverflowMenu()
   await expect(toggle).toBeVisible()
   await toggle.click()
-  await expect(toggle).toBeChecked()
+  await expect(toggle).toHaveAttribute("aria-checked", "true")
+  await alice.keyboard.press("Escape")
+  await expect(toggle).not.toBeVisible()
 
   // The next empty visible row is drafted automatically.
   await expect.poll(() => ws.readTargetText(1), { timeout: 20_000 }).toContain("Viewport AI draft")
-  await expect(ws.cellRow(1).getByLabel("AI draft — individual human review required")).toBeVisible()
+
+  // AQU-1041 removed the visible AI-draft tag, so assert provenance on the
+  // authoritative projection: the auto-draft is aiDrafted, the human-owned
+  // row is not.
+  await expect
+    .poll(async () => {
+      const cells = await readProjectedCells(await jwtFor("alice"), seeded, "target")
+      return {
+        autoDraft: cells.find((c) => c.cellId === seeded.cellIds[1])?.aiDrafted ?? false,
+        humanRow: cells.find((c) => c.cellId === seeded.cellIds[0])?.aiDrafted ?? true,
+      }
+    }, { timeout: 15_000, intervals: [500, 1_000] })
+    .toEqual({ autoDraft: true, humanRow: false })
 
   // Human ownership is a hard stop even though the row remained visible.
   await expect.poll(() => ws.readTargetText(0)).toContain("Human translation")
@@ -43,9 +61,9 @@ test("translate as read drafts the viewport without replacing human text", async
   // It is a reading mode, not an ephemeral button state.
   await alice.reload()
   await ws.waitForEditor()
-  toggle = alice.getByRole("switch", { name: "Translate as read" })
-  await expect(toggle).toBeChecked()
+  await ws.openFileOverflowMenu()
+  await expect(toggle).toHaveAttribute("aria-checked", "true")
 
   await toggle.click()
-  await expect(toggle).not.toBeChecked()
+  await expect(toggle).toHaveAttribute("aria-checked", "false")
 })

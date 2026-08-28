@@ -9,7 +9,7 @@
  * affordance reuses the existing CommentsDrawer via onOpenComments.
  */
 
-import { X, AlertTriangle, AlertCircle, BookA, MessageSquare } from "lucide-react"
+import { X, AlertTriangle, AlertCircle, BookA, MessageSquare, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
@@ -30,6 +30,8 @@ interface CheckFindingsDrawerProps {
   running: boolean
   cells: CellData[]
   onClose: () => void
+  /** Re-runs the open-file check without closing the drawer. */
+  onRetry: () => void
   onNavigateToCell: (cellId: string) => void
   /** Opens the existing per-cell comments drawer. */
   onOpenComments?: (cellId: string) => void
@@ -238,6 +240,7 @@ export function CheckFindingsDrawer({
   running,
   cells,
   onClose,
+  onRetry,
   onNavigateToCell,
   onOpenComments,
 }: CheckFindingsDrawerProps) {
@@ -257,15 +260,29 @@ export function CheckFindingsDrawer({
         {/* Wording tracks the "Check file" button and its "Close file check"
             tooltip — the drawer is that button's result surface. */}
         <h3 className="min-w-0 truncate text-sm font-semibold">{t("rules.checkDrawer.title")}</h3>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="shrink-0"
-          onClick={onClose}
-          aria-label={t("rules.checkDrawer.closeAriaLabel")}
-        >
-          <X />
-        </Button>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <AppTooltip content={t("rules.checkDrawer.retryAriaLabel")}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              onClick={onRetry}
+              disabled={running}
+              aria-label={t("rules.checkDrawer.retryAriaLabel")}
+            >
+              {running ? <Spinner /> : <RefreshCw />}
+            </Button>
+          </AppTooltip>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={onClose}
+            aria-label={t("rules.checkDrawer.closeAriaLabel")}
+          >
+            <X />
+          </Button>
+        </div>
       </div>
 
       {running ? (

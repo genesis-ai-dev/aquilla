@@ -3370,8 +3370,6 @@ export function TimelineEditor({
             onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
             onTrimTarget={onTrimTarget}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, RECORDING_SLOT) : undefined}
-            // AQU-646 stage 5: which speaker button silences this row's grains.
-            slot={RECORDING_SLOT}
             emptyCells={emptyTargets}
             // AQU-646: the mic over a stretch with no cell at all creates the
             // blank line first, then opens the recorder — same line the "T"
@@ -3436,7 +3434,6 @@ export function TimelineEditor({
             onTrimTarget={onTrimTarget}
             emptyCells={own.empty}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, slotForTrack(track.id)) : undefined}
-            slot={slotForTrack(track.id)}
             projectId={project?.id ?? null}
             fileId={fileId}
             session={session ?? null}

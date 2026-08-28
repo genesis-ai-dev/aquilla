@@ -8,7 +8,6 @@
 
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest"
 import {
-  openGrainScrub,
   playClipWindow,
   stopClipPreview,
   __resetClipPreviewForTests,
@@ -16,7 +15,6 @@ import {
 import { resetOutputContextForTests } from "./output-context"
 import { __resetMicHoldForTests, setMicHeld } from "./mic-hold"
 import { getActiveAudio } from "./audio-coordinator"
-import { GRAIN_SEC } from "./clip-preview-window"
 
 const fetchCellAudio = vi.hoisted(() => vi.fn(async () => new Uint8Array([1, 2, 3, 4])))
 const audioCacheGet = vi.hoisted(() => vi.fn(async () => null))
@@ -108,14 +106,8 @@ describe("with no audio pipeline — every unit test in this repo", () => {
 
   it("does not go to the network for audio it could never play", async () => {
     playClipWindow(SRC, { startSec: 0, endSec: null })
-    openGrainScrub(SRC, { edge: "in", isMuted: () => false }).moveTo(1)
     await settle()
     expect(fetchCellAudio).not.toHaveBeenCalled()
-  })
-
-  it("a grain scrub with nowhere to play is inert, not broken", () => {
-    const scrub = openGrainScrub(SRC, { edge: "in", isMuted: () => false })
-    expect(() => { scrub.moveTo(1); scrub.close() }).not.toThrow()
   })
 })
 
@@ -153,13 +145,6 @@ describe("playing a trimmed clip", () => {
     expect(second.isPlaying()).toBe(true)
   })
 
-  it("opening a grain scrub silences a running clip — you cannot audition and shave at once", async () => {
-    const playing = playClipWindow(SRC, { startSec: 0, endSec: null })
-    await settle()
-    openGrainScrub(SRC, { edge: "in", isMuted: () => false })
-    expect(playing.isPlaying()).toBe(false)
-  })
-
   // The recording modal's open path calls `pauseAllPlayback()` precisely so the
   // mic never records over sounding audio — and the chip's own mic button is
   // what opens it, one corner away from the play button.
@@ -187,68 +172,6 @@ describe("playing a trimmed clip", () => {
     await settle()
     expect(h.audible).toBe(false)
     expect(StubSource.started).toHaveLength(0)
-  })
-})
-
-describe("grain scrubbing a trim handle", () => {
-  beforeEach(stubAudio)
-
-  it("plays forward from an in-point and up to an out-point", async () => {
-    const inScrub = openGrainScrub(SRC, { edge: "in", isMuted: () => false })
-    await settle()
-    inScrub.moveTo(1)
-    expect(StubSource.started[0].offset).toBeCloseTo(1, 5)
-    inScrub.close()
-
-    StubSource.started = []
-    const outScrub = openGrainScrub(SRC, { edge: "out", isMuted: () => false })
-    await settle()
-    outScrub.moveTo(1)
-    // What you are about to cut off, not what you are throwing away.
-    expect(StubSource.started[0].offset).toBeCloseTo(1 - GRAIN_SEC, 5)
-    outScrub.close()
-  })
-
-  // The speaker can be flipped mid-drag, so this is read per grain rather than
-  // captured — `audibility.ts` is emphatic about why merging from a caller's
-  // own copy of that state is the bug.
-  it("reads the mute per grain, not once at the start", async () => {
-    let muted = false
-    const scrub = openGrainScrub(SRC, { edge: "in", isMuted: () => muted })
-    await settle()
-    scrub.moveTo(1)
-    expect(StubSource.started).toHaveLength(1)
-    muted = true
-    scrub.moveTo(1.2)
-    expect(StubSource.started).toHaveLength(1) // nothing new was created at all
-    muted = false
-    scrub.moveTo(1.4)
-    expect(StubSource.started).toHaveLength(2)
-    scrub.close()
-  })
-
-  // The cap is a guard against an event storm, not the working path.
-  it("never leaves more grains alive than the cap, however fast the hand moves", async () => {
-    const scrub = openGrainScrub(SRC, { edge: "in", isMuted: () => false })
-    await settle()
-    for (let i = 0; i < 40; i += 1) scrub.moveTo(i * 0.05)
-    expect(StubSource.live).toBeLessThanOrEqual(4)
-    scrub.close()
-    expect(StubSource.live).toBe(0)
-  })
-
-  it("makes no sound at the very end of the clip rather than a zero-length node", async () => {
-    const scrub = openGrainScrub(SRC, { edge: "in", isMuted: () => false })
-    await settle()
-    scrub.moveTo(3)
-    expect(StubSource.started).toHaveLength(0)
-    scrub.close()
-  })
-
-  it("closing twice is harmless", async () => {
-    const scrub = openGrainScrub(SRC, { edge: "in", isMuted: () => false })
-    await settle()
-    expect(() => { scrub.close(); scrub.close() }).not.toThrow()
   })
 })
 

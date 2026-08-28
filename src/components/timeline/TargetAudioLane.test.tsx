@@ -1628,7 +1628,13 @@ describe("TargetAudioLane — the preview mini-playhead (2026-08-27)", () => {
   })
 })
 
-describe("TargetAudioLane — grains under a trim handle (stage 5)", () => {
+// The tape noises these once accompanied were removed on 2026-08-28 (Sam:
+// "it actually just sounds awful"). What the block pins outlived them: a trim
+// drag TAKES THE TRANSPORT, a click does not, and a body drag does not. That
+// pause was introduced to keep the grains from fighting the film; it stays on
+// its own merit, because starting to edit a take is a reason to stop playing
+// it, and removing it would be a behaviour change nobody asked for.
+describe("TargetAudioLane — a trim drag takes the transport", () => {
   const wired = {
     ...base,
     projectId: "p1",
@@ -1637,7 +1643,6 @@ describe("TargetAudioLane — grains under a trim handle (stage 5)", () => {
   }
 
   // Sam ruled that dragging a handle pauses the transport and leaves it paused.
-  // Note this IS a behaviour change: today you can trim while the film rolls.
   it("takes the transport once the drag is real", () => {
     pauseAllTransports.mockClear()
     render(<TargetAudioLane {...wired} items={[item({}, 4000)]} onTrimTarget={() => {}} />)
@@ -1661,8 +1666,8 @@ describe("TargetAudioLane — grains under a trim handle (stage 5)", () => {
     expect(pauseAllTransports).not.toHaveBeenCalled()
   })
 
-  // Only the handles. Sam ruled a body drag silent: nothing changes under the
-  // pointer, so there is nothing to hear — and nothing to stop the film for.
+  // Only the handles: a body drag moves the chip without changing what it
+  // contains, so there is nothing to stop the film for.
   it("leaves the transport alone when the chip BODY is dragged", () => {
     pauseAllTransports.mockClear()
     render(<TargetAudioLane {...wired} items={[item({}, 4000)]} onRetimeTarget={() => {}} />)

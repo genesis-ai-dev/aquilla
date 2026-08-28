@@ -11,14 +11,13 @@
 // when their sections touch, the midpoint of overlap-within-the-gap when they
 // don't) — with an outward chevron on the cut; hover restores the true length.
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 import { ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Play, Sparkles, Square, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
-import { getQueueAudibility, MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
-import { slotAudible, RECORDING_SLOT } from "@/lib/timeline/track-slots"
+import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { TimelineSlotButton } from "./TimelineSlotButton"
 import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
 import { isVisible, secToPx, pxToSec, chipRadiusPx } from "@/lib/timeline/scale"
@@ -48,9 +47,9 @@ import { trackChipClass, trackChipPlayingClass, trackHueVars } from "@/lib/timel
 import { DragTimeChip } from "./DragTimeChip"
 import { TargetChipWaveform } from "./TargetChipWaveform"
 import { useChipPreview, type ChipPreview, type ChipPreviewFactory } from "./useChipPreview"
-import { previewWindowForGeom, shouldFireGrain, GRAIN_PERIOD_MS } from "@/lib/audio/clip-preview-window"
+import { previewWindowForGeom } from "@/lib/audio/clip-preview-window"
 import { pauseAllTransports } from "@/lib/audio/transport-pause"
-import type { ClipPreviewHandle, GrainScrub } from "@/lib/audio/clip-preview"
+import type { ClipPreviewHandle } from "@/lib/audio/clip-preview"
 import { useTargetChipPeaks } from "./useTargetChipPeaks"
 import { chipWaveformWindow } from "@/lib/timeline/chip-waveform"
 import { WAVEFORM_BINS } from "@/lib/audio/peaks-loader"
@@ -138,10 +137,6 @@ export interface TargetAudioLaneProps {
    *  ends instantly under happy-dom (no AudioContext), which is right for the
    *  button tests and useless for the mini-playhead's. */
   previewFactory?: ChipPreviewFactory
-  /** AQU-646 stage 5: this track's storage slot, which is also the key its
-   *  speaker button mutes. Only the grain scrub reads it — the play button
-   *  sounds through a mute on purpose. Absent = the default target track. */
-  slot?: string
   /** AQU-646 stage 2: the palette id this track has been given, if any. Absent
    *  or unknown draws the shipped emerald/violet pair — see track-colors. */
   color?: string | null
@@ -205,7 +200,7 @@ function TargetAudioChip({
    *  means the chip draws as it always did. */
   peaks?: Float32Array
   /** AQU-646 stage 5: this clip bound to the preview engine — the play button
-   *  and the grains under a trim handle. Absent means neither exists, which is
+   *  its play button. Absent means it does not exist, which is
    *  what a lane with no project or session hands out and therefore what this
    *  lane's own tests get, exactly as with `peaks`. */
   preview?: ChipPreview
@@ -460,10 +455,6 @@ function TargetAudioChip({
     // hardening. A right-drag on a take chip moves or trims it today.
     if (e.button !== 0 || e.ctrlKey) return
     e.stopPropagation()
-    // Resume the audio device and start the decode while the gesture is still
-    // open — a browser only honours a resume inside one, and by the time the
-    // first grain is due it has closed.
-    if (mode !== "move") preview?.prime()
     const startX = e.clientX
     try {
       ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
@@ -473,58 +464,28 @@ function TargetAudioChip({
     setDrag({ mode, dx: 0 })
     movedRef.current = false
 
-    // ── AQU-646 stage 5: tape noises under a trim handle ──────────────────
-    //
-    // Fed from HERE rather than from its own listener, and after `proposeSpan`,
-    // so what you hear is what the chip is showing — snapping, the neighbour
-    // clamps and MIN_TARGET_LEN_SEC included. Clip-local seconds are the same
-    // subtraction the commit below makes: the edge, minus the anchor.
-    //
-    // The beat is an interval reading a ref, never the pointer stream: a mouse
-    // reports at 60–120Hz and a trackpad faster, so firing per move would make
-    // the grain rate a property of somebody's hardware.
-    const wantsGrains = mode !== "move" && Boolean(preview)
-    let scrub: GrainScrub | null = null
-    let grainTimer: ReturnType<typeof setInterval> | null = null
-    let lastMoveMs = 0
-    let lastFireMs = 0
-    let lastClipSec = 0
-    const endGrains = () => {
-      if (grainTimer != null) { clearInterval(grainTimer); grainTimer = null }
-      scrub?.close()
-      scrub = null
-    }
-
     const onMove = (ev: PointerEvent) => {
       if (Math.abs(ev.clientX - startX) > 3) {
         // ON THE THRESHOLD, NOT ON POINTERDOWN. A press that never becomes a
         // drag must stay exactly the click it always was — including that it
         // does not stop the film.
-        if (!movedRef.current && wantsGrains) {
-          pauseAllTransports()
-          scrub = preview!.scrub(mode === "resize-l" ? "in" : "out")
-          grainTimer = setInterval(() => {
-            const now = performance.now()
-            if (!shouldFireGrain(now, lastFireMs, lastMoveMs)) return
-            lastFireMs = now
-            scrub?.moveTo(lastClipSec)
-          }, GRAIN_PERIOD_MS)
-        }
+        //
+        // The tape-noise grains this used to start are gone (Sam, 2026-08-28:
+        // "it actually just sounds awful"). Trimming is silent now; the
+        // waveform and the drag readout are the feedback. The PAUSE stays and
+        // is now its own rule rather than a consequence: starting to edit a
+        // take is a reason to stop playing it, and leaving the transport
+        // running under a trim would be a behaviour change nobody asked for.
+        if (!movedRef.current && mode !== "move") pauseAllTransports()
         movedRef.current = true
       }
       const dx = ev.clientX - startX
       setDrag((d) => (d ? { ...d, dx } : d))
-      if (scrub) {
-        const proposed = proposeSpan(mode, pxToSec(dx, pxPerSec))
-        lastClipSec = (mode === "resize-l" ? proposed.start : proposed.end) - geom.anchor
-        lastMoveMs = performance.now()
-      }
     }
     const onUp = (ev: PointerEvent) => {
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
       window.removeEventListener("pointercancel", onCancel)
-      endGrains()
       setDrag(null)
       const s = proposeSpan(mode, pxToSec(ev.clientX - startX, pxPerSec))
       if (mode === "move") {
@@ -547,7 +508,6 @@ function TargetAudioChip({
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
       window.removeEventListener("pointercancel", onCancel)
-      endGrains()
       setDrag(null)
       // Nothing is committed: the pointer was taken away, so there is no
       // release position to read as intent.
@@ -1089,7 +1049,6 @@ export function TargetAudioLane({
   session,
   peaksByAudioId,
   previewFactory,
-  slot,
   color,
   laneTestId = "tl-target-lane",
 }: TargetAudioLaneProps) {
@@ -1173,15 +1132,10 @@ export function TargetAudioLane({
   })
   const peaksFor = peaksByAudioId ?? loadedPeaks
 
-  // AQU-646 stage 5. READ LIVE, per grain, rather than captured at render: the
-  // speaker button can be flipped mid-drag, and `audibility.ts` is emphatic
-  // about why merging from a caller's own copy of that state is the bug. The
-  // play button passes no mute at all — it sounds through one by ruling.
-  const isMuted = useCallback(
-    () => !slotAudible(getQueueAudibility(), slot ?? RECORDING_SLOT),
-    [slot],
-  )
-  const boundPreview = useChipPreview({ projectId: projectId ?? null, session: session ?? null, isMuted })
+  // AQU-646 stage 5: the chip's play button, bound to the engine. No mute is
+  // threaded through — the button sounds through one by ruling, and the trim
+  // grains that DID respect the mute were removed on 2026-08-28.
+  const boundPreview = useChipPreview({ projectId: projectId ?? null, session: session ?? null })
   const makePreview = previewFactory ?? boundPreview
 
   const candidatesFor = (cellId: string, section: { start: number; end: number }): number[] => {

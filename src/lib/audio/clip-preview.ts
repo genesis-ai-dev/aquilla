@@ -1,4 +1,4 @@
-// Hearing ONE clip: the chip's play button, and the grains under a trim handle.
+// Hearing ONE clip: the chip's play button.
 // (AQU-646 stage 5)
 //
 // WHY THIS DECODES INSTEAD OF USING AN <audio> ELEMENT, which is the decision
@@ -12,11 +12,6 @@
 //   indexed, and seeking one in that state fires `ended` immediately and throws
 //   the take away. `wireOverlayElement`'s comment measures it. So an element
 //   here would ignore the trim on essentially every take in every project.
-//
-//   The grains settle it on their own. A `currentTime` write is asynchronous and
-//   drops `readyState` even on a fully buffered element, so retriggering one
-//   sixteen times a second is a seek storm. There is no version of grains on an
-//   element.
 //
 // AND THE PARTITION IS A SYMMETRY, NOT A HEDGE. The clips that break an element
 // are the SHORT ones (takes, seconds long, cheap to decode); the clips too big
@@ -42,10 +37,8 @@ import { clearActiveAudioIf, setActiveAudio, type ActiveAudioController } from "
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
 import {
   canDecodePreview,
-  grainWindow,
-  GRAIN_FADE_SEC,
-  GRAIN_SCHEDULE_AHEAD_SEC,
-  MAX_LIVE_GRAINS,
+  CLIP_FADE_SEC,
+  SCHEDULE_AHEAD_SEC,
   PREVIEW_BUFFER_BUDGET_BYTES,
 } from "./clip-preview-window"
 import { micIsHeld } from "./mic-hold"
@@ -89,12 +82,6 @@ export interface ClipPreviewHandle {
    * off "the engine is making noise", which no unit test could ever observe.
    */
   audible: boolean
-}
-
-export interface GrainScrub {
-  /** The pointer moved to this offset into the CLIP. */
-  moveTo(clipSec: number): void
-  close(): void
 }
 
 export type PrimeResult = "ready" | "too-long" | "unavailable"
@@ -150,7 +137,7 @@ function previewContext(): AudioContext | null {
   return getOutputContext()
 }
 
-/** Resume on the gesture, not at first sound: by the time a grain fires we may
+/** Resume on the gesture, not at first sound: by the time playback is due we may
  *  be outside the browser's autoplay window and nothing would be heard. */
 function resumeContext(ctx: AudioContext): void {
   if (ctx.state === "suspended") void ctx.resume().catch(() => { /* user-driven */ })
@@ -234,7 +221,7 @@ export function stopClipPreview(): void {
   previous?.stop()
 }
 
-/** A grain, or a whole trimmed clip — the same primitive at two lengths. */
+/** One trimmed clip, played as scheduled. */
 function playWindow(
   ctx: AudioContext,
   buffer: AudioBuffer,
@@ -248,7 +235,7 @@ function playWindow(
   source.connect(gain)
   gain.connect(ctx.destination)
 
-  const t0 = ctx.currentTime + GRAIN_SCHEDULE_AHEAD_SEC
+  const t0 = ctx.currentTime + SCHEDULE_AHEAD_SEC
   const length = durationSec ?? Math.max(0, buffer.duration - offsetSec)
   const t1 = t0 + length
   // LINEAR, and from a real zero. `exponentialRampToValueAtTime` cannot start
@@ -299,7 +286,7 @@ const SILENT_HANDLE: ClipPreviewHandle = {
  * Resume the device and start the decode, synchronously inside the gesture.
  *
  * Called on pointerdown rather than at first sound: a browser only honours
- * `resume()` inside a user gesture, and by the time the first grain is due the
+ * `resume()` inside a user gesture, and by the time the first sound is due the
  * gesture is over.
  */
 export async function primeClipPreview(src: ClipPreviewSource): Promise<PrimeResult> {
@@ -314,10 +301,11 @@ export async function primeClipPreview(src: ClipPreviewSource): Promise<PrimeRes
 /**
  * Play exactly `[startSec, endSec)` of the clip — its own clock, not the file's.
  *
- * `muted` is the CALLER's to state, never read from a store in here. The two
- * features disagree about it on purpose: the play button sounds through a muted
- * track (Sam: it is an inspection tool) while the grains respect the mute, and
- * making each caller say which it is stops them drifting into each other.
+ * `muted` is the CALLER's to state, never read from a store in here. The chip's
+ * play button deliberately passes nothing — it sounds through a muted track
+ * because it is an inspection tool (Sam). The option survives the removal of
+ * the trim grains, which were the caller that DID respect the mute, so that a
+ * future caller can still say which it is rather than inheriting a default.
  */
 export function playClipWindow(
   src: ClipPreviewSource,
@@ -384,68 +372,16 @@ export function playClipWindow(
     clipEnd = end
     // The same instant `playWindow` computes as its own t0 — kept in step by
     // construction, since both are derived from `ctx.currentTime` here.
-    startedAtCtx = ctx.currentTime + GRAIN_SCHEDULE_AHEAD_SEC
+    startedAtCtx = ctx.currentTime + SCHEDULE_AHEAD_SEC
     live = playWindow(ctx, buffer, start, length, {
       // A clip-length fade is inaudible but still removes the edge click.
-      fadeSec: GRAIN_FADE_SEC,
+      fadeSec: CLIP_FADE_SEC,
       volume: opts?.volume,
       onEnded: finish,
     })
   })
 
   return handle
-}
-
-/**
- * A trim handle is being dragged; make tape noises under it.
- *
- * `isMuted` is a GETTER, read per grain rather than captured: the speaker button
- * can be flipped mid-drag, and `audibility.ts` is emphatic about why merging
- * from a caller's own copy of that state is the bug.
- */
-export function openGrainScrub(
-  src: ClipPreviewSource,
-  opts: { edge: "in" | "out"; isMuted: () => boolean },
-): GrainScrub {
-  const ctx = previewContext()
-  let closed = false
-  let buffer: AudioBuffer | null = null
-  const liveGrains: { stop(): void }[] = []
-
-  const scrub: GrainScrub & { stop(): void } = {
-    moveTo() { /* replaced below when a context exists */ },
-    close() { scrub.stop() },
-    stop() {
-      if (closed) return
-      closed = true
-      for (const g of liveGrains.splice(0)) g.stop()
-      if (currentPreview === scrub) currentPreview = null
-    },
-  }
-  if (!ctx) return scrub
-  resumeContext(ctx)
-  // Opening a scrub silences a running play preview: you cannot be auditioning
-  // a clip and shaving its edge at the same moment.
-  takeTheFloor(scrub)
-  void loadBuffer(src).then((b) => { if (!closed) buffer = b })
-
-  scrub.moveTo = (clipSec: number) => {
-    if (closed || !buffer || opts.isMuted()) return
-    const w = grainWindow(clipSec, opts.edge, buffer.duration)
-    if (!w) return
-    // The cap is a guard against an event storm, not the working path — at the
-    // grain period against the grain length there are never more than two.
-    while (liveGrains.length >= MAX_LIVE_GRAINS) liveGrains.shift()?.stop()
-    const grain = playWindow(ctx, buffer, w.offsetSec, w.durationSec, {
-      fadeSec: GRAIN_FADE_SEC,
-      onEnded: () => {
-        const i = liveGrains.indexOf(grain)
-        if (i >= 0) liveGrains.splice(i, 1)
-      },
-    })
-    liveGrains.push(grain)
-  }
-  return scrub
 }
 
 /**

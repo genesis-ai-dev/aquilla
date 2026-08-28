@@ -16,12 +16,10 @@
 import { useCallback } from "react"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import {
-  openGrainScrub,
   playClip,
   primeClipPreview,
   type ClipPreviewHandle,
   type ClipPreviewSource,
-  type GrainScrub,
 } from "@/lib/audio/clip-preview"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -34,16 +32,11 @@ export interface ChipPreview {
   /** Play the clip as the timeline draws it. Sounds through a muted track:
    *  Sam's ruling is that this button is an inspection tool. */
   play(window: { startSec: number; endSec: number | null }, opts?: { onEnded?(): void }): ClipPreviewHandle
-  /** Tape noises under a trim handle. Respects the track's mute — the other
-   *  half of the same ruling. */
-  scrub(edge: "in" | "out"): GrainScrub
 }
 
 export interface UseChipPreviewArgs {
   projectId: string | null
   session: FrontierSession | null
-  /** Read LIVE, per grain — the speaker button can be flipped mid-drag. */
-  isMuted: () => boolean
 }
 
 export type ChipPreviewFactory = (
@@ -52,7 +45,7 @@ export type ChipPreviewFactory = (
   durationSec: number | null,
 ) => ChipPreview | undefined
 
-export function useChipPreview({ projectId, session, isMuted }: UseChipPreviewArgs): ChipPreviewFactory {
+export function useChipPreview({ projectId, session }: UseChipPreviewArgs): ChipPreviewFactory {
   return useCallback(
     (cell, audioId, durationSec) => {
       const url = cell.attachments?.[audioId]?.url
@@ -68,9 +61,8 @@ export function useChipPreview({ projectId, session, isMuted }: UseChipPreviewAr
       return {
         prime: () => { void primeClipPreview(src) },
         play: (window, opts) => playClip(src, window, { onEnded: opts?.onEnded }),
-        scrub: (edge) => openGrainScrub(src, { edge, isMuted }),
       }
     },
-    [projectId, session, isMuted],
+    [projectId, session],
   )
 }

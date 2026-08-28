@@ -22,7 +22,7 @@
  */
 
 import { useState } from "react"
-import { Check, ChevronRight, Link2, RefreshCw, X } from "lucide-react"
+import { ChevronRight, Link2, RefreshCw, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -121,7 +121,7 @@ function CandidateRow({
           data-testid={`cue-link-pair-${row.cueCellId}`}
           onClick={() => onPair(row.textCellId, row.cueCellId)}
         >
-          <Check className="mr-1 h-3 w-3" /> {t("editor.timeline.cueLinkPair")}
+          {t("editor.timeline.cueLinkPair")}
         </Button>
         <Button
           size="sm"

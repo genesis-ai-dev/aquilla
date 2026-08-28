@@ -1496,7 +1496,7 @@ export function AudioRecordingModal({
                       onClick={save}
                       className="h-[52px] w-full text-sm font-semibold"
                     >
-                      <Check className="mr-1.5 h-4 w-4" /> {t("common.save")}
+                      {t("common.save")}
                     </Button>
                   </span>
                 </AppTooltip>
@@ -1563,8 +1563,6 @@ export function AudioRecordingModal({
                     >
                       {ttsBusy ? (
                         <Spinner className="mr-1.5 size-3.5" />
-                      ) : ttsDone ? (
-                        <Check className="mr-1.5 h-3.5 w-3.5 text-emerald-500" />
                       ) : (
                         <Sparkles className="mr-1.5 h-3.5 w-3.5" />
                       )}

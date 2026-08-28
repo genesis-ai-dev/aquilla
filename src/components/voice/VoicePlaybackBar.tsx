@@ -267,7 +267,23 @@ export function VoicePlaybackBar({
 
         {/* Transport */}
         <div className="flex shrink-0 items-center gap-0.5 self-center">
-          <SpeedButton rate={rate} onChange={(r) => (drivesVideo ? videoController?.setRate(r) : setQueueRate(r))} />
+          <SpeedButton
+            rate={rate}
+            // EVERY ENGINE THAT IS SOUNDING, not whichever one drives
+            // (2026-08-27, verified by Sam on a real film). The dubs always
+            // fire through the queue's overlay pool no matter who owns the
+            // clock, and the pool takes its speed from the queue's own rate —
+            // which this `? :` never set when a film or the virtual clock was
+            // driving. So takes fired at the right MOMENT (firing reads the
+            // clock) and then played at 1x internally: every take started on
+            // cue and drifted within itself while the film ran fast. The
+            // elements keep their pitch at speed by browser default, same as
+            // the film.
+            onChange={(r) => {
+              setQueueRate(r)
+              if (drivesVideo) videoController?.setRate(r)
+            }}
+          />
           <IconButton title={t("audio.playbackBar.previousLine")} disabled={!canPlay} onClick={() => stepLine(-1)}>
             <SkipBack className="h-4 w-4" />
           </IconButton>

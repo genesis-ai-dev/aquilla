@@ -1,6 +1,7 @@
 import { useMemo, type RefObject, type ReactNode } from "react"
 import { ListChecks, LoaderCircle, WandSparkles } from "lucide-react"
 import { EditorModeToggle, type EditorLens } from "@/components/EditorModeToggle"
+import { EDITOR_SURFACE_OVERFLOW_TRIGGER_CLASS } from "@/components/editor-surface-toolbar"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import type { CheckRunResult } from "@/lib/check/deterministic-check"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -114,7 +115,7 @@ export function FileChapterToolbar({
           triggerRef={fileOptionsAnchorRef}
           triggerVariant="outline"
           triggerSize="icon"
-          triggerClassName="bg-card shadow-xs"
+          triggerClassName={EDITOR_SURFACE_OVERFLOW_TRIGGER_CLASS}
           ariaLabel="File options"
           testId="file-options-menu"
         />

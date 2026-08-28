@@ -55,7 +55,33 @@ describe("FileChapterToolbar translate as read", () => {
     expect(onLensChange).toHaveBeenCalledWith("text")
   })
 
-  it("keeps mode labels in quick tooltips instead of visible text", async () => {
+  it("shows Text, Audio, and Agent labels beside the icons on larger screens", () => {
+    render(
+      <FileChapterToolbar
+        lens="text"
+        onLensChange={vi.fn()}
+        onAgentSelect={vi.fn()}
+        checkOpen={false}
+        checkRunning={false}
+        checkResult={null}
+        onCheckToggle={vi.fn()}
+        menuItems={[]}
+      />,
+    )
+
+    expect(screen.getByRole("tab", { name: "Text" })).toHaveTextContent("Text")
+    expect(screen.getByRole("tab", { name: "Audio" })).toHaveTextContent("Audio")
+    expect(screen.getByRole("tab", { name: "Agent" })).toHaveTextContent("Agent")
+    expect(screen.getByRole("tab", { name: "Agent" }).querySelector("svg")).not.toBeNull()
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument()
+  })
+
+  it("keeps mode labels in quick tooltips on compact screens", async () => {
+    vi.stubGlobal("matchMedia", vi.fn().mockImplementation(() => ({
+      matches: false,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })))
     render(
       <FileChapterToolbar
         lens="text"

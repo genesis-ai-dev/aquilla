@@ -19,7 +19,11 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { EditorModeToggle, type EditorLens } from "@/components/EditorModeToggle"
-import { EDITOR_SURFACE_TOOLBAR_CLASS } from "@/components/editor-surface-toolbar"
+import {
+  EDITOR_SURFACE_OVERFLOW_TRIGGER_CLASS,
+  EDITOR_SURFACE_TOOLBAR_CLASS,
+} from "@/components/editor-surface-toolbar"
+import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
 import type { AgentProposal } from "@/lib/agent/protocol"
 import { useAgentSession } from "@/lib/agent/session-store"
@@ -71,6 +75,8 @@ export interface AgentWorkbenchProps {
     timeOrdered?: boolean
     onLensChange: (lens: EditorLens) => void
   }
+  /** File-identity ⋯ (rename / move / export / delete). Editor-only tools stay off this surface. */
+  fileMenuItems?: OverflowMenuItem[]
   /** Live document context flanking the Agent pane. */
   workspace?: {
     cells: AgentWorkbenchCell[]
@@ -104,7 +110,7 @@ export interface AgentWorkbenchProps {
   }
 }
 
-export function AgentWorkbench({ agent, credits, onCollapse, onJumpToCell, onChooseFile, editorMode, workspace }: AgentWorkbenchProps) {
+export function AgentWorkbench({ agent, credits, onCollapse, onJumpToCell, onChooseFile, editorMode, fileMenuItems, workspace }: AgentWorkbenchProps) {
   const t = useT()
   const { state, stop, reset, decide } = useAgentSession(agent.projectId, agent.author)
   // Decisions per proposal row (key: proposalId:cellId) live in the SESSION
@@ -397,12 +403,22 @@ export function AgentWorkbench({ agent, credits, onCollapse, onJumpToCell, onCho
 
         <div className="ms-auto flex shrink-0 items-center gap-2">
           {editorMode ? (
-            <EditorModeToggle
-              lens={editorMode.lens}
-              onChange={editorMode.onLensChange}
-              agentActive
-              timeOrdered={editorMode.timeOrdered}
-            />
+            <>
+              <EditorModeToggle
+                lens={editorMode.lens}
+                onChange={editorMode.onLensChange}
+                agentActive
+                timeOrdered={editorMode.timeOrdered}
+              />
+              <OverflowMenu
+                items={fileMenuItems ?? []}
+                triggerVariant="outline"
+                triggerSize="icon"
+                triggerClassName={EDITOR_SURFACE_OVERFLOW_TRIGGER_CLASS}
+                ariaLabel="File options"
+                testId="file-options-menu"
+              />
+            </>
           ) : null}
           {state.isStreaming && (
             <Button type="button" variant="outline" size="sm" onClick={stop}>

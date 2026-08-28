@@ -11,6 +11,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import type { AgentFrame } from "@/lib/agent/protocol"
 
 // Stub the chat rail but keep the workbench seam: render each proposal
@@ -467,6 +468,29 @@ describe("AgentWorkbench Chat | Project knowledge tab slot (AQU-AGENT §5)", () 
     fireEvent.click(within(row).getByRole("tab", { name: "Text" }))
     expect(onLensChange).toHaveBeenCalledWith("text")
     expect(within(row).queryByRole("button", { name: "Collapse Agent pane" })).not.toBeInTheDocument()
+    expect(within(row).queryByTestId("file-options-menu")).not.toBeInTheDocument()
+  })
+
+  it("puts file-identity options next to the mode switch, not editor tools", async () => {
+    const onRename = vi.fn()
+    render(
+      <AgentWorkbench
+        {...workbenchProps()}
+        editorMode={{ lens: "text", onLensChange: vi.fn() }}
+        fileMenuItems={[
+          { id: "file-rename", label: "Rename", onClick: onRename },
+          { id: "file-export", label: "Export" },
+        ]}
+      />,
+    )
+
+    const row = screen.getByTestId("agent-toolbar-row")
+    await userEvent.click(within(row).getByRole("button", { name: "File options" }))
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeVisible()
+    expect(screen.getByRole("menuitem", { name: "Export" })).toBeVisible()
+    expect(screen.queryByRole("menuitem", { name: "Check file" })).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole("menuitem", { name: "Rename" }))
+    expect(onRename).toHaveBeenCalledOnce()
   })
 
   it("shows header Collapse only when the workbench was expanded from the sidebar", () => {

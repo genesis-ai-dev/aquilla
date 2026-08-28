@@ -306,7 +306,7 @@ function Disclosure({
         <Button type="button" variant="ghost" className="w-full justify-start" aria-expanded={open}>
           <ChevronDown
             data-icon="inline-start"
-            className={cn("transition-transform motion-reduce:transition-none", !open && "-rotate-90")}
+            className={cn(!open && "-rotate-90")}
             aria-hidden
           />
           {title}

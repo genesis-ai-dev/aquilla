@@ -1643,7 +1643,7 @@ export function AudioRecordingModal({
                   className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground"
                 >
                   {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums">{recordingTakes.length}</span>
-                  <ChevronUp className={cn("h-3.5 w-3.5 transition-transform", takesOpen && "rotate-180")} />
+                  <ChevronUp className={cn("h-3.5 w-3.5", takesOpen && "rotate-180")} />
                 </Button>
               ) : (
                 <span data-testid="rec-takes-count" className="shrink-0 px-1 text-xs font-medium">

@@ -205,7 +205,7 @@ function CollapsedGroup({
         className="flex w-full items-center gap-1 py-1 text-left text-muted-foreground hover:text-foreground"
         onClick={() => setOpen((o) => !o)}
       >
-        <ChevronRight className={cn("h-3 w-3 transition-transform", open && "rotate-90")} />
+        <ChevronRight className={cn("h-3 w-3", open && "rotate-90")} />
         {label(ids.length)}
       </button>
       {open && (

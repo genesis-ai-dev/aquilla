@@ -91,3 +91,83 @@ describe("RuleEditor toggles", () => {
     expect(screen.queryByText(/Autofix — regex replace/i)).not.toBeInTheDocument()
   })
 })
+
+// AQU-609: lane scoping in the editor. WHY: the saved `scope`/`lane` decide
+// which lanes a rule constrains — a wrong payload here means a French-only
+// rule silently lints every lane (or an org rule degrades to project scope on
+// its next edit, which was a real latent bug this change fixed).
+describe("RuleEditor lane scope (AQU-609)", () => {
+  function fillRequired() {
+    fireEvent.change(screen.getByLabelText("Rule name"), { target: { value: "R" } })
+    fireEvent.change(screen.getByLabelText("Pattern"), { target: { value: "bad" } })
+  }
+
+  it("hides the lane picker without lanes and saves project scope", () => {
+    const onSave = vi.fn()
+    render(<RuleEditor cells={[]} onSave={onSave} onCancel={vi.fn()} />)
+    expect(screen.queryByText("Applies to")).not.toBeInTheDocument()
+    fillRequired()
+    fireEvent.click(screen.getByRole("button", { name: "Create rule" }))
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ scope: "project" }))
+  })
+
+  it("saves scope lane + the picked lane when a lane is chosen", () => {
+    const onSave = vi.fn()
+    render(
+      <RuleEditor
+        cells={[]}
+        onSave={onSave}
+        onCancel={vi.fn()}
+        lanes={["fr", "es"]}
+        defaultLaneLabel="Spanish (base)"
+      />,
+    )
+    // All lanes + default lane + the two named lanes.
+    expect(screen.getByText("Applies to")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "All lanes" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Spanish (base)" })).toBeInTheDocument()
+    fillRequired()
+    fireEvent.click(screen.getByRole("button", { name: "fr" }))
+    fireEvent.click(screen.getByRole("button", { name: "Create rule" }))
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: "lane", lane: "fr" }),
+    )
+  })
+
+  it("clears the lane pin when switching a lane rule back to All lanes", () => {
+    const onSave = vi.fn()
+    const initialRule = {
+      id: "r1", name: "R", description: "", severity: "minor" as const,
+      source: "user" as const, scope: "lane" as const, lane: "fr",
+      check: { type: "target-forbids" as const, targetPattern: "bad" },
+      enabled: true, createdAt: "2026-01-01T00:00:00.000Z",
+    }
+    render(
+      <RuleEditor
+        initialRule={initialRule}
+        cells={[]}
+        onSave={onSave}
+        onCancel={vi.fn()}
+        lanes={["fr", "es"]}
+      />,
+    )
+    fireEvent.click(screen.getByRole("button", { name: "All lanes" }))
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: "project", lane: undefined }),
+    )
+  })
+
+  it("preserves org scope when editing without a lane picker (no silent downgrade)", () => {
+    const onSave = vi.fn()
+    const orgRule = {
+      id: "r1", name: "Org rule", description: "", severity: "minor" as const,
+      source: "user" as const, scope: "org" as const,
+      check: { type: "target-forbids" as const, targetPattern: "bad" },
+      enabled: true, createdAt: "2026-01-01T00:00:00.000Z",
+    }
+    render(<RuleEditor initialRule={orgRule} cells={[]} onSave={onSave} onCancel={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }))
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ scope: "org" }))
+  })
+})

@@ -46,7 +46,7 @@ import {
 } from "../../../../db/shared/scene-briefs"
 import { getFileSegmentation } from "../../../../db/shared/file-segmentation"
 import { selectCellPairs, type CellPair } from "../agent/tools/select-cells"
-import { type LintRule } from "../agent/lint"
+import { rulesForLane, type LintRule } from "../agent/lint"
 import { loadProjectContext, type ProjectContext } from "./project-context"
 import { openRouterExtras } from "../llm-vendor"
 import { deriveSpanSeeds, seedsFromBoundaries } from "./segment"
@@ -1168,7 +1168,8 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
   const layerAbove: LayerAboveBlock[] = ctx.projectBriefL1
     ? [{ ref: "project-brief", text: ctx.projectBriefL1 }]
     : []
-  const rules: LintRule[] = ctx.authoredRules
+  // AQU-609: lane-scoped rules only constrain their own lane's drafts.
+  const rules: LintRule[] = rulesForLane(ctx.authoredRules, run.targetLang)
   const shared: RunContext = {
     ctx,
     rules,

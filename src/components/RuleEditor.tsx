@@ -128,15 +128,31 @@ interface RuleEditorProps {
   onCancel: () => void
   /** Optional class override for the outer shell (e.g. dialog embed). */
   className?: string
+  /**
+   * AQU-609: the project's NAMED target-language lanes (excluding `''`). When
+   * non-empty, an "Applies to" picker offers project scope ("All lanes"), the
+   * default lane, or one named lane. Omit for org-rule editors and single-lane
+   * projects — the rule then keeps its existing scope (or `project` on create).
+   */
+  lanes?: string[]
+  /** Display label for the default (`''`) lane, e.g. the project's base
+   *  target language. Falls back to a generic string. */
+  defaultLaneLabel?: string
 }
 
-export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: RuleEditorProps) {
+export function RuleEditor({ initialRule, cells, onSave, onCancel, className, lanes, defaultLaneLabel }: RuleEditorProps) {
   const t = useT()
   // ── Field state ──
   const [name, setName] = useState(initialRule?.name ?? "")
   const [description, setDescription] = useState(initialRule?.description ?? "")
   const [severity, setSeverity] = useState<"major" | "minor">(initialRule?.severity ?? "minor")
   const [enabled, setEnabled] = useState(initialRule?.enabled ?? true)
+  // AQU-609: `null` = every lane (project scope); a string = that lane only
+  // (`''` is the default lane, per the AQU-538 convention).
+  const [laneChoice, setLaneChoice] = useState<string | null>(() =>
+    initialRule?.scope === "lane" ? initialRule.lane ?? "" : null,
+  )
+  const showLanePicker = (lanes?.length ?? 0) > 0
 
   // Decode existing check into side/mode/pattern
   const [side, setSide] = useState<Side>(() => {
@@ -233,12 +249,22 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
       has_autofix: !!autofix,
     })
 
+    // Scope: the lane picker decides when shown; otherwise preserve the rule's
+    // existing scope (an org-rule edit must not silently flip to `project`).
+    const scoped: Pick<TranslationRule, "scope" | "lane"> = showLanePicker
+      ? laneChoice === null
+        // `lane: undefined` on purpose: an update spreads over the old rule, so
+        // a lane→all-lanes change must overwrite the stale `lane` field.
+        ? { scope: "project", lane: undefined }
+        : { scope: "lane", lane: laneChoice }
+      : { scope: initialRule?.scope ?? "project", lane: initialRule?.lane }
+
     onSave({
       name: name.trim(),
       description: description.trim(),
       severity,
       source: "user",
-      scope: "project",
+      ...scoped,
       check: currentCheck!,
       enabled,
       autofix,
@@ -360,6 +386,33 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
             ))}
           </div>
         </div>
+
+        {/* AQU-609: lane scope — only for multi-lane project-rule editors */}
+        {showLanePicker && (
+          <div>
+            <FieldLabel className="text-xs">{t("rules.editor.laneLabel")}</FieldLabel>
+            <div className="mt-1 flex flex-wrap gap-1">
+              {[null, "", ...(lanes ?? [])].map((laneOption) => (
+                <button
+                  key={laneOption === null ? " all" : `lane:${laneOption}`}
+                  type="button"
+                  onClick={() => setLaneChoice(laneOption)}
+                  className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+                    laneChoice === laneOption
+                      ? "bg-primary text-primary-foreground"
+                      : "bg-muted text-muted-foreground hover:bg-muted/80"
+                  }`}
+                >
+                  {laneOption === null
+                    ? t("rules.editor.lane.allLanes")
+                    : laneOption === ""
+                      ? defaultLaneLabel || t("rules.editor.lane.defaultLane")
+                      : laneOption}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div className="flex items-end">
           <label className="flex items-center gap-1.5 text-xs">

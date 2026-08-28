@@ -16,6 +16,21 @@ function compile(pattern: string, flags: string): RegExp | null {
   return re
 }
 
+/**
+ * AQU-609: restrict a merged rules array to the given target-language lane.
+ * Lane-scoped rules apply only when their `lane` matches (`''` = the
+ * project-default lane, same convention as cells/AQU-538); org, project,
+ * builtin, and terminology rules apply in every lane. Callers evaluating
+ * against a lane-bound cell view (editor, health, drafting, autopilot) filter
+ * here; management surfaces keep the full list.
+ */
+export function rulesForLane(
+  rules: TranslationRule[],
+  lane: string,
+): TranslationRule[] {
+  return rules.filter((r) => r.scope !== "lane" || (r.lane ?? "") === lane)
+}
+
 export function checkRules(
   fileCells: Map<string, CellData[]>,
   rules: TranslationRule[]

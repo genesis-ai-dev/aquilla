@@ -257,11 +257,18 @@ describe("MilestoneNavigator", () => {
     // Only the active story's ranges are listed until another one is opened.
     expect(screen.queryByRole("option", { name: /Cells 1–1 / })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("option", { name: /Story u44d21 / }))
+    const collapsed = screen.getByRole("option", { name: /Story u44d21 / })
+    const collapsedChevron = collapsed.querySelector("svg.lucide-chevron-right")
+    expect(collapsedChevron).toBeTruthy()
+    expect(collapsedChevron).not.toHaveClass("rotate-90")
+
+    fireEvent.click(collapsed)
     expect(onSelect).not.toHaveBeenCalled()
     expect(pickerSearch("story")).toBeInTheDocument()
     expect(screen.getByRole("option", { name: /Cells 1–1 / })).toBeInTheDocument()
     expect(screen.queryByRole("option", { name: /Cells 51–100 / })).not.toBeInTheDocument()
+    expect(screen.getByRole("option", { name: /Story u44d21 / }).querySelector("svg.lucide-chevron-right"))
+      .toHaveClass("rotate-90")
 
     fireEvent.click(screen.getByRole("option", { name: /Cells 1–1 / }))
     expect(onSelect).toHaveBeenCalledWith("story:u44d21", "story:u44d21:range:c1")

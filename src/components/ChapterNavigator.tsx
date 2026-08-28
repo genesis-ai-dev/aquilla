@@ -10,7 +10,7 @@ import {
 } from "react"
 import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
-import { ChevronDown, ChevronLeft, ChevronRight, CheckIcon, CornerDownRight } from "lucide-react"
+import { ChevronLeft, ChevronRight, CheckIcon, CornerDownRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import {
@@ -376,11 +376,11 @@ function VirtualizedMilestoneList({
                   </>
                 )}
                 {expandable ? (
-                  <ChevronDown
+                  <ChevronRight
                     aria-hidden="true"
                     className={cn(
-                      "size-4 shrink-0 text-muted-foreground transition-transform",
-                      expandedKey === row.milestone.key && "rotate-180",
+                      "size-4 shrink-0 text-muted-foreground",
+                      expandedKey === row.milestone.key && "rotate-90",
                     )}
                   />
                 ) : isActive ? (

@@ -14,10 +14,9 @@ import { Spinner } from "@/components/ui/spinner"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { ChatComposer, type ChatComposerHandle, type SuggestedAction } from "@/components/chat/ChatComposer"
 import { InputGroupButton } from "@/components/ui/input-group"
-import { serializeWithChips, type ContextChip } from "@/lib/agent/context-chip"
+import type { ContextChip } from "@/lib/agent/context-chip"
+import { composeAgentSend } from "@/lib/agent/compose-send"
 import { uploadAgentArtifact, ArtifactUploadError } from "@/lib/agent/artifact-upload"
-import { expandSlashCommand } from "@/lib/agent/slash-commands"
-import { getTranslatorProfile, profileForPrompt } from "@/lib/translator-profile"
 import type { CellData } from "@/hooks/useCells"
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { ApplyContext } from "@/lib/agent/apply"
@@ -144,30 +143,18 @@ export function AgentDockView({
 
   const sendPrompt = useCallback(
     (text: string, chips: ContextChip[] = []) => {
-      if ((!text.trim() && chips.length === 0) || !jwt) return
-      // Slash commands expand into vetted prompts; the bubble keeps the typed
-      // command (CLI-style). Chips skip expansion — a chip message is already
-      // a specific ask, not a command.
-      const expanded = chips.length === 0 ? expandSlashCommand(text) : null
-      // `display` (with [ref] chips) shows in the bubble; `wire` (tokens +
-      // legend) is what the model receives.
-      const { wire, display } = expanded
-        ? { wire: expanded, display: text.trim() }
-        : serializeWithChips(text, chips)
-      // Read the profile at send time (fresh, no extra re-render). The server
-      // re-caps every field; this just avoids sending an empty object.
-      const translatorProfile = profileForPrompt(getTranslatorProfile())
-      send({
-        wire,
-        display,
+      // Shared with the Team tab's main-channel composer so the same typed
+      // text means the same thing in both places (compose-send.ts).
+      const options = composeAgentSend({
+        text,
+        chips,
         jwt,
-        request: {
-          projectId,
-          ...(context.fileId || context.cellId ? { context: { ...context } } : {}),
-          ...(translatorProfile ? { translatorProfile } : {}),
-          ...(attachments.length > 0 ? { artifacts: attachments } : {}),
-        },
+        projectId,
+        context,
+        artifacts: attachments,
       })
+      if (!options) return
+      send(options)
       // Attachments belong to the message that carried them — clear after send.
       if (attachments.length > 0) setAttachments([])
     },

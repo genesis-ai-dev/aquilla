@@ -21,13 +21,7 @@ import {
 } from "@/components/ui/dialog"
 import { BuiltinChecksList } from "./BuiltinChecksList"
 import { RuleEditor } from "./RuleEditor"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { LaneCombobox } from "@/components/LaneCombobox"
 import { lanesWithRules, filterRulesForDisplay } from "@/lib/rules/rule-engine"
 import { RuleImportDialog } from "./RuleImportDialog"
 import { RuleSuggestFromEditsDialog } from "./RuleSuggestFromEditsDialog"
@@ -356,8 +350,8 @@ export function RulesSurface({
             <div className="flex flex-wrap items-center gap-2">
               <CardTitle>{t("rules.surface.projectRulesCardTitle", { count: userRules.length })}</CardTitle>
               {showLaneFilter && (
-                <Select
-                  items={[
+                <LaneCombobox
+                  options={[
                     { value: "all", label: t("rules.surface.laneFilter.all") },
                     { value: "project", label: t("rules.surface.laneFilter.projectWide") },
                     ...laneFilterLanes.map((lane) => ({
@@ -366,25 +360,33 @@ export function RulesSurface({
                     })),
                   ]}
                   value={effectiveLaneFilter}
-                  onValueChange={(v) => setLaneFilter(String(v))}
-                >
-                  <SelectTrigger
-                    size="sm"
-                    className="ms-auto"
-                    aria-label={t("rules.surface.laneFilterAriaLabel")}
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">{t("rules.surface.laneFilter.all")}</SelectItem>
-                    <SelectItem value="project">{t("rules.surface.laneFilter.projectWide")}</SelectItem>
-                    {laneFilterLanes.map((lane) => (
-                      <SelectItem key={`lane:${lane}`} value={`lane:${lane}`}>
-                        {lane === "" ? defaultLaneLabel || t("rules.editor.lane.defaultLane") : lane}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  onValueChange={setLaneFilter}
+                  searchPlaceholder={t("editor.lane.searchPlaceholder")}
+                  searchAriaLabel={t("editor.lane.searchAriaLabel")}
+                  emptyText={t("editor.lane.searchEmpty")}
+                  align="end"
+                  trigger={
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="ms-auto"
+                      aria-label={t("rules.surface.laneFilterAriaLabel")}
+                    >
+                      {effectiveLaneFilter === "all"
+                        ? t("rules.surface.laneFilter.all")
+                        : effectiveLaneFilter === "project"
+                          ? t("rules.surface.laneFilter.projectWide")
+                          : (() => {
+                              const lane = effectiveLaneFilter.slice("lane:".length)
+                              return lane === ""
+                                ? defaultLaneLabel || t("rules.editor.lane.defaultLane")
+                                : lane
+                            })()}
+                      <ChevronDown className="size-3.5 text-muted-foreground" />
+                    </Button>
+                  }
+                />
               )}
             </div>
           </CardHeader>

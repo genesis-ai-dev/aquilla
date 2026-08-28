@@ -17,14 +17,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Field, FieldError, FieldLabel, OptionalMark } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { X } from "lucide-react"
+import { LaneCombobox } from "@/components/LaneCombobox"
+import { ChevronDown, X } from "lucide-react"
 import type { TranslationRule, RuleCheck, RuleAutofix } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
@@ -395,39 +389,43 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className, la
         </div>
 
         {/* AQU-609: lane scope — only for multi-lane project-rule editors.
-            A dropdown, not a button row: projects can carry 150+ lanes
-            (typing in the open list jumps to a lane via typeahead). Values
-            are prefix-encoded ("scope:project" / "lane:<tag>") because the
-            default lane's tag is the empty string. */}
+            A searchable combobox, not a button row or plain dropdown:
+            projects can carry 150+ lanes. Values are prefix-encoded
+            ("scope:project" / "lane:<tag>") because the default lane's tag is
+            the empty string. */}
         {showLanePicker && (
           <div>
             <FieldLabel className="text-xs">{t("rules.editor.laneLabel")}</FieldLabel>
-            <Select
-              items={[
+            <LaneCombobox
+              options={[
                 { value: "scope:project", label: t("rules.editor.lane.allLanes") },
                 { value: "lane:", label: defaultLaneLabel || t("rules.editor.lane.defaultLane") },
                 ...(lanes ?? []).map((l) => ({ value: `lane:${l}`, label: l })),
               ]}
               value={laneChoice === null ? "scope:project" : `lane:${laneChoice}`}
               onValueChange={(v) =>
-                setLaneChoice(v === "scope:project" ? null : String(v).slice("lane:".length))
+                setLaneChoice(v === "scope:project" ? null : v.slice("lane:".length))
               }
-            >
-              <SelectTrigger size="sm" className="mt-1" aria-label={t("rules.editor.laneLabel")}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="scope:project">{t("rules.editor.lane.allLanes")}</SelectItem>
-                <SelectItem value="lane:">
-                  {defaultLaneLabel || t("rules.editor.lane.defaultLane")}
-                </SelectItem>
-                {(lanes ?? []).map((laneOption) => (
-                  <SelectItem key={laneOption} value={`lane:${laneOption}`}>
-                    {laneOption}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              searchPlaceholder={t("editor.lane.searchPlaceholder")}
+              searchAriaLabel={t("editor.lane.searchAriaLabel")}
+              emptyText={t("editor.lane.searchEmpty")}
+              trigger={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-1"
+                  aria-label={t("rules.editor.laneLabel")}
+                >
+                  {laneChoice === null
+                    ? t("rules.editor.lane.allLanes")
+                    : laneChoice === ""
+                      ? defaultLaneLabel || t("rules.editor.lane.defaultLane")
+                      : laneChoice}
+                  <ChevronDown className="size-3.5 text-muted-foreground" />
+                </Button>
+              }
+            />
           </div>
         )}
 

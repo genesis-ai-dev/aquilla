@@ -90,6 +90,7 @@ import agentMemoryRoutes from "./routes/agent-memory"
 import sceneBriefRoutes from "./routes/scene-briefs"
 import contextualRoutes from "./routes/contextual"
 import contextualDecisionsRoutes from "./routes/contextual-decisions"
+import teamRoutes from "./routes/team"
 import agentArtifactsRoutes from "./routes/agent-artifacts"
 import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
 import mondayRoutes from "./routes/monday"
@@ -276,6 +277,10 @@ app.route("/api/v2/projects", contextualRoutes)
 // Decision routes — the agent → user channel's HTTP surface (seam design
 // §4.3). Sibling router — same base as contextual.ts (routes/contextual-decisions.ts).
 app.route("/api/v2/projects", contextualDecisionsRoutes)
+// Durable team channel — the shared, project-scoped message store behind the
+// one-channel agent workspace (routes/team.ts). Sibling router, same base as
+// contextual.ts; the autopilot tick writes activity into it server-side.
+app.route("/api/v2/projects", teamRoutes)
 // Agent artifact upload — session-JWT attach-file path for the SPA agent
 // composer; proxies bytes into the shared artifacts table + SNAPSHOTS R2 so
 // the harness load_artifact tool can read them (routes/agent-artifacts.ts).

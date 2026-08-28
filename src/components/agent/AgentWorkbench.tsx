@@ -39,6 +39,7 @@ import { translateRuleName } from "@/lib/lqa/builtin-resolver"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { AgentDockView, type AgentDockViewProps } from "./AgentDockView"
 import { AgentContextPane, type AgentWorkbenchCell } from "./AgentContextPane"
+import { TeamThreadsView } from "./TeamThreadsView"
 import { CreditsDial, type CreditsDialProps } from "./CreditsDial"
 import { lintCellFor } from "./ProposalCard"
 import { ProposalReceipt } from "./ProposalReceipt"
@@ -50,13 +51,15 @@ import { WorkingSetPanel, type WorkingSetPanelHandle } from "./WorkingSetPanel"
 // SWARM-TODO stub in ./memory/AgentMemoryTab.tsx.
 const AgentMemoryTab = lazy(() => import("./memory/AgentMemoryTab"))
 
-type WorkbenchTab = "sessions" | "memory"
+type WorkbenchTab = "team" | "sessions" | "memory"
 
 export interface AgentWorkbenchProps {
   /** Same wiring the dock panel gets — one source of truth in ProjectWorkspace. */
   agent: Omit<AgentDockViewProps, "suggestedActions" | "pendingPrompt" | "onPendingPromptConsumed">
   /** Org agent-credit gauge in the header (maintainer+ only; self-hides). */
   credits?: CreditsDialProps | null
+  /** File display names for the Team tab's thread titles. */
+  fileNames?: ReadonlyMap<string, string>
   /** Minimize to the dock and dismiss the editor Agent tab. */
   onClose: () => void
   /** Jump the editor to a cell ("open" on a working-set row). */
@@ -96,7 +99,7 @@ export interface AgentWorkbenchProps {
   }
 }
 
-export function AgentWorkbench({ agent, credits, onClose, onJumpToCell, onChooseFile, workspace }: AgentWorkbenchProps) {
+export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCell, onChooseFile, workspace }: AgentWorkbenchProps) {
   const t = useT()
   const { state, stop, reset, decide } = useAgentSession(agent.projectId, agent.author)
   // Decisions per proposal row (key: proposalId:cellId) live in the SESSION
@@ -105,6 +108,11 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell, onChoose
   const decided = state.decided
   const [applying, setApplying] = useState(false)
   const [tab, setTab] = useState<WorkbenchTab>("sessions")
+  // "Ask AI" hands the workbench a context chip for the composer — that flow
+  // must land in the chat, whatever tab was left open.
+  useEffect(() => {
+    if (agent.pendingChip) setTab("sessions")
+  }, [agent.pendingChip])
   const panelRef = useRef<WorkingSetPanelHandle>(null)
   const sourceScrollRef = useRef<HTMLDivElement>(null)
   const targetScrollRef = useRef<HTMLDivElement>(null)
@@ -386,6 +394,9 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell, onChoose
             className="h-7 w-fit shrink-0 p-0"
             aria-label={t("agentWorkspace.sections")}
           >
+            <TabsTrigger value="team" className="h-full px-2 text-xs">
+              {t("agent.team.tab")}
+            </TabsTrigger>
             <TabsTrigger value="sessions" className="h-full px-2 text-xs">
               {t("agentWorkspace.chat")}
             </TabsTrigger>
@@ -429,6 +440,10 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell, onChoose
             </AppTooltip>
           </span>
         </div>
+
+        <TabsContent value="team" className="flex min-h-0 flex-1 flex-col">
+          <TeamThreadsView projectId={agent.projectId} fileNames={fileNames} />
+        </TabsContent>
 
         <TabsContent value="sessions" className="flex min-h-0 flex-1 flex-col">
           <ResizablePanelGroup

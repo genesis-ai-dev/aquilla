@@ -935,6 +935,11 @@ export function ProjectWorkspace() {
     const id = agentScopeFileId ?? activeFileId
     return id ? projectFiles.find((f) => f.id === id) ?? null : null
   }, [agentScopeFileId, activeFileId, projectFiles])
+  // Thread titles for the workbench's Team tab.
+  const agentFileNames = useMemo(
+    () => new Map(projectFiles.map((f) => [f.id, f.name])),
+    [projectFiles],
+  )
 
   useEffect(() => {
     setAgentTabOpen(centerSurface === "agent" || readAgentTabOpen(projectId))
@@ -8753,13 +8758,15 @@ export function ProjectWorkspace() {
         leftDock={
           <LeftDock
             activeTab={dockTab}
+            railActiveTab={centerSurface === "agent" ? "agent" : null}
             onActiveTabChange={(t) => {
-              // Agent rail: while the workbench is showing, re-focus it;
+              // Agent rail: while the workbench is showing, the rail item is
+              // marked active and clicking it toggles back to the editor;
               // otherwise open the compact panel in the dock (even if an
               // Agent editor tab is still sitting in the strip).
               if (t === "agent") {
-                if (resolveSidebarAgentClick(centerSurface === "agent") === "activate-editor-tab") {
-                  openAgentTab()
+                if (resolveSidebarAgentClick(centerSurface === "agent") === "close-workbench") {
+                  closeAgentTab()
                   return
                 }
               }
@@ -9232,6 +9239,7 @@ export function ProjectWorkspace() {
               onPendingChipConsumed: () => setPendingChip(null),
             }}
             credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
+            fileNames={agentFileNames}
             onClose={closeAgentTab}
             onChooseFile={() => setDockTab("files")}
             onJumpToCell={(fileId, cellId) =>

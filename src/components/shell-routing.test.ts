@@ -172,8 +172,10 @@ describe("shouldShowAudioToolbar", () => {
 })
 
 describe("resolveSidebarAgentClick", () => {
-  it("activates the editor Agent tab only while the workbench is the active surface", () => {
-    expect(resolveSidebarAgentClick(true)).toBe("activate-editor-tab")
+  it("toggles back to the editor while the workbench is the active surface", () => {
+    // Re-navigating to the URL you are already on reads as a dead control
+    // (2026-08-28 transcript) — the rail click must visibly do something.
+    expect(resolveSidebarAgentClick(true)).toBe("close-workbench")
   })
 
   it("opens the agent panel inline in the dock when the workbench is minimized", () => {

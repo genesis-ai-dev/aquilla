@@ -50,6 +50,9 @@ export const agent = defineNamespace({
       "The agent works inside this project — it can search, draft, and check. Every change arrives as a proposal {you} review and apply.",
     "agent.emptyState.introYou": "you",
     "agent.emptyState.tryAsking": "Try asking",
+    "agent.emptyState.promptHint":
+      "Tapping an example fills the message box — nothing is sent until you press Enter.",
+    "agent.emptyState.meetTeam": "Meet the team",
     "agent.emptyState.shortcuts": "Shortcuts",
     "agent.emptyState.dismiss": "Don't show this again",
 
@@ -69,6 +72,61 @@ export const agent = defineNamespace({
     "agent.run.tool.examples": "examples",
     "agent.run.tool.search": "search",
     "agent.run.tool.draft": "draft",
+
+    // ── Run timeline plain-language activity lines (AgentRunView) ────────
+    //    One sentence per tool kind, written for a translator, not an
+    //    engineer. Raw command text (SQL in particular) must never appear in
+    //    the collapsed line — it stays behind the expand.
+    "agent.run.friendly.sql": "Checked the project records",
+    "agent.run.friendly.emit": "Staged drafts for review",
+    "agent.run.friendly.docs": "Consulted the project documents",
+    "agent.run.friendly.aquifer": "Looked up Bible resources",
+    "agent.run.friendly.read": "Read the passage",
+    "agent.run.friendly.examples": "Gathered translation examples",
+    "agent.run.friendly.search": "Searched the project",
+    "agent.run.friendly.draft": "Drafted a translation",
+
+    // ── Agent team personas (personas.ts — social-workspace design) ──────
+    "agent.persona.drafter.name": "Drafter",
+    "agent.persona.drafter.tagline": "Reads each passage in context and writes the first draft.",
+    "agent.persona.reviewer.name": "Reviewer",
+    "agent.persona.reviewer.tagline": "Checks every draft for meaning, restraint, and naturalness.",
+    "agent.persona.coordinator.name": "Coordinator",
+    "agent.persona.coordinator.tagline": "Plans the work and brings finished drafts to you for review.",
+
+    // ── Team threads view (TeamThreadsView) ──────────────────────────────
+    "agent.team.tab": "Team",
+    "agent.team.rosterTitle": "Your translation team",
+    "agent.team.threadsTitle": "Threads",
+    "agent.team.needsYou": "Needs your expertise",
+    "agent.team.loading": "Loading the team's activity…",
+    "agent.team.loadFailed": "Couldn't load the team's activity.",
+    "agent.team.retry": "Retry",
+    "agent.team.emptyTitle": "The team posts its work here",
+    "agent.team.emptyBody":
+      "When Autopilot runs, each file becomes a thread where the team narrates its work — what it read, what it drafted, and what is waiting for you.",
+    "agent.team.emptyHint": "Start Autopilot from its pill in the editor to see the team at work.",
+    "agent.team.threadEmpty": "No detailed activity was recorded for this run.",
+    "agent.team.reviewDrafts": "Review drafts",
+    "agent.team.unnamedThread": "Autopilot run",
+    "agent.team.spanFallback": "this passage",
+    "agent.team.msg.started": "Starting on {span}.",
+    "agent.team.msg.reading": "Reading the situation around {span}.",
+    "agent.team.msg.drafting": "Drafting {span}.",
+    "agent.team.msg.checking": "Checking the drafts for {span}.",
+    "agent.team.msg.sceneReady": plural({
+      one: "Wrote a situation note for {span} and kept {count} question open.",
+      other: "Wrote a situation note for {span} and kept {count} questions open.",
+    }),
+    "agent.team.msg.sceneReadyUncounted": "Wrote a situation note for {span}.",
+    "agent.team.msg.draftsStaged": plural({
+      one: "Put {count} draft out for your review.",
+      other: "Put {count} drafts out for your review.",
+    }),
+    "agent.team.msg.draftsStagedUncounted": "Put drafts out for your review.",
+    "agent.team.msg.outcomeDone": "Finished {span}.",
+    "agent.team.msg.outcomePartial": "Finished {span} — some cells still have no draft.",
+    "agent.team.msg.outcomeFailed": "Hit a problem in {span} — this needs attention.",
 
     // ── Full-screen workbench (AgentWorkbench) ──────────────────────────
     "agent.workbench.newSessionAriaLabel": "New session",
@@ -742,6 +800,72 @@ export const agent = defineNamespace({
           "row, deliberately no confirm-all.",
         placeholders: {
           ref: "The row's canonical reference, a truncated cell id, or the literal fallback word 'cell' when neither is known — not translated.",
+        },
+      },
+      "agent.team.msg.started": {
+        description:
+          "Team-thread message from the Coordinator persona when Autopilot picks " +
+          "up a new piece of text.",
+        placeholders: {
+          span: "Human passage label (e.g. 'MRK 4:1–4:8'), or the translated 'this passage' fallback.",
+        },
+      },
+      "agent.team.msg.reading": {
+        description: "Team-thread message from the Drafter persona during the reading phase.",
+        placeholders: {
+          span: "Human passage label, or the translated 'this passage' fallback.",
+        },
+      },
+      "agent.team.msg.drafting": {
+        description: "Team-thread message from the Drafter persona during the drafting phase.",
+        placeholders: {
+          span: "Human passage label, or the translated 'this passage' fallback.",
+        },
+      },
+      "agent.team.msg.checking": {
+        description: "Team-thread message from the Reviewer persona during the checking phase.",
+        placeholders: {
+          span: "Human passage label, or the translated 'this passage' fallback.",
+        },
+      },
+      "agent.team.msg.sceneReady": {
+        description:
+          "Team-thread message when a situation note (scene brief) is saved, with " +
+          "how many open questions it deliberately kept open.",
+        placeholders: {
+          span: "Human passage label, or the translated 'this passage' fallback.",
+          count: "Number of open questions recorded in the note's ambiguity register.",
+        },
+      },
+      "agent.team.msg.sceneReadyUncounted": {
+        description:
+          "sceneReady variant when the event carried no open-question count.",
+        placeholders: {
+          span: "Human passage label, or the translated 'this passage' fallback.",
+        },
+      },
+      "agent.team.msg.draftsStaged": {
+        description:
+          "Team-thread message from the Coordinator when drafts land for human review.",
+        placeholders: { count: "How many drafts were staged." },
+      },
+      "agent.team.msg.outcomeDone": {
+        description: "Team-thread message when a passage finishes cleanly.",
+        placeholders: {
+          span: "Human passage label, or the translated 'this passage' fallback.",
+        },
+      },
+      "agent.team.msg.outcomePartial": {
+        description:
+          "Team-thread message when a passage finishes but some cells were skipped.",
+        placeholders: {
+          span: "Human passage label, or the translated 'this passage' fallback.",
+        },
+      },
+      "agent.team.msg.outcomeFailed": {
+        description: "Team-thread message when a passage fails and needs a human.",
+        placeholders: {
+          span: "Human passage label, or the translated 'this passage' fallback.",
         },
       },
     },

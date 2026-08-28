@@ -59,14 +59,17 @@ export function shouldApplyCheckResult(
   return resultFileId != null && resultFileId === activeFileId
 }
 
-/** Sidebar Agent rail click: focus the workbench only while it is the
- *  active center surface. A leftover Agent tab in the strip (after
- *  minimize / switching to a file) must not steal the click — that is
- *  dock mode again. */
+/** Sidebar Agent rail click. While the workbench is the active center
+ *  surface the rail item shows as active, and clicking it LEAVES the
+ *  workbench (back to the editor) — the rail's toggle idiom, and the fix for
+ *  "I can't click the agent thing in the sidebar" (2026-08-28 transcript):
+ *  re-navigating to the URL you are already on reads as a dead control. A
+ *  leftover Agent tab in the strip (after minimize / switching to a file)
+ *  must not steal the click — that is dock mode again. */
 export function resolveSidebarAgentClick(
   workbenchActive: boolean,
-): "activate-editor-tab" | "open-dock" {
-  return workbenchActive ? "activate-editor-tab" : "open-dock"
+): "close-workbench" | "open-dock" {
+  return workbenchActive ? "close-workbench" : "open-dock"
 }
 
 /**

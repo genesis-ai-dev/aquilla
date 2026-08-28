@@ -7,9 +7,11 @@
 
 import { useState } from "react"
 import { Bot, ExternalLink } from "lucide-react"
+import { AGENT_PERSONA_IDS, AGENT_PERSONAS } from "@/lib/agent/personas"
 import { SLASH_COMMANDS } from "@/lib/agent/slash-commands"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
+import { PersonaAvatar } from "./PersonaAvatar"
 
 const DOCS_URL =
   (import.meta.env.VITE_DOCS_URL as string | undefined)?.trim() ||
@@ -83,6 +85,25 @@ export function AgentEmptyState({ onPromptSelect }: AgentEmptyStateProps) {
         </div>
 
         <div className="flex flex-col gap-1.5">
+          <p className="text-[11px] font-medium">{t("agent.emptyState.meetTeam")}</p>
+          <ul className="flex flex-col gap-1.5">
+            {AGENT_PERSONA_IDS.map((id) => {
+              const persona = AGENT_PERSONAS[id]
+              return (
+                <li key={id} className="flex items-start gap-2">
+                  <PersonaAvatar personaId={id} size="sm" className="mt-0.5" />
+                  <p className="text-[11px] leading-relaxed">
+                    <span className="font-medium text-foreground">{t(persona.nameKey)}</span>
+                    {" — "}
+                    {t(persona.taglineKey)}
+                  </p>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
           <p className="text-[11px] font-medium">{t("agent.emptyState.tryAsking")}</p>
           {EXAMPLE_PROMPTS.map((prompt) => (
             <button
@@ -94,6 +115,7 @@ export function AgentEmptyState({ onPromptSelect }: AgentEmptyStateProps) {
               {prompt}
             </button>
           ))}
+          <p className="text-[10px] text-muted-foreground/80">{t("agent.emptyState.promptHint")}</p>
         </div>
 
         <div className="flex flex-col gap-1">

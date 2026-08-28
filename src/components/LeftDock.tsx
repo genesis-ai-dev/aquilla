@@ -56,6 +56,10 @@ export interface LeftDockProps {
   /** Externally controlled active tab (useful for "open chat" button in header) */
   activeTab?: DockTab | null
   onActiveTabChange?: (tab: DockTab | null) => void
+  /** Rail item to mark active WITHOUT opening its panel — e.g. the Agent item
+   *  while the agent workbench is the center surface (its panel stays closed
+   *  during the takeover, but the rail must still show where the user is). */
+  railActiveTab?: DockTab | null
 }
 
 // ---------------------------------------------------------------------------
@@ -78,12 +82,13 @@ const TAB_META: TabMeta[] = [
 interface TabRailProps {
   tabs: TabMeta[]
   activeTab: DockTab | null
+  railActiveTab?: DockTab | null
   agentBadge?: number
   onTabClick: (tab: DockTab) => void
   orientation: "left" | "top"
 }
 
-function TabRail({ tabs, activeTab, agentBadge, onTabClick, orientation }: TabRailProps) {
+function TabRail({ tabs, activeTab, railActiveTab, agentBadge, onTabClick, orientation }: TabRailProps) {
   const t = useT()
   const isTop = orientation === "top"
 
@@ -97,7 +102,7 @@ function TabRail({ tabs, activeTab, agentBadge, onTabClick, orientation }: TabRa
     >
       {tabs.map(({ id, icon: Icon, labelKey }) => {
         const label = t(labelKey)
-        const isActive = activeTab === id
+        const isActive = activeTab === id || railActiveTab === id
         const button = (
           <button
             key={id}
@@ -165,6 +170,7 @@ export function LeftDock({
   agentBadge,
   activeTab: controlledTab,
   onActiveTabChange,
+  railActiveTab,
 }: LeftDockProps) {
   const t = useT()
   const { position: railPosition } = useDockRailPosition()
@@ -240,6 +246,7 @@ export function LeftDock({
             <TabRail
               tabs={visibleTabs}
               activeTab={activeTab}
+              railActiveTab={railActiveTab}
               agentBadge={agentBadge}
               onTabClick={handleRailIconClick}
               orientation="top"
@@ -256,6 +263,7 @@ export function LeftDock({
               <TabRail
                 tabs={visibleTabs}
                 activeTab={activeTab}
+                railActiveTab={railActiveTab}
                 agentBadge={agentBadge}
                 onTabClick={handleRailIconClick}
                 orientation="left"

@@ -13,9 +13,16 @@ beforeEach(() => {
 })
 
 describe("AgentEmptyState", () => {
-  it("shows intro, example prompts, slash commands, and the guide link", () => {
+  it("shows intro, team roster, example prompts, slash commands, and the guide link", () => {
     render(<AgentEmptyState onPromptSelect={() => {}} />)
     expect(screen.getByText(/works inside this project/)).toBeInTheDocument()
+    // The social-workspace roster: the user meets the team before the first
+    // run, so later thread attribution has a referent.
+    for (const name of ["Drafter", "Reviewer", "Coordinator"]) {
+      expect(screen.getByText(name)).toBeInTheDocument()
+    }
+    // Prefill-only behavior is stated, not left to be discovered.
+    expect(screen.getByText(/nothing is sent until you press Enter/)).toBeInTheDocument()
     for (const prompt of EXAMPLE_PROMPTS) {
       expect(screen.getByRole("button", { name: prompt })).toBeInTheDocument()
     }

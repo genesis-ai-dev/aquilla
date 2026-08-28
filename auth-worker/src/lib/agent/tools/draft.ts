@@ -196,7 +196,15 @@ export async function executeDraft(
   work = work.slice(0, limit)
 
   if (work.length === 0) {
-    return { ok: true, text: "Nothing to draft — no untranslated cells in scope." }
+    // A bare "nothing here" reads as a dead end (2026-08-28 transcript) —
+    // always hand the model a concrete next step to relay to the user.
+    return {
+      ok: true,
+      text:
+        "Nothing to draft — no untranslated cells in scope. "
+        + "Suggest a next step to the user: run /check to review the existing "
+        + "translations in this scope, or pick a file that still has untranslated cells.",
+    }
   }
 
   // Discourse left-context: committed pairs immediately before the batch.

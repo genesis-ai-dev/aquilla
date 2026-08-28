@@ -145,6 +145,8 @@ export interface TeamConversationRow {
   badge: number
   /** Someone is actively working/streaming in this conversation. */
   live: boolean
+  /** Pinned rows (Team chat) render as their own block with a pin glyph. */
+  pinned?: boolean
 }
 
 export function isRunWorkingStatus(status: string): boolean {
@@ -180,6 +182,7 @@ export function buildConversationRows(args: {
       at: null,
       badge: 0,
       live: args.isStreaming,
+      pinned: true,
     },
   ]
   if (args.openCount > 0) {

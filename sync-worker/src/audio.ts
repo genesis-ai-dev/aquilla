@@ -53,9 +53,12 @@ export function audioObjectKey(
  * Rejects any id that could act as a path separator once interpolated into
  * `audioObjectKey`'s template. The handlers in this file get `projectId`/
  * `fileId` from `[^/]+` URL segments, which are inherently safe — but
- * `tts.ts` and `voice-convert.ts` take these same ids from a JSON/form body
- * and pass them straight through, so a caller could otherwise smuggle `/`
- * (or `..`) into the resulting R2 key.
+ * `tts.ts`, `voice-convert.ts`, and `diarization.ts` take ids (projectId/
+ * fileId, and — [Pen test] API security & data exposure, 2026-08-27 —
+ * voice-convert's `sourceAudioId` / diarization's `audioObject`) from a
+ * JSON/form body and pass them straight through, so a caller could otherwise
+ * smuggle `/` (or `..`) into the resulting R2 key. Every such call site now
+ * validates with this function before building a key.
  */
 export function isPathSafeId(id: string): boolean {
   if (id.length === 0 || id === "." || id === "..") return false

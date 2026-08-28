@@ -290,6 +290,26 @@ async function sha256HexBytes(bytes: Uint8Array): Promise<string> {
 
 // ── GET metadata / content ─────────────────────────────────────────────────
 
+// [Pen test] API security & data exposure (2026-08-27): metadata/inspect had
+// no throttle at all — only upload did. Cheap DB/64KB-sniff reads, so this
+// mirrors search's cap rather than upload's tighter one.
+const ARTIFACT_META_MAX_PER_CREDENTIAL = 300
+
+async function checkArtifactRateLimit(
+  db: AquillaDb,
+  kind: string,
+  credentialId: string,
+  max: number,
+): Promise<Response | null> {
+  const identifier = `credential:${credentialId}`
+  const recent = await countRecentRateLimitEvents(db, kind, identifier)
+  if (recent >= max) {
+    return errorResponse('rate_limited', 'artifact read rate limit exceeded, slow down')
+  }
+  await recordRateLimitEvent(db, kind, identifier)
+  return null
+}
+
 async function handleGetMeta(
   request: Request,
   env: ExternalEnv,
@@ -298,7 +318,15 @@ async function handleGetMeta(
 ): Promise<Response> {
   const authed = await authArtifact(request, env, projectId, ROLE.VIEWER)
   if (!authed.ok) return authed.response
-  const row = await loadArtifact(env.AQUILLA_PG as AquillaDb, projectId, artifactId)
+  const db = env.AQUILLA_PG as AquillaDb
+  const limited = await checkArtifactRateLimit(
+    db,
+    'external_artifact_meta',
+    authed.cred.credentialId,
+    ARTIFACT_META_MAX_PER_CREDENTIAL,
+  )
+  if (limited) return limited
+  const row = await loadArtifact(db, projectId, artifactId)
   if (!row) return errorResponse('not_found', `artifact ${artifactId} not found`)
   return Response.json({ artifact: rowToMeta(row) })
 }
@@ -335,6 +363,12 @@ function safeContentTypeFor(stored: string | null): string {
   return stored as string
 }
 
+// [Pen test] API security & data exposure (2026-08-27): content streams up to
+// MAX_ARTIFACT_BYTES (25 MB) per call and had no throttle — a leaked PAT could
+// repeat-download to run up R2 egress costs. Mirrors upload's cap: same order
+// of bytes moved, just in the opposite direction.
+const ARTIFACT_CONTENT_MAX_PER_CREDENTIAL = 120
+
 async function handleGetContent(
   request: Request,
   env: ExternalEnv,
@@ -344,7 +378,15 @@ async function handleGetContent(
   if (!env.SNAPSHOTS) return errorResponse('job_failed', 'SNAPSHOTS bucket not configured')
   const authed = await authArtifact(request, env, projectId, ROLE.VIEWER)
   if (!authed.ok) return authed.response
-  const row = await loadArtifact(env.AQUILLA_PG as AquillaDb, projectId, artifactId)
+  const db = env.AQUILLA_PG as AquillaDb
+  const limited = await checkArtifactRateLimit(
+    db,
+    'external_artifact_content',
+    authed.cred.credentialId,
+    ARTIFACT_CONTENT_MAX_PER_CREDENTIAL,
+  )
+  if (limited) return limited
+  const row = await loadArtifact(db, projectId, artifactId)
   if (!row) return errorResponse('not_found', `artifact ${artifactId} not found`)
 
   const obj = await env.SNAPSHOTS.get(row.r2_key)
@@ -519,7 +561,15 @@ async function handleInspect(
   if (!env.SNAPSHOTS) return errorResponse('job_failed', 'SNAPSHOTS bucket not configured')
   const authed = await authArtifact(request, env, projectId, ROLE.VIEWER)
   if (!authed.ok) return authed.response
-  const row = await loadArtifact(env.AQUILLA_PG as AquillaDb, projectId, artifactId)
+  const db = env.AQUILLA_PG as AquillaDb
+  const limited = await checkArtifactRateLimit(
+    db,
+    'external_artifact_meta',
+    authed.cred.credentialId,
+    ARTIFACT_META_MAX_PER_CREDENTIAL,
+  )
+  if (limited) return limited
+  const row = await loadArtifact(db, projectId, artifactId)
   if (!row) return errorResponse('not_found', `artifact ${artifactId} not found`)
 
   // Audio artifacts report size + content type only — no decoding, no

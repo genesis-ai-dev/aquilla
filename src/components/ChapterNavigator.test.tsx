@@ -337,6 +337,60 @@ describe("MilestoneNavigator", () => {
     expect(screen.queryByRole("option", { name: /Genesis 1189 / })).not.toBeInTheDocument()
   })
 
+  it("virtualizes expanded nested cell ranges instead of mounting every range", () => {
+    const ranges = Array.from({ length: 400 }, (_, index) => {
+      const start = index * 50 + 1
+      const end = start + 49
+      return {
+        key: `story:big:range:${index}`,
+        label: `${start}–${end}`,
+        firstCellId: `c${index}`,
+        translated: 0,
+        validated: 0,
+        total: 50,
+      }
+    })
+    const items: MilestoneNavigationItem[] = [
+      {
+        key: "story:big",
+        kind: "story",
+        label: "Story big",
+        shortLabel: "1",
+        description: "20000 cells",
+        translated: 0,
+        validated: 0,
+        total: 20_000,
+        subsections: ranges,
+      },
+      ...Array.from({ length: 200 }, (_, index) => ({
+        key: `story:${index}`,
+        kind: "story" as const,
+        label: `Story ${index}`,
+        shortLabel: `${index}`,
+        description: "1 cell",
+        translated: 0,
+        validated: 0,
+        total: 1,
+      })),
+    ]
+    render(
+      <MilestoneNavigator
+        items={items}
+        activeKey="story:big"
+        activeSubsectionKey="story:big:range:0"
+        onSelect={() => {}}
+      />,
+    )
+    openPicker(/Current story: Story big/)
+
+    const options = screen.getAllByRole("option")
+    expect(options.length).toBeGreaterThan(0)
+    expect(options.length).toBeLessThan(ranges.length)
+    expect(screen.getByRole("option", { name: /Story big / })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: /Cells 1–50 / })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: /Cells 19951–20000 / })).not.toBeInTheDocument()
+  })
+
   it("keeps Combobox keyboard navigation: ArrowDown then Enter selects the next chapter", () => {
     const onSelect = vi.fn()
     render(<MilestoneNavigator items={chapters} activeKey="scripture:MAT:1" onSelect={onSelect} />)

@@ -59,8 +59,10 @@ interface NavigationRow {
   subsection?: MilestoneNavigationSubsection
 }
 
-// Estimate only — real height comes from measureElement (no locked style.height).
+// Fixed row heights so open doesn't wait on measureElement. Nested cell-range
+// rows are one line of label plus the same two-line progress column.
 const MILESTONE_ROW_HEIGHT_PX = 48
+const SUBSECTION_ROW_HEIGHT_PX = 40
 
 /** Matches EditorTable: picker is absolutely centered from lg up. */
 const LG_MIN_WIDTH_QUERY = "(min-width: 1024px)"
@@ -269,7 +271,10 @@ function VirtualizedMilestoneList({
     enabled: open,
     count: filteredItems.length,
     getScrollElement: () => scrollElementRef.current,
-    estimateSize: () => MILESTONE_ROW_HEIGHT_PX,
+    getItemKey: (index) => filteredItems[index]?.key ?? index,
+    estimateSize: (index) => (
+      filteredItems[index]?.subsection ? SUBSECTION_ROW_HEIGHT_PX : MILESTONE_ROW_HEIGHT_PX
+    ),
     overscan: 12,
     initialRect: { width: 320, height: 360 },
     // happy-dom reports 0×0 for CSS-sized scrollports; coerce so rows mount.
@@ -292,10 +297,17 @@ function VirtualizedMilestoneList({
     [virtualizer],
   )
 
+  const didScrollOnOpenRef = useRef(false)
   useEffect(() => {
-    if (!open || filteredItems.length === 0) return
+    if (!open) {
+      didScrollOnOpenRef.current = false
+      return
+    }
+    if (didScrollOnOpenRef.current || filteredItems.length === 0) return
     const index = filteredItems.findIndex((row) => row.key === activeRowKey)
     if (index < 0) return
+    // Once per open — expanding a nested story must not re-scroll the list.
+    didScrollOnOpenRef.current = true
     queueMicrotask(() => {
       virtualizer.scrollToIndex(index, { align: "center" })
     })
@@ -329,7 +341,6 @@ function VirtualizedMilestoneList({
                 key={row.key}
                 index={virtualItem.index}
                 data-index={virtualItem.index}
-                ref={virtualizer.measureElement}
                 value={row}
                 data-checked={isActive || undefined}
                 {...(subsection ? { "data-milestone-subsection": "" } : {})}
@@ -346,6 +357,7 @@ function VirtualizedMilestoneList({
                   left: 0,
                   right: 0,
                   width: "auto",
+                  height: virtualItem.size,
                   transform: `translateY(${virtualItem.start}px)`,
                 }}
               >

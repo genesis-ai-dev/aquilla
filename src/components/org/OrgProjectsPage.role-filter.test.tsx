@@ -172,12 +172,14 @@ describe("org Projects Role filter (AQU-1042)", () => {
     expect(rowNames()).toEqual(["Psalms"])
   })
 
-  it("composes with the PM filter: role Owner + PM anna leaves only Gospels", async () => {
+  // AQU-1027: anna is the mocked viewer, so her PM slice is reached through
+  // the pinned "Managed by me" option rather than by name.
+  it("composes with the PM filter: role Owner + the viewer's own projects leaves only Gospels", async () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
     await pickOption(/role filter/i, "Owner")
-    await pickOption(/project manager filter/i, "anna")
+    await pickOption(/project manager filter/i, "Managed by me")
     expect(rowNames()).toEqual(["Gospels"])
   })
 

@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import {
   PM_FILTER_ALL,
+  PM_FILTER_MINE,
   PM_FILTER_UNASSIGNED,
   pmFilterFor,
   type PmFilter,
@@ -22,25 +23,37 @@ import {
  * Options are data-derived: the caller passes the PMs actually present in the
  * loaded rows, so the list never shows a stale or invented person. Unassigned
  * is offered only when some loaded row has no PM.
+ *
+ * AQU-1027: a signed-in viewer also gets a pinned "Managed by me" option. It
+ * is offered even when they manage nothing here, so the answer is an empty
+ * table rather than the control quietly not being there.
  */
 export function ProjectPmFilter({
   value,
   usernames,
   showUnassigned,
+  viewerUsername,
   onValueChange,
   className,
 }: {
   value: PmFilter
-  /** PMs present in the loaded rows — see `pmFilterUsernames`. */
+  /** PMs present in the loaded rows, viewer excluded — see `pmFilterUsernames`. */
   usernames: readonly string[]
   /** Whether any loaded row has no designated PM. */
   showUnassigned: boolean
+  /** Signed-in username; enables the pinned "Managed by me" option. */
+  viewerUsername?: string | null
   onValueChange: (value: PmFilter) => void
   className?: string
 }) {
   const { t } = useI18n()
   const items = [
     { value: PM_FILTER_ALL as PmFilter, label: t("org.orgProjectsPage.pmFilter.all") },
+    // Pinned directly under the reset default: a PM holding 50 of 150 projects
+    // should not have to hunt for their own name among the alphabetical rest.
+    ...(viewerUsername?.trim()
+      ? [{ value: PM_FILTER_MINE as PmFilter, label: t("org.orgProjectsPage.pmFilter.mine") }]
+      : []),
     ...usernames.map((username) => ({ value: pmFilterFor(username), label: username })),
     // Unassigned last, mirroring the PM column's "missing sorts last" rule.
     ...(showUnassigned

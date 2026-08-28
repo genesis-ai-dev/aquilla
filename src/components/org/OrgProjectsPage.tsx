@@ -11,8 +11,10 @@ import { ProjectStatusFilter } from "./ProjectStatusFilter"
 import { ProjectPmFilter } from "./ProjectPmFilter"
 import {
   PM_FILTER_ALL,
+  PM_FILTER_MINE,
   filterByPm,
   hasUnassignedPm,
+  isManagedBy,
   pmFilterUsernames,
   resolvePmFilter,
   type PmFilter,
@@ -141,16 +143,21 @@ export function OrgProjectsPage() {
   // slice, so toggling status never silently drops the PM you picked. A PM that
   // leaves the portfolio entirely falls back to "all" instead of stranding the
   // table on an option the control no longer offers.
-  const pmUsernames = pmFilterUsernames(sourceProjects)
+  const pmUsernames = pmFilterUsernames(sourceProjects, username)
   const showUnassignedPm = hasUnassignedPm(sourceProjects)
-  const activePmFilter = resolvePmFilter(pmFilter, pmUsernames, showUnassignedPm)
+  const activePmFilter = resolvePmFilter(pmFilter, pmUsernames, showUnassignedPm, username)
+  // AQU-1027: read off every loaded row, not the filtered slice — "Managed by
+  // me" plus a status filter that matches nothing is still a filter miss, not
+  // proof that the viewer manages nothing.
+  const managesNone =
+    !isPageLoading && !sourceProjects.some((project) => isManagedBy(project, username))
   // AQU-1042: same derivation rule for the viewer-role options — every loaded
   // row, not the filtered slice. Roleless rows ("—" in the Role column) pass
   // only under the "all" default.
   const roleNames = roleFilterNames(sourceProjects, portfolio.roleByProjectId)
   const activeRoleFilter = resolveRoleFilter(roleFilter, roleNames)
   const visibleProjects = filterByRole(
-    filterByPm(statusFilteredProjects, activePmFilter),
+    filterByPm(statusFilteredProjects, activePmFilter, username),
     portfolio.roleByProjectId,
     activeRoleFilter,
   )
@@ -187,6 +194,7 @@ export function OrgProjectsPage() {
               jwt={jwt}
               author={session?.username}
               allowSelfAssignment={orgSettings.allowSelfAssignment}
+              viewerUsername={username}
               onLanesChanged={portfolio.bumpRefresh}
               initialLens={statusFilter === "attention" ? "attention" : projectLens}
               loading={isPageLoading}
@@ -204,6 +212,7 @@ export function OrgProjectsPage() {
                     value={activePmFilter}
                     usernames={pmUsernames}
                     showUnassigned={showUnassignedPm}
+                    viewerUsername={username}
                     onValueChange={setPmFilter}
                     className="bg-card"
                   />
@@ -234,7 +243,11 @@ export function OrgProjectsPage() {
                   : activePmFilter !== PM_FILTER_ALL || activeRoleFilter !== ROLE_FILTER_ALL
                     ? // AQU-1040/AQU-1042: a filter combination that matches nothing
                       // is a filtered-empty table, not an empty org.
-                      t("org.orgHome.projectsPanel.noMatchingProjects")
+                      // AQU-1027: name the reason when the viewer manages nothing at
+                      // all here, rather than blaming the filter combination.
+                      activePmFilter === PM_FILTER_MINE && managesNone
+                      ? t("org.orgProjectsPage.pmFilter.mineEmptyTitle")
+                      : t("org.orgHome.projectsPanel.noMatchingProjects")
                     : statusFilter === "stalled"
                       ? t("org.orgHome.emptyTitle.stalled")
                       : statusFilter === "attention"

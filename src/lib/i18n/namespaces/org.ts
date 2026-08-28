@@ -1027,12 +1027,18 @@ export const org = defineNamespace({
     // AQU-1040: designated-PM filter, sibling to the status filter in the
     // Projects toolbar. The PM names themselves are usernames, not strings.
     "org.orgProjectsPage.pmFilter.all": "All PMs",
+    // AQU-1027: identity option pinned above the named PMs. PM designation
+    // (projects.pm_user_id) is a different thing from the file assignments
+    // behind "Assigned to me", so this is the only surface that exposes it.
+    "org.orgProjectsPage.pmFilter.mine": "Managed by me",
+    "org.orgProjectsPage.pmFilter.mineEmptyTitle": "You don’t manage any projects here.",
     "org.orgProjectsPage.pmFilterAria": "Project manager filter",
     // AQU-1042: viewer-role filter, third control in the Projects toolbar.
     // The role option labels come from common.role.* (same keys as RoleLabel).
     "org.orgProjectsPage.roleFilter.all": "All roles",
     "org.orgProjectsPage.roleFilterAria": "Role filter",
     // "Unassigned" PM option → org.projectOverview.unassigned (identical text)
+    // "(you)" marker on the PM column's own row → editor.validation.you
     // Filtered-to-nothing empty title → org.orgHome.projectsPanel.noMatchingProjects
     // Zero-projects empty title → org.orgHome.projectsPanel.emptyTitle
     // Zero-projects empty description → org.overview.emptyDescription
@@ -1201,7 +1207,7 @@ export const org = defineNamespace({
       },
       "org.orgProjectsPage.pmFilterAria": {
         description:
-          "Accessible name for the project-manager filter control on the org Projects page. Its options are the PM usernames present in the loaded table, plus Unassigned and an 'All PMs' default; it narrows the table alongside the status filter and the search box.",
+          "Accessible name for the project-manager filter control on the org Projects page. Its options are an 'All PMs' default, a pinned 'Managed by me' identity option when someone is signed in, the other PM usernames present in the loaded table, and Unassigned; it narrows the table alongside the status filter and the search box.",
       },
       "org.orgProjectsPage.roleFilterAria": {
         description:

@@ -44,7 +44,7 @@ import {
   type ContextualRunRecord,
 } from "@/lib/contextual/transport"
 import { humanPassageLabel } from "../../../shared/span-label"
-import { PersonaAvatar } from "./PersonaAvatar"
+import { AgentCardTrigger } from "./AgentCard"
 import { TeamChannel } from "./TeamChannel"
 import { TeamChannelComposer } from "./TeamChannelComposer"
 import { TeamChannelSpine } from "./TeamChannelSpine"
@@ -68,7 +68,15 @@ export interface TeamThreadsViewProps {
   author?: string
 }
 
-function TeamRoster({ activePersonas, t }: { activePersonas: ReadonlySet<string>; t: TFunction }) {
+function TeamRoster({
+  activePersonas,
+  projectId,
+  t,
+}: {
+  activePersonas: ReadonlySet<string>
+  projectId: string
+  t: TFunction
+}) {
   return (
     <div className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
       <span className="text-[11px] font-semibold text-foreground/90">
@@ -77,9 +85,7 @@ function TeamRoster({ activePersonas, t }: { activePersonas: ReadonlySet<string>
       <ul className="flex items-center gap-1.5" data-testid="team-roster">
         {AGENT_PERSONA_IDS.map((id) => (
           <li key={id} className="flex items-center gap-1">
-            <span role="img" aria-label={t(AGENT_PERSONAS[id].nameKey)}>
-              <PersonaAvatar personaId={id} size="sm" />
-            </span>
+            <AgentCardTrigger personaId={id} projectId={projectId} size="sm" />
             {activePersonas.has(id) && (
               <span
                 data-testid={`team-roster-live-${id}`}
@@ -94,7 +100,7 @@ function TeamRoster({ activePersonas, t }: { activePersonas: ReadonlySet<string>
   )
 }
 
-function TeamEmptyState({ t }: { t: TFunction }) {
+function TeamEmptyState({ projectId, t }: { projectId: string; t: TFunction }) {
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto p-6">
       <div className="flex max-w-sm flex-col gap-4">
@@ -109,7 +115,7 @@ function TeamEmptyState({ t }: { t: TFunction }) {
             const persona = AGENT_PERSONAS[id]
             return (
               <li key={id} className="flex items-start gap-2.5">
-                <PersonaAvatar personaId={id} />
+                <AgentCardTrigger personaId={id} projectId={projectId} size="md" />
                 <div className="min-w-0">
                   <p className="text-xs font-medium">{t(persona.nameKey)}</p>
                   <p className="text-xs leading-relaxed text-muted-foreground">
@@ -318,7 +324,7 @@ export function TeamThreadsView({ projectId, fileNames, jwt, author }: TeamThrea
       </div>
     )
   } else if (isEmpty) {
-    body = <TeamEmptyState t={t} />
+    body = <TeamEmptyState projectId={projectId} t={t} />
   } else if (openItem) {
     body = (
       <>
@@ -358,7 +364,7 @@ export function TeamThreadsView({ projectId, fileNames, jwt, author }: TeamThrea
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <TeamRoster activePersonas={activePersonas} t={t} />
+      <TeamRoster activePersonas={activePersonas} projectId={projectId} t={t} />
       <div className="flex min-h-0 flex-1">{body}</div>
       {showComposer && (
         <TeamChannelComposer

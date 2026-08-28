@@ -442,7 +442,16 @@ export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCel
         </div>
 
         <TabsContent value="team" className="flex min-h-0 flex-1 flex-col">
-          <TeamThreadsView projectId={agent.projectId} fileNames={fileNames} />
+          {/* jwt/author must mirror AgentDockView's wiring so the Team tab and
+              the Chat tab address the SAME session-store instance (author is
+              the store's owner key — ProjectWorkspace may fall back to a
+              project username when no session exists). */}
+          <TeamThreadsView
+            projectId={agent.projectId}
+            fileNames={fileNames}
+            jwt={agent.jwt}
+            author={agent.author}
+          />
         </TabsContent>
 
         <TabsContent value="sessions" className="flex min-h-0 flex-1 flex-col">

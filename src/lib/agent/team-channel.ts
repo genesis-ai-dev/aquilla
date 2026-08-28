@@ -21,7 +21,41 @@ import type {
   ContextualDecisionView,
   ContextualRunRecord,
 } from "@/lib/contextual/transport"
+import type { TFunction } from "@/lib/i18n/I18nProvider"
 import { personaForRegion, type AgentPersonaId } from "./personas"
+import type { TeamFeedMessage } from "./social-feed"
+
+/** The plain-language sentence for one feed step — shared by the thread pane
+ *  and the step inspector so the two can never disagree. */
+export function feedMessageText(message: TeamFeedMessage, t: TFunction): string {
+  const span = (label: string | null) => label ?? t("agent.team.spanFallback")
+  const { body } = message
+  switch (body.kind) {
+    case "started":
+      return t("agent.team.msg.started", { span: span(body.spanLabel) })
+    case "phase":
+      if (body.region === "reading") return t("agent.team.msg.reading", { span: span(body.spanLabel) })
+      if (body.region === "drafting") return t("agent.team.msg.drafting", { span: span(body.spanLabel) })
+      if (body.region === "checking") return t("agent.team.msg.checking", { span: span(body.spanLabel) })
+      // buildRunFeed never emits staging phases; keep the mapping total anyway.
+      return t("agent.team.msg.outcomeDone", { span: span(body.spanLabel) })
+    case "sceneReady":
+      return body.ambiguityCount != null && body.ambiguityCount > 0
+        ? t("agent.team.msg.sceneReady", {
+            span: span(body.spanLabel),
+            count: body.ambiguityCount,
+          })
+        : t("agent.team.msg.sceneReadyUncounted", { span: span(body.spanLabel) })
+    case "draftsStaged":
+      return body.count != null
+        ? t("agent.team.msg.draftsStaged", { count: body.count })
+        : t("agent.team.msg.draftsStagedUncounted")
+    case "outcome":
+      if (body.status === "done") return t("agent.team.msg.outcomeDone", { span: span(body.spanLabel) })
+      if (body.status === "partial") return t("agent.team.msg.outcomePartial", { span: span(body.spanLabel) })
+      return t("agent.team.msg.outcomeFailed", { span: span(body.spanLabel) })
+  }
+}
 
 /** One autopilot run, dispatched by the Coordinator. Owns the run thread. */
 export interface TeamDispatchItem {
@@ -64,6 +98,11 @@ export function decisionThreadId(decisionId: string): string {
 
 export const TEAM_CHAT_CONVERSATION = "team-chat"
 export const QUESTIONS_CONVERSATION = "questions"
+
+/** Query param carrying the active conversation on `/project/:id/agent` —
+ *  URL-driven so the sidebar list and the center pane share one selection
+ *  (and a thread can be linked to). Absent = Team chat. */
+export const CONVERSATION_PARAM = "conversation"
 
 /**
  * Statuses whose thread still accepts a steering message. Parked runs count:

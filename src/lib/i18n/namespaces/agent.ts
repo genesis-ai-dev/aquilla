@@ -184,8 +184,17 @@ export const agent = defineNamespace({
       one: "{count} draft ready for your review",
       other: "{count} drafts ready for your review",
     }),
-    "agent.team.hideList": "Hide the conversation list",
-    "agent.team.showList": "Show the conversation list",
+    // v2.2 three-column layout: dock threads list + step inspector + re-open.
+    // (The v2.1 focus toggle went away — collapsing the dock plays that role.)
+    "agent.team.newConversation": "New conversation",
+    "agent.team.composer.reopenPlaceholder":
+      "Message to start new work on this file — your note guides the fresh run.",
+    "agent.team.inspector.title": "Step detail",
+    "agent.team.inspector.close": "Close step detail",
+    "agent.team.inspector.note": "Situation note",
+    "agent.team.inspector.reasons": "Why",
+    "agent.team.inspector.details": "Details",
+    "agent.team.inspector.noDetails": "This step recorded no further detail.",
     "agent.team.spanFallback": "this passage",
     "agent.team.msg.started": "Starting on {span}.",
     "agent.team.msg.reading": "Reading the situation around {span}.",

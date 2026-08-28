@@ -27,24 +27,25 @@ export class AgentPage {
 
   // ── Entry ──────────────────────────────────────────────────────────────
 
-  /** Open Agent from the sidebar rail.
-   *  While the workbench is the active surface, focuses that tab; otherwise
-   *  opens the compact agent panel inline in the dock. Minimize dismisses
-   *  the editor Agent tab. */
+  /** Open the agent CHAT from the sidebar rail (v2.2 three-column layout):
+   *  the rail's Agent tab opens the dock THREADS LIST — no composer lives in
+   *  the dock any more — so this continues into the agent surface, where the
+   *  workbench chat (and its composer) is the default tab. */
   async openAgentTab(): Promise<void> {
     await this.page
       .getByRole("complementary")
       .getByRole("button", { name: "Agent", exact: true })
       .click()
+    await this.page.getByRole("button", { name: "Open agent in editor tab" }).click()
+    await expect(this.page).toHaveURL(/\/agent(?:\?|$)/)
+    await expect(this.page.getByRole("textbox", { name: "Ask the agent" })).toBeVisible()
   }
 
-  /** Assert the compact dock panel is showing (composer, not /agent). */
+  /** Assert the dock's Agent panel is showing its threads list (v2.2) —
+   *  the dock lists conversations; composing happens on the agent surface. */
   async expectDocked(): Promise<void> {
-    await expect(this.page).not.toHaveURL(/\/agent(?:\?|$)/)
-    await expect(this.page.getByRole("textbox", { name: "Ask the agent" })).toBeVisible()
-    await expect(
-      this.page.getByRole("button", { name: "Open agent in editor tab" }),
-    ).toBeVisible()
+    await expect(this.page.getByTestId("team-conversation-list")).toBeVisible()
+    await expect(this.page.getByRole("textbox", { name: "Ask the agent" })).not.toBeVisible()
   }
 
   /** Expand the docked agent panel into an editor tab at

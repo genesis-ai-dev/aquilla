@@ -58,6 +58,8 @@ describe("buildRunFeed", () => {
     const staged = feed[5].body
     if (staged.kind !== "draftsStaged") throw new Error("expected draftsStaged")
     expect(staged.count).toBe(3)
+    // The receipt behind the sentence rides along for the step inspector.
+    expect(feed[5].raw).toEqual({ kind: "drafts_staged", details: { count: 3 } })
     const outcome = feed[6].body
     if (outcome.kind !== "outcome") throw new Error("expected outcome")
     expect(outcome.status).toBe("done")

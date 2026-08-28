@@ -88,7 +88,6 @@ import {
   shouldPatchSystemPrompt,
   shouldSelfHealZeroFileLink,
   shouldApplyCheckResult,
-  resolveSidebarAgentClick,
   reconcileContextualAfterRealtimeOpen,
   reconcileContextualDraftsAfterAppliedEvent,
 } from "./project-workspace-helpers"
@@ -886,7 +885,12 @@ export function ProjectWorkspace() {
   const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
   // FRO-308: left dock active tab (null = collapsed rail only)
-  const [dockTab, setDockTab] = useState<DockTab | null>("files")
+  // Deep-loading straight onto the agent surface should land with the
+  // threads list open (v2.2) — the takeover effect below only fires on
+  // surface TRANSITIONS, so the initial value must be surface-aware.
+  const [dockTab, setDockTab] = useState<DockTab | null>(() =>
+    centerSurface === "agent" ? "agent" : "files",
+  )
   // Agent editor tab is in the strip while the workbench is open. Minimize
   // and the tab's × dismiss it. Switching to a file tab leaves the surface
   // but keeps the tab until then.
@@ -904,21 +908,17 @@ export function ProjectWorkspace() {
     prevSurfaceRef.current = centerSurface
     if (centerSurface === "agent" && prev !== "agent") {
       dockTabBeforeAgentRef.current = dockTab
-      // The file explorer is the workbench's scope picker — open it by
-      // default (the Agent tab itself stays unreachable during the takeover).
-      setDockTab("files")
+      // v2.2 three-column layout: the Agent panel is the THREADS LIST — on
+      // the agent surface it is the natural left column. The file explorer
+      // (the workbench's scope picker) stays one rail click away.
+      setDockTab("agent")
     } else if (centerSurface !== "agent" && prev === "agent") {
-      // Entry forces the scope picker ("files"), so treat that forced default
+      // Entry forced the threads list ("agent"), so treat that forced default
       // (or a collapsed rail) as "no manual choice" and restore the saved tab.
       // Any other tab was picked manually mid-takeover — keep it.
-      // Minimize returns to dock mode: if the user expanded from the Agent
-      // panel, restore that panel rather than leaving them on Files.
       setDockTab((cur) =>
-        cur === null || cur === "files" ? dockTabBeforeAgentRef.current : cur,
+        cur === null || cur === "agent" ? dockTabBeforeAgentRef.current : cur,
       )
-    } else if (centerSurface === "agent" && dockTab === "agent") {
-      // Restore/route paths can re-land the agent tab mid-takeover; collapse.
-      setDockTab(null)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- dockTab read on transition only
   }, [centerSurface])
@@ -964,6 +964,9 @@ export function ProjectWorkspace() {
   // A source selection the user sent to the agent via "Ask AI". Opens the
   // integrated Agent pane and is inserted into the composer as a context chip.
   const [pendingChip, setPendingChip] = useState<ContextChip | null>(null)
+  // A dock quick-action prompt (Summarize book/chapter) headed for the agent
+  // surface's chat — the dock no longer hosts a composer of its own (v2.2).
+  const [pendingAgentPrompt, setPendingAgentPrompt] = useState<string | null>(null)
   const handleAskAiFromSelection = useCallback((chip: ContextChip) => {
     setPendingChip(chip)
     openAgentTab()
@@ -8760,16 +8763,8 @@ export function ProjectWorkspace() {
             activeTab={dockTab}
             railActiveTab={centerSurface === "agent" ? "agent" : null}
             onActiveTabChange={(t) => {
-              // Agent rail: while the workbench is showing, the rail item is
-              // marked active and clicking it toggles back to the editor;
-              // otherwise open the compact panel in the dock (even if an
-              // Agent editor tab is still sitting in the strip).
-              if (t === "agent") {
-                if (resolveSidebarAgentClick(centerSurface === "agent") === "close-workbench") {
-                  closeAgentTab()
-                  return
-                }
-              }
+              // The Agent rail opens the threads-list panel everywhere (v2.2);
+              // navigation to the agent surface happens by picking a thread.
               setDockTab(t)
               // Opening the Voices tab puts the editor into the Audio lens so
               // the per-line voice controls show alongside the panel.
@@ -8892,25 +8887,15 @@ export function ProjectWorkspace() {
             }
             agentPanel={
               <AgentDockPanel
-                agent={{
-                  projectId: project.id,
-                  jwt,
-                  author: currentUsername,
-                  roleLevel: currentRoleLevel,
-                  context: {
-                    fileId: activeFileId ?? undefined,
-                    cellId: focusedCellId ?? undefined,
-                  },
-                  rules,
-                  resolveCell: resolveCellById,
-                  onApplied: handleAgentApplied,
-                }}
+                projectId={project.id}
+                author={currentUsername}
+                fileNames={agentFileNames}
                 bibleSummary={bibleSummary}
-                pendingChip={pendingChip}
-                onPendingChipConsumed={() => setPendingChip(null)}
-                credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
+                onSummaryPrompt={(prompt) => {
+                  setPendingAgentPrompt(prompt)
+                  openAgentTab()
+                }}
                 onExpand={openAgentTab}
-                expanded={centerSurface === "agent"}
               />
             }
             searchPanel={
@@ -9237,6 +9222,8 @@ export function ProjectWorkspace() {
               onApplied: handleAgentApplied,
               pendingChip,
               onPendingChipConsumed: () => setPendingChip(null),
+              pendingPrompt: pendingAgentPrompt,
+              onPendingPromptConsumed: () => setPendingAgentPrompt(null),
             }}
             credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
             fileNames={agentFileNames}

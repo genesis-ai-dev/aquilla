@@ -1,20 +1,21 @@
 /**
- * TeamThreadsView tests — the Team tab is a typical chat (v2.1 of the
- * 2026-08-28 social-workspace design): a conversations list beside one
- * active conversation. These assert the presentation contract:
+ * TeamThreadsView tests — the Team surface in the v2.2 three-column layout
+ * (2026-08-28): the conversations list lives in the DOCK (AgentDockPanel);
+ * this surface is the active conversation plus the optional step inspector.
+ * These assert the presentation contract:
  *
- *  - the list reads like a chat app: Team chat pinned first, one consolidated
- *    questions conversation, runs newest-first, each row a name + one-line
- *    preview, with the single accent reserved for counts that need the human;
- *  - Team chat is the default conversation and is time-ordered: Coordinator
- *    dispatches (with a quiet "view updates" affordance — the replies-badge
- *    pattern), questions addressed to the human, the live session underneath;
- *  - selecting a conversation never costs the user their place — the list
- *    stays put (focus mode hides it deliberately), Team chat and Escape are
- *    the ways home;
- *  - the one composer says where it sends. In a run conversation it wears a
- *    scope chip and its message goes to that RUN as steering, not to the
- *    chat; on a finished run it closes rather than silently swallowing text.
+ *  - selection is URL-driven (CONVERSATION_PARAM): absent = Team chat, and a
+ *    run id in the URL opens that run's conversation directly (a dock click,
+ *    a shared link);
+ *  - Team chat is time-ordered: Coordinator dispatches (with a quiet "view
+ *    updates" affordance), questions addressed to the human, the live
+ *    session underneath; Escape is the keyboard way home;
+ *  - clicking a step opens the inspector third column with the receipts
+ *    (raw event kind/details) behind collapsed sections;
+ *  - the one composer says where it sends: Team chat → the shared session;
+ *    a live run → steering; a FINISHED run with CONTRIBUTOR+ → re-opens the
+ *    work (fresh run seeded with the message); finished without the role →
+ *    the box closes and says why.
  *
  * Transport and the shared session store are mocked — this is the
  * presentation contract, not the wire.
@@ -23,6 +24,7 @@
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
+import { ROLE } from "@/lib/frontier/roles"
 import type {
   ContextualDecisionsPage,
   ContextualRunActivity,
@@ -35,7 +37,8 @@ vi.mock("@/lib/contextual/transport", () => ({
   fetchContextualDecisions: vi.fn(),
   fetchContextualRunActivity: vi.fn(),
   sendContextualSteering: vi.fn(),
-  // DecisionCard (rendered in a question thread) imports this too.
+  startFileContextualRun: vi.fn(),
+  // DecisionCard (rendered in the questions conversation) imports this too.
   actOnContextualDecision: vi.fn(),
 }))
 
@@ -43,8 +46,8 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "test-jwt", username: "alice" }, loading: false }),
 }))
 
-// The shared chat session: the channel renders its runs and its composer
-// sends into it. Faked so the channel's own wiring is what's under test.
+// The shared chat session: Team chat renders its runs and its composer sends
+// into it. Faked so the surface's own wiring is what's under test.
 const agentSend = vi.fn()
 const agentSessionState = {
   sessionId: "s1",
@@ -109,7 +112,9 @@ const fetchContextualRuns = vi.mocked(transport.fetchContextualRuns)
 const fetchContextualDecisions = vi.mocked(transport.fetchContextualDecisions)
 const fetchContextualRunActivity = vi.mocked(transport.fetchContextualRunActivity)
 const sendContextualSteering = vi.mocked(transport.sendContextualSteering)
+const startFileContextualRun = vi.mocked(transport.startFileContextualRun)
 
+const { resetTeamConversationsForTesting } = await import("@/lib/agent/team-conversations")
 const { TeamThreadsView } = await import("./TeamThreadsView")
 
 function runRecord(overrides: Partial<ContextualRunRecord> = {}): ContextualRunRecord {
@@ -155,6 +160,19 @@ function activity(events: ContextualRunActivity["events"]): ContextualRunActivit
   }
 }
 
+const stagedEvent = {
+  id: "e1",
+  runId: "run-1",
+  projectId: "p1",
+  fileId: "file-1",
+  kind: "drafts_staged",
+  spanId: "s1",
+  spanLabel: "MRK 4:1–4:8",
+  summary: "",
+  details: { count: 3 },
+  createdAt: "2026-08-28T12:00:05Z",
+}
+
 const openQuestion = {
   id: "d1",
   fileId: "file-1",
@@ -166,12 +184,13 @@ const openQuestion = {
   assignedUserId: null,
 }
 
-function renderView() {
+function renderView(options: { initialEntry?: string; roleLevel?: number } = {}) {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[options.initialEntry ?? "/project/p1/agent"]}>
       <TeamThreadsView
         projectId="p1"
         fileNames={new Map([["file-1", "Mark"], ["file-2", "Luke"]])}
+        roleLevel={options.roleLevel ?? null}
       />
     </MemoryRouter>,
   )
@@ -188,13 +207,14 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  resetTeamConversationsForTesting()
   agentSessionState.runs = []
   agentSessionState.isStreaming = false
   fetchContextualRunActivity.mockResolvedValue(activity([]))
   sendContextualSteering.mockResolvedValue(undefined)
 })
 
-describe("TeamThreadsView — the typical-chat layout", () => {
+describe("TeamThreadsView — the active conversation surface", () => {
   it("introduces the team when nothing has run yet", async () => {
     fetchContextualRuns.mockResolvedValue(runsPage([]))
     fetchContextualDecisions.mockResolvedValue(decisionsPage())
@@ -203,41 +223,6 @@ describe("TeamThreadsView — the typical-chat layout", () => {
     for (const name of ["Drafter", "Reviewer", "Coordinator"]) {
       expect(screen.getAllByText(name).length).toBeGreaterThan(0)
     }
-    view.unmount()
-  })
-
-  it("lists conversations — Team chat pinned first, questions, then runs newest-first", async () => {
-    fetchContextualRuns.mockResolvedValue(
-      runsPage([
-        runRecord({ runId: "run-1", fileId: "file-1", updatedAt: "2026-08-28T11:30:00Z" }),
-        runRecord({
-          runId: "run-2",
-          fileId: "file-2",
-          updatedAt: "2026-08-28T13:30:00Z",
-          proposedDrafts: 0,
-          status: "done",
-          phase: null,
-        }),
-      ]),
-    )
-    fetchContextualDecisions.mockResolvedValue(
-      decisionsPage({ openCount: 1, decisions: [openQuestion] }),
-    )
-    const view = renderView()
-
-    const list = await screen.findByTestId("team-conversation-list")
-    // Pinned Team chat, the consolidated questions row, then runs by recency.
-    const rows = within(list).getAllByRole("button")
-    expect(rows).toHaveLength(4)
-    expect(rows[0]).toHaveTextContent("Team chat")
-    expect(rows[1]).toHaveTextContent("Needs your expertise")
-    expect(rows[2]).toHaveTextContent("Luke")
-    expect(rows[3]).toHaveTextContent("Mark")
-    // The only accent on the list: counts that need the human.
-    expect(within(list).getByText("1")).toBeInTheDocument() // open question
-    expect(within(list).getByText("3")).toBeInTheDocument() // staged drafts on Mark
-    // Run rows carry a one-line status preview.
-    expect(within(list).getByText("3 drafts ready for your review")).toBeInTheDocument()
     view.unmount()
   })
 
@@ -268,8 +253,6 @@ describe("TeamThreadsView — the typical-chat layout", () => {
       "Two prior renderings of this name conflict.",
       "How is Mark going?",
     ])
-    // Question messages are addressed to the human, in the Coordinator's voice.
-    expect(within(channel).getByText("Needs your expertise")).toBeInTheDocument()
     // The replies-badge pattern: a quiet inline affordance under the message.
     expect(
       within(channel).getByRole("button", { name: "Open the thread for Mark" }),
@@ -277,55 +260,43 @@ describe("TeamThreadsView — the typical-chat layout", () => {
     view.unmount()
   })
 
-  it("selects a run conversation from View updates — list stays, composer scopes", async () => {
-    fetchContextualRuns.mockResolvedValue(
-      runsPage([
-        runRecord({ runId: "run-1", fileId: "file-1", createdAt: "2026-08-28T11:00:00Z" }),
-        runRecord({ runId: "run-2", fileId: "file-2", createdAt: "2026-08-28T13:00:00Z" }),
-      ]),
-    )
+  it("opens the conversation named by the URL directly (dock click, shared link)", async () => {
+    fetchContextualRuns.mockResolvedValue(runsPage([runRecord()]))
     fetchContextualDecisions.mockResolvedValue(decisionsPage())
-    fetchContextualRunActivity.mockResolvedValue(
-      activity([
-        {
-          id: "e1",
-          runId: "run-1",
-          projectId: "p1",
-          fileId: "file-1",
-          kind: "drafts_staged",
-          spanId: "s1",
-          spanLabel: "MRK 4:1–4:8",
-          summary: "",
-          details: { count: 3 },
-          createdAt: "2026-08-28T12:00:05Z",
-        },
-      ]),
-    )
-    const view = renderView()
+    fetchContextualRunActivity.mockResolvedValue(activity([stagedEvent]))
+    const view = renderView({ initialEntry: "/project/p1/agent?conversation=run%3Arun-1" })
 
-    fireEvent.click(await screen.findByRole("button", { name: "Open the thread for Mark" }))
-
-    // The conversation pane shows the subagent's play-by-play…
+    expect(await screen.findByTestId("team-thread-detail")).toBeInTheDocument()
     expect(await screen.findByText("Put 3 drafts out for your review.")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Review drafts" })).toBeInTheDocument()
-    // …while the conversations list keeps the user's place (no panel takeover),
-    // with the run's row marked current.
-    const list = screen.getByTestId("team-conversation-list")
-    const current = Array.from(list.querySelectorAll("[aria-current='true']"))
-    expect(current).toHaveLength(1)
-    expect(current[0]).toHaveTextContent("Mark")
     // The composer says exactly who it is talking to.
-    const scope = screen.getByTestId("team-composer-scope")
-    expect(scope).toHaveTextContent("Drafter · MRK 4:1–4:8")
+    expect(screen.getByTestId("team-composer-scope")).toHaveTextContent("Drafter · MRK 4:1–4:8")
+    view.unmount()
+  })
+
+  it("clicking a step opens the inspector with the receipts behind collapsed sections", async () => {
+    fetchContextualRuns.mockResolvedValue(runsPage([runRecord()]))
+    fetchContextualDecisions.mockResolvedValue(decisionsPage())
+    fetchContextualRunActivity.mockResolvedValue(activity([stagedEvent]))
+    const view = renderView({ initialEntry: "/project/p1/agent?conversation=run%3Arun-1" })
+
+    fireEvent.click(await screen.findByText("Put 3 drafts out for your review."))
+    const inspector = await screen.findByTestId("team-step-inspector")
+    // The receipts are collapsed by default…
+    expect(within(inspector).queryByText("drafts_staged")).not.toBeInTheDocument()
+    // …and one click away.
+    fireEvent.click(within(inspector).getByRole("button", { name: "Details" }))
+    expect(within(inspector).getByText("drafts_staged")).toBeInTheDocument()
+    expect(within(inspector).getByText("count")).toBeInTheDocument()
+    // Close restores the two-column view.
+    fireEvent.click(within(inspector).getByRole("button", { name: "Close step detail" }))
+    expect(screen.queryByTestId("team-step-inspector")).not.toBeInTheDocument()
     view.unmount()
   })
 
   it("sends a thread message to that run as steering, never to the chat", async () => {
     fetchContextualRuns.mockResolvedValue(runsPage([runRecord({ runId: "run-7" })]))
     fetchContextualDecisions.mockResolvedValue(decisionsPage())
-    const view = renderView()
-
-    fireEvent.click(await screen.findByRole("button", { name: "Open the thread for Mark" }))
+    const view = renderView({ initialEntry: "/project/p1/agent?conversation=run%3Arun-7" })
     await screen.findByTestId("team-composer-scope")
 
     fireEvent.change(screen.getByLabelText("Ask the agent"), {
@@ -340,14 +311,46 @@ describe("TeamThreadsView — the typical-chat layout", () => {
     view.unmount()
   })
 
-  it("closes the thread composer on a finished run and explains why", async () => {
+  it("re-opens a finished run by messaging when the viewer can start runs", async () => {
     fetchContextualRuns.mockResolvedValue(
       runsPage([runRecord({ runId: "run-9", status: "done", phase: null })]),
     )
     fetchContextualDecisions.mockResolvedValue(decisionsPage())
-    const view = renderView()
+    startFileContextualRun.mockResolvedValue({ runId: "run-10" })
+    const view = renderView({
+      initialEntry: "/project/p1/agent?conversation=run%3Arun-9",
+      roleLevel: ROLE.CONTRIBUTOR,
+    })
 
-    fireEvent.click(await screen.findByRole("button", { name: "Open the thread for Mark" }))
+    const box = await screen.findByLabelText("Ask the agent")
+    expect(box).toBeEnabled()
+    expect(box).toHaveAttribute(
+      "placeholder",
+      "Message to start new work on this file — your note guides the fresh run.",
+    )
+    fireEvent.change(box, { target: { value: "redo GEN 1 with simpler wording" } })
+    fireEvent.click(screen.getByRole("button", { name: "Send" }))
+
+    await waitFor(() =>
+      expect(startFileContextualRun).toHaveBeenCalledWith("p1", "file-1", ""),
+    )
+    await waitFor(() =>
+      expect(sendContextualSteering).toHaveBeenCalledWith(
+        "run-10",
+        "redo GEN 1 with simpler wording",
+      ),
+    )
+    expect(agentSend).not.toHaveBeenCalled()
+    view.unmount()
+  })
+
+  it("closes the thread composer on a finished run for viewers who cannot start runs", async () => {
+    fetchContextualRuns.mockResolvedValue(
+      runsPage([runRecord({ runId: "run-9", status: "done", phase: null })]),
+    )
+    fetchContextualDecisions.mockResolvedValue(decisionsPage())
+    const view = renderView({ initialEntry: "/project/p1/agent?conversation=run%3Arun-9" })
+
     const box = await screen.findByLabelText("Ask the agent")
     expect(box).toBeDisabled()
     expect(box).toHaveAttribute(
@@ -357,50 +360,24 @@ describe("TeamThreadsView — the typical-chat layout", () => {
     view.unmount()
   })
 
-  it("returns to Team chat from the list row and from Escape", async () => {
+  it("Escape returns to Team chat", async () => {
     fetchContextualRuns.mockResolvedValue(runsPage([runRecord()]))
     fetchContextualDecisions.mockResolvedValue(decisionsPage())
-    const view = renderView()
+    const view = renderView({ initialEntry: "/project/p1/agent?conversation=run%3Arun-1" })
 
-    fireEvent.click(await screen.findByRole("button", { name: "Open the thread for Mark" }))
     expect(await screen.findByTestId("team-thread-detail")).toBeInTheDocument()
-
-    // The pinned first row is the way home.
-    const list = screen.getByTestId("team-conversation-list")
-    fireEvent.click(within(list).getByText("Team chat"))
+    fireEvent.keyDown(window, { key: "Escape" })
     expect(await screen.findByTestId("team-channel")).toBeInTheDocument()
-    // Back on the channel, the composer addresses the team, not a subagent.
+    // Back on Team chat, the composer addresses the team, not a subagent.
     expect(screen.queryByTestId("team-composer-scope")).not.toBeInTheDocument()
     expect(screen.getByLabelText("Ask the agent")).toHaveAttribute(
       "placeholder",
       "Message the team…",
     )
-
-    // Escape is the keyboard twin.
-    fireEvent.click(within(list).getByText("Mark"))
-    expect(await screen.findByTestId("team-thread-detail")).toBeInTheDocument()
-    fireEvent.keyDown(window, { key: "Escape" })
-    expect(await screen.findByTestId("team-channel")).toBeInTheDocument()
     view.unmount()
   })
 
-  it("focus mode hides the conversations list and brings it back", async () => {
-    fetchContextualRuns.mockResolvedValue(runsPage([runRecord()]))
-    fetchContextualDecisions.mockResolvedValue(decisionsPage())
-    const view = renderView()
-    await screen.findByTestId("team-channel")
-
-    expect(screen.getByTestId("team-conversation-list")).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId("team-focus-toggle"))
-    expect(screen.queryByTestId("team-conversation-list")).not.toBeInTheDocument()
-    // The conversation itself stays put on the wide canvas.
-    expect(screen.getByTestId("team-channel")).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId("team-focus-toggle"))
-    expect(screen.getByTestId("team-conversation-list")).toBeInTheDocument()
-    view.unmount()
-  })
-
-  it("sends a channel message to the shared chat session", async () => {
+  it("sends a Team chat message to the shared chat session", async () => {
     fetchContextualRuns.mockResolvedValue(runsPage([runRecord()]))
     fetchContextualDecisions.mockResolvedValue(decisionsPage())
     const view = renderView()

@@ -13,6 +13,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import type { AgentFrame } from "@/lib/agent/protocol"
 
+// The workbench reads the conversation query param (v2.2) to decide its
+// landing tab; these tests exercise the review loop, not routing — a bare
+// empty-params stub keeps them router-free.
+vi.mock("react-router-dom", async () => {
+  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
+  return { ...actual, useSearchParams: () => [new URLSearchParams(), vi.fn()] as const }
+})
+
 // Stub the chat rail but keep the workbench seam: render each proposal
 // through renderProposalOverride so the RECEIPT (counters + Undo) is real.
 vi.mock("./AgentDockView", async () => {

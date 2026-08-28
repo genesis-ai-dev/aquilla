@@ -11,6 +11,7 @@
  */
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useSearchParams } from "react-router-dom"
 import { Bot, Minimize2, RotateCcw, Square } from "lucide-react"
 import type { Layout } from "react-resizable-panels"
 import { Button } from "@/components/ui/button"
@@ -37,6 +38,7 @@ import { checkRulesForCell } from "@/lib/rules/rule-engine"
 import { formatInfractionMessage } from "@/lib/rules/format-infraction"
 import { translateRuleName } from "@/lib/lqa/builtin-resolver"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { CONVERSATION_PARAM } from "@/lib/agent/team-channel"
 import { AgentDockView, type AgentDockViewProps } from "./AgentDockView"
 import { AgentContextPane, type AgentWorkbenchCell } from "./AgentContextPane"
 import { TeamThreadsView } from "./TeamThreadsView"
@@ -54,8 +56,9 @@ const AgentMemoryTab = lazy(() => import("./memory/AgentMemoryTab"))
 type WorkbenchTab = "team" | "sessions" | "memory"
 
 export interface AgentWorkbenchProps {
-  /** Same wiring the dock panel gets — one source of truth in ProjectWorkspace. */
-  agent: Omit<AgentDockViewProps, "suggestedActions" | "pendingPrompt" | "onPendingPromptConsumed">
+  /** One source of truth in ProjectWorkspace. `pendingPrompt` rides along so
+   *  dock quick actions (Summarize book/chapter) run in this surface's chat. */
+  agent: Omit<AgentDockViewProps, "suggestedActions">
   /** Org agent-credit gauge in the header (maintainer+ only; self-hides). */
   credits?: CreditsDialProps | null
   /** File display names for the Team tab's thread titles. */
@@ -107,12 +110,19 @@ export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCel
   // was applied (that would re-offer applied drafts and drop Undo).
   const decided = state.decided
   const [applying, setApplying] = useState(false)
-  const [tab, setTab] = useState<WorkbenchTab>("sessions")
-  // "Ask AI" hands the workbench a context chip for the composer — that flow
-  // must land in the chat, whatever tab was left open.
+  // A conversation in the URL (a dock thread click, a shared link) lands on
+  // the Team surface; otherwise the chat is the default.
+  const [searchParams] = useSearchParams()
+  const conversationParam = searchParams.get(CONVERSATION_PARAM)
+  const [tab, setTab] = useState<WorkbenchTab>(() => (conversationParam ? "team" : "sessions"))
   useEffect(() => {
-    if (agent.pendingChip) setTab("sessions")
-  }, [agent.pendingChip])
+    if (conversationParam) setTab("team")
+  }, [conversationParam])
+  // "Ask AI" hands the workbench a context chip, and dock quick actions hand
+  // it a prompt — both flows must land in the chat, whatever tab was open.
+  useEffect(() => {
+    if (agent.pendingChip || agent.pendingPrompt) setTab("sessions")
+  }, [agent.pendingChip, agent.pendingPrompt])
   const panelRef = useRef<WorkingSetPanelHandle>(null)
   const sourceScrollRef = useRef<HTMLDivElement>(null)
   const targetScrollRef = useRef<HTMLDivElement>(null)
@@ -451,6 +461,7 @@ export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCel
             fileNames={fileNames}
             jwt={agent.jwt}
             author={agent.author}
+            roleLevel={agent.roleLevel}
           />
         </TabsContent>
 

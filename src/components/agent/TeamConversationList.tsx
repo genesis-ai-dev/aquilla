@@ -13,18 +13,9 @@ import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { fmtShortCalendarDate } from "@/lib/format-date"
+import type { TeamConversationRow } from "@/lib/agent/team-conversations"
 
-export interface TeamConversationRow {
-  id: string
-  title: string
-  preview: string
-  /** ISO timestamp of the latest activity; null hides the time slot. */
-  at: string | null
-  /** Count needing the human (drafts to review, open questions). 0 hides it. */
-  badge: number
-  /** Someone is actively working/streaming in this conversation. */
-  live: boolean
-}
+export type { TeamConversationRow }
 
 export interface TeamConversationListProps {
   rows: TeamConversationRow[]
@@ -34,8 +25,9 @@ export interface TeamConversationListProps {
 
 export function TeamConversationList({ rows, selectedId, onSelect }: TeamConversationListProps) {
   const { locale } = useI18n()
+  // Width and chrome belong to the host (the dock panel sizes itself).
   return (
-    <div className="flex w-60 shrink-0 flex-col border-e border-border/60 bg-muted/20">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <ScrollArea className="min-h-0 flex-1">
         <div className="flex flex-col divide-y divide-border/40" data-testid="team-conversation-list">
           {rows.map((row) => {

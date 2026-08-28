@@ -47,6 +47,9 @@ export interface TeamFeedMessage {
   /** Event `createdAt` — ISO timestamp. */
   at: string
   body: TeamFeedBody
+  /** The durable event behind the sentence, for the step inspector — the
+   *  plain-language line is the surface, this is the receipt. */
+  raw: { kind: string; details: Record<string, unknown> }
 }
 
 const EXCERPT_MAX = 240
@@ -77,7 +80,7 @@ function briefExcerpt(
 function messageFor(
   event: ContextualActivityEvent,
   briefs: ContextualActivitySceneBrief[],
-): TeamFeedMessage | null {
+): Omit<TeamFeedMessage, "raw"> | null {
   const spanLabel = humanPassageLabel(event.spanLabel)
   switch (event.kind) {
     case "span_started":
@@ -164,7 +167,7 @@ export function buildRunFeed(
     } else {
       lastPhaseRegion.delete(spanKey)
     }
-    feed.push(message)
+    feed.push({ ...message, raw: { kind: event.kind, details: event.details } })
   }
   return feed
 }

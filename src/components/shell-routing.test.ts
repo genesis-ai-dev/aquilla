@@ -19,7 +19,6 @@
  * still maps them to "editor".
  */
 import { describe, it, expect } from "vitest"
-import { resolveSidebarAgentClick } from "./project-workspace-helpers"
 
 // ── Replicate the pure derivation logic from ProjectWorkspace ──────────────
 // Keep in sync with the `centerSurface` derivation in ProjectWorkspace.tsx.
@@ -171,14 +170,3 @@ describe("shouldShowAudioToolbar", () => {
   })
 })
 
-describe("resolveSidebarAgentClick", () => {
-  it("toggles back to the editor while the workbench is the active surface", () => {
-    // Re-navigating to the URL you are already on reads as a dead control
-    // (2026-08-28 transcript) — the rail click must visibly do something.
-    expect(resolveSidebarAgentClick(true)).toBe("close-workbench")
-  })
-
-  it("opens the agent panel inline in the dock when the workbench is minimized", () => {
-    expect(resolveSidebarAgentClick(false)).toBe("open-dock")
-  })
-})

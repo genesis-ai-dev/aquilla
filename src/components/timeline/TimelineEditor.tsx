@@ -743,7 +743,7 @@ function LaneLabel({
         // lift and the selection tint, so both still win their groups — and a
         // LIFTED folder drops back under the rule (the lift's z-10 wins the z
         // group), which is today's look for every travelling row.
-        folder && "relative z-30 bg-muted",
+        folder && "relative z-30 bg-[color:var(--tl-folder-band)]",
         // The lift. Opaque background + shadow because the row it passes over
         // is still drawn where it always was — the other rows deliberately do
         // NOT part (see the gutter's comment), so the only thing separating the
@@ -3970,6 +3970,18 @@ export function TimelineEditor({
                 track, and it cannot be moved.) */}
             <div
               ref={gutterInnerRef}
+              // ABOVE THE DIVIDER RULE, AND THAT IS LOAD-BEARING (2026-08-27).
+              //
+              // `handleTrackScroll` writes a `transform` on this element to
+              // slave it to the lanes' scrollTop, and a transform creates a
+              // stacking context — which trapped the folder row's `z-30` inside
+              // it, so from the first scroll onward the rule painted back over
+              // the band and the seam returned. Raising this element itself
+              // fixes it for good: it carries no background of its own, so the
+              // rule still shows through every ordinary row and is covered only
+              // where a row paints something opaque, which is what the folder
+              // band is.
+              className="relative z-30"
               role={onReorderTrack ? "list" : undefined}
               aria-label={onReorderTrack ? t("editor.timeline.gutterReorderAria") : undefined}
             >

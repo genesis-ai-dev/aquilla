@@ -54,17 +54,32 @@ export interface TrackHue {
 }
 
 /**
- * Sam's seven, evenly spaced in OKLCH (his spec, 2026-08-27).
+ * Sam's six, evenly spaced in OKLCH (his spec, 2026-08-27; Coral was cut the
+ * same day).
  *
- * NOTE WHAT IS IN HERE THAT NEVER COULD BE BEFORE: Amber and Coral sit in the
- * registers the chip's own warnings use (the amber soft-overflow border, the
- * red at-fault body), and Cyan is near the sky selection ring. Under the old
- * model that made them unusable, because a warning only repainted PART of the
- * chip and an amber track would have hidden an amber warning. Under this one a
- * warning repaints the whole chip and the identity fill stands aside entirely,
- * so the state still changes visibly. It remains the weakest point of the
- * palette and it is Sam's call on screen, which is the standing rule for every
- * colour decision in this PR.
+ * WHAT IS IN HERE THAT NEVER COULD BE BEFORE — and the honest limit of it.
+ * Amber sits in the register the soft-overflow warning uses, and Cyan near the
+ * sky selection ring. For the RED at-fault state this is genuinely solved: it
+ * repaints the whole chip body, so no hue can hide it.
+ *
+ * THE AMBER ONE IS NOT SOLVED, and this docstring used to claim otherwise.
+ * Soft-overflow is border-and-ring only, while a coloured chip already sets
+ * `border-[color:var(--tl-track-hue)]` — so on the Amber hue the warning is
+ * amber on amber. The `cn()` ordering is right and the warning does win the
+ * border group; it just wins it with nearly the same colour. Reviewed and
+ * deliberately deferred (Sam, 2026-08-27: "leave it as is for now"), together
+ * with making that warning's threshold configurable. The fix that retires the
+ * class rather than this one collision is to give the warning something that
+ * is not a border colour — a dashed edge, or the `»` glyph the truncation
+ * states already use.
+ *
+ * Contrast, also reviewed and accepted the same day: over the dark ground the
+ * .67 take rung leaves the waveform at 2.9:1 on Cyan and 2.9:1 on Amber, under
+ * the 3:1 guideline for non-text. It carries a waveform and small glyphs
+ * rather than words — the rung that carries words is .33, which clears 5.5:1
+ * on every hue — and forcing all six past 4.5:1 would need the take alpha down
+ * at .43, on top of generated's .33, which would flatten the ladder. Left as
+ * a deliberate call.
  */
 export const TRACK_HUES: readonly TrackHue[] = [
   // Sam tuned green, amber and magenta by eye, and all three moved the same
@@ -134,7 +149,7 @@ export function hueForTrack(kind: string, color: string | null | undefined): str
  * untinted (text).
  */
 const ALPHA_BY_KIND: Record<string, Partial<TrackAlpha>> = {
-  "source-audio": { hover: 0.12, generated: 0.24 },
+  "source-audio": { hover: 0.12, hoverFill: 0.36, generated: 0.24 },
 }
 
 /** The custom properties for a row, resolved from its kind and its colour. */
@@ -155,6 +170,7 @@ export const DEFAULT_HUE = BY_ID.get("green")!
 /** The four strengths a row is drawn at. */
 export interface TrackAlpha {
   hover: number
+  hoverFill: number
   generated: number
   take: number
 }
@@ -173,6 +189,23 @@ export const ALPHA: TrackAlpha = {
    * performed, 100 to name the row itself.
    */
   hover: 0.18,
+  /**
+   * THE SAME HINT, ON SOMETHING THAT IS ALREADY FILLED (2026-08-27).
+   *
+   * `hover` above is the lightest rung on purpose, and that is right for an
+   * EMPTY surface — the dotted placeholder between two source chips has
+   * nothing to be lighter than. Applied to a chip that already carries a fill
+   * it is a bug: both are `background-color`, so the hover REPLACES the fill
+   * rather than adding to it, and pointing at a chip made it fainter. Every
+   * row had it; source audio, whose ladder is lighter still, is where it was
+   * visible (.24 → .12, a chip that halves under the pointer).
+   *
+   * So the rule this rung exists to keep, and which its test states as a
+   * property rather than a number: A HOVER IS NEVER FAINTER THAN WHAT IT
+   * COVERS. One step above `generated`, which is the strongest fill any
+   * hoverable chip wears — a take chip is not hoverable this way.
+   */
+  hoverFill: 0.45,
   /** A generated voice — lighter, because it is derived rather than performed. */
   generated: 0.33,
   /** A recorded take. */
@@ -258,6 +291,7 @@ function hueVarsFromHex(hex: string, alpha: TrackAlpha): Record<string, string> 
   return {
     "--tl-track-hue": hex,
     "--tl-track-hover": hexToRgba(hex, alpha.hover),
+    "--tl-track-hover-fill": hexToRgba(hex, alpha.hoverFill),
     "--tl-track-gen": hexToRgba(hex, alpha.generated),
     "--tl-track-take": hexToRgba(hex, alpha.take),
   }
@@ -292,6 +326,11 @@ export const TRACK_CHIP_GENERATED_CLASS =
 export const TRACK_ACCENT_CLASS = "border-l-4 border-l-[color:var(--tl-track-hue)]"
 /** What anything on a coloured row does under the pointer. */
 export const TRACK_HOVER_CLASS = "hover:bg-[color:var(--tl-track-hover)]"
+
+/** …and the one for a chip that already has a fill to beat. See `hoverFill`:
+ *  the two are the same CSS property, so the hover replaces the fill rather
+ *  than layering over it, and the lighter rung made a hovered chip fainter. */
+export const TRACK_HOVER_FILL_CLASS = "hover:bg-[color:var(--tl-track-hover-fill)]"
 /** The gutter dot, at full strength. */
 export const TRACK_DOT_CLASS = "bg-[color:var(--tl-track-hue)]"
 /**

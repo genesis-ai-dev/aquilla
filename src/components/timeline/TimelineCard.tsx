@@ -13,7 +13,7 @@
 import { useRef, useState } from "react"
 import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { TRACK_HOVER_CLASS } from "@/lib/timeline/track-colors"
+import { TRACK_HOVER_FILL_CLASS } from "@/lib/timeline/track-colors"
 import { secToPx, pxToSec, clampRange, chipRadiusPx } from "@/lib/timeline/scale"
 import {
   MIN_CHIP_GRIP_H_PX,
@@ -403,7 +403,13 @@ export function TimelineCard({
         // colour away at exactly the moment you were pointing at it. Every
         // other card keeps the grey: those rows are dense text, not clips.
         !selected && !multiSelected && !drag && "hover:z-10",
-        !selected && !multiSelected && !drag && (isDialogue ? TRACK_HOVER_CLASS : "hover:bg-muted/30"),
+        // …and the FILLED rung, not the lightest one: a dialogue chip already
+        // wears `--tl-track-gen`, and both are `background-color`, so the hover
+        // replaces the fill instead of layering over it. With the plain hover
+        // rung (.18, below the .33 fill) pointing at a chip made it FAINTER —
+        // .24 → .12 on source audio, which is where it was obvious enough to
+        // report (2026-08-27).
+        !selected && !multiSelected && !drag && (isDialogue ? TRACK_HOVER_FILL_CLASS : "hover:bg-muted/30"),
       )}
       style={{ left: `${left}px`, width: `${width}px`, borderRadius: `${radiusPx}px` }}
     >

@@ -50,7 +50,12 @@ export function TimelineFolderLane({
       // this is its lane half, the same opaque token the gutter's folder row
       // wears, so the band reads as one strip with no seam at the column edge
       // (the gutter's edge rule is covered on that side; see its comment).
-      className="relative border-b border-border bg-muted"
+      //
+      // ITS OWN TOKEN, not `bg-muted`: in dark, `--muted` is defined to exactly
+      // `--surface`, which is also `--background` — so the band was the page
+      // ground and simply did not exist there, while still covering its 1px of
+      // the divider and leaving a gap in it.
+      className="relative border-b border-border bg-[color:var(--tl-folder-band)]"
       style={{ height: `${folderRowHPx(rowH)}px` }}
     >
       {blocks.map((block) => (

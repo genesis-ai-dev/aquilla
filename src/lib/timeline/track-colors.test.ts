@@ -1,5 +1,6 @@
 // AQU-646 stage 7: one hue, three alphas.
 
+import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 
 import {
@@ -56,7 +57,7 @@ describe("the palette", () => {
   // to recorded takes. The two chip values are an even ladder —
   // a third and two thirds of the way to the solid.
   it("keeps an even ladder of alphas, with the lane painting nothing", () => {
-    expect(ALPHA).toEqual({ hover: 0.18, generated: 0.33, take: 0.67 })
+    expect(ALPHA).toEqual({ hover: 0.18, hoverFill: 0.45, generated: 0.33, take: 0.67 })
     expect(TRACK_LANE_TINT_CLASS).toBe("")
   })
 })
@@ -114,10 +115,11 @@ describe("the alphas", () => {
   })
 
   // The variables are the whole interface between this module and the lane.
-  it("publishes the hue and its three variants as custom properties", () => {
+  it("publishes the hue and every variant as custom properties", () => {
     expect(trackHueVars("cyan")).toEqual({
       "--tl-track-hue": "#00c3cd",
       "--tl-track-hover": "rgba(0, 195, 205, 0.18)",
+      "--tl-track-hover-fill": "rgba(0, 195, 205, 0.45)",
       "--tl-track-gen": "rgba(0, 195, 205, 0.33)",
       "--tl-track-take": "rgba(0, 195, 205, 0.67)",
     })
@@ -243,12 +245,33 @@ describe("source audio, drawn lighter than everything else", () => {
     }
   })
 
-  // Still a ladder, just a shorter one — the hover must stay under the fill or
-  // pointing at a chip would darken it past what it means.
-  it("keeps its two rungs in order", () => {
-    const vars = trackHueVarsFor("source-audio", null)
-    expect(vars["--tl-track-hover"]).toBe(hexToRgba("#0e9bd6", 0.12))
-    expect(0.12).toBeLessThan(0.24)
+  // THIS USED TO COMPARE TWO LITERALS — `expect(0.12).toBeLessThan(0.24)`,
+  // next to a `hexToRgba(hex, X)` checked against `hexToRgba(hex, X)`. Both
+  // sides were the same value by construction, so no change to the code could
+  // ever fail it, and the exception it claimed to guard could be deleted
+  // outright and leave it green. That is how the hover bug below shipped.
+  // Assert the RELATIONSHIPS instead, against the real lookup.
+  it("is a whole ladder of its own, every rung lighter than the default", () => {
+    const light = trackHueVarsFor("source-audio", null)
+    const normal = trackHueVarsFor("target-audio", "cyan")
+    const alphaOf = (v: string) => Number(v.slice(v.lastIndexOf(",") + 1, -1))
+
+    for (const rung of ["--tl-track-hover", "--tl-track-hover-fill", "--tl-track-gen"]) {
+      expect(alphaOf(light[rung]), rung).toBeLessThan(alphaOf(normal[rung]))
+    }
+  })
+
+  // THE PROPERTY THE BUG BROKE, stated for EVERY kind rather than as numbers:
+  // a hover is never fainter than the fill it replaces. They are the same CSS
+  // property, so the hover does replace it — with the plain hover rung, .18
+  // under a .33 fill, pointing at a chip made it fainter.
+  it("never lets a hover be fainter than the fill it covers", () => {
+    const alphaOf = (v: string) => Number(v.slice(v.lastIndexOf(",") + 1, -1))
+    for (const kind of ["source-audio", "source-subtitles", "target-subtitles", "target-audio"]) {
+      const vars = trackHueVarsFor(kind, "cyan")
+      expect(alphaOf(vars["--tl-track-hover-fill"]), kind)
+        .toBeGreaterThan(alphaOf(vars["--tl-track-gen"]))
+    }
   })
 })
 
@@ -292,5 +315,55 @@ describe("the preview progress fill (2026-08-27)", () => {
   it("mutes the identity colour underneath — the gradient's washes must not stack on it", () => {
     expect(trackChipPlayingClass("take")).toContain("bg-transparent")
     expect(trackChipPlayingClass("generated")).toContain("bg-transparent")
+  })
+})
+
+// ── The folder band's token, checked against the stylesheet itself ──────────
+//
+// The band shipped as `bg-muted`, and in dark `--muted` is defined to exactly
+// `--surface`, which is also `--background` — so the band WAS the page ground
+// and simply did not exist in dark mode, while still covering its 1px of the
+// gutter divider and leaving a gap in it. No component test could see that:
+// happy-dom resolves no custom properties and paints nothing. The stylesheet
+// is plain text, so read it.
+describe("the folder band is visible in both themes", () => {
+  // A PLAIN RELATIVE READ, and it took three tries to land on it. `?raw`
+  // returns "" because vitest stubs CSS imports; `new URL(..., import.meta.url)`
+  // throws because that is not a file: URL under vite's transform; and
+  // `resolve(process.cwd(), ...)` yields "/src/index.css" because cwd reports
+  // "/" here. The bare relative path works — the fs shim resolves it against
+  // the project root. Each of the other three threw at COLLECTION, which
+  // vitest reports as "no tests" rather than as a failure, so a summary line
+  // saying "passed" was hiding a suite that never ran.
+  const css = readFileSync("src/index.css", "utf8")
+  /** The two theme blocks, by the selectors that actually open them. */
+  const LIGHT = ":where(:root)"
+  const DARK = ":where(html.dark)"
+
+  /** The value of one custom property inside the block a selector opens. */
+  const tokenIn = (selector: string, name: string): string => {
+    const at = css.indexOf(selector)
+    expect(at, `${selector} not found`).toBeGreaterThan(-1)
+    const block = css.slice(at, css.indexOf("\n  }", at))
+    const m = new RegExp(`--${name}:\\s*([^;]+);`).exec(block)
+    expect(m, `--${name} not found in ${selector}`).not.toBeNull()
+    return m![1].trim()
+  }
+
+  /** `--background` follows `--surface` in both themes; resolve one hop. */
+  const ground = (selector: string): string => {
+    const bg = tokenIn(selector, "background")
+    return bg.startsWith("var(--surface)") ? tokenIn(selector, "surface") : bg
+  }
+
+  it("differs from the page ground in light AND in dark", () => {
+    for (const selector of [LIGHT, DARK]) {
+      expect(tokenIn(selector, "tl-folder-band"), selector).not.toBe(ground(selector))
+    }
+  })
+
+  // The bug in one line: this is what the band used to be painted with.
+  it("records that --muted is NOT usable for it, because dark defines it to the ground", () => {
+    expect(tokenIn(DARK, "muted")).toBe(ground(DARK))
   })
 })

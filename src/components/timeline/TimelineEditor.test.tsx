@@ -1835,7 +1835,8 @@ describe("TimelineEditor — rows come from the track model", () => {
     // Source text, Source audio, Dubs, Target audio, Spanish — ONLY the
     // folder wears the band; the members keep their ordinary rows (the first
     // reading of this request, reverted).
-    expect(rows.map((r) => r.className.includes("bg-muted"))).toEqual([
+    const BAND = "bg-[color:var(--tl-folder-band)]"
+    expect(rows.map((r) => r.className.includes(BAND))).toEqual([
       false, false, true, false, false,
     ])
     // Opaque and above the divider rule, which is what closes the seam…
@@ -1848,7 +1849,7 @@ describe("TimelineEditor — rows come from the track model", () => {
     expect(gutter.className).not.toContain("border-r")
     // The lane half of the band wears the same token, so the strip is one
     // colour edge to edge.
-    expect(screen.getByTestId("tl-folder-lane-grp").className).toContain("bg-muted")
+    expect(screen.getByTestId("tl-folder-lane-grp").className).toContain(BAND)
   })
 
   it("keeps reordering working while a folder is collapsed", () => {

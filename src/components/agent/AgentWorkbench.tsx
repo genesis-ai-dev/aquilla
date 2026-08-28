@@ -374,7 +374,7 @@ export function AgentWorkbench({ agent, credits, onCollapse, onJumpToCell, onCho
       {/* Own Tabs root for Chat/Memory so the Text/Audio/Agent switch
           (also Tabs) is not nested. Same chrome as the editor chapter row. */}
       <div data-testid="agent-toolbar-row" className={EDITOR_SURFACE_TOOLBAR_CLASS}>
-        <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <Bot className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
         <span className="shrink-0 text-sm font-medium">{t("agentWorkspace.agent")}</span>
         {activeRun && (
           <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" role="status">

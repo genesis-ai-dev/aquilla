@@ -119,6 +119,7 @@ describe("EditorTable chapter row", () => {
     expect(row.compareDocumentPosition(targetHeader) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(row.className).toContain("py-2")
     expect(row.className).toContain("ps-4")
+    expect(row.className).toContain("pe-2")
     expect(screen.getByRole("navigation", { name: "Milestone navigation" })).toBeVisible()
     expect(screen.getByRole("combobox", { name: /Current chapter/ })).toBeVisible()
   })

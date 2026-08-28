@@ -6,6 +6,7 @@ import { AccessLinkPage } from "./AccessLinkPage"
 import { redeemAccessLink, FrontierAuthError } from "@/lib/frontier/auth"
 
 const navigate = vi.fn()
+const adopt = vi.fn(async () => {})
 vi.mock("react-router-dom", async (i) => ({
   ...(await i<typeof import("react-router-dom")>()),
   useNavigate: () => navigate,
@@ -14,6 +15,10 @@ vi.mock("react-router-dom", async (i) => ({
 vi.mock("@/lib/frontier/auth", async (i) => ({
   ...(await i<typeof import("@/lib/frontier/auth")>()),
   redeemAccessLink: vi.fn(),
+}))
+
+vi.mock("@/hooks/useAccounts", () => ({
+  useAccounts: () => ({ adopt, loading: false }),
 }))
 
 const redeemMock = vi.mocked(redeemAccessLink)
@@ -45,10 +50,13 @@ describe("AccessLinkPage", () => {
 
     await waitFor(() => {
       expect(redeemMock).toHaveBeenCalledWith("tok123", "4821")
+      expect(adopt).toHaveBeenCalledWith(expect.objectContaining({ username: "translator" }))
       expect(navigate).toHaveBeenCalledWith("/project/proj-9/editor", { replace: true })
     })
     // Onboarding is marked complete so the fresh browser isn't bounced.
-    expect(localStorage.getItem("aquilla:onboardingComplete")).toBe("true")
+    expect(localStorage.getItem("aquilla:onboardingComplete")).toBeNull()
+    expect(localStorage.getItem("aquilla:onboardingComplete:account:translator")).toBe("true")
+    expect(localStorage.getItem("aquilla:productTourEligible")).toBe("true")
   })
 
   it("shows the generic dead-link error on a wrong PIN and does not navigate", async () => {

@@ -3650,7 +3650,6 @@ export const mfa: Catalog = {
   "terminology.editor.errorBlocked": "Peranan anda tidak boleh mengubah pangkalan istilah.",
   "terminology.editor.errorSourceAndRenderingRequired": "Istilah sumber dan terjemahan diperlukan sebelum istilah boleh diaktifkan.",
   "terminology.editor.errorImportFailed": "Import gagal",
-  "terminology.editor.title": "Pangkalan Istilah",
   "terminology.editor.findingTerms": "Mencari istilah…",
   "terminology.editor.suggestTerms": "Cadang istilah",
   "terminology.editor.exportCsv": "Eksport CSV",

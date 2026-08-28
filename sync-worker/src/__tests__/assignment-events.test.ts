@@ -101,7 +101,7 @@ describe('assignment.create — book scope', () => {
       note: 'Please start here',
     })
 
-    const result = handleAssignmentEvent(db, authed, 2000)
+    const result = handleAssignmentEvent(db, authed, 2000, 1)
     await db.batch(result.stmts)
 
     const t = await snapshot()
@@ -140,7 +140,7 @@ describe('assignment.create — lane (AQU-538 §3.5)', () => {
       targetLang: 'es',
     })
 
-    const result = handleAssignmentEvent(db, authed, 2100)
+    const result = handleAssignmentEvent(db, authed, 2100, 2)
     await db.batch(result.stmts)
 
     const row = (await snapshot()).assignments.find((a) => a.assignment_id === 'as-lane')
@@ -157,7 +157,7 @@ describe('assignment.create — lane (AQU-538 §3.5)', () => {
       assigneeUserId: 42,
     })
 
-    const result = handleAssignmentEvent(db, authed, 2200)
+    const result = handleAssignmentEvent(db, authed, 2200, 3)
     await db.batch(result.stmts)
 
     const row = (await snapshot()).assignments.find((a) => a.assignment_id === 'as-nolane')
@@ -174,7 +174,7 @@ describe('assignment.create — lane (AQU-538 §3.5)', () => {
       assignmentId: 'as-re',
       assigneeUserId: 55,
     })
-    await db.batch(handleAssignmentEvent(db, plain, 4100).stmts)
+    await db.batch(handleAssignmentEvent(db, plain, 4100, 4).stmts)
     let row = (await snapshot()).assignments.find((a) => a.assignment_id === 'as-re')
     expect(row!.assignee_user_id).toBe(55)
     expect(row!.target_lang).toBe('es')
@@ -185,7 +185,7 @@ describe('assignment.create — lane (AQU-538 §3.5)', () => {
       assigneeUserId: 55,
       targetLang: 'fr',
     })
-    await db.batch(handleAssignmentEvent(db, repin, 4200).stmts)
+    await db.batch(handleAssignmentEvent(db, repin, 4200, 5).stmts)
     row = (await snapshot()).assignments.find((a) => a.assignment_id === 'as-re')
     expect(row!.target_lang).toBe('fr')
   })
@@ -202,7 +202,7 @@ describe('assignment.create — chapter scope', () => {
       assigneeUserId: 42,
     })
 
-    const result = handleAssignmentEvent(db, authed, 3000)
+    const result = handleAssignmentEvent(db, authed, 3000, 6)
     await db.batch(result.stmts)
 
     const t = await snapshot()
@@ -221,7 +221,7 @@ describe('assignment.reassign', () => {
       assigneeUserId: 99,
     })
 
-    const result = handleAssignmentEvent(db, authed, 4000)
+    const result = handleAssignmentEvent(db, authed, 4000, 7)
     await db.batch(result.stmts)
 
     expect((await snapshot()).assignments.find((a) => a.assignment_id === 'as-3')!.assignee_user_id).toBe(99)
@@ -233,7 +233,7 @@ describe('assignment.unassign', () => {
     const { db, snapshot } = await makeTestDb({ assignments: [seededAssignment({ assignment_id: 'as-4' })] })
     const authed = await authorizeAssignment('assignment.unassign', { assignmentId: 'as-4' })
 
-    const result = handleAssignmentEvent(db, authed, 5000)
+    const result = handleAssignmentEvent(db, authed, 5000, 8)
     await db.batch(result.stmts)
 
     const row = (await snapshot()).assignments.find((a) => a.assignment_id === 'as-4')

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { type ColumnDef } from "@tanstack/react-table"
 import { useLocation, useNavigate } from "react-router-dom"
 import { AppShell } from "@/components/AppShell"
@@ -19,8 +19,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import {
-  fetchArchivedProjects,
-  fetchOrgDeletedFiles,
+  fetchArchivedProjectsResult,
+  fetchOrgDeletedFilesResult,
+  projectsResultError,
   type CloudProjectSummary,
   type OrgDeletedFile,
 } from "@/lib/sync/cloud-projects"
@@ -30,6 +31,7 @@ import { archivedPath } from "@/lib/navigation/org-paths"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { ArchiveRestore, Building2 } from "lucide-react"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 
 type ArchivedTab = "projects" | "files"
 
@@ -48,22 +50,46 @@ export function ArchivedProjects() {
   const [files, setFiles] = useState<OrgDeletedFile[]>([])
   const [filesLoading, setFilesLoading] = useState(false)
   const [filesLoaded, setFilesLoaded] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [projectsLoadError, setProjectsLoadError] = useState<string | null>(null)
+  const [filesLoadError, setFilesLoadError] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
   const [restoringId, setRestoringId] = useState<string | null>(null)
+  const projectsRequestRef = useRef(0)
+  const filesRequestRef = useRef(0)
+  const loadScopeKey = jwt && activeOrgId != null ? `${jwt}\u0000${activeOrgId}` : null
+  const loadScopeRef = useRef(loadScopeKey)
+  loadScopeRef.current = loadScopeKey
 
   const loadProjects = useCallback(() => {
+    const request = ++projectsRequestRef.current
     if (!jwt || activeOrgId == null) {
       setProjects([])
       setProjectsLoading(false)
       return
     }
     setProjectsLoading(true)
-    fetchArchivedProjects(jwt, activeOrgId)
-      .then(setProjects)
-      .finally(() => setProjectsLoading(false))
-  }, [jwt, activeOrgId])
+    fetchArchivedProjectsResult(jwt, activeOrgId)
+      .then((result) => {
+        if (projectsRequestRef.current !== request || loadScopeRef.current !== loadScopeKey) return
+        if (!result.ok) {
+          if (result.reason === "unauthenticated") void notifySessionExpiredIfCurrent(jwt)
+          throw projectsResultError(result)
+        }
+        setProjects(result.projects)
+        setProjectsLoadError(null)
+      })
+      .catch((caught) => {
+        if (projectsRequestRef.current !== request || loadScopeRef.current !== loadScopeKey) return
+        setProjects([])
+        setProjectsLoadError(caught instanceof Error ? caught.message : String(caught))
+      })
+      .finally(() => {
+        if (projectsRequestRef.current === request && loadScopeRef.current === loadScopeKey) setProjectsLoading(false)
+      })
+  }, [jwt, activeOrgId, loadScopeKey])
 
   const loadFiles = useCallback(() => {
+    const request = ++filesRequestRef.current
     if (!jwt || activeOrgId == null) {
       setFiles([])
       setFilesLoading(false)
@@ -71,19 +97,34 @@ export function ArchivedProjects() {
       return
     }
     setFilesLoading(true)
-    fetchOrgDeletedFiles(jwt, activeOrgId)
-      .then(setFiles)
+    fetchOrgDeletedFilesResult(jwt, activeOrgId)
+      .then((result) => {
+        if (filesRequestRef.current !== request || loadScopeRef.current !== loadScopeKey) return
+        if (!result.ok) {
+          if (result.reason === "unauthenticated") void notifySessionExpiredIfCurrent(jwt)
+          throw projectsResultError(result)
+        }
+        setFiles(result.files)
+        setFilesLoadError(null)
+      })
+      .catch((caught) => {
+        if (filesRequestRef.current !== request || loadScopeRef.current !== loadScopeKey) return
+        setFiles([])
+        setFilesLoadError(caught instanceof Error ? caught.message : String(caught))
+      })
       .finally(() => {
+        if (filesRequestRef.current !== request || loadScopeRef.current !== loadScopeKey) return
         setFilesLoading(false)
         setFilesLoaded(true)
       })
-  }, [jwt, activeOrgId])
+  }, [jwt, activeOrgId, loadScopeKey])
 
   useEffect(() => {
     loadProjects()
   }, [loadProjects])
 
   useEffect(() => {
+    filesRequestRef.current += 1
     setFiles([])
     setFilesLoaded(false)
   }, [jwt, activeOrgId])
@@ -94,22 +135,23 @@ export function ArchivedProjects() {
 
   function setTab(next: ArchivedTab) {
     if (activeOrgId == null) return
+    setActionError(null)
     navigate(archivedPath(activeOrgId, next), { replace: true })
   }
 
   const handleRestoreProject = useCallback(
     async (id: string) => {
       if (!jwt || restoringId) return
-      setError(null)
+      setActionError(null)
       setRestoringId(id)
       try {
         const res = await unarchiveProjectRemote(id, jwt)
         if (res.kind === "restored" || res.kind === "local-only") {
           loadProjects()
         } else if (res.kind === "forbidden") {
-          setError(res.message ?? "Only owners can restore a project.")
+          setActionError(res.message ?? "Only owners can restore a project.")
         } else if (res.kind === "error") {
-          setError(res.message)
+          setActionError(res.message)
         }
       } finally {
         setRestoringId(null)
@@ -121,7 +163,7 @@ export function ArchivedProjects() {
   const handleRestoreFile = useCallback(
     async (file: OrgDeletedFile) => {
       if (restoringId) return
-      setError(null)
+      setActionError(null)
       setRestoringId(file.fileId)
       try {
         await emitFileRestore({
@@ -132,9 +174,9 @@ export function ArchivedProjects() {
         setFiles((current) => current.filter((f) => f.fileId !== file.fileId))
       } catch (e) {
         if (e instanceof InsufficientRoleError) {
-          setError("Only project leads and above can restore a file.")
+          setActionError("Only project leads and above can restore a file.")
         } else {
-          setError(e instanceof Error ? e.message : "Couldn't restore that file.")
+          setActionError(e instanceof Error ? e.message : "Couldn't restore that file.")
         }
       } finally {
         setRestoringId(null)
@@ -280,9 +322,9 @@ export function ArchivedProjects() {
             inset={false}
           />
 
-          {error && (
+          {(actionError ?? (tab === "files" ? filesLoadError : projectsLoadError)) && (
             <p className="mb-4 text-sm text-destructive" role="alert">
-              {error}
+              {actionError ?? (tab === "files" ? filesLoadError : projectsLoadError)}
             </p>
           )}
 

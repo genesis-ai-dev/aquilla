@@ -44,10 +44,16 @@ Parse `$ARGUMENTS`:
   queue — **never `Triage`/`Backlog`**), pick the highest-priority / lowest-numbered one, and
   operate on it.
 - **`debug "<desc>"`** or **`improve "<desc>"`** → this is *new* work not yet tracked.
-  Create the issue first (`save_issue` into the project, team, priority from your judgment) and
-  set the status by readiness: if it's fully specified and agent-ready, **`Todo`**; if it needs a
-  human decision/review first (HITL), **`Triage`** (`086173c5-…`) — then hand off rather than
-  working it. Once created and agent-ready, proceed as if the user passed that `AQU-###`.
+  Create the issue first (`save_issue` into the project, team, priority from your judgment)
+  with status **`Triage`** (`086173c5-…`) — **every new issue is born in `Triage`, never
+  `Todo`**, no matter how agent-ready it looks. Then:
+  - **Interactive session** (a human just typed this command): the invocation *is* the
+    triage decision — if the issue is fully specified and agent-ready, promote it to `Todo`
+    and proceed as if the user passed that `AQU-###`; if it needs a human decision/review
+    first (HITL), leave it in `Triage` and hand off rather than working it.
+  - **Unattended run** (scheduled routine, swarm agent, or any session where no human typed
+    this command): leave it in `Triage` and stop — a human promotes it via `/triage`. Never
+    self-promote an issue you created.
 - **`--deploy`** → after marking `Fixed`, deploy for dev validation and advance to
   `Dev Verification Needed` (see Step 3). Without it, stop at `Fixed` and tell the user.
 - **`--no-verify`** → skip the dev-stack verification gate (only if the user insists).

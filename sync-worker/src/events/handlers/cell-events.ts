@@ -37,6 +37,12 @@ import type { DispatchResult } from './types'
 
 export interface HandleCellEventOptions {
   /**
+   * AQU-1005: pre-allocated server_seq for this event. Allocation happens
+   * once per request via allocateSeqRange, OUTSIDE the write transaction, so
+   * the per-project counter row lock is never held across the event batch.
+   */
+  serverSeq: number
+  /**
    * When false, the projection statements are SKIPPED — the caller has
    * decided this event is a stale chain sibling (AD-2 lost the first-
    * child race) and only the `events` row should be persisted.
@@ -75,8 +81,6 @@ export function handleCellEvent(
 ): DispatchResult {
   const { event, claims } = authed
 
-  // server_seq is allocated by the per-project counter inside the INSERT —
-  // see events/event-insert.ts for the race-safety argument.
   const eventInsert = buildEventInsertStmt(db, {
     id: event.id,
     schemaVersion: event.schemaVersion,
@@ -89,6 +93,7 @@ export function handleCellEvent(
     payloadJson: JSON.stringify(event.payload),
     clientTs: event.clientTs,
     serverTs,
+    serverSeq: opts.serverSeq,
   })
 
   const stmts: AquillaStatement[] = [eventInsert]

@@ -64,10 +64,12 @@ export function usePendingOutboxRecords(opts: Options): OutboxRecord[] {
       return
     }
     let cancelled = false
+    let refreshRequest = 0
 
     async function refresh() {
+      const request = ++refreshRequest
       const all = await peekOutboxBatch(maxResults * 2)
-      if (cancelled) return
+      if (cancelled || request !== refreshRequest) return
       // AQU-274: exclude quarantined records from the overlay so failed events
       // don't show as pending validation/commit state. SUB-9: inspector views
       // opt in via `includeFailed` so refusals stay visible with Retry/Discard.

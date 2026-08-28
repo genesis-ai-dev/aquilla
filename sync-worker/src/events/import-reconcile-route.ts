@@ -22,7 +22,7 @@ import {
   slotKey,
   type ChainSlot,
 } from './chain-claims'
-import { allocateSeqRange, type SeqEventInsertRow } from './event-insert'
+import { allocateSeqRange, buildSettleSeqRangeStmt, type SeqEventInsertRow } from './event-insert'
 import { contentHash, fileCountersRecomputeStmt, type PersistedEvent } from './event-projection'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { ROLE } from './role-policy'
@@ -969,6 +969,7 @@ export async function handleImportReconcileRequest(
   }
   statements.push(fileCountersRecomputeStmt(db, body.projectId, body.fileId, serverTs))
   statements.push(...fullProgressRecomputeStmts(db, body.projectId, body.fileId, serverTs))
+  statements.push(buildSettleSeqRangeStmt(db, body.projectId, seqBase))
 
   try {
     await runBatch(db, statements)

@@ -18,6 +18,9 @@ import {
   requeueTransientlyFailedOutboxEvents,
   stampOutboxError,
   subscribeToOutbox,
+  setActiveOutboxOwner,
+  claimLegacyOutboxEvents,
+  outboxRecordCountAllOwners,
 } from "./outbox"
 import type { CqrsRawEvent } from "./outbox-types"
 import { CQRS_SCHEMA_VERSION } from "./outbox-types"
@@ -58,6 +61,51 @@ describe("cqrs outbox", () => {
     expect(peek[0].lastError).toBe(null)
     await removeOutboxEvents(["e1"])
     expect(await outboxPendingCount()).toBe(0)
+  })
+
+  it("keeps each account's durable queue isolated across switches", async () => {
+    setActiveOutboxOwner("alice")
+    await enqueueOutboxEvent(sample)
+    expect(await outboxPendingCount()).toBe(1)
+
+    setActiveOutboxOwner("bob")
+    expect(await outboxPendingCount()).toBe(0)
+    expect(await peekPendingOutboxBatch(10)).toEqual([])
+    await enqueueOutboxEvent({ ...sample, id: "bob-event", author: "bob" })
+    expect((await peekOutboxBatch(10)).map((record) => record.id)).toEqual(["bob-event"])
+
+    setActiveOutboxOwner("alice")
+    expect((await peekOutboxBatch(10)).map((record) => record.id)).toEqual(["e1"])
+  })
+
+  it("keeps an enqueue in the owner scope that initiated it", async () => {
+    setActiveOutboxOwner("alice")
+    const enqueuing = enqueueOutboxEvent(sample)
+    setActiveOutboxOwner("bob")
+    await enqueuing
+
+    expect(await peekOutboxBatch(10)).toEqual([])
+    setActiveOutboxOwner("alice")
+    expect((await peekOutboxBatch(10)).map((record) => record.id)).toEqual(["e1"])
+  })
+
+  it("claims unresolved pre-hydration edits for the first resolved owner", async () => {
+    await enqueueOutboxEvent(sample)
+    setActiveOutboxOwner("alice")
+    expect(await peekOutboxBatch(10)).toEqual([])
+
+    await claimLegacyOutboxEvents("alice")
+    expect((await peekOutboxBatch(10)).map((record) => record.id)).toEqual(["e1"])
+  })
+
+  it("counts inactive account records for sign-out-all warnings", async () => {
+    setActiveOutboxOwner("alice")
+    await enqueueOutboxEvent(sample)
+    setActiveOutboxOwner("bob")
+    await enqueueOutboxEvent({ ...sample, id: "bob-event", author: "bob" })
+
+    expect(await outboxPendingCount()).toBe(1)
+    expect(await outboxRecordCountAllOwners()).toBe(2)
   })
 
   it("reads every durable outbox event scoped to one cell", async () => {

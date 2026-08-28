@@ -73,7 +73,7 @@ export interface UseProjectsMembersMatrix {
 export function useProjectsMembersMatrix(): UseProjectsMembersMatrix {
   const { session } = useFrontierSession();
   const jwt = session?.jwt ?? null;
-  const { projects } = useAccessibleProjects();
+  const { projects, error: projectsError } = useAccessibleProjects();
   const { state: orgState } = useOrg();
   const orgId = orgState.kind === "success" ? orgState.org.id : null;
   const { members: orgMembers } = useOrgMembers(orgId);
@@ -214,5 +214,8 @@ export function useProjectsMembersMatrix(): UseProjectsMembersMatrix {
     void refresh();
   }, [refresh]);
 
-  return { matrix, isLoading, error, refresh };
+  // The matrix refresh can legitimately succeed with zero projects. Do not
+  // let that success erase a project-directory failure that produced the
+  // empty list in the first place.
+  return { matrix, isLoading, error: projectsError ?? error, refresh };
 }

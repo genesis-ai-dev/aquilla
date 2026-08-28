@@ -63,6 +63,9 @@ export function handleFileTrackSet(
   db: AquillaDb,
   authed: AuthorizedEvent<'file.track.set'>,
   serverTs: number,
+  /** Pre-allocated server_seq for this event (AQU-1005: allocation happens
+   *  once per request via allocateSeqRange, outside the write transaction). */
+  serverSeq: number,
 ): DispatchOutcome {
   const { event, claims } = authed
 
@@ -188,6 +191,7 @@ export function handleFileTrackSet(
     payloadJson: JSON.stringify(event.payload),
     clientTs: event.clientTs,
     serverTs,
+    serverSeq,
   })
 
   const fileUpdate = buildFileTrackSetStmt(

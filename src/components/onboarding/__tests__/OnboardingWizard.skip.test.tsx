@@ -4,7 +4,7 @@
  * Covers:
  *  - Existing user (has orgs): after login in SignInStep, wizard skips to dashboard
  *  - Fresh user (no orgs, no onboardingComplete): wizard continues to Name step
- *  - localStorage "aquilla:onboardingComplete" flag also triggers skip
+ *  - per-account completion never leaks through the browser-local marker
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
@@ -40,15 +40,25 @@ vi.mock("../steps/SignInStep", () => ({
   SignInStep: ({
     onNext,
     onLoginComplete,
+    onSignupComplete,
+    continuationError,
+    continuationBusy,
   }: {
     onNext: () => void
     onBack: () => void
-    onLoginComplete?: () => void
+    onLoginComplete?: (session: { username: string; jwt: string; createdAt: string }) => void
+    onSignupComplete?: (session: { username: string; jwt: string; createdAt: string }) => void
+    continuationError?: string | null
+    continuationBusy?: boolean
   }) => (
     <div>
       <p>Sign-in step</p>
-      <button onClick={() => onLoginComplete?.()}>Login complete</button>
-      <button onClick={onNext}>Signup complete</button>
+      {continuationError && <p role="alert">{continuationError}</p>}
+      <button disabled={continuationBusy} onClick={() => onLoginComplete?.({ username: "alice", jwt: "jwt-alice", createdAt: "x" })}>Login complete</button>
+      <button onClick={() => {
+        if (onSignupComplete) onSignupComplete({ username: "alice", jwt: "jwt-alice", createdAt: "x" })
+        else onNext()
+      }}>Signup complete</button>
     </div>
   ),
 }))
@@ -73,13 +83,23 @@ vi.mock("@/lib/analytics-consent", () => ({
 }))
 
 const mockRefreshOrgs = vi.fn()
+const mockListMyOrgs = vi.fn()
 let mockOrgs: { id: number; name: string }[] = []
+let mockUsername: string | null = "alice"
 
 vi.mock("@/context/OrgContext", () => ({
   useActiveOrg: () => ({
     orgs: mockOrgs,
     refresh: mockRefreshOrgs,
   }),
+}))
+vi.mock("@/hooks/useFrontierSession", () => ({
+  useFrontierSession: () => ({
+    session: mockUsername ? { username: mockUsername, jwt: "jwt", createdAt: "x" } : null,
+  }),
+}))
+vi.mock("@/lib/frontier/orgs", () => ({
+  listMyOrgs: (...args: unknown[]) => mockListMyOrgs(...args),
 }))
 
 const navigate = vi.fn()
@@ -113,6 +133,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   navigate.mockReset()
   mockOrgs = []
+  mockUsername = "alice"
   localStorage.clear()
 })
 
@@ -121,9 +142,22 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("OnboardingWizard — returning user skip", () => {
+  it("stays at the decision step and retries when organization classification fails", async () => {
+    mockListMyOrgs.mockRejectedValueOnce(new Error("offline")).mockResolvedValueOnce([])
+    renderWizard()
+    advanceToSignIn()
+
+    fireEvent.click(screen.getByRole("button", { name: /login complete/i }))
+    expect(await screen.findByRole("alert")).toHaveTextContent(/couldn't check/i)
+    expect(navigate).not.toHaveBeenCalled()
+    expect(screen.queryByText("Name step")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /login complete/i }))
+    expect(await screen.findByText("Name step")).toBeInTheDocument()
+  })
+
   it("navigates to / and skips Name step when user has orgs after login", async () => {
-    // refreshOrgs resolves with one org (existing user).
-    mockRefreshOrgs.mockResolvedValue([{ id: 1, name: "MyOrg" }])
+    mockListMyOrgs.mockResolvedValue([{ id: 1, name: "MyOrg" }])
 
     renderWizard()
     advanceToSignIn()
@@ -143,9 +177,9 @@ describe("OnboardingWizard — returning user skip", () => {
     expect(screen.queryByText("Name step")).not.toBeInTheDocument()
   })
 
-  it("navigates to / when localStorage onboardingComplete is set, even with no orgs", async () => {
-    localStorage.setItem("aquilla:onboardingComplete", "true")
-    mockRefreshOrgs.mockResolvedValue([]) // no orgs, but flag is set
+  it("navigates to / when this account's onboarding marker is set, even with no orgs", async () => {
+    localStorage.setItem("aquilla:onboardingComplete:account:alice", "true")
+    mockListMyOrgs.mockResolvedValue([]) // no orgs, but flag is set
 
     renderWizard()
     advanceToSignIn()
@@ -159,8 +193,24 @@ describe("OnboardingWizard — returning user skip", () => {
     })
   })
 
+  it("does not let another browser account's completion skip onboarding", async () => {
+    localStorage.setItem("aquilla:onboardingComplete", "true")
+    localStorage.setItem("aquilla:onboardingComplete:account:bob", "true")
+    mockUsername = null // React has not committed the just-authenticated account yet.
+    mockListMyOrgs.mockResolvedValue([])
+
+    renderWizard()
+    advanceToSignIn()
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /login complete/i }))
+    })
+
+    expect(await screen.findByText("Name step")).toBeInTheDocument()
+    expect(navigate).not.toHaveBeenCalled()
+  })
+
   it("advances to Name step when fresh user has no orgs and no flag", async () => {
-    mockRefreshOrgs.mockResolvedValue([]) // brand-new account
+    mockListMyOrgs.mockResolvedValue([]) // brand-new account
 
     renderWizard()
     advanceToSignIn()

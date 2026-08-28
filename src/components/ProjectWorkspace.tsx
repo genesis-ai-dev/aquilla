@@ -122,6 +122,7 @@ import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
 import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, needsSynthesis, takesNeedingMeasure, runMeasureAll } from "@/lib/audio/batch-audio"
 import { injectOptimisticAudioTrim, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
@@ -210,6 +211,7 @@ import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { ExpandableFileList } from "./ExpandableFileList"
 import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
 import { FileDetailsModal } from "./FileDetailsModal"
+import { RenameDialog } from "./RenameDialog"
 import { FileSegmentationDialog } from "./FileSegmentationDialog"
 import { SidebarProjectSection } from "./SidebarProjectSection"
 import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
@@ -1030,7 +1032,7 @@ export function ProjectWorkspace() {
   // Prefer the Frontier session username (authenticated identity) over the
   // project-level username setting. Validation entries and edit history
   // should attribute to the actual signed-in user.
-  const { session: frontierSession, logout: doLogout } = useFrontierSession()
+  const { session: frontierSession } = useFrontierSession()
   const currentUsername = frontierSession?.username || project?.username || "local"
   // Keep the ref in sync so effects declared earlier in the component can
   // access the resolved username without a hoisting issue.
@@ -1075,13 +1077,15 @@ export function ProjectWorkspace() {
             },
           }))
         },
-        onUnauthorized: () => {
-          // FRO-159: The stored session JWT was rejected by the auth server (401).
-          // This happens after a backend migration (e.g. Postgres switch) that
-          // invalidates existing tokens. Clear the session so the user is
-          // redirected to login rather than silently failing on every file open.
-          console.warn("[ProjectWorkspace] session JWT rejected (401) — clearing session for re-auth")
-          void doLogout().then(() => navigate("/"))
+        onUnauthorized: (failedJwt) => {
+          // FRO-159: the session JWT was rejected (401) — surface it instead of
+          // silently failing on every file open. AQU-994: raise the dismissible
+          // session-expired banner rather than force-logging the user out; a
+          // lone 401 can be a transient server fault misreported as an auth
+          // failure (the 2026-08-25 incident), and the old doLogout() here also
+          // revoked the still-valid token server-side and wiped local data.
+          console.warn("[ProjectWorkspace] session JWT rejected (401) on sync-token mint — raising session-expired banner")
+          void notifySessionExpiredIfCurrent(failedJwt)
         },
       },
     )
@@ -1090,8 +1094,6 @@ export function ProjectWorkspace() {
     project?.name,
     project?.origin?.kind,
     project?.origin?.kind === "git" ? project?.origin.gitlabProjectId : undefined,
-    doLogout,
-    navigate,
   ])
 
   // Project-AWARE fetcher for the outbox flusher. The outbox is global across
@@ -1103,16 +1105,15 @@ export function ProjectWorkspace() {
   // background drain serves all projects.
   const getTokenForProjectFile = useMemo(() => {
     return buildProjectAwareMinter(() => jwtRef.current, undefined, {
-      onUnauthorized: () => {
-        // Only a /sync-token mint 401 (the session JWT itself is dead) reaches
-        // here — that genuinely means re-auth. A per-event 403 does NOT, so the
-        // outbox banner no longer mislabels permission failures as "session
-        // expired" (FRO-xxx).
-        console.warn("[ProjectWorkspace] session JWT rejected (401) during outbox drain — clearing session")
-        void doLogout().then(() => navigate("/"))
+      onUnauthorized: (failedJwt) => {
+        // Only a /sync-token mint 401 reaches here — a per-event 403 does NOT,
+        // so permission failures are never mislabeled as "session expired".
+        // AQU-994: banner, not logout — see getTokenForFile above.
+        console.warn("[ProjectWorkspace] session JWT rejected (401) during outbox drain — raising session-expired banner")
+        void notifySessionExpiredIfCurrent(failedJwt)
       },
     })
-  }, [doLogout, navigate])
+  }, [])
 
   useEffect(() => {
     if (!project?.id || !activeFileId) {
@@ -6346,7 +6347,7 @@ export function ProjectWorkspace() {
   )
 
   const [moveTargetId, setMoveTargetId] = useState<string | null>(null)
-  const [renameSignal, setRenameSignal] = useState<{ fileId: string; nonce: number } | null>(null)
+  const [renameFileId, setRenameFileId] = useState<string | null>(null)
   const [moveCorpus, setMoveCorpus] = useState("")
   const existingCorpusMarkers = useMemo(() => {
     const set = new Set<string>()
@@ -8271,7 +8272,7 @@ export function ProjectWorkspace() {
         id: "file-rename",
         label: t("fileDetails.rename"),
         icon: Pencil,
-        onClick: () => setRenameSignal({ fileId: activeFileId, nonce: Date.now() }),
+        onClick: () => setRenameFileId(activeFileId),
       },
       {
         id: "file-move",
@@ -8829,7 +8830,6 @@ export function ProjectWorkspace() {
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
                   canExportByOrgPolicy={canExportByOrgPolicy}
-                  renameSignal={renameSignal}
                 />
                 <SidebarProjectSection items={projectNavItems} />
                 {/* FRO-192: member's per-project assignment pickup panel. */}
@@ -9716,6 +9716,7 @@ export function ProjectWorkspace() {
                 running={checkRunning}
                 cells={legacyCells}
                 onClose={() => setCheckOpen(false)}
+                onRetry={() => { void runCheck() }}
                 onNavigateToCell={jumpToCellId}
                 onOpenComments={(cellId) => {
                   // Reuse the existing comments drawer; one aside at a time.
@@ -9748,6 +9749,7 @@ export function ProjectWorkspace() {
                 onReply={(threadId, text) => addMessage(commentsCell.id, threadId, text)}
                 onResolve={(threadId, msg) => resolveThread(commentsCell.id, threadId, msg)}
                 onReopen={(threadId) => reopenThread(commentsCell.id, threadId)}
+                currentUsername={currentUsername}
               />
             )}
             {historyCell && (
@@ -10174,6 +10176,22 @@ export function ProjectWorkspace() {
         onOpenChange={(v) => { if (!v) setDetailsFileId(null) }}
         file={detailsFileId ? project.files.find((f) => f.id === detailsFileId) ?? null : null}
         progress={detailsFileId ? fileProgress.get(detailsFileId) : undefined}
+      />
+      <RenameDialog
+        open={renameFileId !== null}
+        onOpenChange={(open) => { if (!open) setRenameFileId(null) }}
+        title={t("fileDetails.renameDialogTitle")}
+        label={t("common.name")}
+        initialValue={
+          renameFileId
+            ? project.files.find((f) => f.id === renameFileId)?.name ?? ""
+            : ""
+        }
+        onSubmit={async (next) => {
+          if (!renameFileId) return
+          await handleRename(renameFileId, next)
+          setRenameFileId(null)
+        }}
       />
       {/* FRO-272: soft-delete confirmation — file moves to "Recently deleted" (30-day retention). */}
       <ConfirmActionDialog

@@ -39,6 +39,11 @@ import {
   type SourceUser,
 } from "../src/lib/migrate/users"
 
+import { installMigrateRunnerHeader } from "./lib/migrate-runner-header"
+
+// AQU-1005: stamp every /migrate/* call with the runner id (fence audit).
+installMigrateRunnerHeader()
+
 interface Args {
   apply: boolean
   limit: number | null

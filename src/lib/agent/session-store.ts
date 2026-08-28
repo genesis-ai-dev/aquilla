@@ -91,8 +91,15 @@ export interface SessionPersistence {
  * is guarded — a disabled/quota-full/unavailable store degrades to ephemeral
  * behaviour rather than throwing (Tauri, private mode, SSR).
  */
-export function localStoragePersistence(projectId: string): SessionPersistence {
-  const key = `aquilla:agent-session:v1:${projectId}`
+export function localStoragePersistence(projectId: string, ownerKey?: string | null): SessionPersistence {
+  const owner = ownerKey === undefined
+    ? null
+    : ownerKey === null
+      ? "local"
+      : `account:${encodeURIComponent(ownerKey)}`
+  const key = owner === null
+    ? `aquilla:agent-session:v1:${projectId}`
+    : `aquilla:agent-session:v2:${owner}:${projectId}`
   return {
     load() {
       try {
@@ -291,17 +298,24 @@ export class AgentSessionStore {
 
 const stores = new Map<string, AgentSessionStore>()
 
-export function agentSessionStore(projectId: string): AgentSessionStore {
-  let store = stores.get(projectId)
+function agentStoreKey(projectId: string, ownerKey?: string | null): string {
+  if (ownerKey === undefined) return projectId
+  const owner = ownerKey === null ? "local" : `account:${ownerKey}`
+  return `${owner}\u0000${projectId}`
+}
+
+export function agentSessionStore(projectId: string, ownerKey?: string | null): AgentSessionStore {
+  const key = agentStoreKey(projectId, ownerKey)
+  let store = stores.get(key)
   if (!store) {
-    store = new AgentSessionStore(realRunAgent, localStoragePersistence(projectId))
-    stores.set(projectId, store)
+    store = new AgentSessionStore(realRunAgent, localStoragePersistence(projectId, ownerKey))
+    stores.set(key, store)
   }
   return store
 }
 
 /** Subscribe a component to the project's shared agent session. */
-export function useAgentSession(projectId: string): {
+export function useAgentSession(projectId: string, ownerKey?: string | null): {
   state: AgentSessionState
   send: (options: AgentSendOptions) => void
   stop: () => void
@@ -309,7 +323,7 @@ export function useAgentSession(projectId: string): {
   decide: (entries: Iterable<[string, RowDecision]>) => void
   noteActivity: (key: string, note: string) => void
 } {
-  const store = agentSessionStore(projectId)
+  const store = agentSessionStore(projectId, ownerKey)
   const state = useSyncExternalStore(store.subscribe, store.getState, store.getState)
   const send = useCallback((options: AgentSendOptions) => store.send(options), [store])
   const stop = useCallback(() => store.stop(), [store])

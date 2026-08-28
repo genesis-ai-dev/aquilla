@@ -80,7 +80,7 @@ function envWith(db: AquillaDb) {
 describe('file.delete / file.restore dispatch routing', () => {
   it('file.delete routes to the handler, returns events INSERT + files UPDATE (2 stmts)', async () => {
     const authed = await makeAuthorized('file.delete', 500)
-    const outcome = dispatchEvent(makeNoOpDb(), authed, 9999, { updateProjection: true })
+    const outcome = dispatchEvent(makeNoOpDb(), authed, 9999, { serverSeq: 1, updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     expect(outcome.result.stmts.length).toBe(2) // events INSERT + files UPDATE
@@ -91,7 +91,7 @@ describe('file.delete / file.restore dispatch routing', () => {
 
   it('file.restore routes to the handler, returns events INSERT + files UPDATE (2 stmts)', async () => {
     const authed = await makeAuthorized('file.restore', 500)
-    const outcome = dispatchEvent(makeNoOpDb(), authed, 9999, { updateProjection: true })
+    const outcome = dispatchEvent(makeNoOpDb(), authed, 9999, { serverSeq: 2, updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     expect(outcome.result.stmts.length).toBe(2)
@@ -174,7 +174,7 @@ describe('file.delete / file.restore projection (PGlite)', () => {
 
     // 1. file.delete stamps deleted_at.
     const deleteAuthed = await makeAuthorized('file.delete', 500)
-    const deleteOutcome = dispatchEvent(db, deleteAuthed, 42000, { updateProjection: true })
+    const deleteOutcome = dispatchEvent(db, deleteAuthed, 42000, { serverSeq: 3, updateProjection: true })
     expect(deleteOutcome.ok).toBe(true)
     if (!deleteOutcome.ok) throw new Error('unreachable')
     await db.batch(deleteOutcome.result.stmts)
@@ -199,7 +199,7 @@ describe('file.delete / file.restore projection (PGlite)', () => {
     const token = await makeToken(500)
     const auth2 = await authorize(token, raw2, SECRET)
     if (!auth2.ok) throw new Error(`authorize failed: ${auth2.reason}`)
-    const o2 = dispatchEvent(db, auth2.event, 99000, { updateProjection: true })
+    const o2 = dispatchEvent(db, auth2.event, 99000, { serverSeq: 4, updateProjection: true })
     if (!o2.ok) throw new Error('unreachable')
     await db.batch(o2.result.stmts)
 
@@ -209,7 +209,7 @@ describe('file.delete / file.restore projection (PGlite)', () => {
 
     // 3. file.restore clears deleted_at.
     const restoreAuthed = await makeAuthorized('file.restore', 500)
-    const restoreOutcome = dispatchEvent(db, restoreAuthed, 45000, { updateProjection: true })
+    const restoreOutcome = dispatchEvent(db, restoreAuthed, 45000, { serverSeq: 5, updateProjection: true })
     expect(restoreOutcome.ok).toBe(true)
     if (!restoreOutcome.ok) throw new Error('unreachable')
     await db.batch(restoreOutcome.result.stmts)
@@ -260,7 +260,7 @@ describe('GET /files listing exclusion (PGlite)', () => {
 
     // Soft-delete the active file.
     const deleteAuthed = await makeAuthorized('file.delete', 500, 'file-active')
-    const dOutcome = dispatchEvent(db, deleteAuthed, 5000, { updateProjection: true })
+    const dOutcome = dispatchEvent(db, deleteAuthed, 5000, { serverSeq: 6, updateProjection: true })
     if (!dOutcome.ok) throw new Error('unreachable')
     await db.batch(dOutcome.result.stmts)
 
@@ -274,7 +274,7 @@ describe('GET /files listing exclusion (PGlite)', () => {
 
     // Restore the active file.
     const restoreAuthed = await makeAuthorized('file.restore', 500, 'file-active')
-    const rOutcome = dispatchEvent(db, restoreAuthed, 6000, { updateProjection: true })
+    const rOutcome = dispatchEvent(db, restoreAuthed, 6000, { serverSeq: 7, updateProjection: true })
     if (!rOutcome.ok) throw new Error('unreachable')
     await db.batch(rOutcome.result.stmts)
 

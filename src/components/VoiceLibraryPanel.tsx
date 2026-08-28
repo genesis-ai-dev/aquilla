@@ -6,14 +6,13 @@
 // (CloneVoiceModalHost) so the modal does not depend on this panel being mounted.
 //
 // Click a row to select it (the active voice — the assign target). Drag a row
-// onto a line to assign it. The row's ⋯ menu edits / sets-narrator / deletes.
+// onto a line to assign it. The row's ⋯ menu (and a right-click) edits /
+// makes-narrator / deletes.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react"
 import { Check, MoreHorizontal, Pencil, Plus, Search, Star, Trash2 } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
 import {
@@ -21,6 +20,22 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  MenuGroup,
+  MenuItem,
+  MenuSeparator,
+  createMenuHandle,
+} from "@/components/ui/menu-parts"
 import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { PRESET_VOICES, upsertVoice } from "@/lib/audio/voices"
@@ -251,8 +266,45 @@ export function VoiceLibraryPanel({
   )
 }
 
+function VoiceActionMenu({
+  isDefault, canDelete, onEdit, onMakeDefault, onDelete,
+}: {
+  isDefault: boolean
+  canDelete: boolean
+  onEdit: () => void
+  onMakeDefault: () => void
+  onDelete: () => void
+}) {
+  const t = useT()
+  return (
+    <>
+      <MenuGroup>
+        <MenuItem onClick={onEdit}>
+          <Pencil /> {t("common.edit")}
+        </MenuItem>
+        {!isDefault && (
+          <MenuItem onClick={onMakeDefault}>
+            <Star /> {t("audio.newVoice.makeNarratorButton")}
+          </MenuItem>
+        )}
+      </MenuGroup>
+      {canDelete && (
+        <>
+          <MenuSeparator />
+          <MenuGroup>
+            <MenuItem variant="destructive" onClick={onDelete}>
+              <Trash2 /> {t("common.delete")}
+            </MenuItem>
+          </MenuGroup>
+        </>
+      )}
+    </>
+  )
+}
+
 /** A single selectable voice row: avatar · name · meta · narrator star ·
- *  selected check · hover ⋯ menu. Click selects; drag assigns onto a line. */
+ *  selected check · hover ⋯ menu. Click selects; drag assigns onto a line.
+ *  Right-click (and the ⋯ button) open the same items as a file-tab row. */
 function VoiceRow({
   voice, projectProvider, active, isDefault, stats, canEdit, onSelect, onEdit, onMakeDefault, onDelete,
 }: {
@@ -273,30 +325,24 @@ function VoiceRow({
   onDelete: () => void
 }) {
   const t = useT()
+  const actionsMenu = useMemo(() => createMenuHandle(), [])
   // Same resolution the synth path uses (CellTtsButton, generateAndAttachCellVoice):
   // a voice's own provider wins; an absent one falls back to the project's
   // configured engine — never a hardcoded "Gemini".
   const engineLabel = voice.referenceAudioId
     ? t("audio.library.cloneEngineLabel")
     : providerInfo(voice.provider ?? projectProvider).shortTitle
-  const [menuOpen, setMenuOpen] = useState(false)
-  return (
-    <AppTooltip content={t("audio.library.rowHint")}>
-      <div
-        role="button"
-        tabIndex={0}
-        draggable
-        onDragStart={(e) => {
-          e.dataTransfer.setData(VOICE_ASSIGN_MIME, voice.id)
-          e.dataTransfer.effectAllowed = "copy"
-        }}
-        onClick={onSelect}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() } }}
-        className={cn(
-          "group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-start text-sm transition-colors",
-          active ? "bg-primary/10" : "hover:bg-accent/50",
-        )}
-      >
+  const actions = (
+    <VoiceActionMenu
+      isDefault={isDefault}
+      canDelete={!voice.builtIn}
+      onEdit={onEdit}
+      onMakeDefault={onMakeDefault}
+      onDelete={onDelete}
+    />
+  )
+  const body = (
+    <>
       <VoiceAvatar voice={voice} size={28} />
       <span className="min-w-0 flex-1">
         <span className="block truncate font-medium leading-tight">{voice.name}</span>
@@ -311,77 +357,66 @@ function VoiceRow({
         </span>
       </span>
       {isDefault && (
-        <AppTooltip content={t("audio.library.narratorHint")}>
-          <Badge
-            variant="secondary"
-            className="shrink-0 gap-1 text-[9px]"
+        <AppTooltip content={t("audio.narrator")}>
+          <span
+            aria-label={t("audio.narrator")}
+            data-testid="voice-narrator-star"
+            className="inline-flex shrink-0 text-muted-foreground"
           >
-            <Star data-icon="inline-start" /> {t("audio.narrator")}
-          </Badge>
+            <Star className="h-3.5 w-3.5 fill-current" />
+          </span>
         </AppTooltip>
       )}
-      {/* AQU-365: the ⋯ menu is character CRUD (edit/set-narrator/delete) —
-          hidden below the maintainer floor. Selecting/dragging a voice to
-          assign it to a line stays available (a separate, lower-floor
-          concern this ticket doesn't touch). */}
+      {active && <Check data-testid="voice-row-selected" className="h-4 w-4 shrink-0 text-primary" />}
       {canEdit && (
-        <Popover open={menuOpen} onOpenChange={setMenuOpen}>
-          <AppTooltip content={t("audio.library.moreTooltip")}>
-            <PopoverTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={(e) => e.stopPropagation()}
-                  aria-label={t("audio.library.moreActionsLabel")}
-                  className="shrink-0 opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100"
-                >
-                  <MoreHorizontal />
-                </Button>
-              }
-            />
-          </AppTooltip>
-          <PopoverContent align="end" side="bottom" className="w-44 p-1" onClick={(e) => e.stopPropagation()}>
-            <MenuItem icon={Pencil} label={t("common.edit")} onClick={() => { setMenuOpen(false); onEdit() }} />
-            {!isDefault && (
-              <MenuItem icon={Star} label={t("audio.library.setNarrator")} onClick={() => { setMenuOpen(false); onMakeDefault() }} />
-            )}
-            {!voice.builtIn && (
-              <MenuItem
-                icon={Trash2}
-                label={t("common.delete")}
-                destructive
-                onClick={() => { setMenuOpen(false); onDelete() }}
-              />
-            )}
-          </PopoverContent>
-        </Popover>
+        <DropdownMenuTrigger
+          handle={actionsMenu}
+          className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-colors group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100 aria-expanded:opacity-100 aria-expanded:text-foreground"
+          onClick={(e) => e.stopPropagation()}
+          aria-label={t("audio.library.moreActionsLabel")}
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" />
+        </DropdownMenuTrigger>
       )}
-      {active && <Check className="h-4 w-4 shrink-0 text-primary" />}
-      </div>
-    </AppTooltip>
+    </>
   )
-}
+  const rowClass = cn(
+    "group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-start text-sm transition-colors",
+    active ? "bg-primary/10" : "hover:bg-accent/50",
+  )
+  const rowProps = {
+    role: "button" as const,
+    tabIndex: 0,
+    draggable: true,
+    onDragStart: (e: DragEvent) => {
+      e.dataTransfer.setData(VOICE_ASSIGN_MIME, voice.id)
+      e.dataTransfer.effectAllowed = "copy"
+    },
+    onClick: onSelect,
+    onKeyDown: (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() }
+    },
+    className: rowClass,
+  }
 
-function MenuItem({
-  icon: Icon, label, onClick, destructive,
-}: {
-  icon: typeof Pencil
-  label: string
-  onClick: () => void
-  destructive?: boolean
-}) {
+  if (!canEdit) {
+    return <div {...rowProps}>{body}</div>
+  }
+
   return (
-    <Button
-      type="button"
-      variant={destructive ? "destructive" : "ghost"}
-      onClick={onClick}
-      className="w-full justify-start"
-    >
-      <Icon data-icon="inline-start" />
-      {label}
-    </Button>
+    <>
+      <ContextMenu>
+        <ContextMenuTrigger render={<div {...rowProps} />}>
+          {body}
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-44">{actions}</ContextMenuContent>
+      </ContextMenu>
+      <DropdownMenu handle={actionsMenu}>
+        <DropdownMenuContent align="end" className="w-44">
+          {actions}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
   )
 }
 

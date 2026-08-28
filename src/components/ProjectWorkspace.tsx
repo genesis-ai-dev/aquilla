@@ -212,6 +212,7 @@ import { WorkspaceStatusBar } from "./WorkspaceStatusBar"
 import { ExpandableFileList } from "./ExpandableFileList"
 import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
 import { FileDetailsModal } from "./FileDetailsModal"
+import { RenameDialog } from "./RenameDialog"
 import { FileSegmentationDialog } from "./FileSegmentationDialog"
 import { SidebarProjectSection } from "./SidebarProjectSection"
 import { LIVING_MEMORY_ICON } from "./LivingMemoryButton"
@@ -6348,7 +6349,7 @@ export function ProjectWorkspace() {
   )
 
   const [moveTargetId, setMoveTargetId] = useState<string | null>(null)
-  const [renameSignal, setRenameSignal] = useState<{ fileId: string; nonce: number } | null>(null)
+  const [renameFileId, setRenameFileId] = useState<string | null>(null)
   const [moveCorpus, setMoveCorpus] = useState("")
   const existingCorpusMarkers = useMemo(() => {
     const set = new Set<string>()
@@ -8274,7 +8275,7 @@ export function ProjectWorkspace() {
         id: "file-rename",
         label: t("fileDetails.rename"),
         icon: Pencil,
-        onClick: () => setRenameSignal({ fileId: activeFileId, nonce: Date.now() }),
+        onClick: () => setRenameFileId(activeFileId),
       },
       {
         id: "file-move",
@@ -8826,7 +8827,6 @@ export function ProjectWorkspace() {
                   onApplySuggestion={handleApplyOneSuggestion}
                   onRenameCorpus={handleRenameCorpus}
                   canExportByOrgPolicy={canExportByOrgPolicy}
-                  renameSignal={renameSignal}
                 />
                 <SidebarProjectSection items={projectNavItems} />
                 {/* FRO-192: member's per-project assignment pickup panel. */}
@@ -9713,6 +9713,7 @@ export function ProjectWorkspace() {
                 running={checkRunning}
                 cells={legacyCells}
                 onClose={() => setCheckOpen(false)}
+                onRetry={() => { void runCheck() }}
                 onNavigateToCell={jumpToCellId}
                 onOpenComments={(cellId) => {
                   // Reuse the existing comments drawer; one aside at a time.
@@ -10189,6 +10190,22 @@ export function ProjectWorkspace() {
         onOpenChange={(v) => { if (!v) setDetailsFileId(null) }}
         file={detailsFileId ? project.files.find((f) => f.id === detailsFileId) ?? null : null}
         progress={detailsFileId ? fileProgress.get(detailsFileId) : undefined}
+      />
+      <RenameDialog
+        open={renameFileId !== null}
+        onOpenChange={(open) => { if (!open) setRenameFileId(null) }}
+        title={t("fileDetails.renameDialogTitle")}
+        label={t("common.name")}
+        initialValue={
+          renameFileId
+            ? project.files.find((f) => f.id === renameFileId)?.name ?? ""
+            : ""
+        }
+        onSubmit={async (next) => {
+          if (!renameFileId) return
+          await handleRename(renameFileId, next)
+          setRenameFileId(null)
+        }}
       />
       {/* FRO-272: soft-delete confirmation — file moves to "Recently deleted" (30-day retention). */}
       <ConfirmActionDialog

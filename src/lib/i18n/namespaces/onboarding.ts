@@ -298,9 +298,9 @@ export const onboarding = defineNamespace({
     "onboarding.checklist.comingSoon.standards.title": "Upload project standards",
     "onboarding.checklist.comingSoon.standards.description":
       "Style guides and translation standards the AI will follow.",
-    "onboarding.checklist.comingSoon.glossary.title": "Import glossary / translation memory",
+    "onboarding.checklist.comingSoon.glossary.title": "Import terminology / translation memory",
     "onboarding.checklist.comingSoon.glossary.description":
-      "Existing TM or glossaries to keep terminology consistent.",
+      "Existing TM or term lists to keep terminology consistent.",
 
     // ═══════════════════════════════════════════════════════════════════════
     // System prompt nudge (editor banner)

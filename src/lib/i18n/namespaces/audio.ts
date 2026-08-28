@@ -226,7 +226,7 @@ export const audio = defineNamespace({
       "Narrator — lines without an explicit speaker use this voice.",
     "audio.library.moreActionsLabel": "More voice actions",
     "audio.library.moreTooltip": "More",
-    "audio.library.setNarrator": "Set as narrator",
+    "audio.library.setNarrator": "Make narrator",
     "audio.library.voicedStats": "{voiced}/{assigned} voiced",
     "audio.library.noLinesYet": "no lines yet",
     "audio.library.cloneEngineLabel": "Clone",

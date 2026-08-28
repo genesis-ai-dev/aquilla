@@ -144,13 +144,25 @@ test("naturally expired JWT redirects once and recovers without a forced reauth 
   await loginViaUi(page)
   await expectSignedInAsAlice(page)
 
+  // Single-membership alice is bounced off `/orgs/all` to her org's home
+  // (AQU-864), so `/orgs/all` cannot prove the ?next= round trip — the
+  // post-login URL there is indistinguishable from the default landing.
+  // Pin the round trip to a concrete org route that renders in place.
+  await expect(page).toHaveURL(/\/orgs\/\d+\//, { timeout: 30_000 })
+  const orgId = new URL(page.url()).pathname.match(/\/orgs\/(\d+)/)![1]
+
   await expireStoredJwt(page)
-  await page.goto("/orgs/all?tab=projects")
-  await expect(page).toHaveURL(/\/login\?next=%2Forgs%2Fall%3Ftab%3Dprojects$/)
+  await page.goto(`/orgs/${orgId}/projects`)
+  await expect(page).toHaveURL(
+    new RegExp(`/login\\?next=%2Forgs%2F${orgId}%2Fprojects$`),
+  )
   await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible()
 
   await loginViaUi(page)
-  await expect(page).toHaveURL(/\/orgs\/all\?tab=projects$/, { timeout: 30_000 })
+  await expect(page).toHaveURL(
+    new RegExp(`/orgs/${orgId}/projects$`),
+    { timeout: 30_000 },
+  )
   await expectSignedInAsAlice(page)
   await expect(banner(page)).toBeHidden()
 })

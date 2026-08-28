@@ -119,7 +119,13 @@ function renderTable({ lineNumbers = false, timecode = false, cellLabels = false
     <QueryClientProvider client={qc}>
       <EditorActionsProvider value={{}}>
         <EditorTable
-          project={cellLabels ? projectWithCast : project}
+          // ALWAYS the cast-bearing project, so `cellLabelsEnabled` below is
+          // the ONLY variable (2026-08-28). This used to swing with the gate
+          // flag, which meant the gate-off test rendered a project with no
+          // `ttsSettings` at all — so the label was absent because there was no
+          // cast to show, not because the gate withheld it. Delete the gate
+          // entirely and that test still passed.
+          project={projectWithCast}
           cellStore={store}
           username="tester"
           isCompletionConfigured={false}

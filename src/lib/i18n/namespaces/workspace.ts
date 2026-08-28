@@ -51,8 +51,6 @@ export const workspace = defineNamespace({
     // -- ProjectWorkspace: AppShell chrome --
     "workspace.sidebar.collapse": "Collapse sidebar",
     "workspace.readOnlyGitBanner": "Read-only — imported from git. Push is coming in Phase 2.",
-    "workspace.videoUnavailable":
-      "Video file not available on this device. Attach it locally or paste a URL via the Film icon.",
     "workspace.staleSibling.viewInHistory": "View in history",
     "workspace.staleSource.message":
       "Source text changed since your last edit — your translation was saved, but please re-confirm it reflects the latest source.",
@@ -533,12 +531,6 @@ export const workspace = defineNamespace({
           "'git' and 'Phase 2' are technical/roadmap terms — keep 'git' " +
           "untranslated as the tool's name.",
         maxLength: 90,
-      },
-      "workspace.videoUnavailable": {
-        description:
-          "Banner shown over a subtitle file's timeline when its linked video " +
-          "blob isn't present on this device and no video URL is attached yet. " +
-          "'Film icon' refers to the toolbar icon that opens the attach-video flow.",
       },
       "workspace.staleSibling.viewInHistory": {
         description:

@@ -156,7 +156,10 @@ export const audio = defineNamespace({
     "audio.recordingModal.lineCounterWindow": "{index} / {total} · window {seconds}s",
     "audio.recordingModal.lineCounterVeryShort":
       "{index} / {total} · window {seconds}s · very short",
-    "audio.tts.voicedSeveral": "Voiced {count} heard lines",
+    "audio.tts.voicedSeveral": plural({
+      one: "Voiced {count} heard line",
+      other: "Voiced {count} heard lines",
+    }),
     "audio.tts.voicedSeveralDetail":
       "This subtitle is performed by several heard lines, so each one was given the whole subtitle. Trim them to fit.",
     "audio.tts.mixedCharacters": plural({
@@ -172,8 +175,10 @@ export const audio = defineNamespace({
     "audio.tts.siblingFailedDetail":
       "The clip you played was saved. Delete it and press the button again to retry the rest.",
     "audio.recordingModal.cueReferenceLabel": "This cue:",
-    "audio.recordingModal.ttsSharedNotice":
-      "{count} heard lines perform this subtitle. A generated voice speaks the whole subtitle onto this one, and leaves the others silent.",
+    "audio.recordingModal.ttsSharedNotice": plural({
+      one: "{count} heard line performs this subtitle. A generated voice speaks the whole subtitle onto this one, and leaves the others silent.",
+      other: "{count} heard lines perform this subtitle. A generated voice speaks the whole subtitle onto this one, and leaves the others silent.",
+    }),
     "audio.recordingModal.maxDuration": "max {minutes}m",
     "audio.recordingModal.overrunNotice": "Past the window — this will overrun the cue.",
     "audio.recordingModal.nearLimitNotice":

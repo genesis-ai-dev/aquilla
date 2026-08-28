@@ -649,8 +649,10 @@ export const editor = defineNamespace({
       "Ctrl/⌘-click or Shift-click chips to select more sections.",
     "editor.timeline.transcribeSelectionTooltip":
       "Run speech-to-text on the selected sections' audio only — the rest of the file is left alone.",
-    "editor.timeline.transcribeSelectionSharedTooltip":
-      "Some of these sections are performed by the same heard line, so this runs {count} transcription(s) covering all of them.",
+    "editor.timeline.transcribeSelectionSharedTooltip": plural({
+      one: "Some of these sections are performed by the same heard line, so this runs {count} transcription covering all of them.",
+      other: "Some of these sections are performed by the same heard line, so this runs {count} transcriptions covering all of them.",
+    }),
     "editor.timeline.transcribeSelectionNoAudioTooltip":
       "None of the selected sections has audio to transcribe.",
     "editor.timeline.transcribeSelectionBusyTooltip":

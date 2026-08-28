@@ -177,6 +177,7 @@ import {
 } from "@/lib/audio/linked-takes"
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
+import { nextFolderName } from "@/lib/timeline/track-names"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
 import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
 import { RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
@@ -8404,7 +8405,9 @@ export function ProjectWorkspace() {
         [
           {
             trackId: folderId,
-            patch: { kind: "folder", name: t("editor.timeline.trackAddFolder"), order },
+            // The STORED name, in English whatever the creator's UI language —
+            // see `nextFolderName`. The menu LABEL stays translated.
+            patch: { kind: "folder", name: nextFolderName(serverTimelineTracks), order },
           },
           ...members.map((member, i) => ({
             trackId: member.id,
@@ -8415,7 +8418,7 @@ export function ProjectWorkspace() {
       )
       return folderId
     },
-    [applyTrackPatches, serverTimelineTracks, t],
+    [applyTrackPatches, serverTimelineTracks],
   )
 
   const handleDeleteTrack = useCallback(

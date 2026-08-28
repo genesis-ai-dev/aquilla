@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { nextTrackName } from "./track-names"
+import { nextFolderName, nextTrackName } from "./track-names"
 
 const named = (...names: string[]) => names.map((name) => ({ name }))
 
@@ -57,5 +57,46 @@ describe("nextTrackName — file-save numbering", () => {
       rows.push({ name: next })
     }
     expect(rows.at(-1)!.name).toBe("Track 24")
+  })
+})
+
+// ── Folders are named the same way, and just as untranslatably ─────────────
+//
+// A folder used to be stored under the MENU LABEL, `t("…trackAddFolder")` — so
+// one made by someone working in Thai was stored as "โฟลเดอร์" and every
+// collaborator read that word in their gutter, and because the label is a
+// constant, every folder on a file was called the same thing. The i18n note
+// beside that key already said the rule: an automatic name is DATA, not copy.
+describe("nextFolderName — the same rule, its own sequence", () => {
+  const named = (...names: string[]) => names.map((name) => ({ name }))
+
+  it("calls the first one just Folder, then counts up", () => {
+    expect(nextFolderName([])).toBe("Folder")
+    expect(nextFolderName(named("Folder"))).toBe("Folder 1")
+    expect(nextFolderName(named("Folder", "Folder 1"))).toBe("Folder 2")
+  })
+
+  it("reuses a number the moment nothing holds it, like tracks do", () => {
+    expect(nextFolderName(named("Folder", "Folder 2"))).toBe("Folder 1")
+    expect(nextFolderName(named("Folder 1", "Folder 2"))).toBe("Folder")
+  })
+
+  // THE TWO SEQUENCES ARE SEPARATE. "Track 1" and "Folder 1" are different
+  // names and never read as one, so neither may consume the other's slot.
+  it("counts only its own stem", () => {
+    expect(nextFolderName(named("Track", "Track 1", "Track 2"))).toBe("Folder")
+    expect(nextTrackName(named("Folder", "Folder 1"))).toBe("Track")
+  })
+
+  // …but it still scans EVERY row, because a track someone renamed to
+  // "Folder 1" occupies that name in the gutter whatever kind it is.
+  it("respects a row of any kind holding the name", () => {
+    expect(nextFolderName(named("Folder", "Folder 1"))).toBe("Folder 2")
+  })
+
+  it("ignores near-misses and tolerates rename padding", () => {
+    expect(nextFolderName(named("Folders", "Folder A", "folder", "Folder-1"))).toBe("Folder")
+    expect(nextFolderName(named("Folder", "Folder 01"))).toBe("Folder 1")
+    expect(nextFolderName(named("  Folder  "))).toBe("Folder 1")
   })
 })

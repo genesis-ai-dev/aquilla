@@ -121,7 +121,7 @@ import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { resolveTargetAudio } from "@/lib/audio/track-audio"
 import { RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
-import { nextTrackName } from "@/lib/timeline/track-names"
+import { nextFolderName, nextTrackName } from "@/lib/timeline/track-names"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useVideoClockSec, useVideoClockPlaying } from "@/lib/timeline/video-clock"
@@ -3654,7 +3654,12 @@ export function TimelineEditor({
                   onClick: () => {
                     const folderId = trackEditing.onAdd({
                       kind: "folder",
-                      name: t("editor.timeline.trackAddFolder"),
+                      // The STORED name, not the menu's label. Naming it
+                      // `t(...)` put the creator's UI language into a synced
+                      // field, so a folder made in Thai read as Thai for
+                      // everyone — and being a constant, every folder on a file
+                      // was called the same thing (2026-08-28).
+                      name: nextFolderName(tracks),
                     })
                     setRenamingTrackId(folderId)
                   },

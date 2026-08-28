@@ -51,6 +51,7 @@ import {
   UNBOUND_TTL_MS,
   clearOptimisticShadows,
   injectOptimisticAudioAttachment,
+  injectOptimisticAudioPlace,
   injectOptimisticAudioRemove,
   notifyAudioAttachmentsChanged,
 } from "@/lib/audio/audio-attachments-bus"
@@ -413,6 +414,32 @@ describe("optimistic overlay — outbox-anchored lifetime (SUB-48)", () => {
     await waitFor(() => expect(entryOf(result)?.selectedAudioId).toBe(LONG.audioId))
   })
 
+  // The other half of the drag fix (2026-08-27): `handleRetimeTarget` now
+  // hands its overlay the emit promise, where before it passed nothing — so a
+  // dragged chip ran on exactly the unbound timer the case below pins, and
+  // sprang back after 15 seconds offline while its event sat queued and
+  // healthy. This is the behaviour that binding buys: outbox-anchored, alive
+  // for as long as the event is genuinely still on its way.
+  it("a BOUND place overlay outlives the unbound bound while its event is queued", async () => {
+    vi.useFakeTimers()
+    try {
+      fetchMock.mockResolvedValue(serverLongSelected())
+      const { result } = mount()
+      await vi.waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+      queued("evt-drag")
+      act(() => injectOptimisticAudioPlace("f1", "c1", { ...LONG, targetOffsetMs: 2500 }, "evt-drag"))
+      vi.advanceTimersByTime(UNBOUND_TTL_MS + 60_000)
+      await act(async () => {
+        await result.current.revalidate()
+      })
+      // Still where it was dragged — the outbox record vouches for it.
+      expect(entryOf(result)?.attachments[LONG.audioId]?.targetOffsetMs).toBe(2500)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("an overlay that never learns an event id expires on the unbound bound", async () => {
     vi.useFakeTimers()
     try {
@@ -651,6 +678,72 @@ describe("optimistic overlay — selection and duration correctness", () => {
     expect(entryOf(result)?.selectedBySlot?.recording).toBe(MISLABELLED.audioId)
     // The server's own answer for the track is untouched by the bad shadow.
     expect(entryOf(result)?.selectedBySlot?.[TRACK_SLOT]).toBe("audio-c1-400-trk.wav")
+  })
+
+  // ── A drag's overlay is nothing but its position (2026-08-27) ─────────────
+  //
+  // `shadowConfirmed` compared the slot selection, both trims, the duration
+  // and the label — every field an overlay can assert EXCEPT `targetOffsetMs`,
+  // and a place overlay copies all of those verbatim from the row it overlays.
+  // So every comparison was trivially equal, the FIRST read after a drag
+  // confirmed it, and the chip snapped back to its old anchor until the real
+  // save landed. A rejected placement vanished silently, because the
+  // not-saved badge only lives as long as the overlay.
+  it("a place overlay is NOT confirmed by a read still carrying the old anchor", async () => {
+    // Server knows LONG at its old spot (no offset at all).
+    fetchMock.mockResolvedValue(serverLongSelected())
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    queued("evt-place")
+    act(() => injectOptimisticAudioPlace("f1", "c1", { ...LONG, targetOffsetMs: 2500 }, "evt-place"))
+    delivered("evt-place") // out of the outbox: only confirmation may retire it
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    // The overlay survives the stale read — the chip stays where it was dragged.
+    expect(entryOf(result)?.attachments[LONG.audioId]?.targetOffsetMs).toBe(2500)
+  })
+
+  it("…and IS confirmed once the server carries the new anchor", async () => {
+    const placed = { ...LONG, targetOffsetMs: 2500 }
+    fetchMock.mockResolvedValue(cells({
+      attachments: { [LONG.audioId]: placed, [SHORT.audioId]: SHORT },
+      selectedAudioId: LONG.audioId,
+    }))
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    delivered("evt-place2")
+    act(() => injectOptimisticAudioPlace("f1", "c1", placed, "evt-place2"))
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    // Confirmed and retired — server truth carries the position now, and the
+    // grace window is not holding a ghost.
+    expect(entryOf(result)?.attachments[LONG.audioId]?.targetOffsetMs).toBe(2500)
+  })
+
+  // A trim overlay legitimately omits the position — it must not be held
+  // hostage to an offset it never asserted, or every trim of a previously
+  // DRAGGED take would sit unconfirmed to the grace bound, stuck "saving".
+  it("an overlay that asserts no position still confirms over a placed take", async () => {
+    const placedOnServer = { ...LONG, targetOffsetMs: 2500 }
+    fetchMock.mockResolvedValue(cells({
+      attachments: { [LONG.audioId]: placedOnServer },
+      selectedAudioId: LONG.audioId,
+    }))
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    delivered("evt-trim2")
+    // A trim re-inject: trims + duration, NO targetOffsetMs field at all.
+    const { targetOffsetMs: _omit, ...noPosition } = placedOnServer
+    act(() => injectOptimisticAudioPlace("f1", "c1", noPosition, "evt-trim2"))
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    expect(entryOf(result)?.attachments[LONG.audioId]?.targetOffsetMs).toBe(2500)
   })
 
   it("trim overlays only confirm when the server carries the same trims", async () => {

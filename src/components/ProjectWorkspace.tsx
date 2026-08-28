@@ -2105,6 +2105,23 @@ export function ProjectWorkspace() {
       // The resolver already merged this cell's attachments (raw store cells
       // carry none), which is the same lookup the trim path above does.
       const att = cell.attachments?.[audioId]
+      // EMIT FIRST, BIND THE OVERLAY TO IT (2026-08-27). Every sibling write
+      // hands its overlay the emit promise so the outbox record can vouch for
+      // it — "pending" keeps it alive indefinitely, "failed" repaints it as
+      // not-saved (the AQU-924 rule). This one didn't, so a dragged chip ran
+      // on the 15-second unbound timer instead: offline it sprang back while
+      // its event sat queued and healthy, and a rejected placement disappeared
+      // without a word. `emitCellAudioPlace` only builds the event and queues
+      // it durably — nothing has gone to the network yet — so starting it
+      // before the paint costs nothing.
+      const placeP = emitCellAudioPlace({
+        projectId: project.id,
+        fileId: takeFileId,
+        cellId,
+        audioId,
+        targetOffsetMs,
+        author: currentUsername,
+      })
       if (att) {
         injectOptimisticAudioPlace(takeFileId, cellId, {
           audioId,
@@ -2117,7 +2134,7 @@ export function ProjectWorkspace() {
           trimStartMs: att.trimStartMs ?? null,
           trimEndMs: att.trimEndMs ?? null,
           targetOffsetMs,
-        })
+        }, placeP)
       } else if (takeFileId !== activeFileId) {
         // A cue cell is not in this file's store, so the store's optimistic
         // path cannot reach it — and its file is read once and never
@@ -2125,14 +2142,7 @@ export function ProjectWorkspace() {
         setCueAnchorOverridesRef.current(cellId, targetOffsetMs)
       }
 
-      await emitCellAudioPlace({
-        projectId: project.id,
-        fileId: takeFileId,
-        cellId,
-        audioId,
-        targetOffsetMs,
-        author: currentUsername,
-      })
+      await placeP
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
     },

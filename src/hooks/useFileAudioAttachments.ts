@@ -153,6 +153,16 @@ function shadowConfirmed(entry: CellAudioEntry | undefined, shadow: OptimisticSh
   // Label compared only when the overlay explicitly carries one — trim
   // re-injects omit it and the server keeps the existing name.
   if (att.label !== undefined && (server.label ?? null) !== att.label) return false
+  // THE POSITION, same rule as the label (2026-08-27). A drag's overlay is
+  // nothing BUT its position — every other field it copies verbatim from the
+  // server row it overlays — so without this line every comparison above was
+  // trivially equal and the FIRST read after a drag "confirmed" it: the chip
+  // snapped back to the old spot until the real save landed, and a rejected
+  // placement vanished with no not-saved badge at all. Gated on `undefined`
+  // exactly like the label, because trim and attach overlays legitimately
+  // omit it and must not be held hostage to a position they never asserted.
+  if (att.targetOffsetMs !== undefined && (server.targetOffsetMs ?? null) !== att.targetOffsetMs)
+    return false
   return true
 }
 

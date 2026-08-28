@@ -1,31 +1,39 @@
 /**
- * TeamThreadsView.tsx — the workbench's Team tab (2026-08-28 social-workspace
- * design): the autopilot pipeline presented as a small named team posting in
- * threads, Telegram-style, instead of a technical console.
+ * TeamThreadsView.tsx — the workbench's Team tab.
  *
- * Left rail: the persona roster (live dot on whoever is working) above one
- * thread per autopilot run, plus a pinned "Needs your expertise" thread while
- * open decisions exist. Right pane: the selected thread as a message feed —
- * every message attributed to a persona (personas.ts) and phrased in plain
- * language (social-feed.ts). Read-only over the same transport the activity
- * inspector uses; decisions keep their existing answer/dismiss actions.
+ * v2, the one-channel model (2026-08-28 social-workspace design): the team is
+ * ONE project channel, not a thread list. The Coordinator speaks at top level
+ * — a dispatch message per autopilot run, a question message per decision it
+ * can't settle alone — and the live chat session continues underneath, in the
+ * same shared session store the Chat tab drives. Every one of those messages
+ * owns a thread; opening one gives the thread the width and collapses the
+ * channel to a narrow spine of avatars in the same order, so the user keeps
+ * their place in time. One composer sits at the bottom throughout: in the
+ * channel it addresses the orchestrator, in a run thread it addresses that
+ * subagent (steering), and in a question thread it stands down because the
+ * DecisionCard carries its own Answer input.
+ *
+ * Read-only over the same transport the activity inspector uses, polled every
+ * 4s while the document is visible.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { Link } from "react-router-dom"
-import { AlertTriangle, MessageCircleQuestion } from "lucide-react"
-import { Badge } from "@/components/ui/badge"
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
+import { AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Spinner } from "@/components/ui/spinner"
-import { cn } from "@/lib/utils"
 import { useI18n, type TFunction } from "@/lib/i18n/I18nProvider"
-import { fmtShortCalendarDate } from "@/lib/format-date"
-import { draftReviewHref } from "@/components/project-workspace-lane-deeplink"
-import { DecisionCard } from "@/components/contextual/DecisionCard"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { AGENT_PERSONA_IDS, AGENT_PERSONAS, personaForRegion } from "@/lib/agent/personas"
-import { buildRunFeed, type TeamFeedMessage } from "@/lib/agent/social-feed"
+import { buildRunFeed } from "@/lib/agent/social-feed"
+import { composeAgentSend } from "@/lib/agent/compose-send"
+import { useAgentSession } from "@/lib/agent/session-store"
+import type { ContextChip } from "@/lib/agent/context-chip"
+import {
+  buildTeamChannel,
+  isSteerableStatus,
+  personaForRun,
+  type TeamDispatchItem,
+} from "@/lib/agent/team-channel"
 import { normalizePhase } from "@/lib/contextual/process-graph"
 import {
   fetchContextualDecisions,
@@ -35,137 +43,52 @@ import {
   type ContextualRunActivity,
   type ContextualRunRecord,
 } from "@/lib/contextual/transport"
+import { humanPassageLabel } from "../../../shared/span-label"
 import { PersonaAvatar } from "./PersonaAvatar"
+import { TeamChannel } from "./TeamChannel"
+import { TeamChannelComposer } from "./TeamChannelComposer"
+import { TeamChannelSpine } from "./TeamChannelSpine"
+import { TeamThreadDetail } from "./TeamThreadDetail"
+import { isRunWorking } from "./team-run-status"
 
 const POLL_MS = 4_000
 const RUN_PAGE_LIMIT = 12
-const DECISIONS_THREAD = "decisions"
 
 export interface TeamThreadsViewProps {
   projectId: string
-  /** File display names for thread titles; falls back to a generic label. */
+  /** File display names for message/thread titles; falls back to a generic label. */
   fileNames?: ReadonlyMap<string, string>
+  /**
+   * Session wiring for the channel composer. The workbench mounts this tab
+   * with projectId + fileNames only, so both default to the signed-in
+   * session — pass them explicitly to guarantee the Team tab and the Chat tab
+   * address the same session-store instance (`author` is its owner key).
+   */
+  jwt?: string | null
+  author?: string
 }
 
-function statusKey(run: ContextualRunRecord): Parameters<TFunction>[0] {
-  if (run.status === "failed") return "autopilot.status.needsAttention"
-  if (run.status === "running" || run.status === "pausing") return "autopilot.status.working"
-  if (run.status === "paused") return "autopilot.status.paused"
-  if (run.status === "parked") {
-    return run.total > run.done + run.failed ? "autopilot.status.queued" : "autopilot.status.idle"
-  }
-  if (run.status === "done") return "autopilot.status.complete"
-  if (run.status === "terminated") return "autopilot.status.stopped"
-  return "autopilot.status.notStarted"
-}
-
-function isWorking(run: ContextualRunRecord): boolean {
-  return run.status === "running" || run.status === "pausing"
-}
-
-function feedMessageText(message: TeamFeedMessage, t: TFunction): string {
-  const span = (label: string | null) => label ?? t("agent.team.spanFallback")
-  const { body } = message
-  switch (body.kind) {
-    case "started":
-      return t("agent.team.msg.started", { span: span(body.spanLabel) })
-    case "phase":
-      if (body.region === "reading") return t("agent.team.msg.reading", { span: span(body.spanLabel) })
-      if (body.region === "drafting") return t("agent.team.msg.drafting", { span: span(body.spanLabel) })
-      if (body.region === "checking") return t("agent.team.msg.checking", { span: span(body.spanLabel) })
-      // buildRunFeed never emits staging phases; keep the mapping total anyway.
-      return t("agent.team.msg.outcomeDone", { span: span(body.spanLabel) })
-    case "sceneReady":
-      return body.ambiguityCount != null && body.ambiguityCount > 0
-        ? t("agent.team.msg.sceneReady", {
-            span: span(body.spanLabel),
-            count: body.ambiguityCount,
-          })
-        : t("agent.team.msg.sceneReadyUncounted", { span: span(body.spanLabel) })
-    case "draftsStaged":
-      return body.count != null
-        ? t("agent.team.msg.draftsStaged", { count: body.count })
-        : t("agent.team.msg.draftsStagedUncounted")
-    case "outcome":
-      if (body.status === "done") return t("agent.team.msg.outcomeDone", { span: span(body.spanLabel) })
-      if (body.status === "partial") return t("agent.team.msg.outcomePartial", { span: span(body.spanLabel) })
-      return t("agent.team.msg.outcomeFailed", { span: span(body.spanLabel) })
-  }
-}
-
-function FeedMessageRow({
-  message,
-  reviewHref,
-  locale,
-  t,
-}: {
-  message: TeamFeedMessage
-  reviewHref: string | null
-  locale: string
-  t: TFunction
-}) {
-  const persona = AGENT_PERSONAS[message.persona]
-  const time = message.at
-    ? new Date(message.at).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })
-    : null
-  const excerpt = message.body.kind === "sceneReady" ? message.body.excerpt : null
-  const reasons = message.body.kind === "outcome" ? message.body.reasons : []
-  const reviewLinkHref = message.body.kind === "draftsStaged" ? reviewHref : null
+function TeamRoster({ activePersonas, t }: { activePersonas: ReadonlySet<string>; t: TFunction }) {
   return (
-    <div className="flex items-start gap-2" data-feed-kind={message.body.kind}>
-      <PersonaAvatar personaId={persona.id} className="mt-0.5" />
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <div className="flex items-baseline gap-2">
-          <span className={cn("text-xs font-medium", persona.textClass)}>{t(persona.nameKey)}</span>
-          {time && <span className="text-[10px] text-muted-foreground">{time}</span>}
-        </div>
-        <p className="text-sm leading-relaxed">{feedMessageText(message, t)}</p>
-        {excerpt && (
-          <blockquote className="mt-0.5 border-s-2 border-border ps-2 text-xs leading-relaxed text-muted-foreground">
-            {excerpt}
-          </blockquote>
-        )}
-        {reasons.length > 0 && (
-          <ul className="mt-0.5 flex flex-col gap-0.5 text-xs text-muted-foreground">
-            {reasons.map((reason) => (
-              <li key={reason}>{reason}</li>
-            ))}
-          </ul>
-        )}
-        {reviewLinkHref && (
-          <Link
-            to={reviewLinkHref}
-            className="mt-0.5 w-fit text-xs font-medium underline underline-offset-2 hover:text-foreground"
-          >
-            {t("agent.team.reviewDrafts")}
-          </Link>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function TeamRoster({ activeRegions, t }: { activeRegions: ReadonlySet<string>; t: TFunction }) {
-  return (
-    <div className="flex flex-col gap-1.5 border-b px-3 py-2.5">
-      <p className="text-[11px] font-semibold text-foreground/90">{t("agent.team.rosterTitle")}</p>
-      <ul className="flex flex-col gap-1">
-        {AGENT_PERSONA_IDS.map((id) => {
-          const persona = AGENT_PERSONAS[id]
-          const live = activeRegions.has(id)
-          return (
-            <li key={id} className="flex items-center gap-2">
+    <div className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
+      <span className="text-[11px] font-semibold text-foreground/90">
+        {t("agent.team.rosterTitle")}
+      </span>
+      <ul className="flex items-center gap-1.5" data-testid="team-roster">
+        {AGENT_PERSONA_IDS.map((id) => (
+          <li key={id} className="flex items-center gap-1">
+            <span role="img" aria-label={t(AGENT_PERSONAS[id].nameKey)}>
               <PersonaAvatar personaId={id} size="sm" />
-              <span className="text-xs">{t(persona.nameKey)}</span>
-              {live && (
-                <span
-                  aria-label={t("autopilot.status.working")}
-                  className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse motion-reduce:animate-none"
-                />
-              )}
-            </li>
-          )
-        })}
+            </span>
+            {activePersonas.has(id) && (
+              <span
+                data-testid={`team-roster-live-${id}`}
+                aria-label={t("autopilot.status.working")}
+                className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse motion-reduce:animate-none"
+              />
+            )}
+          </li>
+        ))}
       </ul>
     </div>
   )
@@ -203,11 +126,18 @@ function TeamEmptyState({ t }: { t: TFunction }) {
   )
 }
 
-export function TeamThreadsView({ projectId, fileNames }: TeamThreadsViewProps) {
-  const { locale, t } = useI18n()
+export function TeamThreadsView({ projectId, fileNames, jwt, author }: TeamThreadsViewProps) {
+  const { t } = useI18n()
+  const { session } = useFrontierSession()
+  const sessionJwt = jwt !== undefined ? jwt : (session?.jwt ?? null)
+  // Must match the owner key AgentDockView passes, or the Team tab would open
+  // a SECOND session store and show a different conversation than the Chat tab.
+  const ownerKey = author ?? session?.username ?? "local"
+  const { state, send, stop } = useAgentSession(projectId, ownerKey)
+
   const [runs, setRuns] = useState<ContextualRunRecord[] | null>(null)
   const [decisions, setDecisions] = useState<ContextualDecisionsPage | null>(null)
-  const [selected, setSelected] = useState<string | null>(null)
+  const [openThreadId, setOpenThreadId] = useState<string | null>(null)
   const [activity, setActivity] = useState<ContextualRunActivity | null>(null)
   const [activityLoading, setActivityLoading] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
@@ -220,7 +150,7 @@ export function TeamThreadsView({ projectId, fileNames }: TeamThreadsViewProps) 
     return { runsPage, decisionsPage }
   }, [projectId])
 
-  // List + decisions: initial load and a visibility-aware poll. The generation
+  // Channel data: initial load and a visibility-aware poll. The disposal
   // guard drops late responses after a project switch (repo read-hook idiom).
   useEffect(() => {
     let disposed = false
@@ -246,21 +176,31 @@ export function TeamThreadsView({ projectId, fileNames }: TeamThreadsViewProps) 
     }
   }, [refresh])
 
-  // First load picks a sensible thread: open questions first, else the
-  // newest run. Never steals an explicit selection afterwards.
-  useEffect(() => {
-    if (selected !== null || runs === null || decisions === null) return
-    if (decisions.openCount > 0) setSelected(DECISIONS_THREAD)
-    else if (runs.length > 0) setSelected(runs[0].runId)
-  }, [selected, runs, decisions])
-
-  // The selected run's activity, polled on the same cadence while working.
-  const selectedRun = useMemo(
-    () => (runs ?? []).find((run) => run.runId === selected) ?? null,
-    [runs, selected],
+  const openDecisions = useMemo(() => decisions?.decisions ?? [], [decisions])
+  const openCount = decisions?.openCount ?? 0
+  const channelItems = useMemo(
+    () => buildTeamChannel(runs ?? [], openDecisions),
+    [runs, openDecisions],
   )
+  const openItem = useMemo(
+    () => channelItems.find((item) => item.threadId === openThreadId) ?? null,
+    [channelItems, openThreadId],
+  )
+
+  // A thread whose parent message left the channel (answered question, run
+  // paged out) has nothing left to show — fall back to the full channel
+  // rather than stranding the user on an empty pane.
   useEffect(() => {
-    if (!selectedRun) {
+    if (openThreadId !== null && channelItems.length > 0 && openItem === null) {
+      setOpenThreadId(null)
+    }
+  }, [openThreadId, openItem, channelItems.length])
+
+  const openRun = openItem?.kind === "dispatch" ? openItem.run : null
+
+  // The open run's activity, polled on the same cadence.
+  useEffect(() => {
+    if (!openRun) {
       setActivity(null)
       return
     }
@@ -268,10 +208,10 @@ export function TeamThreadsView({ projectId, fileNames }: TeamThreadsViewProps) 
     setActivityLoading(true)
     const load = async () => {
       try {
-        const result = await fetchContextualRunActivity(projectId, selectedRun.runId)
+        const result = await fetchContextualRunActivity(projectId, openRun.runId)
         if (!disposed) setActivity(result)
       } catch {
-        // The runs list already reported reachability; a transient activity
+        // The channel already reported reachability; a transient activity
         // failure keeps the previous feed rather than blanking the thread.
       } finally {
         if (!disposed) setActivityLoading(false)
@@ -286,32 +226,67 @@ export function TeamThreadsView({ projectId, fileNames }: TeamThreadsViewProps) 
       disposed = true
       window.clearInterval(timer)
     }
-  }, [projectId, selectedRun])
+  }, [projectId, openRun])
+
+  // Esc closes the thread — the keyboard twin of clicking the spine.
+  useEffect(() => {
+    if (openThreadId === null) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpenThreadId(null)
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [openThreadId])
 
   const feed = useMemo(() => (activity ? buildRunFeed(activity) : []), [activity])
 
   const activePersonas = useMemo(() => {
     const active = new Set<string>()
     for (const run of runs ?? []) {
-      if (!isWorking(run)) continue
+      if (!isRunWorking(run)) continue
       const region = normalizePhase(run.phase)
       active.add(region ? personaForRegion(region) : "coordinator")
     }
     return active
   }, [runs])
 
-  const threadTitle = useCallback(
+  const runTitle = useCallback(
     (run: ContextualRunRecord) =>
       fileNames?.get(run.fileId) ?? run.spanLabel ?? t("agent.team.unnamedThread"),
     [fileNames, t],
   )
+  const titleFor = useCallback(
+    (item: TeamDispatchItem) => runTitle(item.run),
+    [runTitle],
+  )
 
-  const openDecisions = decisions?.decisions ?? []
-  const openCount = decisions?.openCount ?? 0
+  const sendToChannel = useCallback(
+    (text: string, chips: ContextChip[]) => {
+      const options = composeAgentSend({ text, chips, jwt: sessionJwt, projectId })
+      if (!options) return
+      send(options)
+    },
+    [sessionJwt, projectId, send],
+  )
+
+  const composerThread = openRun
+    ? {
+        runId: openRun.runId,
+        personaId: personaForRun(openRun),
+        scopeLabel: humanPassageLabel(openRun.spanLabel) ?? runTitle(openRun),
+        steerable: isSteerableStatus(openRun.status),
+      }
+    : null
+
   const loading = runs === null && !loadFailed
+  const isEmpty = channelItems.length === 0 && state.runs.length === 0
+  // A question thread hides the composer: DecisionCard owns its own Answer
+  // input, and a second box would be two ways to say one thing.
+  const showComposer = openItem?.kind !== "question"
 
+  let body: ReactNode
   if (loadFailed && runs === null) {
-    return (
+    body = (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
         <AlertTriangle className="h-4 w-4 text-destructive" aria-hidden />
         <p className="text-xs text-muted-foreground">{t("agent.team.loadFailed")}</p>
@@ -334,147 +309,66 @@ export function TeamThreadsView({ projectId, fileNames }: TeamThreadsViewProps) 
         </Button>
       </div>
     )
-  }
-
-  if (loading) {
-    return (
+  } else if (loading) {
+    body = (
       <div className="flex min-h-0 flex-1 flex-col gap-2 p-4" aria-label={t("agent.team.loading")}>
         <Skeleton className="h-4 w-48" />
         <Skeleton className="h-4 w-64" />
         <Skeleton className="h-4 w-56" />
       </div>
     )
-  }
-
-  if ((runs?.length ?? 0) === 0 && openCount === 0) {
-    return <TeamEmptyState t={t} />
+  } else if (isEmpty) {
+    body = <TeamEmptyState t={t} />
+  } else if (openItem) {
+    body = (
+      <>
+        <TeamChannelSpine
+          items={channelItems}
+          openThreadId={openItem.threadId}
+          onRestore={() => setOpenThreadId(null)}
+        />
+        <TeamThreadDetail
+          item={openItem}
+          projectId={projectId}
+          title={
+            openItem.kind === "dispatch"
+              ? runTitle(openItem.run)
+              : t("agent.team.needsYou")
+          }
+          feed={feed}
+          feedLoading={activityLoading}
+          onClose={() => setOpenThreadId(null)}
+          onDecisionResolved={() => {
+            void fetchContextualDecisions(projectId).then(setDecisions).catch(() => {})
+          }}
+        />
+      </>
+    )
+  } else {
+    body = (
+      <TeamChannel
+        items={channelItems}
+        titleFor={titleFor}
+        onOpenThread={setOpenThreadId}
+        heldQuestions={Math.max(0, openCount - openDecisions.length)}
+        conversationRuns={state.runs}
+      />
+    )
   }
 
   return (
-    <div className="flex min-h-0 flex-1">
-      {/* Thread rail — roster, then one row per conversation. */}
-      <div className="flex w-60 shrink-0 flex-col border-e">
-        <TeamRoster activeRegions={activePersonas} t={t} />
-        <ScrollArea className="min-h-0 flex-1">
-          <div className="flex flex-col divide-y">
-            {openCount > 0 && (
-              <button
-                type="button"
-                onClick={() => setSelected(DECISIONS_THREAD)}
-                aria-current={selected === DECISIONS_THREAD}
-                className={cn(
-                  "flex items-center gap-2 px-3 py-2.5 text-start transition-colors hover:bg-accent/60 active:scale-[0.99]",
-                  selected === DECISIONS_THREAD && "bg-accent",
-                )}
-              >
-                <MessageCircleQuestion className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
-                <span className="min-w-0 flex-1 truncate text-xs font-medium">
-                  {t("agent.team.needsYou")}
-                </span>
-                <Badge className="h-4 min-w-4 px-1 text-[10px]">{openCount}</Badge>
-              </button>
-            )}
-            {(runs ?? []).map((run) => (
-              <button
-                key={run.runId}
-                type="button"
-                onClick={() => setSelected(run.runId)}
-                aria-current={selected === run.runId}
-                className={cn(
-                  "flex flex-col gap-0.5 px-3 py-2.5 text-start transition-colors hover:bg-accent/60 active:scale-[0.99]",
-                  selected === run.runId && "bg-accent",
-                )}
-              >
-                <span className="flex items-center gap-1.5">
-                  <span className="min-w-0 flex-1 truncate text-xs font-medium">
-                    {threadTitle(run)}
-                  </span>
-                  {(run.proposedDrafts ?? 0) > 0 && (
-                    <Badge className="h-4 min-w-4 px-1 text-[10px]">{run.proposedDrafts}</Badge>
-                  )}
-                </span>
-                <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  {isWorking(run) && <Spinner className="h-2.5 w-2.5 shrink-0" />}
-                  <span className="truncate">{t(statusKey(run))}</span>
-                  <span className="ms-auto shrink-0">
-                    {fmtShortCalendarDate(run.updatedAt, Date.now(), locale)}
-                  </span>
-                </span>
-              </button>
-            ))}
-          </div>
-        </ScrollArea>
-      </div>
-
-      {/* Selected thread. */}
-      <div className="flex min-w-0 flex-1 flex-col">
-        {selected === DECISIONS_THREAD ? (
-          <ScrollArea className="min-h-0 flex-1">
-            <div className="mx-auto flex max-w-xl flex-col gap-3 p-4">
-              <p className="text-xs font-semibold text-foreground/90">
-                {t("autopilot.decisions.heading")}
-              </p>
-              {openDecisions.length === 0 ? (
-                <p className="text-xs text-muted-foreground">{t("autopilot.decisions.empty")}</p>
-              ) : (
-                openDecisions.map((decision) => (
-                  <DecisionCard
-                    key={decision.id}
-                    decision={decision}
-                    projectId={projectId}
-                    onResolved={() => {
-                      void fetchContextualDecisions(projectId).then(setDecisions).catch(() => {})
-                    }}
-                  />
-                ))
-              )}
-              {openCount > openDecisions.length && (
-                <p className="text-xs text-muted-foreground">
-                  {t("autopilot.decisions.held", { count: openCount - openDecisions.length })}
-                </p>
-              )}
-            </div>
-          </ScrollArea>
-        ) : selectedRun ? (
-          <>
-            <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
-              <span className="min-w-0 truncate text-sm font-medium">{threadTitle(selectedRun)}</span>
-              <span className="shrink-0 text-[11px] text-muted-foreground">
-                {t(statusKey(selectedRun))}
-              </span>
-            </div>
-            <ScrollArea className="min-h-0 flex-1">
-              <div className="mx-auto flex max-w-xl flex-col gap-3 p-4">
-                {feed.length === 0 ? (
-                  activityLoading ? (
-                    <div className="flex flex-col gap-2">
-                      <Skeleton className="h-4 w-56" />
-                      <Skeleton className="h-4 w-40" />
-                    </div>
-                  ) : (
-                    <p className="text-xs text-muted-foreground">{t("agent.team.threadEmpty")}</p>
-                  )
-                ) : (
-                  feed.map((message) => (
-                    <FeedMessageRow
-                      key={message.id}
-                      message={message}
-                      reviewHref={draftReviewHref(
-                        projectId,
-                        selectedRun.fileId,
-                        null,
-                        selectedRun.targetLang ?? "",
-                      )}
-                      locale={locale}
-                      t={t}
-                    />
-                  ))
-                )}
-              </div>
-            </ScrollArea>
-          </>
-        ) : null}
-      </div>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <TeamRoster activePersonas={activePersonas} t={t} />
+      <div className="flex min-h-0 flex-1">{body}</div>
+      {showComposer && (
+        <TeamChannelComposer
+          thread={composerThread}
+          isConfigured={Boolean(sessionJwt)}
+          isStreaming={state.isStreaming}
+          onStop={stop}
+          onSendToChannel={sendToChannel}
+        />
+      )}
     </div>
   )
 }

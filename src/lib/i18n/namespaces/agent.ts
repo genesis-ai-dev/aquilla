@@ -195,6 +195,19 @@ export const agent = defineNamespace({
     "agent.team.msg.outcomePartial": "Finished {span} — some cells still have no draft.",
     "agent.team.msg.outcomeFailed": "Hit a problem in {span} — this needs attention.",
 
+    // ── One project channel (TeamChannel / spine / thread composer) ───────
+    "agent.team.msg.dispatch": "Started work on {file}.",
+    "agent.team.openThreadAriaLabel": "Open the thread for {title}",
+    "agent.team.openQuestionAriaLabel": "Open this question",
+    "agent.team.closeThread": "Back to the channel",
+    "agent.team.spineAriaLabel": "Back to the channel",
+    "agent.team.composer.channelPlaceholder": "Message the team…",
+    "agent.team.composer.threadPlaceholder": "Message {persona}…",
+    "agent.team.composer.finishedPlaceholder":
+      "This work has finished — there is no one left in this thread to direct.",
+    "agent.team.composer.scope": "{persona} · {scope}",
+    "agent.team.composer.sendFailed": "Couldn't send that message. Try again.",
+
     // ── Full-screen workbench (AgentWorkbench) ──────────────────────────
     "agent.workbench.newSessionAriaLabel": "New session",
     "agent.workbench.minimizeTooltip": "Minimize to sidebar",
@@ -944,6 +957,54 @@ export const agent = defineNamespace({
           "way a profile link reads.",
         placeholders: {
           name: "The persona's display name — the already-translated Drafter / Reviewer / Coordinator string.",
+        },
+      },
+      "agent.team.msg.dispatch": {
+        description:
+          "Top-level channel message from the Coordinator announcing that a file " +
+          "has been handed to the team; clicking it opens that run's thread.",
+        placeholders: {
+          file: "The file's display name, its passage label, or the translated 'Autopilot run' fallback — a document name, not translated.",
+        },
+      },
+      "agent.team.openThreadAriaLabel": {
+        description:
+          "Accessible name for a channel message that opens an autopilot run's " +
+          "thread, naming which piece of work it opens.",
+        placeholders: {
+          title: "The file's display name, its passage label, or the translated 'Autopilot run' fallback — not translated.",
+        },
+      },
+      "agent.team.openQuestionAriaLabel": {
+        description:
+          "Accessible name for a channel message that opens the thread where the " +
+          "team's open question is answered.",
+      },
+      "agent.team.spineAriaLabel": {
+        description:
+          "Accessible name for the collapsed channel column shown beside an open " +
+          "thread; activating it restores the full-width channel.",
+      },
+      "agent.team.closeThread": {
+        description:
+          "Accessible name for the back control in a thread header, which closes " +
+          "the thread and restores the full-width channel.",
+      },
+      "agent.team.composer.threadPlaceholder": {
+        description:
+          "Message-box placeholder while a run thread is open — the message goes " +
+          "to that teammate as a direction, not to the general chat.",
+        placeholders: {
+          persona: "The translated teammate name (Drafter / Reviewer / Coordinator).",
+        },
+      },
+      "agent.team.composer.scope": {
+        description:
+          "Chip above the message box naming exactly who and what the message will " +
+          "reach, so a thread message is never mistaken for a channel message.",
+        placeholders: {
+          persona: "The translated teammate name (Drafter / Reviewer / Coordinator).",
+          scope: "The passage label or file name the run is working — not translated.",
         },
       },
     },

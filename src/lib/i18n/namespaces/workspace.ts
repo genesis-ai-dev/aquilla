@@ -383,6 +383,12 @@ export const workspace = defineNamespace({
     "workspace.chipStrip.diffEndDetail": "End: {value}",
 
     // -- timeline/TargetAudioLane --
+    "workspace.targetAudioLane.previewTooLong":
+      "This take is too long to preview here — play the timeline instead.",
+    "workspace.targetAudioLane.previewTooLarge": "This take is too big to preview yet.",
+    "workspace.targetAudioLane.previewTooLargeDetail":
+      "Its length has never been measured, so it cannot be prepared for preview. Run Measure all from the file menu and try again.",
+    "workspace.targetAudioLane.previewUnavailable": "This take cannot be previewed.",
     "workspace.targetAudioLane.overlapsNext": "Overlaps the next dub",
     "workspace.targetAudioLane.overlapsPrevious": "Overlaps the previous dub",
     "workspace.targetAudioLane.recordAudio": "Record audio for this line",
@@ -1618,6 +1624,29 @@ export const workspace = defineNamespace({
         placeholders: { value: "Already-formatted signed seconds (e.g. '+0.3s') — not translated." },
       },
 
+      "workspace.targetAudioLane.previewTooLong": {
+        description:
+          "Toast when the chip's play button is pressed on a take too long to " +
+          "decode for preview. It points at the timeline, which streams and can " +
+          "play it.",
+      },
+      "workspace.targetAudioLane.previewTooLarge": {
+        description:
+          "Toast when the play button is pressed on a take whose LENGTH was " +
+          "never recorded and whose file is over the preview size ceiling. " +
+          "Distinct from 'too long' because it has a cure: measuring the take. " +
+          "Before this the button simply made no sound and said nothing.",
+      },
+      "workspace.targetAudioLane.previewTooLargeDetail": {
+        description:
+          "Body for the above, naming the fix. 'Measure all' is the file-menu " +
+          "action that backfills missing durations.",
+      },
+      "workspace.targetAudioLane.previewUnavailable": {
+        description:
+          "Toast when the play button cannot reach a take's audio at all — a " +
+          "legacy attachment whose bytes are gone, or no audio device.",
+      },
       "workspace.targetAudioLane.overlapsNext": {
         description:
           "Tooltip line on a target-audio (dub) chip whose tail overlaps the " +

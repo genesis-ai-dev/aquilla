@@ -84,7 +84,14 @@ export interface ClipPreviewHandle {
   audible: boolean
 }
 
-export type PrimeResult = "ready" | "too-long" | "unavailable"
+/** Why a clip could not be previewed, when it could not.
+ *
+ *  `too-long` — its measured duration is past the decode ceiling.
+ *  `too-large` — its BYTES are past the ceiling and nobody has measured it, so
+ *    the duration gate above could not catch it. Separate because it has a
+ *    cure the other does not: measuring the take (2026-08-28).
+ *  `unavailable` — no audio pipeline, or the bytes cannot be reached at all. */
+export type PrimeResult = "ready" | "too-long" | "too-large" | "unavailable"
 
 // ── The decoded-buffer cache ────────────────────────────────────────────────
 //
@@ -294,6 +301,15 @@ export async function primeClipPreview(src: ClipPreviewSource): Promise<PrimeRes
   if (!ctx) return "unavailable"
   resumeContext(ctx)
   if (!canDecodePreview(src.durationSec)) return "too-long"
+  // THE BYTES BEFORE THE BUFFER, so an oversized unmeasured clip can say WHY.
+  // `loadBuffer` applies the same byte ceiling and answers null either way, so
+  // asking it first would collapse "too big to decode" and "cannot be reached"
+  // into one silence — which is exactly how the play button came to do nothing
+  // at all, with nothing on screen. `loadBytes` reads the byte cache, so this
+  // is not a second download.
+  const loaded = await loadBytes(src)
+  if (!loaded) return "unavailable"
+  if (!canDecodePreview(src.durationSec, loaded.bytes.byteLength)) return "too-large"
   const buffer = await loadBuffer(src)
   return buffer ? "ready" : "unavailable"
 }
@@ -395,10 +411,14 @@ export function playClipWindow(
 export function playLongClipWindow(
   src: ClipPreviewSource,
   window: { startSec: number; endSec: number | null },
-  opts?: { onEnded?: () => void },
+  opts?: { muted?: boolean; onEnded?: () => void },
 ): ClipPreviewHandle {
   const frontier = parseFrontierAudioUrl(src.url)
-  if (!frontier || typeof Audio === "undefined") {
+  // `muted` means the same thing in both engines, or the option would be
+  // decided by clip LENGTH — silence under two minutes, full volume over it,
+  // on the same button. Latent today (no caller passes it) and cheap to keep
+  // honest, which is why it is a guard rather than a comment.
+  if (!frontier || typeof Audio === "undefined" || opts?.muted) {
     opts?.onEnded?.()
     return SILENT_HANDLE
   }

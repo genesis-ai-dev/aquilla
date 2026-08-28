@@ -7,6 +7,12 @@ import { render, screen, fireEvent, act } from "@testing-library/react"
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 const pauseAllTransports = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/audio/transport-pause", () => ({ pauseAllTransports }))
+const toastAdd = vi.hoisted(() => vi.fn())
+vi.mock("@/components/ui/toast", async (importActual) => {
+  const actual = await importActual<typeof import("@/components/ui/toast")>()
+  return { ...actual, toast: { ...actual.toast, add: toastAdd } }
+})
+
 import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
 import { chipRadiusPx } from "@/lib/timeline/scale"
 import type { CellData } from "@/hooks/useCells"
@@ -33,6 +39,14 @@ function item(
     ...over,
   } as unknown as CellData
   return { cell, kind: "take", audioId: takeId }
+}
+
+/** The play button primes before it plays (2026-08-28) — it asks the engine
+ *  whether the clip CAN be previewed and reports why when it cannot — so a
+ *  click settles a microtask later. Every assertion after one has to wait. */
+const pressPlay = async () => {
+  fireEvent.click(screen.getByTestId("tl-target-c1-play"))
+  await act(async () => { await Promise.resolve() })
 }
 
 const base = {
@@ -1432,10 +1446,10 @@ describe("TargetAudioLane — the play button (stage 5)", () => {
   // THE RULING THIS FEATURE WOULD OTHERWISE VIOLATE BY DEFAULT. The chip's own
   // onClick seeks, so without `stopPropagation` pressing play would move the
   // playhead — the one thing Sam said it must not do.
-  it("does not move the playhead", () => {
+  it("does not move the playhead", async () => {
     const onSeek = vi.fn()
     render(<TargetAudioLane {...wired} items={[item({}, 4000)]} onSeek={onSeek} />)
-    fireEvent.click(screen.getByTestId("tl-target-c1-play"))
+    await pressPlay()
     expect(onSeek).not.toHaveBeenCalled()
   })
 
@@ -1465,6 +1479,58 @@ describe("TargetAudioLane — the play button (stage 5)", () => {
 
   // Two corners want the width now, so the mic's threshold widens the same way
   // it already does for a state glyph.
+  // ── It says why, instead of doing nothing (2026-08-28) ───────────────────
+  //
+  // A take nobody has measured that is over the byte ceiling is refused deep
+  // inside the decode path, so the button made no sound and offered no reason.
+  // Sam's ruling: explain it, and never fall through to the streaming engine —
+  // an unmeasured clip is exactly the kind whose seek kills playback.
+  const refusingPreview = (why: "too-long" | "too-large" | "unavailable") => {
+    const play = vi.fn()
+    return {
+      play,
+      factory: () => ({ prime: async () => why, play }),
+    }
+  }
+
+  it("explains a take it cannot preview, and does not try to play it", async () => {
+    const stub = refusingPreview("too-large")
+    render(<TargetAudioLane {...base} previewFactory={stub.factory as never} items={[item({}, 4000)]} />)
+    await pressPlay()
+    expect(stub.play).not.toHaveBeenCalled()
+    expect(toastAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ title: expect.stringContaining("too big to preview") }),
+    )
+  })
+
+  it("says something different for a take that is merely too long", async () => {
+    const stub = refusingPreview("too-long")
+    render(<TargetAudioLane {...base} previewFactory={stub.factory as never} items={[item({}, 4000)]} />)
+    await pressPlay()
+    expect(toastAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ title: expect.stringContaining("too long to preview") }),
+    )
+  })
+
+  // A silent handle fires `onEnded` SYNCHRONOUSLY and reports `isPlaying()`
+  // false. Storing it left a dead handle in the ref, after which every press
+  // took the stop branch and did nothing — the button wedged itself.
+  it("does not wedge itself on an engine that ends instantly", async () => {
+    const play = vi.fn(() => ({
+      stop: () => {},
+      isPlaying: () => false,
+      positionSec: () => null,
+      audible: false,
+    }))
+    const factory = () => ({ prime: async () => "ready" as const, play })
+    render(<TargetAudioLane {...base} previewFactory={factory as never} items={[item({}, 4000)]} />)
+    await pressPlay()
+    await pressPlay()
+    // The second press must be another attempt to PLAY, not a stop of a
+    // handle that was never sounding.
+    expect(play).toHaveBeenCalledTimes(2)
+  })
+
   it("leaves room for the record button on a chip wide enough for both", () => {
     render(
       <TargetAudioLane {...wired} items={[item({}, 4000)]} onOpenRecording={() => {}} />,
@@ -1493,12 +1559,11 @@ describe("TargetAudioLane — the preview mini-playhead (2026-08-27)", () => {
       audible: true,
     }
     const factory = () => ({
-      prime: () => {},
+      prime: async () => "ready" as const,
       play: (_w: { startSec: number; endSec: number | null }, opts?: { onEnded?(): void }) => {
         onEnded = opts?.onEnded
         return handle
       },
-      scrub: () => ({ moveTo: () => {}, close: () => {} }),
     })
     return { factory, setPos: (p: number | null) => { pos = p }, end: () => onEnded?.() }
   }
@@ -1514,12 +1579,12 @@ describe("TargetAudioLane — the preview mini-playhead (2026-08-27)", () => {
   afterEach(() => vi.restoreAllMocks())
   const frame = () => { const q = rafQ; rafQ = []; q.forEach((cb) => cb(0)) }
 
-  it("appears with the play press, rides the engine's clock, and leaves on stop", () => {
+  it("appears with the play press, rides the engine's clock, and leaves on stop", async () => {
     const stub = stubPreview()
     render(<TargetAudioLane {...base} previewFactory={stub.factory} items={[item({}, 4000)]} />)
     expect(screen.queryByTestId("tl-target-c1-playline")).toBeNull()
 
-    fireEvent.click(screen.getByTestId("tl-target-c1-play"))
+    await pressPlay()
     const line = screen.getByTestId("tl-target-c1-playline")
     // Not interactible, and invisible until the sound actually starts — a
     // decode is in flight and a line stuck at x=0 would be a lie.
@@ -1537,27 +1602,27 @@ describe("TargetAudioLane — the preview mini-playhead (2026-08-27)", () => {
     expect(line.style.left).toBe("100px")
 
     // The play button is a toggle; stopping unmounts the line outright.
-    fireEvent.click(screen.getByTestId("tl-target-c1-play"))
+    await pressPlay()
     expect(screen.queryByTestId("tl-target-c1-playline")).toBeNull()
   })
 
-  it("disappears on its own when the clip reaches the end", () => {
+  it("disappears on its own when the clip reaches the end", async () => {
     const stub = stubPreview()
     render(<TargetAudioLane {...base} previewFactory={stub.factory} items={[item({}, 4000)]} />)
-    fireEvent.click(screen.getByTestId("tl-target-c1-play"))
+    await pressPlay()
     expect(screen.getByTestId("tl-target-c1-playline")).toBeInTheDocument()
     act(() => stub.end())
     expect(screen.queryByTestId("tl-target-c1-playline")).toBeNull()
   })
 
-  it("maps a trimmed take through the anchor, not the visual left", () => {
+  it("maps a trimmed take through the anchor, not the visual left", async () => {
     // trimStart 1s: the chip's box begins at clip-second 1, so position 1 is
     // the LEFT EDGE, not 40px in.
     const stub = stubPreview()
     render(
       <TargetAudioLane {...base} previewFactory={stub.factory} items={[item({}, 4000, "c1", { trimStartMs: 1000 })]} />,
     )
-    fireEvent.click(screen.getByTestId("tl-target-c1-play"))
+    await pressPlay()
     stub.setPos(1)
     frame()
     expect(screen.getByTestId("tl-target-c1-playline").style.left).toBe("0px")
@@ -1569,13 +1634,13 @@ describe("TargetAudioLane — the preview mini-playhead (2026-08-27)", () => {
   // ── The progress fill (Sam, same round): the unplayed side drops to the
   // hover rung and the chip re-fills behind the line — the SoundCloud pattern
   // in the palette's own ladder.
-  it("dims the unplayed side on press and re-fills behind the playhead", () => {
+  it("dims the unplayed side on press and re-fills behind the playhead", async () => {
     const stub = stubPreview()
     render(<TargetAudioLane {...base} previewFactory={stub.factory} items={[item({}, 4000)]} />)
     const chip = screen.getByTestId("tl-target-c1")
     expect(chip.className).not.toContain("bg-[image:")
 
-    fireEvent.click(screen.getByTestId("tl-target-c1-play"))
+    await pressPlay()
     // The identity fill is muted and the split gradient takes the slot…
     expect(chip.className).toContain("bg-transparent")
     expect(chip.className).toContain("var(--tl-track-take)_var(--tl-play-x")
@@ -1588,12 +1653,12 @@ describe("TargetAudioLane — the preview mini-playhead (2026-08-27)", () => {
     frame()
     expect(chip.style.getPropertyValue("--tl-play-x")).toBe("80px")
 
-    fireEvent.click(screen.getByTestId("tl-target-c1-play"))
+    await pressPlay()
     expect(chip.className).not.toContain("bg-[image:")
     expect(chip.style.getPropertyValue("--tl-play-x")).toBe("")
   })
 
-  it("a generated voice re-fills to its own lighter rung", () => {
+  it("a generated voice re-fills to its own lighter rung", async () => {
     const stub = stubPreview()
     render(
       <TargetAudioLane
@@ -1602,11 +1667,11 @@ describe("TargetAudioLane — the preview mini-playhead (2026-08-27)", () => {
         items={[{ ...item({}, 4000), kind: "generated" }]}
       />,
     )
-    fireEvent.click(screen.getByTestId("tl-target-c1-play"))
+    await pressPlay()
     expect(screen.getByTestId("tl-target-c1").className).toContain("var(--tl-track-gen)_var(--tl-play-x")
   })
 
-  it("never repaints a red at-fault chip — the warning still beats playback", () => {
+  it("never repaints a red at-fault chip — the warning still beats playback", async () => {
     const stub = stubPreview()
     render(
       <TargetAudioLane
@@ -1620,7 +1685,7 @@ describe("TargetAudioLane — the preview mini-playhead (2026-08-27)", () => {
     )
     const offender = screen.getByTestId("tl-target-c1")
     expect(offender).toHaveAttribute("data-overflow", "overlap")
-    fireEvent.click(screen.getByTestId("tl-target-c1-play"))
+    await pressPlay()
     expect(offender.className).not.toContain("bg-[image:")
     expect(offender.className).toContain("bg-red-100/80")
     // The line itself still rides — it is the warning-safe half of the feature.

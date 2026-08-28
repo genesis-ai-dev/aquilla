@@ -74,13 +74,20 @@ class StubCtx {
     return Promise.resolve({ duration: 3, length: 144000, numberOfChannels: 1 } as AudioBuffer)
   }
 }
+/** The context the engine actually built, so a test can move its clock —
+ *  `positionSec` is read off it and there is no other way to advance time. */
+let lastCtx: StubCtx | null = null
 function stubAudio() {
-  vi.stubGlobal("AudioContext", function AC(this: unknown) { return new StubCtx() } as unknown as typeof AudioContext)
+  vi.stubGlobal("AudioContext", function AC(this: unknown) {
+    lastCtx = new StubCtx()
+    return lastCtx
+  } as unknown as typeof AudioContext)
 }
 /** Let the decode promise and the `.then` that starts playback both settle. */
 const settle = () => new Promise((r) => setTimeout(r, 0))
 
 beforeEach(() => {
+  lastCtx = null
   StubSource.live = 0
   StubSource.started = []
   fetchCellAudio.mockClear()
@@ -132,6 +139,48 @@ describe("playing a trimmed clip", () => {
     playClipWindow(SRC, { startSec: 1, endSec: 99 })
     await settle()
     expect(StubSource.started[0].offset + StubSource.started[0].duration).toBeCloseTo(3, 5)
+  })
+
+  // ── `positionSec`, on a REAL handle ──────────────────────────────────────
+  //
+  // The chip's mini-playhead and its progress fill are both drawn from this,
+  // and until now nothing called it on anything but a hand-written stub — so
+  // the engine and its consumer were each tested against the other's
+  // assumption, and either could have drifted without a failure. The contract:
+  // CLIP seconds (the same clock as the trims), null until sound actually
+  // starts, null again after it stops.
+  it("reports the clip's own clock, not the file's", async () => {
+    const h = playClipWindow(SRC, { startSec: 1, endSec: 2 })
+    await settle()
+    // The window opened at clip-second 1, so that is where it starts — a file
+    // position would have added the take's placement on the timeline.
+    expect(h.positionSec()).toBeCloseTo(1, 5)
+  })
+
+  it("is null until sound actually starts, and again once it stops", async () => {
+    const h = playClipWindow(SRC, { startSec: 0, endSec: null })
+    // The decode has not resolved, so nothing is sounding yet. A wall clock
+    // started at the press would already be counting — and would be wrong by
+    // exactly the decode.
+    expect(h.positionSec()).toBeNull()
+    await settle()
+    expect(h.positionSec()).not.toBeNull()
+    h.stop()
+    expect(h.positionSec()).toBeNull()
+  })
+
+  it("advances with the audio clock", async () => {
+    const h = playClipWindow(SRC, { startSec: 0.5, endSec: null })
+    await settle()
+    lastCtx!.currentTime += 0.75
+    expect(h.positionSec()).toBeCloseTo(1.25, 2)
+  })
+
+  it("never runs past the end of the window it was given", async () => {
+    const h = playClipWindow(SRC, { startSec: 0, endSec: 1 })
+    await settle()
+    lastCtx!.currentTime += 60
+    expect(h.positionSec()).toBeCloseTo(1, 5)
   })
 
   // ONE AT A TIME IS A PROPERTY OF THE ENGINE, not a protocol every chip keeps —

@@ -16,6 +16,7 @@ import type { ReactNode } from "react"
 import { ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Play, Sparkles, Square, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { toast } from "@/components/ui/toast"
 import { Spinner } from "@/components/ui/spinner"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { TimelineSlotButton } from "./TimelineSlotButton"
@@ -583,7 +584,7 @@ function TargetAudioChip({
     // Two corners want the width now, not one.
     fullPx >= (leftGlyph != null || showPlayButton ? 46 : 28)
 
-  function togglePreview() {
+  async function togglePreview() {
     if (previewRef.current) {
       previewRef.current.stop()
       previewRef.current = null
@@ -591,6 +592,30 @@ function TargetAudioChip({
       return
     }
     if (!preview) return
+    // ASK FIRST, AND SAY SO WHEN THE ANSWER IS NO (2026-08-28). This used to
+    // play straight into whatever happened: a clip nobody has measured that is
+    // over the byte ceiling is refused deep inside the decode path, so the
+    // button made no sound and offered no reason. The device is already
+    // resumed by the pointerdown handler, which runs inside the gesture, so
+    // awaiting here costs nothing a browser cares about.
+    const ready = await preview.prime()
+    if (ready !== "ready") {
+      toast.add({
+        type: "info",
+        title: t(
+          ready === "too-long"
+            ? "workspace.targetAudioLane.previewTooLong"
+            : ready === "too-large"
+              ? "workspace.targetAudioLane.previewTooLarge"
+              : "workspace.targetAudioLane.previewUnavailable",
+        ),
+        description:
+          ready === "too-large"
+            ? t("workspace.targetAudioLane.previewTooLargeDetail")
+            : undefined,
+      })
+      return
+    }
     // THE CLIP AS THE TIMELINE DRAWS IT — `takeTrims` gives every recorded take
     // a trim at birth, so this is the ordinary case rather than an edge one.
     const handle = preview.play(previewWindowForGeom(geom), {
@@ -599,8 +624,14 @@ function TargetAudioChip({
         setPreviewing(false)
       },
     })
-    previewRef.current = handle
-    setPreviewing(handle.isPlaying())
+    // ONLY IF IT IS ACTUALLY SOUNDING. An engine with nowhere to play fires
+    // `onEnded` SYNCHRONOUSLY and hands back a silent handle; storing that left
+    // a dead one in the ref, and every press afterwards took the stop branch
+    // above and did nothing at all — the button wedged itself.
+    if (handle.isPlaying()) {
+      previewRef.current = handle
+      setPreviewing(true)
+    }
   }
   const kindTitle = chip.item.kind === "take" ? "Recorded take" : "Generated voice"
   // SUB-53: audio-first says how the two compare instead of warning. Longer is

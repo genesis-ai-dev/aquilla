@@ -20,6 +20,7 @@ import {
   primeClipPreview,
   type ClipPreviewHandle,
   type ClipPreviewSource,
+  type PrimeResult,
 } from "@/lib/audio/clip-preview"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -27,8 +28,10 @@ import type { FrontierSession } from "@/lib/frontier/types"
 /** What one chip can do with its own audio. */
 export interface ChipPreview {
   /** Resume the device and start the decode, synchronously inside a gesture —
-   *  browsers only honour a resume while the gesture is still open. */
-  prime(): void
+   *  browsers only honour a resume while the gesture is still open. Resolves
+   *  with WHY it could not be played, when it could not: the play button reads
+   *  this rather than sounding into silence. */
+  prime(): Promise<PrimeResult>
   /** Play the clip as the timeline draws it. Sounds through a muted track:
    *  Sam's ruling is that this button is an inspection tool. */
   play(window: { startSec: number; endSec: number | null }, opts?: { onEnded?(): void }): ClipPreviewHandle
@@ -59,7 +62,7 @@ export function useChipPreview({ projectId, session }: UseChipPreviewArgs): Chip
         durationSec,
       }
       return {
-        prime: () => { void primeClipPreview(src) },
+        prime: () => primeClipPreview(src),
         play: (window, opts) => playClip(src, window, { onEnded: opts?.onEnded }),
       }
     },

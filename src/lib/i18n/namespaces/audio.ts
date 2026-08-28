@@ -128,7 +128,7 @@ export const audio = defineNamespace({
     // AQU-646: leaving the recorder with a take that was never attached.
     "audio.recordingModal.unsavedTakeTitle": "Keep this take?",
     "audio.recordingModal.unsavedTakeBody":
-      "You recorded a take and haven't saved it yet. Closing without saving throws it away.",
+      "You recorded a take and haven't saved it yet. Leaving this line without saving throws it away.",
     "audio.recordingModal.discardTake": "Throw it away",
     "audio.recordingModal.saveTake": "Save take",
     // AQU-646 stage 4c: what the button says when generation failed, while it
@@ -1051,7 +1051,10 @@ export const audio = defineNamespace({
         description:
           "Body of that confirmation. States plainly that the recording is not " +
           "stored yet and what leaving would cost, because nothing on screen " +
-          "otherwise distinguishes a saved take from an unsaved one.",
+          "otherwise distinguishes a saved take from an unsaved one. Says " +
+          "LEAVING THIS LINE rather than closing: the same confirmation now " +
+          "also covers the previous/next arrows, which step to another line " +
+          "without closing the recorder (2026-08-27).",
       },
       "audio.recordingModal.discardTake": {
         description:

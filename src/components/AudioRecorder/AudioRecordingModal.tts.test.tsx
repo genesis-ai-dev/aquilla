@@ -615,4 +615,88 @@ describe("AudioRecordingModal — an unsaved take is not lost quietly", () => {
     expect(screen.queryByTestId("rec-confirm-close")).toBeNull()
     expect(onClose).toHaveBeenCalledTimes(1)
   })
+
+  // ── …AND THE ARROWS ARE AN EXIT TOO (2026-08-27) ────────────────────────
+  //
+  // The guard above was wired to the X, Escape and clicking outside, and
+  // stopped there. But ‹ › — and Alt+Arrow, which shares their handler — step
+  // to another line, and the cell-change effect calls `resetToIdle()`, which
+  // drops the pending blob. So the one control an operator presses over and
+  // over while working through a file was the one that threw a take away
+  // without asking. Sam's ruling: ask, exactly like the X does.
+  const twoCells = () => [
+    cellWith("bonjour"),
+    { ...cellWith("salut"), id: "c2" } as CellData,
+  ]
+
+  function renderWithNav() {
+    const onActiveCellChange = vi.fn()
+    render(
+      <AudioRecordingModal
+        open project={project} cells={twoCells()} activeCellId="c1"
+        username="sam" onActiveCellChange={onActiveCellChange} onClose={() => {}}
+      />,
+    )
+    return onActiveCellChange
+  }
+
+  it("asks before stepping to the next line, instead of dropping the take", () => {
+    stopped()
+    const onActiveCellChange = renderWithNav()
+    fireEvent.click(screen.getByTestId("rec-next"))
+    expect(screen.getByTestId("rec-confirm-close")).toBeInTheDocument()
+    expect(onActiveCellChange).not.toHaveBeenCalled()
+  })
+
+  // Alt+Arrow runs through the same helper, so it must inherit the same guard
+  // rather than needing its own.
+  it("asks on Alt+Arrow too", () => {
+    stopped()
+    const onActiveCellChange = renderWithNav()
+    fireEvent.keyDown(window, { key: "ArrowRight", altKey: true })
+    expect(screen.getByTestId("rec-confirm-close")).toBeInTheDocument()
+    expect(onActiveCellChange).not.toHaveBeenCalled()
+  })
+
+  // Throwing it away goes WHERE THEY ASKED, not merely closing the dialog —
+  // the confirmation performs the exit that was pending, whichever it was.
+  it("moves on once the answer is to throw it away", () => {
+    stopped()
+    const onActiveCellChange = renderWithNav()
+    fireEvent.click(screen.getByTestId("rec-next"))
+    fireEvent.click(screen.getByTestId("rec-confirm-discard"))
+    expect(onActiveCellChange).toHaveBeenCalledWith("c2")
+  })
+
+  it("steps back the same way", () => {
+    stopped()
+    const onActiveCellChange = vi.fn()
+    render(
+      <AudioRecordingModal
+        open project={project} cells={twoCells()} activeCellId="c2"
+        username="sam" onActiveCellChange={onActiveCellChange} onClose={() => {}}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("rec-prev"))
+    expect(screen.getByTestId("rec-confirm-close")).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId("rec-confirm-discard"))
+    expect(onActiveCellChange).toHaveBeenCalledWith("c1")
+  })
+
+  // Unchanged where there is nothing to lose: the arrows must not start asking
+  // on every line, which would make the guard worse than the bug.
+  it("steps straight over when no take is waiting", () => {
+    const onActiveCellChange = renderWithNav()
+    fireEvent.click(screen.getByTestId("rec-next"))
+    expect(screen.queryByTestId("rec-confirm-close")).toBeNull()
+    expect(onActiveCellChange).toHaveBeenCalledWith("c2")
+  })
+
+  // The arrows stay PRESSABLE while a take is in preview — disabling them
+  // would answer the question by refusing to pose it.
+  it("leaves the arrows enabled so they can ask at all", () => {
+    stopped()
+    renderWithNav()
+    expect(screen.getByTestId("rec-next")).toBeEnabled()
+  })
 })

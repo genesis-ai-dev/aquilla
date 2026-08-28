@@ -166,6 +166,10 @@ interface Props {
 // navigating to another line or closing the dialog.
 type Phase = "idle" | "counting" | "recording" | "preview" | "uploading" | "error"
 
+/** A way out of the recorder that a take sitting unsaved has to be asked about
+ *  first — closing it, or stepping to another line. */
+type PendingExit = { kind: "close" } | { kind: "goto"; index: number }
+
 // The read-aloud block's geometry, in one place and independent of whether the
 // film is showing. The line the operator performs from should look the same
 // whichever way the dialog is arranged; only the column width differs, and the
@@ -1270,21 +1274,39 @@ export function AudioRecordingModal({
    * about: `uploading` is already being kept, and the earlier phases have
    * nothing recorded yet.
    */
-  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false)
+  /**
+   * What the user asked to do and has not been allowed to yet, because a take
+   * is sitting unsaved. Null when nothing is pending.
+   *
+   * 2026-08-27: this was a bare `confirmCloseOpen` boolean, because closing was
+   * the only exit that asked. But the ‹ › buttons — and Alt+Arrow, which shares
+   * their handler — are an exit too: `canNav` includes `preview`, and the
+   * cell-change effect calls `resetToIdle()`, which drops the pending blob. So
+   * the one control an operator presses over and over while working through a
+   * file was the one that threw a take away without asking. Holding the INTENT
+   * rather than a flag is what lets the same confirmation serve both, which is
+   * Sam's ruling: ask, exactly like the X does.
+   */
+  const [pendingExit, setPendingExit] = useState<PendingExit | null>(null)
   const hasUnsavedTake = phase === "preview"
   const requestClose = useCallback(() => {
-    if (hasUnsavedTake) { setConfirmCloseOpen(true); return }
+    if (hasUnsavedTake) { setPendingExit({ kind: "close" }); return }
     onClose()
   }, [hasUnsavedTake, onClose])
-  // Never leave the question hanging over a line it is no longer about.
-  useEffect(() => { setConfirmCloseOpen(false) }, [activeCellId])
+  // Never leave the question hanging over a line it is no longer about. This
+  // also clears it after a discard-and-go, which changes the active cell.
+  useEffect(() => { setPendingExit(null) }, [activeCellId])
 
+  // Deliberately still true in `preview`: the arrows have to stay pressable in
+  // order to ASK. Disabling them there would answer the question by refusing to
+  // pose it, and strand someone who wants to move on.
   const canNav = phase === "idle" || phase === "preview" || phase === "error"
   const gotoIndex = useCallback((idx: number) => {
     if (!canNav) return
     if (idx < 0 || idx >= cells.length) return
+    if (hasUnsavedTake) { setPendingExit({ kind: "goto", index: idx }); return }
     onActiveCellChange(cells[idx].id)
-  }, [canNav, cells, onActiveCellChange])
+  }, [canNav, cells, onActiveCellChange, hasUnsavedTake])
 
   // While the modal is open, claim the audio keyboard shortcuts so the global
   // Space handler doesn't toggle whatever clip the user was just playing.
@@ -2226,7 +2248,7 @@ export function AudioRecordingModal({
         the recorder's own Escape handler recognises its own dialog, and leaving
         it off is what lets Escape dismiss THIS one without also closing the
         recorder underneath it. */}
-    <Dialog open={confirmCloseOpen} onOpenChange={(next) => { if (!next) setConfirmCloseOpen(false) }}>
+    <Dialog open={pendingExit !== null} onOpenChange={(next) => { if (!next) setPendingExit(null) }}>
       <DialogContent className="sm:max-w-[420px]" data-testid="rec-confirm-close">
         <DialogHeader>
           <DialogTitle>{t("audio.recordingModal.unsavedTakeTitle")}</DialogTitle>
@@ -2236,7 +2258,16 @@ export function AudioRecordingModal({
           <Button
             variant="ghost"
             data-testid="rec-confirm-discard"
-            onClick={() => { setConfirmCloseOpen(false); onClose() }}
+            onClick={() => {
+              const exit = pendingExit
+              setPendingExit(null)
+              // Whichever way out was asked for. The index was in range when it
+              // was queued, but the list can move underneath a dialog, so it is
+              // read back rather than trusted.
+              const next = exit?.kind === "goto" ? cells[exit.index] : null
+              if (next) onActiveCellChange(next.id)
+              else if (exit?.kind === "close") onClose()
+            }}
           >
             {t("audio.recordingModal.discardTake")}
           </Button>
@@ -2244,7 +2275,7 @@ export function AudioRecordingModal({
             data-testid="rec-confirm-save"
             disabled={!online}
             onClick={() => {
-              setConfirmCloseOpen(false)
+              setPendingExit(null)
               // The recorder's own post-save behaviour takes it from here —
               // settling the line, and advancing or closing as the auto-advance
               // preference says. NOT forced closed on top of that: a save that

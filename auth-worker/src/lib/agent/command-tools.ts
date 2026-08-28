@@ -185,6 +185,8 @@ function mintFailureText(reason: SyncTokenMintFailure): string {
       return "the project is frozen — writes are paused"
     case "no_access":
       return "the user's project access could not be resolved"
+    case "role_lookup_failed":
+      return "the user's project access could not be verified right now (temporary server issue) — retry shortly"
     case "unsafe_id":
       return "the project id contains characters that cannot be minted into a sync token"
   }

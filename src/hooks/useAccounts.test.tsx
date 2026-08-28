@@ -1,11 +1,13 @@
-import { describe, it, expect, beforeEach, vi } from "vitest"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import { render, renderHook, act, waitFor } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
-import { AccountsProvider, useAccounts } from "./useAccounts"
+import { AccountsProvider, SESSION_LOAD_TIMEOUT_MS, useAccounts } from "./useAccounts"
 import * as sessionStore from "@/lib/frontier/session-store"
+import * as projectIndex from "@/lib/store/project-index"
 import {
   _resetDbForTesting, addSession, sessionKey,
+  publishDataOwner, saveSession,
 } from "@/lib/frontier/session-store"
 
 // useAccounts clears the React Query cache on account switch (AQU-212), so it
@@ -15,18 +17,22 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 )
 
 describe("useAccounts", () => {
-  beforeEach(async () => { await _resetDbForTesting() })
+  beforeEach(async () => {
+    await _resetDbForTesting()
+    await projectIndex.clearAllLocalData()
+  })
+  afterEach(() => vi.restoreAllMocks())
 
   it("returns empty state initially", async () => {
     const { result } = renderHook(() => useAccounts(), { wrapper })
     await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.hydrated).toBe(true)
     expect(result.current.active).toBeNull()
     expect(result.current.sessions).toHaveLength(0)
   })
 
   it("hydrates IndexedDB once for multiple app-level consumers", async () => {
-    const loadActiveSpy = vi.spyOn(sessionStore, "loadActiveSession")
-    const listSessionsSpy = vi.spyOn(sessionStore, "listSessions")
+    const snapshotSpy = vi.spyOn(sessionStore, "loadAccountsSnapshot")
     const qc = new QueryClient()
 
     function Consumer() {
@@ -46,8 +52,32 @@ describe("useAccounts", () => {
     await waitFor(() => {
       expect(view.getAllByText("ready")).toHaveLength(2)
     })
-    expect(loadActiveSpy).toHaveBeenCalledTimes(1)
-    expect(listSessionsSpy).toHaveBeenCalledTimes(1)
+    expect(snapshotSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it("surfaces a recoverable error when session storage hangs, then retries", async () => {
+    vi.useFakeTimers()
+    const snapshotSpy = vi.spyOn(sessionStore, "loadAccountsSnapshot")
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockResolvedValueOnce({ active: null, sessions: [], dataOwner: null })
+    try {
+      const { result } = renderHook(() => useAccounts(), { wrapper })
+      await act(async () => { await vi.advanceTimersByTimeAsync(SESSION_LOAD_TIMEOUT_MS) })
+
+      expect(result.current.loading).toBe(false)
+      expect(result.current.loadError?.message).toMatch(/did not respond/i)
+
+      const callsBeforeRetry = snapshotSpy.mock.calls.length
+      // The retry now durably publishes the resolved data owner through IDB;
+      // fake-indexeddb schedules that transaction with timers, so restore real
+      // timers after exercising the hydration timeout itself.
+      vi.useRealTimers()
+      await act(async () => { await result.current.retryLoad() })
+      expect(result.current.loadError).toBeNull()
+      expect(snapshotSpy).toHaveBeenCalledTimes(callsBeforeRetry + 1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("reflects sessions after add", async () => {
@@ -77,6 +107,131 @@ describe("useAccounts", () => {
     })
     await act(async () => { await result.current.activate(adaKey) })
     await waitFor(() => expect(result.current.active?.username).toBe("ada"))
+  })
+
+  it("keeps the previous identity behind a loading boundary until cleanup settles", async () => {
+    const alice = { jwt: "a", username: "alice", createdAt: "2026-01-01T00:00:00Z" }
+    const bob = { jwt: "b", username: "bob", createdAt: "2026-01-02T00:00:00Z" }
+    await addSession(alice)
+    const qc = new QueryClient()
+    const scopedWrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    )
+    const { result } = renderHook(() => useAccounts(), { wrapper: scopedWrapper })
+    await waitFor(() => expect(result.current.active?.username).toBe("alice"))
+
+    let releaseCleanup!: () => void
+    const cleanup = new Promise<void>((resolve) => { releaseCleanup = resolve })
+    const cleanupSpy = vi.spyOn(projectIndex, "clearAllLocalData").mockReturnValueOnce(cleanup)
+    // `adopt` follows an auth helper that has already persisted the session.
+    // This focused state-ordering test supplies that durable commit boundary.
+    vi.spyOn(sessionStore, "publishDataOwner").mockResolvedValue(true)
+    let adopting!: Promise<void>
+    act(() => { adopting = result.current.adopt(bob) })
+
+    expect(result.current.active?.username).toBe("alice")
+    expect(result.current.loading).toBe(true)
+    expect(result.current.hydrated).toBe(true)
+    expect(cleanupSpy).toHaveBeenCalledOnce()
+
+    releaseCleanup()
+    await act(async () => { await adopting })
+    expect(result.current.active?.username).toBe("bob")
+    expect(result.current.loading).toBe(false)
+  })
+
+  it("blocks the account handoff and exposes retry when cleanup fails", async () => {
+    const alice = { jwt: "a", username: "alice", createdAt: "2026-01-01T00:00:00Z" }
+    const bob = { jwt: "b", username: "bob", createdAt: "2026-01-02T00:00:00Z" }
+    await addSession(alice)
+    const { result } = renderHook(() => useAccounts(), { wrapper })
+    await waitFor(() => expect(result.current.active?.username).toBe("alice"))
+
+    vi.spyOn(projectIndex, "clearAllLocalData")
+      .mockRejectedValueOnce(new Error("blocked database"))
+      .mockResolvedValueOnce(undefined)
+    vi.spyOn(sessionStore, "publishDataOwner").mockResolvedValue(true)
+
+    await act(async () => {
+      await expect(result.current.adopt(bob)).rejects.toThrow(/blocked database/i)
+    })
+    expect(result.current.active?.username).toBe("alice")
+    expect(result.current.loading).toBe(false)
+    expect(result.current.transitionError?.message).toMatch(/blocked database/i)
+
+    vi.spyOn(sessionStore, "loadAccountsSnapshot").mockResolvedValueOnce({
+      active: bob,
+      dataOwner: "alice",
+      sessions: [{
+        key: "bob",
+        username: "bob",
+        createdAt: bob.createdAt,
+        active: true,
+      }],
+    })
+    await act(async () => { await result.current.retryTransition() })
+    expect(result.current.active?.username).toBe("bob")
+    expect(result.current.transitionError).toBeNull()
+  })
+
+  it("resumes cleanup after a reload interrupts a persisted account switch", async () => {
+    const alice = { jwt: "a", username: "alice", createdAt: "2026-01-01T00:00:00Z" }
+    const bob = { jwt: "b", username: "bob", createdAt: "2026-01-02T00:00:00Z" }
+    await saveSession(alice)
+    await publishDataOwner("alice")
+    // Session activation landed, but the old tab closed before publishing the
+    // matching client-data owner.
+    await saveSession(bob)
+    const cleanupSpy = vi.spyOn(projectIndex, "clearAllLocalData")
+
+    const { result } = renderHook(() => useAccounts(), { wrapper })
+    await waitFor(() => expect(result.current.active?.username).toBe("bob"))
+
+    expect(cleanupSpy).toHaveBeenCalledOnce()
+    expect((await sessionStore.loadAccountsSnapshot()).dataOwner).toBe("bob")
+  })
+
+  it("resumes cleanup after a reload interrupts logout", async () => {
+    const alice = { jwt: "a", username: "alice", createdAt: "2026-01-01T00:00:00Z" }
+    await saveSession(alice)
+    await publishDataOwner("alice")
+    await sessionStore.clearSession()
+    const cleanupSpy = vi.spyOn(projectIndex, "clearAllLocalData")
+
+    const { result } = renderHook(() => useAccounts(), { wrapper })
+    await waitFor(() => expect(result.current.hydrated).toBe(true))
+
+    expect(result.current.active).toBeNull()
+    expect(cleanupSpy).toHaveBeenCalledOnce()
+    expect((await sessionStore.loadAccountsSnapshot()).dataOwner).toBeNull()
+  })
+
+  it("preserves local-only projects on the first account login", async () => {
+    await projectIndex.createProject({
+      id: "local-project",
+      name: "Local project",
+      sourceLanguage: "en",
+      targetLanguage: "fr",
+      createdAt: "2026-01-01T00:00:00Z",
+      files: [],
+      members: [],
+    })
+    const cleanupSpy = vi.spyOn(projectIndex, "clearAllLocalData")
+    const { result } = renderHook(() => useAccounts(), { wrapper })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    vi.spyOn(sessionStore, "publishDataOwner").mockResolvedValue(true)
+
+    await act(async () => {
+      await result.current.adopt({
+        jwt: "b",
+        username: "bob",
+        createdAt: "2026-01-02T00:00:00Z",
+      })
+    })
+
+    expect(cleanupSpy).not.toHaveBeenCalled()
+    expect(result.current.active?.username).toBe("bob")
+    expect(await projectIndex.getProject("local-project")).toBeDefined()
   })
 
   // FRO-367: when a refresh observes a DIFFERENT active account than before —

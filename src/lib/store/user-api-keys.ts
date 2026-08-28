@@ -9,13 +9,17 @@
 // the bar against any realistic attacker.
 
 import { useSyncExternalStore } from "react"
+import {
+  ownerScopedLocalStorageKey,
+  subscribeClientLocalStorageOwner,
+} from "@/lib/frontier/client-local-storage"
 
 export type ApiKeyPurpose = "gemini-tts" | "completion"
 
 const PREFIX = "frontier:user-api-key:"
 
 function storageKey(purpose: ApiKeyPurpose): string {
-  return PREFIX + purpose
+  return ownerScopedLocalStorageKey(PREFIX + purpose)
 }
 
 function safeGet(key: string): string | null {
@@ -90,9 +94,11 @@ export function useUserApiKey(purpose: ApiKeyPurpose): string | undefined {
       }
       if (typeof window !== "undefined") window.addEventListener("storage", onStorage)
       const off = subscribe(l)
+      const offOwner = subscribeClientLocalStorageOwner(l)
       return () => {
         if (typeof window !== "undefined") window.removeEventListener("storage", onStorage)
         off()
+        offOwner()
       }
     },
     () => getUserApiKey(purpose),

@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import {
   fetchAccessibleProjectsResult,
+  fetchOrgDeletedFilesResult,
   resolveCloudProjectResult,
 } from "./cloud-projects"
 
@@ -65,7 +66,7 @@ describe("fetchAccessibleProjectsResult", () => {
     expect(result.status).toBe(500)
   })
 
-  it("returns ok:false reason:'unauthorized' on 401", async () => {
+  it("returns ok:false reason:'unauthenticated' on 401", async () => {
     global.fetch = vi.fn(async () =>
       new Response("Unauthorized", { status: 401 }),
     ) as unknown as typeof fetch
@@ -73,11 +74,11 @@ describe("fetchAccessibleProjectsResult", () => {
     const result = await fetchAccessibleProjectsResult("jwt", undefined, API)
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error("unreachable")
-    expect(result.reason).toBe("unauthorized")
+    expect(result.reason).toBe("unauthenticated")
     expect(result.status).toBe(401)
   })
 
-  it("returns ok:false reason:'unauthorized' on 403", async () => {
+  it("returns ok:false reason:'forbidden' on 403", async () => {
     global.fetch = vi.fn(async () =>
       new Response("Forbidden", { status: 403 }),
     ) as unknown as typeof fetch
@@ -85,7 +86,7 @@ describe("fetchAccessibleProjectsResult", () => {
     const result = await fetchAccessibleProjectsResult("jwt", undefined, API)
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error("unreachable")
-    expect(result.reason).toBe("unauthorized")
+    expect(result.reason).toBe("forbidden")
   })
 
   it("returns ok:true with empty array when server returns an empty projects list", async () => {
@@ -110,6 +111,38 @@ describe("fetchAccessibleProjectsResult", () => {
 
     await fetchAccessibleProjectsResult("jwt", 7, API)
     expect(capturedUrl).toMatch(/\?orgId=7$/)
+  })
+})
+
+describe("fetchOrgDeletedFilesResult", () => {
+  it("keeps a legitimate empty list distinct from a failed read", async () => {
+    global.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ files: [] }), { status: 200 }),
+    ) as unknown as typeof fetch
+
+    await expect(fetchOrgDeletedFilesResult("jwt", 7, API)).resolves.toEqual({
+      ok: true,
+      files: [],
+    })
+  })
+
+  it("preserves 401 so the caller can expire the rejected credential", async () => {
+    global.fetch = vi.fn(async () => new Response("", { status: 401 })) as unknown as typeof fetch
+
+    await expect(fetchOrgDeletedFilesResult("jwt", 7, API)).resolves.toEqual({
+      ok: false,
+      reason: "unauthenticated",
+      status: 401,
+    })
+  })
+
+  it("reports network failure instead of returning an empty list", async () => {
+    global.fetch = vi.fn(async () => { throw new Error("Failed to fetch") }) as unknown as typeof fetch
+
+    await expect(fetchOrgDeletedFilesResult("jwt", 7, API)).resolves.toEqual({
+      ok: false,
+      reason: "unreachable",
+    })
   })
 })
 
@@ -160,6 +193,24 @@ describe("resolveCloudProjectResult", () => {
     expect(result.ok).toBe(false)
     if (result.ok) throw new Error("unreachable")
     expect(result.reason).toBe("forbidden")
+  })
+
+  it("preserves a direct 401 as unauthenticated", async () => {
+    global.fetch = vi.fn(async () => new Response("", { status: 401 })) as unknown as typeof fetch
+
+    const result = await resolveCloudProjectResult("p-1", "jwt", API)
+    expect(result).toEqual({ ok: false, reason: "unauthenticated" })
+  })
+
+  it("preserves a fallback-list 401 as unauthenticated", async () => {
+    let calls = 0
+    global.fetch = vi.fn(async () => {
+      calls += 1
+      return new Response("", { status: calls === 1 ? 404 : 401 })
+    }) as unknown as typeof fetch
+
+    const result = await resolveCloudProjectResult("p-1", "jwt", API)
+    expect(result).toEqual({ ok: false, reason: "unauthenticated" })
   })
 
   it("returns ok:false reason:'unreachable' on network error (not 'not-found')", async () => {

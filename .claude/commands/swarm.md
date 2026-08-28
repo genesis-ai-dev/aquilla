@@ -82,9 +82,15 @@ pass. For each oversized issue:
 1. Split it into **tracer-bullet vertical slices** — each independently shippable and verifiable
    (lean on the `to-issues` skill's slicing discipline if helpful).
 2. `save_issue` to create each slice as a **sub-issue** (`parentId` = the big issue), in the same
-   project + team, status `Todo`, priority inherited, with a one-line scope + acceptance criterion.
+   project + team, **status `Triage`** — new issues are never created in `Todo` (see AGENTS.md →
+   "Agent-ready vs. human-in-the-loop"), priority inherited, with a one-line scope + acceptance
+   criterion.
 3. Leave the parent as a tracking umbrella (do not work it directly; its children carry the work).
 4. Comment on the parent listing the sub-issues created.
+5. The slices now sit in the human queue, so **this run does not work them** (they are not
+   `Todo`, and the swarm never self-promotes issues it created). Record the decomposition in §M
+   and move on — a human reviews the split and promotes the slices via `/triage`; a later swarm
+   drains them.
 
 Skip this for issues that already fit one agent.
 

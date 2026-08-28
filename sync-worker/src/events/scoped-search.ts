@@ -421,6 +421,25 @@ const DEFAULT_MAX_ASKERS = 5000
 /** Cap on OR-terms per asker — mirrors the 40-term slice in querySourceNeighbors. */
 const MAX_QUERY_TERMS = 40
 
+/** Hard per-statement ceiling for neighbors retrieval (AQU-1005). The unscoped
+ *  predecessor of this query ran for minutes on large projects and saturated
+ *  the shared compute (client aborts at 15s don't cancel the server-side
+ *  query); the ceiling turns any future regression into a fast, loud error
+ *  instead of a silent convoy. */
+const NEIGHBOR_STATEMENT_TIMEOUT_MS = 20_000
+
+/** Run `fn` with a transaction-local statement_timeout when the executor
+ *  supports transactions (the Postgres shim and PGlite both do); fall back to
+ *  an unbounded plain run otherwise. The interpolated value is a module-local
+ *  integer constant, never caller input. */
+async function withNeighborTimeout<T>(db: AquillaDb, fn: (h: AquillaDb) => Promise<T>): Promise<T> {
+  if (!db.transaction) return fn(db)
+  return db.transaction(async (tx) => {
+    await tx.prepare(`SET LOCAL statement_timeout = ${NEIGHBOR_STATEMENT_TIMEOUT_MS}`).run()
+    return fn(tx)
+  })
+}
+
 /**
  * Batched replacement for the per-cell `querySourceNeighbors` N+1 (AQU-641).
  *
@@ -444,15 +463,19 @@ export async function queryFileSourceNeighbors(
   db: AquillaDb,
   verifiedProjectId: VerifiedProjectId,
   fileId: string,
-  opts: { topK?: number; maxAskers?: number },
+  opts: { topK?: number; maxAskers?: number; targetLang?: string },
 ): Promise<Map<string, ValidatedNeighbor[]>> {
   const topK = clampLimit(opts.topK)
   const maxAskers = opts.maxAskers ?? DEFAULT_MAX_ASKERS
+  // AQU-1005: retrieval is lane-scoped. '' is the single-lane default —
+  // multi-lane projects store one target row per (cell, target_lang), and an
+  // unscoped join would fan out per lane and mix examples across languages.
+  const targetLang = opts.targetLang ?? ""
 
   // One statement:
-  //   askers = translated + unvalidated source cells in the file
+  //   askers = translated + unvalidated source cells in the file (one lane)
   //   q      = OR-tsquery rebuilt from each asker's value_tsv lexemes
-  //   n      = top-k same-file translated source neighbors by ts_rank
+  //   n      = top-k same-file, same-lane translated source neighbors by ts_rank
   const sql =
     "WITH askers AS (" +
     "  SELECT s.cell_id AS asker_id, s.value_tsv AS asker_tsv" +
@@ -460,6 +483,7 @@ export async function queryFileSourceNeighbors(
     "  JOIN cells t" +
     "    ON t.project_id = s.project_id AND t.file_id = s.file_id" +
     "   AND t.cell_id = s.cell_id AND t.side = 'target'" +
+    "   AND t.target_lang = ?" +
     "  WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'" +
     "    AND t.value <> '' AND t.validated = 0" +
     "  LIMIT ?" +
@@ -478,6 +502,7 @@ export async function queryFileSourceNeighbors(
     "  JOIN cells tc" +
     "    ON tc.project_id = c.project_id AND tc.file_id = c.file_id" +
     "   AND tc.cell_id = c.cell_id AND tc.side = 'target' AND tc.value <> ''" +
+    "   AND tc.target_lang = ?" +
     "  WHERE c.project_id = ? AND c.file_id = ? AND c.side = 'source'" +
     "    AND c.cell_id <> a.asker_id" +
     "    AND c.value_tsv @@ to_tsquery('simple', q.terms)" +
@@ -485,10 +510,12 @@ export async function queryFileSourceNeighbors(
     "  LIMIT ?" +
     ") n ON q.terms IS NOT NULL"
 
-  const result = await db
-    .prepare(sql)
-    .bind(verifiedProjectId, fileId, maxAskers, verifiedProjectId, fileId, topK)
-    .all<{ asker_id: string; cell_id: string; value: string; target_value: string; rank: number }>()
+  const result = await withNeighborTimeout(db, (h) =>
+    h
+      .prepare(sql)
+      .bind(targetLang, verifiedProjectId, fileId, maxAskers, targetLang, verifiedProjectId, fileId, topK)
+      .all<{ asker_id: string; cell_id: string; value: string; target_value: string; rank: number }>(),
+  )
 
   const byAsker = new Map<string, ValidatedNeighbor[]>()
   for (const row of result.results ?? []) {
@@ -503,81 +530,4 @@ export async function queryFileSourceNeighbors(
     else byAsker.set(row.asker_id, [neighbor])
   }
   return byAsker
-}
-
-// Chunk size for the batched neighbor lookup: 2 bind params per query cell
-// plus 2 trailing binds, comfortably under Postgres' 65535-param ceiling while
-// keeping each statement's LATERAL fan-out bounded.
-const NEIGHBOR_BATCH_CHUNK = 200
-
-/**
- * AQU-641: batched form of `querySourceNeighbors` — one LATERAL query per
- * chunk of query cells instead of one FTS query per cell. Same semantics per
- * cell (self excluded, translated neighbors only, project-wide retrieval,
- * ranked by ts_rank, top-k). Cells whose text tokenizes to nothing are
- * omitted from the result map.
- */
-export async function querySourceNeighborsBatch(
-  db: AquillaDb,
-  verifiedProjectId: VerifiedProjectId,
-  queries: ReadonlyArray<{ cellId: string; text: string }>,
-  opts: { topK?: number; validatedOnly?: boolean },
-): Promise<Map<string, ValidatedNeighbor[]>> {
-  const limit = clampLimit(opts.topK)
-  const usable: Array<{ cellId: string; tsq: string }> = []
-  for (const q of queries) {
-    const tsq = neighborTsquery(q.text)
-    if (tsq !== null) usable.push({ cellId: q.cellId, tsq })
-  }
-
-  const out = new Map<string, ValidatedNeighbor[]>()
-  for (let i = 0; i < usable.length; i += NEIGHBOR_BATCH_CHUNK) {
-    const chunk = usable.slice(i, i + NEIGHBOR_BATCH_CHUNK)
-    const valuesSql = chunk.map(() => "(?::text, ?::text)").join(", ")
-    const binds: unknown[] = []
-    for (const q of chunk) binds.push(q.cellId, q.tsq)
-    const sql =
-      "SELECT q.query_cell_id AS query_cell_id, n.cell_id AS cell_id, " +
-      "n.value AS value, n.target_value AS target_value, n.rank AS rank " +
-      `FROM (VALUES ${valuesSql}) AS q(query_cell_id, tsq) ` +
-      "JOIN LATERAL (" +
-      "SELECT c.cell_id AS cell_id, c.value AS value, t.value AS target_value, " +
-      "ts_rank(c.value_tsv, to_tsquery('simple', q.tsq)) AS rank " +
-      "FROM cells c " +
-      "JOIN cells t " +
-      "  ON  t.project_id = c.project_id " +
-      "  AND t.file_id    = c.file_id " +
-      "  AND t.cell_id    = c.cell_id " +
-      "  AND t.side       = 'target' " +
-      "  AND t.value     != '' " +
-      "WHERE c.value_tsv @@ to_tsquery('simple', q.tsq) " +
-      "AND c.project_id = ? " +
-      "AND c.side = 'source' " +
-      "AND c.cell_id != q.query_cell_id " +
-      (opts.validatedOnly ? "AND t.validated = 1 " : "") +
-      "ORDER BY rank DESC " +
-      "LIMIT ?" +
-      ") n ON TRUE"
-    binds.push(verifiedProjectId, limit)
-
-    const result = await db.prepare(sql).bind(...binds).all<{
-      query_cell_id: string
-      cell_id: string
-      value: string
-      target_value: string
-      rank: number
-    }>()
-    for (const row of result.results) {
-      const list = out.get(row.query_cell_id)
-      const neighbor: ValidatedNeighbor = {
-        cellId: row.cell_id,
-        value: row.value,
-        targetValue: row.target_value,
-        rank: row.rank,
-      }
-      if (list) list.push(neighbor)
-      else out.set(row.query_cell_id, [neighbor])
-    }
-  }
-  return out
 }

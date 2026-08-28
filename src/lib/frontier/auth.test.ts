@@ -95,7 +95,7 @@ describe("login", () => {
   // is why every auth entry point (login/register/devLogin/redeemAccessLink)
   // gets it for free.
   it("clears the session-expired flag once the new session is persisted", async () => {
-    notifySessionExpired();
+    notifySessionExpired("jwt-dead");
     expect(isSessionExpired()).toBe(true);
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({
@@ -108,7 +108,7 @@ describe("login", () => {
   });
 
   it("leaves the session-expired flag set when the re-login fails", async () => {
-    notifySessionExpired();
+    notifySessionExpired("jwt-dead");
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ detail: "bad creds" }), { status: 401 })
     );
@@ -122,7 +122,7 @@ describe("login", () => {
   // 401s land AFTER finalizeSession() lowered the flag. The guarded notifier
   // must drop them — and still honor a genuine expiry of the new session.
   it("a straggler 401 from the replaced JWT cannot re-raise the banner after re-login", async () => {
-    notifySessionExpired();
+    notifySessionExpired("jwt-dead");
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({
         access_token: "jwt-fresh",

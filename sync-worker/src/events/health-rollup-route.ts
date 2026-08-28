@@ -22,7 +22,7 @@
 // Auth: sync-token JWT scoped to projectId.
 
 import { verifyTokenForProject } from "../auth"
-import { makeVerifiedProjectId, querySourceNeighborsBatch } from "./scoped-search"
+import { makeVerifiedProjectId, queryFileSourceNeighbors } from "./scoped-search"
 import { lexicalConfidence } from "../lib/confidence/lexical-confidence"
 import { propagateHealth, type PropNode, type PropEdges, type PropEdge } from "../lib/confidence/propagate-health"
 
@@ -99,7 +99,7 @@ async function computeFileHealth(
   db: AquillaDb,
   verifiedProjectId: string & { __brand: "verified-project-id" },
   fileId: string,
-  opts: { perHopDecay: number; maxHops: number; topK: number },
+  opts: { perHopDecay: number; maxHops: number; topK: number; targetLang: string },
 ): Promise<{ health: number; cellCount: number }> {
   const rawCells = await loadFileCellsForRollup(db, verifiedProjectId, fileId)
 
@@ -112,14 +112,17 @@ async function computeFileHealth(
   const byId = new Map(cells.map((c) => [c.cell_id, c]))
 
   // Build edges: for each unvalidated node, its top-k source-similar neighbors.
-  // AQU-641: one batched LATERAL query per chunk instead of one FTS query per cell.
+  // AQU-1005: retrieval is file+lane-scoped in ONE statement — this route only
+  // ever keeps same-file neighbors, so the old project-wide LATERAL sweep was
+  // pure wasted compute (minutes per call on large projects).
   const unvalidated = nodes.filter((n) => !n.validated)
-  const neighborMap = await querySourceNeighborsBatch(
-    db,
-    verifiedProjectId,
-    unvalidated.map((n) => ({ cellId: n.id, text: byId.get(n.id)!.source_text })),
-    { topK: opts.topK, validatedOnly: false },
-  )
+  const neighborMap =
+    unvalidated.length === 0
+      ? new Map<string, never[]>()
+      : await queryFileSourceNeighbors(db, verifiedProjectId, fileId, {
+          topK: opts.topK,
+          targetLang: opts.targetLang,
+        })
   const edges: PropEdges = new Map()
   for (const node of unvalidated) {
     const cell = byId.get(node.id)!
@@ -188,7 +191,14 @@ export async function handleHealthRollupRequest(
   }
 
   const startedAt = Date.now()
-  const opts = { perHopDecay, maxHops, topK: DEFAULT_TOP_K }
+  // Optional target-language lane ('' = the single-lane default). Scopes
+  // neighbor retrieval so multi-lane projects don't mix languages (AQU-1005).
+  const opts = {
+    perHopDecay,
+    maxHops,
+    topK: DEFAULT_TOP_K,
+    targetLang: url.searchParams.get("lane") ?? "",
+  }
 
   const fileHealth: Record<string, number> = {}
   let totalCells = 0

@@ -139,7 +139,14 @@ export async function createCloudProject(
  */
 export type ProjectsResult =
   | { ok: true; projects: CloudProjectSummary[] }
-  | { ok: false; reason: "unreachable" | "unauthorized" | "error"; status?: number }
+  | { ok: false; reason: "unreachable" | "unauthenticated" | "forbidden" | "error"; status?: number }
+
+export function projectsResultError(result: Exclude<ProjectsResult, { ok: true }>): Error {
+  if (result.reason === "unauthenticated") return new UserError(401, "", "project")
+  if (result.reason === "forbidden") return new UserError(403, "", "project")
+  if (result.reason === "unreachable") return new TypeError("Failed to fetch")
+  return new UserError(result.status ?? 500, "", "project")
+}
 
 /**
  * GET /api/v2/projects — returns a discriminated result so callers can
@@ -163,7 +170,7 @@ export async function fetchAccessibleProjectsResult(
       headers: { Authorization: `Bearer ${jwt}` },
     })
     if (!res.ok) {
-      const reason = res.status === 401 || res.status === 403 ? "unauthorized" : "error"
+      const reason = res.status === 401 ? "unauthenticated" : res.status === 403 ? "forbidden" : "error"
       return { ok: false, reason, status: res.status }
     }
     const body = (await res.json()) as { projects?: CloudProjectSummary[] }
@@ -205,16 +212,28 @@ export async function fetchArchivedProjects(
   orgId: number,
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<CloudProjectSummary[]> {
+  const result = await fetchArchivedProjectsResult(jwt, orgId, apiUrl)
+  return result.ok ? result.projects : []
+}
+
+export async function fetchArchivedProjectsResult(
+  jwt: string,
+  orgId: number,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<ProjectsResult> {
   try {
     const res = await fetch(`${apiUrl}/api/v2/projects?orgId=${orgId}&archived=true`, {
       method: "GET",
       headers: { Authorization: `Bearer ${jwt}` },
     })
-    if (!res.ok) return []
+    if (!res.ok) {
+      const reason = res.status === 401 ? "unauthenticated" : res.status === 403 ? "forbidden" : "error"
+      return { ok: false, reason, status: res.status }
+    }
     const body = (await res.json()) as { projects?: CloudProjectSummary[] }
-    return body.projects ?? []
+    return { ok: true, projects: body.projects ?? [] }
   } catch {
-    return []
+    return { ok: false, reason: "unreachable" }
   }
 }
 
@@ -228,26 +247,43 @@ export interface OrgDeletedFile {
   deletedAt: number
 }
 
+export type DeletedFilesResult =
+  | { ok: true; files: OrgDeletedFile[] }
+  | { ok: false; reason: "unreachable" | "unauthenticated" | "forbidden" | "error"; status?: number }
+
 /**
  * GET /api/v2/orgs/:orgId/deleted-files — soft-deleted files across projects
  * the caller can see. Powers the Archived page's Recently deleted tab.
- * Returns [] on any error so the tab can still render an empty state.
+ * @deprecated Prefer {@link fetchOrgDeletedFilesResult}; this compatibility
+ * wrapper cannot distinguish an empty deleted-files list from a failed read.
  */
 export async function fetchOrgDeletedFiles(
   jwt: string,
   orgId: number,
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<OrgDeletedFile[]> {
+  const result = await fetchOrgDeletedFilesResult(jwt, orgId, apiUrl)
+  return result.ok ? result.files : []
+}
+
+export async function fetchOrgDeletedFilesResult(
+  jwt: string,
+  orgId: number,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<DeletedFilesResult> {
   try {
     const res = await fetch(`${apiUrl}/api/v2/orgs/${orgId}/deleted-files`, {
       method: "GET",
       headers: { Authorization: `Bearer ${jwt}` },
     })
-    if (!res.ok) return []
+    if (!res.ok) {
+      const reason = res.status === 401 ? "unauthenticated" : res.status === 403 ? "forbidden" : "error"
+      return { ok: false, reason, status: res.status }
+    }
     const body = (await res.json()) as { files?: OrgDeletedFile[] }
-    return body.files ?? []
+    return { ok: true, files: body.files ?? [] }
   } catch {
-    return []
+    return { ok: false, reason: "unreachable" }
   }
 }
 
@@ -473,7 +509,7 @@ export async function resolveCloudProject(
  */
 export type ResolveProjectResult =
   | { ok: true; project: ProjectStateResponse | CloudProjectSummary }
-  | { ok: false; reason: "not-found" | "forbidden" | "unreachable" }
+  | { ok: false; reason: "not-found" | "forbidden" | "unauthenticated" | "unreachable" }
 
 /**
  * Like {@link resolveCloudProject} but returns a discriminated result
@@ -495,12 +531,20 @@ export async function resolveCloudProjectResult(
       const project = (await directRes.json()) as ProjectStateResponse
       return { ok: true, project }
     }
+    if (directRes.status === 401) {
+      return { ok: false, reason: "unauthenticated" }
+    }
     if (directRes.status === 404 || directRes.status === 403) {
       // Might be an older deployment that hasn't landed GET /:id — fall back
       // to the list endpoint before concluding "not found".
       const listResult = await fetchAccessibleProjectsResult(jwt, undefined, apiUrl)
       if (!listResult.ok) {
-        // List endpoint also failed → server is down.
+        if (listResult.reason === "unauthenticated") {
+          return { ok: false, reason: "unauthenticated" }
+        }
+        if (listResult.reason === "forbidden") {
+          return { ok: false, reason: "forbidden" }
+        }
         return { ok: false, reason: "unreachable" }
       }
       const found = listResult.projects.find((p) => p.id === projectId)

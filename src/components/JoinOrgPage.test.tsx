@@ -5,6 +5,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Routes, Route } from "react-router-dom"
 import { JoinOrgPage } from "./JoinOrgPage"
 import { acceptOrgInvite, previewOrgInvite } from "@/lib/frontier/orgs"
+import { UserError } from "@/lib/errors/user-error"
 
 const navigate = vi.fn()
 vi.mock("react-router-dom", async (i) => ({
@@ -95,5 +96,14 @@ describe("JoinOrgPage invite context (AQU-471)", () => {
     expect(acceptOrgInvite).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole("button", { name: /accept invitation/i }))
     await waitFor(() => expect(acceptOrgInvite).toHaveBeenCalledWith(expect.any(String), "tok"))
+  })
+
+  it("re-prompts inline auth when the server rejects an unexpired JWT", async () => {
+    sessionValue = { session: { jwt: fakeJwt(3600) }, loading: false }
+    vi.mocked(acceptOrgInvite).mockRejectedValueOnce(new UserError(401, ""))
+    renderJoinOrg()
+    fireEvent.click(await screen.findByRole("button", { name: /accept invitation/i }))
+    expect(await screen.findByText("do-login")).toBeInTheDocument()
+    expect(screen.queryByText(/Couldn't join/)).not.toBeInTheDocument()
   })
 })

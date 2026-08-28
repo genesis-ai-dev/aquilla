@@ -39,6 +39,11 @@ import {
   type LocalIdmlOriginal,
 } from "./lib/idml-migration-artifacts"
 
+import { installMigrateRunnerHeader } from "./lib/migrate-runner-header"
+
+// AQU-1005: stamp every /migrate/* call with the runner id (fence audit).
+installMigrateRunnerHeader()
+
 const AUTH = process.env.AUTH_BASE ?? "http://127.0.0.1:8788"
 const SYNC = process.env.SYNC_BASE ?? "http://127.0.0.1:8789"
 const VITE = process.env.VITE_BASE ?? "http://127.0.0.1:5173"

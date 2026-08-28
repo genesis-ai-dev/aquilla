@@ -79,6 +79,17 @@ Both routes 404 unless `WRANGLER_LOCAL=1`; prod `wrangler.toml` never sets it. *
 
 For the E2E suite, prefer the existing `/__test__/reset` + alice/bob/carol helpers (`e2e/helpers/seed.ts`) — those give clean isolation per test. The `/__dev__/login` bypass is for manual browser dev and ad-hoc Playwright probes.
 
+## Slow-request logs — treat them as failures
+
+Both workers log any request that takes **≥ 5s**, even when it succeeds — as a
+`[slow-request]` console line locally and a `slow: <METHOD> <path>` warn in
+PostHog Logs in production (AQU-1005: only-error logging hid DB saturation for
+90 minutes because the SPA aborts at 15s and an aborted request produces no
+server-side error). **Dev flow rule:** a `[slow-request]` line in `pnpm dev` /
+e2e worker output is a defect to investigate before shipping, not noise — find
+the query behind it (Neon `pg_stat_statements` or an `EXPLAIN ANALYZE`) rather
+than raising the threshold.
+
 ## Issue workflow (Linear — Aquilla team)
 
 Bugs and tasks live in Linear (team `Aquilla`, key `AQU`). Move issues through the
@@ -121,16 +132,19 @@ So every issue carries a spec question:
 Whether an agent may pick an issue up is read straight off the **status** — there are no
 `ready-for-agent`/`ready-for-human` labels; status carries it:
 
-- **`Triage` = the human queue.** Anything that needs a human *first* — an architectural or
-  design decision, a review, external access, or hands-on human implementation — plus any
-  un-vetted incoming issue. Linear's Triage status sits *outside* the Backlog→Todo→… flow
-  (an issue in Triage has no normal workflow status — that is the point). **Agents never pick
-  up a Triage issue.** `to-issues` files its **HITL** slices straight into `Triage`; `/triage`
-  moves an issue out of `Triage` only once it is either genuinely agent-ready (→ `Todo`) or
-  explicitly a human's to implement.
+- **`Triage` = the human queue, and the only birthplace of new issues.** Anything that needs
+  a human *first* — an architectural or design decision, a review, external access, or
+  hands-on human implementation — plus any un-vetted incoming issue. Linear's Triage status
+  sits *outside* the Backlog→Todo→… flow (an issue in Triage has no normal workflow status —
+  that is the point). **Agents never pick up a Triage issue.** **Every newly created issue —
+  from `/issue debug|improve`, `to-issues`, `/swarm` decomposition, scheduled routines, or any
+  other automation — is created in `Triage`, never in `Todo`.** `/triage` moves an issue out
+  of `Triage` only once it is either genuinely agent-ready (→ `Todo`) or explicitly a human's
+  to implement.
 - **`Todo` = agent-ready (AFK).** Fully specified, acceptance criteria present, no human
-  decision outstanding. This is the **only** queue `/issue next` and `/swarm` draw from.
-  `Backlog` is agent-ready-but-deferred — promote it to `Todo` to enqueue it.
+  decision outstanding. This is the **only** queue `/issue next` and `/swarm` draw from — and
+  issues enter it **only by human promotion** (via `/triage` or an explicit human instruction),
+  never at creation. `Backlog` is agent-ready-but-deferred — promote it to `Todo` to enqueue it.
 
 Category is orthogonal: tag every issue **`Bug`**, **`Feature`**, or **`Improvement`** (the
 `/triage` category role).
@@ -139,9 +153,9 @@ Status pipeline:
 
 | Status | Meaning | Who/when |
 | --- | --- | --- |
-| **Triage** | Human queue — needs review/decision, or not yet vetted. **HITL work lives here.** | agents NEVER pick up from here |
+| **Triage** | Human queue — needs review/decision, or not yet vetted. **All new issues are created here; HITL work lives here.** | agents NEVER pick up from here |
 | **Backlog** | Captured & agent-ready, but deferred | promote to `Todo` to release it |
-| **Todo** | Agent-ready (AFK) — fully specified w/ acceptance criteria | the ONLY queue `/issue next` & `/swarm` pull from |
+| **Todo** | Agent-ready (AFK) — fully specified w/ acceptance criteria. Entered only by human promotion, never at creation | the ONLY queue `/issue next` & `/swarm` pull from |
 | **Dispatched** | Dev/AI has **begun work** on the task | set when you pick the issue up |
 | **Fixed** | Dev/AI has fixed it, **not deployed yet** | set the moment the fix is committed |
 | **Dev Verification Needed** | Fix deployed to the **dev branch**, awaiting dev-team validation | set after deploying to dev |

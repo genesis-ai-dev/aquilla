@@ -320,6 +320,11 @@ export interface JWTPayload {
    *  0073). Optional — tokens minted before this field existed have none
    *  and simply aren't individually revocable. */
   jti?: string
+  /** Session start time (seconds): when the user actually logged in, carried
+   *  forward unchanged across every sliding refresh (AQU-995) while `iat`
+   *  tracks the current token. Optional — tokens minted before this field
+   *  existed have none, and refresh falls back to their `iat`. */
+  sst?: number
   [k: string]: unknown
 }
 

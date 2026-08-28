@@ -41,8 +41,14 @@ import { Spinner } from "@/components/ui/spinner"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { listMyOrgs, type OrgSummary } from "@/lib/frontier/orgs"
-import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
+import {
+  fetchAccessibleProjectsResult,
+  projectsResultError,
+  type CloudProjectSummary,
+} from "@/lib/sync/cloud-projects"
 import { ROLE } from "@/lib/frontier/roles"
+import { toUserFacingError, UserError } from "@/lib/errors/user-error"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import {
   listCredentials,
   mintCredential,
@@ -88,47 +94,73 @@ function scopeLabel(
   return t("onboarding.apiTokens.scope.unscoped")
 }
 
-/** Fetches the caller's orgs + accessible projects once, for scope filtering
- * in the mint dialog and name resolution in the list. Swallows errors —
- * scope names just fall back to raw ids if this fails. */
+/** Fetches the caller's orgs + accessible projects for scope filtering and
+ * name resolution. Failures stay explicit so an unavailable directory cannot
+ * masquerade as an account with no scope choices. */
 function useOrgsAndProjects(jwt: string | null): {
   orgs: OrgSummary[]
   projects: CloudProjectSummary[]
+  isLoading: boolean
+  error: string | null
+  retry: () => void
 } {
   const [orgs, setOrgs] = useState<OrgSummary[]>([])
   const [projects, setProjects] = useState<CloudProjectSummary[]>([])
+  const [isLoading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     if (!jwt) {
       setOrgs([])
       setProjects([])
+      setLoading(false)
+      setError(null)
       return
     }
     let cancelled = false
-    Promise.all([listMyOrgs(jwt), fetchAccessibleProjects(jwt)])
-      .then(([o, p]) => {
+    setLoading(true)
+    setError(null)
+    Promise.all([listMyOrgs(jwt), fetchAccessibleProjectsResult(jwt)])
+      .then(([o, result]) => {
         if (cancelled) return
+        if (!result.ok) {
+          if (result.reason === "unauthenticated") void notifySessionExpiredIfCurrent(jwt)
+          throw projectsResultError(result)
+        }
         setOrgs(o)
-        setProjects(p)
+        setProjects(result.projects)
+        setError(null)
       })
-      .catch(() => {
+      .catch((error) => {
         if (cancelled) return
+        if (error instanceof UserError && error.category === "session-expired") {
+          void notifySessionExpiredIfCurrent(jwt)
+        }
         setOrgs([])
         setProjects([])
+        setError(toUserFacingError(error, "token scopes").message)
       })
+      .finally(() => { if (!cancelled) setLoading(false) })
     return () => {
       cancelled = true
     }
-  }, [jwt])
+  }, [jwt, refreshKey])
 
-  return { orgs, projects }
+  return { orgs, projects, isLoading, error, retry: () => setRefreshKey((key) => key + 1) }
 }
 
 export function ApiTokensSection() {
   const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
-  const { orgs, projects } = useOrgsAndProjects(jwt)
+  const {
+    orgs,
+    projects,
+    isLoading: scopesLoading,
+    error: scopesError,
+    retry: retryScopes,
+  } = useOrgsAndProjects(jwt)
   const [credentials, setCredentials] = useState<ApiCredential[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -176,12 +208,21 @@ export function ApiTokensSection() {
           jwt={jwt}
           orgs={orgs}
           projects={projects}
+          disabled={scopesLoading || scopesError != null}
           onMinted={(result) => {
             setMintResult(result)
             refresh()
           }}
         />
       </div>
+      {scopesError && (
+        <div className="flex items-center gap-2 px-4 text-xs text-destructive" role="alert">
+          <span>{scopesError}</span>
+          <Button type="button" size="xs" variant="ghost" onClick={retryScopes}>
+            {t("common.retry")}
+          </Button>
+        </div>
+      )}
       <SettingsGroup>
         <SettingsRow label={t("onboarding.apiTokens.yourTokensLabel")} block>
           {loading && !credentials ? (
@@ -517,11 +558,13 @@ function MintTokenDialog({
   jwt,
   orgs,
   projects,
+  disabled,
   onMinted,
 }: {
   jwt: string
   orgs: OrgSummary[]
   projects: CloudProjectSummary[]
+  disabled: boolean
   onMinted: (result: MintCredentialResult) => void
 }) {
   const t = useT()
@@ -609,7 +652,9 @@ function MintTokenDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" />}>{t("onboarding.apiTokens.newTokenTrigger")}</DialogTrigger>
+      <DialogTrigger render={<Button size="sm" disabled={disabled} />}>
+        {t("onboarding.apiTokens.newTokenTrigger")}
+      </DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{t("onboarding.apiTokens.newTokenDialogHeading")}</DialogTitle>

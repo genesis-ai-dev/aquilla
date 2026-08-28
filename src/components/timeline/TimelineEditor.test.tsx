@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 import { TimelineEditor } from "./TimelineEditor"
 import type { CellData } from "@/hooks/useCells"
@@ -23,20 +23,31 @@ vi.mock("./useOutputLatency", () => ({ useOutputLatency: () => mockOutputLatency
 let mockQueueState: QueueState = { kind: "idle" }
 let mockProgress: QueueProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
 // Round 5: the speaker buttons push audibility straight into the queue.
-let lastAudibility: { source: boolean; target: boolean } | null = null
+let lastAudibility: { source: boolean; target: boolean; bySlot?: Record<string, boolean> } | null = null
 // Stage 2: audibility is a STORE now — lib/audio/audibility merges every toggle
 // against `getQueueAudibility()` rather than against component state, precisely
 // so the editor's button and the video pane's cannot clobber each other. So the
 // stub has to BE a store (value + getter + subscription), not just a recorder;
 // a stub that only remembered the last write would let the editor's button read
 // a stale value and the clobbering bug back in through the test suite.
+// It carries `bySlot` THROUGH, which is not incidental: an added track's
+// speaker addresses its own slot in that map, so a store that flattened it away
+// would make every per-track mute read back as "audible" inside this suite —
+// the same blindness that let stage 6A's bug reach Sam.
 const audibilityStore = vi.hoisted(() => {
-  let value = { source: true, target: true }
+  let value: { source: boolean; target: boolean; bySlot?: Record<string, boolean> } = {
+    source: true,
+    target: true,
+  }
   const listeners = new Set<() => void>()
   return {
     get: () => value,
-    set: (next: { source: boolean; target: boolean }) => {
-      value = { source: next.source, target: next.target }
+    set: (next: { source: boolean; target: boolean; bySlot?: Record<string, boolean> }) => {
+      value = {
+        source: next.source,
+        target: next.target,
+        ...(next.bySlot ? { bySlot: { ...next.bySlot } } : {}),
+      }
       for (const l of listeners) l()
     },
     subscribe: (l: () => void) => {
@@ -65,7 +76,7 @@ vi.mock("@/lib/audio/play-queue", async () => {
     // file position cannot be allowed to drift from the real rule.
     queueClockIsFileTime: (cell: CellData | undefined | null) =>
       cell?.medium === "media" && sourceClipAudioForCell(cell) != null,
-    setQueueAudibility: (a: { source: boolean; target: boolean }) => {
+    setQueueAudibility: (a: { source: boolean; target: boolean; bySlot?: Record<string, boolean> }) => {
       lastAudibility = a
       audibilityStore.set(a)
     },
@@ -692,6 +703,16 @@ describe("TimelineEditor", () => {
 
     fireEvent.click(tgt)
     expect(lastAudibility).toEqual({ source: false, target: false })
+    // STAGE 6A — THE ASSERTION THIS TEST WAS MISSING. It checked that the click
+    // reached the store and never that the button reported it back, so a reader
+    // that classified `"target"` differently from the writer passed here and
+    // shipped: the row really did mute while the icon stayed on, and the second
+    // click people naturally gave it turned the sound back on (Sam, 2026-08-27).
+    expect(tgt).toHaveAttribute("aria-pressed", "false")
+
+    fireEvent.click(tgt)
+    expect(tgt).toHaveAttribute("aria-pressed", "true")
+    expect(lastAudibility).toEqual({ source: false, target: true })
   })
 
   it("a muted-source preference persists across mounts", () => {
@@ -1796,6 +1817,40 @@ describe("TimelineEditor — rows come from the track model", () => {
   // behaviour — the handle simply stops working — so nothing else would catch
   // it. The keyboard path shares the wiring, which is what makes it testable
   // here at all (happy-dom gives every element a 0x0 rect).
+  // 2026-08-27 (Sam, second reading — the first greyed the MEMBERS, wrongly):
+  // the FOLDER ROW ITSELF is the grey — one opaque band across both columns,
+  // with no break at the gutter/lane edge. The break was the gutter column's
+  // own `border-r`, which no row could paint over (a border sits outside the
+  // content box), so the divider is now an overlay rule the opaque z-30
+  // folder row covers on its own stretch.
+  it("draws the folder row as one grey band across both columns, over the divider", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        tracks={foldedTracks()} onRetimeSubtitle={() => {}} onReorderTrack={() => {}}
+      />,
+    )
+    const gutter = screen.getByTestId("tl-scroll").previousElementSibling!
+    const rows = [...gutter.querySelectorAll<HTMLElement>("[data-tl-track-row]")]
+    // Source text, Source audio, Dubs, Target audio, Spanish — ONLY the
+    // folder wears the band; the members keep their ordinary rows (the first
+    // reading of this request, reverted).
+    expect(rows.map((r) => r.className.includes("bg-muted"))).toEqual([
+      false, false, true, false, false,
+    ])
+    // Opaque and above the divider rule, which is what closes the seam…
+    expect(rows[2].className).toContain("z-30")
+    // …and the divider is an overlay INSIDE the gutter now, not a border on
+    // it, full height as before.
+    const rule = screen.getByTestId("tl-gutter-rule")
+    expect(gutter.contains(rule)).toBe(true)
+    expect(rule.className).toContain("inset-y-0")
+    expect(gutter.className).not.toContain("border-r")
+    // The lane half of the band wears the same token, so the strip is one
+    // colour edge to edge.
+    expect(screen.getByTestId("tl-folder-lane-grp").className).toContain("bg-muted")
+  })
+
   it("keeps reordering working while a folder is collapsed", () => {
     const onReorderTrack = vi.fn()
     render(
@@ -1956,6 +2011,45 @@ describe("TimelineEditor — rows come from the track model", () => {
     expect(editing.onDelete).toHaveBeenCalledWith(["trk-es"])
   })
 
+  // ── AQU-646 stage 6D ───────────────────────────────────────────────────────
+  //
+  // …AND THE NUMBER HAS TO BE TRUE, which is what nothing checked. The count
+  // scanned only the ACTIVE file's audio, so on a file whose takes live on its
+  // audio-cue sibling the dialog said "This track has no recordings on it" and
+  // then orphaned them — Sam lost two tracks' takes that way on 2026-08-27.
+  it("counts takes that live on the cue sibling, not just this file's", () => {
+    const editing = editingActions()
+    const cueWithTake = [
+      cell({
+        id: "cue1", fileId: "f1-cues", original: "One", medium: "media", startTime: 0, endTime: 4,
+        selectedBySlot: { "trk-es": "aud-es" },
+        attachments: {
+          "aud-es": { audioId: "aud-es", slot: "trk-es", url: "frontier-audio://aud-es" },
+        },
+      } as unknown as Partial<CellData>),
+    ]
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells} onRetimeSubtitle={() => {}}
+        audioCues={cueWithTake}
+        targetCells={cueWithTake}
+        tracks={deriveTracksForFile({
+          trackOverrides: { "trk-es": { kind: "audio", name: "Spanish", order: 5 } },
+        })}
+        onReorderTrack={vi.fn()} onRenameTrack={vi.fn()} trackEditing={editing}
+      />,
+    )
+    const rows = screen.getByTestId("tl-scroll").previousElementSibling!
+      .querySelectorAll<HTMLElement>("[data-tl-track-row]")
+    fireEvent.contextMenu(rows[rows.length - 1])
+    fireEvent.click(screen.getByText("Delete track"))
+    const dialog = screen.getByTestId("tl-delete-track-dialog")
+    // The take is counted and named…
+    expect(dialog).toHaveTextContent("1 recording on this track will be deleted with it.")
+    // …and the sentence that would have been a lie is nowhere on screen.
+    expect(dialog).not.toHaveTextContent("no recordings")
+  })
+
   // Only a track someone MADE. A derived row is a fact about the file — its
   // subtitles, its source audio, its dub — so "delete" could only mean "hide
   // it", which there is no state for.
@@ -2109,6 +2203,37 @@ describe("TimelineEditor — rows come from the track model", () => {
     expect(selectedRows()).toEqual(["Target audio"])
   })
 
+  // AQU-646 stage 7: EVERY row carries a hue and an identity bar, derived rows
+  // included — their fixed colours went through the same hue-plus-alpha
+  // vocabulary as the pickable ones, so the gutter reads as one system rather
+  // than as two. A folder is the exception: it is a heading, not a track.
+  it("gives every track row an accent bar and a hue, and a folder neither", () => {
+    render(selectable({ trackEditing: editingActions(), tracks: foldedTracks() }))
+    const named = (name: string) => Array.from(rows()).find((r) => r.textContent?.includes(name))!
+
+    // THE BAR IS A CLASS ON THE ROW, never a new element: an accent span would
+    // become the row's firstElementChild, which the drop-indent test reads.
+    const audio = named("Target audio") as HTMLElement
+    expect(audio.className).toContain("border-l-4")
+    expect(audio.className).toContain("border-l-[color:var(--tl-track-hue)]")
+    expect(audio.style.getPropertyValue("--tl-track-hue")).toBe("#40c06e")
+
+    // A source row is not PICKABLE, but it still has a colour of its own and
+    // is now drawn the same way — that is the whole of this change.
+    const source = named("Source text") as HTMLElement
+    expect(source.className).toContain("border-l-4")
+    expect(source.style.getPropertyValue("--tl-track-hue")).toBe("#8b93a3")
+
+    // …and every row's hue is its own, not one shared default.
+    const dubs = named("Dubs") as HTMLElement // the folder
+    expect(dubs.className).not.toContain("border-l-4")
+    expect(dubs.style.getPropertyValue("--tl-track-hue")).toBe("")
+  })
+
+  // AQU-646 stage 7: SIX SWATCHES IN A SUBMENU, one click each (Sam,
+  // 2026-08-27: "all the user needs to see is the six colors to pick from").
+  // The picker dialog that briefly stood between the menu and the colour went
+  // with the custom colours that needed it.
   it("recolours every selected track in one call, one value each", () => {
     const editing = editingActions()
     render(selectable({ trackEditing: editing, tracks: foldedTracks() }))
@@ -2117,21 +2242,16 @@ describe("TimelineEditor — rows come from the track model", () => {
     fireEvent.click(named("Spanish"), { metaKey: true })
     fireEvent.contextMenu(named("Spanish"))
     fireEvent.click(screen.getByText("Colour 2 tracks"))
-    // Two axes, so EVERY hue appears twice — once in each column — and the
-    // swatch has to be picked by the column it belongs to. That is also the
-    // assertion: clicking Teal under "Primary" must set the PRIMARY
-    // and leave each track's own secondary exactly as it was.
-    const recorded = screen.getByText("Primary:").parentElement!
-    fireEvent.click(within(recorded).getByText("Teal"))
+    fireEvent.click(screen.getByText("Magenta"))
+
     expect(editing.onSetColor).toHaveBeenCalledTimes(1)
-    // ONE CALL, ONE VALUE PER TRACK — each keeps its own other axis, so the
-    // payload is a list of pairs and not a list plus a colour.
+    // ONE CALL, ONE VALUE PER TRACK — the payload's shape never depended on
+    // where the colour came from. The value is the preset's ID, not its hex:
+    // what an id LOOKS like is this build's business, not the project's.
     const [updates] = editing.onSetColor.mock.calls[0] as [{ trackId: string; color: string }[]]
     expect([...updates].sort((a, b) => a.trackId.localeCompare(b.trackId))).toEqual([
-      // Teal on the primary axis; the secondary stays the violet each track
-      // already had, which is the half the call must NOT disturb.
-      { trackId: "target-audio", color: "teal-violet" },
-      { trackId: "trk-es", color: "teal-violet" },
+      { trackId: "target-audio", color: "magenta" },
+      { trackId: "trk-es", color: "magenta" },
     ])
   })
 
@@ -3178,6 +3298,166 @@ describe("TimelineEditor — an added track finds its takes where they actually 
     // keep.
     expect(within(lane).queryByTestId("tl-target-empty-s1")).toBeNull()
   })
+
+  // ── AQU-646 stage 6C ───────────────────────────────────────────────────────
+  //
+  // Sam, 2026-08-27: "the first new track I added didn't let me add any audio
+  // into it, or at least didn't display any of the takes that were recorded
+  // into it." His track was aligned to SOURCE AUDIO, and that arm of
+  // `cellsForSourceTrack` answered with the RAW `audioCues` prop rather than
+  // the audio-merged `targetCells`. Stage 3c-1 above fixed the two subtitle
+  // arms and never touched this one.
+  //
+  // THE FIXTURE IS DELIBERATELY DIFFERENT FROM THE ONE ABOVE, and that is the
+  // whole point: those cases pass ONE array as both `audioCues` and
+  // `targetCells`, which makes the raw and merged lists indistinguishable and
+  // would let this bug pass unnoticed. Here they are genuinely two lists — the
+  // raw cues carry no attachments at all, exactly as the real prop doesn't.
+  const rawCues = [
+    cell({ id: "cue1", fileId: "f1-cues", original: "One", medium: "media", startTime: 0, endTime: 4 }),
+    cell({ id: "cue2", fileId: "f1-cues", original: "Two", medium: "media", startTime: 5, endTime: 9 }),
+  ]
+  const audioAlignedTrack = deriveTracksForFile(
+    {
+      trackOverrides: {
+        "trk-audio": { kind: "audio", name: "Track", order: 9, sourceTrackId: "source-audio" },
+      },
+    },
+    { isSubtitleImport: true, hasMediaCells: false, hasAudioCues: true },
+  )
+
+  it("draws a SOURCE-AUDIO-aligned track's take, which lives only on the merged cells", () => {
+    const mergedCues = [
+      cell({
+        id: "cue1", fileId: "f1-cues", original: "One", medium: "media", startTime: 0, endTime: 4,
+        selectedBySlot: { "trk-audio": "aud-audio" },
+        attachments: {
+          "aud-audio": { audioId: "aud-audio", slot: "trk-audio", url: "frontier-audio://aud-audio" },
+        },
+      } as unknown as Partial<CellData>),
+      rawCues[1],
+    ]
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={subtitleCells}
+        audioCues={rawCues}
+        targetCells={mergedCues}
+        tracks={audioAlignedTrack}
+        onRetimeSubtitle={() => {}}
+      />,
+    )
+    const lane = screen.getByTestId("tl-target-lane-trk-audio")
+    expect(within(lane).getByTestId("tl-target-cue1")).toBeInTheDocument()
+  })
+
+  // ── AQU-646 stage 6B ───────────────────────────────────────────────────────
+  //
+  // Sam, 2026-08-27: "trimming just doesn't work under any circumstances… in
+  // the target audio track", on a file with NO FILM. The handles are withheld
+  // when the master would ignore a dub's trims — but the virtual transport
+  // (stage 3h) fires takes through the overlay pool, which honours them, and
+  // this gate had never been told about it. Cue cells carry no source clip of
+  // their own, so every clause was false and the row lost its handles.
+  const takeOnCue = [
+    cell({
+      id: "cue1", fileId: "f1-cues", original: "One", medium: "media", startTime: 0, endTime: 4,
+      // CELL-SEEDED, deliberately: the derived row refuses a recording-slot
+      // clip that is not seeded with the cell id, because that is how the
+      // shared imported SOURCE clip is told apart from a dub.
+      selectedAudioId: "take-cue1-1",
+      attachments: {
+        "take-cue1-1": {
+          audioId: "take-cue1-1", slot: "recording", url: "frontier-audio://take-cue1-1",
+          durationMs: 4000,
+        },
+      },
+    } as unknown as Partial<CellData>),
+  ]
+
+  function renderFilmless(virtualIsTransport: boolean) {
+    return render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        virtualIsTransport={virtualIsTransport}
+        cells={subtitleCells}
+        audioCues={takeOnCue}
+        targetCells={takeOnCue}
+        tracks={deriveTracksForFile({}, { isSubtitleImport: true, hasMediaCells: false, hasAudioCues: true })}
+        onRetimeSubtitle={() => {}}
+        onTrimTarget={() => {}}
+      />,
+    )
+  }
+
+  it("gives a film-less file its trim handles once the virtual clock drives it", () => {
+    renderFilmless(true)
+    expect(screen.getByTestId("tl-target-cue1-handle-l")).toBeInTheDocument()
+    expect(screen.getByTestId("tl-target-cue1-handle-r")).toBeInTheDocument()
+  })
+
+  // ── AQU-646 stage 6J ───────────────────────────────────────────────────────
+  //
+  // Sam, 2026-08-27: "target text should not be an option there because it's
+  // not a source. And as far as source text and source audio go, in BTT
+  // products where source audio is linked to source text the new tracks align
+  // with the source audio regardless of which you select."
+  it("offers one honest alignment on a cue-linked file, named for the audio", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={subtitleCells}
+        audioCues={rawCues}
+        targetCells={rawCues}
+        tracks={deriveTracksForFile({}, {
+          isSubtitleImport: true, hasMediaCells: false, hasAudioCues: true,
+        })}
+        onRetimeSubtitle={() => {}}
+        onReorderTrack={vi.fn()} onRenameTrack={vi.fn()} trackEditing={{
+          onAdd: vi.fn(), onSetColor: vi.fn(), onLeaveFolder: vi.fn(),
+          onMoveToScope: vi.fn(), onCreateFolderFrom: vi.fn(), onDelete: vi.fn(),
+        }}
+      />,
+    )
+    // The toolbar control is a MENU — "Audio track" or "Folder" — so opening
+    // the dialog takes both clicks.
+    fireEvent.click(screen.getByTestId("tl-add-track"))
+    fireEvent.click(screen.getByText("Audio track"))
+    // One option, stated rather than asked…
+    expect(screen.getByTestId("tl-add-track-align-fixed")).toHaveTextContent("Source audio")
+    expect(screen.queryByTestId("tl-add-track-align")).toBeNull()
+    // …and the boring automatic name.
+    expect(screen.getByTestId("tl-add-track-name")).toHaveValue("Track")
+  })
+
+  it("never offers Target text, which is not a source", () => {
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable
+        cells={subtitleCells}
+        tracks={deriveTracksForFile({}, {
+          isSubtitleImport: true, hasMediaCells: false, hasAudioCues: false,
+        })}
+        onRetimeSubtitle={() => {}}
+        onReorderTrack={vi.fn()} onRenameTrack={vi.fn()} trackEditing={{
+          onAdd: vi.fn(), onSetColor: vi.fn(), onLeaveFolder: vi.fn(),
+          onMoveToScope: vi.fn(), onCreateFolderFrom: vi.fn(), onDelete: vi.fn(),
+        }}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-add-track"))
+    fireEvent.click(screen.getByText("Audio track"))
+    const shown = screen.queryByTestId("tl-add-track-align")
+      ?? screen.getByTestId("tl-add-track-align-fixed")
+    expect(shown.textContent).not.toContain("Target")
+  })
+
+  it("still withholds them when nothing that honours trims is driving", () => {
+    // The honest remaining case: the queue sounding a take-only section through
+    // an imported source recording, a master that ignores dub trims.
+    renderFilmless(false)
+    expect(screen.queryByTestId("tl-target-cue1-handle-l")).toBeNull()
+  })
 })
 
 describe("TimelineEditor — a menu with nothing in it does not open", () => {
@@ -3595,5 +3875,187 @@ describe("TimelineEditor — folders look like folders", () => {
     const lefts = blocks.map((b) => parseFloat(b.style.left))
     expect(lefts).toContain(15 * ZOOM_DEFAULT)
     expect(lefts).not.toContain(0)
+  })
+})
+
+// ── AQU-646 stage 5 ─────────────────────────────────────────────────────────
+//
+// Sam, 2026-08-26: dragging the playhead scrubs the picture. happy-dom gives
+// every element a 0-origin rect, which is what lets a clientX map straight to a
+// track offset here with no stubbing — the same thing TimelineRuler.test.tsx
+// already relies on.
+describe("TimelineEditor — dragging the playhead (stage 5)", () => {
+  beforeEach(() => { topOwner.value = 1 })
+
+  const rowCells = [cell({ id: "m1", original: "One", medium: "media", startTime: 0, endTime: 10 })]
+
+  function renderScrub() {
+    const onSeekToTime = vi.fn()
+    const onScrubStart = vi.fn()
+    const onScrubEnd = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={rowCells}
+        onRetimeSubtitle={() => {}}
+        onSeekToTime={onSeekToTime}
+        onScrubStart={onScrubStart}
+        onScrubEnd={onScrubEnd}
+      />,
+    )
+    return { onSeekToTime, onScrubStart, onScrubEnd, ruler: screen.getByTestId("tl-ruler") }
+  }
+
+  // THE EXISTING GESTURE MUST SURVIVE UNTOUCHED. A click on this band has
+  // always seeked, and has never stopped playback — so the transport is taken
+  // at the intent threshold, not at pointerdown.
+  it("a plain click still seeks, and is not a scrub", () => {
+    const { onSeekToTime, onScrubStart, onScrubEnd, ruler } = renderScrub()
+    fireEvent.click(ruler, { clientX: 152 })
+    expect(onSeekToTime).toHaveBeenCalledTimes(1)
+    expect(onSeekToTime.mock.calls[0][0]).toBeCloseTo(4, 1) // 152 / 38
+    expect(onScrubStart).not.toHaveBeenCalled()
+    expect(onScrubEnd).not.toHaveBeenCalled()
+  })
+
+  it("a press that never travels 3px does not take the transport", () => {
+    const { onScrubStart, ruler } = renderScrub()
+    fireEvent.pointerDown(ruler, { button: 0, pointerId: 1, clientX: 100 })
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 102 })
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 102 })
+    expect(onScrubStart).not.toHaveBeenCalled()
+  })
+
+  it("takes the transport once, at the threshold, however far the drag goes", () => {
+    const { onScrubStart, ruler } = renderScrub()
+    fireEvent.pointerDown(ruler, { button: 0, pointerId: 1, clientX: 100 })
+    for (const x of [140, 180, 220, 260]) fireEvent.pointerMove(window, { pointerId: 1, clientX: x })
+    expect(onScrubStart).toHaveBeenCalledTimes(1)
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 260 })
+  })
+
+  it("hands the transport back on release, and lands the final position", async () => {
+    const { onSeekToTime, onScrubEnd, ruler } = renderScrub()
+    fireEvent.pointerDown(ruler, { button: 0, pointerId: 1, clientX: 100 })
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 300 })
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 380 })
+    expect(onScrubEnd).toHaveBeenCalledTimes(1)
+    // The landing seek goes through the ordinary funnel, which is what cues the
+    // queue where the hand stopped.
+    await waitFor(() => expect(onSeekToTime).toHaveBeenCalled())
+    const landed = onSeekToTime.mock.calls[onSeekToTime.mock.calls.length - 1][0]
+    expect(landed).toBeCloseTo(10, 1) // 380 / 38
+  })
+
+  // A CANCELLED DRAG COMMITS NOTHING — but the transport still has to come
+  // back, or it stays suppressed for the rest of the session.
+  it("hands the transport back when the pointer is taken away", () => {
+    const { onScrubEnd, ruler } = renderScrub()
+    fireEvent.pointerDown(ruler, { button: 0, pointerId: 1, clientX: 100 })
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 300 })
+    fireEvent.pointerCancel(window, { pointerId: 1, clientX: 300 })
+    expect(onScrubEnd).toHaveBeenCalledTimes(1)
+  })
+
+  /**
+   * Frames, on demand. The gesture coalesces its work into a rAF, so without
+   * driving one nothing it does is observable inside a test body at all —
+   * which is how two of these first passed while asserting nothing.
+   *
+   * QUEUE AND FLUSH, never run-inline. A stub that invokes the callback
+   * synchronously makes the coalescing guard latch forever: the callback clears
+   * the pending-frame id BEFORE the assignment that stores it, so the id stays
+   * set and every later move returns early. That is an artifact of the stub,
+   * not of the code — and it silently reduced a ten-move drag to one.
+   */
+  function withFrames(run: (flush: () => void) => void) {
+    const queued: FrameRequestCallback[] = []
+    const raf = vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((cb) => {
+      queued.push(cb as FrameRequestCallback)
+      return queued.length
+    })
+    // Inside `act`: the frame callback is what calls setState, and outside act
+    // that update never reaches the DOM before the assertion reads it.
+    const flush = () => { act(() => { for (const cb of queued.splice(0)) cb(0) }) }
+    try { run(flush) } finally { raf.mockRestore() }
+  }
+
+  // THE JUDDER THIS EXISTS TO PREVENT. The three effects that write the
+  // timeline's clock are each fired by a transport publishing where it actually
+  // LANDED — always behind the pointer, because the picture is seeked on a
+  // throttle. Leave them running during a drag and every seek yanks the head
+  // back to where the throttle last sampled.
+  //
+  // This pins the OUTCOME, not one mechanism: the head is held on the hand
+  // twice over — the effects stand down for the duration, and the head is drawn
+  // from the scrub position rather than the clock — and removing either alone
+  // leaves the other covering it. Removing both fails this.
+  it("keeps the head on the hand when a transport publishes an older position", () => {
+    mockQueueState = { kind: "playing", cellIndex: 0, cellId: "m1" }
+    mockProgress = { currentTime: 2, duration: 20, rate: 1, volume: 1 }
+    const clipped = [
+      cell({
+        id: "m1", original: "One", medium: "media", startTime: 0, endTime: 20,
+        attachments: { "audio-f1-1690000000-shared.mp3": { type: "audio", url: "frontier-audio://src" } },
+      } as Partial<CellData>),
+    ]
+    const { rerender } = render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={clipped}
+        onRetimeSubtitle={() => {}} onSeekToTime={() => {}}
+        onScrubStart={() => {}} onScrubEnd={() => {}}
+      />,
+    )
+    const head = () => parseFloat(screen.getByTestId("tl-playhead").style.left)
+    const ruler = screen.getByTestId("tl-ruler")
+    withFrames((flush) => {
+      fireEvent.pointerDown(ruler, { button: 0, pointerId: 1, clientX: 100 })
+      fireEvent.pointerMove(window, { pointerId: 1, clientX: 38 * 12 })
+      flush()
+    })
+    expect(head()).toBeCloseTo(38 * 12, 0)
+
+    // The transport now reports where it got to. Mid-scrub, that is stale news.
+    mockProgress = { currentTime: 4, duration: 20, rate: 1, volume: 1 }
+    rerender(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={clipped}
+        onRetimeSubtitle={() => {}} onSeekToTime={() => {}}
+        onScrubStart={() => {}} onScrubEnd={() => {}}
+      />,
+    )
+    expect(head()).toBeCloseTo(38 * 12, 0)
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 38 * 12 })
+    mockQueueState = { kind: "idle" }
+    mockProgress = { currentTime: 0, duration: 0, rate: 1, volume: 1 }
+  })
+
+  // A drag's trailing `click` must not seek a second time and fight the
+  // landing seek the release already issued.
+  it("does not seek twice for one gesture", async () => {
+    const { onSeekToTime, ruler } = renderScrub()
+    fireEvent.pointerDown(ruler, { button: 0, pointerId: 1, clientX: 100 })
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 300 })
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 300 })
+    const afterRelease = onSeekToTime.mock.calls.length
+    fireEvent.click(ruler, { clientX: 300 })
+    expect(onSeekToTime).toHaveBeenCalledTimes(afterRelease)
+  })
+
+  // The workspace crossing is the expensive part of a seek — it re-renders the
+  // whole project view — so it is throttled on top of the per-frame coalescing.
+  it("does not cross into the workspace once per frame", () => {
+    const { onSeekToTime, ruler } = renderScrub()
+    withFrames((flush) => {
+      fireEvent.pointerDown(ruler, { button: 0, pointerId: 1, clientX: 100 })
+      for (let i = 0; i < 10; i += 1) {
+        fireEvent.pointerMove(window, { pointerId: 1, clientX: 140 + i * 10 })
+        flush()
+      }
+    })
+    // Ten frames' worth of movement, and the leading edge is the only one that
+    // gets through inside the throttle window.
+    expect(onSeekToTime.mock.calls.length).toBeGreaterThan(0)
+    expect(onSeekToTime.mock.calls.length).toBeLessThan(10)
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 240 })
   })
 })

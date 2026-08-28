@@ -21,7 +21,7 @@ import {
   useQueueAudibility,
   type TrackAudibility,
 } from "@/lib/audio/play-queue"
-import { isDefaultTrackSlot, slotAudible } from "@/lib/timeline/track-slots"
+import { isDefaultTrackSlot } from "@/lib/timeline/track-slots"
 
 // Re-exported so both buttons — the timeline's lane gutter and the video pane's
 // header — reach audibility through exactly one module.
@@ -88,31 +88,79 @@ export function seedAudibility(fileId: string): void {
 }
 
 /**
- * Flip one track for one file: persist first, then publish.
+ * WHICH FLAG A ROW'S SPEAKER ADDRESSES. (AQU-646 stage 6A)
  *
- * The merge base is `getQueueAudibility()` — the store — never a caller's own
- * state. That is the entire reason this module exists: with two buttons live,
- * merging from either one's local copy silently drops the other's toggle.
+ * THE WRITER AND THE READER MUST BOTH COME THROUGH HERE, and the reason is a
+ * bug that shipped: `toggleAudibility` classified `"target"` as the target
+ * flag while the gutter button read its state back through `slotAudible`,
+ * which knows only real SLOTS — so `"target"` fell through to `bySlot`, a map
+ * nothing ever writes that key into, and the button reported "audible"
+ * forever. Every click genuinely muted or unmuted the row while the icon never
+ * moved, so the natural second click silently undid the first (Sam,
+ * 2026-08-27: "you can't mute and unmute the audio target track").
+ *
+ * `slotAudible` is NOT the thing to reuse here. It answers for real slots —
+ * which is exactly right for the queue's overlay sweep, where every entry
+ * carries one — but the derived row's `audibilityKey` is the bare word
+ * `"target"`, which is not a slot at all. This function is the one that speaks
+ * both languages.
  */
+type AudibilityTarget = "source" | "target" | "slot"
+
+function audibilityTargetFor(slotOrTrack: string): AudibilityTarget {
+  if (slotOrTrack === "source") return "source"
+  // The default row answers to `target` under any of its names: the row's own
+  // `audibilityKey`, or either of the two legacy slots it stores takes in.
+  if (slotOrTrack === "target" || isDefaultTrackSlot(slotOrTrack)) return "target"
+  return "slot"
+}
+
 /**
- * Flip one track's audio.
+ * Is this row's audio on?
+ *
+ * Takes whatever a gutter row calls itself — `"source"`, `"target"`, a default
+ * slot, or an added track's id — and answers from the flag `toggleAudibility`
+ * would flip for that same string. ABSENT MEANS AUDIBLE, the rule every layer
+ * here uses: a brand-new track is heard without anybody opting in.
+ */
+export function trackAudible(state: TrackAudibility, slotOrTrack: string): boolean {
+  switch (audibilityTargetFor(slotOrTrack)) {
+    case "source":
+      return state.source !== false
+    case "target":
+      return state.target !== false
+    default:
+      return state.bySlot?.[slotOrTrack] !== false
+  }
+}
+
+/**
+ * Flip one track's audio for one file: persist first, then publish.
  *
  * TAKES A SLOT, not a `keyof TrackAudibility`. (AQU-646 stage 3) The two named
  * flags are still named — `"source"` and the default row's `"recording"` /
  * `"generatedVoice"` both mean `target` — and every added track addresses its
  * own flag by its slot.
+ *
+ * The merge base is `getQueueAudibility()` — the store — never a caller's own
+ * state. That is the entire reason this module exists: with two buttons live,
+ * merging from either one's local copy silently drops the other's toggle. And
+ * the flag it flips is chosen by `audibilityTargetFor`, the same classifier
+ * `trackAudible` reads back through, so the two can never disagree again.
  */
 export function toggleAudibility(fileId: string, slotOrTrack: string): void {
   const current = getQueueAudibility()
-  const next: TrackAudibility =
-    slotOrTrack === "source"
-      ? { ...current, source: !current.source }
-      : isDefaultTrackSlot(slotOrTrack) || slotOrTrack === "target"
-        ? { ...current, target: !current.target }
-        : {
-            ...current,
-            bySlot: { ...current.bySlot, [slotOrTrack]: !slotAudible(current, slotOrTrack) },
-          }
+  const audible = trackAudible(current, slotOrTrack)
+  const next: TrackAudibility = (() => {
+    switch (audibilityTargetFor(slotOrTrack)) {
+      case "source":
+        return { ...current, source: !audible }
+      case "target":
+        return { ...current, target: !audible }
+      default:
+        return { ...current, bySlot: { ...current.bySlot, [slotOrTrack]: !audible } }
+    }
+  })()
   persist(fileId, next)
   setQueueAudibility(next)
 }

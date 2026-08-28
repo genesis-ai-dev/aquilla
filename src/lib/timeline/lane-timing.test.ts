@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest"
 import {
   chipOverflowState,
   chipOverlaps,
+  dualFaultMeetSec,
   effectiveAttachmentDurationMs,
   subtitleSpanSec,
   targetChipGeom,
@@ -340,5 +341,46 @@ describe("chipOverlaps", () => {
       headSec: null,
       tailSec: expect.closeTo(0.1, 5),
     })
+  })
+})
+
+describe("dualFaultMeetSec — where a mutually-offending pair meets (2026-08-27)", () => {
+  const meet = (
+    prevChipEnd: number, nextChipStart: number,
+    prevSectionEnd: number, nextSectionStart: number,
+  ) =>
+    dualFaultMeetSec(
+      { chipEndSec: prevChipEnd, sectionEndSec: prevSectionEnd },
+      { chipStartSec: nextChipStart, sectionStartSec: nextSectionStart },
+    )
+
+  it("touching sections collapse to the shared border — the 2026-08-08 cut, unchanged", () => {
+    // Sections [10,20]/[20,30]; chips [10,24] and [17,27].
+    expect(meet(24, 17, 20, 20)).toBe(20)
+  })
+
+  it("across a gap, the pair meets at the midpoint of their overlap", () => {
+    // Sam's screenshots, in round seconds: sections end 83.0 / start 83.4,
+    // chips end 83.3 / start 83.1 — the overlap [83.1, 83.3] sits wholly
+    // inside the gap, so its own midpoint is the meet.
+    expect(meet(83.3, 83.1, 83.0, 83.4)).toBeCloseTo(83.2)
+  })
+
+  it("an overlap reaching outside the gap is clamped to the borders first", () => {
+    // Gap [19,21]; the next chip reaches back to 18, INSIDE the previous
+    // section — the meet must not follow it in there. Zone [19, 20] → 19.5.
+    expect(meet(20, 18, 19, 21)).toBeCloseTo(19.5)
+    // Mirror: the previous chip reaches past the next SECTION's start.
+    expect(meet(22, 20, 19, 21)).toBeCloseTo(20.5)
+    // Both ends spill past the gap: the whole gap is the zone.
+    expect(meet(22, 18, 19, 21)).toBeCloseTo(20)
+  })
+
+  it("overlapping SECTIONS meet between the crossed borders", () => {
+    // Sections [10,21]/[19,30] overlap; chips [10,23] and [17,27]. lo/hi
+    // invert (21 > 19) and the midpoint lands between the borders — one point,
+    // so the painted pair stays disjoint, which the old per-border cuts
+    // (end at 21, start at 19) did not.
+    expect(meet(23, 17, 21, 19)).toBeCloseTo(20)
   })
 })

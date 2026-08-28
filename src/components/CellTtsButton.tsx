@@ -31,6 +31,20 @@ import { normalizeVoiceForProvider, resolveTtsProvider, providerInfo } from "@/l
 
 interface Props {
   cellId: string
+  /**
+   * WHOSE CAST ASSIGNMENT PICKS THE VOICE — which is not always the cell the
+   * clip is written to. (2026-08-27)
+   *
+   * Character voices are assigned on the SUBTITLE rows and stored by their cell
+   * id, but on a file with an audio-cue sibling the clip must be written to the
+   * heard line performing that subtitle. When `cellId` was redirected to the
+   * cue and this did not exist, `castAssignments[cue]` was simply absent, the
+   * lookup fell through to the project default, and every character's line was
+   * generated — and durably attached — in the narrator's voice, while the
+   * character gutter in the same row went on showing the right name. Absent ⇒
+   * `cellId`, which is every arrangement without cues.
+   */
+  voiceCellId?: string
   text: string
   original?: string
   context?: string
@@ -107,6 +121,7 @@ function rememberUrl(key: string, url: string): void {
 
 export function CellTtsButton({
   cellId,
+  voiceCellId,
   text,
   original,
   context,
@@ -129,7 +144,11 @@ export function CellTtsButton({
   const status = useTtsStatus(statusKey)
   // AQU-646: honor persisted cast assignments (e.g. diarization's Speaker N →
   // cell mapping) so generate speaks in the assigned character's voice.
-  const baseVoice = resolveCastVoice(projectTtsSettings, cellId, cellTtsSettings?.voiceId)
+  // The VOICE follows the line the assignment was made on; the WRITE follows
+  // `cellId`. The recorder and the bulk run have always carried these two
+  // separately (`generateCellVoice`'s `voiceCellId`) — this button had one
+  // prop doing both jobs.
+  const baseVoice = resolveCastVoice(projectTtsSettings, voiceCellId ?? cellId, cellTtsSettings?.voiceId)
   const provider = baseVoice.provider ?? resolveTtsProvider(projectTtsSettings)
   const voice = normalizeVoiceForProvider(baseVoice, provider, { targetLanguage })
   const modelStatus = useModelStatus(provider === "mms" ? "mms" : "kokoro")
@@ -228,6 +247,7 @@ export function CellTtsButton({
             // AFTER the blob is in hand, and each one guarded — the clip the
             // user asked to hear must not be lost because a sibling failed.
             let alsoWritten = 0
+            let alsoFailed = 0
             for (const also of alsoAttachTo ?? []) {
               try {
                 await generateAndAttachCellVoice({
@@ -243,6 +263,15 @@ export function CellTtsButton({
                 })
                 alsoWritten += 1
               } catch (e) {
+                // Still swallowed on purpose — the clip the user asked to hear
+                // must not be lost because a sibling failed — but no longer
+                // SILENT. Until 2026-08-27 this was the whole handler, and
+                // because the success toast below counts only what landed, a
+                // run where every sibling failed produced no toast at all:
+                // indistinguishable from an ordinary one-clip success, with
+                // the other heard lines left silent in the dub and nothing on
+                // screen saying so.
+                alsoFailed += 1
                 console.error("[tts] sibling attach failed", also.cellId, e)
               }
             }
@@ -263,6 +292,13 @@ export function CellTtsButton({
                 type: "success",
                 title: t("audio.tts.voicedSeveral", { count: alsoWritten + 1 }),
                 description: t("audio.tts.voicedSeveralDetail"),
+              })
+            }
+            if (alsoFailed > 0) {
+              toast.add({
+                type: "error",
+                title: t("audio.tts.siblingFailed", { count: alsoFailed }),
+                description: t("audio.tts.siblingFailedDetail"),
               })
             }
           } else if (provider === "omnivoice") {

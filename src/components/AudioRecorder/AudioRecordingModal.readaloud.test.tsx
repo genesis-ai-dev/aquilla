@@ -351,20 +351,42 @@ describe("generating a voice for a cue", () => {
 describe("the shared-subtitle notice", () => {
   beforeEach(() => localStorage.clear())
 
-  it("says how many heard lines share the line, before anything is generated", () => {
-    renderModal(() => ({
-      text: "Assieds-toi.",
-      reference: "Sit down, sit down.",
-      linkedCount: 1,
-      voiceCellId: "sub-7",
-      sharedWith: 2,
-    }))
-    const notice = screen.getByTestId("rec-tts-shared-notice")
+  const shared = () => ({
+    text: "Assieds-toi.",
+    reference: "Sit down, sit down.",
+    linkedCount: 1,
+    voiceCellId: "sub-7",
+    sharedWith: 2,
+  })
+
+  // AFTER THE PRESS, NOT BEFORE (Sam, 2026-08-27) — a reversal of the original
+  // call. The first version fired on "this subtitle is shared" rather than on
+  // "you are about to generate", so a performer doing mic takes carried a
+  // permanent paragraph about text-to-speech for a button they may never press.
+  it("stays quiet until a voice has actually been generated", () => {
+    renderModal(shared)
+    expect(screen.queryByTestId("rec-tts-shared-notice")).toBeNull()
+    // …and generating is still the right thing to do, so nothing is gated.
+    expect(screen.getByTestId("rec-generate-tts")).toBeEnabled()
+  })
+
+  it("names what is still silent once the voice has landed", async () => {
+    renderModal(shared)
+    fireEvent.click(screen.getByTestId("rec-generate-tts"))
+    const notice = await screen.findByTestId("rec-tts-shared-notice")
     expect(notice).toHaveTextContent("2 heard lines")
     expect(notice).toHaveTextContent(/leaves the others silent/i)
-    // …and it is a notice, not a gate: generating is still the right thing to
-    // do, you just need to know what you are getting.
-    expect(screen.getByTestId("rec-generate-tts")).toBeEnabled()
+  })
+
+  // Nothing was voiced, so "the others are still silent" would be misleading —
+  // and it would stack on top of the failure message the button already shows.
+  it("says nothing when the generation failed", async () => {
+    const { generateCellVoice } = await import("@/lib/audio/voice-generate-helpers")
+    vi.mocked(generateCellVoice).mockResolvedValueOnce(false)
+    renderModal(shared)
+    fireEvent.click(screen.getByTestId("rec-generate-tts"))
+    await waitFor(() => expect(vi.mocked(generateCellVoice)).toHaveBeenCalled())
+    expect(screen.queryByTestId("rec-tts-shared-notice")).toBeNull()
   })
 
   // ~92% of lines. A notice on every one of them would be wallpaper, which is

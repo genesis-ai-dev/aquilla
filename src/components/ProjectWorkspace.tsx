@@ -102,6 +102,7 @@ import { VoiceSidebar } from "./voice/VoiceSidebar"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
   setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
+import { pauseAllTransports } from "@/lib/audio/transport-pause"
 import { videoOwnsFile, virtualOwnsFile } from "@/lib/audio/transport"
 import { cellIdAtSec } from "@/lib/timeline/source-regions"
 import { clearVideoControllerIf, setVideoController } from "@/lib/timeline/video-controller"
@@ -124,7 +125,6 @@ import { RuleDrawer } from "./RuleDrawer"
 import { CommentsDrawer } from "./CommentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
-import { VideoAttachmentDialog } from "./VideoAttachmentDialog"
 import { SharePanel } from "./SharePanel"
 import { extractCuesFromCells } from "@/lib/video/vtt-generator"
 import { useFileSync } from "@/hooks/useFileSync"
@@ -165,7 +165,15 @@ import { sequenceBetween } from "@/lib/timeline/derive"
 import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
 import { MIN_ADDABLE_SPAN_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
 import { audioIdSeededWith } from "@/lib/audio/upload"
-import { buildLinkedTakes, primaryAudioHome, resolveAudioHomes } from "@/lib/audio/linked-takes"
+import {
+  buildLinkedTakes,
+  divergentVoiceTargets,
+  joinCueText,
+  primaryAudioHome,
+  resolveAudioHomes,
+  resolveSynthTargets,
+  type SynthTargetPlan,
+} from "@/lib/audio/linked-takes"
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
@@ -192,11 +200,11 @@ import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { extractVoiceReference } from "@/lib/audio/reference-extract"
-import { getVoiceLibrary, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
+import { assignedCastVoiceId, getVoiceLibrary, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Bot, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical } from "lucide-react"
+import { Bot, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { setMicHeld } from "@/lib/audio/mic-hold"
 import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
@@ -1308,14 +1316,11 @@ export function ProjectWorkspace() {
    *  resolver above: the editor-actions context is assembled long before the
    *  cue links are built, and rows need this to be identity-stable. */
   const audioHomeRef = useRef<(cell: CellData) => readonly CellData[] | null>((cell) => [cell])
-  /** AQU-646 stage 3f: what a bulk synth would do for one cell. Ref-wrapped for
-   *  the same dependency-ordering reason as its neighbours — the menu COUNT and
-   *  the RUN are both declared above the cue links this reads. */
-  const synthTargetsForRef = useRef<(cell: CellData) => SynthTarget[]>((cell) =>
-    cell.translated?.trim() && !cell.selectedGeneratedVoiceAudioId
-      ? [{ cell, text: cell.translated.trim() }]
-      : [],
-  )
+  /** AQU-646: the resolved bulk-synth plan, for the action closure below (which
+   *  is memoised above where the plan is computed). NOT the old placeholder
+   *  resolver — that one answered before the cue links loaded and its answer
+   *  stuck; this only ever holds the real, fully-resolved array. */
+  const synthTargetsRef = useRef<SynthTargetPlan[]>([])
   /** How many takes are attached to the CURRENT audio cues. Read by the import
    *  handler, which is declared above the attachment read it needs. */
   const cueTakeCountRef = useRef<() => number>(() => 0)
@@ -2290,6 +2295,63 @@ export function ProjectWorkspace() {
     projectId: project?.id ?? null,
     fileId: audioCueSibling ? (activeFileId ?? null) : null,
   })
+
+  // AQU-646 (2026-08-27): THE CUE CELLS ARE RESOLVED HERE, beside the links
+  // they belong with, and not 4,800 lines below where they used to sit.
+  //
+  // The menu counts (`audioCounts`) and everything else that has to answer
+  // "what would a bulk run actually do" are declared between there and here,
+  // so they could not name these values as dependencies — they read a REF
+  // instead, and therefore kept whatever answer the first render produced,
+  // before the cue read had landed. The count promised to match the run and
+  // silently did not. Moving the block up is what lets those consumers list
+  // real dependencies; it depends on nothing declared after `cueLinks`, and
+  // no early return sits between, so hook order is unchanged.
+  // ── Stage 4: takes live on the AUDIO CUES, not the subtitle rows ─────────
+  // Forced by the data model, not chosen: `cell_audio.selected` is per (cell,
+  // slot), so a cell holds ONE selected recording — and on episode 101, 93
+  // subtitle lines are performed as two or more heard lines. Those lines could
+  // never hold their takes.
+  //
+  // The cue sibling's CELLS stay frozen and outside live sync (useAudioCueCells
+  // is a one-shot read — they are a transcript of a finished film and no event
+  // ever edits them). Only their ATTACHMENTS are live, which is exactly what
+  // this second per-file read gives us.
+  const { byCellId: cueAudioByCellId } = useFileAudioAttachments(
+    project?.id ?? null,
+    audioCueSibling?.id ?? null,
+  )
+  // Dragging a take on a cue: the anchor the drag writes lands in the CUE
+  // cell's metadata, and useAudioCueCells reads its file ONCE (frozen
+  // transcript, no live sync, nothing to invalidate). Without a local overlay
+  // the chip would spring back to where it started and only move after a
+  // reload. Server truth still wins on the next mount — this only covers the
+  // gap between the drag and that read.
+  const [cueAnchorOverrides, setCueAnchorOverrides] = useState<ReadonlyMap<string, number>>(
+    new Map(),
+  )
+  setCueAnchorOverridesRef.current = (cellId, offsetMs) =>
+    setCueAnchorOverrides((prev) => new Map(prev).set(cellId, offsetMs))
+  const audioCueCells = useMemo(() => {
+    if (!audioCues) return null
+    const merged = mergeCellsWithAudio(audioCues, cueAudioByCellId)
+    if (cueAnchorOverrides.size === 0) return merged
+    return merged.map((c) => {
+      const offset = cueAnchorOverrides.get(c.id)
+      return offset === undefined
+        ? c
+        : { ...c, metadata: { ...(c.metadata ?? {}), target_offset_ms: offset } }
+    })
+  }, [audioCues, cueAudioByCellId, cueAnchorOverrides])
+  cueTakeCountRef.current = () => {
+    let n = 0
+    for (const entry of cueAudioByCellId.values()) {
+      // Only live clips count. A tombstoned attachment is already gone, and
+      // refusing an import over one would be a dead end with no way out.
+      n += Object.keys(entry.attachments).length > 0 ? 1 : 0
+    }
+    return n
+  }
   /**
    * Toggle one pairing by hand (linking mode). Paints first, then emits — the
    * event can sit in the outbox for a while and the chip has to answer the
@@ -3563,19 +3625,25 @@ export function ProjectWorkspace() {
     toast.add({ type: "success", title: "Removed the audio cues. The Source audio track is gone." })
   }, [project?.id, audioCueSiblings, currentUsername, getTokenForProjectFile, refresh])
 
-  const [videoDialogOpen, setVideoDialogOpen] = useState(false)
   // Nothing reads this any more (round 8 removed the dead cue clock below), but
   // the player it belongs to comes back with the event grammar in v1.x, so the
   // wire stays rather than being re-derived from scratch then.
   const [, setCurrentVideoTime] = useState(0)
   const videoPlayerRef = useRef<VideoPlayerHandle>(null)
   // Phase 2c-gamma: video attachments lived on Y.Doc meta. Disabled here so
-  // the editor still renders for subtitle files; the attach/play workflow
-  // comes back via the event grammar in v1.x.
-  const videoAttachment: { videoStartOffset?: number; videoUrl?: string } = {}
+  // the editor still renders for subtitle files; the PLAYER comes back via the
+  // event grammar in v1.x — which is why `videoSrc` and the cue extraction
+  // below stay parked rather than being re-derived from scratch then.
+  //
+  // AQU-646 stage 6I (Sam, 2026-08-27): THE ATTACH HALF DOES NOT COME BACK,
+  // and it is gone. `VideoAttachmentDialog` was still reachable from the ⋯
+  // menu on every subtitle file, offering a URL field and a file upload over a
+  // `current` that was permanently empty and an `onSave` that was a literal
+  // no-op — "it opens up a little modal that claims to let you upload video and
+  // it does not." Linking a film is `LinkVideoUrlDialog`'s job and always was;
+  // this was a second, broken door to the same room. The dialog, its test and
+  // its i18n went with the menu item.
   const videoSrc: string | null = null
-  const blobUnavailable = false
-  const saveVideo: (..._: unknown[]) => void = () => {}
 
   // Live cues for the VideoPlayer's overlay (bypasses iframe CC). We drive
   // rendering from cell data directly so edits appear immediately without a
@@ -3584,8 +3652,6 @@ export function ProjectWorkspace() {
     if (!isSubtitleFile || !videoSrc || cellSummaries.length === 0) return []
     return readAtVersion(cellStoreVersion, () => extractCuesFromCells(cellStore.getAllCellViews()))
   }, [cellStore, cellStoreVersion, cellSummaries.length, isSubtitleFile, videoSrc])
-
-  const videoStartOffset = videoAttachment.videoStartOffset ?? 0
 
   // AQU-646 round 8: `activeCueIndex` and the 500ms effect that fed it to
   // scrollToCellIndex are GONE. Three things were wrong with them at once.
@@ -6901,26 +6967,58 @@ export function ProjectWorkspace() {
     cellStore.setOwnTakeCellIds(ownTakeCellIds)
   }, [cellStore, ownTakeCellIds])
 
+  /** The link index in the shape every cue-aware resolver takes. */
+  const cueLinkArgs = useMemo(
+    () => ({
+      cueCells: audioCueCells,
+      cuesForText: cueLinks.cuesForText,
+      textForCue: cueLinks.textForCue,
+    }),
+    [audioCueCells, cueLinks],
+  )
+
+  /**
+   * EXACTLY what "generate a voice for every line" would do, resolved once and
+   * read by both the menu count and the run — so the number you confirm is the
+   * work that happens.
+   *
+   * 2026-08-27: this used to be a per-cell function behind a ref, because the
+   * cue data was declared thousands of lines below the count that needed it.
+   * The ref meant the count could not name its dependencies and kept the answer
+   * from before the cue read landed; the fan-out-per-subtitle inside it meant
+   * one heard line performing two subtitles was generated twice, into one slot,
+   * racing. Both are gone: the cue block moved up (see its note), and the rule
+   * itself is a pure, tested function that iterates DESTINATIONS.
+   */
+  const synthTargets = useMemo(() => {
+    if (!activeFileId) return []
+    const cells = mergeCellsWithAudio(readAtVersion(cellStoreVersion, getActiveCells), workspaceAudioByCellId)
+    return resolveSynthTargets(cells, cueLinkArgs)
+  }, [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId, cueLinkArgs])
+  synthTargetsRef.current = synthTargets
+
   // AQU-646: real counts for the "Transcribe all" / "Synth all" menu items,
-  // sharing the exact filters the batch runners use (needsTranscription /
-  // needsSynthesis) so the menu count always matches what the run would do.
-  // getActiveCells() is merged with audio attachments; keyed on the store
-  // version so counts track edits/attaches live.
+  // sharing the exact filters the batch runners use so the menu count always
+  // matches what the run would do.
+  //
+  // BOTH NUMBERS ARE ABOUT DESTINATIONS. On a file with an audio-cue sibling
+  // the audio lives on the heard lines, not the subtitle rows — so counting
+  // subtitles over-counts a cue that performs several of them, and for
+  // transcription it is simply always zero, because no subtitle cell ever
+  // carries a `selectedAudioId` there. That zero hid "Transcribe all
+  // recordings" from the menu outright on exactly the files this branch is for.
   const audioCounts = useMemo(() => {
     if (!activeFileId) return { untranscribed: 0, unsynthesized: 0 }
-    const cells = mergeCellsWithAudio(readAtVersion(cellStoreVersion, getActiveCells), workspaceAudioByCellId)
+    // The cue list is already merged with its own file's attachments, and it
+    // includes the ~10 heard lines an episode that no subtitle is linked to —
+    // a take on one of those needs transcribing like any other.
+    const holders =
+      audioCueCells ??
+      mergeCellsWithAudio(readAtVersion(cellStoreVersion, getActiveCells), workspaceAudioByCellId)
     let untranscribed = 0
-    let unsynthesized = 0
-    for (const c of cells) {
-      if (needsTranscription(c)) untranscribed++
-      // Stage 3f: COUNT WHAT THE RUN WOULD DO, which on a cue file is one per
-      // heard line rather than one per subtitle — and zero for a line nothing
-      // performs. `needsSynthesis` alone counted subtitles, including ones the
-      // run now correctly refuses.
-      unsynthesized += synthTargetsForRef.current(c).length
-    }
-    return { untranscribed, unsynthesized }
-  }, [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId])
+    for (const c of holders) if (needsTranscription(c)) untranscribed++
+    return { untranscribed, unsynthesized: synthTargets.length }
+  }, [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId, audioCueCells, synthTargets])
 
   // Eager media strategy: prefetch every recording's waveform peaks into the
   // OPFS cache once the file is open, so even cells the user hasn't scrolled
@@ -7023,8 +7121,16 @@ export function ProjectWorkspace() {
       if (!activeFileId || !project) return
       // AQU-646 P0: merge attachments in — needsTranscription gates on
       // selectedAudioId, which raw store cells never carry.
-      const cells = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
-      const fileId = activeFileId
+      //
+      // 2026-08-27: …and on a file with an audio-cue sibling the recordings are
+      // not on these cells at all. The subtitle rows never carry a
+      // `selectedAudioId`, so `needsTranscription` was false for every one of
+      // them and this ran over an EMPTY target list — silently, because the
+      // toast below is created lazily on the first progress call and a
+      // zero-target run never makes one. Same list the menu count uses, so the
+      // number offered and the work done cannot disagree.
+      const cells =
+        audioCueCells ?? mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
       void (async () => {
         // Same lazy toast as the mp3 auto-transcribe: created on the first
         // progress call, so a run with nothing to transcribe never leaves a
@@ -7062,7 +7168,11 @@ export function ProjectWorkspace() {
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
         await refreshOutboxPending()
         revalidateCells()
-        notifyAudioAttachmentsChanged(fileId)
+        // EVERY file the run touched, not just the one on screen: a cue file's
+        // transcripts land in the hidden sibling, and poking only the active id
+        // left them invisible until a reload. Same rule as
+        // `handleTranscribeSections`.
+        for (const id of new Set(cells.map((c) => c.fileId))) notifyAudioAttachmentsChanged(id)
         // Only if something was actually reported — see the lazy toast above.
         // A short count means the banner's Cancel was pressed mid-run.
         if (toastId !== null) {
@@ -7074,17 +7184,43 @@ export function ProjectWorkspace() {
     },
     runSynthAll: () => {
       if (!activeFileId || !project) return
+      // THE SAME ARRAY THE MENU COUNTED. `runBatchSynthAll` still takes a
+      // per-cell resolver for its other callers, so the already-resolved plan
+      // is handed back through it keyed by source — the run cannot drift from
+      // the number the confirmation dialog showed.
+      const targets = synthTargetsRef.current
+      const byFirstSource = new Map<string, SynthTarget[]>()
+      for (const t of targets) {
+        const key = t.voiceCellId
+        const list = byFirstSource.get(key)
+        const one = { cell: t.cell, text: t.text, voiceCellId: t.voiceCellId }
+        if (list) list.push(one)
+        else byFirstSource.set(key, [one])
+      }
       const cells = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
       void runBatchSynthAll({
         cells,
         project,
         session: frontierSession ?? null,
         username: currentUsername,
-        resolveTargets: synthTargetsForRef.current,
+        resolveTargets: (c) => byFirstSource.get(c.id) ?? [],
+      }).then(() => {
+        // Sam, 2026-08-27: a heard line performed by lines with DIFFERENT
+        // characters is generated in the first one's voice — say which ones,
+        // afterwards, rather than silently picking.
+        const divergent = divergentVoiceTargets(targets, (id) =>
+          assignedCastVoiceId(project.ttsSettings, id),
+        )
+        if (divergent.length === 0) return
+        toast.add({
+          type: "info",
+          title: t("audio.tts.mixedCharacters", { count: divergent.length }),
+          description: t("audio.tts.mixedCharactersDetail"),
+        })
       })
     },
     navigate,
-  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId])
+  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioCueCells, t])
 
   // AQU-661: the dynamic primary-action button was removed; its actions now live
   // in the ⋯ overflow menu. This preserves the button's confirmation flow —
@@ -7113,51 +7249,6 @@ export function ProjectWorkspace() {
     project?.id ?? null,
     timelineEditorVisible ? activeFileId : null,
   )
-  // ── Stage 4: takes live on the AUDIO CUES, not the subtitle rows ─────────
-  // Forced by the data model, not chosen: `cell_audio.selected` is per (cell,
-  // slot), so a cell holds ONE selected recording — and on episode 101, 93
-  // subtitle lines are performed as two or more heard lines. Those lines could
-  // never hold their takes.
-  //
-  // The cue sibling's CELLS stay frozen and outside live sync (useAudioCueCells
-  // is a one-shot read — they are a transcript of a finished film and no event
-  // ever edits them). Only their ATTACHMENTS are live, which is exactly what
-  // this second per-file read gives us.
-  const { byCellId: cueAudioByCellId } = useFileAudioAttachments(
-    project?.id ?? null,
-    audioCueSibling?.id ?? null,
-  )
-  // Dragging a take on a cue: the anchor the drag writes lands in the CUE
-  // cell's metadata, and useAudioCueCells reads its file ONCE (frozen
-  // transcript, no live sync, nothing to invalidate). Without a local overlay
-  // the chip would spring back to where it started and only move after a
-  // reload. Server truth still wins on the next mount — this only covers the
-  // gap between the drag and that read.
-  const [cueAnchorOverrides, setCueAnchorOverrides] = useState<ReadonlyMap<string, number>>(
-    new Map(),
-  )
-  setCueAnchorOverridesRef.current = (cellId, offsetMs) =>
-    setCueAnchorOverrides((prev) => new Map(prev).set(cellId, offsetMs))
-  const audioCueCells = useMemo(() => {
-    if (!audioCues) return null
-    const merged = mergeCellsWithAudio(audioCues, cueAudioByCellId)
-    if (cueAnchorOverrides.size === 0) return merged
-    return merged.map((c) => {
-      const offset = cueAnchorOverrides.get(c.id)
-      return offset === undefined
-        ? c
-        : { ...c, metadata: { ...(c.metadata ?? {}), target_offset_ms: offset } }
-    })
-  }, [audioCues, cueAudioByCellId, cueAnchorOverrides])
-  cueTakeCountRef.current = () => {
-    let n = 0
-    for (const entry of cueAudioByCellId.values()) {
-      // Only live clips count. A tombstoned attachment is already gone, and
-      // refusing an import over one would be a dead end with no way out.
-      n += Object.keys(entry.attachments).length > 0 ? 1 : 0
-    }
-    return n
-  }
 
   // Which cell the recorder should OPEN on, given whatever id asked for it.
   // The timeline's Target row already hands over a cue id; the dialogue table's
@@ -7339,15 +7430,12 @@ export function ProjectWorkspace() {
           sharedWith: 1,
         }
       }
-      const byId = new Map(cellSummaries.map((c) => [c.id, c]))
-      const linked = textIds
-        .map((id) => byId.get(id))
-        .filter((c): c is (typeof cellSummaries)[number] => Boolean(c))
-        .sort((a, b) => (a.startTime ?? 0) - (b.startTime ?? 0))
-      const text = linked
-        .map((c) => c.translated?.trim())
-        .filter((t): t is string => Boolean(t))
-        .join(" ")
+      // ONE JOIN, SHARED WITH THE BULK RUN (`joinCueText`). What the performer
+      // reads here and what "generate a voice for all" makes this line say have
+      // to be the same string; two copies of the rule would let them drift, and
+      // the drift would be silent.
+      const byId = new Map(cellSummaries.map((c) => [c.id, c as unknown as CellData]))
+      const { text, linked } = joinCueText(textIds, byId)
       // Only worth showing the transcript when the subtitle is SHARED with
       // other cues — that is the only case where the performer has to work out
       // which part of the line in front of them belongs to this take.
@@ -7497,39 +7585,6 @@ export function ProjectWorkspace() {
     [linkedTakesByCell, audioMergedCells],
   )
 
-  /**
-   * AQU-646 stage 3f: what a bulk synth would actually do, per source cell.
-   *
-   * The words live on this cell; the audio belongs wherever `resolveAudioHomes`
-   * says — itself on an ordinary file, the heard lines performing it on a file
-   * with an audio-cue sibling. Sam's ruling: a subtitle performed by two heard
-   * lines generates onto BOTH, each speaking the whole line.
-   *
-   * SHARED WITH THE MENU COUNT, because the comment on `audioCounts` promises
-   * the number matches what the run does — and it would silently stop being
-   * true the moment these two rules diverged.
-   */
-  const synthTargetsFor = useCallback(
-    (cell: CellData): SynthTarget[] => {
-      const text = cell.translated?.trim()
-      if (!text) return []
-      const homes = resolveAudioHomes(cell.id, {
-        cueCells: audioCueCells,
-        cuesForText: cueLinks.cuesForText,
-      })
-      // Nothing performs this line — there is nowhere to put a voice, and the
-      // subtitle cell is exactly the wrong answer.
-      if (homes.kind === "none") return []
-      const cells = homes.kind === "self" ? [cell] : homes.cells
-      return cells
-        // Each home keeps its own "already voiced" test: one cue of a pair may
-        // have been generated and the other not.
-        .filter((c) => !c.selectedGeneratedVoiceAudioId)
-        .map((c) => ({ cell: c, text, voiceCellId: cell.id }))
-    },
-    [audioCueCells, cueLinks],
-  )
-  synthTargetsForRef.current = synthTargetsFor
 
   const handleTranscribeSections = useCallback(
     (cellIds: string[]) => {
@@ -8383,14 +8438,34 @@ export function ProjectWorkspace() {
       // and the attachment scan runs once. Looping the whole read per track
       // would be N passes over every cell in the file for no reason.
       const doomedSlots = new Set(
-        doomed.filter((t) => t.kind !== "folder").map((t) => (t.id === "target-audio" ? "recording" : t.id)),
+        doomed.filter((t) => t.kind !== "folder").map((t) => slotForTrack(t.id)),
       )
-      const removals: Array<{ cellId: string; audioId: string }> = []
+      // AQU-646 stage 6D: BOTH FILES, and each removal remembers which one it
+      // came from.
+      //
+      // This used to scan `timelineAudioByCellId` alone and emit every removal
+      // against `activeFileId`. On a file with an audio-cue sibling that is the
+      // wrong map AND the wrong file: takes are written against the cue cells
+      // in the sibling, so the scan found nothing, the confirmation said the
+      // track was empty, and the delete dropped the track row while leaving its
+      // recordings alive in a slot no track would ever address again. Sam did
+      // exactly that to two tracks on 2026-08-27.
+      //
+      // The two maps are disjoint by cell id — one is this file's audio read,
+      // the other the sibling's — so a clip is gathered once and only once.
+      const removals: Array<{ cellId: string; audioId: string; fileId: string }> = []
       if (doomedSlots.size > 0) {
-        for (const [cellId, entry] of timelineAudioByCellId) {
-          for (const [audioId, att] of Object.entries(entry.attachments)) {
-            if (!doomedSlots.has(att.slot)) continue
-            removals.push({ cellId, audioId })
+        const sources: Array<[typeof timelineAudioByCellId, string | null]> = [
+          [timelineAudioByCellId, activeFileId],
+          [cueAudioByCellId, audioCueSibling?.id ?? null],
+        ]
+        for (const [map, fileId] of sources) {
+          if (!fileId) continue
+          for (const [cellId, entry] of map) {
+            for (const [audioId, att] of Object.entries(entry.attachments)) {
+              if (!doomedSlots.has(att.slot)) continue
+              removals.push({ cellId, audioId, fileId })
+            }
           }
         }
       }
@@ -8416,7 +8491,10 @@ export function ProjectWorkspace() {
             ...removals.map((r) => ({
               kind: "cell.audio.remove" as const,
               projectId: project.id,
-              fileId: activeFileId,
+              // The file the CELL lives in — not the active one. A take on a
+              // cue belongs to the sibling, and an event aimed at the wrong
+              // file projects onto nothing.
+              fileId: r.fileId,
               cellId: r.cellId,
               parentId: null,
               author: currentUsername,
@@ -8467,6 +8545,8 @@ export function ProjectWorkspace() {
       activeFileId,
       currentUsername,
       timelineAudioByCellId,
+      cueAudioByCellId,
+      audioCueSibling?.id,
       serverTimelineTracks,
       getTokenForProjectFile,
       refresh,
@@ -8558,7 +8638,37 @@ export function ProjectWorkspace() {
   // which is harmless only because the pane is keyed by file id — a fragile
   // thing to rely on when the toggle effect deliberately depends on the nonce
   // alone.
-  useEffect(() => { setVideoSeek(null); setVideoToggle(null) }, [activeFileId])
+  /**
+   * AQU-646 stage 5: is the playhead being dragged right now?
+   *
+   * A ref, not state: it is read inside a seek that fires many times a second
+   * and it must never cause a render of its own.
+   *
+   * THE FLAG MUST NOT STICK, IN EITHER DIRECTION, and both failures are ugly.
+   * Stuck TRUE and every later seek skips the queue for the rest of the
+   * session — click a chip, press play, and the queue starts somewhere else.
+   * Stuck FALSE and a scrub cues the queue on every throttled tick, which mints
+   * tokens, opens elements, and raises a user-facing missing-clip toast for
+   * every gone take it crosses. So it is cleared from the release, from a
+   * cancel, from the editor's own unmount, and here on a file switch.
+   */
+  const scrubbingRef = useRef(false)
+  useEffect(() => { scrubbingRef.current = false; setVideoSeek(null); setVideoToggle(null) }, [activeFileId])
+  const handleTimelineScrubStart = useCallback(() => {
+    scrubbingRef.current = true
+    // `pauseAllTransports`, not `pauseAllPlayback`: the latter is queue-only and
+    // deliberately does not reach the picture. This one covers the queue, the
+    // single-cell clip, a standalone film AND the virtual clock (which
+    // registers into the same controller store) — and its own doc block
+    // explains why it must never touch `setExternalDubsPlaying`, which is a
+    // derived write that wedges false for the session.
+    //
+    // Nothing resumes on release. That is the house rule the video pane already
+    // states for its own pauses, and Sam's ruling — picture only — would be
+    // violated the instant an auto-resume started sound under a stopped hand.
+    pauseAllTransports()
+  }, [])
+  const handleTimelineScrubEnd = useCallback(() => { scrubbingRef.current = false }, [])
   const handleTimelineSeekToTime = useCallback((sec: number) => {
     // AQU-646 stage 3h: A FILE WITH TIMINGS AND NO MASTER — the virtual clock
     // is the transport, so the seek ends here, exactly as it ends at the
@@ -8574,6 +8684,18 @@ export function ProjectWorkspace() {
       return
     }
     setVideoSeek((prev) => ({ sec: Math.max(0, sec), nonce: (prev?.nonce ?? 0) + 1 }))
+    // AQU-646 stage 5: A SCRUB MOVES THE PICTURE AND NOTHING ELSE (Sam).
+    //
+    // Placed AFTER the stamp so the frame still follows the hand, and BEFORE
+    // the video-transport return below so a SLAVED film is covered too. It
+    // earns its keep twice over: it is what keeps the drag silent, and it is
+    // what stops the slaved arrangement issuing two element seeks per tick —
+    // this nonce, plus the queue's own corrective on the tick that follows.
+    //
+    // The virtual arm above is deliberately NOT suppressed: it is the only
+    // thing that moves the head on a film-less file, and it is already silent
+    // because the scrub paused the transport before the first move.
+    if (scrubbingRef.current) return
     // ROUND 6 — the picture is the transport, so the seek ends here.
     //
     // This function was written for audio files, where an explicit seek should
@@ -8937,16 +9059,6 @@ export function ProjectWorkspace() {
     }
 
     const contextual: OverflowMenuItem[] = [
-      ...(isSubtitleFile
-        ? [{
-            id: "attach-video",
-            // Reuses the video-attachment dialog's own title (this item opens
-            // it) rather than minting a duplicate "Attach video" string.
-            label: t("editor.video.title"),
-            icon: Film,
-            onClick: () => setVideoDialogOpen(true),
-          }]
-        : []),
       ...(suggestions.length > 0 && (suggestionsDismissed || project?.suggestionsDismissedAt)
         ? [{
             id: "redetect-suggestions",
@@ -9051,7 +9163,6 @@ export function ProjectWorkspace() {
     handleReinviteSuggestions,
     handleWorkspaceAction,
     hasUnfinished,
-    isSubtitleFile,
     lens,
     openExportFlow,
     project,
@@ -9752,11 +9863,6 @@ export function ProjectWorkspace() {
             <div className="px-3 py-1 empty:hidden">
               <CompletionBulkProgressBanner />
             </div>
-            {isSubtitleFile && blobUnavailable && !videoAttachment.videoUrl && (
-              <div className="bg-amber-50 px-4 py-2 text-xs text-amber-700 dark:bg-amber-950 dark:text-amber-400">
-                {t("workspace.videoUnavailable")}
-              </div>
-            )}
             {/* F6: stale-sibling dead-letter banner. Clicking "View in
                 history" routes to the affected cell's history drawer where
                 the stale commit is preserved as a branch off its parent and
@@ -9872,7 +9978,10 @@ export function ProjectWorkspace() {
               ref={videoPlayerRef}
               src={videoSrc}
               cues={videoCues}
-              startOffset={videoStartOffset}
+              // Was `videoAttachment.videoStartOffset ?? 0`; the attachment it
+              // read is gone (stage 6I) and this player is parked behind a
+              // hardcoded-null `videoSrc`, so it never mounts to read it.
+              startOffset={0}
               onTimeUpdate={setCurrentVideoTime}
             />
           ) : undefined
@@ -10037,6 +10146,10 @@ export function ProjectWorkspace() {
                     onCueActivated={handleCueActivated}
                     activateRequest={timelineActivateRequest}
                     coreMediaUrl={activeFile.coreMediaUrl ?? null}
+                    // AQU-646 stage 6B: the trim handles are withheld when the
+                    // thing playing would ignore a dub's trims — and the
+                    // virtual transport honours them, exactly as the film does.
+                    virtualIsTransport={virtualIsTransport}
                     editable={!isReadOnly}
                     fileId={activeFile.id}
                     onRetimeSubtitle={handleRetimeSubtitle}
@@ -10093,6 +10206,8 @@ export function ProjectWorkspace() {
                       void handleToggleCueLink(textCellId, cueCellId, linked)
                     }}
                     onSeekToTime={handleTimelineSeekToTime}
+                    onScrubStart={handleTimelineScrubStart}
+                    onScrubEnd={handleTimelineScrubEnd}
                     tracks={timelineTracks}
                     timingMode={timingMode}
                     onChangeTimingMode={canEditTimingMode ? handleChangeTimingMode : undefined}
@@ -10872,10 +10987,6 @@ export function ProjectWorkspace() {
         open={shareOpen} onOpenChange={setShareOpen}
         projectId={projectId!}
         onSharesChanged={refreshChecklistShares}
-      />
-      <VideoAttachmentDialog
-        open={videoDialogOpen} onOpenChange={setVideoDialogOpen}
-        current={videoAttachment} onSave={saveVideo}
       />
       {/* AQU-661: confirmation for workspace actions folded from the removed
           primary-action dropdown into the ⋯ overflow menu. */}

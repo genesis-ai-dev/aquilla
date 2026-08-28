@@ -46,7 +46,11 @@ export function TimelineFolderLane({
     <div
       data-testid={`tl-folder-lane-${trackId}`}
       data-collapsed={collapsed ? "" : undefined}
-      className="relative border-b border-border"
+      // 2026-08-27 (Sam): the folder row is a GREY BAND across both columns —
+      // this is its lane half, the same opaque token the gutter's folder row
+      // wears, so the band reads as one strip with no seam at the column edge
+      // (the gutter's edge rule is covered on that side; see its comment).
+      className="relative border-b border-border bg-muted"
       style={{ height: `${folderRowHPx(rowH)}px` }}
     >
       {blocks.map((block) => (

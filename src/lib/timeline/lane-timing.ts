@@ -305,3 +305,37 @@ export function chipTrespass(
     tail: o.tailSec != null && span.end > section.end,
   }
 }
+
+/**
+ * Where a MUTUALLY-trespassing pair of chips meets when both are drawn short
+ * at rest (2026-08-27, Sam's dual-overlap-across-a-gap round). When both chips
+ * of a pair are at fault, each one's edge lies inside the other, so neither is
+ * a valid place for its neighbour to stop. They used to retreat to their OWN
+ * section borders — right when the sections touch (one shared border, the pair
+ * meets »|« on it), wrong when a gap separates them: two red chips would paint
+ * 0.4s apart while warning about an overlap the rest state now HID, and no
+ * hover could ever show it, because each chip expanded alone against the
+ * other's distant cut.
+ *
+ * The general rule: meet at the midpoint of the zone that is both inside the
+ * pair's audible overlap AND between their sections' facing borders. Both
+ * trespassing guarantees that zone is never empty — the previous chip's end is
+ * past its own border, the next chip's start is before its own — and when the
+ * sections touch it collapses to exactly the shared border, so the adjacent
+ * case keeps its old cut byte for byte. Overlapping SECTIONS (the borders
+ * cross) inverts lo/hi; the midpoint then lands between the crossed borders,
+ * which also keeps the painted pair disjoint — the old per-border cuts made
+ * them overlap at rest there.
+ *
+ * The midpoint, not a split weighted by how far each chip trespassed: the cut
+ * is a paint affordance, not a verdict — blame already lives in the warning —
+ * and a midpoint holds still while one chip is dragged near it.
+ */
+export function dualFaultMeetSec(
+  prev: { chipEndSec: number; sectionEndSec: number },
+  next: { chipStartSec: number; sectionStartSec: number },
+): number {
+  const lo = Math.max(next.chipStartSec, prev.sectionEndSec)
+  const hi = Math.min(prev.chipEndSec, next.sectionStartSec)
+  return (lo + hi) / 2
+}

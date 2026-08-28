@@ -89,6 +89,7 @@ import {
   TL_ROW_H_CLASS,
 } from "@/lib/timeline/row-metrics"
 import { orderForDrop, type RowBound } from "@/lib/timeline/track-reorder"
+import { SCRUB_SEEK_THROTTLE_MS } from "@/lib/timeline/scrub"
 import {
   buildTrackRows,
   folderIdsOf,
@@ -102,7 +103,7 @@ import {
   type TrackRow,
 } from "@/lib/timeline/track-groups"
 import { loadCollapsedFolders, saveCollapsedFolders, toggleCollapsed } from "@/lib/timeline/track-collapse"
-import { isColorableKind, trackDot } from "@/lib/timeline/track-colors"
+import { TRACK_ACCENT_CLASS, TRACK_DOT_CLASS, trackHueVarsFor } from "@/lib/timeline/track-colors"
 import type { SummarySpan } from "@/lib/timeline/summary-band"
 import { TimelineFolderLane } from "./TimelineFolderLane"
 import { RowMetricsContext, useRowMetrics, type RowMetrics } from "./useRowMetrics"
@@ -114,12 +115,13 @@ import { RowMetricsContext, useRowMetrics, type RowMetrics } from "./useRowMetri
 // mute button too now and two components each merging a toggle into their OWN
 // copy of the preference clobber one another.
 import { useQueueForFile, useMissingClipCells, queueClockIsFileTime } from "@/lib/audio/play-queue"
-import { seedAudibility, toggleAudibility, useQueueAudibility } from "@/lib/audio/audibility"
+import { seedAudibility, toggleAudibility, trackAudible, useQueueAudibility } from "@/lib/audio/audibility"
 
 import { isInEditableContext, isTopAudioShortcutOwner, pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { spacebarShouldToggle } from "@/lib/audio/playback-keys"
 import { resolveTargetAudio } from "@/lib/audio/track-audio"
-import { RECORDING_SLOT, slotAudible, slotForTrack } from "@/lib/timeline/track-slots"
+import { RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
+import { nextTrackName } from "@/lib/timeline/track-names"
 import { loadSnapEnabled, saveSnapEnabled } from "@/lib/timeline/snap"
 import { setMediaCursorCell, setMediaSyncActive } from "@/lib/timeline/media-cursor"
 import { useVideoClockSec, useVideoClockPlaying } from "@/lib/timeline/video-clock"
@@ -157,6 +159,21 @@ import type { MessageKey } from "@/lib/i18n/messages/en"
 export interface TimelineEditorProps {
   cells: CellData[]
   coreMediaUrl: string | null
+  /**
+   * AQU-646 stage 6B: is the VIRTUAL clock driving this file?
+   *
+   * A file with timings and no media of its own gets a synthetic transport
+   * (stage 3h) that fires takes through the same overlay pool the film does —
+   * so, like the film, it honours a dub's trims. The lane needs to know,
+   * because the trim handles are withheld when the thing playing would ignore
+   * them, and a film-less file otherwise looked untrimmable.
+   *
+   * AN EXPLICIT PROP, NOT DERIVED IN HERE from the clock's own second. The
+   * editor already subscribes to `useVirtualClockSec`, but that goes null with
+   * the transport's momentary state, and "can this be trimmed" is a structural
+   * question about the file, not about whether it happens to be running.
+   */
+  virtualIsTransport?: boolean
   editable: boolean
   /** Used to scope the persisted zoom preference. */
   fileId: string
@@ -321,6 +338,17 @@ export interface TimelineEditorProps {
    *  clicks and clean card clicks route through this (the workspace decides
    *  whether to jump the live queue or cue a paused one). */
   onSeekToTime?(sec: number): void
+  /**
+   * AQU-646 stage 5: the playhead is being dragged / has been released.
+   *
+   * BRACKETING, NOT A FLAG ON `onSeekToTime`. A scrub says three different
+   * things — it has begun (the only moment a pause is correct), it is at X, and
+   * it ended at X (an ordinary seek needing no special treatment) — and folding
+   * them into one callback's arity is the shape this repo already has a scar
+   * from. `onSeekToTime` stays a one-argument call for every caller it has.
+   */
+  onScrubStart?(): void
+  onScrubEnd?(): void
   /** 2026-08-07: the empty-target chips' hover record button (the one
    *  detail-pane action that lives on the lanes, not in the table below). */
   /** AQU-646 stage 3: which TRACK's slot the take should land in. The default
@@ -559,6 +587,7 @@ function LaneLabel({
   name,
   sub,
   dot,
+  hueVars,
   trailing,
   reorder,
   folder,
@@ -573,6 +602,14 @@ function LaneLabel({
   name: string
   sub: string
   dot: string
+  /**
+   * AQU-646 stage 7: the row's hue, as inherited custom properties.
+   *
+   * EVERY row has one now — the derived rows' fixed colours went through the
+   * same vocabulary as the pickable ones, so the gutter reads as one system.
+   * Absent only for a folder, which is a heading rather than a track.
+   */
+  hueVars?: Record<string, string>
   trailing?: ReactNode
   reorder?: LaneLabelReorder
   /** AQU-646 stage 2: this row's name is being edited in place. */
@@ -668,6 +705,17 @@ function LaneLabel({
       data-selected={selected ? "" : undefined}
       className={cn(
         "flex items-center gap-1 overflow-hidden border-b border-border",
+        // AQU-646 stage 7: THE 4px IDENTITY BAR, from Sam's spec ("track header
+        // accent"). A CLASS ON THIS ROOT, deliberately, and not a new element:
+        // an accent span would become the row's `firstElementChild`, which the
+        // drop-indent test reads to decide whether the CONTENT is indented, and
+        // a `before:` pseudo-element would escape to the wrong ancestor because
+        // this root's `relative` is withheld from anyone who cannot reorder.
+        //
+        // It sits AFTER `border-border`: tailwind-merge folds `border-color`
+        // into the per-side groups, so a later bare border colour would wipe an
+        // earlier `border-l-*`. Do not reorder these two.
+        hueVars && TRACK_ACCENT_CLASS,
         // Collapsed, the two surviving glyphs sit CENTRED as a pair rather than
         // pushed to opposite walls: `justify-between` across 44px would strand
         // the dot on one edge and the speaker on the other with nothing
@@ -687,6 +735,15 @@ function LaneLabel({
         // it: without it the browser claims a vertical drag as a scroll gesture
         // and the pointer stream stops mid-drag.
         reorder && "group relative cursor-grab touch-none select-none outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500",
+        // 2026-08-27 (Sam): THE FOLDER ROW IS A GREY BAND, continuous across
+        // both columns — TimelineFolderLane paints the same token on its half.
+        // Opaque and lifted above the gutter's edge rule (z-30 over the
+        // rule's z-20), which is what lets the band cover the rule's 1px and
+        // run unbroken into its lane; see the rule's own comment. BEFORE the
+        // lift and the selection tint, so both still win their groups — and a
+        // LIFTED folder drops back under the rule (the lift's z-10 wins the z
+        // group), which is today's look for every travelling row.
+        folder && "relative z-30 bg-muted",
         // The lift. Opaque background + shadow because the row it passes over
         // is still drawn where it always was — the other rows deliberately do
         // NOT part (see the gutter's comment), so the only thing separating the
@@ -699,6 +756,9 @@ function LaneLabel({
         className,
       )}
       style={{
+        // AQU-646 stage 7: the hue, for the accent bar and the dot. Inherited,
+        // so both read it without either being handed a colour.
+        ...hueVars,
         ...(folder ? { height: `${ownRowH}px` } : undefined),
         ...(lifted ? { transform: `translateY(${reorder?.liftPx}px)` } : undefined),
       }}
@@ -863,18 +923,18 @@ const TRACK_RENDER: Record<
   }
 > = {
   // No speaker button: the Subtitles row makes no sound to mute.
-  "source-subtitles": { sub: "text · reading", dot: "bg-zinc-400 dark:bg-zinc-600", audibilityKey: null, speakerName: "" },
+  "source-subtitles": { sub: "text · reading", dot: TRACK_DOT_CLASS, audibilityKey: null, speakerName: "" },
   // The speaker button publishes into the play queue, which can only reach the
   // queue's OWN elements — so it belongs to this row only while the row is an
   // imported recording's dialogue. Stage 2: on a subtitle file this row draws
   // the audio VTT's cues, which are text and make no sound at all, and the
   // film's soundtrack is silenced from the video pane's own header instead
   // (see the gutter below, which withholds the button in that arrangement).
-  "source-audio": { sub: "original speech", dot: "bg-sky-600", audibilityKey: "source", speakerName: "source audio" },
+  "source-audio": { sub: "original speech", dot: TRACK_DOT_CLASS, audibilityKey: "source", speakerName: "source audio" },
   // Emerald like the dub row beneath it — same side of the file — but pale, so
   // the two subtitle-shaped rows are never mistaken for each other at a glance.
-  "target-subtitles": { sub: "text · translated", dot: "bg-emerald-300 dark:bg-emerald-800", audibilityKey: null, speakerName: "" },
-  "target-audio": { sub: "takes · generated", dot: "bg-emerald-600", audibilityKey: "target", speakerName: "target audio" },
+  "target-subtitles": { sub: "text · translated", dot: TRACK_DOT_CLASS, audibilityKey: null, speakerName: "" },
+  "target-audio": { sub: "takes · generated", dot: TRACK_DOT_CLASS, audibilityKey: "target", speakerName: "target audio" },
   // ── The two kinds a USER makes (stage 2) ──────────────────────────────────
   // Neither carries a speaker button. A folder makes no sound of its own — the
   // tracks inside it do, and each has its own — and an added audio track holds
@@ -884,8 +944,8 @@ const TRACK_RENDER: Record<
   // through the palette (track-colors.ts), which is why the derived rows'
   // entries above stay literal: source subtitles' grey and source audio's
   // aquilla blue are deliberate and not up for recolouring (Sam, 2026-08-22).
-  folder: { sub: "group", dot: "bg-zinc-400 dark:bg-zinc-600", audibilityKey: null, speakerName: "" },
-  audio: { sub: "takes · generated", dot: "bg-emerald-600", audibilityKey: null, speakerName: "" },
+  folder: { sub: "group", dot: TRACK_DOT_CLASS, audibilityKey: null, speakerName: "" },
+  audio: { sub: "takes · generated", dot: TRACK_DOT_CLASS, audibilityKey: null, speakerName: "" },
 }
 
 const NO_SUMMARY_SPANS: SummarySpan[] = []
@@ -898,11 +958,6 @@ const NO_SUMMARY_SPANS: SummarySpan[] = []
  * statements about what those rows ARE, not unassigned defaults, and Sam has
  * ruled twice that they do not change (2026-08-22).
  */
-function trackDotClass(track: TimelineTrack, fallback: string): string {
-  if (!track.color || !isColorableKind(track.kind)) return fallback
-  return trackDot(track.color)
-}
-
 export function TimelineEditor({
   cells,
   coreMediaUrl,
@@ -911,6 +966,7 @@ export function TimelineEditor({
   onRetimeSubtitle,
   onRetimeTarget,
   onRetimeCue,
+  virtualIsTransport = false,
   timingLocked = false,
   onTrimTarget,
   onTogglePlay,
@@ -942,6 +998,8 @@ export function TimelineEditor({
   hasAudioCueTrack = false,
   audioCues,
   onSeekToTime,
+  onScrubStart,
+  onScrubEnd,
   onOpenRecording,
   initialSelectedCellId,
   onSelectedCellChange,
@@ -964,6 +1022,9 @@ export function TimelineEditor({
 }: TimelineEditorProps) {
   const t = useT()
   const audioFirst = timingMode === "audioFirst"
+  // AQU-646 stage 6B: the two masters that fire takes through the overlay pool
+  // — and therefore honour their trims. See the lane's `masterHonorsTrims`.
+  const masterHonorsTrims = Boolean(coreMediaUrl) || virtualIsTransport
   const [pxPerSec, setPxPerSec] = useState(() => loadZoom(fileId))
   // Stage 3: the OTHER zoom. Every row container and every chip box reads these
   // three numbers through CSS custom properties on the root below, so one state
@@ -1196,18 +1257,24 @@ export function TimelineEditor({
   /**
    * How many recordings a delete would take with the track.
    *
-   * Slot-keyed, which is the binding stage 3 will fill in: a take belongs to
-   * the DEFAULT dub row when its slot is `"recording"`, and to an added track
-   * when its slot is that track's id (see the `AudioSlot` note in
-   * audio-attachments-bus). Until stage 3 gives added tracks slots of their
-   * own, an added track honestly holds nothing and this honestly returns 0 —
-   * which is the right number, not a stub. Writing it now rather than later
-   * means the confirmation is correct the day slots exist, instead of being a
-   * dialog that has always said "0 recordings" and stops.
+   * Slot-keyed: a take belongs to the DEFAULT dub row when its slot is
+   * `"recording"`, and to an added track when its slot is that track's id (see
+   * the `AudioSlot` note in audio-attachments-bus).
+   *
+   * IT HAS TO LOOK IN TWO PLACES, and the second one is why this number was
+   * wrong (stage 6D). `audioByCellId` is the ACTIVE file's audio read, but on a
+   * file with an audio-cue sibling every take lives on the SIBLING's cells —
+   * which reach this component already merged, as `targetCells`. Counting only
+   * the active map made the confirmation say "This track has no recordings on
+   * it" and then orphan them: Sam deleted two tracks on 2026-08-27 and left two
+   * live, selected, unreachable takes behind in the database.
+   *
+   * The two sources are disjoint by construction (a cue cell is never in the
+   * active file's map), so summing them cannot double-count.
    */
   function takeCountForTrack(track: TimelineTrack): number {
     if (track.kind === "folder") return 0
-    const slot = track.id === "target-audio" ? "recording" : track.id
+    const slot = slotForTrack(track.id)
     let count = 0
     // `audioByCellId`, NOT the `cells` prop: timeline cells carry no
     // attachments of their own — the per-file audio read is where they live,
@@ -1215,6 +1282,13 @@ export function TimelineEditor({
     // each clip's slot.
     for (const entry of audioByCellId?.values() ?? []) {
       for (const att of Object.values(entry.attachments)) {
+        if (att.slot === slot) count += 1
+      }
+    }
+    // …and the cue sibling's cells, which arrive with their audio already
+    // merged onto them.
+    for (const c of targetCells ?? []) {
+      for (const att of Object.values(c.attachments ?? {})) {
         if (att.slot === slot) count += 1
       }
     }
@@ -1348,7 +1422,32 @@ export function TimelineEditor({
     [cells, queue.cellId],
   )
   const queueClockIsFile = queueClockIsFileTime(queueSoundingCell)
+  /**
+   * AQU-646 stage 5: where the hand is, while the playhead is being dragged.
+   *
+   * NON-NULL MEANS THE SCRUB OWNS THE CLOCK, and that ownership is the whole
+   * reason a drag looks right. This clock has three writers below, each an
+   * effect fired by a transport publishing where it actually landed — and a
+   * landed position is always BEHIND the pointer, because the picture is being
+   * seeked on a throttle. Leave them running during a drag and every seek
+   * yanks the head back to where the throttle last sampled: an oscillation
+   * between the hand and the film, at the throttle's period, fully rendered
+   * because pausing also stops `monotonicSec` from swallowing regressions.
+   *
+   * Held in a ref as well as state: the three effects below read it, and they
+   * must see the CURRENT value rather than the one captured when they were
+   * scheduled.
+   */
+  const [scrubSec, setScrubSec] = useState<number | null>(null)
+  const scrubbingRef = useRef(false)
+  // The workspace crossing is the expensive part of a seek — it re-renders a
+  // tree the size of the whole project view — so it is throttled while the
+  // picture's own coalescer handles the element. Leading and TRAILING: without
+  // the trailing edge the last thing the hand did might never be sent.
+  const scrubSendRef = useRef<{ at: number; timer: ReturnType<typeof setTimeout> | null }>({ at: 0, timer: null })
+  useEffect(() => () => { if (scrubSendRef.current.timer) clearTimeout(scrubSendRef.current.timer) }, [])
   useEffect(() => {
+    if (scrubbingRef.current) return
     if (queueActive && queueClockIsFile) clock.setCurrentSec(queueProgress.currentTime)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
   }, [queueActive, queueClockIsFile, queueProgress.currentTime])
@@ -1359,6 +1458,7 @@ export function TimelineEditor({
   const videoClockSec = useVideoClockSec()
   const videoPlaying = useVideoClockPlaying()
   useEffect(() => {
+    if (scrubbingRef.current) return
     if (!queueActive && videoClockSec != null) clock.setCurrentSec(videoClockSec)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- clock setters are stable
   }, [queueActive, videoClockSec])
@@ -1377,6 +1477,7 @@ export function TimelineEditor({
   const virtualClockSec = useVirtualClockSec()
   const virtualPlaying = useVirtualClockPlaying()
   useEffect(() => {
+    if (scrubbingRef.current) return
     if (!queueActive && videoClockSec == null && virtualClockSec != null) {
       clock.setCurrentSec(virtualClockSec)
     }
@@ -1423,7 +1524,11 @@ export function TimelineEditor({
   // Where the head is DRAWN. Raw `clock.currentSec` still drives everything
   // that seeks or writes; this drives everything that renders or scrolls TO the
   // head, so the page-flip cannot fire several pixels from where the line is.
-  const displayCurrentSec = displaySec(clock.currentSec, outputLatencySec, compensating)
+  // While scrubbing, the hand IS the position — no latency compensation, which
+  // describes where a sound will be heard and has no meaning for a picture
+  // being dragged.
+  const displayCurrentSec =
+    scrubSec != null ? scrubSec : displaySec(clock.currentSec, outputLatencySec, compensating)
   useEffect(() => {
     if (transportPlaying) clock.play()
     else clock.pause()
@@ -1545,7 +1650,10 @@ export function TimelineEditor({
   // own name poured in via `name`, because "mute Spanish VO" is the sentence
   // its speaker should say.
   function speakerToggle(track: string, name?: string) {
-    const audible = track === "source" ? audibility.source : slotAudible(audibility, track)
+    // ONE CLASSIFIER, shared with `toggleAudibility` — see `trackAudible`. The
+    // old `slotAudible` read here did not recognise the derived row's
+    // `"target"` key, so that button never changed state (stage 6A).
+    const audible = trackAudible(audibility, track)
     const keys = SPEAKER_TOGGLE_KEYS[track === "source" ? "source" : "target"]
     const compactSpeaker = rowH < MIN_SPEAKER_FULL_H_PX
     const speakerLabel = name
@@ -2014,7 +2122,23 @@ export function TimelineEditor({
       case "source-audio":
         // The same two tenants that row itself has: an imported recording's
         // dialogue split, or the audio VTT's cues.
-        return dialogue.length > 0 ? dialogue : (audioCues ?? [])
+        //
+        // AQU-646 stage 6C: …AND THE CUE TENANT HAS TO BE THE MERGED LIST.
+        // `audioCues` is the RAW prop — cue cells with no `attachments` and no
+        // `selectedBySlot` on them — while `targetCells` is the same cells with
+        // this project's audio merged in (`mergeCellsWithAudio`, in the
+        // workspace). Resolving over the raw copy meant every line read as
+        // empty: the mic was offered everywhere (so recording worked), the take
+        // saved against the merged world through `primaryAudioHome`, and the
+        // lane never drew it — a take alive and selected in the database that
+        // nothing on screen could show (Sam, 2026-08-27, verified on S01E01).
+        //
+        // Stage 3c-1 fixed exactly this for the two subtitle arms and never
+        // reached this one, which is why a SOURCE-AUDIO-aligned track was the
+        // arrangement still broken. All three arms now answer with the same
+        // list on a cue-linked file — which is also what lets the add-track
+        // dialog collapse them to one honest option (stage 6J).
+        return dialogue.length > 0 ? dialogue : (targetCells ?? audioCues ?? [])
       default:
         return targetSource
     }
@@ -2038,6 +2162,61 @@ export function TimelineEditor({
       else empty.push(c)
     }
     return { items, empty }
+  }
+
+  /**
+   * WHAT A NEW TRACK CAN HONESTLY LINE UP WITH. (AQU-646 stage 6J)
+   *
+   * Two of Sam's 2026-08-27 rulings, and both need this to live in the editor
+   * rather than in the dialog, because both are about how a candidate RESOLVES
+   * rather than about what kind of row it is:
+   *
+   *  1. Target text is never offered. It is a translation of the source, not a
+   *     source of its own, so aligning recordings to it was a category error
+   *     that only ever looked harmless because it lands on the same cells.
+   *
+   *  2. Two candidates that resolve to the SAME cells are one candidate. On a
+   *     file whose source audio is linked to its source text — every BTT
+   *     product — the remaining rows all answer with the heard lines, so the
+   *     picker was offering a choice with no consequence. Sam: "the new tracks
+   *     align with the source audio regardless of which you select." Reference
+   *     equality is the whole test: `cellsForSourceTrack` hands back the very
+   *     same array for every arm that redirects, so identical outcomes are
+   *     identical objects and near-misses are never falsely merged.
+   *
+   * Source audio wins the survivor's seat when it is in the running, because
+   * that is what the track is really aligned to and what its label should say.
+   */
+  function alignmentCandidates(): TimelineTrack[] {
+    const eligible = tracks.filter(
+      (track) => track.kind === "source-subtitles" || track.kind === "source-audio",
+    )
+    const out: TimelineTrack[] = []
+    const seen = new Map<CellData[], TimelineTrack>()
+    for (const track of eligible) {
+      const resolved = cellsForSourceTrack(track.kind)
+      // A row that resolves to nothing is not something to line up against.
+      if (resolved.length === 0) continue
+      const already = seen.get(resolved)
+      if (already) {
+        // Same cells, so the two are one option. Source audio is the honest
+        // name for it — it is where the recordings actually sit.
+        if (track.kind === "source-audio") {
+          out[out.indexOf(already)] = track
+          seen.set(resolved, track)
+        }
+        continue
+      }
+      seen.set(resolved, track)
+      out.push(track)
+    }
+    // A file with nothing resolvable still has to offer something rather than
+    // an empty picker; the subtitle row is the one every file has.
+    if (out.length === 0) {
+      const fallback = eligible.find((track) => track.kind === "source-subtitles") ?? eligible[0]
+      if (fallback) out.push(fallback)
+    }
+    return out
   }
 
   const durationSec = layout.totalSec
@@ -2689,6 +2868,52 @@ export function TimelineEditor({
     el.scrollLeft = Math.max(0, secToPx(anchor.timeSec, pxPerSec) - anchor.offsetX)
   }, [pxPerSec])
 
+  // ── AQU-646 stage 5: dragging the playhead ────────────────────────────────
+  function beginScrub() {
+    scrubbingRef.current = true
+    // A new gesture always sends its first position immediately: the throttle
+    // window belongs to the drag, not to the session.
+    scrubSendRef.current.at = 0
+    // The pause lives in the WORKSPACE, not here: this component documents that
+    // it makes no playback commands, which is what keeps it testable with spy
+    // props. Silence then falls out rather than being enforced — the external
+    // dub driver cues overlays but only sounds them while the transport runs.
+    onScrubStart?.()
+  }
+
+  function moveScrub(sec: number) {
+    setScrubSec(sec)
+    // Keep the local clock in step for everything else that reads it (the
+    // follow-scroll anchor, the cell trace), even though the head is drawn from
+    // `scrubSec` directly.
+    clock.seekTo(sec)
+    const now = performance.now()
+    const send = scrubSendRef.current
+    if (send.timer) { clearTimeout(send.timer); send.timer = null }
+    if (now - send.at >= SCRUB_SEEK_THROTTLE_MS) {
+      send.at = now
+      onSeekToTime?.(Math.max(0, sec))
+      return
+    }
+    send.timer = setTimeout(() => {
+      send.timer = null
+      send.at = performance.now()
+      onSeekToTime?.(Math.max(0, sec))
+    }, SCRUB_SEEK_THROTTLE_MS - (now - send.at))
+  }
+
+  function endScrub(sec: number) {
+    const send = scrubSendRef.current
+    if (send.timer) { clearTimeout(send.timer); send.timer = null }
+    scrubbingRef.current = false
+    setScrubSec(null)
+    // CLEARED BEFORE THE LANDING SEEK, so that seek routes through the ordinary
+    // path and the queue is cued where the hand stopped. The other order leaves
+    // the transport suppressed for its own landing.
+    onScrubEnd?.()
+    seekTo(sec)
+  }
+
   function seekTo(sec: number) {
     // A deliberate seek must land exactly where it was aimed: the timeline is
     // an editor, and at rest the head has to agree with the chip edge under it.
@@ -3136,7 +3361,7 @@ export function TimelineEditor({
             loadingCellId={loadingCellId}
             missingCellIds={missingCellIds}
             editable={editable}
-            externalMaster={Boolean(coreMediaUrl)}
+            masterHonorsTrims={masterHonorsTrims}
             snapEnabled={snapOn && !audioFirst}
             onSelect={selectFromChip}
             onSeek={laneProps.onSeek}
@@ -3145,6 +3370,8 @@ export function TimelineEditor({
             onRetimeTarget={audioFirst ? undefined : onRetimeTarget}
             onTrimTarget={onTrimTarget}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, RECORDING_SLOT) : undefined}
+            // AQU-646 stage 5: which speaker button silences this row's grains.
+            slot={RECORDING_SLOT}
             emptyCells={emptyTargets}
             // AQU-646: the mic over a stretch with no cell at all creates the
             // blank line first, then opens the recorder — same line the "T"
@@ -3201,7 +3428,7 @@ export function TimelineEditor({
             loadingCellId={loadingCellId}
             missingCellIds={missingCellIds}
             editable={editable}
-            externalMaster={Boolean(coreMediaUrl)}
+            masterHonorsTrims={masterHonorsTrims}
             snapEnabled={snapOn && !audioFirst}
             onSelect={selectFromChip}
             onSeek={laneProps.onSeek}
@@ -3209,6 +3436,7 @@ export function TimelineEditor({
             onTrimTarget={onTrimTarget}
             emptyCells={own.empty}
             onOpenRecording={onOpenRecording ? (cellId) => onOpenRecording(cellId, slotForTrack(track.id)) : undefined}
+            slot={slotForTrack(track.id)}
             projectId={project?.id ?? null}
             fileId={fileId}
             session={session ?? null}
@@ -3667,7 +3895,22 @@ export function TimelineEditor({
               through `tl-scroll`'s previousElementSibling, on the stated
               contract that the gutter renders exactly the DOM the hardcoded
               rows did. */}
-          <div ref={gutterRef} className="overflow-hidden border-r border-border bg-muted/20">
+          <div ref={gutterRef} className="relative overflow-hidden bg-muted/20">
+            {/* 2026-08-27 (Sam): the gutter/lane divider, AS AN OVERLAY, NOT A
+                BORDER. It was `border-r` on this container — but a border
+                paints outside the content box, so no row could ever cover its
+                own segment of it, and Sam wants the folder band to run
+                UNBROKEN across both columns. Same pixel (border-box kept the
+                1px inside this cell's width, and so does right-0 w-px), full
+                height including the header strip and the space below the
+                rows, exactly as before — except where a folder row (opaque,
+                z-30) now paints over it. z-20 keeps it above the header's
+                opaque z-10 background, where the old border also showed. */}
+            <div
+              aria-hidden
+              data-testid="tl-gutter-rule"
+              className="pointer-events-none absolute inset-y-0 right-0 z-20 w-px bg-border"
+            />
             {/* The ruler's opposite number. It does NOT translate — the labels
                 below slide under it exactly as the chips slide under the sticky
                 ruler — which is why it has to be opaque. The column's
@@ -3769,7 +4012,16 @@ export function TimelineEditor({
                     // open and by the summary band when it is closed. The
                     // kind-table fallback flows through unrendered.
                     sub={render.sub}
-                    dot={trackDotClass(track, render.dot)}
+                    dot={render.dot}
+                    // Every row but a FOLDER, which is a heading rather than a
+                    // track (Sam's own rule) and has a disclosure triangle
+                    // where the colour dot would be. Giving it an identity bar
+                    // would say it were a fifth kind of track.
+                    hueVars={
+                      track.kind === "folder"
+                        ? undefined
+                        : trackHueVarsFor(track.kind, track.color)
+                    }
                     folder={
                       track.kind === "folder"
                         ? {
@@ -3972,6 +4224,9 @@ export function TimelineEditor({
                 viewStartSec={viewStartSec}
                 viewEndSec={viewEndSec}
                 onScrub={seekTo}
+                onScrubStart={beginScrub}
+                onScrubMove={moveScrub}
+                onScrubEnd={endScrub}
               />
               {trackRows.map((row) => {
                 const lane = laneForTrack(row)
@@ -4031,7 +4286,12 @@ export function TimelineEditor({
               <TimelinePlayhead
                 currentSec={displayCurrentSec}
                 pxPerSec={pxPerSec}
-                playing={transportPlaying}
+                // AQU-646 stage 5: NOT just `transportPlaying`. That flag is
+                // derived from store state and lags a pause by a commit or two,
+                // and while it is still true the playhead's own rAF keeps
+                // extrapolating FORWARD over the scrub position. It is also
+                // what makes `monotonicSec` swallow a backward drag as a hold.
+                playing={transportPlaying && scrubSec == null}
                 rate={transportRate}
               />
               {/* The drop indicator's other half. THE ROWS DELIBERATELY DO NOT
@@ -4102,8 +4362,8 @@ export function TimelineEditor({
         <>
           <AddTrackDialog
             open={addingTrack}
-            tracks={tracks}
-            defaultName={t("editor.timeline.trackNewTrackName")}
+            candidates={alignmentCandidates()}
+            defaultName={nextTrackName(tracks)}
             onCancel={() => setAddingTrack(false)}
             onConfirm={(spec) => {
               setAddingTrack(false)

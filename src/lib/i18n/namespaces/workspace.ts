@@ -186,6 +186,8 @@ export const workspace = defineNamespace({
 
     // -- AudioRecorder/DurationBar --
     "workspace.durationBar.targetLabel": "target {time}",
+    // AQU-646: how far past the window a take has run.
+    "workspace.durationBar.overBy": "+{seconds}s",
 
     // -- CellAiStatusPopover --
     "workspace.aiStatusPopover.technicalDetail": "Technical detail",
@@ -384,6 +386,8 @@ export const workspace = defineNamespace({
     "workspace.targetAudioLane.overlapsNext": "Overlaps the next dub",
     "workspace.targetAudioLane.overlapsPrevious": "Overlaps the previous dub",
     "workspace.targetAudioLane.recordAudio": "Record audio for this line",
+    // AQU-646 stage 5: the other corner of the same chip.
+    "workspace.targetAudioLane.playClip": "Play this clip",
     "workspace.targetAudioLane.runsPastSectionTooltip": "Runs {sec}s past the section",
     "workspace.targetAudioLane.drawnShortNeighboringDubsStay":
       "Drawn short at rest so the neighbouring dubs stay reachable",
@@ -1000,6 +1004,18 @@ export const workspace = defineNamespace({
           "translatable and not hardcoded.",
       },
 
+      "workspace.durationBar.overBy": {
+        description:
+          "Shown beside the running time in the recorder when a take has passed " +
+          "the length of the line it is for, so the performer does not have to " +
+          "subtract two timecodes while recording. The plus sign is meaningful " +
+          "— it always reads as an overrun and never as a countdown — and the " +
+          "unit is seconds to one decimal place. Keep it very short; it sits " +
+          "between two other numbers on one narrow row.",
+        placeholders: {
+          seconds: "How far past the target the take has run, in seconds to one decimal place, without a sign.",
+        },
+      },
       "workspace.durationBar.targetLabel": {
         description:
           "Small caption beside the elapsed-time readout on a recording's " +
@@ -1612,6 +1628,14 @@ export const workspace = defineNamespace({
         description:
           "Tooltip line on a target-audio (dub) chip whose head overlaps the " +
           "PREVIOUS verse's dub, mirroring workspace.targetAudioLane.overlapsNext.",
+      },
+      "workspace.targetAudioLane.playClip": {
+        description:
+          "Hover and screen-reader name of the small play button in the top-" +
+          "left corner of an audio clip in the timeline, opposite the record " +
+          "button. It plays only that one clip, trimmed exactly as the " +
+          "timeline draws it, without moving the playhead or starting the " +
+          "rest of the timeline.",
       },
       "workspace.targetAudioLane.recordAudio": {
         description:

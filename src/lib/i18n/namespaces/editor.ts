@@ -535,29 +535,12 @@ export const editor = defineNamespace({
       other: "Removed validations from {count} cells",
     }),
 
-    // — Attach-video dialog for a timed file ————————————————————————
-    "editor.video.title": "Attach Video",
-    "editor.video.currentlyAttached": "Currently attached",
-    "editor.video.removeAttachment": "Remove attachment",
-    "editor.video.startOffset": "Start offset (s)",
-    "editor.video.saveOffset": "Save offset",
-    "editor.video.offsetHint":
-      "Seconds to wait before cues align. If your video has an intro, set this to " +
-      "the duration of the intro so subtitles line up correctly.",
-    "editor.video.tabUrl": "From URL",
-    "editor.video.tabUpload": "Upload file",
-    "editor.video.urlLabel": "Video URL",
-    "editor.video.urlHint":
-      "Direct video URL (MP4, WebM, etc). URL syncs across collaborators.",
-    "editor.video.displayNameLabel": "Display name (optional)",
-    "editor.video.displayNamePlaceholder": "Episode 1",
-    "editor.video.saveUrl": "Save URL",
-    "editor.video.enterUrl": "Enter a video URL",
-    "editor.video.storingLocally": "Storing video locally...",
-    "editor.video.dropHint": "Drag a video file here, or",
+    // AQU-646 stage 6I: the attach-video DIALOG is gone (Sam, 2026-08-27) — it
+    // claimed to upload a video and did nothing. Only this one string outlived
+    // it, because four import panels borrow it for their own file pickers. The
+    // `editor.video.` prefix is a misnomer now; it is left alone rather than
+    // renamed, which would be churn across five files for a key name.
     "editor.video.chooseFile": "Choose file",
-    "editor.video.localOnlyHint": "Stored locally on this device only (not synced to peers).",
-    "editor.video.uploadedFallbackName": "Uploaded video",
 
     // — Timeline lens (time-ordered files) ————————————————————————
     "editor.timeline.title": "Timeline",
@@ -627,12 +610,13 @@ export const editor = defineNamespace({
     // AQU-646 stage 2: the track colour palette. Each names a PAIR — the tone
     // recorded takes are drawn in, and the near neighbour generated voices get
     // — so the label is the family, not either exact hue.
-    "editor.timeline.colorGreen": "Green",
-    "editor.timeline.colorTeal": "Teal",
-    "editor.timeline.colorIndigo": "Indigo",
+    // Sam's own seven (2026-08-27), named as his spec names them.
+    "editor.timeline.colorCyan": "Cyan",
+    "editor.timeline.colorAzure": "Azure",
     "editor.timeline.colorViolet": "Violet",
-    "editor.timeline.colorFuchsia": "Magenta",
-    "editor.timeline.colorSlate": "Grey",
+    "editor.timeline.colorMagenta": "Magenta",
+    "editor.timeline.colorAmber": "Amber",
+    "editor.timeline.colorGreen": "Green",
     "editor.timeline.measureNote": plural({
       one: "{count} recording has no measured length — its chip is drawn at a guessed width.",
       other:
@@ -744,10 +728,12 @@ export const editor = defineNamespace({
     "editor.timeline.trackMenuAria": "Track options for {name}",
     "editor.timeline.trackRename": "Rename",
     "editor.timeline.trackColor": "Colour",
-    "editor.timeline.trackColorPrimary": "Primary:",
-    "editor.timeline.trackColorSecondary": "Secondary:",
-    "editor.timeline.trackColorRecorded": "Recorded takes",
-    "editor.timeline.trackColorGenerated": "Generated voices",
+    // AQU-646 stage 7: one hue per track, picked from six swatches, so the
+    // whole vocabulary of axes, weights and previews is gone with the picker.
+    // A colour name and a count is all this menu says now.
+    // AQU-646 stage 6H rev 2: the colour PICKER's own words. Temporary by
+    // design — Sam is using it to craft a palette, and when the palette exists
+    // this dialog and these four keys go with it.
     "editor.timeline.trackColorCount": plural({
       one: "Colour {count} track",
       other: "Colour {count} tracks",
@@ -772,7 +758,10 @@ export const editor = defineNamespace({
     "editor.timeline.trackAddTrack": "Audio track",
     "editor.timeline.trackAddFolder": "Folder",
     // "Folder" → editor.timeline.trackAddFolder (identical text)
-    "editor.timeline.trackNewTrackName": "Audio",
+    // AQU-646 stage 6J: the automatic name is DATA, not copy, so it is built in
+    // code now — see `nextTrackName`. It has to be stable across locales: a
+    // track called "Track 2" is stored under that name and read back by
+    // everyone on the project, whatever language each of them is working in.
     // The add-track dialog.
     "editor.timeline.addTrackTitle": "Add an audio track",
     // "Name" → common.name (identical text)
@@ -3343,124 +3332,13 @@ export const editor = defineNamespace({
             "The number the sentence counts; it also selects which plural form is used.",
         },
       },
-      "editor.video.title": {
-        description:
-          "Title of the dialog that links a video to a subtitle/timed file so the " +
-          "translator can watch it while timing cues. Title Case in English because " +
-          "it is a dialog title. 'Attach' rather than 'upload' — a URL is not copied.",
-        maxLength: 24,
-      },
-      "editor.video.currentlyAttached": {
-        description:
-          "Muted label above the name of the video already linked to this file. A " +
-          "state description, not an action.",
-        maxLength: 24,
-      },
-      "editor.video.removeAttachment": {
-        description:
-          "Tooltip and screen-reader name of the trash button that unlinks the " +
-          "current video. For an uploaded file it also deletes the local copy; for a " +
-          "URL nothing at the far end is touched.",
-        maxLength: 26,
-      },
-      "editor.video.startOffset": {
-        description:
-          "Label of the numeric field holding how many seconds of the video come " +
-          "BEFORE the first subtitle cue. The '(s)' is the unit abbreviation for " +
-          "seconds — keep an equivalent short unit marker.",
-        maxLength: 22,
-      },
-      "editor.video.saveOffset": {
-        description:
-          "Small button that stores the start-offset value without changing which " +
-          "video is attached. Imperative.",
-        maxLength: 18,
-      },
-      "editor.video.offsetHint": {
-        description:
-          "Help text under the start-offset field. Two sentences: what the number " +
-          "means, then the common case (a title sequence) worked through so the user " +
-          "knows what to type. 'Cues' are the timed subtitle entries.",
-      },
-      "editor.video.tabUrl": {
-        description:
-          "First of two tabs in the attach-video dialog: link a video already " +
-          "hosted somewhere by pasting its address.",
-        maxLength: 18,
-      },
-      "editor.video.tabUpload": {
-        description:
-          "Second tab: pick a video file from this computer, stored locally in the " +
-          "browser rather than on the server.",
-        maxLength: 18,
-      },
-      "editor.video.urlLabel": {
-        description:
-          "Form label for the field taking the video's web address.",
-        maxLength: 18,
-      },
-      "editor.video.urlHint": {
-        description:
-          "Help text under the video URL field. Two points: it must be a direct " +
-          "link to the video file itself (the formats in parentheses are file-format " +
-          "names and stay as-is), and unlike an upload a URL is visible to the rest " +
-          "of the team.",
-      },
-      "editor.video.displayNameLabel": {
-        description:
-          "Form label for the optional friendly name shown instead of the raw URL. " +
-          "The '(optional)' must survive — it is what tells the user they can skip it.",
-        maxLength: 28,
-      },
-      "editor.video.displayNamePlaceholder": {
-        description:
-          "Example value in the display-name field. It is a sample title, so " +
-          "translate it as a plausible episode name in the target language rather " +
-          "than as an instruction.",
-        maxLength: 20,
-      },
-      "editor.video.saveUrl": {
-        description:
-          "Full-width confirming button on the URL tab; it attaches the pasted " +
-          "address to the file. Imperative.",
-        maxLength: 18,
-      },
-      "editor.video.enterUrl": {
-        description:
-          "Validation error under the URL field when the user pressed the button " +
-          "with the field empty. Imperative — it says what to do, not what went " +
-          "wrong.",
-        maxLength: 28,
-      },
-      "editor.video.storingLocally": {
-        description:
-          "Status text while the chosen video is being written into this browser's " +
-          "local storage. 'Locally' is the reassuring part: nothing is uploaded. " +
-          "Trailing three periods are literal in the English source.",
-      },
-      "editor.video.dropHint": {
-        description:
-          "Line inside the upload drop zone offering drag-and-drop. It ends with " +
-          "'or' on purpose: the file-picker button follows immediately below and " +
-          "completes the sentence.",
-      },
+      // The one survivor of the removed attach-video dialog (stage 6I); the
+      // file pickers in the import panels are what use it now.
       "editor.video.chooseFile": {
         description:
           "Button under the drop zone that opens the operating system's file " +
           "picker. Imperative.",
         maxLength: 18,
-      },
-      "editor.video.localOnlyHint": {
-        description:
-          "Small print under the upload drop zone. The point is the limitation: an " +
-          "uploaded video stays in this browser, so teammates will not see it — " +
-          "unlike a URL. 'Peers' means the other people on the project.",
-      },
-      "editor.video.uploadedFallbackName": {
-        description:
-          "Stand-in name shown for a locally stored video whose original file name " +
-          "was not recorded. A noun phrase, not an action.",
-        maxLength: 24,
       },
       "editor.timeline.title": {
         description:

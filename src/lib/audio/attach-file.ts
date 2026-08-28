@@ -127,9 +127,10 @@ export interface AttachAudioFileResult {
 }
 
 /**
- * Upload `file` to R2 and attach it to `cellId` as a take in the "recording"
- * slot. Throws with a user-presentable message on every failure; the caller
- * owns the busy/error UI and fires its own `onTakeSaved`.
+ * Upload `file` to R2 and attach it to `cellId` as a take in the requested
+ * `slot`, defaulting to the dub row's. Throws with a user-presentable message
+ * on every failure; the caller owns the busy/error UI and fires its own
+ * `onTakeSaved`.
  *
  * NOT auto-transcribed, and that asymmetry with the mic recorder is deliberate
  * — do not "fix" it. A recorded take's blob is provably this line, so Whisper
@@ -200,7 +201,14 @@ export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<
   injectOptimisticAudioAttachment(fileId, cellId, {
     audioId: fullAudioId,
     url: result.url,
-    slot: "recording",
+    // THE CALLER'S SLOT, not a literal. The emit above already used it; this
+    // line did not, so an upload aimed at an added track optimistically
+    // claimed the DEFAULT dub row's selection — and could never be confirmed,
+    // because `shadowConfirmed` looks the selection up BY SLOT and would find
+    // the default row's own take there forever. See the warning in
+    // audio-attachments-bus.ts: a plain-string slot means the compiler cannot
+    // catch a hard-coded one written where a variable belongs.
+    slot,
     mimeType: file.type || null,
     voiceId: null,
     referenceAudioId: null,

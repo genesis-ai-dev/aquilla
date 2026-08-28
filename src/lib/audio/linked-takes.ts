@@ -160,3 +160,141 @@ export function primaryAudioHome(
   if (homes.kind === "none") return null
   return homes.cells[0].id
 }
+
+// ---------------------------------------------------------------------------
+// What a bulk voice generation actually does (2026-08-27)
+// ---------------------------------------------------------------------------
+
+/** One subtitle's translation, trimmed, or null when there is nothing to say. */
+function saidText(cell: CellData): string | null {
+  const t = cell.translated?.trim()
+  return t ? t : null
+}
+
+/**
+ * THE WORDS A HEARD LINE SPEAKS: every subtitle it performs, joined in film
+ * order.
+ *
+ * One join, in one place. `resolveCueReadAloud` shows this same string to the
+ * performer in the recorder, and the bulk run now generates it — two copies of
+ * the rule would let what a person reads and what the machine says drift apart,
+ * which is the whole failure this function exists to prevent.
+ */
+export function joinCueText(
+  textIds: readonly string[],
+  subtitleById: ReadonlyMap<string, CellData>,
+): { text: string; linked: readonly CellData[] } {
+  const linked = textIds
+    .map((id) => subtitleById.get(id))
+    .filter((c): c is CellData => Boolean(c))
+    .sort((a, b) => (a.startTime ?? 0) - (b.startTime ?? 0))
+  return {
+    text: linked.map(saidText).filter((t): t is string => Boolean(t)).join(" "),
+    linked,
+  }
+}
+
+/** What a bulk synth would do, per DESTINATION. */
+export interface SynthTargetPlan {
+  /** The cell the generated clip attaches to — a cue, or the source itself. */
+  cell: CellData
+  /** The words it will say. Never empty; an empty one is not a target. */
+  text: string
+  /** Whose cast assignment picks the voice: the first subtitle in film order.
+   *  Cues carry no assignment of their own — see `generateCellVoice`. */
+  voiceCellId: string
+  /** EVERY subtitle this destination performs, film-ordered. One entry in the
+   *  ordinary case. More means the caller should check whether they agree
+   *  about the character before trusting `voiceCellId`. */
+  linkedTextIds: readonly string[]
+}
+
+export interface ResolveSynthTargetsArgs extends ResolveAudioHomesArgs {
+  /** cue id → the subtitle cells it performs. THE DIRECTION THAT MATTERS HERE
+   *  — see the function's own note. */
+  textForCue: ReadonlyMap<string, readonly string[]>
+}
+
+/**
+ * Everything a "generate a voice for every line" run should do, once.
+ *
+ * ITERATES DESTINATIONS, NOT SOURCES, and that inversion is the entire fix.
+ * Fanning out over subtitles (what stage 3f did) emits one target per
+ * subtitle→cue EDGE, so a heard line performing two subtitles was generated
+ * twice, concurrently, into its single `generatedVoice` slot: both paid for,
+ * the server's per-(cell, slot) deselect keeping whichever finished last, and
+ * the loser stored but silent. Keying on the destination makes that
+ * impossible by construction rather than by a de-duplication step somebody has
+ * to remember — the same race `handleTranscribeSections` had to patch by hand.
+ *
+ * Both directions of the many-to-many stay correct:
+ *   - several subtitles → ONE cue: one target, speaking all of them joined
+ *     (Sam, 2026-08-27);
+ *   - one subtitle → SEVERAL cues: still one target each, every one speaking
+ *     the whole line, which is Sam's August ruling and unchanged.
+ *
+ * With no cue sibling every cell is its own destination, which is every
+ * arrangement that is not a dubbing file and is byte-for-byte what shipped.
+ */
+export function resolveSynthTargets(
+  sourceCells: readonly CellData[],
+  // `cuesForText` is in the args type so callers hand over one link index
+  // rather than picking it apart, but this walks the OTHER direction — that
+  // inversion is the fix, so taking only `textForCue` here is deliberate.
+  { cueCells, textForCue }: ResolveSynthTargetsArgs,
+): SynthTargetPlan[] {
+  // No cue arrangement: each cell speaks its own words onto itself.
+  if (!cueCells || cueCells.length === 0) {
+    const out: SynthTargetPlan[] = []
+    for (const cell of sourceCells) {
+      const text = saidText(cell)
+      if (!text || cell.selectedGeneratedVoiceAudioId) continue
+      out.push({ cell, text, voiceCellId: cell.id, linkedTextIds: [cell.id] })
+    }
+    return out
+  }
+
+  const subtitleById = new Map(sourceCells.map((c) => [c.id, c]))
+  const out: SynthTargetPlan[] = []
+  for (const cue of cueCells) {
+    // Each destination keeps its own "already voiced" test: one cue of a pair
+    // may have been generated and the other not.
+    if (cue.selectedGeneratedVoiceAudioId) continue
+    const textIds = textForCue.get(cue.id) ?? []
+    // A cue nothing is linked to — about ten an episode. There are no words
+    // for it, and its own transcript is reference, not a translation.
+    if (textIds.length === 0) continue
+    const { text, linked } = joinCueText(textIds, subtitleById)
+    // Linked only to lines nobody has translated yet.
+    if (!text || linked.length === 0) continue
+    out.push({
+      cell: cue,
+      text,
+      voiceCellId: linked[0].id,
+      linkedTextIds: linked.map((c) => c.id),
+    })
+  }
+  return out
+}
+
+/**
+ * The destinations whose subtitles do NOT agree about who is speaking.
+ *
+ * Sam, 2026-08-27: generate in the first character's voice, then say which
+ * lines disagreed. `assignedVoiceIdFor` must be the function that can tell an
+ * ASSIGNMENT from a fallback (`assignedCastVoiceId`) — resolving the voice
+ * instead would make every unassigned line look like it agreed with the
+ * project default.
+ */
+export function divergentVoiceTargets(
+  targets: readonly SynthTargetPlan[],
+  assignedVoiceIdFor: (cellId: string) => string | undefined,
+): SynthTargetPlan[] {
+  return targets.filter((t) => {
+    if (t.linkedTextIds.length < 2) return false
+    const assigned = new Set(
+      t.linkedTextIds.map(assignedVoiceIdFor).filter((v): v is string => Boolean(v)),
+    )
+    return assigned.size > 1
+  })
+}

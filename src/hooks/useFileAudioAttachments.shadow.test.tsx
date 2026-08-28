@@ -591,6 +591,68 @@ describe("optimistic overlay — selection and duration correctness", () => {
     expect(entryOf(result)?.selectedAudioId).toBe(LONG.audioId)
   })
 
+  // ── The review's blocker, from the confirmation side (2026-08-27) ─────────
+  //
+  // An upload to an ADDED track injected its shadow with a hard-coded
+  // "recording" slot while the event carried the track's own. The mispaint was
+  // the visible half; this is the half that made it stick. `shadowConfirmed`
+  // looks the selection up BY SLOT, so a shadow claiming "recording" was
+  // compared against the DEFAULT row's real take, never matched, and was never
+  // confirmed — it survived to the settled-grace bound instead and then
+  // vanished. The pair below is the generatedVoice case's missing sibling: an
+  // added track's slot is a uuidv7, not one of the two legacy names.
+  const TRACK_SLOT = "01a04395-3ed1-7c6b-9f2e-6d5a1c0b8e42"
+
+  it("an added track's overlay confirms against ITS OWN slot, leaving the recording slot alone", async () => {
+    const ON_TRACK: AudioAttachmentOut = { ...SHORT, audioId: "audio-c1-400-trk.wav", slot: TRACK_SLOT }
+    // The server has projected the attach on the track's slot — the state the
+    // shadow is supposed to recognise as "caught up".
+    fetchMock.mockResolvedValue(cells({
+      attachments: { [LONG.audioId]: LONG, [ON_TRACK.audioId]: ON_TRACK },
+      selectedAudioId: LONG.audioId,
+      selectedBySlot: { recording: LONG.audioId, [TRACK_SLOT]: ON_TRACK.audioId },
+    }))
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    delivered("evt-trk") // out of the outbox: only confirmation can retire it now
+    act(() => injectOptimisticAudioAttachment("f1", "c1", ON_TRACK, "evt-trk"))
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    // The take is on its own track…
+    expect(entryOf(result)?.selectedBySlot?.[TRACK_SLOT]).toBe(ON_TRACK.audioId)
+    // …and the default dub row's selection was never touched. This is the
+    // assertion the blocker failed: it moved LONG aside for the new upload.
+    expect(entryOf(result)?.selectedAudioId).toBe(LONG.audioId)
+    expect(entryOf(result)?.selectedBySlot?.recording).toBe(LONG.audioId)
+  })
+
+  it("an overlay on the wrong slot cannot confirm against the right one", async () => {
+    // The blocker's shape, stated directly: the shadow says "recording", the
+    // server projected the take onto the track. Confirmation must NOT be
+    // fooled — and the default row's own take must win the recording slot.
+    const MISLABELLED: AudioAttachmentOut = { ...SHORT, audioId: "audio-c1-400-trk.wav", slot: "recording" }
+    fetchMock.mockResolvedValue(cells({
+      attachments: { [LONG.audioId]: LONG },
+      selectedAudioId: LONG.audioId,
+      selectedBySlot: { recording: LONG.audioId, [TRACK_SLOT]: "audio-c1-400-trk.wav" },
+    }))
+    const { result } = mount()
+    await waitFor(() => expect(result.current.byCellId.size).toBe(1))
+
+    queued("evt-bad")
+    act(() => injectOptimisticAudioAttachment("f1", "c1", MISLABELLED, "evt-bad"))
+    await act(async () => {
+      await result.current.revalidate()
+    })
+    // While it is queued the overlay paints, and it paints on the WRONG row —
+    // the default one — which is exactly what the user saw.
+    expect(entryOf(result)?.selectedBySlot?.recording).toBe(MISLABELLED.audioId)
+    // The server's own answer for the track is untouched by the bad shadow.
+    expect(entryOf(result)?.selectedBySlot?.[TRACK_SLOT]).toBe("audio-c1-400-trk.wav")
+  })
+
   it("trim overlays only confirm when the server carries the same trims", async () => {
     const TRIMMED: AudioAttachmentOut = { ...LONG, trimStartMs: 500, trimEndMs: 4000 }
     fetchMock.mockResolvedValue(serverLongSelected()) // server has null trims

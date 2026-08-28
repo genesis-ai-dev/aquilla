@@ -9,7 +9,7 @@
 
 import { type ChangeEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, RefreshCw, Settings2, Sparkles, Square, Upload, Volume2, VolumeX, X } from "lucide-react"
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -1228,7 +1228,14 @@ export function AudioRecordingModal({
       setErrorMessage(e instanceof Error ? e.message : String(e))
       setPhase("error")
     }
-  }, [activeCell, session, project.id, username, recordingTakes, onTakeSaved, scheduleAutoAdvance, returnToReady])
+    // `targetSlot` is read above, so it is listed — the mic-save callback next
+    // door always has. It is NOT load-bearing today and the omission was never
+    // a live bug: `recordingTakes` is memoised on `ownSlots`, which is itself
+    // memoised on `targetSlot`, so the slot already reached this list
+    // transitively and the callback was rebuilt whenever it changed. Named
+    // explicitly anyway, because that chain is two hops of coincidence away
+    // from someone decoupling the takes list from the track.
+  }, [activeCell, session, project.id, username, recordingTakes, targetSlot, onTakeSaved, scheduleAutoAdvance, returnToReady])
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const onUploadInputChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
@@ -1249,6 +1256,28 @@ export function AudioRecordingModal({
     },
     [],
   )
+
+  /**
+   * AQU-646: leaving with a take you have not kept (Sam, 2026-08-26).
+   *
+   * A recorded take sits in `preview` until Save attaches it — nothing is
+   * written until then, so every way out of this dialog silently threw it away:
+   * the X, clicking outside, and (most quietly of all) Escape, which called
+   * RETAKE and scrapped the take without even closing, so you stayed on the
+   * screen with no sign anything had gone.
+   *
+   * All three now come through here. `preview` is the only phase worth asking
+   * about: `uploading` is already being kept, and the earlier phases have
+   * nothing recorded yet.
+   */
+  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false)
+  const hasUnsavedTake = phase === "preview"
+  const requestClose = useCallback(() => {
+    if (hasUnsavedTake) { setConfirmCloseOpen(true); return }
+    onClose()
+  }, [hasUnsavedTake, onClose])
+  // Never leave the question hanging over a line it is no longer about.
+  useEffect(() => { setConfirmCloseOpen(false) }, [activeCellId])
 
   const canNav = phase === "idle" || phase === "preview" || phase === "error"
   const gotoIndex = useCallback((idx: number) => {
@@ -1282,8 +1311,10 @@ export function AudioRecordingModal({
         e.preventDefault()
         if (phase === "recording") { stopRecording(); return }
         if (phase === "counting") { countdown.cancel(); setLeadIn(null); setPhase("idle"); return }
-        if (phase === "preview") { retake(); return }
-        onClose()
+        // Escape used to RETAKE here, which threw the take away and left the
+        // modal open — the quietest way in the app to lose a recording. It now
+        // asks, like every other way out. Retake is still one button away.
+        requestClose()
         return
       }
       // SUB-52: modifier check matches the other Space handlers — Cmd/Ctrl/
@@ -1314,7 +1345,7 @@ export function AudioRecordingModal({
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [open, phase, startFlow, stopRecording, countdown, retake, save, onClose, gotoIndex, activeIndex])
+  }, [open, phase, startFlow, stopRecording, countdown, retake, save, requestClose, gotoIndex, activeIndex])
 
   if (!open || !activeCell) return null
 
@@ -1327,7 +1358,8 @@ export function AudioRecordingModal({
   const takeInHand = phase === "counting" || phase === "recording" || phase === "preview" || phase === "uploading"
 
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
+    <>
+    <Dialog open={open} onOpenChange={(next) => { if (!next) requestClose() }}>
       {/* AQU-230: max-h constrains the dialog to the viewport (with 4vh margin)
           so it never clips at 100% zoom on 1280×800 or smaller viewports.
           The dialog is split into a fixed header, a scrollable stage+takes
@@ -1436,7 +1468,7 @@ export function AudioRecordingModal({
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  onClick={onClose}
+                  onClick={requestClose}
                   aria-label={t("common.close")}
                   className="shrink-0 text-muted-foreground/60"
                 >
@@ -1614,16 +1646,32 @@ export function AudioRecordingModal({
                 {readAloudReference}
               </p>
             )}
-            {/* AQU-646 stage 3g: what a GENERATED voice would do here, said
-                before it is pressed rather than after.
+            {/* AQU-646: what a GENERATED voice just did here.
                 
                 Right beside the transcript above, which appears on exactly this
                 condition and for the neighbouring reason — that one tells the
                 performer which part of the line is theirs; this one says a
-                machine voice makes no such distinction. Never dismissible
-                (Sam: "lets be super safe for now"), and absent on the ~92% of
-                lines that are not shared. */}
-            {ttsSharedWith > 1 && (
+                machine voice makes no such distinction.
+                
+                AFTER THE PRESS, NOT BEFORE (Sam, 2026-08-27), which reverses
+                the original call that it should warn first. The reason the
+                first version was wrong: it fires on "this subtitle is shared",
+                NOT on "you are about to generate" — so a performer doing mic
+                takes got a permanent paragraph about text-to-speech, on roughly
+                one line in twelve, for a button they may never press.
+                
+                Moving it costs less than it looks: generating is cheap and
+                undoable, so this never guarded against loss. It corrects a
+                mental model, and afterwards it does that better — before, it is
+                an abstract caveat; after, it is a to-do that names exactly what
+                is still silent.
+                
+                `ttsDone` is precisely the right signal and already existed: set
+                only when a generation SUCCEEDED (a failure leaves its own red
+                message and must not be told the others are silent, because
+                nothing was voiced), and cleared when the active line changes,
+                which is the "until you leave the line" rule. */}
+            {ttsSharedWith > 1 && ttsDone && (
               <p
                 data-testid="rec-tts-shared-notice"
                 className="mt-1.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400"
@@ -1924,7 +1972,7 @@ export function AudioRecordingModal({
                           ? ttsProgressPct != null
                             ? t("audio.recordingModal.ttsDownloadingPct", { percent: ttsProgressPct })
                             : ttsStatus.kind === "synthesizing"
-                              ? t("audio.recordingModal.ttsSynthesizing")
+                              ? t("common.synthesizing")
                               : t("audio.recordingModal.generateButton")
                           : ttsShowFailure
                             ? t("audio.recordingModal.ttsFailedButton")
@@ -2166,6 +2214,51 @@ export function AudioRecordingModal({
         `}</style>
       </DialogContent>
     </Dialog>
+    {/* AQU-646: the guard on leaving with a take you have not kept.
+        LAYERED, and that is not the compromise it looks like: this component
+        already stacks a dialog (the timing-mode heads-up) and its keyboard
+        handler already stands down for one, so the arrangement is proven here
+        rather than new. It also works identically whichever way you tried to
+        leave — the X, Escape, or clicking outside — where a bubble hung off the
+        close button would have no anchor for the other two.
+
+        Deliberately NOT marked `data-recorder-dialog`: that attribute is how
+        the recorder's own Escape handler recognises its own dialog, and leaving
+        it off is what lets Escape dismiss THIS one without also closing the
+        recorder underneath it. */}
+    <Dialog open={confirmCloseOpen} onOpenChange={(next) => { if (!next) setConfirmCloseOpen(false) }}>
+      <DialogContent className="sm:max-w-[420px]" data-testid="rec-confirm-close">
+        <DialogHeader>
+          <DialogTitle>{t("audio.recordingModal.unsavedTakeTitle")}</DialogTitle>
+          <DialogDescription>{t("audio.recordingModal.unsavedTakeBody")}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button
+            variant="ghost"
+            data-testid="rec-confirm-discard"
+            onClick={() => { setConfirmCloseOpen(false); onClose() }}
+          >
+            {t("audio.recordingModal.discardTake")}
+          </Button>
+          <Button
+            data-testid="rec-confirm-save"
+            disabled={!online}
+            onClick={() => {
+              setConfirmCloseOpen(false)
+              // The recorder's own post-save behaviour takes it from here —
+              // settling the line, and advancing or closing as the auto-advance
+              // preference says. NOT forced closed on top of that: a save that
+              // fails leaves the take previewable with its error, and closing
+              // over it would throw away the very thing this asked to keep.
+              void save()
+            }}
+          >
+            {t("audio.recordingModal.saveTake")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }
 

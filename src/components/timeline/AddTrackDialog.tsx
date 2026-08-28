@@ -12,7 +12,7 @@
 // whose line no longer exists on the new source, which is a migration
 // masquerading as a dropdown.
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -28,43 +28,56 @@ import { useT } from "@/lib/i18n/I18nProvider"
 
 export function AddTrackDialog({
   open,
-  tracks,
+  candidates,
   defaultName,
   onCancel,
   onConfirm,
 }: {
   open: boolean
-  /** Every track on this file — the alignment candidates are drawn from it. */
-  tracks: readonly TimelineTrack[]
+  /**
+   * What this track can line up with — RESOLVED BY THE CALLER (stage 6J).
+   *
+   * The dialog used to take every track on the file and filter for the rows
+   * that carry lines. That was the right shape while the answer was structural,
+   * but two of Sam's 2026-08-27 rulings made it a question only the editor can
+   * answer. Target text is not a source and is never offered. And on a file
+   * where the source audio is linked to the source text, every remaining
+   * candidate resolves to the SAME cells — the heard lines — so offering two
+   * names for one outcome was a choice with no consequence, which is worse than
+   * no choice at all. The editor computes the honest list; this renders it.
+   */
+  candidates: readonly TimelineTrack[]
   defaultName: string
   onCancel(): void
   onConfirm(spec: { name: string; sourceTrackId: string | null }): void
 }) {
   const t = useT()
   const [name, setName] = useState(defaultName)
-
-  // WHAT A NEW TRACK CAN LINE UP WITH is the rows that actually carry lines:
-  // the subtitle rows and the source-audio row. A folder holds no lines of its
-  // own, and another audio track's takes are not a grid to align against — they
-  // are the same lines, once removed.
-  const candidates = tracks.filter(
-    (track) =>
-      track.kind === "source-subtitles" ||
-      track.kind === "target-subtitles" ||
-      track.kind === "source-audio",
-  )
   const [sourceTrackId, setSourceTrackId] = useState<string>(candidates[0]?.id ?? "")
+  // Sam, 2026-08-27: "if there's only one option, the modal shouldn't present a
+  // dropdown. It should just list that one option as what it's going to be
+  // aligned with." A picker with one item asks a question whose answer is
+  // already fixed — and, worse, looks like it has alternatives hidden in it.
+  const onlyCandidate = candidates.length === 1 ? candidates[0] : null
 
-  // Reseed on every open. Without this, cancelling with a half-typed name and
-  // reopening would show that name again as though it had been saved.
+  // Reseed ON THE OPENING EDGE, and only there. Without any reseed, cancelling
+  // with a half-typed name and reopening would show that name again as though
+  // it had been saved.
+  //
+  // KEYING THIS ON `defaultName` WAS A BUG (stage 6J, found in review). It was
+  // safe while the default was a constant string, but 6J made it
+  // `nextTrackName(tracks)` — derived from the synced track list — so a track
+  // arriving from anywhere (a collaborator, or your own add's round-trip
+  // landing) changes it WHILE THE DIALOG IS OPEN, re-runs this effect, and
+  // wipes whatever you were typing. The live values are read through a ref so
+  // the effect depends on the one thing that should retrigger it: opening.
+  const seed = useRef({ defaultName, candidates })
+  seed.current = { defaultName, candidates }
   useEffect(() => {
     if (!open) return
-    setName(defaultName)
-    setSourceTrackId(candidates[0]?.id ?? "")
-    // `candidates` is derived from `tracks` and recomputed each render; keying
-    // the effect on it would reseed the field while somebody was typing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, defaultName])
+    setName(seed.current.defaultName)
+    setSourceTrackId(seed.current.candidates[0]?.id ?? "")
+  }, [open])
 
   const trimmed = name.trim()
 
@@ -90,24 +103,40 @@ export function AddTrackDialog({
             />
           </label>
 
-          <label className="block space-y-1.5">
-            <span className="text-sm font-medium">{t("editor.timeline.addTrackAlignLabel")}</span>
-            <select
-              data-testid="tl-add-track-align"
-              value={sourceTrackId}
-              onChange={(e) => setSourceTrackId(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-sky-500"
-            >
-              {candidates.map((track) => (
-                <option key={track.id} value={track.id}>
-                  {track.name}
-                </option>
-              ))}
-            </select>
+          <div className="block space-y-1.5">
+            {/* A `<span id>` + `aria-labelledby`, not a `<label>`: this wrapper
+                stopped being a `<label>` when the single-candidate branch put a
+                `<p>` inside it, and a bare span left the `<select>` with no
+                accessible name at all (found in review). */}
+            <span id="tl-add-track-align-label" className="text-sm font-medium">
+              {t("editor.timeline.addTrackAlignLabel")}
+            </span>
+            {onlyCandidate ? (
+              // Stated, not asked. It still says WHAT the track will line up
+              // with — that is the fact the hint below is about, and it does
+              // not stop being true just because there is nothing to decide.
+              <p data-testid="tl-add-track-align-fixed" className="text-sm">
+                {onlyCandidate.name}
+              </p>
+            ) : (
+              <select
+                data-testid="tl-add-track-align"
+                aria-labelledby="tl-add-track-align-label"
+                value={sourceTrackId}
+                onChange={(e) => setSourceTrackId(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-sky-500"
+              >
+                {candidates.map((track) => (
+                  <option key={track.id} value={track.id}>
+                    {track.name}
+                  </option>
+                ))}
+              </select>
+            )}
             <DialogDescription className="text-xs">
               {t("editor.timeline.addTrackAlignHint")}
             </DialogDescription>
-          </label>
+          </div>
         </div>
 
         <DialogFooter>

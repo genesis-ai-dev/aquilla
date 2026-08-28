@@ -541,3 +541,78 @@ describe("AudioRecordingModal — a failed generation says so (stage 4c)", () =>
     await expectTooltip(screen.getByTestId("rec-generate-tts"), /TTS not configured/i)
   })
 })
+
+// ── AQU-646: leaving with a take you have not kept ──────────────────────────
+//
+// Sam, 2026-08-26: "if you've recorded a take and haven't actually clicked save
+// yet or retake, but you click the little X button or press escape, then the
+// recording modal closes and by default does not save the recorded take."
+//
+// It was worse than that: Escape called RETAKE, so it threw the take away
+// WITHOUT closing — the quietest way in the app to lose a recording.
+describe("AudioRecordingModal — an unsaved take is not lost quietly", () => {
+  const stopped = () => {
+    recorderState.value = {
+      kind: "stopped",
+      blob: new Blob(["x"], { type: "audio/webm" }),
+      mimeType: "audio/webm",
+      ext: "webm",
+      durationSec: 3,
+    }
+  }
+  beforeEach(() => { attachmentsState.byCellId = new Map() })
+  afterEach(() => { recorderState.value = { kind: "idle" } })
+
+  function renderWithClose() {
+    const onClose = vi.fn()
+    render(
+      <AudioRecordingModal
+        open project={project} cells={[cellWith("bonjour")]} activeCellId="c1"
+        username="sam" onActiveCellChange={() => {}} onClose={onClose}
+      />,
+    )
+    return onClose
+  }
+
+  it("asks before closing on the X", () => {
+    stopped()
+    const onClose = renderWithClose()
+    fireEvent.click(screen.getByRole("button", { name: /close/i }))
+    expect(screen.getByTestId("rec-confirm-close")).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  // The one Sam did not know about: this used to scrap the take on the spot.
+  it("asks on Escape instead of throwing the take away", () => {
+    stopped()
+    const onClose = renderWithClose()
+    fireEvent.keyDown(window, { key: "Escape" })
+    expect(screen.getByTestId("rec-confirm-close")).toBeInTheDocument()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it("leaves when the answer is to throw it away", () => {
+    stopped()
+    const onClose = renderWithClose()
+    fireEvent.click(screen.getByRole("button", { name: /close/i }))
+    fireEvent.click(screen.getByTestId("rec-confirm-discard"))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps the take when the answer is to save it", async () => {
+    stopped()
+    renderWithClose()
+    fireEvent.click(screen.getByRole("button", { name: /close/i }))
+    fireEvent.click(screen.getByTestId("rec-confirm-save"))
+    // The recorder's ordinary save runs; nothing is discarded behind it.
+    await waitFor(() => expect(emitAttach).toHaveBeenCalled())
+  })
+
+  // The question is only worth asking when there is something to lose.
+  it("closes straight away when no take is waiting", () => {
+    const onClose = renderWithClose()
+    fireEvent.click(screen.getByRole("button", { name: /close/i }))
+    expect(screen.queryByTestId("rec-confirm-close")).toBeNull()
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+})

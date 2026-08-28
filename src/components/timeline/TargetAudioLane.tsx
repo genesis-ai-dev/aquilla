@@ -7,16 +7,18 @@
 // neighbour's dub (both will sound). Length is never clamped. At rest the
 // chip AT FAULT is the one drawn short (2026-08-08), cut at the edge of the
 // neighbour it intrudes on — or, when the two intrude on each other, at the
-// source border between them — with an outward chevron on the cut; hover
-// restores the true length.
+// pair's meet point (2026-08-27, `dualFaultMeetSec`: the shared source border
+// when their sections touch, the midpoint of overlap-within-the-gap when they
+// don't) — with an outward chevron on the cut; hover restores the true length.
 
-import { useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
-import { ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Sparkles, VolumeX } from "lucide-react"
+import { ChevronsLeft, ChevronsRight, CloudAlert, CloudUpload, Mic, Play, Sparkles, Square, VolumeX } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
-import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
+import { getQueueAudibility, MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
+import { slotAudible, RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import { TimelineSlotButton } from "./TimelineSlotButton"
 import { MIN_SLOT_PX, useHotSlot } from "./slot-hover"
 import { isVisible, secToPx, pxToSec, chipRadiusPx } from "@/lib/timeline/scale"
@@ -34,14 +36,19 @@ import {
   chipOverflowState,
   chipOverlaps,
   chipTrespass,
+  dualFaultMeetSec,
   MIN_TARGET_LEN_SEC,
   type TargetChipGeom,
 } from "@/lib/timeline/lane-timing"
 import { sourceClipAudioForCell } from "@/lib/audio/track-audio"
 import { snapSpan, SNAP_THRESHOLD_PX } from "@/lib/timeline/snap"
-import { trackChipTint } from "@/lib/timeline/track-colors"
+import { trackChipClass, trackChipPlayingClass, trackHueVars } from "@/lib/timeline/track-colors"
 import { DragTimeChip } from "./DragTimeChip"
 import { TargetChipWaveform } from "./TargetChipWaveform"
+import { useChipPreview, type ChipPreview, type ChipPreviewFactory } from "./useChipPreview"
+import { previewWindowForGeom, shouldFireGrain, GRAIN_PERIOD_MS } from "@/lib/audio/clip-preview-window"
+import { pauseAllTransports } from "@/lib/audio/transport-pause"
+import type { ClipPreviewHandle, GrainScrub } from "@/lib/audio/clip-preview"
 import { useTargetChipPeaks } from "./useTargetChipPeaks"
 import { chipWaveformWindow } from "@/lib/timeline/chip-waveform"
 import { WAVEFORM_BINS } from "@/lib/audio/peaks-loader"
@@ -75,10 +82,24 @@ export interface TargetAudioLaneProps {
    *  badge (decision 2026-08-05). */
   missingCellIds?: ReadonlySet<string>
   editable: boolean
-  /** The linked PICTURE is the transport's master (video-first): takes fire
-   *  through the external dub driver, which honours their trims, so chips are
-   *  trimmable even on text cells that own no source clip of their own. */
-  externalMaster?: boolean
+  /**
+   * DOES THE THING DRIVING PLAYBACK HONOUR A DUB'S TRIMS?
+   *
+   * Renamed from `externalMaster` in stage 6B, because the old name had become
+   * a lie: it asked "is a film the master", when the question the one consumer
+   * below actually asks is whether the trim handles would tell the truth. Two
+   * masters honour trims by firing takes through the overlay pool — the linked
+   * PICTURE (video-first) and the VIRTUAL clock (a file with timings and no
+   * media at all, stage 3h) — and the second of those was invisible to this
+   * gate for a whole round, so a VTT-only file offered no handles anywhere
+   * (Sam, 2026-08-27: "trimming just doesn't work... there was no film").
+   *
+   * The master that does NOT honour them is the queue playing an imported
+   * source recording: a take-only section sounds through that master, which
+   * ignores dub trims, so a handle there would move nothing. That case keeps
+   * its withheld handles — see `resizable` below.
+   */
+  masterHonorsTrims?: boolean
   snapEnabled?: boolean
   onSelect(id: string): void
   /** Clean chip click navigates playback to the section (same as a card). */
@@ -110,6 +131,15 @@ export interface TargetAudioLaneProps {
   /** Test/story seam: supplied peaks bypass the loader entirely, so a test can
    *  assert the drawing without mocking OPFS, the network or AudioContext. */
   peaksByAudioId?: ReadonlyMap<string, Float32Array>
+  /** Test/story seam, same rule: a supplied factory bypasses the engine
+   *  binding, so a test can hold a chip in the PLAYING state — the real engine
+   *  ends instantly under happy-dom (no AudioContext), which is right for the
+   *  button tests and useless for the mini-playhead's. */
+  previewFactory?: ChipPreviewFactory
+  /** AQU-646 stage 5: this track's storage slot, which is also the key its
+   *  speaker button mutes. Only the grain scrub reads it — the play button
+   *  sounds through a mute on purpose. Absent = the default target track. */
+  slot?: string
   /** AQU-646 stage 2: the palette id this track has been given, if any. Absent
    *  or unknown draws the shipped emerald/violet pair — see track-colors. */
   color?: string | null
@@ -146,9 +176,9 @@ interface ChipGeometry {
 function TargetAudioChip({
   chip,
   prevChip,
-  prevAtFaultTail,
+  prevMeetSec,
   nextChipStartSec,
-  nextAtFaultHead,
+  nextMeetSec,
   paintOrder,
   audioFirst,
   pxPerSec,
@@ -163,24 +193,31 @@ function TargetAudioChip({
   onTrimTarget,
   onOpenRecording,
   peaks,
-  color,
+  preview,
 }: {
   chip: ChipGeometry
-  /** The track's palette id. */
-  color?: string | null
+  // AQU-646 stage 7: NO `color` PROP. The hue reaches this chip as inherited
+  // CSS custom properties set on the lane root, so there is nothing to thread
+  // and nothing to keep in step — see `trackHueVars`.
   /** AQU-646: this clip's whole-clip peaks, once they have arrived. Absent
    *  means the chip draws as it always did. */
   peaks?: Float32Array
+  /** AQU-646 stage 5: this clip bound to the preview engine — the play button
+   *  and the grains under a trim handle. Absent means neither exists, which is
+   *  what a lane with no project or session hands out and therefore what this
+   *  lane's own tests get, exactly as with `peaks`. */
+  preview?: ChipPreview
   /** The PREVIOUS chip's span — a chip can begin before its own section
    *  (end-based drag bounds), so its head can lie under this neighbour. */
   prevChip: { start: number; end: number; usingFallback: boolean } | null
-  /** 2026-08-08: is the PREVIOUS chip itself trespassing forward into this
-   *  one? Then its end is no place to yield at — both retreat to the source
-   *  border between them instead. */
-  prevAtFaultTail: boolean
+  /** 2026-08-08 / 2026-08-27: when the PREVIOUS chip and this one trespass on
+   *  EACH OTHER, its end is no place to yield at — both rest-cut to this
+   *  shared meet point instead (`dualFaultMeetSec`, resolved once in the
+   *  lane). Null whenever the pair is not mutually at fault. */
+  prevMeetSec: number | null
   nextChipStartSec: number | null
-  /** …and the mirror: is the NEXT chip trespassing back into this one? */
-  nextAtFaultHead: boolean
+  /** …and the mirror: the meet point with the NEXT chip. */
+  nextMeetSec: number | null
   /** Higher paints on top — earlier-start chips cover later ones. */
   paintOrder: number
   /** SUB-53: verses are laid out end to end, so nothing overlaps and nothing
@@ -207,6 +244,22 @@ function TargetAudioChip({
   const { cell } = chip.item
   const { geom, section } = chip
   const [drag, setDrag] = useState<{ mode: ChipDragMode; dx: number } | null>(null)
+  /**
+   * AQU-646 stage 5: is THIS chip's own preview sounding?
+   *
+   * Driven off the handle's lifecycle rather than off "the engine is making
+   * noise", which is what lets a unit test enter this state at all — happy-dom
+   * has no AudioContext, so nothing here is ever audible there.
+   */
+  const [previewing, setPreviewing] = useState(false)
+  const previewRef = useRef<ClipPreviewHandle | null>(null)
+  useEffect(() => () => { previewRef.current?.stop() }, [])
+  /** The mini-playhead's DOM node — positioned imperatively per frame, so the
+   *  60Hz ride never re-renders the chip. */
+  const playlineRef = useRef<HTMLSpanElement | null>(null)
+  /** The chip root, for the same ride to write `--tl-play-x` — where the
+   *  progress fill's gradient splits. */
+  const chipRef = useRef<HTMLButtonElement | null>(null)
   const [hovered, setHovered] = useState(false)
   const movedRef = useRef(false)
   // AQU-646 stage 3: how tall this chip is drawn. Outside a timeline (this
@@ -315,18 +368,60 @@ function TargetAudioChip({
   // An offending end yields to the NEIGHBOUR'S OWN EDGE — the least it can
   // give up and still not bury it. When both chips of a pair trespass, each
   // one's edge lies inside the other, so neither is a valid place to stop:
-  // they retreat to the source-audio border between them and meet there back
-  // to back (»|«). Either way the painted boxes end up disjoint, and an
-  // innocent chip always paints its true length.
+  // they meet back to back (»|«) at the pair's shared meet point instead
+  // (2026-08-27, `dualFaultMeetSec` — the midpoint of the zone inside both
+  // the audible overlap and the stretch between the two sections; with
+  // touching sections that IS the shared border, the old cut). Either way the
+  // painted boxes end up disjoint, an innocent chip always paints its true
+  // length — and hovering one of a mutually-offending pair now extends its
+  // true edge visibly ACROSS the neighbour's resting cut, so the collision
+  // the red warns about can actually be seen.
   // SUB-53: inert in audio-first (verses are laid out end to end).
   const engaged = hovered || drag !== null
-  const headCutSec = headTrespass ? (prevAtFaultTail ? section.start : prevChip?.end ?? section.start) : null
-  const tailCutSec = tailTrespass ? (nextAtFaultHead ? section.end : nextChipStartSec ?? section.end) : null
+  const headCutSec = headTrespass ? (prevMeetSec ?? prevChip?.end ?? section.start) : null
+  const tailCutSec = tailTrespass ? (nextMeetSec ?? nextChipStartSec ?? section.end) : null
   const paintedStart = !engaged && headCutSec != null ? headCutSec : span.start
   const paintedEnd = !engaged && tailCutSec != null ? tailCutSec : span.end
   const truncatedHead = paintedStart > span.start + 0.0005
   const truncatedTail = paintedEnd < span.end - 0.0005
   const truncated = truncatedHead || truncatedTail
+  // 2026-08-27 (Sam): a white line rides the chip while ITS OWN preview plays —
+  // not interactible, appears with the play button's sound, gone on stop or
+  // end. Driven from the ENGINE's clock (`positionSec` is clip seconds, null
+  // until sound actually starts — a wall clock would lead by the decode
+  // latency), converted here to a left offset inside the painted box; the
+  // chip's own overflow-hidden crops it when the box is drawn short. Position
+  // lands on the node imperatively so the ride never re-renders the chip.
+  useEffect(() => {
+    if (!previewing) return
+    // Held for the cleanup: the ref's current can have moved on by then.
+    const chipEl = chipRef.current
+    let raf = 0
+    const tick = () => {
+      const el = playlineRef.current
+      const pos = previewRef.current?.positionSec() ?? null
+      if (el) {
+        if (pos == null) {
+          el.style.opacity = "0"
+        } else {
+          el.style.opacity = "1"
+          el.style.left = `${secToPx(geom.anchor + pos - paintedStart, pxPerSec)}px`
+        }
+      }
+      // The progress fill's split point. No position yet = 0px = the whole
+      // chip at the "not yet" rung — press feedback while the decode runs.
+      chipEl?.style.setProperty(
+        "--tl-play-x",
+        pos == null ? "0px" : `${Math.max(0, secToPx(geom.anchor + pos - paintedStart, pxPerSec))}px`,
+      )
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => {
+      cancelAnimationFrame(raf)
+      chipEl?.style.removeProperty("--tl-play-x")
+    }
+  }, [previewing, geom.anchor, paintedStart, pxPerSec])
   // The height term is the same argument as the width one: a trim handle is a
   // target you have to hit, and on a compact band it is smaller than the
   // pointer that has to find it.
@@ -342,6 +437,10 @@ function TargetAudioChip({
     // hardening. A right-drag on a take chip moves or trims it today.
     if (e.button !== 0 || e.ctrlKey) return
     e.stopPropagation()
+    // Resume the audio device and start the decode while the gesture is still
+    // open — a browser only honours a resume inside one, and by the time the
+    // first grain is due it has closed.
+    if (mode !== "move") preview?.prime()
     const startX = e.clientX
     try {
       ;(e.currentTarget as Element).setPointerCapture?.(e.pointerId)
@@ -350,13 +449,59 @@ function TargetAudioChip({
     }
     setDrag({ mode, dx: 0 })
     movedRef.current = false
+
+    // ── AQU-646 stage 5: tape noises under a trim handle ──────────────────
+    //
+    // Fed from HERE rather than from its own listener, and after `proposeSpan`,
+    // so what you hear is what the chip is showing — snapping, the neighbour
+    // clamps and MIN_TARGET_LEN_SEC included. Clip-local seconds are the same
+    // subtraction the commit below makes: the edge, minus the anchor.
+    //
+    // The beat is an interval reading a ref, never the pointer stream: a mouse
+    // reports at 60–120Hz and a trackpad faster, so firing per move would make
+    // the grain rate a property of somebody's hardware.
+    const wantsGrains = mode !== "move" && Boolean(preview)
+    let scrub: GrainScrub | null = null
+    let grainTimer: ReturnType<typeof setInterval> | null = null
+    let lastMoveMs = 0
+    let lastFireMs = 0
+    let lastClipSec = 0
+    const endGrains = () => {
+      if (grainTimer != null) { clearInterval(grainTimer); grainTimer = null }
+      scrub?.close()
+      scrub = null
+    }
+
     const onMove = (ev: PointerEvent) => {
-      if (Math.abs(ev.clientX - startX) > 3) movedRef.current = true
-      setDrag((d) => (d ? { ...d, dx: ev.clientX - startX } : d))
+      if (Math.abs(ev.clientX - startX) > 3) {
+        // ON THE THRESHOLD, NOT ON POINTERDOWN. A press that never becomes a
+        // drag must stay exactly the click it always was — including that it
+        // does not stop the film.
+        if (!movedRef.current && wantsGrains) {
+          pauseAllTransports()
+          scrub = preview!.scrub(mode === "resize-l" ? "in" : "out")
+          grainTimer = setInterval(() => {
+            const now = performance.now()
+            if (!shouldFireGrain(now, lastFireMs, lastMoveMs)) return
+            lastFireMs = now
+            scrub?.moveTo(lastClipSec)
+          }, GRAIN_PERIOD_MS)
+        }
+        movedRef.current = true
+      }
+      const dx = ev.clientX - startX
+      setDrag((d) => (d ? { ...d, dx } : d))
+      if (scrub) {
+        const proposed = proposeSpan(mode, pxToSec(dx, pxPerSec))
+        lastClipSec = (mode === "resize-l" ? proposed.start : proposed.end) - geom.anchor
+        lastMoveMs = performance.now()
+      }
     }
     const onUp = (ev: PointerEvent) => {
       window.removeEventListener("pointermove", onMove)
       window.removeEventListener("pointerup", onUp)
+      window.removeEventListener("pointercancel", onCancel)
+      endGrains()
       setDrag(null)
       const s = proposeSpan(mode, pxToSec(ev.clientX - startX, pxPerSec))
       if (mode === "move") {
@@ -375,8 +520,18 @@ function TargetAudioChip({
         trimEndMs: durationMs != null && trimEndMs >= durationMs - 10 ? undefined : trimEndMs,
       })
     }
+    const onCancel = () => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+      window.removeEventListener("pointercancel", onCancel)
+      endGrains()
+      setDrag(null)
+      // Nothing is committed: the pointer was taken away, so there is no
+      // release position to read as intent.
+    }
     window.addEventListener("pointermove", onMove)
     window.addEventListener("pointerup", onUp)
+    window.addEventListener("pointercancel", onCancel)
   }
 
   // AQU-646: NO KIND GLYPH IN THE CHIP (Sam, 2026-08-24). A mic or sparkles sat
@@ -435,8 +590,35 @@ function TargetAudioChip({
   // bands must still be able to say "these two dubs collide".
   const fitsBadges = chipH >= MIN_CHIP_META_H_PX
   const showLeftGlyph = leftGlyph != null && fitsBadges && paintedPx >= 20
+  // AQU-646 stage 5. Withheld while a state glyph holds the corner — see the
+  // button's own comment — and needing the same room the record mic does.
+  const showPlayButton = Boolean(preview) && leftGlyph == null && fitsBadges && fullPx >= 28
   const showRecordButton =
-    editable && Boolean(onOpenRecording) && fitsBadges && fullPx >= (leftGlyph != null ? 46 : 28)
+    editable &&
+    Boolean(onOpenRecording) &&
+    fitsBadges &&
+    // Two corners want the width now, not one.
+    fullPx >= (leftGlyph != null || showPlayButton ? 46 : 28)
+
+  function togglePreview() {
+    if (previewRef.current) {
+      previewRef.current.stop()
+      previewRef.current = null
+      setPreviewing(false)
+      return
+    }
+    if (!preview) return
+    // THE CLIP AS THE TIMELINE DRAWS IT — `takeTrims` gives every recorded take
+    // a trim at birth, so this is the ordinary case rather than an edge one.
+    const handle = preview.play(previewWindowForGeom(geom), {
+      onEnded: () => {
+        previewRef.current = null
+        setPreviewing(false)
+      },
+    })
+    previewRef.current = handle
+    setPreviewing(handle.isPlaying())
+  }
   const kindTitle = chip.item.kind === "take" ? "Recorded take" : "Generated voice"
   // SUB-53: audio-first says how the two compare instead of warning. Longer is
   // normal here; shorter is equally unremarkable.
@@ -512,6 +694,7 @@ function TargetAudioChip({
     <AppTooltip content={tooltipContent} disabled={drag != null}>
     <button
       type="button"
+      ref={chipRef}
       data-testid={`tl-target-${cell.id}`}
       // Space after clicking a chip belongs to the TRANSPORT (same opt-in as
       // the timeline cards); the corner record button inside stays native.
@@ -523,6 +706,11 @@ function TargetAudioChip({
       {...(syncFailed ? { "data-sync-failed": "true" } : {})}
       {...(missing ? { "data-missing": "true" } : {})}
       {...(loading ? { "data-loading": "true" } : {})}
+      // AQU-646 stage 6F: the flag the LANE lifts itself by, so the drag
+      // readout above this chip is not painted over by a neighbouring row. Set
+      // here rather than reported upward because the drag already lives in this
+      // component and nothing else needs to know about it.
+      {...(drag ? { "data-tl-drag": "" } : {})}
       {...(truncated
         ? { "data-truncated": truncatedHead && truncatedTail ? "both" : truncatedHead ? "start" : "end" }
         : {})}
@@ -558,6 +746,13 @@ function TargetAudioChip({
       }}
       onPointerDown={(e) => beginDrag("move", e)}
       style={{
+        // AQU-646 stage 7: NO COLOUR HERE ANY MORE, and that is the headline.
+        // The hue arrives as inherited CUSTOM PROPERTIES set once on the lane,
+        // and the identity tint below is an ordinary class referencing them —
+        // so the state layers beat it by sitting later in the same `cn()`,
+        // exactly as they always did. Rev 2 had to put the fill in this style
+        // object and gate it on `overflow === "none"`, because an inline style
+        // beats every class; that gate is gone with the style.
         left: `${secToPx(paintedStart, pxPerSec)}px`,
         width: `${paintedPx}px`,
         // Same rule as every other chip, its own smaller cap (was rounded-md).
@@ -579,7 +774,15 @@ function TargetAudioChip({
         // colour by sitting after it. Injecting the palette anywhere else, or
         // letting a palette entry introduce a group the warnings do not also
         // set, would let a colour quietly win over an alarm.
-        trackChipTint(color, chip.item.kind),
+        trackChipClass(chip.item.kind),
+        // 2026-08-27 (Sam): the preview PROGRESS FILL rides the identity slot
+        // — played side at the chip's own rung, unplayed side at the hover
+        // rung, split at `--tl-play-x`. Gated off the red at-fault body (a
+        // warning still beats playback paint; amber needs no gate, it is
+        // border-only) and off fallback chips (a guessed width has no honest
+        // progress to draw).
+        previewing && !geom.usingFallback && overflow !== "overlap" &&
+          trackChipPlayingClass(chip.item.kind),
         // An unmeasurable clip spans its section, so say so rather than
         // letting a placeholder width pass for the real thing.
         geom.usingFallback && "border-dashed",
@@ -659,7 +862,14 @@ function TargetAudioChip({
         <span
           aria-hidden
           data-testid={`tl-target-${cell.id}-generated`}
-          className="pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2"
+                  // AQU-646 stage 5: the play button wants this side too. The sparkle
+            // is decorative and the button is an action, so on hover the
+            // action wins — the same reason the sparkle already gives way to a
+            // corner state badge.
+            className={cn(
+              "pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2",
+              showPlayButton && "transition-opacity group-hover/chip:opacity-0",
+            )}
         >
           {/* THE SAME GLYPH THAT USED TO SIT DEAD CENTRE, byte for byte
               (Sam, 2026-08-24) — same lucide icon, same 3.5 size, same outline
@@ -712,6 +922,41 @@ function TargetAudioChip({
       {/* Round 8b (Sam): record right from the chip — opens this cell's
           recording modal (takes and all) without a trip to the detail pane.
           Inset from the right edge so it never fights the trim handle. */}
+      {/* AQU-646 stage 5: hear THIS clip, as the timeline draws it (Sam,
+          2026-08-26). Mirrors the record mic at the other corner — an action,
+          hover-revealed, not a state.
+
+          IT YIELDS THE CORNER TO A STATE GLYPH. `left-1.5 top-1` is a single
+          priority slot (missing > syncFailed > loading > saving), and three of
+          those four mean the clip cannot play anyway. The sparkle beside it
+          fades on hover instead, since both want the left side and only one of
+          them is an action.
+
+          BOTH `stopPropagation` CALLS ARE LOAD-BEARING. Without the pointerdown
+          one, pressing play begins a chip MOVE drag; without the click one, the
+          chip's own onClick fires `onSeek` — which moves the playhead, the
+          exact thing this button was ruled not to do. */}
+      {showPlayButton && preview && (
+        <span
+          role="button"
+          tabIndex={0}
+          title={previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
+          aria-label={previewing ? t("common.stop") : t("workspace.targetAudioLane.playClip")}
+          data-testid={`tl-target-${cell.id}-play`}
+          onPointerDown={(e) => { e.stopPropagation(); preview.prime() }}
+          onClick={(e) => { e.stopPropagation(); togglePreview() }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault()
+              e.stopPropagation()
+              togglePreview()
+            }
+          }}
+          className="absolute left-2 top-1 z-10 flex h-4 w-4 items-center justify-center rounded-full bg-background/80 opacity-0 shadow-sm ring-1 ring-border transition-opacity hover:bg-background group-hover/chip:opacity-100 focus-visible:opacity-100"
+        >
+          {previewing ? <Square className="h-2 w-2 fill-current" /> : <Play className="h-2.5 w-2.5 fill-current" />}
+        </span>
+      )}
       {showRecordButton && onOpenRecording && (
         <span
           role="button"
@@ -736,6 +981,19 @@ function TargetAudioChip({
         >
           <Mic className="h-2.5 w-2.5" />
         </span>
+      )}
+      {/* The preview's mini-playhead (2026-08-27, Sam): white, non-interactive,
+          exists only while this chip's own preview sounds. Left/opacity are
+          written by the rAF effect above; it mounts hidden so no line flashes
+          at x=0 during the decode. The faint dark halo is what keeps a white
+          hairline visible over a light-theme chip wash. */}
+      {previewing && (
+        <span
+          aria-hidden
+          ref={playlineRef}
+          data-testid={`tl-target-${cell.id}-playline`}
+          className="pointer-events-none absolute inset-y-0 left-0 z-10 w-px bg-white opacity-0 shadow-[0_0_2px_rgba(0,0,0,0.5)]"
+        />
       )}
       {/* SUB-48: the cut edge of a chip drawn short — the audio really does
           keep going past here, and the amber/red ring still tells you it
@@ -793,7 +1051,7 @@ export function TargetAudioLane({
   loadingCellId,
   missingCellIds,
   editable,
-  externalMaster,
+  masterHonorsTrims,
   snapEnabled,
   onSelect,
   onSeek,
@@ -807,6 +1065,8 @@ export function TargetAudioLane({
   fileId,
   session,
   peaksByAudioId,
+  previewFactory,
+  slot,
   color,
   laneTestId = "tl-target-lane",
 }: TargetAudioLaneProps) {
@@ -839,9 +1099,20 @@ export function TargetAudioLane({
       // the handles off across the whole video-first workflow. The external
       // dub driver fires those takes through the overlay pool, which honours
       // trimStart AND trimEnd, so a handle there tells the truth.
+      //
+      // 2026-08-27 (stage 6B): AND THE SAME IS TRUE OF THE VIRTUAL CLOCK, which
+      // is what `masterHonorsTrims` now carries. Stage 3h gave a file with
+      // timings and no media its own transport, driving the very same overlay
+      // pool — but this gate was never told, so on a film-less file every
+      // clause here was false and the derived row withheld its handles
+      // completely. That is the whole of Sam's "trimming just doesn't work".
+      //
+      // The remaining false case is honest: the queue playing an imported
+      // source recording sounds a take-only section through a master that
+      // ignores dub trims, so a handle would move nothing.
       resizable:
         !geom.usingFallback &&
-        (audioFirst || externalMaster || sourceClipAudioForCell(item.cell) != null),
+        (audioFirst || masterHonorsTrims || sourceClipAudioForCell(item.cell) != null),
       ratio:
         slot && slot.targetLenSec > 0 && slot.sourceLenSec > 0
           ? slot.targetLenSec / slot.sourceLenSec
@@ -878,6 +1149,17 @@ export function TargetAudioLane({
     bins: WAVEFORM_BINS,
   })
   const peaksFor = peaksByAudioId ?? loadedPeaks
+
+  // AQU-646 stage 5. READ LIVE, per grain, rather than captured at render: the
+  // speaker button can be flipped mid-drag, and `audibility.ts` is emphatic
+  // about why merging from a caller's own copy of that state is the bug. The
+  // play button passes no mute at all — it sounds through one by ruling.
+  const isMuted = useCallback(
+    () => !slotAudible(getQueueAudibility(), slot ?? RECORDING_SLOT),
+    [slot],
+  )
+  const boundPreview = useChipPreview({ projectId: projectId ?? null, session: session ?? null, isMuted })
+  const makePreview = previewFactory ?? boundPreview
 
   const candidatesFor = (cellId: string, section: { start: number; end: number }): number[] => {
     if (!snapEnabled) return []
@@ -923,8 +1205,8 @@ export function TargetAudioLane({
 
   // 2026-08-08: every chip's fault flags, resolved once. A chip needs its
   // NEIGHBOUR's flag as well as its own: when both trespass on each other,
-  // neither's edge is a valid place to stop, so they meet at the source
-  // border between them instead of at each other's (invalid) edges.
+  // neither's edge is a valid place to stop, so they meet at a shared point
+  // between them instead of at each other's (invalid) edges.
   const trespass = chips.map((c, i) =>
     chipTrespass(
       { start: c.geom.start, end: c.geom.end },
@@ -933,10 +1215,55 @@ export function TargetAudioLane({
       chips[i + 1]?.geom.start ?? null,
     ),
   )
+  // 2026-08-27: THAT shared point, resolved here because a chip cannot compute
+  // it alone — it needs its neighbour's SECTION border, which the chips are
+  // never handed. `meetAfter[i]` sits between chip i and chip i+1, and exists
+  // only when the pair is mutually at fault; chip i reads it as `nextMeetSec`,
+  // chip i+1 as `prevMeetSec`, so the two rest-cuts land on the same second
+  // and the pair meets »|« even across a gap between their sections.
+  const meetAfter = chips.map((c, i) => {
+    const next = chips[i + 1]
+    if (!next || !trespass[i].tail || !trespass[i + 1].head) return null
+    return dualFaultMeetSec(
+      { chipEndSec: c.geom.end, sectionEndSec: c.section.end },
+      { chipStartSec: next.geom.start, sectionStartSec: next.section.start },
+    )
+  })
 
   return (
     // `isolate`: chip z-indexes stack within the lane — never over the playhead.
-    <div data-testid={laneTestId} className={`isolate relative ${TL_ROW_H_CLASS} border-b border-border`}>
+    //
+    // AQU-646 stage 6F: …EXCEPT WHILE A CHIP IS BEING DRAGGED, when the whole
+    // lane is lifted instead. `isolate` collapses this subtree into one unit at
+    // the z-auto tier, which is what keeps the chips under the playhead — but
+    // it also caps the drag readout, which hangs above the chip's own top edge
+    // and belongs above everything. The rows that occlude it are the ones that
+    // do NOT isolate: TimelineLane and SourceRegionLane let their cards'
+    // `z-10`/`z-20` and their cue-link overlays escape into the shared context,
+    // and positive z beats the z-auto tier no matter the DOM order. So a
+    // source region one row up painted over the readout of the take being
+    // trimmed beneath it (Sam, 2026-08-27).
+    //
+    // The lift is driven by the chip's own `data-tl-drag`, through `:has()`, so
+    // no drag state has to be hoisted into the lane or the editor to make the
+    // paint order right. At rest nothing changes at all, which is what keeps
+    // the playhead over the chips everywhere except mid-gesture — where the
+    // thing under the pointer is what you need to see.
+    <div
+      data-testid={laneTestId}
+      // AQU-646 stage 7: THE HUE IS SET ONCE, HERE, and inherited by everything
+      // inside. Custom properties inherit and set no colour property of their
+      // own, so this is both the cheapest way to reach every chip (no prop
+      // threading) and the reason the identity tint can stay an ordinary class
+      // that the warning states still beat.
+      //
+      // THE LANE ITSELF PAINTS NOTHING (Sam, 2026-08-27). It briefly wore an
+      // 18% wash, from the spec's "lane background behind the grid" — but that
+      // value went to the generated-voice chip instead, and a tinted lane
+      // competed with the very clips sitting on it.
+      style={trackHueVars(color)}
+      className={`isolate relative ${TL_ROW_H_CLASS} border-b border-border has-[[data-tl-drag]]:z-40`}
+    >
       {(emptySpans ?? []).map((span) => {
         const leftPx = secToPx(span.startSec, pxPerSec)
         const widthPx = secToPx(span.endSec - span.startSec, pxPerSec)
@@ -1011,9 +1338,9 @@ export function TargetAudioLane({
                   }
                 : null
             }
-            prevAtFaultTail={trespass[i - 1]?.tail ?? false}
+            prevMeetSec={i > 0 ? meetAfter[i - 1] : null}
             nextChipStartSec={chips[i + 1]?.geom.start ?? null}
-            nextAtFaultHead={trespass[i + 1]?.head ?? false}
+            nextMeetSec={meetAfter[i]}
             paintOrder={chips.length - i}
             audioFirst={Boolean(audioFirst)}
             pxPerSec={pxPerSec}
@@ -1021,7 +1348,6 @@ export function TargetAudioLane({
             loading={loadingCellId === chip.item.cell.id}
             missing={missingCellIds?.has(chip.item.cell.id) ?? false}
             editable={editable}
-            color={color}
             snap={{ enabled: Boolean(snapEnabled), candidates: candidatesFor(chip.item.cell.id, chip.section) }}
             onSelect={onSelect}
             onSeek={onSeek}
@@ -1029,6 +1355,7 @@ export function TargetAudioLane({
             onTrimTarget={onTrimTarget}
             onOpenRecording={onOpenRecording}
             peaks={peaksFor.get(chip.item.audioId)}
+            preview={makePreview(chip.item.cell, chip.item.audioId, chip.geom.durationSec)}
           />
         ) : null,
       )}

@@ -13,6 +13,7 @@
 import { useRef, useState } from "react"
 import { X } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { TRACK_HOVER_CLASS } from "@/lib/timeline/track-colors"
 import { secToPx, pxToSec, clampRange, chipRadiusPx } from "@/lib/timeline/scale"
 import {
   MIN_CHIP_GRIP_H_PX,
@@ -373,8 +374,18 @@ export function TimelineCard({
         // SUB-11: the drag chip renders above the card bounds, so overflow can't
         // be hidden mid-drag; inner text stays contained by its own `truncate`s.
         drag ? "z-20 overflow-visible" : "overflow-hidden",
+        // AQU-646 stage 7: the row's own hue, at the same wash every other
+        // clip in the timeline uses, read from the variable the lane
+        // publishes. It replaces a hand-written sky pair with its own `dark:`
+        // variants — an alpha over the page is already right in both themes.
+        //
+        // ONLY THE DIALOGUE CARD IS TINTED. A subtitle card is dense text and
+        // there are hundreds of them; a wash behind every one would fight the
+        // words rather than identify the row, which the gutter's accent bar
+        // already does. That asymmetry is the same one the row colours have
+        // always had, now said in the shared vocabulary.
         isDialogue
-          ? "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-900 dark:bg-sky-950/50 dark:text-sky-200"
+          ? "border-[color:var(--tl-track-hue)] bg-[color:var(--tl-track-gen)] text-foreground"
           : "border-border bg-card text-foreground",
         // Dotted means a different thing in each track (Sam, 2026-08-11). In
         // SUBTITLES it is this: the cell is real, the words are not here yet.
@@ -385,7 +396,14 @@ export function TimelineCard({
         // AQU-928: no ring-offset — the lighter, flush ring reads as "also in
         // the selection" next to the primary's offset one.
         !selected && multiSelected && "z-10 ring-2 ring-sky-400/80",
-        !selected && !multiSelected && !drag && "hover:z-10 hover:bg-muted/30",
+        // AQU-646 stage 7: a source-audio chip answers the pointer in its OWN
+        // hue at the hover wash, matching the dotted placeholder between two of
+        // them (Sam, 2026-08-27: "hovering any source audio chip region, real
+        // or dotted"). It used to go to a neutral grey, which threw the row's
+        // colour away at exactly the moment you were pointing at it. Every
+        // other card keeps the grey: those rows are dense text, not clips.
+        !selected && !multiSelected && !drag && "hover:z-10",
+        !selected && !multiSelected && !drag && (isDialogue ? TRACK_HOVER_CLASS : "hover:bg-muted/30"),
       )}
       style={{ left: `${left}px`, width: `${width}px`, borderRadius: `${radiusPx}px` }}
     >
@@ -395,10 +413,9 @@ export function TimelineCard({
         <DragTimeChip mode={drag.mode} startSec={previewStart} endSec={previewEnd} deltaSec={dragDeltaSec} />
       )}
       <span
-        className={cn(
-          "absolute inset-y-0 left-0",
-          isDialogue ? "bg-sky-600" : "bg-zinc-400 dark:bg-zinc-600",
-        )}
+        // The card's own identity bar, in the row's hue at full strength —
+        // the same solid the gutter's accent and colour dot use.
+        className="absolute inset-y-0 left-0 bg-[color:var(--tl-track-hue)]"
         // Follows the card's own corner or it pokes out of a sharpened one.
         style={{
           width: `${ACCENT_BAR_PX}px`,

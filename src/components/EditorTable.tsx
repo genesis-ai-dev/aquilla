@@ -5980,8 +5980,37 @@ function EditorRow({
                 20px above its translation — the target lane can't be made
                 conditional to match, because it also reserves the strip the
                 floating action rail occupies. */}
-            <div data-testid="source-context-line" data-context-kind={contextIsTimecode ? "timecode" : undefined} className={cn("mb-1 flex h-4 items-center gap-1 text-xs text-muted-foreground", contextIsTimecode ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
-              <span>{cell.context}</span>
+            <div data-testid="source-context-line" className={cn("mb-1 flex h-4 items-center gap-2 text-xs text-muted-foreground", showCellLabel ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
+              {/* AQU-646: the character, on the SOURCE side too (Sam,
+                  2026-08-26) — "put that character label also in the top left
+                  of source cells… we'll just scoot the time range over".
+
+                  THE SAME VALUE THE TARGET CORNER SHOWS, deliberately: the two
+                  names in this app are not interchangeable (the sheet's
+                  `cast_name` is what the timeline, the recorder and the exports
+                  print), and Sam's call was that these two corners agree with
+                  each other rather than with those. It therefore rides the
+                  same "Show cell labels" preference and goes blank in the same
+                  places.
+
+                  `dir="auto"` because the lane is forced LTR for timecodes and
+                  a name is not a timecode. The width cap is what does the
+                  scooting: a long character name truncates rather than pushing
+                  the timing out of the row. */}
+              {showCellLabel && (
+                <AppTooltip content={labelText} disabled={!labelText}>
+                  <span data-testid="source-cell-label" dir="auto" className="max-w-[45%] shrink-0 truncate">
+                    {labelText}
+                  </span>
+                </AppTooltip>
+              )}
+              {/* A TIMECODE IS NOT SHOWN HERE ANY MORE (Sam, 2026-08-27,
+                  relaying the client): it moved to the foot of the cell — see
+                  `source-timing-line` — so the character label has this corner
+                  to itself. Other context, a scripture reference like
+                  "GEN 1:1", still belongs at the top: it names what the line IS
+                  rather than when it happens, and it is centred as it was. */}
+              {!contextIsTimecode && <span className="min-w-0 truncate">{cell.context}</span>}
             </div>
             <SourceReferenceAttachments metadata={cell.metadata} />
             {sourceEditing ? (
@@ -6023,6 +6052,23 @@ function EditorRow({
             )}
             {cellExamples.length > 0 && (
               <ExamplePanel examples={cellExamples} />
+            )}
+            {/* THE TIMING, AT THE FOOT OF THE CELL. Rendered ONLY for a
+                timecode, and that asymmetry with the lane above is deliberate:
+                the top lane is reserved even when empty because its 20px is
+                what keeps the source and target columns' first lines on one
+                baseline, while nothing below the text mirrors anything — so an
+                always-on strip here would be wasted height on every scripture
+                row in the app. */}
+            {contextIsTimecode && (
+              <div
+                data-testid="source-timing-line"
+                data-context-kind="timecode"
+                className="mt-1 flex h-4 items-center justify-start text-left text-xs text-muted-foreground"
+                dir="ltr"
+              >
+                <span className="min-w-0 truncate">{cell.context}</span>
+              </div>
             )}
           </div>
         )}
@@ -6572,6 +6618,15 @@ function EditorRow({
                   they live and always did. Only the destination moves. */}
               <CellTtsButton
                 cellId={audioHome?.id ?? cell.id}
+                // …BUT THE VOICE STILL COMES OFF THIS ROW. Character voices are
+                // assigned on the subtitle and stored by ITS cell id, so handing
+                // the cue's id to the cast lookup — which redirecting `cellId`
+                // alone did — found no assignment and fell through to the
+                // project default. Every character's line was generated, and
+                // durably attached, in the narrator's voice, while the character
+                // gutter in the same row went on showing the right name
+                // (2026-08-27).
+                voiceCellId={cell.id}
                 text={visibleTranslated}
                 original={effectiveSourceText(cell)}
                 context={cell.context}

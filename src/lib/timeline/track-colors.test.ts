@@ -1,240 +1,296 @@
-// AQU-646 — the track colour palette. Six hues, two weights, two axes.
-//
-// Three of these tests are worth more than the rest, and none is about a colour
-// looking right:
-//
-//   · "an untouched track is byte-identical" is what stops a palette round
-//     silently repainting every project in the app. It is also what makes the
-//     "Default" item unnecessary, so it is load-bearing twice.
-//   · "no hue reaches into the state layers' vocabulary" is what stops someone
-//     adding an amber, which would make a take running long indistinguishable
-//     from a take at rest. That failure is invisible in review — the swatch
-//     looks lovely — and only shows up when something goes wrong on someone
-//     else's project.
-//   · "every class is a literal" is what stops someone tidying the table into a
-//     template. Tailwind generates only the classes it can see in source, so a
-//     constructed one produces no CSS and the chip renders untinted.
+// AQU-646 stage 7: one hue, three alphas.
 
 import { describe, expect, it } from "vitest"
+
 import {
-  DEFAULT_PRIMARY,
-  DEFAULT_SECONDARY,
+  ALPHA,
+  DEFAULT_HUE,
+  TRACK_ACCENT_CLASS,
+  TRACK_CHIP_GENERATED_CLASS,
+  TRACK_CHIP_TAKE_CLASS,
+  TRACK_DASH_CLASS,
+  TRACK_DOT_CLASS,
+  TRACK_HOVER_CLASS,
   TRACK_HUES,
-  formatTrackColor,
+  TRACK_LANE_TINT_CLASS,
+  hexToRgba,
   isColorableKind,
-  parseTrackColor,
-  trackChipTint,
-  trackDot,
+  hueForTrack,
+  parseTrackHue,
+  trackChipClass,
+  trackChipPlayingClass,
+  trackHueVars,
+  trackHueVarsFor,
 } from "./track-colors"
 
 const hue = (id: string) => TRACK_HUES.find((h) => h.id === id)!
 
-describe("the palette's shape", () => {
-  it("offers six hues, none of them duplicated", () => {
-    const ids = TRACK_HUES.map((h) => h.id)
-    expect(ids).toEqual(["green", "teal", "indigo", "violet", "fuchsia", "slate"])
-    expect(new Set(ids).size).toBe(ids.length)
+describe("the palette", () => {
+  // Sam's own seven, from the spec he wrote (2026-08-27), evenly spaced in
+  // OKLCH. Pinned by value because the point of the exercise was choosing them.
+  it("is Sam's six hues, in his order", () => {
+    expect(TRACK_HUES.map((h) => h.id)).toEqual([
+      "cyan", "azure", "violet", "magenta", "amber", "green",
+    ])
+    // Coral is gone and two were retuned by eye (Sam, 2026-08-27): magenta
+    // toward red with more saturation, amber brightened to 92% HSB.
+    expect(TRACK_HUES.map((h) => h.hex)).toEqual([
+      "#00c3cd", "#2489eb", "#865deb", "#da2b84", "#eba720", "#40c06e",
+    ])
   })
 
-  it("gives every hue both weights, a dot and an i18n key", () => {
+  it("gives every hue an id, a hex and a name to translate", () => {
     for (const h of TRACK_HUES) {
-      expect(h.light, h.id).toMatch(/^border-/)
-      expect(h.dark, h.id).toMatch(/^border-/)
-      expect(h.swatchLight, h.id).toMatch(/^bg-/)
-      expect(h.swatchDark, h.id).toMatch(/^bg-/)
+      expect(h.hex, h.id).toMatch(/^#[0-9a-f]{6}$/)
       expect(h.labelKey, h.id).toMatch(/^editor\.timeline\.color/)
     }
+    expect(new Set(TRACK_HUES.map((h) => h.id)).size).toBe(TRACK_HUES.length)
   })
 
-  // The ids are persisted into files.meta and validated by the worker's
-  // TRACK_COLOR_PATTERN. An id this side would happily write and that side
-  // would 400 makes every retry of that event fail identically, which wedges
-  // the client's outbox behind it.
-  //
-  // THE PAIRED FORM HAS TO PASS IT TOO — that is why this design needed no
-  // worker change at all.
-  it("produces values the server's pattern accepts, in every combination", () => {
+  it("defaults to green, the nearest thing here to the shipped emerald", () => {
+    expect(DEFAULT_HUE.id).toBe("green")
+  })
+
+  // Sam moved the whole ladder down a rung after using it: the lane lost its
+  // colour, the lane's value went to generated voices and the generated value
+  // to recorded takes. The two chip values are an even ladder —
+  // a third and two thirds of the way to the solid.
+  it("keeps an even ladder of alphas, with the lane painting nothing", () => {
+    expect(ALPHA).toEqual({ hover: 0.18, generated: 0.33, take: 0.67 })
+    expect(TRACK_LANE_TINT_CLASS).toBe("")
+  })
+})
+
+describe("reading a stored value", () => {
+  it("takes a preset id", () => {
+    expect(parseTrackHue("cyan")).toBe("#00c3cd")
+    expect(parseTrackHue("amber")).toBe("#eba720")
+  })
+
+  it("takes a bare hex, which is what the picker writes", () => {
+    expect(parseTrackHue("00c3cd")).toBe("#00c3cd")
+    expect(parseTrackHue("123456")).toBe("#123456")
+  })
+
+  // THE MIGRATION THAT ISN'T. Every value already on disk is a two-part pair
+  // from the old two-axis palette; this model has no second axis, so the first
+  // half wins and the second is dropped.
+  it("takes the first half of a legacy pair and drops the second", () => {
+    expect(parseTrackHue("green-teal")).toBe(hue("green").hex)
+    expect(parseTrackHue("violet-magenta")).toBe(hue("violet").hex)
+    expect(parseTrackHue("00c3cd-8b5cf6")).toBe("#00c3cd")
+  })
+
+  it("falls back for a retired id rather than failing", () => {
+    // teal, indigo, fuchsia and slate were hues in earlier palettes and are not
+    // here. A pattern-not-enum wire format is exactly what makes that safe.
+    for (const retired of ["teal", "indigo", "fuchsia", "slate", "emerald", "nonsense", ""]) {
+      expect(parseTrackHue(retired), retired).toBe(DEFAULT_HUE.hex)
+    }
+    expect(parseTrackHue(null)).toBe(DEFAULT_HUE.hex)
+    expect(parseTrackHue(undefined)).toBe(DEFAULT_HUE.hex)
+  })
+
+  // What the menu writes has to survive the server, which validates a colour as
+  // a pattern rather than an enum.
+  it("round-trips every preset id through the server's pattern", () => {
     const pattern = /^[a-z0-9][a-z0-9-]{0,31}$/
-    for (const a of TRACK_HUES) {
-      expect(a.id, a.id).toMatch(pattern)
-      for (const b of TRACK_HUES) {
-        expect(formatTrackColor(a.id, b.id), `${a.id}-${b.id}`).toMatch(pattern)
-      }
+    for (const h of TRACK_HUES) {
+      expect(pattern.test(h.id), h.id).toBe(true)
+      expect(parseTrackHue(h.id)).toBe(h.hex)
     }
   })
 })
 
-describe("an untouched track", () => {
-  // Sam, 2026-08-22: "our green purple pairing for the default first track
-  // should remain as is until manually changed." These two strings are copied
-  // byte-for-byte from the tint that shipped. If they drift, every project in
-  // the app silently gets a new look — which is why the literals are written
-  // out here rather than referenced from the module under test.
-  it("keeps the shipped emerald/violet EXACTLY", () => {
-    for (const none of [null, undefined, ""]) {
-      expect(trackChipTint(none, "take")).toBe(
-        "border-emerald-500/60 bg-emerald-100/80 text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300",
-      )
-      expect(trackChipTint(none, "generated")).toBe(
-        "border-violet-500/60 bg-violet-100/80 text-violet-800 dark:bg-violet-950/70 dark:text-violet-300",
-      )
-      expect(trackDot(none)).toBe("bg-emerald-600")
-    }
+describe("the alphas", () => {
+  it("turns a hex into rgba at the asked-for alpha", () => {
+    expect(hexToRgba("#00c3cd", ALPHA.take)).toBe("rgba(0, 195, 205, 0.67)")
+    expect(hexToRgba("#00c3cd", ALPHA.generated)).toBe("rgba(0, 195, 205, 0.33)")
+    expect(hexToRgba("#ffffff", 1)).toBe("rgba(255, 255, 255, 1)")
   })
 
-  // THE REASON THERE IS NO "DEFAULT" ITEM IN THE PICKER (Sam, 2026-08-25).
-  // The shipped look has to be reachable by picking two ordinary swatches,
-  // otherwise removing that item would strand it.
-  it("is reachable by picking green and violet like anything else", () => {
-    const explicit = formatTrackColor("green", "violet")
-    expect(trackChipTint(explicit, "take")).toBe(trackChipTint(null, "take"))
-    expect(trackChipTint(explicit, "generated")).toBe(trackChipTint(null, "generated"))
-    expect(trackDot(explicit)).toBe(trackDot(null))
+  it("never emits NaN into a style, whatever it is handed", () => {
+    expect(hexToRgba("nope", 0.5)).toBe("rgba(0, 0, 0, 0.5)")
   })
 
-  // …and it shows its ticks there, so an untouched track does not read as
-  // having no colour at all.
-  it("reports green and violet as its current choice", () => {
-    expect(parseTrackColor(null).primary.id).toBe("green")
-    expect(parseTrackColor(null).secondary.id).toBe("violet")
-    expect(DEFAULT_PRIMARY.id).toBe("green")
-    expect(DEFAULT_SECONDARY.id).toBe("violet")
+  // The variables are the whole interface between this module and the lane.
+  it("publishes the hue and its three variants as custom properties", () => {
+    expect(trackHueVars("cyan")).toEqual({
+      "--tl-track-hue": "#00c3cd",
+      "--tl-track-hover": "rgba(0, 195, 205, 0.18)",
+      "--tl-track-gen": "rgba(0, 195, 205, 0.33)",
+      "--tl-track-take": "rgba(0, 195, 205, 0.67)",
+    })
+  })
+
+  it("publishes the default for a track that has never been coloured", () => {
+    expect(trackHueVars(null)["--tl-track-hue"]).toBe(DEFAULT_HUE.hex)
   })
 })
 
-describe("the hues the state layers have already claimed", () => {
-  // amber-500 = soft overflow, red-500 = at fault, sky-500 = selection ring AND
-  // the Source-audio dot. A track wearing any of them is a track whose warnings
-  // cannot be seen. rose/pink sit in the same register as the at-fault body.
-  const RESERVED = ["amber", "red", "rose", "pink", "orange", "sky", "yellow"]
-
-  it("no hue reaches into any of them", () => {
-    for (const h of TRACK_HUES) {
-      for (const reserved of RESERVED) {
-        const used = `${h.light} ${h.dark} ${h.swatchLight} ${h.swatchDark}`
-        expect(used.includes(`-${reserved}-`), `${h.id} uses ${reserved}`).toBe(false)
-      }
-    }
-  })
-})
-
-describe("every class is a literal, because Tailwind only emits what it can see", () => {
-  it("has no template interpolation anywhere in the table", () => {
-    for (const h of TRACK_HUES) {
-      for (const cls of [h.light, h.dark, h.swatchLight, h.swatchDark]) {
-        expect(cls, h.id).not.toContain("${")
-      }
+describe("the class vocabulary", () => {
+  // EVERY ONE MUST BE A LITERAL. Tailwind emits only what it can see while
+  // scanning source, so a constructed class produces no CSS at all — silently,
+  // and looking exactly like a data problem.
+  it("holds no template interpolation anywhere", () => {
+    const all = [
+      TRACK_CHIP_TAKE_CLASS, TRACK_CHIP_GENERATED_CLASS,
+      TRACK_ACCENT_CLASS, TRACK_DOT_CLASS,
+    ]
+    for (const cls of all) {
+      expect(cls, cls).not.toContain("${")
+      expect(cls, cls).toMatch(/var\(--tl-track-|text-foreground|border-l-4/)
     }
   })
 
-  // A missing dark: variant is not a small omission — it means the chip keeps
-  // its light-mode fill in dark mode and the text on it becomes unreadable.
-  it("gives both weights of both hues a full light+dark recipe", () => {
-    for (const h of TRACK_HUES) {
-      for (const [name, cls] of [["light", h.light], ["dark", h.dark]] as const) {
-        expect(cls, `${h.id}.${name}`).toMatch(/^border-\w+-\d+(\/\d+)? /)
-        expect(cls, `${h.id}.${name}`).toMatch(/ bg-\w+-\d+(\/\d+)? /)
-        expect(cls, `${h.id}.${name}`).toMatch(/ text-\w+-\d+/)
-        expect(cls, `${h.id}.${name}`).toMatch(/ dark:bg-\w+-\d+(\/\d+)?/)
-        expect(cls, `${h.id}.${name}`).toMatch(/ dark:text-\w+-\d+$/)
-      }
+  // Sam, 2026-08-27: "put full fill color as outline of chips." An audio chip
+  // gets a definite edge rather than a soft block that dissolves into the row —
+  // and it is the same solid the gutter accent and the dot already use.
+  it("outlines both audio chips in the hue at full strength", () => {
+    for (const cls of [TRACK_CHIP_TAKE_CLASS, TRACK_CHIP_GENERATED_CLASS]) {
+      expect(cls).toContain("border-[color:var(--tl-track-hue)]")
+      // …while the FILL stays the wash that says which kind of clip it is.
+      expect(cls).not.toContain("bg-[color:var(--tl-track-hue)]")
     }
   })
 
-  // SAM'S ACTUAL REQUIREMENT, and the reason a same-hue pair is legal at all:
-  // every primary is drawn lighter than every secondary. Hue cannot tell the
-  // two roles apart when both are green, so weight must — and it has to hold
-  // for EVERY hue, not just the one anybody happened to look at.
-  it("draws every hue's primary weight lighter than its secondary weight", () => {
-    for (const h of TRACK_HUES) {
-      const lightFill = Number(h.light.match(/bg-\w+-(\d+)/)![1])
-      const darkFill = Number(h.dark.match(/bg-\w+-(\d+)/)![1])
-      expect(lightFill, `${h.id} light fill`).toBeLessThan(darkFill)
+  it("picks the body for a take and the lighter wash for a generated voice", () => {
+    expect(trackChipClass("take")).toBe(TRACK_CHIP_TAKE_CLASS)
+    expect(trackChipClass("generated")).toBe(TRACK_CHIP_GENERATED_CLASS)
+    expect(trackChipClass("take")).toContain("--tl-track-take")
+    expect(trackChipClass("generated")).toContain("--tl-track-gen")
+  })
+
+  // Both chips are washes now — most of what you read against is the page — so
+  // the theme's own foreground is right in both themes, and ink chosen against
+  // the hue would be wrong.
+  it("inks both chips against the theme, not against the hue", () => {
+    for (const cls of [TRACK_CHIP_TAKE_CLASS, TRACK_CHIP_GENERATED_CLASS]) {
+      expect(cls).toContain("text-foreground")
+      expect(cls).not.toContain("--tl-track-ink")
     }
   })
 
-  // The state layers come AFTER the palette in the chip's class list, and
-  // tailwind-merge resolves last-wins PER UTILITY GROUP. A palette entry that
-  // introduced a group the warning layers do not also set — a ring, a
-  // border-side, an opacity — would survive past them and beat the warning.
+  // THE INVARIANT THE WHOLE SCHEME RESTS ON: the identity classes may only set
+  // groups the state layers also set, so a warning can override them. A `ring-`
+  // or an `opacity-` here would be a tint the alarm vocabulary cannot beat.
   it("introduces no utility group the state layers cannot override", () => {
-    for (const h of TRACK_HUES) {
-      for (const cls of [h.light, h.dark]) {
-        expect(cls, h.id).not.toMatch(/\bring-/)
-        expect(cls, h.id).not.toMatch(/\bborder-[lrtbxy]-/)
-        expect(cls, h.id).not.toMatch(/\bopacity-/)
-      }
+    for (const cls of [TRACK_CHIP_TAKE_CLASS, TRACK_CHIP_GENERATED_CLASS]) {
+      expect(cls).not.toMatch(/(^|\s)ring-/)
+      expect(cls).not.toMatch(/(^|\s)opacity-/)
+      expect(cls).not.toMatch(/(^|\s)border-[lrtbxy]-/)
+      expect(cls).not.toMatch(/(^|\s)shadow-/)
     }
   })
 })
 
-describe("reading and writing a two-axis colour", () => {
-  it("round-trips a pair", () => {
-    const value = formatTrackColor("violet", "green")
-    expect(value).toBe("violet-green")
-    expect(parseTrackColor(value).primary.id).toBe("violet")
-    expect(parseTrackColor(value).secondary.id).toBe("green")
+// AQU-646 stage 7: the derived rows went through the same vocabulary, so the
+// gutter and the lanes are drawn from one system rather than two.
+describe("the rows nobody picks a colour for", () => {
+  it("gives each derived kind a hue of its own", () => {
+    expect(hueForTrack("source-subtitles", null)).toBe("#8b93a3")
+    expect(hueForTrack("source-audio", null)).toBe("#0e9bd6")
+    expect(hueForTrack("target-subtitles", null)).toBe("#40c06e")
   })
 
-  // The point of two weights: hue stops carrying the distinction, so the same
-  // hue on both axes is a legal and useful choice.
-  it("allows the same hue twice and still draws two tones", () => {
-    for (const h of TRACK_HUES) {
-      const value = formatTrackColor(h.id, h.id)
-      expect(trackChipTint(value, "take")).toBe(h.light)
-      expect(trackChipTint(value, "generated")).toBe(h.dark)
-      expect(trackChipTint(value, "take")).not.toBe(trackChipTint(value, "generated"))
-    }
+  // Their colours are statements about what the row IS, so a stored value —
+  // which nothing should ever write for these — must not move them.
+  it("ignores a colour written onto one anyway", () => {
+    expect(hueForTrack("source-audio", "magenta")).toBe("#0e9bd6")
+    expect(hueForTrack("source-subtitles", "da2b84")).toBe("#8b93a3")
   })
 
-  it("reads a bare id as that hue on both axes", () => {
-    expect(parseTrackColor("violet").primary.id).toBe("violet")
-    expect(parseTrackColor("violet").secondary.id).toBe("violet")
+  it("keeps a pickable row's own colour, and its default", () => {
+    expect(hueForTrack("target-audio", "magenta")).toBe("#da2b84")
+    expect(hueForTrack("audio", "cyan")).toBe("#00c3cd")
+    expect(hueForTrack("target-audio", null)).toBe(DEFAULT_HUE.hex)
   })
 
-  // THIS IS WHY THE SERVER VALIDATES A PATTERN AND NOT AN ENUM. A newer client
-  // ships palette entries this build has never heard of, and during a rollout
-  // the newer client is the normal case. Falling back means the track is still
-  // there, still named and still playing — just not in the colour someone else
-  // picked — and its stored value is untouched, so their client keeps showing
-  // it correctly. The two retired palettes' ids land here too.
-  it("falls back for hues it cannot name, including the retired palettes'", () => {
-    for (const retired of ["lime", "emerald", "purple", "stone", "cyan"]) {
-      expect(trackChipTint(retired, "take"), retired).toBe(hue("green").light)
-    }
-    // A whole pair from a retired palette falls all the way back to the default.
-    expect(trackChipTint("lime-stone", "take")).toBe(hue("green").light)
-    expect(trackChipTint("lime-stone", "generated")).toBe(hue("violet").dark)
-    // …and a half-known value still draws the half it knows.
-    expect(trackChipTint("teal-stone", "take")).toBe(hue("teal").light)
-    expect(trackChipTint("teal-stone", "generated")).toBe(hue("violet").dark)
+  // Source audio's blue and the palette's Azure have to stay tellable apart —
+  // a track wearing Azure must not read as the source-audio row.
+  it("keeps source audio clear of the palette's azure", () => {
+    expect(hueForTrack("source-audio", null)).not.toBe(hue("azure").hex)
   })
 
-  it("picks the weight by clip kind", () => {
-    expect(trackChipTint("green-green", "take")).toBe(hue("green").light)
-    expect(trackChipTint("green-green", "generated")).toBe(hue("green").dark)
-  })
-
-  it("takes the gutter dot from the primary", () => {
-    expect(trackDot("violet-green")).toBe(hue("violet").swatchDark)
+  it("publishes their hues through the same variables as everything else", () => {
+    const vars = trackHueVarsFor("target-subtitles", null)
+    expect(vars["--tl-track-hue"]).toBe("#40c06e")
+    expect(vars["--tl-track-hover"]).toBe("rgba(64, 192, 110, 0.18)")
+    expect(vars["--tl-track-gen"]).toBe("rgba(64, 192, 110, 0.33)")
   })
 })
 
-describe("which kinds may be recoloured at all", () => {
-  // Sam confirmed the derived dub row on 2026-08-24 — it is a dub row like any
-  // other, and it has always been included here.
-  it("allows the derived dub row and added audio tracks", () => {
+// Sam, 2026-08-27: "when hovering any source audio chip region, real or
+// dotted, have the hover color be 18% opacity." Both surfaces answer the
+// pointer in the row's own hue at the lightest rung.
+// Sam, 2026-08-27: source audio drops to 24% fill and 12% hover. It is the one
+// row you are not working ON — reference material, hundreds of chips, often
+// continuous for minutes — so at the shared strength it reads as a solid band
+// and competes with the dub row underneath it.
+describe("source audio, drawn lighter than everything else", () => {
+  it("takes its own fill and hover, below the shared ladder", () => {
+    const vars = trackHueVarsFor("source-audio", null)
+    expect(vars["--tl-track-gen"]).toBe("rgba(14, 155, 214, 0.24)")
+    expect(vars["--tl-track-hover"]).toBe("rgba(14, 155, 214, 0.12)")
+  })
+
+  it("leaves every other row on the shared ladder", () => {
+    for (const kind of ["target-audio", "audio", "source-subtitles", "target-subtitles"]) {
+      const vars = trackHueVarsFor(kind, null)
+      const hue = vars["--tl-track-hue"]
+      expect(vars["--tl-track-gen"], kind).toBe(hexToRgba(hue, ALPHA.generated))
+      expect(vars["--tl-track-hover"], kind).toBe(hexToRgba(hue, ALPHA.hover))
+    }
+  })
+
+  // Still a ladder, just a shorter one — the hover must stay under the fill or
+  // pointing at a chip would darken it past what it means.
+  it("keeps its two rungs in order", () => {
+    const vars = trackHueVarsFor("source-audio", null)
+    expect(vars["--tl-track-hover"]).toBe(hexToRgba("#0e9bd6", 0.12))
+    expect(0.12).toBeLessThan(0.24)
+  })
+})
+
+describe("what answers the pointer", () => {
+  it("uses the hover wash, and it is the lightest rung", () => {
+    expect(TRACK_HOVER_CLASS).toBe("hover:bg-[color:var(--tl-track-hover)]")
+    expect(ALPHA.hover).toBeLessThan(ALPHA.generated)
+  })
+
+  it("gives the dotted placeholder the same hover, over no fill at rest", () => {
+    expect(TRACK_DASH_CLASS).toContain("hover:bg-[color:var(--tl-track-hover)]")
+    // Nothing at rest: a block of colour would overstate an absence.
+    expect(TRACK_DASH_CLASS).not.toMatch(/(^|\s)bg-/)
+    expect(TRACK_DASH_CLASS).toContain("border-dashed")
+  })
+})
+
+describe("which rows may be recoloured", () => {
+  it("is the audio rows, derived and added alike", () => {
     expect(isColorableKind("target-audio")).toBe(true)
     expect(isColorableKind("audio")).toBe(true)
   })
 
-  // Sam, 2026-08-22: "do not be changeable. It is deliberate, we've talked
-  // about this many times." Grey for source subtitles and aquilla blue for
-  // source audio are statements, not unassigned defaults.
-  it("refuses the source rows and folders", () => {
-    expect(isColorableKind("source-subtitles")).toBe(false)
-    expect(isColorableKind("source-audio")).toBe(false)
-    expect(isColorableKind("target-subtitles")).toBe(false)
-    expect(isColorableKind("folder")).toBe(false)
+  it("is never a source row or a folder", () => {
+    for (const kind of ["source-subtitles", "source-audio", "target-subtitles", "folder"]) {
+      expect(isColorableKind(kind), kind).toBe(false)
+    }
+  })
+})
+
+describe("the preview progress fill (2026-08-27)", () => {
+  it("splits each kind's fill at the playhead, in the ladder's own rungs", () => {
+    const take = trackChipPlayingClass("take")
+    expect(take).toContain("var(--tl-track-take)_var(--tl-play-x")
+    expect(take).toContain("var(--tl-track-hover)_var(--tl-play-x")
+    const gen = trackChipPlayingClass("generated")
+    expect(gen).toContain("var(--tl-track-gen)_var(--tl-play-x")
+    expect(gen).toContain("var(--tl-track-hover)_var(--tl-play-x")
+  })
+
+  it("mutes the identity colour underneath — the gradient's washes must not stack on it", () => {
+    expect(trackChipPlayingClass("take")).toContain("bg-transparent")
+    expect(trackChipPlayingClass("generated")).toContain("bg-transparent")
   })
 })

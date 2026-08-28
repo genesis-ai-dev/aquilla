@@ -7,7 +7,13 @@
 // rules that decide what the tab draws.
 
 import { describe, it, expect } from "vitest"
-import { buildLinkedTakes, primaryAudioHome, resolveAudioHomes } from "./linked-takes"
+import {
+  buildLinkedTakes,
+  divergentVoiceTargets,
+  primaryAudioHome,
+  resolveAudioHomes,
+  resolveSynthTargets,
+} from "./linked-takes"
 import type { CellData } from "@/hooks/useCells"
 
 /** A cue with a selected take, as `mergeCellsWithAudio` leaves one. The audio
@@ -180,39 +186,113 @@ describe("resolveAudioHomes", () => {
   })
 })
 
-// AQU-646 stage 3f — what a bulk synth does on a cue file.
+// ── What a bulk voice generation resolves to ────────────────────────────────
 //
-// The rule Sam set (2026-08-25): a subtitle performed by two heard lines
-// generates onto BOTH, each speaking the whole line, and the user trims. This
-// is that rule expressed as data, since the workspace closure that builds it
-// cannot be reached from a test.
-describe("the shape a bulk synth resolves to", () => {
-  const cues = [cue("c1", { take: false }), cue("c2", { take: false })]
-  const links = new Map<string, readonly string[]>([["sub-a", ["c2", "c1"]]])
+// This block used to assert against a HAND-COPIED transcription of the
+// workspace's `synthTargetsFor`, on the reasoning that the live copy closed
+// over React state and could not be reached. The copy had already drifted from
+// the real one (it returned nothing in the self case, where the real function
+// returns a target), and its fixture only ever had ONE subtitle — so the
+// many-to-many direction, where the bug actually lived, was never constructed.
+// The resolver is a pure exported function now and these test IT.
+describe("resolveSynthTargets", () => {
+  /** A subtitle line, with a translation and no generated voice yet. */
+  const sub = (id: string, translated: string, startTime: number): CellData =>
+    ({ id, fileId: "f1", original: "", translated, startTime, medium: "media" }) as unknown as CellData
 
-  /** The workspace's `synthTargetsFor`, transcribed. Kept here so the rule is
-   *  pinned somewhere even though its live copy closes over React state. */
-  const targetsFor = (cellId: string, text: string) => {
-    const homes = resolveAudioHomes(cellId, { cueCells: cues, cuesForText: links })
-    if (homes.kind === "none") return []
-    const cells = homes.kind === "self" ? [] : homes.cells
-    return cells.map((c) => ({ cellId: c.id, text, voiceCellId: cellId }))
-  }
+  it("with no cue sibling, every line speaks its own words onto itself", () => {
+    const cells = [sub("a", "Sit down.", 0), sub("b", "Now.", 1)]
+    expect(resolveSynthTargets(cells, { cueCells: null, cuesForText: new Map(), textForCue: new Map() }))
+      .toEqual([
+        { cell: cells[0], text: "Sit down.", voiceCellId: "a", linkedTextIds: ["a"] },
+        { cell: cells[1], text: "Now.", voiceCellId: "b", linkedTextIds: ["b"] },
+      ])
+  })
 
-  it("generates onto EVERY performing cue, in film order, each with the whole line", () => {
-    expect(targetsFor("sub-a", "Sit down.")).toEqual([
-      { cellId: "c1", text: "Sit down.", voiceCellId: "sub-a" },
-      { cellId: "c2", text: "Sit down.", voiceCellId: "sub-a" },
+  it("skips a line with no translation, and one already voiced", () => {
+    const blank = sub("a", "   ", 0)
+    const voiced = { ...sub("b", "Now.", 1), selectedGeneratedVoiceAudioId: "gen-1" } as CellData
+    expect(resolveSynthTargets([blank, voiced], { cueCells: null, cuesForText: new Map(), textForCue: new Map() }))
+      .toEqual([])
+  })
+
+  // THE BUG THIS GROUP EXISTS FOR. Two subtitles performed by ONE heard line
+  // used to emit two targets for that one cue — two paid generations racing
+  // into a single slot, the loser stored and silent.
+  it("generates ONCE for a heard line that performs several subtitles, speaking all of them", () => {
+    const cues = [cue("c1", { take: false })]
+    const subs = [sub("s2", "Now.", 10), sub("s1", "Sit down.", 5)]
+    const links = index([["s1", ["c1"]], ["s2", ["c1"]]])
+    const out = resolveSynthTargets(subs, { cueCells: cues, ...links })
+
+    expect(out).toHaveLength(1)
+    expect(out[0].cell.id).toBe("c1")
+    // Joined in FILM order, not the order the subtitles were handed in.
+    expect(out[0].text).toBe("Sit down. Now.")
+    // The voice follows the first line in film order (Sam, 2026-08-27).
+    expect(out[0].voiceCellId).toBe("s1")
+    expect(out[0].linkedTextIds).toEqual(["s1", "s2"])
+  })
+
+  // The other direction, which was already right and must stay right: Sam's
+  // August ruling that one subtitle performed by two heard lines voices BOTH,
+  // each speaking the whole line.
+  it("still voices every heard line that performs one subtitle", () => {
+    const cues = [cue("c1", { take: false }), cue("c2", { take: false })]
+    const subs = [sub("s1", "Sit down.", 5)]
+    const out = resolveSynthTargets(subs, { cueCells: cues, ...index([["s1", ["c1", "c2"]]]) })
+    expect(out.map((t) => [t.cell.id, t.text])).toEqual([
+      ["c1", "Sit down."],
+      ["c2", "Sit down."],
     ])
   })
 
-  // The voice follows the SUBTITLE's cast assignment, not the cue's — cues have
-  // none, so without this every dub speaks in the project default.
-  it("keeps the subtitle as the cast-assignment key for every cue", () => {
-    expect(targetsFor("sub-a", "x").every((t) => t.voiceCellId === "sub-a")).toBe(true)
+  it("leaves an already-voiced heard line alone while doing its unvoiced neighbour", () => {
+    const done = { ...cue("c1", { take: false }), selectedGeneratedVoiceAudioId: "gen-1" } as CellData
+    const cues = [done, cue("c2", { take: false })]
+    const subs = [sub("s1", "Sit down.", 5), sub("s2", "Now.", 10)]
+    const out = resolveSynthTargets(subs, { cueCells: cues, ...index([["s1", ["c1"]], ["s2", ["c2"]]]) })
+    expect(out.map((t) => t.cell.id)).toEqual(["c2"])
   })
 
-  it("generates nothing for a line no cue performs", () => {
-    expect(targetsFor("sub-orphan", "x")).toEqual([])
+  it("generates nothing for a heard line nothing is linked to, or whose lines are untranslated", () => {
+    const cues = [cue("c1", { take: false }), cue("c2", { take: false })]
+    const subs = [sub("s1", "   ", 5)]
+    // c1 is linked to an untranslated line; c2 is linked to nothing at all.
+    const out = resolveSynthTargets(subs, { cueCells: cues, ...index([["s1", ["c1"]]]) })
+    expect(out).toEqual([])
+  })
+
+  it("ignores a subtitle the cue index points at but this build cannot see", () => {
+    const cues = [cue("c1", { take: false })]
+    const subs = [sub("s1", "Sit down.", 5)]
+    const out = resolveSynthTargets(subs, { cueCells: cues, ...index([["s1", ["c1"]], ["ghost", ["c1"]]]) })
+    expect(out).toHaveLength(1)
+    expect(out[0].text).toBe("Sit down.")
+    expect(out[0].linkedTextIds).toEqual(["s1"])
+  })
+})
+
+describe("divergentVoiceTargets", () => {
+  const sub = (id: string, translated: string, startTime: number): CellData =>
+    ({ id, fileId: "f1", original: "", translated, startTime, medium: "media" }) as unknown as CellData
+  const plan = (linkedTextIds: string[]) =>
+    ({ cell: sub("c1", "x", 0), text: "x", voiceCellId: linkedTextIds[0], linkedTextIds })
+
+  it("reports a heard line whose subtitles are assigned different characters", () => {
+    const assigned = (id: string) => ({ s1: "v-peter", s2: "v-andrew" })[id]
+    expect(divergentVoiceTargets([plan(["s1", "s2"])], assigned)).toHaveLength(1)
+  })
+
+  it("says nothing when they agree, or when only one is assigned at all", () => {
+    const agree = (id: string) => ({ s1: "v-peter", s2: "v-peter" })[id]
+    expect(divergentVoiceTargets([plan(["s1", "s2"])], agree)).toEqual([])
+    // An UNASSIGNED line does not count as disagreeing — it has no opinion.
+    const partial = (id: string) => ({ s1: "v-peter" })[id]
+    expect(divergentVoiceTargets([plan(["s1", "s2"])], partial)).toEqual([])
+  })
+
+  it("says nothing about an ordinary one-subtitle line", () => {
+    expect(divergentVoiceTargets([plan(["s1"])], () => "v-peter")).toEqual([])
   })
 })

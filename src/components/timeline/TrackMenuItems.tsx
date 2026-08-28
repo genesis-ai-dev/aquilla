@@ -29,21 +29,18 @@
 
 import type { ReactNode } from "react"
 import { FolderPlus, FolderMinus, Palette, Pencil, Trash2 } from "lucide-react"
-import { cn } from "@/lib/utils"
 import {
-  ContextMenuGroup,
   ContextMenuItem,
-  ContextMenuLabel,
   ContextMenuSeparator,
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
 } from "@/components/ui/context-menu"
+import { cn } from "@/lib/utils"
 import {
   TRACK_HUES,
-  formatTrackColor,
   isColorableKind,
-  parseTrackColor,
+  parseTrackHue,
 } from "@/lib/timeline/track-colors"
 import { DEFAULT_TRACK_IDS, type TimelineTrack } from "@/lib/timeline/tracks"
 import type { useT } from "@/lib/i18n/I18nProvider"
@@ -192,6 +189,15 @@ export function trackMenuItems({
       {onRename && rename && (colourable.length > 0 || foldable.length > 0
         || inAFolder.length > 0 || deletable.length > 0) && <ContextMenuSeparator />}
 
+      {/* AQU-646 stage 7: SIX SWATCHES, AND NOTHING ELSE (Sam, 2026-08-27:
+          "all the user needs to see is the six colors to pick from. no previews
+          or anything").
+
+          It is a submenu again. The dialog that briefly stood here existed for
+          exactly one reason — a native `<input type="color">` hands focus to
+          the operating system, and a context menu closes on that — and with the
+          custom picker gone so is the reason. A submenu recolours in one click
+          instead of three, which is the whole point of simplifying it. */}
       {editing && colourable.length > 0 && (
         <ContextMenuSub>
           <ContextMenuSubTrigger>
@@ -200,92 +206,31 @@ export function trackMenuItems({
               ? t("editor.timeline.trackColorCount", { count: colourable.length })
               : t("editor.timeline.trackColor")}
           </ContextMenuSubTrigger>
-          <ContextMenuSubContent className="w-auto min-w-0 p-2">
-            {/* TWO AXES SIDE BY SIDE, drawn to Sam's own mock-up (2026-08-25).
-                A circle plus a plain label, in two columns under "Primary:" and
-                "Secondary:", rather than the tinted tiles with the words inside
-                them that came before ("I don't like the design of the pickers
-                at all"). Columns make the popup wider and shorter, which reads
-                as a picker instead of a menu of options.
-
-                THE HEADINGS SAY "PRIMARY" AND "SECONDARY" ON PURPOSE, and the
-                tooltip is what pays for that. Sam: the pairing is learnable from
-                the default green/purple you can already see on the chips, "maybe
-                we can have a hover… it'll give a little tooltip about recorded
-                takes versus generated voices." So the words stay short and the
-                explanation is one hover away, on every swatch in the column.
-
-                THERE IS NO "DEFAULT" ITEM, and it is not missing: the shipped
-                look IS green-primary + violet-secondary, so it is reachable by
-                picking those two like anything else. */}
-            <div className="flex items-stretch gap-2">
-              {([
-                { axis: "primary", headKey: "editor.timeline.trackColorPrimary", tipKey: "editor.timeline.trackColorRecorded" },
-                { axis: "secondary", headKey: "editor.timeline.trackColorSecondary", tipKey: "editor.timeline.trackColorGenerated" },
-              ] as const).map(({ axis, headKey, tipKey }, columnIndex) => {
-                const tip = t(tipKey as Parameters<typeof t>[0])
-                return (
-                  // A REAL GROUP ROOT, not just a heading — Base UI's
-                  // MenuGroupLabel reads MenuGroupContext and throws without
-                  // one, and the grouping is what tells a screen reader which
-                  // swatches belong to which heading. That grouping is also
-                  // what lets each swatch's own label stay just the colour
-                  // name without becoming ambiguous.
-                  <ContextMenuGroup
-                    key={axis}
-                    className={cn("min-w-28", columnIndex > 0 && "border-l border-border pl-2")}
-                  >
-                    <ContextMenuLabel className="px-1 pb-1" title={tip}>
-                      {t(headKey as Parameters<typeof t>[0])}
-                    </ContextMenuLabel>
-                    {TRACK_HUES.map((hue) => {
-                      // "Every one of them is already this", which is the only
-                      // thing a selected state could honestly mean for several.
-                      const current = colourable.every(
-                        (tr) => parseTrackColor(tr.color)[axis].id === hue.id,
-                      )
-                      return (
-                        <ContextMenuItem
-                          key={hue.id}
-                          closeOnClick={false}
-                          title={tip}
-                          className="gap-2"
-                          onClick={() =>
-                            editing.onSetColor(
-                              colourable.map((tr) => {
-                                const choice = parseTrackColor(tr.color)
-                                return {
-                                  trackId: tr.id,
-                                  color: formatTrackColor(
-                                    axis === "primary" ? hue.id : choice.primary.id,
-                                    axis === "secondary" ? hue.id : choice.secondary.id,
-                                  ),
-                                }
-                              }),
-                            )
-                          }
-                        >
-                          {/* Drawn at the weight THIS column uses, so the two
-                              columns visibly differ and picking violet as a
-                              secondary and getting the heavier violet is not a
-                              surprise. The ring sits outside the circle so it
-                              never eats into the colour being judged. */}
-                          <span
-                            aria-hidden
-                            className={cn(
-                              "h-3.5 w-3.5 shrink-0 rounded-full",
-                              axis === "primary" ? hue.swatchLight : hue.swatchDark,
-                              current && "ring-2 ring-foreground/50 ring-offset-1 ring-offset-popover",
-                            )}
-                          />
-                          {t(hue.labelKey as Parameters<typeof t>[0])}
-                        </ContextMenuItem>
-                      )
-                    })}
-                  </ContextMenuGroup>
-                )
-              })}
-            </div>
+          <ContextMenuSubContent className="w-auto min-w-0 p-1">
+            {TRACK_HUES.map((hue) => {
+              // "Every one of them is already this", which is the only thing a
+              // selected state could honestly mean across several tracks.
+              const current = colourable.every((tr) => parseTrackHue(tr.color) === hue.hex)
+              return (
+                <ContextMenuItem
+                  key={hue.id}
+                  className="gap-2"
+                  onClick={() =>
+                    editing.onSetColor(colourable.map((tr) => ({ trackId: tr.id, color: hue.id })))
+                  }
+                >
+                  <span
+                    aria-hidden
+                    className={cn(
+                      "h-3.5 w-3.5 shrink-0 rounded-full",
+                      current && "ring-2 ring-foreground/50 ring-offset-1 ring-offset-popover",
+                    )}
+                    style={{ backgroundColor: hue.hex }}
+                  />
+                  {t(hue.labelKey as Parameters<typeof t>[0])}
+                </ContextMenuItem>
+              )
+            })}
           </ContextMenuSubContent>
         </ContextMenuSub>
       )}

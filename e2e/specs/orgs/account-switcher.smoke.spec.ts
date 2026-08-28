@@ -1,6 +1,7 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { ensureAuthState, injectAdditionalSession } from "../../helpers/auth"
 import { AccountSwitcherPage } from "../../helpers/page-objects/AccountSwitcher"
+import { seedUser } from "../../helpers/seed"
 import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
@@ -78,4 +79,39 @@ test("logging out promotes another signed-in account", async ({ alice }) => {
   await expect(alice.getByRole("button", { name: /Account menu: bob/i })).toBeVisible({
     timeout: 10_000,
   })
+})
+
+test("logout and second-user sign-in survive unavailable private storage", async ({ alice }) => {
+  test.setTimeout(120_000)
+  const bob = seedUser("bob")
+
+  // Safari Private Browsing exposes OPFS but rejects getDirectory() with this
+  // UnknownError. Install the same browser-level constraint before reloading
+  // so every app module observes the private-storage behavior.
+  await alice.context().addInitScript(() => {
+    Object.defineProperty(navigator.storage, "getDirectory", {
+      configurable: true,
+      value: () => Promise.reject(new DOMException(
+        "The operation failed for an unknown transient reason (e.g. out of memory).",
+        "UnknownError",
+      )),
+    })
+  })
+  await alice.reload()
+
+  await new AccountSwitcherPage(alice).logOutCurrentAccount("alice")
+  await expect(alice.getByRole("button", { name: "Log in" })).toBeVisible({ timeout: 30_000 })
+
+  await alice.goto("/orgs/all")
+  await expect(alice.getByText("Sign in to see your workspace")).toBeVisible({ timeout: 30_000 })
+  await alice.getByRole("link", { name: "Sign in" }).click()
+
+  await alice.getByLabel("Username or email").fill(bob.username)
+  await alice.getByRole("textbox", { name: "Password" }).fill(bob.password)
+  await alice.getByRole("button", { name: "Sign in" }).click()
+
+  await expect(alice.getByRole("button", { name: /Account menu: bob/i })).toBeVisible({
+    timeout: 30_000,
+  })
+  await expect(alice.getByText(/couldn't safely finish switching accounts/i)).toHaveCount(0)
 })

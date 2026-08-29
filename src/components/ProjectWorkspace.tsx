@@ -897,28 +897,34 @@ export function ProjectWorkspace() {
   const [agentTabOpen, setAgentTabOpen] = useState(
     () => centerSurface === "agent" || readAgentTabOpen(projectId),
   )
-  // Agent workbench (agent-mode-v2 §4) is a takeover surface: collapse the
-  // dock to the rail on entry (a second agent chat beside the workbench is
-  // confusing) and restore the user's tab on exit. Manual reopen still wins —
-  // this only fires on surface transitions.
+  // Agent workbench is a takeover surface (v2.2 three-column layout): the
+  // dock's Agent panel is the THREADS LIST, so entry opens it as the natural
+  // left column, and exit restores whatever the user had before. Manual tab
+  // picks mid-takeover win — this only fires on surface transitions.
   const dockTabBeforeAgentRef = useRef<DockTab | null>("files")
+  // Programmatic dock switches during the takeover (the workbench's "Choose
+  // file" scope picker) must NOT read as a manual pick on exit, or leaving
+  // the surface strands the user on Files instead of their saved tab.
+  const dockTabForcedRef = useRef(false)
   const prevSurfaceRef = useRef(centerSurface)
   useEffect(() => {
     const prev = prevSurfaceRef.current
     prevSurfaceRef.current = centerSurface
     if (centerSurface === "agent" && prev !== "agent") {
       dockTabBeforeAgentRef.current = dockTab
-      // v2.2 three-column layout: the Agent panel is the THREADS LIST — on
-      // the agent surface it is the natural left column. The file explorer
-      // (the workbench's scope picker) stays one rail click away.
+      dockTabForcedRef.current = false
       setDockTab("agent")
     } else if (centerSurface !== "agent" && prev === "agent") {
-      // Entry forced the threads list ("agent"), so treat that forced default
-      // (or a collapsed rail) as "no manual choice" and restore the saved tab.
-      // Any other tab was picked manually mid-takeover — keep it.
+      // Entry forced the threads list ("agent"), so treat that forced default,
+      // a collapsed rail, or a programmatic mid-takeover switch as "no manual
+      // choice" and restore the saved tab. Any other tab was picked manually
+      // mid-takeover — keep it.
       setDockTab((cur) =>
-        cur === null || cur === "agent" ? dockTabBeforeAgentRef.current : cur,
+        cur === null || cur === "agent" || dockTabForcedRef.current
+          ? dockTabBeforeAgentRef.current
+          : cur,
       )
+      dockTabForcedRef.current = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- dockTab read on transition only
   }, [centerSurface])
@@ -8765,6 +8771,9 @@ export function ProjectWorkspace() {
             onActiveTabChange={(t) => {
               // The Agent rail opens the threads-list panel everywhere (v2.2);
               // navigation to the agent surface happens by picking a thread.
+              // A rail click is a MANUAL pick — it overrides any programmatic
+              // mid-takeover switch when deciding what to restore on exit.
+              dockTabForcedRef.current = false
               setDockTab(t)
               // Opening the Voices tab puts the editor into the Audio lens so
               // the per-line voice controls show alongside the panel.
@@ -9228,7 +9237,10 @@ export function ProjectWorkspace() {
             credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
             fileNames={agentFileNames}
             onClose={closeAgentTab}
-            onChooseFile={() => setDockTab("files")}
+            onChooseFile={() => {
+              dockTabForcedRef.current = true
+              setDockTab("files")
+            }}
             onJumpToCell={(fileId, cellId) =>
               navigate(`/project/${projectId}/editor/file/${fileId}?cellId=${encodeURIComponent(cellId)}`)
             }

@@ -40,7 +40,23 @@ vi.mock("@/lib/contextual/transport", () => ({
   startFileContextualRun: vi.fn(),
   // DecisionCard (rendered in the questions conversation) imports this too.
   actOnContextualDecision: vi.fn(),
+  // The v3 mode control's "check for updates now".
+  requestReactCheck: vi.fn(),
 }))
+
+// The v3 agentModes experiment is device-local: the surface reads it straight
+// from the IDB project record, so the flag is controlled here rather than
+// through a prop.
+vi.mock("@/lib/store/project-index", () => ({ getProject: vi.fn() }))
+
+// The mode dial reads the shared settings row; stub the read so these tests
+// stay about the Team surface rather than the settings wire.
+vi.mock("@/lib/agent/agent-mode", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/agent/agent-mode")>(
+    "@/lib/agent/agent-mode",
+  )
+  return { ...actual, fetchAgentMode: vi.fn(), patchAgentMode: vi.fn() }
+})
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "test-jwt", username: "alice" }, loading: false }),
@@ -113,6 +129,11 @@ const fetchContextualDecisions = vi.mocked(transport.fetchContextualDecisions)
 const fetchContextualRunActivity = vi.mocked(transport.fetchContextualRunActivity)
 const sendContextualSteering = vi.mocked(transport.sendContextualSteering)
 const startFileContextualRun = vi.mocked(transport.startFileContextualRun)
+
+const projectIndex = await import("@/lib/store/project-index")
+const getProject = vi.mocked(projectIndex.getProject)
+const agentModeApi = await import("@/lib/agent/agent-mode")
+const fetchAgentMode = vi.mocked(agentModeApi.fetchAgentMode)
 
 const { resetTeamConversationsForTesting } = await import("@/lib/agent/team-conversations")
 const { TeamThreadsView } = await import("./TeamThreadsView")
@@ -212,6 +233,13 @@ beforeEach(() => {
   agentSessionState.isStreaming = false
   fetchContextualRunActivity.mockResolvedValue(activity([]))
   sendContextualSteering.mockResolvedValue(undefined)
+  // No cached project record → every registry flag reads its default, and
+  // agentModes defaults ON.
+  getProject.mockResolvedValue(undefined)
+  fetchAgentMode.mockResolvedValue({
+    mode: { initiative: false, react: false, scope: "full" },
+    version: 1,
+  })
 })
 
 describe("TeamThreadsView — the active conversation surface", () => {
@@ -412,6 +440,143 @@ describe("TeamThreadsView — the active conversation surface", () => {
     expect(screen.getByTestId("contextual-decision-card")).toBeInTheDocument()
     // DecisionCard owns its own Answer input — the channel composer stands down.
     expect(screen.queryByLabelText("Ask the agent")).not.toBeInTheDocument()
+    view.unmount()
+  })
+
+  it("never titles a conversation with a raw span id", async () => {
+    // The server hands back an opaque span id whenever it had no human ref to
+    // name the wave by. Printing it would be the "no raw ids anywhere
+    // user-facing" regression from the live review.
+    fetchContextualRuns.mockResolvedValue(
+      runsPage([
+        runRecord({
+          runId: "run-4",
+          fileId: "file-unknown",
+          spanLabel: "0b6f1f1e-4a1e-4c33-9f4a-8f2b0f5f1e77",
+        }),
+      ]),
+    )
+    fetchContextualDecisions.mockResolvedValue(decisionsPage())
+    const view = renderView({ initialEntry: "/project/p1/agent?conversation=run%3Arun-4" })
+
+    expect(await screen.findByText("Autopilot run")).toBeInTheDocument()
+    expect(screen.queryByText(/0b6f1f1e/)).toBeNull()
+    view.unmount()
+  })
+
+  it("offers Next passage on a parked run and starts a one-span run from it", async () => {
+    // Parked between waves is exactly where "do the next bit, then I'll look"
+    // belongs — and spanLimit 1 is what keeps it to one bit.
+    fetchContextualRuns.mockResolvedValue(
+      // run-12 is the run the click is about to create; the poller would pick
+      // it up on its next pass, which is what lets selection land on it.
+      runsPage([
+        runRecord({ runId: "run-11", status: "parked", phase: null }),
+        runRecord({ runId: "run-12", status: "running" }),
+      ]),
+    )
+    fetchContextualDecisions.mockResolvedValue(decisionsPage())
+    startFileContextualRun.mockResolvedValue({ runId: "run-12" })
+    const view = renderView({
+      initialEntry: "/project/p1/agent?conversation=run%3Arun-11",
+      roleLevel: ROLE.CONTRIBUTOR,
+    })
+
+    fireEvent.click(await screen.findByTestId("team-next-passage"))
+
+    await waitFor(() =>
+      expect(startFileContextualRun).toHaveBeenCalledWith("p1", "file-1", "", 1),
+    )
+    // Selection follows the fresh run, so the button is a way INTO the new
+    // work rather than a fire-and-forget.
+    await waitFor(() =>
+      expect(fetchContextualRunActivity).toHaveBeenCalledWith("p1", "run-12"),
+    )
+    view.unmount()
+  })
+
+  it("offers Next passage on a finished run too, but not on one still working", async () => {
+    fetchContextualRuns.mockResolvedValue(
+      runsPage([
+        runRecord({ runId: "run-13", status: "done", phase: null }),
+        runRecord({ runId: "run-14", status: "running" }),
+      ]),
+    )
+    fetchContextualDecisions.mockResolvedValue(decisionsPage())
+    const done = renderView({
+      initialEntry: "/project/p1/agent?conversation=run%3Arun-13",
+      roleLevel: ROLE.CONTRIBUTOR,
+    })
+    expect(await screen.findByTestId("team-next-passage")).toBeInTheDocument()
+    done.unmount()
+
+    const working = renderView({
+      initialEntry: "/project/p1/agent?conversation=run%3Arun-14",
+      roleLevel: ROLE.CONTRIBUTOR,
+    })
+    await screen.findByTestId("team-thread-detail")
+    // A run with momentum needs no second starter racing it.
+    expect(screen.queryByTestId("team-next-passage")).toBeNull()
+    working.unmount()
+  })
+
+  it("withholds Next passage from a viewer who cannot start runs", async () => {
+    fetchContextualRuns.mockResolvedValue(
+      runsPage([runRecord({ runId: "run-15", status: "done", phase: null })]),
+    )
+    fetchContextualDecisions.mockResolvedValue(decisionsPage())
+    const view = renderView({ initialEntry: "/project/p1/agent?conversation=run%3Arun-15" })
+
+    await screen.findByTestId("team-thread-detail")
+    expect(screen.queryByTestId("team-next-passage")).toBeNull()
+    view.unmount()
+  })
+
+  it("reports a failed Next passage instead of leaving the click unanswered", async () => {
+    fetchContextualRuns.mockResolvedValue(
+      runsPage([runRecord({ runId: "run-16", status: "parked", phase: null })]),
+    )
+    fetchContextualDecisions.mockResolvedValue(decisionsPage())
+    startFileContextualRun.mockRejectedValue(new Error("offline"))
+    const view = renderView({
+      initialEntry: "/project/p1/agent?conversation=run%3Arun-16",
+      roleLevel: ROLE.CONTRIBUTOR,
+    })
+
+    fireEvent.click(await screen.findByTestId("team-next-passage"))
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Couldn't start the next passage.",
+    )
+    view.unmount()
+  })
+
+  it("shows the agent-mode dial in the roster row", async () => {
+    fetchContextualRuns.mockResolvedValue(runsPage([runRecord()]))
+    fetchContextualDecisions.mockResolvedValue(decisionsPage())
+    const view = renderView({ roleLevel: ROLE.CONTRIBUTOR })
+    expect(await screen.findByTestId("agent-mode-trigger")).toHaveTextContent("Manual")
+    view.unmount()
+  })
+
+  it("renders none of the v3 affordances when the agentModes experiment is off", async () => {
+    // Flag off must leave the rest of the Team surface untouched — the
+    // conversation still opens, only the new controls are absent.
+    getProject.mockResolvedValue({
+      id: "p1",
+      experimentalFlags: { agentModes: false },
+    } as never)
+    fetchContextualRuns.mockResolvedValue(
+      runsPage([runRecord({ runId: "run-17", status: "done", phase: null })]),
+    )
+    fetchContextualDecisions.mockResolvedValue(decisionsPage())
+    const view = renderView({
+      initialEntry: "/project/p1/agent?conversation=run%3Arun-17",
+      roleLevel: ROLE.CONTRIBUTOR,
+    })
+
+    expect(await screen.findByTestId("team-thread-detail")).toBeInTheDocument()
+    expect(screen.queryByTestId("agent-mode-trigger")).toBeNull()
+    expect(screen.queryByTestId("team-next-passage")).toBeNull()
     view.unmount()
   })
 

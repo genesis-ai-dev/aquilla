@@ -47,7 +47,7 @@ import { ensureRunThread } from "./team-ingest"
 import {
   groupByFile,
   NON_DISCOURSE_KINDS,
-  readActiveRunFiles,
+  readRunStatesByFile,
   readExpertEvents,
   readFileKinds,
   REACT_MAX_EVENTS_PER_SWEEP,
@@ -92,8 +92,26 @@ export type StartReactionRun = (
   input: StartReactionRunInput,
 ) => Promise<StartReactionRunResult>
 
+export interface WakeReactionRunInput {
+  projectId: string
+  fileId: string
+  /** The parked run to wake — the reaction continues ITS conversation. */
+  runId: string
+  /** Auto-steering direction queued before the resumed tick reads steering. */
+  direction: string
+}
+
+/** Wakes a PARKED run with the reaction steering instead of starting a rival
+ *  run on the same file — a finished reaction parks, and without this every
+ *  parked run would block that file's reactions forever. */
+export type WakeReactionRun = (
+  env: Env,
+  input: WakeReactionRunInput,
+) => Promise<StartReactionRunResult>
+
 export interface ReactDeps {
   startRun: StartReactionRun
+  wakeRun: WakeReactionRun
 }
 
 export interface ReactSkip {
@@ -275,9 +293,9 @@ export async function reactCheckProject(
 
   const signals = groupByFile(rows)
   if (signals.length > 0) {
-    const [kinds, activeFiles] = await Promise.all([
+    const [kinds, runStates] = await Promise.all([
       readFileKinds(db, projectId, signals.map((s) => s.fileId)),
-      readActiveRunFiles(db, projectId),
+      readRunStatesByFile(db, projectId),
     ])
     const lastReactionAt = { ...state.lastReactionAt }
 
@@ -299,8 +317,16 @@ export async function reactCheckProject(
         skipped.push({ fileId: signal.fileId, reason: "not a discourse file" })
         continue
       }
-      if (activeFiles.has(signal.fileId)) {
+      const runState = runStates.get(signal.fileId)
+      if (runState?.state === "busy") {
         skipped.push({ fileId: signal.fileId, reason: "a run is already active on this file" })
+        continue
+      }
+      if (runState?.state === "paused") {
+        // A person paused work on this file — an uninvited reaction must not
+        // override that intent. The events are consumed; the next edit after
+        // they resume earns a fresh reaction.
+        skipped.push({ fileId: signal.fileId, reason: "a person paused the run on this file" })
         continue
       }
       const previous = Date.parse(lastReactionAt[signal.fileId] ?? "")
@@ -309,19 +335,34 @@ export async function reactCheckProject(
         continue
       }
 
+      const direction = reactionDirection(mode.scope, signal.count, signal.refs)
       let started: StartReactionRunResult
       try {
-        started = await deps.startRun(env, {
-          projectId,
-          fileId: signal.fileId,
-          anchorCellId: signal.anchorCellId,
-          direction: reactionDirection(mode.scope, signal.count, signal.refs),
-        })
+        started =
+          runState?.state === "parked"
+            ? // A parked run is idle but resumable: the reaction wakes IT with
+              // the new steering, continuing the same conversation, rather
+              // than starting a rival run the active-exists guard would block.
+              await deps.wakeRun(env, {
+                projectId,
+                fileId: signal.fileId,
+                runId: runState.runId,
+                direction,
+              })
+            : await deps.startRun(env, {
+                projectId,
+                fileId: signal.fileId,
+                anchorCellId: signal.anchorCellId,
+                direction,
+              })
       } catch (err) {
         // One unstartable file must not cost the others their turn — or the
         // cursor advance that keeps the sweep from replaying this window.
         console.warn(`[react] start failed for ${projectId}/${signal.fileId}:`, err)
-        skipped.push({ fileId: signal.fileId, reason: "start_failed" })
+        skipped.push({
+          fileId: signal.fileId,
+          reason: runState?.state === "parked" ? "wake_failed" : "start_failed",
+        })
         continue
       }
       if (started.status !== "ok") {

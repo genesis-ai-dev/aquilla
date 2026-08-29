@@ -126,17 +126,42 @@ export async function readFileKinds(
 }
 
 /** Files with a run already in flight — the reaction is already happening. */
-export async function readActiveRunFiles(
+/** What a file's most-relevant undead run means for a reaction:
+ *  `busy` — actively working, leave it alone; `paused` — a PERSON paused it,
+ *  never override that intent; `parked` — idle but resumable, so a reaction
+ *  WAKES it (carrying the run id to wake) instead of starting a rival run. */
+export type FileRunState =
+  | { state: "busy" }
+  | { state: "paused" }
+  | { state: "parked"; runId: string }
+
+export async function readRunStatesByFile(
   db: AquillaDb,
   projectId: string,
-): Promise<Set<string>> {
+): Promise<Map<string, FileRunState>> {
   const { results } = await db
     .prepare(
-      `SELECT DISTINCT file_id FROM contextual_runs
+      `SELECT file_id, id, status FROM contextual_runs
         WHERE project_id = ?
-          AND status IN ('running','pausing','paused','parked','waiting')`,
+          AND status IN ('running','pausing','paused','parked','waiting')
+        ORDER BY updated_at DESC`,
     )
     .bind(projectId)
-    .all<{ file_id: string }>()
-  return new Set(results.map((row) => row.file_id))
+    .all<{ file_id: string; id: string; status: string }>()
+  const rank = (state: FileRunState["state"]): number =>
+    state === "busy" ? 2 : state === "paused" ? 1 : 0
+  const map = new Map<string, FileRunState>()
+  for (const row of results) {
+    const next: FileRunState =
+      row.status === "paused"
+        ? { state: "paused" }
+        : row.status === "parked"
+          ? { state: "parked", runId: row.id }
+          : { state: "busy" }
+    const current = map.get(row.file_id)
+    // Rows arrive newest-first, so on equal rank the FRESHEST run wins (a
+    // reaction wakes the most recently parked run, not an ancient one).
+    if (!current || rank(next.state) > rank(current.state)) map.set(row.file_id, next)
+  }
+  return map
 }

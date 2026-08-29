@@ -175,7 +175,12 @@ qualifying events in a discourse file with no active/recent reaction run),
 then START a contextual run `initiatedBy: "reaction"` anchored at the
 affected cells, seeded with an auto-steering direction naming the trigger
 ("Reacting to N human edits in <refs>; scope qa → verify and report, do not
-redraft unless a check fails"). Premise from the meeting: "anytime you have
+redraft unless a check fails"). Existing-run etiquette (shipped): a BUSY run
+(running/pausing/waiting) defers the reaction; a PAUSED run is never
+overridden — a person asked for quiet; a PARKED run with remaining work is
+WOKEN with the reaction steering (continuing its own conversation); an
+EXHAUSTED parked run is retired and replaced by a fresh reaction run over the
+file's current state. Premise from the meeting: "anytime you have
 human expert data injected, there are implications of that." Anti-noise: a
 reaction is a THREAD, not notifications — debounce, one open reaction per
 file, cooldown between reactions. Never throw into the cron.

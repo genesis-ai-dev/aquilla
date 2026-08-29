@@ -9,6 +9,10 @@
  * unknown future kinds are skipped rather than rendered as jargon, and
  * consecutive same-region phase updates for the same span collapse into one
  * message so a long run reads as a conversation, not a log.
+ *
+ * Message ids are unique by construction, even when the wire delivers
+ * colliding event ids — they key React's list and address the step
+ * inspector's selection, so a collision would silently swallow a step.
  */
 
 import {
@@ -148,6 +152,10 @@ function messageFor(
   }
 }
 
+/** Separator that cannot occur inside an event id or kind, so the composite
+ *  dedupe key can never be forged by an id that merely contains the joiner. */
+const DUPE_KEY_SEP = "\u0000"
+
 export function buildRunFeed(
   activity: Pick<ContextualRunActivity, "events" | "sceneBriefs">,
 ): TeamFeedMessage[] {
@@ -157,9 +165,23 @@ export function buildRunFeed(
   const feed: TeamFeedMessage[] = []
   // Collapse consecutive same-region phase updates per span.
   const lastPhaseRegion = new Map<string, ProcessRegion>()
+  // Message ids address React keys AND the step inspector's selection, so a
+  // colliding wire id silently swallows a step: two events render as one row,
+  // and clicking either opens whichever the lookup finds first. The wire is
+  // supposed to mint unique ids; this makes the feed correct even when it
+  // doesn't. Exact repeats (same id AND same kind — a re-delivered event)
+  // collapse to one message; a reused id carrying a DIFFERENT kind is two real
+  // steps, so both survive under deterministic `${id}#2`, `${id}#3` ids.
+  const emitted = new Set<string>()
+  const idUses = new Map<string, number>()
   for (const event of ordered) {
     const message = messageFor(event, activity.sceneBriefs)
     if (!message) continue
+    // Checked before the phase bookkeeping below: a re-delivered event must
+    // leave no trace, or it would advance `lastPhaseRegion` past a region
+    // whose message never reached the feed.
+    const dupeKey = `${message.id}${DUPE_KEY_SEP}${event.kind}`
+    if (emitted.has(dupeKey)) continue
     const spanKey = event.spanId ?? "run"
     if (message.body.kind === "phase") {
       if (lastPhaseRegion.get(spanKey) === message.body.region) continue
@@ -167,7 +189,14 @@ export function buildRunFeed(
     } else {
       lastPhaseRegion.delete(spanKey)
     }
-    feed.push({ ...message, raw: { kind: event.kind, details: event.details } })
+    emitted.add(dupeKey)
+    const uses = idUses.get(message.id) ?? 0
+    idUses.set(message.id, uses + 1)
+    feed.push({
+      ...message,
+      id: uses === 0 ? message.id : `${message.id}#${uses + 1}`,
+      raw: { kind: event.kind, details: event.details },
+    })
   }
   return feed
 }

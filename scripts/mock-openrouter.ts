@@ -35,6 +35,16 @@ interface MockToolCall {
 }
 
 let callSeq = 0
+/**
+ * Separate from `callSeq` so every completion gets a distinct id even when it
+ * carries no tool call. `respond()` used to stamp `mock-${Date.now()}-${callSeq}`
+ * while only `toolCall()` advanced the counter — so a contextual run, whose
+ * nodes never emit tool calls, minted the SAME id for every response that
+ * landed inside one millisecond. That surfaced live as five identical ids in a
+ * run's seeded activity (2026-08-28 review). Ids that identify a thing must be
+ * minted by the thing that hands them out.
+ */
+let responseSeq = 0
 
 function toolCall(args: Record<string, unknown>): MockToolCall {
   return {
@@ -55,7 +65,7 @@ function namedToolCall(name: string, args: Record<string, unknown>): MockToolCal
 
 function respond(content: string | null, tool_calls?: MockToolCall[]) {
   return {
-    id: `mock-${Date.now()}-${callSeq}`,
+    id: `mock-${Date.now()}-${++responseSeq}`,
     choices: [
       {
         message: { role: "assistant", content, ...(tool_calls ? { tool_calls } : {}) },

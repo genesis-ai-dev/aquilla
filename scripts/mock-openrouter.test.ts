@@ -110,4 +110,26 @@ describe("scripted local agent", () => {
     ])
     expect(generation.tool_calls).toBeUndefined()
   })
+
+  // Regression (2026-08-28 live review): a run's seeded activity showed five
+  // identical ids. The completion id was `mock-${Date.now()}-${callSeq}`, and
+  // only tool calls advanced callSeq — so the contextual nodes, which emit no
+  // tool calls, minted one id for every response inside the same millisecond.
+  it("mints a distinct id per completion, even for back-to-back tool-call-free replies", () => {
+    const contextualNode = (marker: string) => [
+      { role: "system", content: `[[ctx:${marker}]] contextual node` },
+      { role: "user", content: "Summarize this span for the reader." },
+    ]
+
+    const ids = [
+      scriptMockResponse(contextualNode("summarize")).id,
+      scriptMockResponse(contextualNode("summarize")).id,
+      scriptMockResponse(contextualNode("summarize")).id,
+      scriptMockResponse(contextualNode("summarize")).id,
+      scriptMockResponse(contextualNode("summarize")).id,
+    ]
+
+    // The bodies are deliberately identical — only the ids must differ.
+    expect(new Set(ids).size).toBe(ids.length)
+  })
 })

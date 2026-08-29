@@ -243,6 +243,7 @@ export const agent = defineNamespace({
       "This work has finished — there is no one left in this thread to direct.",
     "agent.team.composer.scope": "{persona} · {scope}",
     "agent.team.composer.sendFailed": "Couldn't send that message. Try again.",
+    "agent.team.inspector.resize": "Resize step detail",
 
     // ── Shared chat management (AgentChatOptions) ───────────────────────
     "agent.chatOptions.label": "Chat options",
@@ -1170,6 +1171,12 @@ export const agent = defineNamespace({
         description:
           "Tooltip on a disabled per-row Validate button in the validation queue " +
           "when the signed-in user's project role is below the validation floor.",
+      },
+      "agent.team.inspector.resize": {
+        description:
+          "Accessible name of the drag handle on the inner edge of the step-detail " +
+          "column, which widens or narrows that column. Focusable: the arrow keys " +
+          "move it too. A verb phrase naming what is resized.",
       },
     },
   },

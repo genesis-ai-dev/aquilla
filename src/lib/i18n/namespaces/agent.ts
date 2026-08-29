@@ -224,6 +224,7 @@ export const agent = defineNamespace({
       "This work has finished — there is no one left in this thread to direct.",
     "agent.team.composer.scope": "{persona} · {scope}",
     "agent.team.composer.sendFailed": "Couldn't send that message. Try again.",
+    "agent.team.inspector.resize": "Resize step detail",
 
     // ── Full-screen workbench (AgentWorkbench) ──────────────────────────
     "agent.workbench.newSessionAriaLabel": "New session",
@@ -1019,6 +1020,12 @@ export const agent = defineNamespace({
           persona: "The translated teammate name (Drafter / Reviewer / Coordinator).",
           scope: "The passage label or file name the run is working — not translated.",
         },
+      },
+      "agent.team.inspector.resize": {
+        description:
+          "Accessible name of the drag handle on the inner edge of the step-detail " +
+          "column, which widens or narrows that column. Focusable: the arrow keys " +
+          "move it too. A verb phrase naming what is resized.",
       },
     },
   },

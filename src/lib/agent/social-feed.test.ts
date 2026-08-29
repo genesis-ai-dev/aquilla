@@ -115,6 +115,57 @@ describe("buildRunFeed", () => {
     expect(partialBody.status).toBe("partial")
   })
 
+  // Colliding wire ids were seen live (2026-08-28 review: five identical ids
+  // in one run's activity). The seed that minted them is fixed, but the feed
+  // must stay correct regardless: message ids key React's list AND address the
+  // step inspector's selection, so a collision silently swallows a step.
+  it("collapses a re-delivered event (same id AND same kind) to one message", () => {
+    const feed = buildRunFeed({
+      events: [
+        ev({ kind: "span_started", id: "dup", createdAt: "2026-08-28T12:00:01Z" }),
+        ev({ kind: "span_started", id: "dup", createdAt: "2026-08-28T12:00:02Z" }),
+        ev({ kind: "drafts_staged", id: "other", details: { count: 1 } }),
+      ],
+      sceneBriefs: [],
+    })
+    expect(feed.map((m) => m.body.kind)).toEqual(["started", "draftsStaged"])
+    expect(feed.map((m) => m.id)).toEqual(["dup", "other"])
+  })
+
+  it("keeps both steps when one id carries two different kinds, under distinct ids", () => {
+    const feed = buildRunFeed({
+      events: [
+        ev({ kind: "span_started", id: "dup", createdAt: "2026-08-28T12:00:01Z" }),
+        ev({ kind: "scene_ready", id: "dup", createdAt: "2026-08-28T12:00:02Z" }),
+        ev({ kind: "drafts_staged", id: "dup", createdAt: "2026-08-28T12:00:03Z" }),
+      ],
+      sceneBriefs: [],
+    })
+    expect(feed.map((m) => m.body.kind)).toEqual(["started", "sceneReady", "draftsStaged"])
+    // Deterministic suffixes, so a re-fetch of the same activity addresses the
+    // same step: the inspector's selection survives a poll.
+    expect(feed.map((m) => m.id)).toEqual(["dup", "dup#2", "dup#3"])
+    expect(new Set(feed.map((m) => m.id)).size).toBe(feed.length)
+  })
+
+  it("lets a re-delivered phase event leave no trace on the collapse state", () => {
+    // The duplicate must be dropped BEFORE the phase bookkeeping: if it
+    // advanced the collapse cursor, the genuine "checking" beat behind it
+    // would be swallowed as a repeat.
+    const feed = buildRunFeed({
+      events: [
+        ev({ kind: "phase", phase: "reading", id: "p1", createdAt: "2026-08-28T12:00:01Z" }),
+        ev({ kind: "phase", phase: "checking", id: "p1", createdAt: "2026-08-28T12:00:02Z" }),
+        ev({ kind: "phase", phase: "checking", id: "p2", createdAt: "2026-08-28T12:00:03Z" }),
+      ],
+      sceneBriefs: [],
+    })
+    // p1's second delivery is the same (id, kind) as its first, so it drops;
+    // p2 is the run's first surviving "checking" beat and must survive.
+    expect(feed.map((m) => m.id)).toEqual(["p1", "p2"])
+    expect(feed.map((m) => m.persona)).toEqual(["drafter", "reviewer"])
+  })
+
   it("orders messages by event time even when the input is shuffled", () => {
     const started = ev({ kind: "span_started" })
     const outcome = ev({ kind: "span_outcome", status: "complete" })

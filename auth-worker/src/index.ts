@@ -97,7 +97,8 @@ import mondayRoutes from "./routes/monday"
 import contactRoutes from "./routes/contact"
 import billingRoutes from "./routes/billing"
 import { flushDirtyLinks } from "./lib/monday/push"
-import { sweepStrandedContextualRuns } from "./routes/contextual"
+import { startReactionRun, sweepStrandedContextualRuns } from "./routes/contextual"
+import { runReactSweep } from "./lib/react-loop"
 import {
   deploymentEnvironmentError,
   scheduledDeploymentEnvironmentError,
@@ -404,8 +405,13 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
   }
 }) as typeof app.fetch
 
-// Cron (wrangler.toml [triggers], every 5 minutes): flush Monday board links
-// whose push was debounced (dirty_at set), oldest first, capped at 20 per run.
+// Cron (wrangler.toml [triggers], every 5 minutes). Three independent pieces
+// of work, each isolated so one failing cannot take the others down:
+//   1. flush Monday board links whose push was debounced (dirty_at set),
+//      oldest first, capped at 20 per run;
+//   2. sweep stranded contextual runs (dead driver / parked with spans left);
+//   3. the v3 react watcher — projects with agentMode.react on react to human
+//      expert input that landed in the event log.
 // The scheduled entrypoint doesn't pass through the fetch wrapper above, so it
 // builds its own request-scoped Postgres shim the same way.
 const scheduled = async (
@@ -450,6 +456,22 @@ const scheduled = async (
       }
     } catch (err) {
       console.error("[contextual cron] sweep failed:", err)
+    }
+    // React watcher (v3): projects with agentMode.react on respond to human
+    // expert input landing in the event log. Same contract as the sweep above
+    // — bounded, best-effort, and NEVER allowed to fail the cron; its driver
+    // promise joins sweepDone so the shared connection outlives the runs it
+    // starts.
+    try {
+      const react = await runReactSweep(runEnv, { startRun: startReactionRun })
+      const previous = sweepDone
+      sweepDone = Promise.allSettled([previous, react.done]).then(() => {})
+      if (react.reactions.length > 0) {
+        console.log(`[react cron] started ${react.reactions.length} reaction run(s)`)
+        ctx.waitUntil(react.done)
+      }
+    } catch (err) {
+      console.error("[react cron] sweep failed:", err)
     }
   } finally {
     if (shim) ctx.waitUntil(sweepDone.then(() => shim!.close()))

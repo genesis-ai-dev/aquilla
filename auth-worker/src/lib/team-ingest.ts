@@ -19,7 +19,7 @@
 import type { AquillaDb } from "../../../db/shim/postgres"
 import type { ContextualRunEvent } from "../../../db/shared/contextual-runs"
 import { humanPassageLabel } from "../../../shared/span-label"
-import type { TeamActivityBody, TeamPersonaId } from "../../../shared/team-channel"
+import type { TeamActivityBody, TeamPersonaId, TeamThread } from "../../../shared/team-channel"
 import {
   appendMessage,
   ensureThread,
@@ -120,17 +120,61 @@ export function mapRunEvent(event: ContextualRunEvent): MappedActivity | null {
 }
 
 /** Label the run's thread by the file it is translating, falling back to the
- *  span label and finally the raw id — a thread title is never blank. */
+ *  given hint and finally the raw id — a thread title is never blank. */
 async function resolveThreadTitle(
   db: AquillaDb,
-  event: ContextualRunEvent,
+  input: { projectId: string; fileId: string; hint?: string | null },
 ): Promise<string> {
   const file = await db
     .prepare("SELECT name FROM files WHERE id = ? AND project_id = ?")
-    .bind(event.fileId, event.projectId)
+    .bind(input.fileId, input.projectId)
     .first<{ name: string }>()
-  const title = file?.name ?? humanPassageLabel(event.spanLabel) ?? event.fileId
+  const title = file?.name ?? input.hint ?? input.fileId
   return title.slice(0, 160)
+}
+
+export interface EnsureRunThreadInput {
+  projectId: string
+  runId: string
+  fileId: string
+  /** Used as the title when the file row can't be read. */
+  titleHint?: string | null
+}
+
+/**
+ * The thread that covers one contextual run, opening its main-channel dispatch
+ * message the first time anyone asks for it.
+ *
+ * Both writers of a run's thread go through here — the activity write-through
+ * below, and the react watcher's coordinator note (lib/react-loop.ts) — so the
+ * "exactly one dispatch message per thread" invariant has ONE owner. Whichever
+ * caller wins the thread INSERT posts the dispatch; if a reaction opens the
+ * thread before the first tick does, the channel still reads correctly.
+ */
+export async function ensureRunThread(
+  db: AquillaDb,
+  input: EnsureRunThreadInput,
+): Promise<TeamThread> {
+  const { thread, created } = await ensureThread(db, {
+    projectId: input.projectId,
+    sourceKind: "run",
+    sourceRef: input.runId,
+    title: await resolveThreadTitle(db, {
+      projectId: input.projectId,
+      fileId: input.fileId,
+      hint: input.titleHint ?? null,
+    }),
+  })
+  if (created) {
+    await appendMessage(db, {
+      projectId: input.projectId,
+      threadId: null,
+      author: { kind: "persona", id: "coordinator" },
+      bodyKind: "text",
+      body: { text: dispatchText(thread.title), threadId: thread.id },
+    })
+  }
+  return thread
 }
 
 /**
@@ -148,24 +192,14 @@ export async function ingestRunActivity(
     const mapped = mapRunEvent(event)
     if (!mapped) return
 
-    const { thread, created } = await ensureThread(db, {
-      projectId: event.projectId,
-      sourceKind: "run",
-      sourceRef: event.runId,
-      title: await resolveThreadTitle(db, event),
-    })
-
     // Exactly one writer wins the thread INSERT, so the dispatch message that
     // owns this thread lands in the main channel exactly once.
-    if (created) {
-      await appendMessage(db, {
-        projectId: event.projectId,
-        threadId: null,
-        author: { kind: "persona", id: "coordinator" },
-        bodyKind: "text",
-        body: { text: dispatchText(thread.title), threadId: thread.id },
-      })
-    }
+    const thread = await ensureRunThread(db, {
+      projectId: event.projectId,
+      runId: event.runId,
+      fileId: event.fileId,
+      titleHint: humanPassageLabel(event.spanLabel),
+    })
 
     // Collapse consecutive same-region phase updates for the same span, the
     // way the client feed does — a long run should read as a conversation,

@@ -31,6 +31,7 @@ import {
   findOccupiedCells,
   findProposedCellsFromOtherRuns,
   appendContextualRunEvent,
+  spanLimitReached,
   type ContextualRun,
   type ContextualRunEvent,
   type ContextualRunStatus,
@@ -1160,7 +1161,13 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     await setSpanCursor(db, runId, cursor)
   }
 
-  if (cursor.nextIndex >= cursor.seeds.length) {
+  // Two ways a run is finished with drafting: its cursor is exhausted, or it
+  // hit the span limit its starter asked for ("translate the next passage,
+  // then I look" — v3 §"Next step only"). Both settle through the SAME parking
+  // path, and the limit is checked HERE, before a wave is picked, so that any
+  // driver — the kicked loop, a resume, the cron sweeper — re-parks a capped
+  // run without spending a single model call on it.
+  if (cursor.nextIndex >= cursor.seeds.length || spanLimitReached(run)) {
     // Exhausted work parks so successful drafts stay reviewable on a live run.
     // A run that produced nothing at all still fails, so Play can start fresh.
     const t = run.failedSpans > 0 && run.doneSpans === 0
@@ -1302,9 +1309,15 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
     return result(false, fresh?.status ?? "not_found")
   }
   if (after) await notify(runStateFrame(after))
-  if (fresh?.status === "running" && advanced.nextIndex >= advanced.seeds.length) {
+  if (
+    fresh?.status === "running" &&
+    (advanced.nextIndex >= advanced.seeds.length || spanLimitReached(fresh))
+  ) {
     // Mixed success parks with failedSpans as the attention signal. A run
     // that staged nothing still fails so retry can start a new run.
+    // The span limit settles at this same edge — reading `fresh`, whose
+    // counters recordWaveOutcome just advanced — so a capped run parks as soon
+    // as its last allowed span settles rather than one idle wave later.
     const t = fresh.failedSpans > 0 && fresh.doneSpans === 0
       ? await failRun(db, runId, fresh.lastError ?? "One or more passages need attention.")
       : await parkRun(db, runId)

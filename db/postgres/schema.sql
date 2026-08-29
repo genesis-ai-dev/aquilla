@@ -259,8 +259,15 @@ CREATE TABLE project_settings (
     -- AQU-575: compact portfolio projections. Never load the multi-MB settings
     -- blob merely to read validationCount or targetLanes.
     validation_count TEXT GENERATED ALWAYS AS ((settings::jsonb)->>'validationCount') STORED,
-    target_lanes JSONB GENERATED ALWAYS AS ((settings::jsonb)->'targetLanes') STORED
+    target_lanes JSONB GENERATED ALWAYS AS ((settings::jsonb)->'targetLanes') STORED,
+    -- 0085: the v3 agent-mode react switch, projected for the 5-minute react
+    -- watcher — it asks "which projects have react on?" across the whole table
+    -- every sweep, and must never parse a multi-MB blob to answer. BOOLEAN, so
+    -- absent/false/garbage all collapse to the documented default (off).
+    agent_react BOOLEAN
+      GENERATED ALWAYS AS (((settings::jsonb) -> 'agentMode' ->> 'react') = 'true') STORED
 );
+CREATE INDEX project_settings_agent_react ON project_settings(project_id) WHERE agent_react;
 
 CREATE TABLE org_settings (
     org_id     BIGINT PRIMARY KEY REFERENCES organizations(id) ON DELETE CASCADE,
@@ -1313,6 +1320,7 @@ CREATE TABLE IF NOT EXISTS contextual_runs (
   anchor_cell_id text,                  -- where the user was looking at start; rotates the first wave
   scope_group text,                     -- shared id across runs one project-wide start created
   blocked_on_decision_id text,          -- set while status='waiting'; the open contextual_decisions row blocking this run
+  span_limit integer,                   -- 0084: park after this many settled spans (done+failed); NULL = unlimited ("next step only")
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()  -- doubles as the driver heartbeat/lease
 );

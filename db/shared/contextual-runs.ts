@@ -90,8 +90,19 @@ export interface ContextualRun {
   anchorCellId: string | null
   /** Shared across every run one project-wide start created. */
   scopeGroup: string | null
+  /** "Next step only" (v3): park once `doneSpans + failedSpans` reaches this.
+   *  NULL is the historical behaviour — draft the whole file. */
+  spanLimit: number | null
   createdAt: string
   updatedAt: string
+}
+
+/** Has this run drafted everything its starter asked for? Checked at the span
+ *  edge by the tick, and mirrored in SQL by `claimStrandedRuns` so the cron
+ *  cannot resume a run the user deliberately capped. */
+export function spanLimitReached(run: ContextualRun): boolean {
+  if (run.spanLimit == null) return false
+  return run.doneSpans + run.failedSpans >= run.spanLimit
 }
 
 export type SteeringKind = "direction" | "refresh_span" | "note"
@@ -313,6 +324,7 @@ interface RunRow {
   blocked_on_decision_id: string | null
   anchor_cell_id: string | null
   scope_group: string | null
+  span_limit: number | null
   created_at: unknown
   updated_at: unknown
 }
@@ -345,6 +357,7 @@ function rowToRun(r: RunRow): ContextualRun {
     blockedOnDecisionId: r.blocked_on_decision_id ?? null,
     anchorCellId: r.anchor_cell_id ?? null,
     scopeGroup: r.scope_group ?? null,
+    spanLimit: r.span_limit == null ? null : Number(r.span_limit),
     createdAt: toIso(r.created_at),
     updatedAt: toIso(r.updated_at),
   }
@@ -353,7 +366,7 @@ function rowToRun(r: RunRow): ContextualRun {
 const RUN_COLS = `id, project_id, file_id, target_lang, status, initiated_by, role_snapshot,
   span_cursor, done_spans, total_spans, failed_spans, units_spent, calls_spent,
   last_error, steering_cursor, blocked_on_decision_id, anchor_cell_id, scope_group,
-  created_at, updated_at`
+  span_limit, created_at, updated_at`
 
 interface SteeringRow {
   id: string
@@ -799,6 +812,8 @@ export interface CreateRunInput {
   anchorCellId?: string | null
   /** Shared across every run one project-wide start created. */
   scopeGroup?: string | null
+  /** Park after this many settled spans; omit/null for the whole file. */
+  spanLimit?: number | null
 }
 
 export type CreateRunResult =
@@ -827,8 +842,8 @@ export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<C
       .prepare(
         `INSERT INTO contextual_runs
             (id, project_id, file_id, target_lang, status, initiated_by, role_snapshot,
-             anchor_cell_id, scope_group)
-         VALUES (?, ?, ?, ?, 'running', ?, ?::jsonb, ?, ?)
+             anchor_cell_id, scope_group, span_limit)
+         VALUES (?, ?, ?, ?, 'running', ?, ?::jsonb, ?, ?, ?)
          RETURNING ${RUN_COLS}`,
       )
       .bind(
@@ -840,6 +855,7 @@ export async function createRun(db: AquillaDb, input: CreateRunInput): Promise<C
         input.roleSnapshot ?? null,
         input.anchorCellId ?? null,
         input.scopeGroup ?? null,
+        input.spanLimit ?? null,
       )
       .first<RunRow>()
     if (!row) throw new Error("insert returned no row")
@@ -1791,6 +1807,13 @@ export const DRIVER_STALE_SECONDS = 300
  *     parked deliberately. Waking it is how a file larger than one loop's cap
  *     finishes without the user clicking anything.
  *
+ * A run that parked at its `span_limit` is deliberately NOT adopted: "translate
+ * the next passage, then I look" is a request to stop, and a cron that resumed
+ * it five minutes later would silently undo the only thing the control does.
+ * Restarting such a run is a human gesture (resume / steering), which is also
+ * what clears the wedge — the tick re-parks it immediately unless the limit was
+ * raised, so nothing here can spend model budget past the cap.
+ *
  * The UPDATE is the claim: exactly one sweeper can win a given row per pass,
  * because the guard requires the stale heartbeat it then overwrites.
  */
@@ -1805,6 +1828,7 @@ export async function claimStrandedRuns(
         WHERE id IN (
           SELECT id FROM contextual_runs
            WHERE updated_at < now() - make_interval(secs => ?)
+             AND (span_limit IS NULL OR done_spans + failed_spans < span_limit)
              AND (
                status = 'running'
                OR (status = 'parked'

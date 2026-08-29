@@ -341,6 +341,31 @@ describe("react-check gates", () => {
     expect(woken?.doneSpans ?? 0).toBeGreaterThan(0)
   })
 
+  it("retires an EXHAUSTED parked run and reacts with a fresh one", async () => {
+    // Waking a run whose every span has settled would consume the steering
+    // and re-park untouched — the reaction must instead run over the file's
+    // CURRENT state, leaving the old conversation as finished history.
+    await setSettings({ agentMode: { react: true, scope: "full" } })
+    await seedHumanCommit(5 * MINUTE)
+    const existing = await createRun(env.AQUILLA_PG, { projectId: PROJECT, fileId: FILE })
+    expect(existing.status).toBe("ok")
+    const exhaustedId = existing.status === "ok" ? existing.run.id : ""
+    await env.AQUILLA_PG.prepare(
+      "UPDATE contextual_runs SET status='parked', done_spans=2, total_spans=2 WHERE id = ?",
+    )
+      .bind(exhaustedId)
+      .run()
+
+    const { body } = await reactCheck()
+    expect(body.skipped).toEqual([])
+    expect(body.reactions).toHaveLength(1)
+    expect(body.reactions[0].fileId).toBe(FILE)
+    // A FRESH run reacted; the exhausted one was retired, not revived.
+    expect(body.reactions[0].runId).not.toBe(exhaustedId)
+    expect((await getRun(env.AQUILLA_PG, exhaustedId))?.status).toBe("terminated")
+    expect((await getRun(env.AQUILLA_PG, body.reactions[0].runId))?.initiatedBy).toBe("reaction")
+  })
+
   it("never overrides a PAUSED run — a person asked for quiet on that file", async () => {
     await setSettings({ agentMode: { react: true, scope: "full" } })
     await seedHumanCommit(5 * MINUTE)

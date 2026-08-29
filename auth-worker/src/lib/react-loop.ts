@@ -97,6 +97,9 @@ export interface WakeReactionRunInput {
   fileId: string
   /** The parked run to wake — the reaction continues ITS conversation. */
   runId: string
+  /** Most recently edited cell — anchors a FRESH run when the parked one's
+   *  work-list is exhausted and waking would have nothing to drive. */
+  anchorCellId: string | null
   /** Auto-steering direction queued before the resumed tick reads steering. */
   direction: string
 }
@@ -343,10 +346,13 @@ export async function reactCheckProject(
             ? // A parked run is idle but resumable: the reaction wakes IT with
               // the new steering, continuing the same conversation, rather
               // than starting a rival run the active-exists guard would block.
+              // (An EXHAUSTED parked run is retired and replaced inside the
+              // waker — its work-list has nothing left to drive.)
               await deps.wakeRun(env, {
                 projectId,
                 fileId: signal.fileId,
                 runId: runState.runId,
+                anchorCellId: signal.anchorCellId,
                 direction,
               })
             : await deps.startRun(env, {

@@ -626,6 +626,33 @@ export const wakeReactionRun: WakeReactionRun = async (env, input) => {
   const words = await wordGuard(env.AQUILLA_PG, orgId)
   if (!words.ok) return { status: "skipped", reason: `word_cap_exceeded (${words.reason})` }
 
+  // An EXHAUSTED parked run (every span settled) has nothing left to drive —
+  // waking it would consume the steering and re-park untouched. Retire it and
+  // start a fresh reaction run over the file's CURRENT state instead; the old
+  // conversation stays in the list as finished history.
+  const parked = await getRun(env.AQUILLA_PG, input.runId)
+  if (
+    parked
+    && parked.totalSpans > 0
+    && parked.doneSpans + parked.failedSpans >= parked.totalSpans
+  ) {
+    const retired = await terminateRun(env.AQUILLA_PG, input.runId)
+    if (retired.status !== "ok") {
+      return { status: "skipped", reason: `wake_failed (retire ${retired.status})` }
+    }
+    try {
+      await publishRunStateOutsideTick(env, env.AQUILLA_PG, input.projectId, retired.run)
+    } catch (err) {
+      console.warn(`[react] retire notify failed for run ${input.runId}:`, err)
+    }
+    return startReactionRun(env, {
+      projectId: input.projectId,
+      fileId: input.fileId,
+      anchorCellId: input.anchorCellId,
+      direction: input.direction,
+    })
+  }
+
   // Queue the steering BEFORE resuming, so the woken tick's steering read
   // picks the direction up ahead of its first wave.
   const steer = await appendSteering(env.AQUILLA_PG, {

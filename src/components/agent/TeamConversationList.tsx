@@ -10,7 +10,7 @@
  * the work-item conversations below it.
  */
 
-import { Pin } from "lucide-react"
+import { Pin, Zap } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Spinner } from "@/components/ui/spinner"
@@ -31,11 +31,13 @@ function ConversationRow({
   row,
   selected,
   locale,
+  reactionLabel,
   onSelect,
 }: {
   row: TeamConversationRow
   selected: boolean
   locale: string
+  reactionLabel: string
   onSelect: (id: string) => void
 }) {
   return (
@@ -51,6 +53,15 @@ function ConversationRow({
     >
       <span className="flex items-center gap-1.5">
         {row.live && <Spinner className="h-2.5 w-2.5 shrink-0 text-muted-foreground" />}
+        {/* Uninvited work reads as uninvited: a muted glyph, never an accent —
+            a reaction is a thread to find, not an alert. */}
+        {row.reaction && (
+          <Zap
+            data-testid={`conversation-reaction-${row.id}`}
+            aria-label={reactionLabel}
+            className="h-3 w-3 shrink-0 text-muted-foreground"
+          />
+        )}
         <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
           {row.title}
         </span>
@@ -76,7 +87,8 @@ function ConversationRow({
 }
 
 export function TeamConversationList({ rows, selectedId, onSelect }: TeamConversationListProps) {
-  const { locale } = useI18n()
+  const { locale, t } = useI18n()
+  const reactionLabel = t("agent.team.reactionLabel")
   const pinned = rows.filter((row) => row.pinned)
   const rest = rows.filter((row) => !row.pinned)
   // Width and chrome belong to the host (the dock panel sizes itself).
@@ -92,6 +104,7 @@ export function TeamConversationList({ rows, selectedId, onSelect }: TeamConvers
                   row={row}
                   selected={row.id === selectedId}
                   locale={locale}
+                  reactionLabel={reactionLabel}
                   onSelect={onSelect}
                 />
               ))}
@@ -104,6 +117,7 @@ export function TeamConversationList({ rows, selectedId, onSelect }: TeamConvers
                 row={row}
                 selected={row.id === selectedId}
                 locale={locale}
+                reactionLabel={reactionLabel}
                 onSelect={onSelect}
               />
             ))}

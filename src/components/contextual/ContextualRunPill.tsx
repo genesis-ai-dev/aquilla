@@ -8,6 +8,7 @@
 // here are plain user words (ui-jargon-guard.test.ts bans spec ids).
 
 import { useEffect, useMemo, useState } from "react"
+import { Link } from "react-router-dom"
 import { AlertTriangle, CheckCircle2, Eye, ListTree, Pause, PencilSparkles, Sparkles, X } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -27,6 +28,7 @@ import {
 } from "@/lib/contextual/run-store"
 import { useContextualDraftsSummary } from "@/lib/contextual/drafts-store"
 import { installContextualTransport, type ContextualRunRecord } from "@/lib/contextual/transport"
+import { CONVERSATION_PARAM, runThreadId } from "@/lib/agent/team-channel"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { AutopilotActivityInspector } from "./AutopilotActivityInspector"
 import { ContextualSteering } from "./ContextualSteering"
@@ -443,6 +445,19 @@ function ContextualRunPillScoped({
     </AppTooltip>
   ) : null
 
+  // The run narrates itself in the Team surface; the pill is a readout, not
+  // the transcript. A quiet link is the whole affordance — same conversation
+  // id the dock and a shared link use.
+  const threadLink = runId ? (
+    <Link
+      to={`/project/${encodeURIComponent(projectId)}/agent?${CONVERSATION_PARAM}=${encodeURIComponent(runThreadId(runId))}`}
+      className="shrink-0 text-muted-foreground underline-offset-2 hover:underline"
+      data-testid="contextual-open-thread"
+    >
+      {t("agent.team.openThread")}
+    </Link>
+  ) : null
+
   if (!content && !activityButton) return null
 
   return (
@@ -454,6 +469,7 @@ function ContextualRunPillScoped({
         data-contextual-available={available ? "true" : "false"}
       >
         {content}
+        {threadLink}
         {steer}
         {activityButton}
         {trailing}

@@ -25,7 +25,9 @@ import {
   installContextualTransport,
   realContextualTransport,
   resetContextualTransportForTesting,
+  requestReactCheck,
   sendContextualSteering,
+  startFileContextualRun,
   startProjectContextualRun,
 } from "./transport"
 import {
@@ -212,6 +214,81 @@ describe("start + run commands", () => {
     const err = await realContextualTransport.pause(RUN.runId).catch((e: unknown) => e)
     expect(err).toBeInstanceOf(ContextualApiError)
     expect((err as ContextualApiError).status).toBe(409)
+  })
+})
+
+describe("next-passage runs (spanLimit)", () => {
+  it("asks for one span when the Team surface says 'next passage'", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ runId: RUN.runId }))
+    await startFileContextualRun(PROJECT_ID, FILE_ID, "fr", 1)
+    expect(JSON.parse(lastRequest().init.body as string)).toEqual({
+      fileId: FILE_ID,
+      targetLang: "fr",
+      spanLimit: 1,
+    })
+  })
+
+  it("omits spanLimit entirely for an ordinary whole-file run", async () => {
+    // A `spanLimit: 0` or `null` on the wire would be a different instruction
+    // from "no limit"; absent has to stay absent.
+    fetchMock.mockResolvedValueOnce(jsonResponse({ runId: RUN.runId }))
+    await startFileContextualRun(PROJECT_ID, FILE_ID)
+    expect(JSON.parse(lastRequest().init.body as string)).toEqual({ fileId: FILE_ID })
+  })
+
+  it("surfaces the server's spanLimit on a listed run", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ runs: [{ runId: RUN.runId, fileId: FILE_ID, spanLimit: 1 }] }),
+    )
+    const page = await fetchContextualRuns(PROJECT_ID)
+    expect(page.runs[0].spanLimit).toBe(1)
+  })
+})
+
+describe("requestReactCheck", () => {
+  it("POSTs the project's react-check route and normalizes what came back", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        reactions: [{ fileId: FILE_ID, runId: RUN.runId }, { fileId: "no-run" }],
+        skipped: [{ fileId: "file-2", reason: "cooldown" }],
+      }),
+    )
+    const result = await requestReactCheck(PROJECT_ID)
+    const { url, init } = lastRequest()
+    expect(url).toContain("/api/v2/projects/proj%2F1/contextual/react-check")
+    expect(init.method).toBe("POST")
+    // A half-formed row is dropped rather than rendered as a reaction with no
+    // thread to open.
+    expect(result).toEqual({
+      reactions: [{ fileId: FILE_ID, runId: RUN.runId }],
+      skipped: [{ fileId: "file-2", reason: "cooldown" }],
+    })
+  })
+
+  it("remembers the started run's project, so its thread can be commanded", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ reactions: [{ fileId: FILE_ID, runId: RUN.runId }], skipped: [] }),
+    )
+    await requestReactCheck(PROJECT_ID)
+    fetchMock.mockResolvedValueOnce(jsonResponse({ ok: true }))
+    await realContextualTransport.pause(RUN.runId)
+    expect(lastRequest().url).toContain("/projects/proj%2F1/contextual/runs/")
+  })
+
+  it("reports null on a server that predates the route instead of throwing", async () => {
+    // The mode control turns this into a disabled button with a reason —
+    // an older backend must not make the whole dial look broken.
+    for (const status of [404, 501]) {
+      fetchMock.mockResolvedValueOnce(jsonResponse({}, status))
+      await expect(requestReactCheck(PROJECT_ID)).resolves.toBeNull()
+    }
+  })
+
+  it("still throws on a real failure, which is not the same as 'not deployed'", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: { message: "nope" } }, 403))
+    const err = await requestReactCheck(PROJECT_ID).catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ContextualApiError)
+    expect((err as ContextualApiError).status).toBe(403)
   })
 })
 

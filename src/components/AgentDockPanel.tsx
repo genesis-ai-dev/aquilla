@@ -27,6 +27,7 @@ import {
   useTeamConversations,
 } from "@/lib/agent/team-conversations"
 import type { ContextualRunRecord } from "@/lib/contextual/transport"
+import { humanPassageLabel } from "../../shared/span-label"
 import { TeamConversationList } from "./agent/TeamConversationList"
 import { runStatusKey } from "./agent/team-run-status"
 import { bookSummaryPrompt, chapterSummaryPrompt } from "@/lib/summary-prompts"
@@ -73,9 +74,14 @@ export function AgentDockPanel({
     ? new URLSearchParams(location.search).get(CONVERSATION_PARAM) ?? TEAM_CHAT_CONVERSATION
     : ""
 
+  // `spanLabel` can be an opaque cell/span id when the server had no human ref
+  // to name the wave by — humanPassageLabel rejects those, so a row title is
+  // never a raw UUID.
   const runTitle = useMemo(
     () => (run: ContextualRunRecord) =>
-      fileNames?.get(run.fileId) ?? run.spanLabel ?? t("agent.team.unnamedThread"),
+      fileNames?.get(run.fileId)
+      ?? humanPassageLabel(run.spanLabel)
+      ?? t("agent.team.unnamedThread"),
     [fileNames, t],
   )
   const rows = useMemo(

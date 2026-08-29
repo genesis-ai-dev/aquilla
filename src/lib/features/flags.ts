@@ -31,6 +31,16 @@ export const FLAGS: Record<string, FeatureFlagDefinition> = {
     // place. Flip this single line to hide it again.
     default: true,
   },
+  agentModes: {
+    labelKey: "agent.mode.flagLabel",
+    descriptionKey: "agent.mode.flagDescription",
+    // Default ON for the same reason as contextualTranslation: this gates
+    // DISCOVERY of the autonomy control, not autonomy itself. The stored mode
+    // is all-off until a human moves a switch, so a visible control costs
+    // nothing — while a hidden one would leave the react loop and the
+    // next-passage button findable only by someone who already knew.
+    default: true,
+  },
 }
 
 /**

@@ -134,6 +134,17 @@ export interface ProjectWideSettings {
    *  audio-first. See the AudioTimingMode doc comment in parsers/types.ts. */
   audioTimingMode?: AudioTimingMode
   /**
+   * The agent team's autonomy dial (v3 of the agent social workspace):
+   * whether the team may pick up work on its own (`initiative`), whether it
+   * responds to human edits it sees land (`react`), and what either loop is
+   * allowed to do (`scope`). Absent means ALL OFF — the behaviour of every
+   * project that never opted in — and is read that way server-side too, so a
+   * missing key can never be mistaken for consent. Project-wide rather than
+   * device-local on purpose: autonomy only one collaborator could see would
+   * be autonomy nobody agreed to. See `@/lib/agent/agent-mode`.
+   */
+  agentMode?: import("@/lib/agent/agent-mode").AgentMode
+  /**
    * AQU-646: may anyone below maintainer move a chip on the timeline?
    *
    * Sam, 2026-08-20: "It needs to be a very active decision to go mess around

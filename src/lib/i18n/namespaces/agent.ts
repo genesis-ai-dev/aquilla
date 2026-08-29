@@ -225,6 +225,72 @@ export const agent = defineNamespace({
     "agent.team.composer.scope": "{persona} · {scope}",
     "agent.team.composer.sendFailed": "Couldn't send that message. Try again.",
 
+    // ── NEW: v3 agent modes (autonomy dial + react loop + next passage) ───
+    // The agent's autonomy is a dial, not an on/off: two independent loops
+    // (initiative, react) plus a scope bound. Wording discipline for this
+    // block — never imply the team applies anything by itself. Autonomy here
+    // decides what the team STARTS working on; everything it produces is
+    // still a staged proposal behind the same human approve/reject gate.
+    "agent.mode.title": "Agent mode",
+    "agent.mode.openLabel": "Agent mode: {mode}",
+    "agent.mode.loading": "Loading agent mode…",
+    "agent.mode.unavailable": "Agent mode is unavailable right now.",
+    "agent.mode.saveFailed": "Couldn't save that. Your change was undone.",
+    "agent.mode.forbidden": "Only a project lead can change the agent mode.",
+    "agent.mode.presetsTitle": "Presets",
+    "agent.mode.preset.fullAutopilot": "Autopilot",
+    "agent.mode.preset.fullAutopilotDescription":
+      "Takes on new passages by itself and responds when you edit.",
+    "agent.mode.preset.reactOnly": "Reacting",
+    "agent.mode.preset.reactOnlyDescription":
+      "Waits for your edits, then follows up on what they imply elsewhere.",
+    "agent.mode.preset.qaOnly": "QA only",
+    "agent.mode.preset.qaOnlyDescription":
+      "Responds to your edits by checking the work — it won't redraft.",
+    "agent.mode.preset.draftOnly": "Draft only",
+    "agent.mode.preset.draftOnlyDescription":
+      "Keeps drafting ahead on its own and stays out of your edits.",
+    "agent.mode.preset.off": "Manual",
+    "agent.mode.preset.offDescription":
+      "Nothing starts unless you start it. This is the default.",
+    "agent.mode.preset.custom": "Custom",
+    "agent.mode.preset.customDescription":
+      "A combination of your own — see the switches below for what is on.",
+    "agent.mode.initiative": "Initiative loop",
+    "agent.mode.initiativeDescription": "The team may pick up new passages on its own.",
+    "agent.mode.react": "React loop",
+    "agent.mode.reactDescription":
+      "The team watches the edits you commit and follows up on them.",
+    "agent.mode.scopeTitle": "What it may work on",
+    "agent.mode.scope.full": "Everything",
+    "agent.mode.scope.qa": "Checks only",
+    "agent.mode.scope.draft": "Drafts only",
+    "agent.mode.graphTitle": "What runs",
+    "agent.mode.checkNow": "Check for updates now",
+    "agent.mode.checking": "Checking…",
+    "agent.mode.checkUnavailable":
+      "This project's server can't check for updates yet.",
+    "agent.mode.checkFailed": "Couldn't check for updates. Try again.",
+    "agent.mode.checkStarted": plural({
+      one: "Started {count} follow-up.",
+      other: "Started {count} follow-ups.",
+    }),
+    "agent.mode.checkNothing": "Nothing new to follow up on.",
+    "agent.mode.flagLabel": "Agent modes",
+    "agent.mode.flagDescription":
+      "Show the agent-mode dial in the team view, along with the next-passage button and manual update checks. The mode itself stays off until someone turns it on.",
+    // Reaction conversations: a run the team started off the back of human
+    // edits, rather than one a person asked for.
+    "agent.team.reactionPreview": "Reacted to your changes — {preview}",
+    "agent.team.reactionLabel": "Started in response to your changes",
+    // "Next passage": one span, then a park, so the human reviews before more
+    // work is spent.
+    "agent.team.nextPassage": "Next passage",
+    "agent.team.nextPassageStarting": "Starting…",
+    "agent.team.nextPassageFailed": "Couldn't start the next passage.",
+    // The editor pill's way into this run's conversation.
+    "agent.team.openThread": "Open thread",
+
     // ── Full-screen workbench (AgentWorkbench) ──────────────────────────
     "agent.workbench.newSessionAriaLabel": "New session",
     "agent.workbench.minimizeTooltip": "Minimize to sidebar",
@@ -1018,6 +1084,36 @@ export const agent = defineNamespace({
         placeholders: {
           persona: "The translated teammate name (Drafter / Reviewer / Coordinator).",
           scope: "The passage label or file name the run is working — not translated.",
+        },
+      },
+      // ── NEW: v3 agent modes ────────────────────────────────────────────
+      "agent.mode.openLabel": {
+        description:
+          "Accessible name for the compact button in the agent team's header " +
+          "that opens the autonomy dial. It repeats the mode name shown on the " +
+          "button so the spoken name contains the visible one — keep the mode " +
+          "placeholder in the string for that reason.",
+        placeholders: {
+          mode: "The current mode's already-translated preset name (Autopilot / Reacting / QA only / Draft only / Manual / Custom).",
+        },
+      },
+      "agent.mode.checkStarted": {
+        description:
+          "Result line under the 'Check for updates now' button in the agent-mode " +
+          "popover, reporting how many follow-up runs the manual check just " +
+          "started off the back of recent human edits. Zero is never phrased with " +
+          "this key — 'agent.mode.checkNothing' covers that case.",
+        placeholders: { count: "How many follow-up runs the check started." },
+      },
+      "agent.team.reactionPreview": {
+        description:
+          "One-line preview of a conversation the team STARTED ITSELF after seeing " +
+          "human edits land, rather than one a person asked for. The marker before " +
+          "the dash is the part that must stay recognisable at a glance — it is how " +
+          "a translator tells an uninvited follow-up from work they requested.",
+        placeholders: {
+          preview:
+            "The conversation's ordinary preview line (a status and passage, or a drafts-ready count) — already translated, inserted verbatim.",
         },
       },
     },

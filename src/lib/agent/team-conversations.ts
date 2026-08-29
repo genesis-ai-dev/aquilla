@@ -147,7 +147,18 @@ export interface TeamConversationRow {
   live: boolean
   /** Pinned rows (Team chat) render as their own block with a pin glyph. */
   pinned?: boolean
+  /**
+   * The team started this one ITSELF, off the back of human edits it saw land
+   * (`initiatedBy === "reaction"`), rather than because a person asked. The
+   * distinction is the whole point of the react loop's anti-noise rule: a
+   * reaction is a thread you can find, not a notification that finds you — so
+   * it has to be legible as uninvited at a glance.
+   */
+  reaction?: boolean
 }
+
+/** How the server marks a run the react loop started. */
+export const REACTION_INITIATOR = "reaction"
 
 export function isRunWorkingStatus(status: string): boolean {
   return status === "running" || status === "pausing"
@@ -200,18 +211,24 @@ export function buildConversationRows(args: {
     const drafts = run.proposedDrafts ?? 0
     const span = humanPassageLabel(run.spanLabel)
     const status = args.runStatusLabel(run)
+    const preview =
+      drafts > 0
+        ? args.t("agent.team.draftsReady", { count: drafts })
+        : span
+          ? `${status} — ${span}`
+          : status
+    const reaction = run.initiatedBy === REACTION_INITIATOR
     rows.push({
       id: runThreadId(run.runId),
       title: args.runTitle(run),
-      preview:
-        drafts > 0
-          ? args.t("agent.team.draftsReady", { count: drafts })
-          : span
-            ? `${status} — ${span}`
-            : status,
+      // The marker goes in FRONT of the ordinary preview rather than
+      // replacing it: "who started this" and "where it is up to" are both
+      // things the row has to answer.
+      preview: reaction ? args.t("agent.team.reactionPreview", { preview }) : preview,
       at: run.updatedAt,
       badge: drafts,
       live: isRunWorkingStatus(run.status),
+      ...(reaction ? { reaction: true } : {}),
     })
   }
   return rows

@@ -4,7 +4,7 @@ import { buildCellData } from "./useCells"
 import type { CellAuditStats } from "./useCellsAuditStats"
 import { streamFileCells, fetchCellsByIds, fetchCellsDelta } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
-import { mergeCellsDelta, readCellsCache, writeCellsCache } from "@/lib/sync/cells-cache"
+import { mergeCellsDelta, readCellsCache, walkAnchorChain, writeCellsCache } from "@/lib/sync/cells-cache"
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { sortByLens } from "@/lib/timeline/derive"
@@ -1093,6 +1093,199 @@ export class CellStore {
     this.emit([cellId])
   }
 
+  /**
+   * AQU-1068: a cell someone just added, visible on the SAME TICK.
+   *
+   * Insert used to wait on a flush round-trip plus a confirming read before the
+   * row existed at all. On a whole Bible that read is cheap on the wire (the
+   * delta carries two or three cells) but expensive here: an insert changes
+   * `order`, and `replaceRows` then treats EVERY cell in the file as changed —
+   * 31k version bumps and a full derived-index rebuild — so the click sat there
+   * for seconds. Applying the insert locally first makes it instant, and the
+   * confirming read becomes a correction nobody waits for.
+   *
+   * The freshness floor is what keeps this safe: it marks the new cell and the
+   * re-anchored sibling as newer than any fetch already in flight, so a delta
+   * that started before this write cannot resurrect the old order. Same
+   * mechanism the target-edit path has used since round 7.
+   *
+   * ROLLBACK IS THE CALLER'S JOB. A floor protects a row indefinitely, so an
+   * insert the server refuses would otherwise leave a phantom that no refetch
+   * can clear — `ProjectWorkspace` undoes it on a rejected flush.
+   */
+  applyOptimisticSourceInsert(row: {
+    cellId: string
+    anchorCellId: string | null
+    /** The row whose anchor now points at the new cell, if there was one. */
+    reanchorCellId?: string | null
+    sequenceIndex?: number
+    value?: string
+    startMs?: number
+    endMs?: number
+    metadata?: Record<string, unknown> | null
+  }): void {
+    if (this.sourceById.has(row.cellId)) return
+    const seq = ++this.writeSeq
+    const now = Date.now()
+    this.sourceById.set(row.cellId, {
+      cellId: row.cellId,
+      side: "source",
+      targetLang: "",
+      value: row.value ?? "",
+      valueHtml: null,
+      type: null,
+      canonicalRef: null,
+      anchorCellId: row.anchorCellId,
+      // No event id yet — the outbox has not been flushed. `getRemovalPlan`
+      // reads this to build a delete's parent, so taking the line straight back
+      // before the flush lands is refused rather than sent with a bad parent.
+      eventId: "",
+      sourceEventId: null,
+      lastEditor: this.ctx.username,
+      lastEditAt: now,
+      validated: false,
+      wordCount: 0,
+      endorsementCount: 0,
+      ...(row.sequenceIndex != null ? { sequenceIndex: row.sequenceIndex } : {}),
+      ...(row.startMs != null ? { startMs: row.startMs } : {}),
+      ...(row.endMs != null ? { endMs: row.endMs } : {}),
+      ...(row.metadata != null ? { metadata: row.metadata } : {}),
+    } as CellRow)
+    this.freshnessFloors.set(row.cellId, seq)
+
+    // The sibling that used to sit where the new cell now does.
+    if (row.reanchorCellId) {
+      const sibling = this.sourceById.get(row.reanchorCellId)
+      if (sibling) {
+        this.sourceById.set(row.reanchorCellId, { ...sibling, anchorCellId: row.cellId })
+        this.freshnessFloors.set(row.reanchorCellId, ++this.writeSeq)
+      }
+    }
+
+    // Position: directly after its anchor, or at the head when it has none.
+    // Splicing rather than pushing is the whole point — appending would put the
+    // row at the bottom of the file until the confirming read re-walked the
+    // chain, which is exactly the drift the anchor re-point exists to prevent.
+    const at = row.anchorCellId ? this.sourceOrder.indexOf(row.anchorCellId) : -1
+    const insertAt = at >= 0 ? at + 1 : 0
+    this.sourceOrder.splice(insertAt, 0, row.cellId)
+    const orderAt = row.anchorCellId ? this.order.indexOf(row.anchorCellId) : -1
+    this.order.splice(orderAt >= 0 ? orderAt + 1 : 0, 0, row.cellId)
+    this.indexById = new Map(this.order.map((id, index) => [id, index]))
+    this.listVersion++
+
+    this.rebuildDerivedIndexes()
+    this.bumpCells(row.reanchorCellId ? [row.cellId, row.reanchorCellId] : [row.cellId])
+    this.fileVersion++
+    this.emit(row.reanchorCellId ? [row.cellId, row.reanchorCellId] : [row.cellId])
+  }
+
+  /**
+   * ...and the same for taking one out. Drops the source row and every lane's
+   * target row, re-points the successor onto the removed cell's own anchor, and
+   * floors both so an in-flight delta cannot bring the row back.
+   *
+   * Returns what it removed, so the caller can restore it if the server refuses.
+   */
+  applyOptimisticSourceRemove(cellId: string): {
+    source: CellRow
+    target: CellRow | undefined
+    otherLanes: CellRow[]
+    orderIndex: number
+    successorCellId: string | null
+  } | null {
+    const source = this.sourceById.get(cellId)
+    if (!source) return null
+    const seq = ++this.writeSeq
+    const target = this.targetById.get(cellId)
+    const otherLanes = this.otherLaneTargetRows.filter((r) => r.cellId === cellId)
+    const orderIndex = this.order.indexOf(cellId)
+
+    let successorCellId: string | null = null
+    for (const [id, r] of this.sourceById) {
+      if (r.anchorCellId === cellId) { successorCellId = id; break }
+    }
+    if (successorCellId) {
+      const successor = this.sourceById.get(successorCellId)!
+      this.sourceById.set(successorCellId, { ...successor, anchorCellId: source.anchorCellId })
+      this.freshnessFloors.set(successorCellId, ++this.writeSeq)
+    }
+
+    this.sourceById.delete(cellId)
+    this.targetById.delete(cellId)
+    this.otherLaneTargetRows = this.otherLaneTargetRows.filter((r) => r.cellId !== cellId)
+    const si = this.sourceOrder.indexOf(cellId)
+    if (si >= 0) this.sourceOrder.splice(si, 1)
+    const ti = this.targetOrder.indexOf(cellId)
+    if (ti >= 0) this.targetOrder.splice(ti, 1)
+    if (orderIndex >= 0) this.order.splice(orderIndex, 1)
+    this.indexById = new Map(this.order.map((id, index) => [id, index]))
+    this.optimisticEdits.delete(targetOverlayKey(cellId, this.ctx.lane ?? ""))
+    this.freshnessFloors.set(cellId, seq)
+    this.listVersion++
+
+    this.rebuildDerivedIndexes()
+    if (successorCellId) this.bumpCells([successorCellId])
+    this.fileVersion++
+    this.emit(successorCellId ? [cellId, successorCellId] : [cellId])
+    return { source, target, otherLanes, orderIndex, successorCellId }
+  }
+
+  /**
+   * Undo of the two above, for a write the server refused. Restores the rows
+   * and the order exactly, and CLEARS the freshness floors — without that the
+   * phantom would be protected from every correcting fetch forever.
+   */
+  rollbackOptimisticSourceChange(
+    cellId: string,
+    restore?: {
+      source: CellRow
+      target: CellRow | undefined
+      otherLanes: CellRow[]
+      orderIndex: number
+      successorCellId: string | null
+    } | null,
+  ): void {
+    if (restore) {
+      this.sourceById.set(cellId, restore.source)
+      if (restore.target) this.targetById.set(cellId, restore.target)
+      if (restore.otherLanes.length) this.otherLaneTargetRows = [...this.otherLaneTargetRows, ...restore.otherLanes]
+      if (restore.successorCellId) {
+        const successor = this.sourceById.get(restore.successorCellId)
+        if (successor) this.sourceById.set(restore.successorCellId, { ...successor, anchorCellId: cellId })
+        this.freshnessFloors.delete(restore.successorCellId)
+      }
+      const at = restore.orderIndex >= 0 ? Math.min(restore.orderIndex, this.order.length) : this.order.length
+      this.order.splice(at, 0, cellId)
+      if (!this.sourceOrder.includes(cellId)) this.sourceOrder.splice(at, 0, cellId)
+      if (restore.target && !this.targetOrder.includes(cellId)) this.targetOrder.push(cellId)
+    } else {
+      // Undoing an INSERT: the row and whatever it displaced.
+      const inserted = this.sourceById.get(cellId)
+      if (inserted) {
+        for (const [id, r] of this.sourceById) {
+          if (r.anchorCellId === cellId) {
+            this.sourceById.set(id, { ...r, anchorCellId: inserted.anchorCellId })
+            this.freshnessFloors.delete(id)
+            break
+          }
+        }
+      }
+      this.sourceById.delete(cellId)
+      this.targetById.delete(cellId)
+      const si = this.sourceOrder.indexOf(cellId)
+      if (si >= 0) this.sourceOrder.splice(si, 1)
+      const oi = this.order.indexOf(cellId)
+      if (oi >= 0) this.order.splice(oi, 1)
+    }
+    this.freshnessFloors.delete(cellId)
+    this.indexById = new Map(this.order.map((id, index) => [id, index]))
+    this.listVersion++
+    this.rebuildDerivedIndexes()
+    this.fileVersion++
+    this.emitAll()
+  }
+
   // Round 7 (AQU-646): optimistic TIMING/metadata patch — chip moves and
   // subtitle retimes apply instantly instead of snapping back for the
   // flush+revalidate round-trip. Mirrors the projections' shapes: startMs/
@@ -1199,6 +1392,25 @@ export class CellStore {
     this.freshnessFloors.set(cellId, ++this.writeSeq)
   }
 
+  /**
+   * Put `sourceOrder` back into anchor-chain order.
+   *
+   * Reuses the cache's `walkAnchorChain` — the same walk the server's read
+   * performs, with the same first-child-wins tie-break and the same
+   * append-the-unreachable rule, so a broken chain loses no rows. It is also
+   * explicitly stacked rather than recursive, which matters here: a Bible's
+   * chain is one cell deep per verse, so a recursive walk would overflow at
+   * around thirty thousand.
+   */
+  private resortSourceOrderByChain(): void {
+    const rows: CellRow[] = []
+    for (const id of this.sourceOrder) {
+      const row = this.sourceById.get(id)
+      if (row) rows.push(row)
+    }
+    this.sourceOrder = walkAnchorChain(rows).map((r) => r.cellId)
+  }
+
   replaceRowsForCell(cellId: string, rows: CellRow[]): void {
     const lane = this.ctx.lane ?? ""
     const source = rows.find((row) => row.side === "source")
@@ -1212,8 +1424,21 @@ export class CellStore {
       if (row.side === "target" && laneOf(row) !== lane) this.otherLaneTargetRows.push(row)
     }
     if (source) {
+      // AQU-1068: a targeted read appends, but position is a function of the
+      // ANCHORS — so re-derive it whenever they can have changed: a row that is
+      // new to us, or one whose anchor moved. A collaborator's insert arrives
+      // as both (the new cell, then the sibling it displaced), and the file is
+      // only in the right order once the second has landed.
+      //
+      // Before this, such a cell simply showed up at the bottom until the next
+      // full or delta read re-walked the chain. Display order hid it on
+      // time-ordered files, where the lens re-sorts by clock; on a
+      // sequence-ordered one it was plainly wrong.
+      const previousAnchor = this.sourceById.get(cellId)?.anchorCellId
+      const anchorMoved = !this.sourceById.has(cellId) || previousAnchor !== source.anchorCellId
       this.sourceById.set(cellId, source)
       if (!this.sourceOrder.includes(cellId)) this.sourceOrder.push(cellId)
+      if (anchorMoved) this.resortSourceOrderByChain()
     } else {
       this.sourceById.delete(cellId)
       this.sourceOrder = this.sourceOrder.filter((id) => id !== cellId)
@@ -1544,6 +1769,49 @@ export interface UseActiveCellStoreResult {
   isError: boolean
 }
 
+/**
+ * AQU-1068: the offline cache write, debounced.
+ *
+ * `writeCellsCache` serialises the WHOLE file — 31k rows on a Bible — and the
+ * structured clone runs on the main thread. Four call sites fired it on every
+ * confirming read, which is what most of the post-insert lag actually was: the
+ * wire cost is a delta of two or three cells, the jank is here.
+ *
+ * Safe to defer: the cache is a rebuildable copy that carries its own
+ * watermark, so a short staleness window costs a slightly larger delta on the
+ * next cold open and nothing else. Flushed on pagehide/visibilitychange so a
+ * closed tab still leaves a good cache behind.
+ */
+const CACHE_WRITE_DEBOUNCE_MS = 2000
+type PendingCacheWrite = { pid: string; fid: string; rows: CellRow[]; seq?: number; epoch?: number }
+let pendingCacheWrite: PendingCacheWrite | null = null
+let cacheWriteTimer: ReturnType<typeof setTimeout> | null = null
+
+function flushCellsCacheWrite(): void {
+  if (cacheWriteTimer != null) { clearTimeout(cacheWriteTimer); cacheWriteTimer = null }
+  const p = pendingCacheWrite
+  pendingCacheWrite = null
+  if (p) void writeCellsCache(p.pid, p.fid, p.rows, p.seq, p.epoch)
+}
+
+function scheduleCellsCacheWrite(pid: string, fid: string, rows: CellRow[], seq?: number, epoch?: number): void {
+  // A newer snapshot supersedes an unwritten older one for the same file; a
+  // different file flushes first so its rows are never dropped.
+  if (pendingCacheWrite && (pendingCacheWrite.pid !== pid || pendingCacheWrite.fid !== fid)) flushCellsCacheWrite()
+  pendingCacheWrite = { pid, fid, rows, seq, epoch }
+  if (cacheWriteTimer != null) clearTimeout(cacheWriteTimer)
+  cacheWriteTimer = setTimeout(flushCellsCacheWrite, CACHE_WRITE_DEBOUNCE_MS)
+}
+
+if (typeof document !== "undefined") {
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushCellsCacheWrite()
+  })
+}
+if (typeof window !== "undefined") {
+  window.addEventListener("pagehide", flushCellsCacheWrite)
+}
+
 export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCellStoreResult {
   const {
     projectId,
@@ -1660,10 +1928,10 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
             const { rows: kept, discardedCellIds } = store.mergeProtectedRows(merged, deltaStartSeq)
             store.replaceRows(kept, { changedCellIds: result.changedCellIds, maxServerSeq: discardedCellIds.size > 0 ? since : nextWatermark })
             if (discardedCellIds.size > 0) nextWatermark = since
-            void writeCellsCache(pid, fid, store.toRows(), nextWatermark, nextEpoch ?? undefined)
+            scheduleCellsCacheWrite(pid, fid, store.toRows(), nextWatermark, nextEpoch ?? undefined)
           } else if (result.maxServerSeq !== since) {
             store.setMaxServerSeq(result.maxServerSeq)
-            void writeCellsCache(pid, fid, store.toRows(), result.maxServerSeq, nextEpoch ?? undefined)
+            scheduleCellsCacheWrite(pid, fid, store.toRows(), result.maxServerSeq, nextEpoch ?? undefined)
           }
           setIsLoading(false)
           return
@@ -1732,7 +2000,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       const watermarkEpoch = watermark === null ? null : streamEpoch
       store.setMaxServerSeq(watermark)
       store.setProjectEpoch(watermarkEpoch)
-      void writeCellsCache(pid, fid, store.toRows(), watermark ?? undefined, watermarkEpoch ?? undefined)
+      scheduleCellsCacheWrite(pid, fid, store.toRows(), watermark ?? undefined, watermarkEpoch ?? undefined)
       setIsLoading(false)
     } catch (err) {
       if (generationRef.current !== gen) return
@@ -1851,7 +2119,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     const pid = projectRef.current
     const fid = fileRef.current
     if (!pid || !fid) return
-    void writeCellsCache(
+    scheduleCellsCacheWrite(
       pid,
       fid,
       store.toRows(),

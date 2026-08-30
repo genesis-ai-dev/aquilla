@@ -216,7 +216,9 @@ export async function writeCellsCache(
  * re-walking the merged set here yields the same order a full server read
  * would have returned.
  */
-function walkAnchorChain(rows: CellRow[]): CellRow[] {
+/** Exported for CellStore.resortSourceOrderByChain (AQU-1068), which needs the
+ *  same walk after a collaborator's insert arrives through a targeted read. */
+export function walkAnchorChain(rows: CellRow[]): CellRow[] {
   if (rows.length === 0) return []
 
   const byAnchor = new Map<string, CellRow[]>()

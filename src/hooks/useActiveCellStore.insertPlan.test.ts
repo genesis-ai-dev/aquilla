@@ -151,3 +151,134 @@ describe("CellStore.hasMediaCells", () => {
     expect(store.hasMediaCells()).toBe(true)
   })
 })
+
+/**
+ * AQU-1068: an insert or removal has to be visible on the tick it happens.
+ *
+ * Waiting for the confirming read made a whole Bible crawl — not on the wire
+ * (the delta carries two or three cells) but here: changing `order` makes
+ * `replaceRows` treat every cell in the file as dirty and rebuild every derived
+ * index. Applying locally first makes the click instant and demotes the read to
+ * a correction nobody waits for.
+ */
+describe("CellStore optimistic insert / remove", () => {
+  const idsOf = (store: CellStore) => store.getAllCellViews().map((c) => c.id)
+
+  it("puts the new cell directly after its anchor, not at the tail", () => {
+    // The whole point. Appending is what the targeted-read path does, and it is
+    // why a collaborator's insert used to land at the bottom of the file.
+    const store = makeStore(chain())
+    store.applyOptimisticSourceInsert({
+      cellId: "new", anchorCellId: "a", reanchorCellId: "b", sequenceIndex: 0.5,
+    })
+    expect(idsOf(store)).toEqual(["a", "new", "b", "c"])
+  })
+
+  it("inserts at the head when it has no anchor", () => {
+    const store = makeStore(chain())
+    store.applyOptimisticSourceInsert({ cellId: "new", anchorCellId: null, reanchorCellId: "a" })
+    expect(idsOf(store)).toEqual(["new", "a", "b", "c"])
+  })
+
+  it("re-points the displaced sibling onto the new cell", () => {
+    // Without this the file has two rows on one anchor, and the chain walk
+    // breaks the tie by event id — the new cell would sort to the tail.
+    const store = makeStore(chain())
+    store.applyOptimisticSourceInsert({ cellId: "new", anchorCellId: "a", reanchorCellId: "b" })
+    expect(store.getInsertPlan("b", "above")!.anchorCellId).toBe("new")
+  })
+
+  it("makes the cell visible to getCellView — what the scroll-to effect waits on", () => {
+    const store = makeStore(chain())
+    store.applyOptimisticSourceInsert({ cellId: "new", anchorCellId: "a", reanchorCellId: "b" })
+    expect(store.getCellView("new")).not.toBeNull()
+  })
+
+  it("bumps the file version, so the footer's counts move at once", () => {
+    const store = makeStore(chain())
+    const before = store.getAllVersion()
+    store.applyOptimisticSourceInsert({ cellId: "new", anchorCellId: "a", reanchorCellId: "b" })
+    expect(store.getAllVersion()).toBeGreaterThan(before)
+    expect(store.getAllSummaries()).toHaveLength(4)
+  })
+
+  it("refuses to insert a cell id the file already has", () => {
+    const store = makeStore(chain())
+    store.applyOptimisticSourceInsert({ cellId: "b", anchorCellId: "a" })
+    expect(idsOf(store)).toEqual(["a", "b", "c"])
+  })
+
+  it("removes a cell and re-points its successor onto its old anchor", () => {
+    const store = makeStore(chain())
+    const removed = store.applyOptimisticSourceRemove("b")
+    expect(idsOf(store)).toEqual(["a", "c"])
+    expect(removed?.successorCellId).toBe("c")
+    expect(store.getInsertPlan("c", "above")!.anchorCellId).toBe("a")
+  })
+
+  it("returns null when asked to remove a cell that is not there", () => {
+    expect(makeStore(chain()).applyOptimisticSourceRemove("nope")).toBeNull()
+  })
+
+  describe("rollback — a write the server refused", () => {
+    // A freshness floor protects a row from every correcting fetch, so without
+    // an explicit undo a refused insert would be a permanent phantom.
+    it("takes an insert back out and restores the sibling's anchor", () => {
+      const store = makeStore(chain())
+      store.applyOptimisticSourceInsert({ cellId: "new", anchorCellId: "a", reanchorCellId: "b" })
+      store.rollbackOptimisticSourceChange("new")
+      expect(idsOf(store)).toEqual(["a", "b", "c"])
+      expect(store.getInsertPlan("b", "above")!.anchorCellId).toBe("a")
+    })
+
+    it("puts a removed cell back where it was", () => {
+      const store = makeStore(chain())
+      const removed = store.applyOptimisticSourceRemove("b")
+      store.rollbackOptimisticSourceChange("b", removed)
+      expect(idsOf(store)).toEqual(["a", "b", "c"])
+      expect(store.getInsertPlan("c", "above")!.anchorCellId).toBe("b")
+    })
+  })
+})
+
+describe("CellStore.resortSourceOrderByChain (via a targeted read)", () => {
+  // A collaborator's insert reaches us as TWO targeted reads — the new cell,
+  // and the sibling whose anchor was re-pointed at it — because the server
+  // emits both events and each arrives on its own `event.applied`. Order is
+  // only correct once both have landed, and that is what this pins.
+  //
+  // Between them the new row sits at the tail, which is transient and
+  // self-correcting: `walkAnchorChain` breaks a sibling tie by event id, and a
+  // fresh uuid always sorts last. That is the same tie-break the server uses,
+  // and the reason an insert emits a re-anchor at all.
+  it("places a collaborator's inserted cell at its anchor once both reads land", () => {
+    const store = makeStore(chain())
+    store.replaceRowsForCell("new", [row("new", { anchorCellId: "a", sequenceIndex: 0.5 })])
+    store.replaceRowsForCell("b", [row("b", { anchorCellId: "new", sequenceIndex: 1 })])
+    expect(store.getAllCellViews().map((c) => c.id)).toEqual(["a", "new", "b", "c"])
+  })
+
+  it("leaves the rest of the file alone while only the first read has arrived", () => {
+    // Transiently at the tail — but never LOST, and never scrambling its
+    // neighbours, which is what would actually hurt.
+    const store = makeStore(chain())
+    store.replaceRowsForCell("new", [row("new", { anchorCellId: "a", sequenceIndex: 0.5 })])
+    const ids = store.getAllCellViews().map((c) => c.id)
+    expect(ids).toContain("new")
+    expect(ids.filter((id) => id !== "new")).toEqual(["a", "b", "c"])
+  })
+
+  it("survives a chain far deeper than the call stack", () => {
+    // A Bible is one cell deep per verse; a recursive walk overflows around
+    // thirty thousand. The reused house walk is explicitly stacked.
+    const deep = Array.from({ length: 30_000 }, (_, i) =>
+      row(`c${i}`, { anchorCellId: i === 0 ? null : `c${i - 1}`, sequenceIndex: i }),
+    )
+    const store = makeStore(deep)
+    expect(() => {
+      store.replaceRowsForCell("inserted", [row("inserted", { anchorCellId: "c0" })])
+      store.replaceRowsForCell("c1", [row("c1", { anchorCellId: "inserted", sequenceIndex: 1 })])
+    }).not.toThrow()
+    expect(store.getAllCellViews().map((c) => c.id).slice(0, 3)).toEqual(["c0", "inserted", "c1"])
+  })
+})

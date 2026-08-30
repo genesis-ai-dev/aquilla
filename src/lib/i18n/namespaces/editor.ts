@@ -769,6 +769,11 @@ export const editor = defineNamespace({
     "editor.removeCell.milestoneWarning":
       "This cell carries the \u201c{label}\u201d heading, which will disappear from chapter navigation.",
     "editor.removeCell.permanent": "This cannot be undone.",
+    // AQU-1068: an insert/removal applies instantly and is corrected if the
+    // server refuses it — the row comes back (or goes away again) on its own,
+    // so the copy explains the reversal rather than asking for an action.
+    "editor.addCell.failedToast": "That cell couldn\u2019t be added, so it has been removed again.",
+    "editor.removeCell.failedToast": "That cell couldn\u2019t be removed, so it has been put back.",
     "editor.row.addLine": "Add a line",
     "editor.row.insertAbove": "Insert above",
     "editor.row.insertBelow": "Insert below",

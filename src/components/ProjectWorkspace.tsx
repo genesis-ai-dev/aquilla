@@ -1790,6 +1790,9 @@ export function ProjectWorkspace() {
       if (!cell) return
       const plan = cellStore.getRemovalPlan(cellId)
       if (!plan) return
+      // Take it off screen NOW; the flush and the confirming read follow. The
+      // snapshot is what puts it back if the server refuses.
+      const removed = cellStore.applyOptimisticSourceRemove(cellId)
       // One batch, in order: re-point the row that pointed at this one, drop
       // any target rows, then the source row itself. The two chain-mutating
       // events sit on DIFFERENT cells, so neither waits on the other's head.
@@ -1826,11 +1829,21 @@ export function ProjectWorkspace() {
           payload: {},
         },
       ])
-      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      await flushOutboxBatch({
+        getTokenForFile: getTokenForProjectFile,
+        // A freshness floor protects a row from every correcting fetch, so a
+        // refused removal would otherwise leave the cell gone from the screen
+        // and present on the server, permanently. Put it back and say so.
+        onRejected: (entries) => {
+          if (!entries.some((e) => e.kind === "source.cell.delete")) return
+          cellStore.rollbackOptimisticSourceChange(cellId, removed)
+          toast.add({ type: "error", title: t("editor.removeCell.failedToast") })
+        },
+      })
       revalidateCells()
       setTimelineSelectedCellId(null)
     },
-    [project?.id, activeFileId, currentUsername, getActiveCell, cellStore, getTokenForProjectFile, revalidateCells],
+    [project?.id, activeFileId, currentUsername, getActiveCell, cellStore, getTokenForProjectFile, revalidateCells, toast, t],
   )
 
   // Media-lens empty state: attach a clip to the ACTIVE file by upload or
@@ -5739,6 +5752,16 @@ export function ProjectWorkspace() {
       // day this batch silently died for a contributor because the reorder
       // still floored at PROJECT_LEAD and enqueueEvents throws per input,
       // before writing anything).
+      // Same instant-feedback path as handleAddCell — see its note.
+      cellStore.applyOptimisticSourceInsert({
+        cellId,
+        anchorCellId: before?.id ?? null,
+        reanchorCellId: oldHead?.cellId ?? successor?.id ?? null,
+        sequenceIndex: sequenceBetween(before?.sequenceIndex, after?.sequenceIndex),
+        startMs,
+        endMs,
+        metadata: { aquillaOrigin: userLineOrigin() },
+      })
       await enqueueEvents([
         {
           kind: "source.cell.create" as const,
@@ -5822,6 +5845,17 @@ export function ProjectWorkspace() {
       const plan = cellStore.getInsertPlan(cellId, position)
       if (!plan) return null
       const newCellId = uuidv7()
+      // Show it NOW. The confirming read below is cheap on the wire but
+      // expensive in the store — an insert changes `order`, so `replaceRows`
+      // marks every cell in the file dirty and rebuilds every derived index.
+      // On a whole Bible that is seconds of nothing happening after the click.
+      cellStore.applyOptimisticSourceInsert({
+        cellId: newCellId,
+        anchorCellId: plan.anchorCellId,
+        reanchorCellId: plan.reanchor?.cellId ?? null,
+        sequenceIndex: sequenceBetween(plan.sequenceBefore, plan.sequenceAfter),
+        metadata: { aquillaOrigin: userLineOrigin() },
+      })
       await enqueueEvents([
         {
           kind: "source.cell.create" as const,
@@ -5859,7 +5893,14 @@ export function ProjectWorkspace() {
             ]
           : []),
       ])
-      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      await flushOutboxBatch({
+        getTokenForFile: getTokenForProjectFile,
+        onRejected: (entries) => {
+          if (!entries.some((e) => e.kind === "source.cell.create")) return
+          cellStore.rollbackOptimisticSourceChange(newCellId)
+          toast.add({ type: "error", title: t("editor.addCell.failedToast") })
+        },
+      })
       revalidateCells()
       setPendingNewCell({ cellId: newCellId, thenRecord: false })
       return newCellId

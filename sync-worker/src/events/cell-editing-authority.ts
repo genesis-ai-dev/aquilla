@@ -25,14 +25,7 @@
 // client's own work. That second half lives in authorize.ts beside this
 // module's, because it needs the event's cell id and this does not.
 
-import { ROLE } from './role-policy'
-
-/** The stored vocabulary. Mirrors ProjectWideSettings.cellEditingFloor. */
-const FLOOR_MAP: Record<string, number> = {
-  maintainer: ROLE.MAINTAINER,
-  project_lead: ROLE.PROJECT_LEAD,
-  contributor: ROLE.CONTRIBUTOR,
-}
+import { cellEditingFloorFromSettings } from '../../../db/shared/cell-editing-floor'
 
 /**
  * The role level this project admits to cell editing, or `null` for nobody.
@@ -42,8 +35,10 @@ const FLOOR_MAP: Record<string, number> = {
  * this build does not recognise. A value a newer client invents must never
  * read as permission on an older worker.
  *
- * Keep in lock-step with the client's `resolveCellEditingFloor`
- * (src/lib/sync/project-settings.ts), which gates the affordance.
+ * The tier -> level mapping is shared with auth-worker's agent staging
+ * (db/shared/cell-editing-floor.ts) so the two servers cannot drift. The
+ * client keeps its own copy in src/lib/sync/project-settings.ts, which gates
+ * the affordance only.
  */
 export async function resolveCellEditingFloor(
   db: AquillaDb,
@@ -61,10 +56,7 @@ export async function resolveCellEditingFloor(
 
     if (!row?.settings) return null
 
-    const parsed = JSON.parse(row.settings) as { cellEditingFloor?: unknown }
-    const floor = parsed?.cellEditingFloor
-    if (typeof floor !== 'string') return null
-    return FLOOR_MAP[floor] ?? null
+    return cellEditingFloorFromSettings(JSON.parse(row.settings))
   } catch {
     return null
   }

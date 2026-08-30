@@ -24,6 +24,7 @@
 import { AliasMap } from "./compress"
 import { AGENT_REQUIRED_ROLE, ROLE_NAME } from "./schema-card"
 import { loadLintRules, lintDraft } from "./lint"
+import { cellEditingFloorFromSettings, isCellEditingKind } from "../../../../db/shared/cell-editing-floor"
 
 // ── Wire contract (must match the plan doc byte-for-byte) ───────────────────
 
@@ -151,10 +152,32 @@ type Verdict =
   | { kind: "rejected"; reason: string }
   | { kind: "stale"; reason: string }
 
+/** AQU-1068: the project's cell-editing tier, or null for nobody. Best-effort
+ *  in the same sense as the lint rules — but failing CLOSED, because the
+ *  refusing answer is the safe one here. */
+async function loadCellEditingFloor(db: AquillaDb, projectId: string): Promise<number | null> {
+  try {
+    const row = await db
+      .prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
+      .bind(projectId)
+      .first<{ settings: string | null }>()
+    if (!row?.settings) return null
+    return cellEditingFloorFromSettings(JSON.parse(row.settings))
+  } catch {
+    return null
+  }
+}
+
 async function stageOne(
   db: AquillaDb,
   raw: RawEmitEvent,
   ctx: EmitStageContext,
+  /**
+   * AQU-1068: the project's cell-editing tier, resolved ONCE per batch by
+   * `stageEvents` and threaded in — `undefined` when the batch contains no
+   * kind that needs it, so an ordinary drafting emit never reads settings.
+   */
+  cellEditingFloor?: number | null,
 ): Promise<Verdict> {
   if (typeof raw !== "object" || raw === null || typeof raw.kind !== "string") {
     return { kind: "rejected", reason: "each event needs a string `kind`" }
@@ -171,6 +194,31 @@ async function stageOne(
       kind: "rejected",
       reason: `role too low: ${kind} requires ${ROLE_NAME[floor] ?? floor} (${floor}), you act as ${ROLE_NAME[ctx.roleLevel] ?? ctx.roleLevel} (${ctx.roleLevel})`,
     }
+  }
+
+  // 1b. AQU-1068: adding and removing cells is gated on the project's
+  // `cellEditingFloor` as well as the static floor above. REFUSING HERE IS THE
+  // WHOLE POINT — the agent applies through the user's own outbox with the
+  // user's own token, so anything staged past this dies at the /events
+  // perimeter with a 403, in the middle of a changeset the user has already
+  // approved. Better to never offer it.
+  if (isCellEditingKind(kind)) {
+    if (cellEditingFloor == null) {
+      return {
+        kind: "rejected",
+        reason: `adding or removing cells is not enabled for this project (${kind})`,
+      }
+    }
+    if (ctx.roleLevel < cellEditingFloor) {
+      return {
+        kind: "rejected",
+        reason: `role too low to add or remove cells: this project requires ${ROLE_NAME[cellEditingFloor] ?? cellEditingFloor} (${cellEditingFloor}), you act as ${ROLE_NAME[ctx.roleLevel] ?? ctx.roleLevel} (${ctx.roleLevel})`,
+      }
+    }
+    // The second gate — removing an IMPORTED cell — is deliberately NOT
+    // mirrored here. It needs the live cell's metadata to answer, the
+    // perimeter already enforces it per event, and a staging-time guess would
+    // be a second opinion that can disagree. This one is cheap and settled.
   }
 
   // 2. Resolve aliases/:vars on the envelope ids.
@@ -405,12 +453,19 @@ export async function stageEvents(
   const lintRules = anyCommit ? await loadLintRules(db, ctx.projectId) : []
   const lintLines: string[] = []
 
+  // Same once-per-emit discipline as the lint rules above: only read settings
+  // when the batch actually contains a kind that needs the answer.
+  const anyCellEditing = rawEvents.some(
+    (r) => typeof (r as RawEmitEvent)?.kind === "string" && isCellEditingKind((r as RawEmitEvent).kind as string),
+  )
+  const cellEditingFloor = anyCellEditing ? await loadCellEditingFloor(db, ctx.projectId) : undefined
+
   for (let i = 0; i < rawEvents.length; i++) {
     const raw = rawEvents[i] as RawEmitEvent
     const kind = typeof raw?.kind === "string" ? raw.kind : "?"
     let verdict: Verdict
     try {
-      verdict = await stageOne(db, raw, ctx)
+      verdict = await stageOne(db, raw, ctx, cellEditingFloor)
     } catch (err) {
       verdict = { kind: "rejected", reason: `stage error: ${err instanceof Error ? err.message : String(err)}` }
     }

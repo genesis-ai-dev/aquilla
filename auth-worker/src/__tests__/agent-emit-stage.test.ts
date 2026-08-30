@@ -37,8 +37,20 @@ async function seedCellPair() {
     .run()
 }
 
+/** AQU-1068: the project's cell-editing tier. Most tests here are about role
+ *  floors, parents and provenance, so they opt the project in and let the new
+ *  gate stay out of the way; the dedicated describe below drives it directly. */
+async function seedCellEditingFloor(tier: string | null) {
+  await env.AQUILLA_PG.prepare(`DELETE FROM project_settings WHERE project_id = ?`).bind(PROJECT).run()
+  await env.AQUILLA_PG
+    .prepare(`INSERT INTO project_settings (project_id, settings) VALUES (?, ?)`)
+    .bind(PROJECT, JSON.stringify(tier ? { cellEditingFloor: tier } : {}))
+    .run()
+}
+
 beforeEach(async () => {
   await seedCellPair()
+  await seedCellEditingFloor("contributor")
 })
 
 describe("stageEvents — role floors (server-side re-validation)", () => {
@@ -419,5 +431,64 @@ describe("stageEvents — destination file naming (AQU-846)", () => {
     )
     expect(result.proposal).not.toBeNull()
     expect(result.proposal!.events[0].display.fileName).toBeUndefined()
+  })
+})
+
+describe("stageEvents — the project's cell-editing tier (AQU-1068)", () => {
+  // Staging is where this has to be caught. The agent applies through the
+  // user's own outbox with the user's own token, so anything staged past the
+  // tier dies at the /events perimeter with a 403 — in the middle of a
+  // changeset the user has already approved.
+
+  it("refuses source.cell.create when the project has not opted in", async () => {
+    await seedCellEditingFloor(null)
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "source.cell.create", fileId: FILE, payload: { value: "x" } }],
+      ctx({ roleLevel: 700 }),
+    )
+    expect(result.proposal).toBeNull()
+    expect(result.modelVerdictBlock).toContain("not enabled for this project")
+  })
+
+  it("refuses an OWNER too — the default is nobody, not a floor", async () => {
+    await seedCellEditingFloor(null)
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "source.cell.delete", fileId: FILE, cellId: CELL, payload: {} }],
+      ctx({ roleLevel: 700 }),
+    )
+    expect(result.proposal).toBeNull()
+  })
+
+  it("refuses a lead below the configured tier", async () => {
+    await seedCellEditingFloor("maintainer")
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "source.cell.create", fileId: FILE, payload: { value: "x" } }],
+      ctx({ roleLevel: 500 }),
+    )
+    expect(result.proposal).toBeNull()
+    expect(result.modelVerdictBlock).toContain("role too low to add or remove cells")
+  })
+
+  it("stages once the tier admits the caller", async () => {
+    await seedCellEditingFloor("maintainer")
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "source.cell.create", fileId: FILE, payload: { value: "x" } }],
+      ctx({ roleLevel: 600 }),
+    )
+    expect(result.proposal).not.toBeNull()
+  })
+
+  it("leaves ordinary drafting alone — a commit never asks about the tier", async () => {
+    await seedCellEditingFloor(null)
+    const result = await stageEvents(
+      env.AQUILLA_PG,
+      [{ kind: "target.cell.commit", fileId: FILE, cellId: CELL, payload: { value: "x" } }],
+      ctx({ roleLevel: 400 }),
+    )
+    expect(result.proposal).not.toBeNull()
   })
 })

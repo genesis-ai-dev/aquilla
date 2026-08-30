@@ -978,6 +978,16 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
+    // AQU-1068. Its predecessor `allowLineCreation` was missing from this list
+    // too, and the bug is invisible until you try it: handleSave closes over a
+    // stale value, the diff below sees no change, `sharedUpdates` comes out
+    // empty and NO REQUEST IS SENT AT ALL. The button reacts, the header keeps
+    // saying "Unsaved changes", and nothing in the console complains. The unit
+    // test does not catch it either — an unrelated re-render refreshes the
+    // closure in happy-dom — so exhaustive-deps is the only guard, and it is a
+    // warning among hundreds. `timingLocked` had the same hole: the timing
+    // LOCK, the one safeguard AQU-646 added, could silently fail to save.
+    cellEditingFloor, timingLocked,
     bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
     precedingTargetCells, importExcludeFrontMatter, getJwt, isCloudProject, t,
   ])

@@ -154,6 +154,12 @@ import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
 import { buildCellRemovalInventory, type CellRemovalInventory } from "@/lib/cell-removal-inventory"
+import {
+  canEditCells,
+  canRemoveImportedCells as canRemoveImportedCellsGate,
+  cellInsertMode,
+} from "@/lib/cell-editing-gate"
+import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
 import { MIN_ADDABLE_SPAN_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import { buildLinkedTakes } from "@/lib/audio/linked-takes"
@@ -7518,16 +7524,28 @@ export function ProjectWorkspace() {
   // setting answers *whether* this project restructures its files. The static
   // canPerform floor still applies underneath, so a viewer is refused even at
   // the most permissive tier. authorize.ts asks exactly the same two things.
-  const cellEditingFloor = resolveCellEditingFloor(project)
-  const canEditLines =
-    cellEditingFloor != null &&
-    (project?.syncRole?.level ?? 0) >= cellEditingFloor &&
-    canPerform("source.cell.create", project?.syncRole?.level ?? null)
-  // ...and the second gate, on removal only: an IMPORTED cell is the client's
-  // own work, so taking one back needs MAINTAINER whatever tier is configured.
-  // Mirrors the `isUserInsertedCell` clause the server applies per event.
-  const canRemoveImportedCells =
-    canEditLines && (project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
+  // Shares the settings read every other consumer uses (useProjectSettings),
+  // so this costs no extra fetch.
+  const { cursor: dcsCursor, loading: dcsCursorLoading } = useDcsUpstreamCursor(
+    project?.id ?? "",
+    project?.syncRole?.level ?? null,
+  )
+  // The truth table lives in cell-editing-gate.ts — this component has no test
+  // harness, and the rule deciding who is offered a destructive button should
+  // not be verified only in a browser.
+  const cellEditingSubject = {
+    floor: resolveCellEditingFloor(project),
+    roleLevel: project?.syncRole?.level ?? null,
+    staticFloorPasses: canPerform("source.cell.create", project?.syncRole?.level ?? null),
+    // A live source link mirrors this project's source from upstream, and a
+    // DCS pin has a repair path that overwrites local source divergence — so a
+    // cell added or removed under either would be silently undone. Loading
+    // counts as pinned, matching how the "Edit source" pencil treats it.
+    sourceIsMirrored:
+      project?.sourceLinkMode === "live" || dcsCursorLoading || dcsCursor !== null,
+  }
+  const canEditLines = canEditCells(cellEditingSubject)
+  const canRemoveImportedCells = canRemoveImportedCellsGate(cellEditingSubject)
   const addLineCells = activeFile?.coreMediaUrl && legacyCellsNeeded
     && !audioMergedCells.some((c) => (c.medium ?? "text") === "media")
     && canEditLines
@@ -7579,9 +7597,12 @@ export function ProjectWorkspace() {
    */
   const untimedCellEditing =
     canEditLines &&
-    !activeFile?.coreMediaUrl &&
-    !legacyCellsNeeded &&
-    !audioMergedCells.some((c) => (c.medium ?? "text") === "media")
+    cellInsertMode({
+      hasMedia: Boolean(activeFile?.coreMediaUrl),
+      isTimed: legacyCellsNeeded,
+      hasChunkedAudioCells: audioMergedCells.some((c) => (c.medium ?? "text") === "media"),
+      fileType: activeFile?.type,
+    }) === "anywhere"
 
   const sourceLineEditing = useMemo(
     () => {

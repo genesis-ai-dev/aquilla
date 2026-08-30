@@ -1117,11 +1117,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "members",
       label: "Members",
-      description: "Who can access this project, invites, roles, and who may restructure content",
+      description: "Who can access this project, invites, and roles",
       icon: Users,
       hub: "Project",
       wide: true,
-      sectionIds: ["section-members", "section-cell-editing"],
+      sectionIds: ["section-members"],
     },
     {
       id: "source-sync",
@@ -1153,10 +1153,15 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "validation",
       label: "Validation & health",
-      description: "Approvals, harmonization, staleness decay",
+      description: "Approvals, harmonization, content structure, staleness decay",
       icon: ShieldCheck,
       hub: "Quality",
-      sectionIds: ["section-validation", "section-decay"],
+      // AQU-1068: `cellEditingFloor` sits with the project's other two role
+      // floors (validation, harmonization) rather than in the Members pane —
+      // that one is gated on the roster permission, which has nothing to do
+      // with who may restructure content, and a setting should not appear or
+      // vanish on an unrelated grant.
+      sectionIds: ["section-validation", "section-cell-editing", "section-decay"],
     },
     {
       id: "audio-media",

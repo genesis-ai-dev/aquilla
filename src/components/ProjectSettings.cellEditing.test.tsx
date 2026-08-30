@@ -141,7 +141,7 @@ function renderSettings(path = `/project/${PROJECT_ID}/settings`) {
   )
 }
 
-const MEMBERS_PANE = `/project/${PROJECT_ID}/settings/members`
+const PANE = `/project/${PROJECT_ID}/settings/validation`
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -152,13 +152,13 @@ beforeEach(() => {
 
 describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
   it("shows No one for a project that never set it — the default is refusal, not a rank", () => {
-    renderSettings(MEMBERS_PANE)
+    renderSettings(PANE)
     expect(screen.getByTestId("settings-cell-editing-floor")).toHaveTextContent("No one")
   })
 
   it("reads back a stored tier", () => {
     currentProject = makeProject({ cellEditingFloor: "project_lead" } as Partial<ProjectRecord>)
-    renderSettings(MEMBERS_PANE)
+    renderSettings(PANE)
     expect(screen.getByTestId("settings-cell-editing-floor")).toHaveTextContent(
       "Maintainers and project leads",
     )
@@ -166,7 +166,7 @@ describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
 
   it("saves the chosen tier as cellEditingFloor, and touches nothing else", async () => {
     const user = userEvent.setup()
-    renderSettings(MEMBERS_PANE)
+    renderSettings(PANE)
 
     await user.click(screen.getByTestId("settings-cell-editing-floor"))
     await user.click(await screen.findByRole("option", { name: "Maintainers" }))
@@ -180,7 +180,7 @@ describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
 
   it("offers the four tiers in order, reset default first", async () => {
     const user = userEvent.setup()
-    renderSettings(MEMBERS_PANE)
+    renderSettings(PANE)
     await user.click(screen.getByTestId("settings-cell-editing-floor"))
     const labels = (await screen.findAllByRole("option")).map((o) => o.textContent)
     expect(labels).toEqual([
@@ -195,7 +195,7 @@ describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
     currentProject = makeProject({ syncRole: { level: 400, source: "member" } } as Partial<ProjectRecord>)
     currentCanEdit = false
     currentReasonCannotEdit = "role"
-    renderSettings(MEMBERS_PANE)
+    renderSettings(PANE)
     expect(screen.getByTestId("settings-cell-editing-floor")).toBeDisabled()
   })
 

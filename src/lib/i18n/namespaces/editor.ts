@@ -739,13 +739,20 @@ export const editor = defineNamespace({
 
     // — Row hover controls + assurance panel (editing table) ——————
     "editor.row.removeLine": "Remove this line",
-    // AQU-1068 round 3: WHY a row cannot take an action. A closed set of four,
+    // AQU-1068 round 3: WHY a row cannot take an action. A closed set with
     // one sentence shape — the same string serves the disabled button's tooltip
     // and the disabled menu item's second line, so the two surfaces cannot
     // drift. Shown instead of hiding the control, because an absent button
     // cannot distinguish "not applicable here" from "this feature is broken".
+    //
+    // The media cause carries TWO strings because the question differs by
+    // action: hovering a dead INSERT asks about a new cell, not about the row
+    // it happens to sit beside, so describing the row there answered the
+    // wrong question (round 4, Sam).
     "editor.row.noRoomReason": "There\u2019s no room here to fit a line.",
-    "editor.row.mediaSegmentReason": "This row is part of the imported audio.",
+    "editor.row.mediaInsertReason": "Cells can\u2019t be added to imported audio.",
+    "editor.row.mediaRemoveReason":
+      "This row is a piece of the original recording, so it can\u2019t be removed.",
     "editor.row.idmlReason":
       "IDML files keep their original layout, so cells can\u2019t be added or removed.",
     "editor.row.maintainerOnlyReason": "Only a maintainer can remove an imported line.",

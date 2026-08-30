@@ -131,6 +131,23 @@ async function main() {
   await page.waitForTimeout(300)
   await page.screenshot({ path: `${SHOTS}/01-timed-text-lens.png` })
 
+  // ── 1b. The SAME file's MEDIA view — pencils over the same silences ───────
+  // Round 4: the timeline's gap derivation was still gated on footage, so this
+  // footage-less VTT offered inserts in the text table and nothing at all in
+  // media view. The two surfaces must agree about the same file. Runs BEFORE
+  // the insert leg below, while the fixture's silences are still pristine.
+  await page.getByRole("tab", { name: "Media" }).click()
+  await page.waitForSelector('[data-testid="tl-lane"]', { timeout: 30_000 })
+  await page.waitForTimeout(1000)
+  const pencils = await page.$$eval('[data-testid^="tl-add-line-"]', (els) => els.length)
+  check("timed VTT media view: gap pencils appear with no footage linked", pencils > 0, `${pencils} slot nodes`)
+  await page.screenshot({ path: `${SHOTS}/01b-timed-media-pencils.png` })
+  // Back to the text lens — the preference persists per PROJECT, and the MP3
+  // leg below shares this one.
+  await page.getByRole("tab", { name: "Text" }).click()
+  await page.waitForSelector("[data-cell-id]", { timeout: 30_000 })
+  await page.waitForTimeout(500)
+
   if (addable > 0) {
     const before = sourceCount(TIMED.file)
     const beforeIds = await rowIds()
@@ -179,7 +196,9 @@ async function main() {
   await mp3Add.hover({ force: true })
   await page.waitForTimeout(1400)
   const tip = (await page.locator('[role="tooltip"]').first().textContent().catch(() => "")) ?? ""
-  check("MP3 import: hovering explains why", /imported audio/i.test(tip), tip.slice(0, 80))
+  // Round 4: the tooltip on the `+` must answer the INSERT ("can't be added"),
+  // not describe the row — the row-describing string was the round-4 complaint.
+  check("MP3 import: hovering the + explains the refused ADD", /can.t be added to imported audio/i.test(tip), tip.slice(0, 80))
   await page.screenshot({ path: `${SHOTS}/03-mp3-disabled.png` })
 
   // ── 3. Untimed .md — still anywhere, both directions ──────────────────────

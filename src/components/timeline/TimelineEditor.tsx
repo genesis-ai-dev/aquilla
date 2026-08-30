@@ -932,9 +932,15 @@ export function TimelineEditor({
   // ask "is there a stretch of film here with no line on it": the pencil in the
   // Subtitles row and the mic in the Target audio row. Both are questions about
   // the TEXT, which is why this still sweeps `cells` and not the audio cues.
+  //
+  // Gated on "no media cells", NOT on footage: a timed VTT with no video
+  // linked has the same silences, and the text table already offers inserts
+  // into them, so hiding the pencils here made the two surfaces disagree
+  // (AQU-1068 round 4). With no footage the duration is null and the regions
+  // span the cells' own extent — head and between-cue gaps, no invented tail.
   const sourceRegions = useMemo(
-    () => (subtitleFileWithFootage ? deriveSourceRegions(cells, videoDurationSec) : EMPTY_SOURCE_REGIONS),
-    [subtitleFileWithFootage, cells, videoDurationSec],
+    () => (dialogue.length === 0 ? deriveSourceRegions(cells, videoDurationSec) : EMPTY_SOURCE_REGIONS),
+    [dialogue, cells, videoDurationSec],
   )
   // The Source-audio row's own map, from the hidden sibling's cues. Same sweep,
   // a different set of boundaries: the audio VTT transcribes the film's

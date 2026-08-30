@@ -1506,6 +1506,31 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
       expect(screen.getByTestId("tl-add-line-20")).toBeInTheDocument()
     })
 
+    // AQU-1068 round 4: the pencils do not depend on a film being linked. A
+    // timed VTT with no video has the same silences, and the text table
+    // already offers inserts into them, so gating the region derivation on
+    // `coreMediaUrl` made the two surfaces disagree about the same file. With
+    // no footage the regions span the cells' own extent — the gaps between
+    // cues still surface, and no tail is invented past the last cue.
+    it("offers the ways in on a timed file with no footage linked", () => {
+      localStorage.setItem("aquilla:timelineZoom:fzoom", String(ZOOM_MAX))
+      render(
+        <TimelineEditor
+          fileId="fzoom" coreMediaUrl={null} editable
+          cells={[
+            cell({ id: "a", original: "A", medium: "text", startTime: 10, endTime: 20 }),
+            cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
+          ]}
+          canAddLine onAddLine={async () => null} onRetimeSubtitle={() => {}}
+        />,
+      )
+      // The same silence every test above uses, and the head gap before 10s.
+      expect(screen.getByTestId("tl-add-line-20")).toBeInTheDocument()
+      expect(screen.getByTestId("tl-add-line-0")).toBeInTheDocument()
+      // No footage length → no region past the last cue to draw a slot in.
+      expect(screen.queryByTestId("tl-add-line-30")).not.toBeInTheDocument()
+    })
+
     // THE SETTING IS THE SINGLE AUTHORITY (Sam, 2026-08-21). Stage 4 used to
     // withdraw both ways in the moment an audio-cue track existed, which made
     // the project setting a visible no-op on every dubbing episode — Matt's

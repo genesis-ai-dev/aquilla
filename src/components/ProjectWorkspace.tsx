@@ -7718,17 +7718,26 @@ export function ProjectWorkspace() {
         isImported: !(isUserAddedLine(cell) && isLineEmpty(cell)),
         canRemoveImported: canRemoveImportedCells,
       })
-      const label = (reason: RowActionReason | null): string | null =>
+      // The label answers the ACTION the user reached for, not the row's
+      // nature — a dead insert is a question about a NEW cell, so the media
+      // cause reads differently there than on remove (round 4).
+      const label = (action: "insert" | "remove", reason: RowActionReason | null): string | null =>
         reason == null
           ? null
           : reason === "media"
-            ? t("editor.row.mediaSegmentReason")
+            ? action === "insert"
+              ? t("editor.row.mediaInsertReason")
+              : t("editor.row.mediaRemoveReason")
             : reason === "idml"
               ? t("editor.row.idmlReason")
               : reason === "noRoom"
                 ? t("editor.row.noRoomReason")
                 : t("editor.row.maintainerOnlyReason")
-      return { above: label(out.above), below: label(out.below), remove: label(out.remove) }
+      return {
+        above: label("insert", out.above),
+        below: label("insert", out.below),
+        remove: label("remove", out.remove),
+      }
     },
     [placement, canRemoveImportedCells, t],
   )

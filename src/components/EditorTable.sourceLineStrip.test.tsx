@@ -175,7 +175,10 @@ function renderTable(over: Partial<Parameters<typeof EditorTable>[0]> = {}) {
 
 const NO_ROOM = "There’s no room here to fit a line."
 const MAINTAINER_ONLY = "Only a maintainer can remove an imported line."
-const MEDIA = "This row is part of the imported audio."
+// Round 4: the media cause answers the ACTION, not the row — a dead insert
+// is a question about a NEW cell, so it no longer describes the row it sits on.
+const MEDIA_ADD = "Cells can’t be added to imported audio."
+const MEDIA_REMOVE = "This row is a piece of the original recording, so it can’t be removed."
 
 /** Mirrors the workspace's real resolver: a reason means "render it disabled
  *  and say this", null means available. */
@@ -305,7 +308,7 @@ describe("EditorTable — the row's structural controls", () => {
     // A menu of nothing but dead items is worse than one explained button.
     renderTable({
       sourceLineEditing: editing({
-        rowActions: () => ({ above: MEDIA, below: MEDIA, remove: MEDIA }),
+        rowActions: () => ({ above: MEDIA_ADD, below: MEDIA_ADD, remove: MEDIA_REMOVE }),
       }),
     })
     await screen.findByText("First cue")
@@ -424,12 +427,12 @@ describe("EditorTable — structural controls on an untimed file", () => {
     expect(within(rowEl("cue-a")).getByTestId("row-remove-cue-a")).not.toBeDisabled()
   })
 
-  it("a media row refuses everything, and says the same thing three times", async () => {
+  it("a media row refuses everything, answering each action in its own words", async () => {
     // An MP3 import: every row IS audio. It used to render nothing at all,
     // which is the case that started this round.
     renderTable({
       sourceLineEditing: untimedEditing({
-        rowActions: () => ({ above: MEDIA, below: MEDIA, remove: MEDIA }),
+        rowActions: () => ({ above: MEDIA_ADD, below: MEDIA_ADD, remove: MEDIA_REMOVE }),
       }),
     })
     await screen.findByText("First cue")

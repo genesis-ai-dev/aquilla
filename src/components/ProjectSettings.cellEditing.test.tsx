@@ -1,9 +1,8 @@
 // AQU-1068 — the "who can add and remove cells" tier, in Project Settings.
 //
 // The setting it replaces was a checkbox in the Timeline card, which put a
-// project-wide permission behind an audio-shaped heading. This one is a role
-// floor and it lives with the roles, because it now governs ordinary text
-// files too.
+// project-wide permission behind an audio-shaped heading. It now governs
+// ordinary text files too, so it sits in General with the everyday settings.
 //
 // What these tests hold: the control renders "No one" for a project that has
 // never set it (the default is refusal, not a rank); a stored tier round-trips
@@ -141,7 +140,7 @@ function renderSettings(path = `/project/${PROJECT_ID}/settings`) {
   )
 }
 
-const PANE = `/project/${PROJECT_ID}/settings/validation`
+const PANE = `/project/${PROJECT_ID}/settings/general`
 
 beforeEach(() => {
   vi.clearAllMocks()

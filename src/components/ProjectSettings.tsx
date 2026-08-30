@@ -1119,10 +1119,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "general",
       label: "General",
-      description: "Name, languages, username, Bible resources",
+      description: "Name, languages, content structure, username, Bible resources",
       icon: SlidersHorizontal,
       hub: "Project",
-      sectionIds: ["section-project-info", "section-languages", "section-bible-resources", "section-import", "section-user"],
+      sectionIds: ["section-project-info", "section-languages", "section-cell-editing", "section-bible-resources", "section-import", "section-user"],
     },
     {
       id: "members",
@@ -1163,15 +1163,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "validation",
       label: "Validation & health",
-      description: "Approvals, harmonization, content structure, staleness decay",
+      description: "Approvals, harmonization, staleness decay",
       icon: ShieldCheck,
       hub: "Quality",
-      // AQU-1068: `cellEditingFloor` sits with the project's other two role
-      // floors (validation, harmonization) rather than in the Members pane —
-      // that one is gated on the roster permission, which has nothing to do
-      // with who may restructure content, and a setting should not appear or
-      // vanish on an unrelated grant.
-      sectionIds: ["section-validation", "section-cell-editing", "section-decay"],
+      sectionIds: ["section-validation", "section-decay"],
     },
     {
       id: "audio-media",
@@ -1627,6 +1622,49 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
           />
         )}
 
+        {searchGroupLabel("section-cell-editing")}
+        {sectionsToRender.some((s) => s.id === "section-cell-editing") && (
+          <div id="section-cell-editing">
+            {/* AQU-1068. One setting answers WHO; the file's own nature answers
+                WHERE — a text file takes a cell anywhere, a subtitle file only
+                in a gap — so nothing here mentions timings or media. */}
+            <SettingsGroup label={t("projectSettings.cellEditing.sectionTitle")}>
+              <SettingsRow
+                label={<label htmlFor="cell-editing-floor">{t("projectSettings.cellEditing.label")}</label>}
+                description={t("projectSettings.cellEditing.description")}
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Select
+                      items={CELL_EDITING_FLOOR_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+                      disabled={!canEditShared}
+                      value={cellEditingFloor}
+                      onValueChange={(value) =>
+                        setCellEditingFloor((value ?? cellEditingFloor) as typeof cellEditingFloor)
+                      }
+                    >
+                      <SelectTrigger
+                        id="cell-editing-floor"
+                        data-testid="settings-cell-editing-floor"
+                        aria-label={t("projectSettings.cellEditing.label")}
+                        className="w-64 bg-background"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {CELL_EDITING_FLOOR_OPTIONS.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>{t(o.labelKey)}</SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </DisabledFieldTooltip>
+                }
+              />
+            </SettingsGroup>
+          </div>
+        )}
+
         {searchGroupLabel("section-bible-resources")}
         {sectionsToRender.some((s) => s.id === "section-bible-resources") && (
           <div id="section-bible-resources">
@@ -1711,49 +1749,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-members")}
         {id && sectionsToRender.some((s) => s.id === "section-members") && (
           <MembersSection projectId={id} />
-        )}
-
-        {searchGroupLabel("section-cell-editing")}
-        {sectionsToRender.some((s) => s.id === "section-cell-editing") && (
-          <div id="section-cell-editing">
-            {/* AQU-1068. One setting answers WHO; the file's own nature answers
-                WHERE — a text file takes a cell anywhere, a subtitle file only
-                in a gap — so nothing here mentions timings or media. */}
-            <SettingsGroup label={t("projectSettings.cellEditing.sectionTitle")}>
-              <SettingsRow
-                label={<label htmlFor="cell-editing-floor">{t("projectSettings.cellEditing.label")}</label>}
-                description={t("projectSettings.cellEditing.description")}
-                control={
-                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
-                    <Select
-                      items={CELL_EDITING_FLOOR_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
-                      disabled={!canEditShared}
-                      value={cellEditingFloor}
-                      onValueChange={(value) =>
-                        setCellEditingFloor((value ?? cellEditingFloor) as typeof cellEditingFloor)
-                      }
-                    >
-                      <SelectTrigger
-                        id="cell-editing-floor"
-                        data-testid="settings-cell-editing-floor"
-                        aria-label={t("projectSettings.cellEditing.label")}
-                        className="w-64 bg-background"
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectGroup>
-                          {CELL_EDITING_FLOOR_OPTIONS.map((o) => (
-                            <SelectItem key={o.value} value={o.value}>{t(o.labelKey)}</SelectItem>
-                          ))}
-                        </SelectGroup>
-                      </SelectContent>
-                    </Select>
-                  </DisabledFieldTooltip>
-                }
-              />
-            </SettingsGroup>
-          </div>
         )}
 
         {searchGroupLabel("section-ai-instructions")}

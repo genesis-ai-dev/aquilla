@@ -211,13 +211,9 @@ export const projectSettings = defineNamespace({
     "projectSettings.cellEditing.sectionTitle": "Content structure",
     "projectSettings.cellEditing.label": "Who can add and remove cells",
     "projectSettings.cellEditing.description":
-      "No one, until you choose otherwise. Once someone is allowed, small buttons appear " +
-      "on each row of a file to add a cell above it, add a cell below it, or remove it. " +
-      "Removing a cell also removes its translations in every language, its recordings " +
-      "and its comments \u2014 the confirmation says exactly what will go before anything " +
-      "happens. Removing a cell that came from an import always needs a maintainer, " +
-      "whatever this is set to. On a subtitle file, cells can only be added where there " +
-      "is a gap in the timings.",
+      "Puts buttons on each row to insert or remove cells. Removing one also removes its " +
+      "translations, recordings and comments; removing an imported cell always needs a " +
+      "maintainer.",
     "projectSettings.cellEditing.optionNone": "No one",
     "projectSettings.cellEditing.optionMaintainer": "Maintainers",
     "projectSettings.cellEditing.optionProjectLead": "Maintainers and project leads",

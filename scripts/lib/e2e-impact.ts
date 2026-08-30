@@ -34,6 +34,11 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/ai/completion.smoke.spec.ts"],
   },
   {
+    // AQU-1025: few-shot retrieval is the AI predict journey, not collab.
+    source: /(?:sync-worker\/.*branching-search|src\/lib\/sync\/branching-search)/i,
+    sentinels: ["e2e/specs/ai/completion.smoke.spec.ts"],
+  },
+  {
     source: /^(?:src\/(?:components|lib|pages)\/.*knowledge|auth-worker\/.*knowledge|db\/shared\/knowledge)/i,
     sentinels: ["e2e/specs/projects/project-settings.smoke.spec.ts"],
   },

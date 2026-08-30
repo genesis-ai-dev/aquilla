@@ -3752,6 +3752,7 @@ export function ProjectWorkspace() {
           topK: limit,
           validatedOnly: true,
           excludeCellId: excludeId,
+          targetLang: activeLane,
         })
         return res.results.map((r) => ({
           cellId: r.cellId,
@@ -3767,7 +3768,7 @@ export function ProjectWorkspace() {
         return []
       }
     },
-    [project?.id, activeFileId, getTokenForFile],
+    [project?.id, activeFileId, getTokenForFile, activeLane],
   )
 
   const branchingSearchPassages = useCallback(
@@ -3789,6 +3790,7 @@ export function ProjectWorkspace() {
           topK: hits,
           radius,
           validatedOnly: true,
+          targetLang: activeLane,
         })
         // Map server `Passage` → existing `PassageHit` shape. Drops
         // `hitCellId` (derivable from cells.find(c => c.hit)) and
@@ -3807,7 +3809,7 @@ export function ProjectWorkspace() {
         return []
       }
     },
-    [project?.id, activeFileId, getTokenForFile],
+    [project?.id, activeFileId, getTokenForFile, activeLane],
   )
 
   const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string, provenance: AiDraftProvenance) => {

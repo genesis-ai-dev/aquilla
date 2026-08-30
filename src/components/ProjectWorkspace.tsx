@@ -158,7 +158,9 @@ import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   canEditCells,
   canRemoveImportedCells as canRemoveImportedCellsGate,
-  cellInsertMode,
+  cellPlacement,
+  rowActionAvailability,
+  type RowActionReason,
 } from "@/lib/cell-editing-gate"
 import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
 import { MIN_ADDABLE_SPAN_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
@@ -7655,10 +7657,8 @@ export function ProjectWorkspace() {
    * panel happens to be open — see cell-editing-gate.ts for why that
    * distinction is the whole of round 1's classification bug.
    */
-  const insertMode = cellInsertMode({
+  const placement = cellPlacement({
     orderedBy: activeFile ? fileOrderedBy(activeFile) : "sequence",
-    hasMediaCells: readAtVersion(cellStoreVersion, () => cellStore.hasMediaCells()),
-    fileType: activeFile?.type,
   })
 
   const videoDurationForTable = useVideoDurationSec(activeFile?.coreMediaUrl ?? null)
@@ -7677,7 +7677,7 @@ export function ProjectWorkspace() {
    */
   const insertSlots = useMemo(
     () =>
-      canEditLines && insertMode === "gaps"
+      canEditLines && placement === "gaps"
         ? insertSlotsByCell(
             deriveSourceRegions(
               readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
@@ -7686,42 +7686,68 @@ export function ProjectWorkspace() {
             MIN_ADDABLE_SPAN_SEC,
           )
         : EMPTY_INSERT_SLOTS,
-    [canEditLines, insertMode, cellStore, cellStoreVersion, videoDurationForTable],
+    [canEditLines, placement, cellStore, cellStoreVersion, videoDurationForTable],
   )
+
   /**
-   * THE single answer to "may this cell be taken back?", asked by the text
-   * table, the timeline lane, and `handleRemoveLine` itself. One predicate
-   * because the two surfaces disagreeing about what is removable is exactly
-   * the class of bug the AQU-646 round chased.
+   * THE single answer to "what may this row do, and why not?", asked by the
+   * text table and the timeline lane alike.
    *
-   * A maintainer may remove anything — the confirmation dialog is what makes
-   * that safe. Below that rank the old rule stands, and it is the same rule
-   * the server enforces per event: only a line somebody added here, only while
-   * it is still empty, because `source.cell.delete` used to strand every take
-   * and comment attached to it. (The projection cascades now, but the rank
-   * split is deliberate: an imported cell is the client's own work.)
+   * Round 3 turned this from a boolean into a reason, because a control that
+   * silently fails to appear teaches nothing: Sam switched the setting on for
+   * an MP3 import, nothing happened, and there was no way to tell a broken
+   * feature from an inapplicable one. The truth table itself lives in
+   * cell-editing-gate.ts so it can be read and tested without a browser.
    */
-  const canRemoveCell = useCallback(
-    (c: CellData) => canRemoveImportedCells || (isUserAddedLine(c) && isLineEmpty(c)),
-    [canRemoveImportedCells],
+  const rowActions = useCallback(
+    (cell: CellData, gaps: { gapAbove: boolean; gapBelow: boolean }) => {
+      const out = rowActionAvailability({
+        placement,
+        // The row IS audio. Read per row, not per file: `medium` rides the
+        // ordinary cell projection, so this needs no attachment fetch and no
+        // lens — and a mixed file can offer inserts on its text rows while
+        // refusing its audio ones.
+        isMediaCell: (cell.medium ?? "text") === "media",
+        // Same check the source pencil makes, so the two agree about which
+        // rows are packaged layout.
+        isIdmlCell: resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml) != null,
+        gapAbove: gaps.gapAbove,
+        gapBelow: gaps.gapBelow,
+        // A line somebody added here and left empty is theirs to take back at
+        // any rank; anything else is the client's own content.
+        isImported: !(isUserAddedLine(cell) && isLineEmpty(cell)),
+        canRemoveImported: canRemoveImportedCells,
+      })
+      const label = (reason: RowActionReason | null): string | null =>
+        reason == null
+          ? null
+          : reason === "media"
+            ? t("editor.row.mediaSegmentReason")
+            : reason === "idml"
+              ? t("editor.row.idmlReason")
+              : reason === "noRoom"
+                ? t("editor.row.noRoomReason")
+                : t("editor.row.maintainerOnlyReason")
+      return { above: label(out.above), below: label(out.below), remove: label(out.remove) }
+    },
+    [placement, canRemoveImportedCells, t],
   )
 
   /**
    * The row controls, one shape for both file kinds, offered in BOTH lenses.
    *
-   * "gaps" and "anywhere" differ only in how a row answers "where would a new
-   * cell go?" — a clock-bound file resolves a silence, an ordinary text file
-   * takes one anywhere. `RowStructureCorner` never learns which; it is handed
-   * thunks (see EditorTable's row loop).
+   * There is no longer a "this file offers nothing" case: whoever may
+   * restructure the project sees the controls on every row, and a row that
+   * cannot take an action renders it disabled with its reason. What is still
+   * withheld entirely is PROJECT-level — the tier not admitting you, or a
+   * mirrored source — because those never change while you are in the file and
+   * a permanently dead control is furniture, not an explanation.
    */
   const sourceLineEditing = useMemo(
     () => {
-      if (!canEditLines || insertMode === "none") return undefined
-      const shared = {
-        canRemove: canRemoveCell,
-        onRemoveLine: (cellId: string) => requestRemoveCell(cellId),
-      }
-      if (insertMode === "anywhere") {
+      if (!canEditLines) return undefined
+      const shared = { rowActions, onRemoveLine: (cellId: string) => requestRemoveCell(cellId) }
+      if (placement === "anywhere") {
         return {
           // Unused on this path — an untimed file has no silences to measure —
           // but the shape is shared, so they are supplied empty rather than
@@ -7743,10 +7769,7 @@ export function ProjectWorkspace() {
         ...shared,
       }
     },
-    [
-      canEditLines, insertMode, insertSlots, handleAddLine, handleAddCell,
-      canRemoveCell, requestRemoveCell,
-    ],
+    [canEditLines, placement, insertSlots, handleAddLine, handleAddCell, rowActions, requestRemoveCell],
   )
 
   // AQU-646 SUB-53 / pre-merge round: which job THIS FILE is for. The mode is

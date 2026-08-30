@@ -768,14 +768,23 @@ interface EditorTableProps {
      * AQU-1068: untimed files insert by ANCHOR, not by clock. When this is
      * present the two span fields above go unused and every row offers both
      * directions — an ordinary text file has room everywhere, so there is no
-     * silence to measure and no "no room" case to withhold a button for.
+     * silence to measure.
      */
     untimed?: {
       onInsertAbove(cellId: string): void
       onInsertBelow(cellId: string): void
     }
-    /** The workspace owns what is removable, exactly as the timeline lane does. */
-    canRemove(cell: CellData): boolean
+    /**
+     * Round 3: what this ROW may do, and why not when it may not. The workspace
+     * owns the rule — the table supplies only the two facts it alone knows (is
+     * there a silence on either side of this row) and renders whatever comes
+     * back. A returned reason means the control is drawn DISABLED with that
+     * text, never omitted.
+     */
+    rowActions(
+      cell: CellData,
+      gaps: { gapAbove: boolean; gapBelow: boolean },
+    ): { above: string | null; below: string | null; remove: string | null }
     onRemoveLine(cellId: string): void
   }
   lineNumbersEnabled: boolean
@@ -2160,9 +2169,26 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           //    deliberate here: pointing at the row you want to push down is
           //    how people describe the act, and there is no gap to reason
           //    about that would make one direction the "real" one.
+          // The silences on either side of this row, on a TIMED file.
+          //
+          // "Above" is the gap the PREVIOUS row owns — `insertSlotsByCell` keys
+          // each qualifying gap to the cue in front of it, and has already
+          // applied both the gap filter and the minimum-width floor, so this is
+          // a lookup rather than a search. The head slot is the one gap no cue
+          // precedes. Both directions are offered wherever there is room; the
+          // same silence being reachable from two rows is deliberate.
           const untimedInserts = sourceLineEditing?.untimed
+          const previousCellId = index > 0 ? displayCellIds[index - 1] : null
           const insertBelowSpan = untimedInserts ? null : (sourceLineEditing?.afterCell.get(cell.id) ?? null)
-          const insertAboveSpan = untimedInserts || index !== 0 ? null : (sourceLineEditing?.head ?? null)
+          const insertAboveSpan = untimedInserts
+            ? null
+            : index === 0
+              ? (sourceLineEditing?.head ?? null)
+              : (previousCellId ? (sourceLineEditing?.afterCell.get(previousCellId) ?? null) : null)
+          const rowActions = sourceLineEditing?.rowActions(cell, {
+            gapAbove: Boolean(insertAboveSpan),
+            gapBelow: Boolean(insertBelowSpan),
+          })
           const onInsertBelow = untimedInserts
             ? () => untimedInserts.onInsertBelow(cell.id)
             : insertBelowSpan
@@ -2173,7 +2199,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             : insertAboveSpan
               ? () => sourceLineEditing!.onAddLine(insertAboveSpan.startSec, insertAboveSpan.endSec)
               : undefined
-          const canRemoveLine = Boolean(sourceLineEditing?.canRemove(cell))
           return (
       <div
         data-cell-id={cell.id}
@@ -2185,7 +2210,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           "relative",
           // The hover group for the structural strip below. Named so it cannot
           // be caught by the row's other `group` users.
-          (onInsertBelow || onInsertAbove || canRemoveLine) && "group/rowstrip",
+          sourceLineEditing && "group/rowstrip",
           untimedInTimeLens && "border-s-2 border-dashed border-amber-400/70",
           showParagraphBoundary && "mt-3",
         )}
@@ -2194,8 +2219,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           <RowStructureCorner
             testId={`row-structure-${cell.id}`}
             onInsertBelow={onInsertBelow}
+            belowDisabledReason={rowActions?.below}
             onInsertAbove={onInsertAbove}
-            onRemove={canRemoveLine ? () => sourceLineEditing.onRemoveLine(cell.id) : undefined}
+            aboveDisabledReason={rowActions?.above}
+            onRemove={() => sourceLineEditing.onRemoveLine(cell.id)}
+            removeDisabledReason={rowActions?.remove}
             removeTestId={`row-remove-${cell.id}`}
           />
         )}
@@ -2771,35 +2799,52 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
  */
 function RowStructureCorner({
   testId,
-  /** Insert after this row, or undefined for "not offered here" — so no `+` AT
-   *  ALL, never a disabled one. On a TIMED file that means "no room in the
-   *  silence", the same rule the timeline's pencil obeys; on an untimed one a
-   *  row always has room, so it is always offered. */
+  /** Insert after this row. Always RENDERED; a reason means it is rendered
+   *  disabled, explaining itself, rather than silently absent. */
   onInsertBelow,
-  /** Insert before this row. Timed files offer it on the FIRST row only —
-   *  everywhere else "above me" is "below my predecessor", which that row
-   *  already offers. Untimed files offer it on every row, because pointing at
-   *  the row you want to push down is how people describe the act. */
+  belowDisabledReason,
+  /** Insert before this row. On a timed file this is the silence in front of
+   *  the row — reachable from here AND as "insert below" on the row above,
+   *  which is deliberate redundancy: pointing at the row you want to push down
+   *  is how people describe the act. */
   onInsertAbove,
+  aboveDisabledReason,
   onRemove,
+  removeDisabledReason,
   removeTestId,
 }: {
   testId: string
   onInsertBelow?: () => void
+  belowDisabledReason?: string | null
   onInsertAbove?: () => void
+  aboveDisabledReason?: string | null
   onRemove?: () => void
+  removeDisabledReason?: string | null
   removeTestId?: string
 }) {
-  // Above the early return: a hook after one runs in a different order on the
-  // renders that bail out, which is the rules-of-hooks error this was.
   const t = useT()
-  if (!onInsertBelow && !onInsertAbove && !onRemove) return null
-  // Both directions available (only ever the first row, and only while the
-  // file still opens on a silence) — the button has to ask which. One
-  // direction available: just do it. A one-item menu is a click for nothing.
-  const needsMenu = Boolean(onInsertAbove && onInsertBelow)
   const square =
-    "flex h-6 w-6 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
+    "flex h-6 w-6 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-background disabled:hover:text-muted-foreground"
+
+  // Both directions dead: disable the `+` itself rather than opening a menu of
+  // nothing but dead items. One hover, one explanation.
+  const bothRefused = Boolean(aboveDisabledReason && belowDisabledReason)
+  const addReason = bothRefused ? (belowDisabledReason ?? aboveDisabledReason ?? null) : null
+
+  const addButton = (
+    <button
+      type="button"
+      title={bothRefused ? undefined : t("editor.row.addLine")}
+      aria-label={t("editor.row.addLine")}
+      data-testid={`${testId}-add`}
+      className={square}
+      disabled={bothRefused}
+      onClick={(e) => e.stopPropagation()}
+    >
+      <Plus className="h-3.5 w-3.5" />
+    </button>
+  )
+
   return (
     <div
       data-testid={testId}
@@ -2810,71 +2855,94 @@ function RowStructureCorner({
         "opacity-50 transition-opacity group-hover/rowstrip:opacity-100 focus-within:opacity-100",
       )}
     >
-      {onRemove && (
-        <button
-          type="button"
-          title={t("editor.row.removeLine")}
-          aria-label={t("editor.row.removeLine")}
-          data-testid={removeTestId ?? `${testId}-remove`}
-          className={square}
-          onClick={(e) => {
-            e.stopPropagation()
-            onRemove()
-          }}
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
-      )}
-      {(onInsertBelow || onInsertAbove) &&
-        (needsMenu ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <button
-                  type="button"
-                  title={t("editor.row.addLine")}
-                  aria-label={t("editor.row.addLine")}
-                  data-testid={`${testId}-add`}
-                  className={square}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
-              }
-            />
-            <DropdownMenuContent align="end" className="min-w-[9rem]">
-              <DropdownMenuItem
-                data-testid="row-insert-above"
-                onClick={() => onInsertAbove!()}
-              >
-                <ArrowUp className="mr-2 h-3.5 w-3.5" />
-                {t("editor.row.insertAbove")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                data-testid="row-insert-below"
-                onClick={() => onInsertBelow!()}
-              >
-                <ArrowDown className="mr-2 h-3.5 w-3.5" />
-                {t("editor.row.insertBelow")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : (
+      {onRemove !== undefined && (
+        <AppTooltip content={removeDisabledReason ?? undefined} disabled={!removeDisabledReason} className="max-w-xs">
           <button
             type="button"
-            title={onInsertAbove ? t("editor.row.addLineAbove") : t("editor.row.addLineBelow")}
-            aria-label={onInsertAbove ? t("editor.row.addLineAbove") : t("editor.row.addLineBelow")}
-            data-testid={`${testId}-add`}
+            title={removeDisabledReason ? undefined : t("editor.row.removeLine")}
+            aria-label={t("editor.row.removeLine")}
+            data-testid={removeTestId ?? `${testId}-remove`}
             className={square}
+            disabled={Boolean(removeDisabledReason)}
             onClick={(e) => {
               e.stopPropagation()
-              ;(onInsertBelow ?? onInsertAbove!)()
+              onRemove()
             }}
           >
-            <Plus className="h-3.5 w-3.5" />
+            <X className="h-3.5 w-3.5" />
           </button>
-        ))}
+        </AppTooltip>
+      )}
+      {bothRefused ? (
+        // A disabled button still opens its tooltip (base-ui keeps a gated
+        // control's explanation reachable — see src/test-utils/tooltip.tsx).
+        <AppTooltip content={addReason ?? undefined} className="max-w-xs">
+          {addButton}
+        </AppTooltip>
+      ) : (
+        <DropdownMenu>
+          <DropdownMenuTrigger render={addButton} />
+          <DropdownMenuContent align="end" className="min-w-[11rem]">
+            <RowInsertItem
+              testId="row-insert-above"
+              icon={<ArrowUp className="mr-2 h-3.5 w-3.5 shrink-0" />}
+              label={t("editor.row.insertAbove")}
+              reason={aboveDisabledReason}
+              onSelect={onInsertAbove}
+            />
+            <RowInsertItem
+              testId="row-insert-below"
+              icon={<ArrowDown className="mr-2 h-3.5 w-3.5 shrink-0" />}
+              label={t("editor.row.insertBelow")}
+              reason={belowDisabledReason}
+              onSelect={onInsertBelow}
+            />
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
     </div>
+  )
+}
+
+/**
+ * One direction inside the `+` menu.
+ *
+ * The reason rides INSIDE the item as a second line rather than in a tooltip,
+ * and not by preference: the menu kit sets `data-disabled:pointer-events-none`
+ * on every item, so hover never reaches a disabled one and a tooltip anchored
+ * there would never open. Inline is better here anyway — always visible instead
+ * of hover-gated, and a menu has the room for it.
+ */
+function RowInsertItem({
+  testId,
+  icon,
+  label,
+  reason,
+  onSelect,
+}: {
+  testId: string
+  icon: React.ReactNode
+  label: string
+  reason?: string | null
+  onSelect?: () => void
+}) {
+  const disabled = Boolean(reason) || !onSelect
+  return (
+    <DropdownMenuItem
+      data-testid={testId}
+      disabled={disabled}
+      onClick={() => { if (!disabled) onSelect?.() }}
+    >
+      {icon}
+      <span className="flex min-w-0 flex-col">
+        <span>{label}</span>
+        {reason ? (
+          <span data-testid={`${testId}-reason`} className="text-xs text-muted-foreground">
+            {reason}
+          </span>
+        ) : null}
+      </span>
+    </DropdownMenuItem>
   )
 }
 

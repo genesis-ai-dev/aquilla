@@ -66,54 +66,105 @@ export interface CellEditingFile {
    * lost its controls entirely in the media lens. One flag, both symptoms.
    */
   orderedBy: OrderedBy
-  /** `cellStore.hasMediaCells()` — a cell that IS audio. Lens-independent by
-   *  construction; see the accessor's note for why that matters. */
-  hasMediaCells: boolean
-  fileType?: string | null
 }
 
-export type CellInsertMode =
-  /** Anywhere between rows — an ordinary text file. */
+export type CellPlacement =
+  /** Anywhere between rows — an ordinary text file has room everywhere. */
   | "anywhere"
   /** Only into a silence wide enough to hold a line — a file on a clock. */
   | "gaps"
-  /** Not offered on this file at all. */
-  | "none"
 
 /**
  * WHERE can a cell go in this file? The tier answers WHO; this answers where,
  * and the two are independent.
  *
- * NOTE WHAT IS ABSENT: the timing MODE (Free vs Original, resolveFileTimingMode)
- * and whether footage happens to be linked. Neither belongs here.
+ * THERE IS NO "none" ANY MORE (round 3). A file that cannot take a cell used to
+ * be answered here, which meant the controls simply did not render — and Sam,
+ * having switched the setting on, could not tell whether the feature was broken
+ * or merely inapplicable. Inapplicability is now a per-ROW fact with a reason
+ * attached (`rowActionAvailability`), so the control appears and explains
+ * itself. This function only decides which shape of "where" the file uses.
+ *
+ * NOTE WHAT IS ABSENT: the timing MODE (Free vs Original) and whether footage
+ * happens to be linked. Neither belongs here.
  *
  *  - MODE governs the derived TARGET timeline, never placement. Free timing lays
  *    takes end to end on their own clock (buildProgramme), but the SOURCE side's
  *    clock does not stop being real because of it — and placement follows the
  *    source, always. That is also what makes a Free -> Original switch a
  *    non-event: an insert made in Free mode is born with real timings, so it
- *    already has a chip waiting when the mode flips back. The alternative
- *    ("Free means anywhere") strands untimed cells in a timed file, where the
- *    VTT exporter drops them silently.
+ *    already has a chip waiting when the mode flips back.
  *
  *  - FOOTAGE is not required for a gap. A subtitle file's cues are timed whether
  *    or not a video is attached; without one there is simply no known tail, so
  *    `deriveSourceRegions` offers head and between-cue gaps and no trailing one.
  */
-export function cellInsertMode(file: CellEditingFile): CellInsertMode {
-  // A media cell IS its audio — there is nothing to mint an inserted one from,
-  // and removing one would destroy a stretch of the client's source recording
-  // behind a confirmation that cannot see it (the imported clip is seeded with
-  // the FILE id, so the take inventory reads zero). Sam, 2026-08-30: no client
-  // will expect to add or remove cells in an imported MP3. One media cell
-  // switches the whole file off, matching the rule the media table already uses.
-  if (file.hasMediaCells) return "none"
-  // IDML is excluded while its export patches translations into the original
-  // package: a removed cell's text still ships unless export learns about
-  // deletions, and removing one slice of a split unit makes export throw (both
-  // AQU-803 findings).
-  if (file.fileType === "idml") return "none"
-  // On a clock: only where there is room, and born with real timings.
-  if (file.orderedBy === "time") return "gaps"
-  return "anywhere"
+export function cellPlacement(file: CellEditingFile): CellPlacement {
+  return file.orderedBy === "time" ? "gaps" : "anywhere"
+}
+
+/**
+ * Why an action is unavailable on one row. A closed set on purpose: the whole
+ * point of round 3 is that every surface asks the same question and gets an
+ * answer from the same short list, rather than each growing its own special
+ * cases.
+ */
+export type RowActionReason =
+  /** The row IS audio — nothing to mint an inserted one from, and removing it
+   *  would destroy a stretch of the client's recording. */
+  | "media"
+  /** IDML keeps its original layout; export patches translations back into the
+   *  package, so a cell born here has nowhere to go (AQU-803). */
+  | "idml"
+  /** A timed file with no silence wide enough on that side. */
+  | "noRoom"
+  /** An imported line, and this person is not a maintainer. */
+  | "maintainerOnly"
+
+export interface RowActionInput {
+  placement: CellPlacement
+  /** `cell.medium === "media"` — the row is a piece of imported audio. */
+  isMediaCell: boolean
+  /** The cell carries an IDML locator (same check the source pencil makes). */
+  isIdmlCell: boolean
+  /** Timed files only: is there a silence above / below this row wide enough?
+   *  Ignored when placement is "anywhere", where there is always room. */
+  gapAbove: boolean
+  gapBelow: boolean
+  /** False for a line somebody added here and left empty — the take-back case. */
+  isImported: boolean
+  /** Whether this viewer may remove an imported line (maintainer and up). */
+  canRemoveImported: boolean
+}
+
+export interface RowActionAvailability {
+  /** `null` means available; a reason means render it, disabled, and say why. */
+  above: RowActionReason | null
+  below: RowActionReason | null
+  remove: RowActionReason | null
+}
+
+/**
+ * THE per-row truth table — one rule, asked the same way by every surface.
+ *
+ * Reasons are ordered by how fundamental they are: a row that IS audio, or that
+ * belongs to a packaged layout, cannot take or lose a cell for reasons that have
+ * nothing to do with clocks or clearance, so those answer first.
+ */
+export function rowActionAvailability(input: RowActionInput): RowActionAvailability {
+  const structural: RowActionReason | null = input.isMediaCell
+    ? "media"
+    : input.isIdmlCell
+      ? "idml"
+      : null
+  if (structural) return { above: structural, below: structural, remove: structural }
+
+  // On a clock, a cell needs a silence to fit into. Off one, there is always
+  // room between two rows.
+  const above = input.placement === "gaps" && !input.gapAbove ? "noRoom" : null
+  const below = input.placement === "gaps" && !input.gapBelow ? "noRoom" : null
+  // Taking back a line somebody added here is always allowed at this point;
+  // removing one the client imported is maintainer work, whatever the tier.
+  const remove = input.isImported && !input.canRemoveImported ? "maintainerOnly" : null
+  return { above, below, remove }
 }

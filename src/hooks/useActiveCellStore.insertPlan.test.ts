@@ -107,52 +107,6 @@ describe("CellStore.getInsertPlan", () => {
 })
 
 /**
- * AQU-1068: the gate has to know whether a file contains cells that ARE audio,
- * and it has to know WITHOUT a media panel being open. Round 1 asked
- * `audioMergedCells` — empty outside the media lens — so an MP3 import read as
- * an ordinary text file, got the full controls, and offered a removal whose
- * confirmation could not see the audio it was about to destroy.
- */
-describe("CellStore.hasMediaCells", () => {
-  it("is false for an ordinary text file", () => {
-    expect(makeStore(chain()).hasMediaCells()).toBe(false)
-  })
-
-  it("is true when any source row is a media cell", () => {
-    const store = makeStore([
-      row("a", { anchorCellId: null, sequenceIndex: 0 }),
-      row("clip", { anchorCellId: "a", sequenceIndex: 1, medium: "media", startMs: 0, endMs: 60_000 }),
-    ])
-    expect(store.hasMediaCells()).toBe(true)
-  })
-
-  it("is true for a single-cell MP3 import — what emitMediaFile creates", () => {
-    const store = makeStore([
-      row("only", { anchorCellId: null, sequenceIndex: 0, medium: "media", startMs: 0, endMs: 183_000 }),
-    ])
-    expect(store.hasMediaCells()).toBe(true)
-  })
-
-  it("reads the answer off the cell projection — no attachments needed", () => {
-    // `medium` rides the ordinary source rows, which is exactly why this can be
-    // asked in any lens. Store cells never carry audio attachments at all.
-    const store = makeStore([row("a", { medium: "media", startMs: 0, endMs: 10 })])
-    expect(store.getAllCellViews()[0].attachments).toBeUndefined()
-    expect(store.hasMediaCells()).toBe(true)
-  })
-
-  it("re-answers after the rows change, rather than serving a stale memo", () => {
-    const store = makeStore(chain())
-    expect(store.hasMediaCells()).toBe(false)
-    store.replaceRows(
-      [row("a", { anchorCellId: null, sequenceIndex: 0, medium: "media", startMs: 0, endMs: 5 })],
-      { full: true },
-    )
-    expect(store.hasMediaCells()).toBe(true)
-  })
-})
-
-/**
  * AQU-1068: an insert or removal has to be visible on the tick it happens.
  *
  * Waiting for the confirming read made a whole Bible crawl — not on the wire

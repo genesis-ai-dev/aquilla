@@ -5,7 +5,7 @@
 // instrument for a matrix of ranks, tiers and file kinds.
 
 import { describe, it, expect } from "vitest"
-import { canEditCells, canRemoveImportedCells, cellInsertMode } from "./cell-editing-gate"
+import { canEditCells, canRemoveImportedCells, cellPlacement, rowActionAvailability } from "./cell-editing-gate"
 import { ROLE } from "@/lib/frontier/roles"
 
 const subject = (over: Partial<Parameters<typeof canEditCells>[0]> = {}) => ({
@@ -67,61 +67,122 @@ describe("canRemoveImportedCells", () => {
   })
 })
 
-describe("cellInsertMode", () => {
-  // Round 1's defect lived HERE, and not in this function: the truth table was
-  // fine, the CALL SITE fed it lens state. These cases are written in the
-  // vocabulary the call site now uses, so a wrong signal cannot pass as a right
-  // one — `orderedBy` and `hasMediaCells` are file facts with no other reading.
-  const file = (over: Partial<Parameters<typeof cellInsertMode>[0]> = {}) => ({
-    orderedBy: "sequence" as const,
-    hasMediaCells: false,
-    fileType: "usfm",
-    ...over,
+describe("cellPlacement", () => {
+  it("a time-ordered file places into gaps", () => {
+    expect(cellPlacement({ orderedBy: "time" })).toBe("gaps")
   })
 
-  it("an ordinary text file takes a cell anywhere", () => {
-    expect(cellInsertMode(file())).toBe("anywhere")
+  it("everything else places anywhere", () => {
+    expect(cellPlacement({ orderedBy: "sequence" })).toBe("anywhere")
   })
 
-  it("a time-ordered file takes one only in a gap", () => {
-    expect(cellInsertMode(file({ orderedBy: "time", fileType: "vtt" }))).toBe("gaps")
-  })
-
-  it("a time-ordered file needs NO footage to be gap-constrained", () => {
-    // Its cues are timed whether or not a video is attached. Round 1 required
-    // `coreMediaUrl`, which left a cue sheet with no footage offering nothing —
-    // and this function can no longer even ask, which is the point.
-    expect(cellInsertMode(file({ orderedBy: "time", fileType: "vtt" }))).toBe("gaps")
-  })
-
-  it("offers nothing on a file containing a media cell", () => {
-    // A media cell IS its audio: nothing to mint an inserted one from, and the
-    // removal inventory cannot see a file-seeded clip (it would say "nothing
-    // attached" while destroying source audio).
-    expect(cellInsertMode(file({ orderedBy: "time", hasMediaCells: true }))).toBe("none")
-  })
-
-  it("one media cell switches the WHOLE file off", () => {
-    // Same rule the media table already uses; a mixed file is still excluded.
-    expect(cellInsertMode(file({ orderedBy: "sequence", hasMediaCells: true }))).toBe("none")
-  })
-
-  it("offers nothing on IDML, which this slice excludes", () => {
-    expect(cellInsertMode(file({ fileType: "idml" }))).toBe("none")
-  })
-
-  it("treats an absent order as sequence — the FileReference default", () => {
-    // `fileOrderedBy` resolves absent to "sequence"; a file that predates the
-    // field must not read as timed.
-    expect(cellInsertMode(file({ orderedBy: "sequence" }))).toBe("anywhere")
+  it("needs NO footage to be gap-constrained", () => {
+    // A subtitle file's cues are timed whether or not a video is attached.
+    // Round 1 required `coreMediaUrl` and left a footage-less cue sheet with
+    // nothing; this function can no longer even ask, which is the point.
+    expect(Object.keys({ orderedBy: "time" } as Parameters<typeof cellPlacement>[0]))
+      .not.toContain("hasMedia")
   })
 
   it("never consults the timing mode — placement follows the source's clock", () => {
-    // The signature cannot express Free vs Original, deliberately. A Free-mode
-    // cue sheet is still gap-constrained, which is what makes a Free -> Original
-    // switch a non-event: inserts are born timed either way.
-    const keys = Object.keys(file())
-    expect(keys).not.toContain("timingMode")
-    expect(keys).not.toContain("hasMedia")
+    // A Free-mode cue sheet is still gap-constrained, which is what makes a
+    // Free -> Original switch a non-event: inserts are born timed either way.
+    expect(Object.keys({ orderedBy: "time" } as Parameters<typeof cellPlacement>[0]))
+      .not.toContain("timingMode")
+  })
+})
+
+describe("rowActionAvailability", () => {
+  // Round 3's rule: a row that cannot take an action still SHOWS the control,
+  // disabled, with the reason. `null` here means available.
+  const row = (over: Partial<Parameters<typeof rowActionAvailability>[0]> = {}) => ({
+    placement: "anywhere" as const,
+    isMediaCell: false,
+    isIdmlCell: false,
+    gapAbove: true,
+    gapBelow: true,
+    isImported: true,
+    canRemoveImported: true,
+    ...over,
+  })
+
+  it("an ordinary row in a text file can do everything", () => {
+    expect(rowActionAvailability(row())).toEqual({ above: null, below: null, remove: null })
+  })
+
+  it("a media row refuses all three, for the same reason", () => {
+    // The row IS audio: nothing to mint an inserted cell from, and removing it
+    // would destroy a stretch of the client's recording behind a confirmation
+    // that cannot see it (the imported clip is file-seeded, so the take
+    // inventory reads zero).
+    expect(rowActionAvailability(row({ isMediaCell: true }))).toEqual({
+      above: "media", below: "media", remove: "media",
+    })
+  })
+
+  it("an IDML row refuses all three", () => {
+    expect(rowActionAvailability(row({ isIdmlCell: true }))).toEqual({
+      above: "idml", below: "idml", remove: "idml",
+    })
+  })
+
+  it("media wins over IDML when a row is somehow both", () => {
+    expect(rowActionAvailability(row({ isMediaCell: true, isIdmlCell: true })).above).toBe("media")
+  })
+
+  it("a structural refusal outranks a clearance one", () => {
+    // A maintainer-only removal is not the useful thing to say about a row that
+    // is a piece of audio.
+    expect(rowActionAvailability(row({ isMediaCell: true, canRemoveImported: false })).remove)
+      .toBe("media")
+  })
+
+  describe("on a clock, each direction answers for itself", () => {
+    const timed = (over = {}) => row({ placement: "gaps", ...over })
+
+    it("both directions when there is a silence on either side", () => {
+      const out = rowActionAvailability(timed())
+      expect([out.above, out.below]).toEqual([null, null])
+    })
+
+    it("only below when the silence is below", () => {
+      expect(rowActionAvailability(timed({ gapAbove: false })))
+        .toMatchObject({ above: "noRoom", below: null })
+    })
+
+    it("only above when the silence is above", () => {
+      expect(rowActionAvailability(timed({ gapBelow: false })))
+        .toMatchObject({ above: null, below: "noRoom" })
+    })
+
+    it("neither when the row is boxed in — but removal is untouched", () => {
+      expect(rowActionAvailability(timed({ gapAbove: false, gapBelow: false })))
+        .toEqual({ above: "noRoom", below: "noRoom", remove: null })
+    })
+  })
+
+  it("ignores gaps entirely when the file has no clock", () => {
+    // An ordinary text file has room between any two rows; a `gapAbove: false`
+    // arriving from a caller that computed it anyway must not close the door.
+    expect(rowActionAvailability(row({ gapAbove: false, gapBelow: false })))
+      .toMatchObject({ above: null, below: null })
+  })
+
+  describe("removal", () => {
+    it("is maintainer work on an imported line", () => {
+      expect(rowActionAvailability(row({ isImported: true, canRemoveImported: false })).remove)
+        .toBe("maintainerOnly")
+    })
+
+    it("is open on a line somebody added here, whatever their rank", () => {
+      // Taking your own empty line back is never gated on rank.
+      expect(rowActionAvailability(row({ isImported: false, canRemoveImported: false })).remove)
+        .toBeNull()
+    })
+
+    it("does not block INSERTS when removal is refused", () => {
+      const out = rowActionAvailability(row({ isImported: true, canRemoveImported: false }))
+      expect([out.above, out.below]).toEqual([null, null])
+    })
   })
 })

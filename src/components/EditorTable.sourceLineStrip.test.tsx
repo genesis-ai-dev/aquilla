@@ -173,17 +173,44 @@ function renderTable(over: Partial<Parameters<typeof EditorTable>[0]> = {}) {
   )
 }
 
+const NO_ROOM = "There’s no room here to fit a line."
+const MAINTAINER_ONLY = "Only a maintainer can remove an imported line."
+const MEDIA = "This row is part of the imported audio."
+
+/** Mirrors the workspace's real resolver: a reason means "render it disabled
+ *  and say this", null means available. */
+const rowActions = (cell: CellData, gaps: { gapAbove: boolean; gapBelow: boolean }) => ({
+  above: gaps.gapAbove ? null : NO_ROOM,
+  below: gaps.gapBelow ? null : NO_ROOM,
+  remove: isUserAddedLine(cell) && isLineEmpty(cell) ? null : MAINTAINER_ONLY,
+})
+
 const editing = (over: Record<string, unknown> = {}) => ({
   head: SLOTS.head,
   afterCell: SLOTS.afterCell,
   onAddLine: vi.fn(),
-  canRemove: (c: CellData) => isUserAddedLine(c) && isLineEmpty(c),
+  rowActions,
   onRemoveLine: vi.fn(),
   ...over,
 }) as NonNullable<Parameters<typeof EditorTable>[0]["sourceLineEditing"]>
 
+const addBtn = (cellId: string) =>
+  within(rowEl(cellId)).getByTestId(`row-structure-${cellId}-add`)
+
+/**
+ * AQU-1068 round 3: THE CONTROL IS ALWAYS THERE, and says why it cannot be
+ * used.
+ *
+ * This reverses the older "no room, no button — never a disabled one" rule, and
+ * deliberately: Sam switched the setting on for an MP3 import, nothing
+ * appeared, and there was no way to tell an inapplicable file from a broken
+ * feature. An absent control teaches nothing. What is still withheld entirely
+ * is PROJECT-level (no access at all) — a permanently dead button is furniture,
+ * not an explanation.
+ */
 describe("EditorTable — the row's structural controls", () => {
   it("renders nothing at all when the workflow is off", async () => {
+    // The one case that still hides: no access.
     renderTable()
     await screen.findByText("First cue")
     expect(screen.queryByTestId("row-structure-cue-a")).toBeNull()
@@ -204,37 +231,97 @@ describe("EditorTable — the row's structural controls", () => {
     expect(corner.className).toContain("group-hover/rowstrip:opacity-100")
   })
 
-  it("offers an insert on a row with room after it", async () => {
-    renderTable({ sourceLineEditing: editing() })
-    await screen.findByText("First cue")
-    expect(within(rowEl("cue-a")).getByTestId("row-structure-cue-a-add")).toBeInTheDocument()
-  })
-
-  it("offers NO insert on a row with no room after it", async () => {
-    // cue-b is absent from the map — the trailing breath is under the floor.
+  it("gives EVERY row a corner, including one with no room after it", async () => {
+    // cue-b is absent from the afterCell map — the trailing breath is under the
+    // floor. It used to get no `+` at all.
     renderTable({ sourceLineEditing: editing() })
     await screen.findByText("Second cue")
-    expect(within(rowEl("cue-b")).queryByTestId("row-structure-cue-b-add")).toBeNull()
+    for (const id of ["cue-a", "added", "cue-b"]) {
+      expect(within(rowEl(id)).getByTestId(`row-structure-${id}`)).toBeInTheDocument()
+      expect(addBtn(id)).toBeInTheDocument()
+    }
+  })
+
+  it("offers BOTH directions on a middle row when both silences exist", async () => {
+    // "added" sits between the 20-25 gap and the 28-40 one. Round 2 offered
+    // only "below" here, on the reasoning that "above me" duplicates the
+    // previous row's "below". The duplication is now deliberate: pointing at
+    // the row you want to push down is how people describe the act.
+    const onAddLine = vi.fn()
+    renderTable({ sourceLineEditing: editing({ onAddLine }) })
+    await screen.findByText("First cue")
+
+    fireEvent.click(addBtn("added"))
+    fireEvent.click(await screen.findByTestId("row-insert-above"))
+    expect(onAddLine).toHaveBeenCalledWith(20, 25)
+
+    fireEvent.click(addBtn("added"))
+    fireEvent.click(await screen.findByTestId("row-insert-below"))
+    expect(onAddLine).toHaveBeenLastCalledWith(28, 40)
+  })
+
+  it("the same silence is reachable from either side of it", async () => {
+    // 20-25 is "below cue-a" and "above added". Both doors, one room.
+    const onAddLine = vi.fn()
+    renderTable({ sourceLineEditing: editing({ onAddLine }) })
+    await screen.findByText("First cue")
+    fireEvent.click(addBtn("cue-a"))
+    fireEvent.click(await screen.findByTestId("row-insert-below"))
+    expect(onAddLine).toHaveBeenCalledWith(20, 25)
+  })
+
+  it("shows the unavailable direction DISABLED, with its reason, not missing", async () => {
+    renderTable({ sourceLineEditing: editing() })
+    await screen.findByText("Second cue")
+    fireEvent.click(addBtn("cue-b"))
+    const below = await screen.findByTestId("row-insert-below")
+    expect(below).toHaveAttribute("data-disabled")
+    expect(within(below).getByTestId("row-insert-below-reason")).toHaveTextContent(NO_ROOM)
+    // ...while the direction that IS available stays live.
+    expect(screen.getByTestId("row-insert-above")).not.toHaveAttribute("data-disabled")
+  })
+
+  it("a disabled direction does nothing when clicked", async () => {
+    const onAddLine = vi.fn()
+    renderTable({ sourceLineEditing: editing({ onAddLine }) })
+    await screen.findByText("Second cue")
+    fireEvent.click(addBtn("cue-b"))
+    fireEvent.click(await screen.findByTestId("row-insert-below"))
+    expect(onAddLine).not.toHaveBeenCalled()
   })
 
   it("hands the exact silence to the workspace, not the row's own times", async () => {
-    // A NON-first row: its + has only one direction to offer, so it acts
-    // immediately. (The first row's + opens a menu — covered below.) The row
-    // itself spans 25–28s; the silence after it is 28–40s, and it is the
+    // The row spans 25-28s; the silence after it is 28-40s, and it is the
     // SILENCE that must travel.
     const onAddLine = vi.fn()
     renderTable({ sourceLineEditing: editing({ onAddLine }) })
     await screen.findByText("First cue")
-    fireEvent.click(within(rowEl("added")).getByTestId("row-structure-added-add"))
+    fireEvent.click(addBtn("added"))
+    fireEvent.click(await screen.findByTestId("row-insert-below"))
     expect(onAddLine).toHaveBeenCalledWith(28, 40)
   })
 
-  it("Remove appears on an empty added line and nowhere else", async () => {
+  it("disables the + ITSELF when neither direction is possible", async () => {
+    // A menu of nothing but dead items is worse than one explained button.
+    renderTable({
+      sourceLineEditing: editing({
+        rowActions: () => ({ above: MEDIA, below: MEDIA, remove: MEDIA }),
+      }),
+    })
+    await screen.findByText("First cue")
+    expect(addBtn("cue-a")).toBeDisabled()
+    fireEvent.click(addBtn("cue-a"))
+    expect(screen.queryByTestId("row-insert-above")).toBeNull()
+  })
+
+  it("Remove is always present, and disabled with a reason where it does not apply", async () => {
     renderTable({ sourceLineEditing: editing() })
     await screen.findByText("First cue")
-    expect(within(rowEl("added")).getByTestId("row-remove-added")).toBeInTheDocument()
-    expect(within(rowEl("cue-a")).queryByTestId("row-remove-cue-a")).toBeNull()
-    expect(within(rowEl("cue-b")).queryByTestId("row-remove-cue-b")).toBeNull()
+    // A line somebody added here and left empty: theirs to take back.
+    expect(within(rowEl("added")).getByTestId("row-remove-added")).not.toBeDisabled()
+    // An imported cue, below maintainer: shown, refused, explained.
+    expect(within(rowEl("cue-a")).getByTestId("row-remove-cue-a")).toBeDisabled()
+    expect(within(rowEl("cue-b")).getByTestId("row-remove-cue-b")).toBeDisabled()
   })
 
   it("Remove reaches the workspace with the row's id", async () => {
@@ -245,51 +332,39 @@ describe("EditorTable — the row's structural controls", () => {
     expect(onRemoveLine).toHaveBeenCalledWith("added")
   })
 
-  // The first row is the only one with a silence in FRONT of it, so it is the
-  // only one whose + has to ask which direction. Everywhere else "above me" is
-  // "below my predecessor", which that row already offers.
-  describe("the first row's two directions", () => {
-    it("+ opens a menu offering both, and each hands over its own silence", async () => {
-      const onAddLine = vi.fn()
-      renderTable({ sourceLineEditing: editing({ onAddLine }) })
-      await screen.findByText("First cue")
-      fireEvent.click(within(rowEl("cue-a")).getByTestId("row-structure-cue-a-add"))
+  it("a disabled Remove does not reach the workspace", async () => {
+    const onRemoveLine = vi.fn()
+    renderTable({ sourceLineEditing: editing({ onRemoveLine }) })
+    await screen.findByText("First cue")
+    fireEvent.click(within(rowEl("cue-a")).getByTestId("row-remove-cue-a"))
+    expect(onRemoveLine).not.toHaveBeenCalled()
+  })
 
-      const above = await screen.findByTestId("row-insert-above")
-      fireEvent.click(above)
-      expect(onAddLine).toHaveBeenCalledWith(0, 10)
+  it("the first row's above direction is the head silence", async () => {
+    const onAddLine = vi.fn()
+    renderTable({ sourceLineEditing: editing({ onAddLine }) })
+    await screen.findByText("First cue")
+    fireEvent.click(addBtn("cue-a"))
+    fireEvent.click(await screen.findByTestId("row-insert-above"))
+    expect(onAddLine).toHaveBeenCalledWith(0, 10)
+  })
 
-      fireEvent.click(within(rowEl("cue-a")).getByTestId("row-structure-cue-a-add"))
-      fireEvent.click(await screen.findByTestId("row-insert-below"))
-      expect(onAddLine).toHaveBeenLastCalledWith(20, 25)
-    })
-
-    it("with no leading silence the + just inserts below — no one-item menu", async () => {
-      const onAddLine = vi.fn()
-      renderTable({ sourceLineEditing: editing({ head: null, onAddLine }) })
-      await screen.findByText("First cue")
-      fireEvent.click(within(rowEl("cue-a")).getByTestId("row-structure-cue-a-add"))
-      expect(onAddLine).toHaveBeenCalledWith(20, 25)
-      expect(screen.queryByTestId("row-insert-above")).toBeNull()
-    })
-
-    it("no other row is ever offered the above direction", async () => {
-      renderTable({ sourceLineEditing: editing() })
-      await screen.findByText("First cue")
-      fireEvent.click(within(rowEl("added")).getByTestId("row-structure-added-add"))
-      expect(screen.queryByTestId("row-insert-above")).toBeNull()
-    })
+  it("with no leading silence the first row's above is disabled, not absent", async () => {
+    renderTable({ sourceLineEditing: editing({ head: null }) })
+    await screen.findByText("First cue")
+    fireEvent.click(addBtn("cue-a"))
+    const above = await screen.findByTestId("row-insert-above")
+    expect(above).toHaveAttribute("data-disabled")
   })
 })
 
 /**
  * AQU-1068: the same corner control, on a file with no clock.
  *
- * An ordinary text file has no silences to measure, so the "no room, no add"
- * rule above has nothing to withhold a button for: every row can take a cell on
- * either side. That difference is resolved in the workspace and arrives here as
- * plain thunks, which is why RowStructureCorner no longer knows what a second
- * is.
+ * An ordinary text file has no silences to measure, so every row can take a
+ * cell on either side. That difference is resolved in the workspace and arrives
+ * here as plain thunks, which is why RowStructureCorner no longer knows what a
+ * second is.
  */
 describe("EditorTable — structural controls on an untimed file", () => {
   const untimedEditing = (over: Record<string, unknown> = {}) =>
@@ -299,22 +374,24 @@ describe("EditorTable — structural controls on an untimed file", () => {
       head: null,
       afterCell: new Map(),
       untimed: { onInsertAbove: vi.fn(), onInsertBelow: vi.fn(), ...(over.untimed ?? {}) },
+      // No clock, so no "no room" — the workspace's resolver ignores the gap
+      // flags entirely when placement is "anywhere".
+      rowActions: (cell: CellData) => ({
+        above: null,
+        below: null,
+        remove: isUserAddedLine(cell) && isLineEmpty(cell) ? null : MAINTAINER_ONLY,
+      }),
       ...over,
     })
 
-  it("offers BOTH directions on every row, not just the first", async () => {
-    // The timed path reserves "insert above" for row 0, because everywhere else
-    // it duplicates the previous row's "insert below". Here the redundancy is
-    // the point: pointing at the row you want to push down is how people
-    // describe the act, and there is no gap that makes one direction the real
-    // one.
+  it("offers BOTH directions on every row", async () => {
     renderTable({ sourceLineEditing: untimedEditing() })
     await screen.findByText("Second cue")
     for (const id of ["cue-a", "added", "cue-b"]) {
-      const corner = within(rowEl(id)).getByTestId(`row-structure-${id}`)
-      fireEvent.click(within(corner).getByTestId(`row-structure-${id}-add`))
-      expect(await screen.findByTestId("row-insert-above")).toBeInTheDocument()
-      expect(screen.getByTestId("row-insert-below")).toBeInTheDocument()
+      fireEvent.click(addBtn(id))
+      const above = await screen.findByTestId("row-insert-above")
+      expect(above).not.toHaveAttribute("data-disabled")
+      expect(screen.getByTestId("row-insert-below")).not.toHaveAttribute("data-disabled")
       fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
     }
   })
@@ -323,8 +400,7 @@ describe("EditorTable — structural controls on an untimed file", () => {
     const onInsertBelow = vi.fn()
     renderTable({ sourceLineEditing: untimedEditing({ untimed: { onInsertAbove: vi.fn(), onInsertBelow } }) })
     await screen.findByText("Second cue")
-    const corner = within(rowEl("cue-b")).getByTestId("row-structure-cue-b")
-    fireEvent.click(within(corner).getByTestId("row-structure-cue-b-add"))
+    fireEvent.click(addBtn("cue-b"))
     fireEvent.click(await screen.findByTestId("row-insert-below"))
     expect(onInsertBelow).toHaveBeenCalledWith("cue-b")
   })
@@ -333,23 +409,31 @@ describe("EditorTable — structural controls on an untimed file", () => {
     const onInsertAbove = vi.fn()
     renderTable({ sourceLineEditing: untimedEditing({ untimed: { onInsertAbove, onInsertBelow: vi.fn() } }) })
     await screen.findByText("First cue")
-    const corner = within(rowEl("cue-a")).getByTestId("row-structure-cue-a")
-    fireEvent.click(within(corner).getByTestId("row-structure-cue-a-add"))
+    fireEvent.click(addBtn("cue-a"))
     fireEvent.click(await screen.findByTestId("row-insert-above"))
     expect(onInsertAbove).toHaveBeenCalledWith("cue-a")
   })
 
   it("still asks the workspace what is removable", async () => {
-    // The predicate is the workspace's, on both file kinds — a maintainer's
-    // widened one and a contributor's narrow one arrive the same way.
-    renderTable({ sourceLineEditing: untimedEditing({ canRemove: () => true }) })
+    renderTable({
+      sourceLineEditing: untimedEditing({
+        rowActions: () => ({ above: null, below: null, remove: null }),
+      }),
+    })
     await screen.findByText("First cue")
-    expect(within(rowEl("cue-a")).getByTestId("row-remove-cue-a")).toBeInTheDocument()
+    expect(within(rowEl("cue-a")).getByTestId("row-remove-cue-a")).not.toBeDisabled()
   })
 
-  it("offers no remove when the workspace says the cell does not qualify", async () => {
-    renderTable({ sourceLineEditing: untimedEditing({ canRemove: () => false }) })
+  it("a media row refuses everything, and says the same thing three times", async () => {
+    // An MP3 import: every row IS audio. It used to render nothing at all,
+    // which is the case that started this round.
+    renderTable({
+      sourceLineEditing: untimedEditing({
+        rowActions: () => ({ above: MEDIA, below: MEDIA, remove: MEDIA }),
+      }),
+    })
     await screen.findByText("First cue")
-    expect(screen.queryByTestId("row-remove-cue-a")).toBeNull()
+    expect(addBtn("cue-a")).toBeDisabled()
+    expect(within(rowEl("cue-a")).getByTestId("row-remove-cue-a")).toBeDisabled()
   })
 })

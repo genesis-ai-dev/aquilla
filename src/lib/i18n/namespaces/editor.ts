@@ -739,6 +739,16 @@ export const editor = defineNamespace({
 
     // — Row hover controls + assurance panel (editing table) ——————
     "editor.row.removeLine": "Remove this line",
+    // AQU-1068 round 3: WHY a row cannot take an action. A closed set of four,
+    // one sentence shape — the same string serves the disabled button's tooltip
+    // and the disabled menu item's second line, so the two surfaces cannot
+    // drift. Shown instead of hiding the control, because an absent button
+    // cannot distinguish "not applicable here" from "this feature is broken".
+    "editor.row.noRoomReason": "There\u2019s no room here to fit a line.",
+    "editor.row.mediaSegmentReason": "This row is part of the imported audio.",
+    "editor.row.idmlReason":
+      "IDML files keep their original layout, so cells can\u2019t be added or removed.",
+    "editor.row.maintainerOnlyReason": "Only a maintainer can remove an imported line.",
     // AQU-1068: the removal confirmation. The body is ASSEMBLED from the
     // fragments below — a resolved-and-concatenated list, the house idiom (see
     // nav.workspaceActions.moreAfterThis) rather than a nested placeholder,

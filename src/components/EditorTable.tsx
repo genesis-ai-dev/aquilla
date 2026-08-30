@@ -2831,13 +2831,34 @@ function RowStructureCorner({
   const bothRefused = Boolean(aboveDisabledReason && belowDisabledReason)
   const addReason = bothRefused ? (belowDisabledReason ?? aboveDisabledReason ?? null) : null
 
+  /**
+   * A disabled button with its reason reachable.
+   *
+   * THE SPAN IS LOAD-BEARING, and `pointer-events-none` on the button with it.
+   * A disabled control fires no pointer events in a real browser, so a tooltip
+   * anchored directly to it never opens — verified in Chromium, where four
+   * seconds of hover produced nothing. Letting the pointer through to a wrapper
+   * that IS hoverable is the same shape CellTranscriptPreview already uses.
+   *
+   * (Unit tests would not have caught this: happy-dom dispatches the events
+   * programmatically, so the tooltip opens there either way.)
+   */
+  const withReason = (node: React.ReactElement, reason: string | null | undefined) =>
+    reason ? (
+      <AppTooltip content={reason} className="max-w-xs">
+        <span className="inline-flex">{node}</span>
+      </AppTooltip>
+    ) : (
+      node
+    )
+
   const addButton = (
     <button
       type="button"
       title={bothRefused ? undefined : t("editor.row.addLine")}
       aria-label={t("editor.row.addLine")}
       data-testid={`${testId}-add`}
-      className={square}
+      className={cn(square, bothRefused && "pointer-events-none")}
       disabled={bothRefused}
       onClick={(e) => e.stopPropagation()}
     >
@@ -2855,14 +2876,14 @@ function RowStructureCorner({
         "opacity-50 transition-opacity group-hover/rowstrip:opacity-100 focus-within:opacity-100",
       )}
     >
-      {onRemove !== undefined && (
-        <AppTooltip content={removeDisabledReason ?? undefined} disabled={!removeDisabledReason} className="max-w-xs">
+      {onRemove !== undefined &&
+        withReason(
           <button
             type="button"
             title={removeDisabledReason ? undefined : t("editor.row.removeLine")}
             aria-label={t("editor.row.removeLine")}
             data-testid={removeTestId ?? `${testId}-remove`}
-            className={square}
+            className={cn(square, removeDisabledReason && "pointer-events-none")}
             disabled={Boolean(removeDisabledReason)}
             onClick={(e) => {
               e.stopPropagation()
@@ -2870,15 +2891,11 @@ function RowStructureCorner({
             }}
           >
             <X className="h-3.5 w-3.5" />
-          </button>
-        </AppTooltip>
-      )}
+          </button>,
+          removeDisabledReason,
+        )}
       {bothRefused ? (
-        // A disabled button still opens its tooltip (base-ui keeps a gated
-        // control's explanation reachable — see src/test-utils/tooltip.tsx).
-        <AppTooltip content={addReason ?? undefined} className="max-w-xs">
-          {addButton}
-        </AppTooltip>
+        withReason(addButton, addReason)
       ) : (
         <DropdownMenu>
           <DropdownMenuTrigger render={addButton} />

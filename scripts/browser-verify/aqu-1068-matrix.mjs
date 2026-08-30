@@ -42,6 +42,24 @@ const seedTake = (project, file, cell) => {
 }
 const dropTake = (file, audioId) =>
   sql(`DELETE FROM cell_audio WHERE file_id='${file}' AND audio_id='${audioId}'`)
+
+/**
+ * Put a fixture back the way the run found it.
+ *
+ * Each pass inserts cells, and on a TIMED file every insert consumes a silence
+ * — after a few runs the little 4-cue VTT has no gaps left at all, every
+ * direction is legitimately refused, and the pass can no longer tell "correctly
+ * refused" from "broken". Dropping the rows this script created makes it
+ * repeatable.
+ *
+ * Projection-only, deliberately: the create events stay in the log, so a
+ * rebuild would bring these cells back. That is fine for a local fixture and
+ * would be wrong for anything else.
+ */
+const resetInsertedCells = (file) =>
+  sql(`DELETE FROM cells WHERE file_id='${file}'
+         AND cell_id IN (SELECT cell_id FROM cells WHERE file_id='${file}' AND side='source'
+                         AND metadata::jsonb -> 'aquillaOrigin' ->> 'kind' = 'user-insert')`)
 const timingOf = (file, cell) =>
   sql(`SELECT COALESCE(start_ms::text,'null')||'/'||COALESCE(end_ms::text,'null') FROM cells WHERE file_id='${file}' AND side='source' AND cell_id='${cell}'`)
 
@@ -80,6 +98,7 @@ async function main() {
       els.map((e) => e.getAttribute("data-testid")).filter((t) => t && !t.endsWith("-add") && !t.endsWith("-remove")))).length
 
   // ── 1. TIMED VTT in the TEXT lens — the shape Sam broke first ─────────────
+  resetInsertedCells(TIMED.file)
   setFloor(TIMED.project, "maintainer")
   await open(TIMED)
   const timedRows = await rowIds()
@@ -87,19 +106,42 @@ async function main() {
   check("timed VTT: the text lens offers structural controls at all",
     timedCorners > 0, `${timedCorners} corners on ${timedRows.length} rows`)
 
-  // Gap-constrained, not willy-nilly: at least one row must have NO insert.
+  // Round 3: every row has a `+`; gap-constraint shows up as DISABLED
+  // directions inside the menu, not as a missing button.
   const addable = await page.$$eval('[data-testid$="-add"]', (els) => els.length)
-  check("timed VTT: inserts are gap-constrained, not offered on every row",
-    addable < timedRows.length, `${addable} add buttons / ${timedRows.length} rows`)
+  check("timed VTT: every row gets a control, none are missing",
+    addable === timedRows.length, `${addable} add buttons / ${timedRows.length} rows`)
+
+  // Somewhere in the file at least one direction must be refused, and it must
+  // say so rather than vanish — that is the whole of round 3.
+  // The LAST cue has no silence after it (no footage linked, so no known tail),
+  // which is the cleanest row to prove "refused, and says so".
+  const lastRow = timedRows[timedRows.length - 1]
+  await page.locator(`[data-testid="row-structure-${lastRow}-add"]`).first().click()
+  const belowItem = page.getByTestId("row-insert-below")
+  await belowItem.waitFor({ timeout: 5000 })
+  check("timed VTT: the direction with no room is DISABLED, not missing",
+    (await belowItem.getAttribute("data-disabled")) !== null)
+  check("timed VTT: ...and carries a reason the user can read",
+    (await page.getByTestId("row-insert-below-reason").count()) > 0,
+    ((await page.getByTestId("row-insert-below-reason").textContent().catch(() => "")) ?? "").slice(0, 60))
+  check("timed VTT: ...while the direction that HAS room stays live",
+    (await page.getByTestId("row-insert-above").getAttribute("data-disabled")) === null)
+  await page.keyboard.press("Escape")
+  await page.waitForTimeout(300)
   await page.screenshot({ path: `${SHOTS}/01-timed-text-lens.png` })
 
   if (addable > 0) {
     const before = sourceCount(TIMED.file)
     const beforeIds = await rowIds()
-    await page.locator('[data-testid$="-add"]').first().click()
-    // One direction acts immediately; two open a menu.
-    const menu = page.getByTestId("row-insert-below")
-    if (await menu.isVisible().catch(() => false)) await menu.click()
+    // The `+` always opens the menu now; pick a direction that is live.
+    await page.locator('[data-testid$="-add"]:not([disabled])').first().click()
+    const below = page.getByTestId("row-insert-below")
+    await below.waitFor({ timeout: 5000 })
+    const target = (await below.getAttribute("data-disabled")) === null
+      ? below
+      : page.getByTestId("row-insert-above")
+    await target.click()
     await page.waitForTimeout(3000)
     const afterIds = await rowIds()
     const newId = afterIds.find((id) => !beforeIds.includes(id))
@@ -120,9 +162,25 @@ async function main() {
   // Prove the file actually OPENED first: a dead file id renders "No file
   // selected", which has no controls either and would read as a pass.
   check("MP3 import: the file opened", mediaRows.length > 0, `${mediaRows.length} rows`)
-  check("MP3 import: no structural controls in the text lens", (await corners()) === 0,
+  // Round 3 inverts this leg. Rendering nothing was the bug: Sam switched the
+  // setting on, nothing happened, and there was no way to tell an inapplicable
+  // file from a broken feature.
+  check("MP3 import: the controls are PRESENT", (await corners()) === mediaRows.length,
     `${await corners()} corners on ${mediaRows.length} rows`)
-  await page.screenshot({ path: `${SHOTS}/03-mp3-none.png` })
+  const mp3Add = page.locator(`[data-testid="row-structure-${mediaRows[0]}-add"]`).first()
+  const mp3Remove = page.locator(`[data-testid="row-remove-${mediaRows[0]}"]`).first()
+  check("MP3 import: add is disabled, not absent", await mp3Add.isDisabled())
+  check("MP3 import: remove is disabled too", await mp3Remove.isDisabled())
+  // `force` because the button carries `pointer-events-none` so the pointer can
+  // reach the wrapper that actually opens the tooltip — Playwright's
+  // actionability check would otherwise refuse the hover. NOT caught: a hover
+  // that fails must fail the check, not silently produce "no tooltip".
+  // Past AppTooltip's 600ms open delay, with room to spare.
+  await mp3Add.hover({ force: true })
+  await page.waitForTimeout(1400)
+  const tip = (await page.locator('[role="tooltip"]').first().textContent().catch(() => "")) ?? ""
+  check("MP3 import: hovering explains why", /imported audio/i.test(tip), tip.slice(0, 80))
+  await page.screenshot({ path: `${SHOTS}/03-mp3-disabled.png` })
 
   // ── 3. Untimed .md — still anywhere, both directions ──────────────────────
   setFloor(UNTIMED.project, "maintainer")
@@ -130,9 +188,9 @@ async function main() {
   const mdRows = await rowIds()
   check("untimed .md: every rendered row offers a control", (await corners()) === mdRows.length,
     `${await corners()} / ${mdRows.length}`)
-  const mdAdd = await page.$$eval('[data-testid$="-add"]', (els) => els.length)
+  const mdAdd = await page.$$eval('[data-testid$="-add"]:not([disabled])', (els) => els.length)
   check("untimed .md: every row can take a cell — no gaps to respect", mdAdd === mdRows.length,
-    `${mdAdd} add buttons`)
+    `${mdAdd} enabled add buttons`)
 
   // ── 3b. The removal dialog must SEE a recording in the text lens ──────────
   //

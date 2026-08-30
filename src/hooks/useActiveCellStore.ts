@@ -677,6 +677,21 @@ export class CellStore {
   } | null {
     const source = this.sourceById.get(cellId)
     if (!source) return null
+    // AQU-1068: NOT YET CONFIRMED, so not yet removable.
+    //
+    // An optimistically inserted row has no event id — the outbox has not been
+    // flushed. Removing it anyway sends a delete whose parent is the empty
+    // string, and worse, a `source.cell.reorder` on the sibling carrying the
+    // SAME parent the insert's own reorder already claimed. AD-2 is
+    // first-child-wins, so the second is dead-lettered and the sibling is left
+    // anchored on the server to a cell that no longer exists — the chain
+    // corruption the re-point exists to prevent, arrived at from the other
+    // side. Offline it is not even a race: both batches flush together and the
+    // later reorder loses every time.
+    //
+    // The caller reports this rather than failing silently; the window closes
+    // as soon as the insert's flush lands.
+    if (!source.eventId) return null
     let successor: { cellId: string; eventId: string } | null = null
     for (const [id, row] of this.sourceById) {
       if (row.anchorCellId === cellId) {
@@ -981,8 +996,22 @@ export class CellStore {
         keep.delete(key)
       }
     }
+    // AQU-1068: anything still in `keep` is protected but ABSENT from the
+    // server's buffer, and pushing it here puts it at the TAIL. For a value
+    // edit that was always harmless — the row already had a place in the
+    // buffer's order. An optimistically INSERTED row is the first kind that is
+    // protected and genuinely absent (a full stream taken before the insert
+    // landed cannot contain it), so a just-added line would teleport to the
+    // bottom of a sequence-ordered file and stay there until something
+    // unrelated refetched. Re-walking the chain puts it back where its anchor
+    // says, which is what the delta path effectively already does.
+    const appended = keep.size > 0
     for (const row of keep.values()) out.push(row)
-    return { rows: out, discardedCellIds }
+    if (!appended) return { rows: out, discardedCellIds }
+    const sources: CellRow[] = []
+    const rest: CellRow[] = []
+    for (const row of out) (row.side === "source" ? sources : rest).push(row)
+    return { rows: [...walkAnchorChain(sources), ...rest], discardedCellIds }
   }
 
   setPendingOverlay(next: Map<string, PendingOverlay>): void {

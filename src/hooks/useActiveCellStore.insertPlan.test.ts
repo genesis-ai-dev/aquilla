@@ -220,6 +220,23 @@ describe("CellStore optimistic insert / remove", () => {
     expect(makeStore(chain()).applyOptimisticSourceRemove("nope")).toBeNull()
   })
 
+  it("refuses to plan a removal for a row the server has not confirmed", () => {
+    // The insert-then-immediately-remove path. An optimistic row has no event
+    // id, so a delete would carry an empty parent AND its companion reorder
+    // would land on the same AD-2 slot the insert's reorder already claimed —
+    // first-child-wins dead-letters the second, and the sibling is left
+    // anchored on the server to a cell that no longer exists. Offline both
+    // batches flush together and the later reorder loses every time.
+    const store = makeStore(chain())
+    store.applyOptimisticSourceInsert({ cellId: "new", anchorCellId: "a", reanchorCellId: "b" })
+    expect(store.getCellView("new")).not.toBeNull()
+    expect(store.getRemovalPlan("new")).toBeNull()
+  })
+
+  it("plans a removal normally once the row carries an event id", () => {
+    expect(makeStore(chain()).getRemovalPlan("b")).not.toBeNull()
+  })
+
   describe("rollback — a write the server refused", () => {
     // A freshness floor protects a row from every correcting fetch, so without
     // an explicit undo a refused insert would be a permanent phantom.

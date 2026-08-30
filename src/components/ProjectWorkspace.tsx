@@ -154,6 +154,7 @@ import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
 import { buildCellRemovalInventory, type CellRemovalInventory } from "@/lib/cell-removal-inventory"
+import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   canEditCells,
   canRemoveImportedCells as canRemoveImportedCellsGate,
@@ -1789,6 +1790,13 @@ export function ProjectWorkspace() {
       // What stays is the sanity check: something has to be there to remove.
       if (!cell) return
       const plan = cellStore.getRemovalPlan(cellId)
+      // Null here means the row is not yet confirmed by the server (see
+      // getRemovalPlan). Silence would read as a dead button — the exact
+      // failure Matt's QA caught on the add-line strip.
+      if (!plan && cellStore.getCellView(cellId)) {
+        toast.add({ type: "error", title: t("editor.removeCell.notYetSavedToast") })
+        return
+      }
       if (!plan) return
       // Take it off screen NOW; the flush and the confirming read follow. The
       // snapshot is what puts it back if the server refuses.
@@ -1834,11 +1842,10 @@ export function ProjectWorkspace() {
         // A freshness floor protects a row from every correcting fetch, so a
         // refused removal would otherwise leave the cell gone from the screen
         // and present on the server, permanently. Put it back and say so.
-        onRejected: (entries) => {
-          if (!entries.some((e) => e.kind === "source.cell.delete")) return
-          cellStore.rollbackOptimisticSourceChange(cellId, removed)
-          toast.add({ type: "error", title: t("editor.removeCell.failedToast") })
-        },
+        onRejected: (entries) =>
+          rollbackRefusedCellChange(entries, cellId, removed, "editor.removeCell.failedToast"),
+        onForbidden: (entries) =>
+          rollbackRefusedCellChange(entries, cellId, removed, "editor.removeCell.forbiddenToast"),
       })
       revalidateCells()
       setTimelineSelectedCellId(null)
@@ -5810,7 +5817,16 @@ export function ProjectWorkspace() {
             ]
           : []),
       ])
-      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      // The gap-insert path had NO rollback at all — the primary Chosen
+      // subtitle workflow applied an optimistic insert and, if the server
+      // refused it, left the row on screen forever behind its freshness floor.
+      await flushOutboxBatch({
+        getTokenForFile: getTokenForProjectFile,
+        onRejected: (entries) =>
+          rollbackRefusedCellChange(entries, cellId, undefined, "editor.addCell.failedToast"),
+        onForbidden: (entries) =>
+          rollbackRefusedCellChange(entries, cellId, undefined, "editor.addCell.forbiddenToast"),
+      })
       revalidateCells()
       // Land on it exactly as clicking its row would — but not yet.
       // `revalidate()` is fire-and-forget, so the row does not exist on this
@@ -5895,11 +5911,10 @@ export function ProjectWorkspace() {
       ])
       await flushOutboxBatch({
         getTokenForFile: getTokenForProjectFile,
-        onRejected: (entries) => {
-          if (!entries.some((e) => e.kind === "source.cell.create")) return
-          cellStore.rollbackOptimisticSourceChange(newCellId)
-          toast.add({ type: "error", title: t("editor.addCell.failedToast") })
-        },
+        onRejected: (entries) =>
+          rollbackRefusedCellChange(entries, newCellId, undefined, "editor.addCell.failedToast"),
+        onForbidden: (entries) =>
+          rollbackRefusedCellChange(entries, newCellId, undefined, "editor.addCell.forbiddenToast"),
       })
       revalidateCells()
       setPendingNewCell({ cellId: newCellId, thenRecord: false })
@@ -6926,9 +6941,29 @@ export function ProjectWorkspace() {
   // seek context) were silently seeing attachment-less cells, so anything
   // gated on `selectedAudioId` no-oped. Read the per-file audio here once for
   // the audio lens and merge where needed.
+  /**
+   * AQU-1068: whether this read is needed at all, WITHOUT asking which panel is
+   * open.
+   *
+   * The removal confirmation counts a cell's recordings from this map, and the
+   * remove button now lives in the text lens too — so gating the read on
+   * `lens === "audio"` made the dialog say "there is nothing else attached to
+   * it" over a cell holding takes, and destroy them on confirm. The same
+   * round-1 shape one more time: a panel fact standing in for a cell fact,
+   * inside the very dialog whose honesty the whole confirm-and-remove trade
+   * rests on.
+   *
+   * Deliberately a SUPERSET of `canEditLines` (which is declared far below and
+   * additionally excludes mirrored sources): this only decides whether to
+   * fetch, so erring wide costs one read and erring narrow costs the truth.
+   * Everyone who can be shown the button is covered.
+   */
+  const mayRestructureCells =
+    resolveCellEditingFloor(project) != null &&
+    (project?.syncRole?.level ?? 0) >= (resolveCellEditingFloor(project) ?? Infinity)
   const { byCellId: workspaceAudioByCellId } = useFileAudioAttachments(
     project?.id ?? null,
-    lens === "audio" ? activeFileId : null,
+    lens === "audio" || mayRestructureCells ? activeFileId : null,
   )
   workspaceAudioByCellIdRef.current = workspaceAudioByCellId
 
@@ -7514,6 +7549,34 @@ export function ProjectWorkspace() {
   // at. This is why the controls are a media-lens affordance.
   //
   /**
+   * AQU-1068: undo an optimistic insert or removal the server refused.
+   *
+   * Wired to BOTH refusal callbacks. `onRejected` alone is not enough — it
+   * documents itself as deliberately skipping 403, and 403 is the only status
+   * the cell-editing gate returns, so a rollback on that callback alone can
+   * never fire for the case it exists for.
+   *
+   * The kind filter is ANY event in the batch, not just the create or delete.
+   * An insert and a removal each emit a `source.cell.reorder` to keep the
+   * anchor chain honest; if that companion is the one refused, the row is
+   * fine but the chain is not, and putting the row back is still the correct
+   * repair.
+   */
+  const rollbackRefusedCellChange = useCallback(
+    (
+      entries: { kind: string }[],
+      cellId: string,
+      restore?: Parameters<typeof cellStore.rollbackOptimisticSourceChange>[1],
+      message?: MessageKey,
+    ) => {
+      if (!entries.some((e) => e.kind.startsWith("source.cell.") || e.kind.startsWith("target.cell."))) return
+      cellStore.rollbackOptimisticSourceChange(cellId, restore)
+      if (message) toast.add({ type: "error", title: t(message) })
+    },
+    [cellStore, toast, t],
+  )
+
+  /**
    * AQU-1068: ask before destroying anything, and say what "anything" is.
    *
    * Removal used to need no dialog: only an EMPTY line somebody had added by
@@ -7557,7 +7620,7 @@ export function ProjectWorkspace() {
       }
       setPendingCellRemoval({ cellId, inventory })
     },
-    [getActiveCell, cellStore, allProjectComments, linkedTakesByCell, handleRemoveLine],
+    [getActiveCell, cellStore, allProjectComments, linkedTakesByCell, handleRemoveLine, toast, t],
   )
 
   // AQU-1068: who may add and remove cells at all. ONE question, asked of the

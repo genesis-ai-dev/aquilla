@@ -29,6 +29,19 @@ const setFloor = (project, tier) =>
 const clearFloor = (project) =>
   sql(`UPDATE project_settings SET settings = (settings::jsonb - 'cellEditingFloor')::text WHERE project_id = '${project}'`)
 const sourceCount = (file) => Number(sql(`SELECT COUNT(*) FROM cells WHERE file_id='${file}' AND side='source'`))
+const firstSourceCell = (file) =>
+  sql(`SELECT cell_id FROM cells WHERE file_id='${file}' AND side='source' ORDER BY sequence_index NULLS LAST LIMIT 1`)
+/** A take of the CELL's own, which is what `audioIdSeededWith` recognises — the
+ *  imported clip a whole file shares is seeded with the FILE id instead. */
+const seedTake = (project, file, cell) => {
+  const audioId = `take-${cell}-verify`
+  sql(`INSERT INTO cell_audio (project_id, file_id, cell_id, audio_id, slot, url, selected, deleted, event_id, created_ts)
+       VALUES ('${project}','${file}','${cell}','${audioId}','recording','https://example.invalid/${audioId}.webm',1,0,'evt-verify',1)
+       ON CONFLICT (project_id, file_id, cell_id, audio_id) DO UPDATE SET deleted = 0, selected = 1`)
+  return audioId
+}
+const dropTake = (file, audioId) =>
+  sql(`DELETE FROM cell_audio WHERE file_id='${file}' AND audio_id='${audioId}'`)
 const timingOf = (file, cell) =>
   sql(`SELECT COALESCE(start_ms::text,'null')||'/'||COALESCE(end_ms::text,'null') FROM cells WHERE file_id='${file}' AND side='source' AND cell_id='${cell}'`)
 
@@ -120,6 +133,33 @@ async function main() {
   const mdAdd = await page.$$eval('[data-testid$="-add"]', (els) => els.length)
   check("untimed .md: every row can take a cell — no gaps to respect", mdAdd === mdRows.length,
     `${mdAdd} add buttons`)
+
+  // ── 3b. The removal dialog must SEE a recording in the text lens ──────────
+  //
+  // The confirmation counted takes from a lens-gated attachments map, so in the
+  // text lens it said "there is nothing else attached to it" over a cell
+  // holding takes — and confirming destroyed them. The round-1 shape one more
+  // time, inside the dialog whose honesty the whole confirm-and-remove trade
+  // rests on. The matrix never exercised removal at all, which is how it
+  // survived.
+  const takeCell = firstSourceCell(UNTIMED.file)
+  const seededAudio = seedTake(UNTIMED.project, UNTIMED.file, takeCell)
+  try {
+    await open(UNTIMED)
+    await page.locator(`[data-testid="row-remove-${takeCell}"]`).first().click()
+    const dialog = page.getByRole("dialog")
+    await dialog.waitFor({ timeout: 10_000 })
+    const body = (await dialog.textContent()) ?? ""
+    check("removal dialog names the recording, in the TEXT lens",
+      /1 recording/i.test(body), body.slice(0, 160))
+    check("...and does not claim the cell is empty",
+      !/nothing else attached/i.test(body))
+    await page.screenshot({ path: `${SHOTS}/05-removal-inventory.png` })
+    await page.keyboard.press("Escape")
+    await page.waitForTimeout(500)
+  } finally {
+    dropTake(UNTIMED.file, seededAudio)
+  }
 
   // ── 4. 31k Bible — the insert must be perceptibly instant ─────────────────
   setFloor(BIBLE.project, "maintainer")

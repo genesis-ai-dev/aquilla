@@ -774,6 +774,9 @@ export const editor = defineNamespace({
     // so the copy explains the reversal rather than asking for an action.
     "editor.addCell.failedToast": "That cell couldn\u2019t be added, so it has been removed again.",
     "editor.removeCell.failedToast": "That cell couldn\u2019t be removed, so it has been put back.",
+    "editor.addCell.forbiddenToast": "You don\u2019t have permission to add cells here, so it has been removed again.",
+    "editor.removeCell.forbiddenToast": "You don\u2019t have permission to remove cells here, so it has been put back.",
+    "editor.removeCell.notYetSavedToast": "That cell is still being saved \u2014 try removing it again in a moment.",
     "editor.row.addLine": "Add a line",
     "editor.row.insertAbove": "Insert above",
     "editor.row.insertBelow": "Insert below",

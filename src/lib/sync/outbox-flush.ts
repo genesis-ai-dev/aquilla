@@ -109,6 +109,19 @@ export interface FlushDeps {
    *  about permissions, and a refused shape is a bug, not a permission
    *  problem. */
   onRejected?: (entries: RejectedEntry[]) => void
+  /** AQU-1068: the same chance to react, for a 403.
+   *
+   *  `onRejected` deliberately skips this class (see its note), which was fine
+   *  while every optimistic write was a value edit a refetch would correct. It
+   *  is not fine for a write that changes the SHAPE of the file: an optimistic
+   *  insert or removal carries a freshness floor, so no correcting fetch can
+   *  undo it, and the caller has to. A permission refusal is also the ONLY
+   *  status the cell-editing gate ever returns, so a rollback wired to
+   *  `onRejected` alone can never fire for the one case it exists for.
+   *
+   *  Fired after the records are quarantined, so the inspector still holds
+   *  them. */
+  onForbidden?: (entries: RejectedEntry[]) => void
 }
 
 function groupOldestFileFirst(records: OutboxRecord[]): OutboxRecord[] {
@@ -385,6 +398,20 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   }
   for (const id of forbiddenIds) {
     await quarantineOutboxEvents([id], rejectionByid.get(id) ?? { status: 403, reason: "forbidden" })
+  }
+  if (forbiddenIds.length > 0 && deps.onForbidden) {
+    // Read kind/fileId back off the batch, as the rejected path does — the
+    // server's array carries only id/status/reason.
+    const recordById = new Map(batch.map((r) => [r.id, r]))
+    deps.onForbidden(
+      forbiddenIds.map((id) => ({
+        id,
+        kind: recordById.get(id)?.event.kind ?? "",
+        status: rejectionByid.get(id)?.status ?? 403,
+        reason: rejectionByid.get(id)?.reason ?? "forbidden",
+        fileId: recordById.get(id)?.event.fileId ?? null,
+      })),
+    )
   }
   const forbiddenSet = new Set(forbiddenIds)
 

@@ -281,3 +281,75 @@ describe("EditorTable — the row's structural controls", () => {
     })
   })
 })
+
+/**
+ * AQU-1068: the same corner control, on a file with no clock.
+ *
+ * An ordinary text file has no silences to measure, so the "no room, no add"
+ * rule above has nothing to withhold a button for: every row can take a cell on
+ * either side. That difference is resolved in the workspace and arrives here as
+ * plain thunks, which is why RowStructureCorner no longer knows what a second
+ * is.
+ */
+describe("EditorTable — structural controls on an untimed file", () => {
+  const untimedEditing = (over: Record<string, unknown> = {}) =>
+    editing({
+      // Supplied empty: an untimed file has no silences, and the shape is
+      // shared with the timed path rather than made optional for one caller.
+      head: null,
+      afterCell: new Map(),
+      untimed: { onInsertAbove: vi.fn(), onInsertBelow: vi.fn(), ...(over.untimed ?? {}) },
+      ...over,
+    })
+
+  it("offers BOTH directions on every row, not just the first", async () => {
+    // The timed path reserves "insert above" for row 0, because everywhere else
+    // it duplicates the previous row's "insert below". Here the redundancy is
+    // the point: pointing at the row you want to push down is how people
+    // describe the act, and there is no gap that makes one direction the real
+    // one.
+    renderTable({ sourceLineEditing: untimedEditing() })
+    await screen.findByText("Second cue")
+    for (const id of ["cue-a", "added", "cue-b"]) {
+      const corner = within(rowEl(id)).getByTestId(`row-structure-${id}`)
+      fireEvent.click(within(corner).getByTestId(`row-structure-${id}-add`))
+      expect(await screen.findByTestId("row-insert-above")).toBeInTheDocument()
+      expect(screen.getByTestId("row-insert-below")).toBeInTheDocument()
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+    }
+  })
+
+  it("passes the row's own id to the insert, not a time span", async () => {
+    const onInsertBelow = vi.fn()
+    renderTable({ sourceLineEditing: untimedEditing({ untimed: { onInsertAbove: vi.fn(), onInsertBelow } }) })
+    await screen.findByText("Second cue")
+    const corner = within(rowEl("cue-b")).getByTestId("row-structure-cue-b")
+    fireEvent.click(within(corner).getByTestId("row-structure-cue-b-add"))
+    fireEvent.click(await screen.findByTestId("row-insert-below"))
+    expect(onInsertBelow).toHaveBeenCalledWith("cue-b")
+  })
+
+  it("insert above passes the row's id too", async () => {
+    const onInsertAbove = vi.fn()
+    renderTable({ sourceLineEditing: untimedEditing({ untimed: { onInsertAbove, onInsertBelow: vi.fn() } }) })
+    await screen.findByText("First cue")
+    const corner = within(rowEl("cue-a")).getByTestId("row-structure-cue-a")
+    fireEvent.click(within(corner).getByTestId("row-structure-cue-a-add"))
+    fireEvent.click(await screen.findByTestId("row-insert-above"))
+    expect(onInsertAbove).toHaveBeenCalledWith("cue-a")
+  })
+
+  it("still asks the workspace what is removable", async () => {
+    // The predicate is the workspace's, on both file kinds — a maintainer's
+    // widened one and a contributor's narrow one arrive the same way.
+    renderTable({ sourceLineEditing: untimedEditing({ canRemove: () => true }) })
+    await screen.findByText("First cue")
+    expect(within(rowEl("cue-a")).getByTestId("row-remove-cue-a")).toBeInTheDocument()
+  })
+
+  it("offers no remove when the workspace says the cell does not qualify", async () => {
+    renderTable({ sourceLineEditing: untimedEditing({ canRemove: () => false }) })
+    await screen.findByText("First cue")
+    expect(screen.queryByTestId("row-remove-cue-a")).toBeNull()
+  })
+})

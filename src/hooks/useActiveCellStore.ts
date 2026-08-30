@@ -689,6 +689,68 @@ export class CellStore {
   }
 
   /**
+   * AQU-1068: everything INSERTING a cell next to another one needs, for a file
+   * with no clock to consult.
+   *
+   * The timed insert (handleAddLine) picks its neighbours by TIME, because on a
+   * subtitle file the clock is what the user is looking at. An ordinary text
+   * file has no clock, so the anchor chain IS the order, and this reads it
+   * directly.
+   *
+   * Returns the anchor the NEW cell takes, the row that must be re-pointed at
+   * it (its former occupant), and both neighbouring sequence indices so the
+   * caller can mint one between them.
+   *
+   *  - "below": the new cell anchors to `cellId`; whatever was anchored to
+   *    `cellId` re-anchors to the new cell.
+   *  - "above": the new cell takes `cellId`'s own anchor; `cellId` itself
+   *    re-anchors to the new cell. When `cellId` is the chain head that anchor
+   *    is null, and the new cell becomes the head — which is exactly why the
+   *    re-point is not optional: two rows claiming a null anchor is the bug
+   *    getChainHeadCellId documents.
+   */
+  getInsertPlan(cellId: string, position: "above" | "below"): {
+    anchorCellId: string | null
+    /** The row whose anchor must be re-pointed at the new cell. */
+    reanchor: { cellId: string; eventId: string } | null
+    sequenceBefore: number | undefined
+    sequenceAfter: number | undefined
+  } | null {
+    const target = this.sourceById.get(cellId)
+    if (!target) return null
+
+    const index = this.order.indexOf(cellId)
+    if (index < 0) return null
+    const prevId = index > 0 ? this.order[index - 1] : null
+    const nextId = index + 1 < this.order.length ? this.order[index + 1] : null
+    const seq = (id: string | null) =>
+      id == null ? undefined : this.getCellView(id)?.sequenceIndex
+
+    if (position === "below") {
+      let successor: { cellId: string; eventId: string } | null = null
+      for (const [id, row] of this.sourceById) {
+        if (row.anchorCellId === cellId) {
+          successor = { cellId: id, eventId: row.eventId }
+          break
+        }
+      }
+      return {
+        anchorCellId: cellId,
+        reanchor: successor,
+        sequenceBefore: seq(cellId),
+        sequenceAfter: seq(nextId),
+      }
+    }
+
+    return {
+      anchorCellId: target.anchorCellId,
+      reanchor: { cellId, eventId: target.eventId },
+      sequenceBefore: seq(prevId),
+      sequenceAfter: seq(cellId),
+    }
+  }
+
+  /**
    * The row that starts the file's anchor chain — the one with no cell before
    * it. AQU-646 round 8: inserting a line BEFORE the first cue would otherwise
    * give the file two of these, and walkAnchorChain buckets both under the same

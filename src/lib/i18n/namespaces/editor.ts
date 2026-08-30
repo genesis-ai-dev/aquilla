@@ -739,6 +739,36 @@ export const editor = defineNamespace({
 
     // — Row hover controls + assurance panel (editing table) ——————
     "editor.row.removeLine": "Remove this line",
+    // AQU-1068: the removal confirmation. The body is ASSEMBLED from the
+    // fragments below — a resolved-and-concatenated list, the house idiom (see
+    // nav.workspaceActions.moreAfterThis) rather than a nested placeholder,
+    // because which clauses appear depends on what the cell actually carries.
+    "editor.removeCell.title": "Remove this cell?",
+    "editor.removeCell.confirmLabel": "Remove it",
+    "editor.removeCell.lead": "This removes the cell and everything on it:",
+    "editor.removeCell.leadNothing":
+      "This removes the cell. There is nothing else attached to it.",
+    "editor.removeCell.translations": plural({
+      one: "its translation in {count} language",
+      other: "its translations in {count} languages",
+    }),
+    "editor.removeCell.takes": plural({
+      one: "{count} recording",
+      other: "{count} recordings",
+    }),
+    "editor.removeCell.comments": plural({
+      one: "{count} comment",
+      other: "{count} comments",
+    }),
+    "editor.removeCell.validations": plural({
+      one: "{count} validation",
+      other: "{count} validations",
+    }),
+    "editor.removeCell.sharedTakeWarning":
+      "One of those recordings also performs other lines.",
+    "editor.removeCell.milestoneWarning":
+      "This cell carries the \u201c{label}\u201d heading, which will disappear from chapter navigation.",
+    "editor.removeCell.permanent": "This cannot be undone.",
     "editor.row.addLine": "Add a line",
     "editor.row.insertAbove": "Insert above",
     "editor.row.insertBelow": "Insert below",
@@ -1450,6 +1480,57 @@ export const editor = defineNamespace({
           "popover — the cells dragging the score down most. Idiomatic in English; " +
           "translate the meaning ('what is hurting the score most'), not the image.",
         maxLength: 24,
+      },
+      "editor.removeCell.translations": {
+        description:
+          "One clause in the list of what removing a cell destroys, in the removal " +
+          "confirmation dialog. Counts the target-language lanes that hold a translation " +
+          "of the cell. Reads as an item in a sentence, e.g. \u201cits translations in 3 " +
+          "languages\u201d, so it starts lower-case and carries no full stop.",
+        placeholders: {
+          count:
+            "The number of target languages; it also selects which plural form is used.",
+        },
+      },
+      "editor.removeCell.takes": {
+        description:
+          "One clause in the list of what removing a cell destroys, in the removal " +
+          "confirmation dialog. Counts the voice recordings made against that cell. " +
+          "Reads as an item in a sentence, so no leading capital and no full stop.",
+        placeholders: {
+          count:
+            "The number of recordings; it also selects which plural form is used.",
+        },
+      },
+      "editor.removeCell.comments": {
+        description:
+          "One clause in the list of what removing a cell destroys, in the removal " +
+          "confirmation dialog. Counts every comment on the cell, replies and already- " +
+          "resolved ones included. Reads as an item in a sentence, so no leading capital " +
+          "and no full stop.",
+        placeholders: {
+          count: "The number of comments; it also selects which plural form is used.",
+        },
+      },
+      "editor.removeCell.validations": {
+        description:
+          "One clause in the list of what removing a cell destroys, in the removal " +
+          "confirmation dialog. Counts the reviewers whose approval currently stands on " +
+          "the cell. Reads as an item in a sentence, so no leading capital and no full stop.",
+        placeholders: {
+          count: "The number of validations; it also selects which plural form is used.",
+        },
+      },
+      "editor.removeCell.milestoneWarning": {
+        description:
+          "Extra warning in the removal confirmation dialog, shown only when the cell " +
+          "being removed is the one carrying a chapter or section heading. Removing it " +
+          "takes that heading out of the chapter navigator.",
+        placeholders: {
+          label:
+            "The heading as it appears in the file, e.g. a chapter number or a section " +
+            "title. Content from the user's own document \u2014 never translate it.",
+        },
       },
       "editor.health.staleSource": {
         description:

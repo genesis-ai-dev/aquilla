@@ -764,6 +764,16 @@ interface EditorTableProps {
     /** Keyed by the cell whose row offers "insert below". */
     afterCell: ReadonlyMap<string, { startSec: number; endSec: number }>
     onAddLine(startSec: number, endSec: number): void
+    /**
+     * AQU-1068: untimed files insert by ANCHOR, not by clock. When this is
+     * present the two span fields above go unused and every row offers both
+     * directions — an ordinary text file has room everywhere, so there is no
+     * silence to measure and no "no room" case to withhold a button for.
+     */
+    untimed?: {
+      onInsertAbove(cellId: string): void
+      onInsertBelow(cellId: string): void
+    }
     /** The workspace owns what is removable, exactly as the timeline lane does. */
     canRemove(cell: CellData): boolean
     onRemoveLine(cellId: string): void
@@ -2131,15 +2141,38 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           const paragraphGroupInfo = cell.paragraphStart === true
             ? paragraphGroupInfoByCellId.get(cell.id)
             : undefined
-          // AQU-646: the row's STRUCTURAL controls — add a line into the
-          // silence after it, take an empty added line back. One map lookup and
-          // one predicate call per row; no scans.
+          // AQU-646 / AQU-1068: the row's STRUCTURAL controls — add a cell
+          // here, take one back. One map lookup and one predicate call per
+          // row; no scans.
           //
-          // `insertAbove` reaches only the first row, because that is the only
-          // row with a silence in front of it — everywhere else "above me" is
-          // "below my predecessor", which that row already offers.
-          const insertBelow = sourceLineEditing?.afterCell.get(cell.id) ?? null
-          const insertAbove = index === 0 ? (sourceLineEditing?.head ?? null) : null
+          // The two file kinds answer "where can a cell go?" differently, and
+          // the answer is resolved HERE into plain thunks so RowStructureCorner
+          // never has to know about clocks:
+          //
+          //  - TIMED (a subtitle file with footage): only into a silence wide
+          //    enough to hold a line. No room, no button. `insertAbove` reaches
+          //    only the first row, because that is the only row with a silence
+          //    in front of it — everywhere else "above me" is "below my
+          //    predecessor", which that row already offers.
+          //
+          //  - UNTIMED (an ordinary text file): a cell can go anywhere, so
+          //    both directions are offered on every row. The redundancy is
+          //    deliberate here: pointing at the row you want to push down is
+          //    how people describe the act, and there is no gap to reason
+          //    about that would make one direction the "real" one.
+          const untimedInserts = sourceLineEditing?.untimed
+          const insertBelowSpan = untimedInserts ? null : (sourceLineEditing?.afterCell.get(cell.id) ?? null)
+          const insertAboveSpan = untimedInserts || index !== 0 ? null : (sourceLineEditing?.head ?? null)
+          const onInsertBelow = untimedInserts
+            ? () => untimedInserts.onInsertBelow(cell.id)
+            : insertBelowSpan
+              ? () => sourceLineEditing!.onAddLine(insertBelowSpan.startSec, insertBelowSpan.endSec)
+              : undefined
+          const onInsertAbove = untimedInserts
+            ? () => untimedInserts.onInsertAbove(cell.id)
+            : insertAboveSpan
+              ? () => sourceLineEditing!.onAddLine(insertAboveSpan.startSec, insertAboveSpan.endSec)
+              : undefined
           const canRemoveLine = Boolean(sourceLineEditing?.canRemove(cell))
           return (
       <div
@@ -2152,7 +2185,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           "relative",
           // The hover group for the structural strip below. Named so it cannot
           // be caught by the row's other `group` users.
-          (insertBelow || insertAbove || canRemoveLine) && "group/rowstrip",
+          (onInsertBelow || onInsertAbove || canRemoveLine) && "group/rowstrip",
           untimedInTimeLens && "border-s-2 border-dashed border-amber-400/70",
           showParagraphBoundary && "mt-3",
         )}
@@ -2160,9 +2193,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
         {sourceLineEditing && (
           <RowStructureCorner
             testId={`row-structure-${cell.id}`}
-            insertBelow={insertBelow}
-            insertAbove={insertAbove}
-            onAddLine={sourceLineEditing.onAddLine}
+            onInsertBelow={onInsertBelow}
+            onInsertAbove={onInsertAbove}
             onRemove={canRemoveLine ? () => sourceLineEditing.onRemoveLine(cell.id) : undefined}
             removeTestId={`row-remove-${cell.id}`}
           />
@@ -2739,30 +2771,33 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
  */
 function RowStructureCorner({
   testId,
-  /** The silence after this row. Null = no room, so no `+` AT ALL — never a
-   *  disabled one. The same "no room, no add" rule the timeline's pencil obeys. */
-  insertBelow,
-  /** The silence before the FIRST cue. Only ever passed to the first row. */
-  insertAbove,
-  onAddLine,
+  /** Insert after this row, or undefined for "not offered here" — so no `+` AT
+   *  ALL, never a disabled one. On a TIMED file that means "no room in the
+   *  silence", the same rule the timeline's pencil obeys; on an untimed one a
+   *  row always has room, so it is always offered. */
+  onInsertBelow,
+  /** Insert before this row. Timed files offer it on the FIRST row only —
+   *  everywhere else "above me" is "below my predecessor", which that row
+   *  already offers. Untimed files offer it on every row, because pointing at
+   *  the row you want to push down is how people describe the act. */
+  onInsertAbove,
   onRemove,
   removeTestId,
 }: {
   testId: string
-  insertBelow: { startSec: number; endSec: number } | null
-  insertAbove: { startSec: number; endSec: number } | null
-  onAddLine(startSec: number, endSec: number): void
+  onInsertBelow?: () => void
+  onInsertAbove?: () => void
   onRemove?: () => void
   removeTestId?: string
 }) {
   // Above the early return: a hook after one runs in a different order on the
   // renders that bail out, which is the rules-of-hooks error this was.
   const t = useT()
-  if (!insertBelow && !insertAbove && !onRemove) return null
+  if (!onInsertBelow && !onInsertAbove && !onRemove) return null
   // Both directions available (only ever the first row, and only while the
   // file still opens on a silence) — the button has to ask which. One
   // direction available: just do it. A one-item menu is a click for nothing.
-  const needsMenu = Boolean(insertAbove && insertBelow)
+  const needsMenu = Boolean(onInsertAbove && onInsertBelow)
   const square =
     "flex h-6 w-6 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
   return (
@@ -2790,7 +2825,7 @@ function RowStructureCorner({
           <X className="h-3.5 w-3.5" />
         </button>
       )}
-      {(insertBelow || insertAbove) &&
+      {(onInsertBelow || onInsertAbove) &&
         (needsMenu ? (
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -2810,14 +2845,14 @@ function RowStructureCorner({
             <DropdownMenuContent align="end" className="min-w-[9rem]">
               <DropdownMenuItem
                 data-testid="row-insert-above"
-                onClick={() => onAddLine(insertAbove!.startSec, insertAbove!.endSec)}
+                onClick={() => onInsertAbove!()}
               >
                 <ArrowUp className="mr-2 h-3.5 w-3.5" />
                 {t("editor.row.insertAbove")}
               </DropdownMenuItem>
               <DropdownMenuItem
                 data-testid="row-insert-below"
-                onClick={() => onAddLine(insertBelow!.startSec, insertBelow!.endSec)}
+                onClick={() => onInsertBelow!()}
               >
                 <ArrowDown className="mr-2 h-3.5 w-3.5" />
                 {t("editor.row.insertBelow")}
@@ -2827,14 +2862,13 @@ function RowStructureCorner({
         ) : (
           <button
             type="button"
-            title={insertAbove ? t("editor.row.addLineAbove") : t("editor.row.addLineBelow")}
-            aria-label={insertAbove ? t("editor.row.addLineAbove") : t("editor.row.addLineBelow")}
+            title={onInsertAbove ? t("editor.row.addLineAbove") : t("editor.row.addLineBelow")}
+            aria-label={onInsertAbove ? t("editor.row.addLineAbove") : t("editor.row.addLineBelow")}
             data-testid={`${testId}-add`}
             className={square}
             onClick={(e) => {
               e.stopPropagation()
-              const span = insertBelow ?? insertAbove!
-              onAddLine(span.startSec, span.endSec)
+              ;(onInsertBelow ?? onInsertAbove!)()
             }}
           >
             <Plus className="h-3.5 w-3.5" />

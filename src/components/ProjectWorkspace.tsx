@@ -4032,6 +4032,7 @@ export function ProjectWorkspace() {
     // lane-aware derivation as the editor project + file metadata.
     project?.completionSettings, project?.sourceLanguage || "", activeLaneTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
     project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
+    activeLane,
   )
 
   // AQU-620: adapter so the editor's per-cell AI action can request a plain

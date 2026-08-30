@@ -276,6 +276,11 @@ export class CellStore {
     details: CellFootnoteDetails
   }>()
   private derivedCache: DerivedCache = { baseVersion: -1, summaries: [], textPairs: [] }
+  /** AQU-1068: memo for `hasMediaCells`, versioned like `derivedCache`. Its own
+   *  field rather than a DerivedCache member because that cache's rebuild walks
+   *  every cell to construct summaries and text pairs, and this question wants
+   *  none of that. */
+  private mediaCellsCache: { baseVersion: number; value: boolean } = { baseVersion: -1, value: false }
 
   /**
    * AQU-646: which cells carry a recording of their own.
@@ -815,6 +820,30 @@ export class CellStore {
   getTextPairs(): readonly CellTextPair[] {
     this.ensureDerivedCache()
     return this.derivedCache.textPairs.length === 0 ? EMPTY_TEXT_PAIRS : this.derivedCache.textPairs
+  }
+
+  /**
+   * AQU-1068: does this file contain a cell that IS audio (`medium === 'media'`)?
+   *
+   * The gate that decides whether add/remove controls are offered has to answer
+   * this WITHOUT a media panel being open. Round 1 asked `audioMergedCells`,
+   * which is built from `legacyCells` and is empty outside the media lens — so
+   * an MP3 import read as an ordinary text file and got the full controls, and
+   * removing one of its cells showed a confirmation claiming nothing was
+   * attached while it destroyed a stretch of the client's source audio.
+   *
+   * `medium` lives on the source rows of the ordinary cell projection, so this
+   * needs no attachment fetch and no lens. Memoized per version — the gate asks
+   * on every render and a whole Bible is 31k rows.
+   */
+  hasMediaCells(): boolean {
+    if (this.mediaCellsCache.baseVersion === this.derivedVersion) return this.mediaCellsCache.value
+    let value = false
+    for (const row of this.sourceById.values()) {
+      if (row.medium === "media") { value = true; break }
+    }
+    this.mediaCellsCache = { baseVersion: this.derivedVersion, value }
+    return value
   }
 
   replaceRows(rows: CellRow[], opts: { maxServerSeq?: number | null; changedCellIds?: Iterable<string>; full?: boolean } = {}): void {

@@ -15,6 +15,7 @@
 // keeps the setting readable — a project admin is never asked about timings.
 
 import { ROLE } from "@/lib/frontier/roles"
+import type { OrderedBy } from "@/lib/parsers/types"
 
 export interface CellEditingSubject {
   /** The tier's role level, or null when the project has not opted in. */
@@ -52,34 +53,67 @@ export function canRemoveImportedCells(s: CellEditingSubject): boolean {
 }
 
 export interface CellEditingFile {
-  /** Present when footage is attached — the file is on a clock. */
-  hasMedia: boolean
-  /** The media lens derives timed rows for this file. */
-  isTimed: boolean
-  /** Cells that ARE audio clips (medium 'media'), not text with audio beside it. */
-  hasChunkedAudioCells: boolean
+  /**
+   * The file's own order — `fileOrderedBy(file)`, i.e. `files.meta.orderedBy`
+   * with `'sequence'` as the absent default. THIS is the timedness signal, and
+   * it is a property of the FILE: `orderedByForFileType` writes `'time'` for
+   * vtt/srt/sbv and for media imports, `'sequence'` for every text and document
+   * type.
+   *
+   * Round 1 asked `legacyCellsNeeded` instead, which is not about the file at
+   * all — it means "is some media panel open right now". A Chosen subtitle file
+   * therefore read as untimed in the text lens (inserts anywhere, no gaps) and
+   * lost its controls entirely in the media lens. One flag, both symptoms.
+   */
+  orderedBy: OrderedBy
+  /** `cellStore.hasMediaCells()` — a cell that IS audio. Lens-independent by
+   *  construction; see the accessor's note for why that matters. */
+  hasMediaCells: boolean
   fileType?: string | null
 }
 
 export type CellInsertMode =
   /** Anywhere between rows — an ordinary text file. */
   | "anywhere"
-  /** Only into a silence wide enough to hold a line — a subtitle file. */
+  /** Only into a silence wide enough to hold a line — a file on a clock. */
   | "gaps"
   /** Not offered on this file at all. */
   | "none"
 
+/**
+ * WHERE can a cell go in this file? The tier answers WHO; this answers where,
+ * and the two are independent.
+ *
+ * NOTE WHAT IS ABSENT: the timing MODE (Free vs Original, resolveFileTimingMode)
+ * and whether footage happens to be linked. Neither belongs here.
+ *
+ *  - MODE governs the derived TARGET timeline, never placement. Free timing lays
+ *    takes end to end on their own clock (buildProgramme), but the SOURCE side's
+ *    clock does not stop being real because of it — and placement follows the
+ *    source, always. That is also what makes a Free -> Original switch a
+ *    non-event: an insert made in Free mode is born with real timings, so it
+ *    already has a chip waiting when the mode flips back. The alternative
+ *    ("Free means anywhere") strands untimed cells in a timed file, where the
+ *    VTT exporter drops them silently.
+ *
+ *  - FOOTAGE is not required for a gap. A subtitle file's cues are timed whether
+ *    or not a video is attached; without one there is simply no known tail, so
+ *    `deriveSourceRegions` offers head and between-cue gaps and no trailing one.
+ */
 export function cellInsertMode(file: CellEditingFile): CellInsertMode {
-  // A chunked-audio file is excluded from both paths: an inserted row there
-  // would be an audio cell with no audio, which is its own ticket.
-  if (file.hasChunkedAudioCells) return "none"
-  // IDML is excluded from this slice and says so on the row. Its cells carry a
-  // packaged layout the editor renders read-only, and export patches
-  // translations back into the original package — so a removed cell's text
-  // still ships unless export learns about deletions, and removing one slice
-  // of a split unit makes export throw (both AQU-803 findings).
+  // A media cell IS its audio — there is nothing to mint an inserted one from,
+  // and removing one would destroy a stretch of the client's source recording
+  // behind a confirmation that cannot see it (the imported clip is seeded with
+  // the FILE id, so the take inventory reads zero). Sam, 2026-08-30: no client
+  // will expect to add or remove cells in an imported MP3. One media cell
+  // switches the whole file off, matching the rule the media table already uses.
+  if (file.hasMediaCells) return "none"
+  // IDML is excluded while its export patches translations into the original
+  // package: a removed cell's text still ships unless export learns about
+  // deletions, and removing one slice of a split unit makes export throw (both
+  // AQU-803 findings).
   if (file.fileType === "idml") return "none"
-  if (file.hasMedia && file.isTimed) return "gaps"
-  if (file.hasMedia || file.isTimed) return "none"
+  // On a clock: only where there is room, and born with real timings.
+  if (file.orderedBy === "time") return "gaps"
   return "anywhere"
 }

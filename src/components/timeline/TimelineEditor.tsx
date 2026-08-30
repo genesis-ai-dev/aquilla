@@ -996,12 +996,21 @@ export function TimelineEditor({
   // no take yet is a different affordance, comes from `emptyCells`, and stays.
   const addableSpans = useMemo(
     () =>
-      !canAddLine
+      // AQU-1068: no add affordance in FREE timing. Free lays takes end to end
+      // on their own clock (buildProgramme), so a "silence" here is not a place
+      // a cell can go — there are no gaps by construction. Gap inserts on a
+      // Free-mode cue sheet still exist; they live on the text table, against
+      // the SOURCE clock, which is the one that stays real in either mode.
+      //
+      // It also retires a latent mismatch: these slots are positioned in raw
+      // file-clock seconds (TimelineLane) while audioFirst cards are placed on
+      // the programme clock, so the two disagreed about where a second was.
+      !canAddLine || audioFirst
         ? []
         : sourceRegions.regions
             .filter((r) => r.kind === "gap" && r.endSec - r.startSec >= MIN_ADDABLE_SPAN_SEC)
             .map((r) => ({ startSec: r.startSec, endSec: r.endSec })),
-    [sourceRegions, canAddLine],
+    [sourceRegions, canAddLine, audioFirst],
   )
   // Round 5: the Target-audio track's chips — one per section with dub audio.
   // AQU-646: in the VTT-plus-footage arrangement the takes hang off TEXT cells

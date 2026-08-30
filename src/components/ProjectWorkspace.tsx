@@ -7546,26 +7546,43 @@ export function ProjectWorkspace() {
   }
   const canEditLines = canEditCells(cellEditingSubject)
   const canRemoveImportedCells = canRemoveImportedCellsGate(cellEditingSubject)
-  const addLineCells = activeFile?.coreMediaUrl && legacyCellsNeeded
-    && !audioMergedCells.some((c) => (c.medium ?? "text") === "media")
-    && canEditLines
-    ? audioMergedCells
-    : null
+  /**
+   * WHERE can a cell go in this file? Answered from the FILE, never from which
+   * panel happens to be open — see cell-editing-gate.ts for why that
+   * distinction is the whole of round 1's classification bug.
+   */
+  const insertMode = cellInsertMode({
+    orderedBy: activeFile ? fileOrderedBy(activeFile) : "sequence",
+    hasMediaCells: readAtVersion(cellStoreVersion, () => cellStore.hasMediaCells()),
+    fileType: activeFile?.type,
+  })
+
   const videoDurationForTable = useVideoDurationSec(activeFile?.coreMediaUrl ?? null)
-  // The insert slots need no gate of their own any more: `addLineCells` is
-  // already `null` unless `canEditLines` passed, and adds and removes now
-  // travel together under one tier. (Matt's QA, 2026-08-21, caught the era
-  // when this strip ignored the old boolean while the timeline's pencil
-  // obeyed it — one authority is what stops that recurring.)
+  /**
+   * The silences, for a file on a clock.
+   *
+   * Derived from the store's own summaries rather than from `audioMergedCells`,
+   * so the slots exist in EVERY lens: `deriveSourceRegions` reads nothing but
+   * `{id, startTime, endTime}`, which the (memoized) summaries already carry,
+   * and the merged-with-audio array those slots used to come from is empty
+   * unless a media panel is open. That is what confined this affordance to the
+   * media lens and what left a Chosen file with no controls at all in text.
+   *
+   * A file with no footage linked simply has no known tail, so there is no
+   * trailing gap after the last cue — head and between-cue gaps still stand.
+   */
   const insertSlots = useMemo(
     () =>
-      addLineCells
+      canEditLines && insertMode === "gaps"
         ? insertSlotsByCell(
-            deriveSourceRegions(addLineCells, videoDurationForTable),
+            deriveSourceRegions(
+              readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+              videoDurationForTable,
+            ),
             MIN_ADDABLE_SPAN_SEC,
           )
         : EMPTY_INSERT_SLOTS,
-    [addLineCells, videoDurationForTable],
+    [canEditLines, insertMode, cellStore, cellStoreVersion, videoDurationForTable],
   )
   /**
    * THE single answer to "may this cell be taken back?", asked by the text
@@ -7586,27 +7603,21 @@ export function ProjectWorkspace() {
   )
 
   /**
-   * AQU-1068: is this file one where a cell can go ANYWHERE?
+   * The row controls, one shape for both file kinds, offered in BOTH lenses.
    *
-   * The media surfaces answer "where?" with the clock — a cell fits only in a
-   * silence wide enough to hold it. An ordinary text file has no clock and no
-   * silences, so it takes a cell anywhere, which is a different insert path
-   * (handleAddCell) and a different set of controls. A file with footage keeps
-   * the timed behaviour untouched, and a chunked-audio file is excluded from
-   * both: an inserted row there would have no audio, which is its own ticket.
+   * "gaps" and "anywhere" differ only in how a row answers "where would a new
+   * cell go?" — a clock-bound file resolves a silence, an ordinary text file
+   * takes one anywhere. `RowStructureCorner` never learns which; it is handed
+   * thunks (see EditorTable's row loop).
    */
-  const untimedCellEditing =
-    canEditLines &&
-    cellInsertMode({
-      hasMedia: Boolean(activeFile?.coreMediaUrl),
-      isTimed: legacyCellsNeeded,
-      hasChunkedAudioCells: audioMergedCells.some((c) => (c.medium ?? "text") === "media"),
-      fileType: activeFile?.type,
-    }) === "anywhere"
-
   const sourceLineEditing = useMemo(
     () => {
-      if (untimedCellEditing) {
+      if (!canEditLines || insertMode === "none") return undefined
+      const shared = {
+        canRemove: canRemoveCell,
+        onRemoveLine: (cellId: string) => requestRemoveCell(cellId),
+      }
+      if (insertMode === "anywhere") {
         return {
           // Unused on this path — an untimed file has no silences to measure —
           // but the shape is shared, so they are supplied empty rather than
@@ -7618,22 +7629,18 @@ export function ProjectWorkspace() {
             onInsertAbove: (cellId: string) => void handleAddCell(cellId, "above"),
             onInsertBelow: (cellId: string) => void handleAddCell(cellId, "below"),
           },
-          canRemove: canRemoveCell,
-          onRemoveLine: (cellId: string) => requestRemoveCell(cellId),
+          ...shared,
         }
       }
-      return addLineCells
-        ? {
-            head: insertSlots.head,
-            afterCell: insertSlots.afterCell,
-            onAddLine: (startSec: number, endSec: number) => void handleAddLine(startSec, endSec),
-            canRemove: canRemoveCell,
-            onRemoveLine: (cellId: string) => requestRemoveCell(cellId),
-          }
-        : undefined
+      return {
+        head: insertSlots.head,
+        afterCell: insertSlots.afterCell,
+        onAddLine: (startSec: number, endSec: number) => void handleAddLine(startSec, endSec),
+        ...shared,
+      }
     },
     [
-      untimedCellEditing, addLineCells, insertSlots, handleAddLine, handleAddCell,
+      canEditLines, insertMode, insertSlots, handleAddLine, handleAddCell,
       canRemoveCell, requestRemoveCell,
     ],
   )

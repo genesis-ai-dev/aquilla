@@ -1465,6 +1465,47 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
       expect(screen.queryByTestId(/^tl-target-add-20/)).not.toBeInTheDocument()
     })
 
+    // AQU-1068: FREE timing has no gaps to insert into — buildProgramme lays
+    // takes end to end on their own clock, so a "silence" on the file clock is
+    // not a place a cell can go. Gap inserts on a Free-mode cue sheet still
+    // exist; they live on the text table, against the SOURCE clock, which is
+    // the one that stays real whichever mode the timeline is showing.
+    it("offers nothing in Free timing, however much clearance you have", () => {
+      setVideoDurationSec(VIDEO, 120)
+      localStorage.setItem("aquilla:timelineZoom:fzoom", String(ZOOM_MAX))
+      render(
+        <TimelineEditor
+          fileId="fzoom" coreMediaUrl={VIDEO} editable
+          cells={[
+            cell({ id: "a", original: "A", medium: "text", startTime: 10, endTime: 20 }),
+            cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
+          ]}
+          canAddLine timingMode="audioFirst"
+          onAddLine={async () => null} onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(screen.queryByTestId("tl-add-line-20")).not.toBeInTheDocument()
+      expect(screen.queryByTestId(/^tl-target-add-20/)).not.toBeInTheDocument()
+    })
+
+    it("still offers them in Original timing — the default", () => {
+      // The guard above must not have taken the affordance away wholesale.
+      setVideoDurationSec(VIDEO, 120)
+      localStorage.setItem("aquilla:timelineZoom:fzoom", String(ZOOM_MAX))
+      render(
+        <TimelineEditor
+          fileId="fzoom" coreMediaUrl={VIDEO} editable
+          cells={[
+            cell({ id: "a", original: "A", medium: "text", startTime: 10, endTime: 20 }),
+            cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
+          ]}
+          canAddLine timingMode="dubbing"
+          onAddLine={async () => null} onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(screen.getByTestId("tl-add-line-20")).toBeInTheDocument()
+    })
+
     // THE SETTING IS THE SINGLE AUTHORITY (Sam, 2026-08-21). Stage 4 used to
     // withdraw both ways in the moment an audio-cue track existed, which made
     // the project setting a visible no-op on every dubbing episode — Matt's

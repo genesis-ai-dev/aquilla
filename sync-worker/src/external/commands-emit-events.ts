@@ -78,13 +78,16 @@ export interface EmitEventsCommand {
 export function emitEventsFloor(cmd: EmitEventsCommand): number {
   let floor = 0
   for (const e of cmd.events) {
-    // Sam, 2026-08-21: source.cell.create/delete/reorder dropped to
-    // CONTRIBUTOR in the static table so the app's `allowLineCreation`
-    // setting can admit contributors — with authorize.ts enforcing the
-    // conditional part per event. THIS surface never runs those per-event
-    // checks, so it keeps the old PROJECT_LEAD floor: an integration adding,
-    // deleting or re-anchoring source rows is a re-import-shaped act, not
-    // the timeline affordance.
+    // AQU-1068: source.cell.create/delete/reorder sit at CONTRIBUTOR in the
+    // static table because the operative gate is the project's
+    // `cellEditingFloor`, applied per event in authorize.ts. This floor is a
+    // PREPARE-TIME fail-fast only — it stops a caller staging a changeset they
+    // could never commit — and PROJECT_LEAD is the honest lower bound for it:
+    // an integration adding, deleting or re-anchoring source rows is a
+    // re-import-shaped act. The real decision still happens at commit, because
+    // these events route through the /events perimeter like any other (see
+    // emit-events-engine.ts), where the project's tier and the maintainer
+    // requirement on removing an IMPORTED cell both apply.
     const kindFloor =
       e.kind === 'source.cell.create' || e.kind === 'source.cell.delete' || e.kind === 'source.cell.reorder'
         ? ROLE.PROJECT_LEAD

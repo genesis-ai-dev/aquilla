@@ -1,5 +1,6 @@
 import { FRONTIER_API_URL } from "./sync-token"
 import { t } from "@/lib/i18n/standalone"
+import { ROLE, type RoleLevel } from "@/lib/frontier/roles"
 import type {
   TranslationRule,
   RulePenalties,
@@ -40,16 +41,32 @@ export interface ProjectWideSettings {
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean
   /**
-   * AQU-646: may people add new lines into the silences on the timeline?
+   * AQU-1068: who may add and remove cells in this project's files?
    *
-   * OFF unless explicitly turned on. The affordance was built speculatively —
-   * no client has asked for it — and it is underdeveloped enough to be a
-   * liability: its mic over an empty stretch used to mint a subtitle line and
-   * record against it, producing a take matching no audio cue at all. Removal
-   * of an empty added line is deliberately NOT gated on this, so switching it
-   * off can never strand a line somebody already made.
+   * Supersedes AQU-646's `allowLineCreation` boolean, which asked the same
+   * question of one surface (the timeline's silences) and could only answer
+   * yes-or-no. Cell editing is now a project-wide capability with a role
+   * FLOOR: "maintainer" admits 600 and up, "project_lead" 500 and up,
+   * "contributor" 400 and up.
+   *
+   * "none" — the default, and what an absent key means — admits NOBODY, and
+   * that includes an owner. This is a "whether", not a "who": a project that
+   * has not opted in does not restructure its files at all, so there is no
+   * clearance that skips the question. Off by default because the affordance
+   * is the liability the setting exists to contain — removing a cell takes its
+   * translations, takes, comments and validations with it (see the cascade in
+   * event-projection's `source.cell.delete` case).
+   *
+   * REMOVING AN IMPORTED CELL NEEDS MAINTAINER ON TOP OF THE FLOOR. Below that
+   * rank a person only ever removes a line somebody added by hand here — an
+   * imported line is the client's own work and stays maintainer-only to take
+   * back, whatever tier is configured. authorize.ts enforces both halves.
+   *
+   * The old boolean is deliberately NOT migrated: a project that had it on
+   * lands on "none" like everyone else, and a maintainer picks a tier when
+   * they want the affordance back (Sam, 2026-08-29).
    */
-  allowLineCreation?: boolean
+  cellEditingFloor?: "none" | "maintainer" | "project_lead" | "contributor"
   /**
    * AQU-186: minimum role level required to trigger a harmonization sweep on
    * this project. Default (absent) = project_lead (500). Configurable up to
@@ -174,6 +191,31 @@ export function resolveTimingLocked(
   settings: Pick<ProjectWideSettings, "timingLocked"> | null | undefined,
 ): boolean {
   return settings?.timingLocked !== false
+}
+
+/**
+ * The role level `cellEditingFloor` admits, or `null` for "nobody".
+ *
+ * `null` is the answer for "none", for an absent key, and for any value this
+ * build does not recognise — a tier a newer client invents must not read as
+ * permission on an older one. THE CLIENT'S COPY IS AN AFFORDANCE GATE ONLY;
+ * the decision that counts is `resolveCellEditingFloor` in the sync worker
+ * (`events/cell-editing-authority.ts`), which reads the same key from the
+ * settings row. Keep the two in lock-step.
+ */
+export function resolveCellEditingFloor(
+  settings: Pick<ProjectWideSettings, "cellEditingFloor"> | null | undefined,
+): RoleLevel | null {
+  switch (settings?.cellEditingFloor) {
+    case "maintainer":
+      return ROLE.MAINTAINER
+    case "project_lead":
+      return ROLE.PROJECT_LEAD
+    case "contributor":
+      return ROLE.CONTRIBUTOR
+    default:
+      return null
+  }
 }
 
 export interface ProjectSettingsResponse {

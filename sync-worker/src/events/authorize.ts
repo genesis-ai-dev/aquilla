@@ -8,7 +8,7 @@ import { requiredRoleFor, ROLE } from './role-policy'
 import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from '../auth'
 import { resolveAllowSelfAssignment } from './assignment-authority'
 import { isLockedTimingEvent, isUserInsertedCell, resolveTimingLocked } from './timing-authority'
-import { resolveAllowLineCreation } from './line-creation-authority'
+import { resolveCellEditingFloor } from './cell-editing-authority'
 import { laneOfEvent } from './event-projection'
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
@@ -268,30 +268,67 @@ export async function authorize<K extends EventKind>(
     }
   }
 
-  // Sam, 2026-08-21: `source.cell.create` / `source.cell.delete` /
-  // `source.cell.reorder` dropped from their old static PROJECT_LEAD floor to
-  // CONTRIBUTOR so the "let people add new lines" project setting can mean
-  // what it says — reorder included because every add and remove BATCHES one
-  // in to keep the anchor chain matching the clock, and a floor that refused
-  // the companion killed the whole batch. The PROJECT_LEAD floor is
-  // re-imposed HERE for whoever is below it: all three pass only while the
-  // project has opted in ("that setting is enabling lines being added or
-  // removed" — the package travels together), and a delete additionally only
-  // for a line a person added by hand — an imported subtitle line stays
-  // lead-only to remove whatever the setting says. Leads and above never
-  // reach these checks; an absent `db` skips them, matching the carve-outs
-  // above.
+  // AQU-1068: `source.cell.create` / `source.cell.delete` /
+  // `source.cell.reorder` are gated on the project's `cellEditingFloor`.
+  // Reorder is in the list because every add and remove BATCHES one in to keep
+  // the anchor chain intact, and a gate that refused the companion killed the
+  // whole batch (which is exactly how this went wrong on 2026-08-21).
+  //
+  // NO `tokenClaims.role < X` TERM, AND ITS ABSENCE IS DELIBERATE. The
+  // predecessor block carried one because it was a conditional floor RAISE for
+  // whoever fell below a static floor; this is not that. "none" — the default,
+  // and what an absent or unreadable setting means — refuses EVERYONE,
+  // including an owner, because the setting answers *whether* a project
+  // restructures its files, not merely *who* may. A clearance term here would
+  // open the back door the gate exists to close.
+  //
+  // The static floors in role-policy.ts stay CONTRIBUTOR on purpose: imports
+  // (`POST /import`, lead-gated in its own route) and the in-app agent emit
+  // these same kinds, and a raised static floor would break them.
+  //
+  // THE EXTERNAL API SURFACE IS EXEMPT, and that is not a hole — it is the
+  // behaviour this path already had. The predecessor block skipped everyone at
+  // PROJECT_LEAD and above, and `emitEventsFloor` holds external callers at
+  // exactly that floor, so no integration gains anything here it did not have
+  // before AQU-1068. It also has to be exempt to work at all: an external
+  // PlanImport POPULATES A NEW FILE through this perimeter (commit.ts chunks
+  // `file.create` + N × `source.cell.create` through it), which is a
+  // file-creation act gated by `file.create`'s own floor, not the
+  // restructuring of an existing file that `cellEditingFloor` governs.
+  //
+  // The in-app agent is deliberately NOT exempt: it applies through the user's
+  // own outbox with the user's own token, so it may do exactly what that
+  // person may do and no more.
+  //
+  // An absent `db` skips the check, matching the carve-outs above.
   if (
     db != null &&
-    tokenClaims.role < ROLE.PROJECT_LEAD &&
+    tokenClaims.src !== 'external' &&
     (raw.kind === 'source.cell.create' ||
       raw.kind === 'source.cell.delete' ||
       raw.kind === 'source.cell.reorder')
   ) {
-    if (!(await resolveAllowLineCreation(db, raw.projectId))) {
-      return { ok: false, status: 403, reason: 'adding lines is not enabled for this project' }
+    const floor = await resolveCellEditingFloor(db, raw.projectId)
+    if (floor == null) {
+      return {
+        ok: false,
+        status: 403,
+        reason: 'adding or removing cells is not enabled for this project',
+      }
     }
-    if (raw.kind === 'source.cell.delete') {
+    if (tokenClaims.role < floor) {
+      return {
+        ok: false,
+        status: 403,
+        reason: `role too low to add or remove cells (${raw.kind})`,
+      }
+    }
+    // ...and the second gate on removal: an IMPORTED cell is the client's own
+    // work, so taking one back needs MAINTAINER whatever tier is configured.
+    // Below that rank a person only ever removes a line somebody added by hand
+    // here. `isUserInsertedCell` fails closed, so an unreadable cell row keeps
+    // the maintainer requirement rather than waiving it.
+    if (raw.kind === 'source.cell.delete' && tokenClaims.role < ROLE.MAINTAINER) {
       const userInserted =
         raw.fileId != null &&
         raw.cellId != null &&
@@ -300,7 +337,7 @@ export async function authorize<K extends EventKind>(
         return {
           ok: false,
           status: 403,
-          reason: 'only a line someone added by hand can be removed at this clearance',
+          reason: 'removing an imported cell requires maintainer',
         }
       }
     }

@@ -148,20 +148,25 @@ export interface TimelineEditorProps {
    * to the new cell's id, or null if it could not be made.
    */
   onAddLine?(startSec: number, endSec: number, opts?: { thenRecord?: boolean }): Promise<string | null>
-  /** Whether this user may create cells at all (source.* is PROJECT_LEAD+). */
-  /** MAY they — the `source.cell.create` clearance. Deliberately separate from
-   *  `allowLineCreation` below: this one also governs taking a line back, and
-   *  policy must not be able to strand a line somebody already made. */
+  /**
+   * May this user add and remove cells here at all?
+   *
+   * AQU-1068 collapsed the old MAY/SHOULD pair into one answer. There used to
+   * be a second `allowLineCreation` prop carrying the project's policy, kept
+   * separate so that switching policy off could not strand a line somebody had
+   * already made. The tier that replaced it governs adds and removes together
+   * — "that setting is enabling lines being added or removed" — so a single
+   * authority is now the thing that keeps the surfaces agreeing.
+   */
   canAddLine?: boolean
   /**
-   * SHOULD they — the project's `allowLineCreation` setting, off by default.
+   * May they remove an IMPORTED cell, not just a line added here?
    *
-   * Adding lines was built speculatively and is underdeveloped, so it stays
-   * hidden until a project turns it on. Removal of an empty added line is NOT
-   * gated on this, which is what makes the off state recoverable rather than
-   * frozen.
+   * The second gate, maintainer-only, whatever tier the project runs. An
+   * imported line is the client's own work; the confirmation dialog upstream
+   * is what makes taking one back safe.
    */
-  allowLineCreation?: boolean
+  canRemoveImportedCells?: boolean
   /** Take back a line someone added, while it is still empty. */
   onRemoveLine?(cellId: string): void
   /** False disables the control — `file.video.set` needs contributor access,
@@ -586,7 +591,7 @@ export function TimelineEditor({
   onRequestLinkVideo,
   onAddLine,
   canAddLine,
-  allowLineCreation = false,
+  canRemoveImportedCells = false,
   onRemoveLine,
   canLinkVideo = true,
   onRequestImportAudioVtt,
@@ -991,12 +996,12 @@ export function TimelineEditor({
   // no take yet is a different affordance, comes from `emptyCells`, and stays.
   const addableSpans = useMemo(
     () =>
-      !allowLineCreation || !canAddLine
+      !canAddLine
         ? []
         : sourceRegions.regions
             .filter((r) => r.kind === "gap" && r.endSec - r.startSec >= MIN_ADDABLE_SPAN_SEC)
             .map((r) => ({ startSec: r.startSec, endSec: r.endSec })),
-    [sourceRegions, allowLineCreation, canAddLine],
+    [sourceRegions, canAddLine],
   )
   // Round 5: the Target-audio track's chips — one per section with dub audio.
   // AQU-646: in the VTT-plus-footage arrangement the takes hang off TEXT cells
@@ -2079,13 +2084,18 @@ export function TimelineEditor({
             // Only a line someone added here, and only while it is still
             // empty — deleting a cell with takes or comments on it would
             // leave every one of them behind.
-            // TAKING A LINE BACK IS NEVER GATED ON POLICY (Sam, 2026-08-14).
-            // Only on clearance and on the cell qualifying — still user-added,
-            // still empty. Turning `allowLineCreation` off, or importing an
-            // audio VTT, must not strand a line somebody already made with no
-            // way to clear it up; an off state you cannot recover from is worse
-            // than the feature it hides.
-            canRemove={canAddLine ? (c) => isUserAddedLine(c) && isLineEmpty(c) : undefined}
+            // AQU-1068 widened this: a MAINTAINER may take back any cell,
+            // imported ones included, and the confirmation dialog upstream is
+            // what makes that safe. Below that rank the old rule stands — only
+            // a line added here, only while it is still empty, because a cell
+            // carrying takes or comments would strand every one of them.
+            // The same predicate the text table asks, so the two surfaces can
+            // never disagree about what is removable.
+            canRemove={
+              canAddLine
+                ? (c) => canRemoveImportedCells || (isUserAddedLine(c) && isLineEmpty(c))
+                : undefined
+            }
             onRemove={onRemoveLine}
             // Only THIS subtitle row takes part in linking. The target-subtitles
             // row below draws the same cells, and giving both an overlay would

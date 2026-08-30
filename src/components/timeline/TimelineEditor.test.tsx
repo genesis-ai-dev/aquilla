@@ -1412,7 +1412,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
       return render(
         <TimelineEditor
           fileId="fzoom" coreMediaUrl={VIDEO} editable cells={cells}
-          canAddLine allowLineCreation onAddLine={async () => null} onRetimeSubtitle={() => {}}
+          canAddLine onAddLine={async () => null} onRetimeSubtitle={() => {}}
         />,
       )
     }
@@ -1441,11 +1441,14 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
       expect(screen.getByTestId("tl-add-line-20")).toBeInTheDocument()
     })
 
-    // The project setting, off unless turned on (Sam, 2026-08-14). Adding
-    // lines was built speculatively — no client asked for it — and its mic over
-    // an empty stretch could mint a subtitle line and record a take matching no
-    // audio cue. Clearance alone must not be enough to surface it.
-    it("offers nothing without the project setting, however much clearance you have", () => {
+    // AQU-1068: `canAddLine` IS the project's answer now, not merely a
+    // clearance sitting beside one. It arrives already folded — the tier AND
+    // the caller's rank — so false here is the off state, whatever rank the
+    // viewer holds. (It used to be two props; the mic over an empty stretch
+    // could mint a subtitle line and record a take matching no audio cue, so
+    // clearance alone was never allowed to surface it. One authority now keeps
+    // that true without the two being able to drift apart.)
+    it("offers nothing when the project has not admitted this user", () => {
       setVideoDurationSec(VIDEO, 120)
       localStorage.setItem("aquilla:timelineZoom:fzoom", String(ZOOM_MAX))
       render(
@@ -1455,7 +1458,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
             cell({ id: "a", original: "A", medium: "text", startTime: 10, endTime: 20 }),
             cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
           ]}
-          canAddLine onAddLine={async () => null} onRetimeSubtitle={() => {}}
+          canAddLine={false} onAddLine={async () => null} onRetimeSubtitle={() => {}}
         />,
       )
       expect(screen.queryByTestId("tl-add-line-20")).not.toBeInTheDocument()
@@ -1477,7 +1480,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
             cell({ id: "a", original: "A", medium: "text", startTime: 10, endTime: 20 }),
             cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
           ]}
-          canAddLine allowLineCreation onAddLine={async () => null} onRetimeSubtitle={() => {}}
+          canAddLine onAddLine={async () => null} onRetimeSubtitle={() => {}}
           hasAudioCueTrack
         />,
       )

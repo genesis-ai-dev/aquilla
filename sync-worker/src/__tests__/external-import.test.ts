@@ -777,6 +777,10 @@ describe('PlanImport — commit replay (crash-retry idempotency)', () => {
       userId: 1,
       username: 'lead',
       role: 500,
+      // What mintInternalSyncToken actually stamps on the external path. The
+      // simulation needs it: AQU-1068 gates source.cell.* on the project's
+      // cellEditingFloor and exempts this surface by exactly this claim.
+      src: 'external',
     })
     const fileEvent: RawEvent<'file.create'> = {
       id: planned.fileEventId,

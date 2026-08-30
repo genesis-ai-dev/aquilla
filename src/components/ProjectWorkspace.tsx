@@ -136,7 +136,7 @@ import {
 import { emitCastAssign, emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
-import { resolveTimingLocked } from "@/lib/sync/project-settings"
+import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
 import { buildCastAdditions, buildCastRemovals, carriesCharacterSheetData } from "@/lib/import/cast-from-speakers"
 import { ImportCharactersDialog } from "./timeline/ImportCharactersDialog"
 import { CharacterCheckDrawer, type ResolveChoice } from "./timeline/CharacterCheckDrawer"
@@ -5723,7 +5723,7 @@ export function ProjectWorkspace() {
       // at the tail. The two chain-mutating events sit on different cells, so
       // neither waits on the other's head. source.cell.reorder carries the
       // same CONTRIBUTOR floor as source.cell.create and rides the same
-      // `allowLineCreation` carve-out on the server (Sam, 2026-08-21 — the
+      // `cellEditingFloor` gate on the server (Sam, 2026-08-21 — the
       // day this batch silently died for a contributor because the reorder
       // still floored at PROJECT_LEAD and enqueueEvents throws per input,
       // before writing anything).
@@ -7394,38 +7394,41 @@ export function ProjectWorkspace() {
   // thousand-object rebuild on every store bump for a surface nobody is looking
   // at. This is why the controls are a media-lens affordance.
   //
-  // Sam, 2026-08-21: who may edit lines at all. Leads and above always could
-  // and still can; a contributor qualifies only while the project has opted
-  // into `allowLineCreation` — "that setting is enabling lines being added or
-  // removed", the package travels together, and the server enforces the same
-  // split per event. The static canPerform floor is CONTRIBUTOR now, so the
-  // settings term is what keeps a contributor's buttons from being offers the
-  // server would refuse.
+  // AQU-1068: who may add and remove cells at all. ONE question, asked of the
+  // project's configured tier — no rank clears it on its own, because the
+  // setting answers *whether* this project restructures its files. The static
+  // canPerform floor still applies underneath, so a viewer is refused even at
+  // the most permissive tier. authorize.ts asks exactly the same two things.
+  const cellEditingFloor = resolveCellEditingFloor(project)
   const canEditLines =
-    (project?.syncRole?.level ?? 0) >= ROLE.PROJECT_LEAD ||
-    ((project?.allowLineCreation ?? false) &&
-      canPerform("source.cell.create", project?.syncRole?.level ?? null))
+    cellEditingFloor != null &&
+    (project?.syncRole?.level ?? 0) >= cellEditingFloor &&
+    canPerform("source.cell.create", project?.syncRole?.level ?? null)
+  // ...and the second gate, on removal only: an IMPORTED cell is the client's
+  // own work, so taking one back needs MAINTAINER whatever tier is configured.
+  // Mirrors the `isUserInsertedCell` clause the server applies per event.
+  const canRemoveImportedCells =
+    canEditLines && (project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
   const addLineCells = activeFile?.coreMediaUrl && legacyCellsNeeded
     && !audioMergedCells.some((c) => (c.medium ?? "text") === "media")
     && canEditLines
     ? audioMergedCells
     : null
   const videoDurationForTable = useVideoDurationSec(activeFile?.coreMediaUrl ?? null)
-  // Matt's QA (2026-08-21): the table's "Add line below" strip ignored the
-  // `allowLineCreation` setting entirely — the timeline's pencil obeyed it
-  // while this second door stood open. The setting gates the INSERT slots
-  // only, not `addLineCells` itself: removal rides `sourceLineEditing` too,
-  // and taking a line back is never gated on policy — switching the setting
-  // off must not strand a line somebody already made.
+  // The insert slots need no gate of their own any more: `addLineCells` is
+  // already `null` unless `canEditLines` passed, and adds and removes now
+  // travel together under one tier. (Matt's QA, 2026-08-21, caught the era
+  // when this strip ignored the old boolean while the timeline's pencil
+  // obeyed it — one authority is what stops that recurring.)
   const insertSlots = useMemo(
     () =>
-      addLineCells && (project?.allowLineCreation ?? false)
+      addLineCells
         ? insertSlotsByCell(
             deriveSourceRegions(addLineCells, videoDurationForTable),
             MIN_ADDABLE_SPAN_SEC,
           )
         : EMPTY_INSERT_SLOTS,
-    [addLineCells, project?.allowLineCreation, videoDurationForTable],
+    [addLineCells, videoDurationForTable],
   )
   const sourceLineEditing = useMemo(
     () =>
@@ -7435,12 +7438,15 @@ export function ProjectWorkspace() {
             afterCell: insertSlots.afterCell,
             onAddLine: (startSec: number, endSec: number) => void handleAddLine(startSec, endSec),
             // The same predicate the timeline lane asks, so the two surfaces
-            // can never disagree about what is removable.
-            canRemove: (c: CellData) => isUserAddedLine(c) && isLineEmpty(c),
+            // can never disagree about what is removable. AQU-1068 widened it:
+            // a maintainer may take back ANY cell, imported ones included, and
+            // the confirmation dialog is what makes that safe.
+            canRemove: (c: CellData) =>
+              canRemoveImportedCells || (isUserAddedLine(c) && isLineEmpty(c)),
             onRemoveLine: (cellId: string) => void handleRemoveLine(cellId),
           }
         : undefined,
-    [addLineCells, insertSlots, handleAddLine, handleRemoveLine],
+    [addLineCells, insertSlots, handleAddLine, handleRemoveLine, canRemoveImportedCells],
   )
 
   // AQU-646 SUB-53 / pre-merge round: which job THIS FILE is for. The mode is
@@ -9360,10 +9366,10 @@ export function ProjectWorkspace() {
                     // server. Offering the button below that bar would mint a
                     // guaranteed 403 and wedge the outbox.
                     canAddLine={canEditLines}
-                    // Off unless this project has turned it on. Clearance and
-                    // policy stay separate props so switching this off still
-                    // leaves an already-added empty line deletable.
-                    allowLineCreation={project?.allowLineCreation ?? false}
+                    // The second gate: an imported line is the client's own
+                    // work, so taking one back is maintainer-only whatever
+                    // tier the project runs.
+                    canRemoveImportedCells={canRemoveImportedCells}
                     canLinkVideo={canPerform("file.video.set", project?.syncRole?.level ?? null)}
                     // AQU-646 stage 2: the audio VTT. The import writes cells,
                     // so it sits behind the SAME source.* floor as the add-line

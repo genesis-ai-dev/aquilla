@@ -208,9 +208,20 @@ export const projectSettings = defineNamespace({
     "projectSettings.timeline.lockLabel": "Lock the timings against dragging",
     "projectSettings.timeline.lockHint":
       "On by default, and on for everyone \u2014 project leads included. The timings came from the client's own file, and a dragged chip moves a line for the whole team with nothing to compare it against afterwards. While this is on, the handles are gone from every imported line and cue; a line somebody added here still moves, and recordings can still be placed against their lines as usual. Only a maintainer can turn it off, and the timeline says so for as long as it is off.",
-    "projectSettings.timeline.addLinesLabel": "Let people add new lines into the timeline's silences",
-    "projectSettings.timeline.addLinesHint":
-      "Off by default. With this on, a pencil appears over each stretch of the timeline that no line covers, and a microphone beside it that creates a line and starts recording. It is never offered on a file with imported audio cues \u2014 there the cues already say where the lines are. Deleting an empty line somebody added stays available either way, so turning this back off can never strand one.",
+    "projectSettings.cellEditing.sectionTitle": "Content structure",
+    "projectSettings.cellEditing.label": "Who can add and remove cells",
+    "projectSettings.cellEditing.description":
+      "No one, until you choose otherwise. Once someone is allowed, small buttons appear " +
+      "on each row of a file to add a cell above it, add a cell below it, or remove it. " +
+      "Removing a cell also removes its translations in every language, its recordings " +
+      "and its comments \u2014 the confirmation says exactly what will go before anything " +
+      "happens. Removing a cell that came from an import always needs a maintainer, " +
+      "whatever this is set to. On a subtitle file, cells can only be added where there " +
+      "is a gap in the timings.",
+    "projectSettings.cellEditing.optionNone": "No one",
+    "projectSettings.cellEditing.optionMaintainer": "Maintainers",
+    "projectSettings.cellEditing.optionProjectLead": "Maintainers and project leads",
+    "projectSettings.cellEditing.optionContributor": "Anyone who can edit",
     // model → projectSettings.advancedLlm.modelLabel
     "projectSettings.field.temperature": "temperature",
     "projectSettings.field.healthPenalty": "health penalty",

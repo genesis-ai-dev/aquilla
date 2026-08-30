@@ -24,17 +24,16 @@ export const ROLE = {
 
 /** Minimum role level required to emit each event kind. Mirrors the server. */
 const REQUIRED_ROLE: Record<string, number> = {
-  // Sam, 2026-08-21: create/delete/reorder sit at CONTRIBUTOR so the "let
-  // people add new lines" project setting can admit contributors. Reorder is
-  // in the set because it is the chain bookkeeping RIDING every add and
-  // remove (handleAddLine/handleRemoveLine batch it in), and a floor that
-  // refused it silently killed the whole batch. This static floor is the
-  // LOWEST reachable one; the server conditionally re-imposes PROJECT_LEAD —
-  // all three refused below lead unless the project opted in, deletes
-  // additionally only for a cell a person added by hand (sync-worker
-  // authorize.ts + line-creation-authority.ts). The client gate's own rule
-  // applies: only block what is PROVABLY insufficient, and with the
-  // carve-out a contributor no longer is.
+  // AQU-1068: create/delete/reorder sit at CONTRIBUTOR because this table is
+  // the LOWEST reachable floor, not the operative one. Reorder is in the set
+  // because it is the chain bookkeeping RIDING every add and remove
+  // (handleAddLine/handleRemoveLine batch it in), and a floor that refused it
+  // silently killed the whole batch. The real gate is the project's
+  // `cellEditingFloor`: all three refused unless the project opted in, and a
+  // delete additionally needs MAINTAINER unless the cell is one a person added
+  // by hand (sync-worker authorize.ts + cell-editing-authority.ts). The client
+  // gate's own rule applies here: only block what is PROVABLY insufficient,
+  // and a contributor is not — the tier decides, and this table cannot see it.
   "source.cell.create": ROLE.CONTRIBUTOR,
   "source.cell.commit": ROLE.PROJECT_LEAD,
   "source.cell.delete": ROLE.CONTRIBUTOR,

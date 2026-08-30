@@ -135,6 +135,25 @@ import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSect
  */
 const SHOW_TERMBASE_SHARING_IN_SETTINGS = false
 
+/**
+ * AQU-1068: the cell-editing tiers, in the order they are offered.
+ *
+ * The reset default leads, matching every other floor control on this page.
+ * The labels are DESCRIPTIVE, not role names resolved through
+ * `resolveRoleName` — "Maintainers and project leads" says who is admitted far
+ * more plainly to a project admin than a bare "Project lead" naming a floor,
+ * and "No one" is not a role at all.
+ */
+const CELL_EDITING_FLOOR_OPTIONS: readonly {
+  value: "none" | "maintainer" | "project_lead" | "contributor"
+  labelKey: MessageKey
+}[] = [
+  { value: "none", labelKey: "projectSettings.cellEditing.optionNone" },
+  { value: "maintainer", labelKey: "projectSettings.cellEditing.optionMaintainer" },
+  { value: "project_lead", labelKey: "projectSettings.cellEditing.optionProjectLead" },
+  { value: "contributor", labelKey: "projectSettings.cellEditing.optionContributor" },
+]
+
 // Well-known OpenAI-compatible providers. Exactly one of `label`/`labelKey` is
 // set per entry: `labelKey` for the two real English descriptions ("Local /
 // self-hosted…", "Other…"), translated at render via presetLabel() below.
@@ -229,7 +248,7 @@ interface Baseline {
   validationNamedUsers: string[]
   allowSelfValidation: boolean
   /** AQU-646: may people add lines into the timeline's silences? */
-  allowLineCreation: boolean
+  cellEditingFloor: "none" | "maintainer" | "project_lead" | "contributor"
   timingLocked: boolean
   harmonize_min_role: "project_lead" | "maintainer"
   /** AQU-460: EXPLICIT persisted value only. `undefined` = no explicit choice
@@ -277,7 +296,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     allowSelfValidation: project.allowSelfValidation ?? true,
     // Off unless a project has said otherwise: the affordance is speculative
     // and underdeveloped, so absent must read as off, not as unset.
-    allowLineCreation: project.allowLineCreation ?? false,
+    cellEditingFloor: project.cellEditingFloor ?? "none",
     // AQU-646: absent means LOCKED, so the box starts ticked on every project
     // that predates the setting. See resolveTimingLocked.
     timingLocked: resolveTimingLocked(project),
@@ -460,7 +479,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [validationRoleFloor, setValidationRoleFloor] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
   const [validationNamedUsers, setValidationNamedUsers] = useState<string[]>([])
   const [allowSelfValidation, setAllowSelfValidation] = useState(true)
-  const [allowLineCreation, setAllowLineCreation] = useState(false)
+  const [cellEditingFloor, setCellEditingFloor] = useState<"none" | "maintainer" | "project_lead" | "contributor">("none")
   const [timingLocked, setTimingLocked] = useState(true)
   // AQU-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
   const [harmonizeMinRole, setHarmonizeMinRole] = useState<"project_lead" | "maintainer">("project_lead")
@@ -521,7 +540,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setValidationRoleFloor(b.validationRoleFloor)
     setValidationNamedUsers(b.validationNamedUsers)
     setAllowSelfValidation(b.allowSelfValidation)
-    setAllowLineCreation(b.allowLineCreation)
+    setCellEditingFloor(b.cellEditingFloor)
     setTimingLocked(b.timingLocked)
     setHarmonizeMinRole(b.harmonize_min_role)
     setBibleResourcesEnabled(b.bibleResourcesEnabled)
@@ -621,7 +640,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       validationRoleFloor !== baseline.validationRoleFloor ||
       JSON.stringify(validationNamedUsers) !== JSON.stringify(baseline.validationNamedUsers) ||
       allowSelfValidation !== baseline.allowSelfValidation ||
-      allowLineCreation !== baseline.allowLineCreation ||
+      cellEditingFloor !== baseline.cellEditingFloor ||
       timingLocked !== baseline.timingLocked ||
       harmonizeMinRole !== baseline.harmonize_min_role ||
       bibleResourcesEnabled !== baseline.bibleResourcesEnabled ||
@@ -637,7 +656,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
-    validationRoleFloor, validationNamedUsers, allowSelfValidation, allowLineCreation,
+    validationRoleFloor, validationNamedUsers, allowSelfValidation, cellEditingFloor,
     timingLocked,
     harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
     precedingTargetCells, importExcludeFrontMatter,
@@ -845,7 +864,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         changedFieldLabels.push("named validators")
       }
       if (allowSelfValidation !== baseline.allowSelfValidation) { sharedUpdates.allowSelfValidation = allowSelfValidation; changedFieldLabels.push("self-validation") }
-      if (allowLineCreation !== baseline.allowLineCreation) { sharedUpdates.allowLineCreation = allowLineCreation; changedFieldLabels.push("adding timeline lines") }
+      if (cellEditingFloor !== baseline.cellEditingFloor) { sharedUpdates.cellEditingFloor = cellEditingFloor; changedFieldLabels.push("who can add and remove cells") }
       if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked; changedFieldLabels.push("the timing lock") }
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
       if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible resources") }
@@ -917,7 +936,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         validationRoleFloor,
         validationNamedUsers,
         allowSelfValidation,
-        allowLineCreation,
+        cellEditingFloor,
         timingLocked,
         harmonize_min_role: harmonizeMinRole,
         bibleResourcesEnabled,
@@ -1026,6 +1045,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
+    // AQU-1068: a permission, so it lives with the roles rather than in the
+    // Timeline card it grew out of — it governs ordinary text files now, not
+    // just the timeline's silences.
+    { id: "section-cell-editing", label: "Content structure", keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role"] },
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot"] },
     { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
@@ -1094,11 +1117,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "members",
       label: "Members",
-      description: "Who can access this project, invites, and roles",
+      description: "Who can access this project, invites, roles, and who may restructure content",
       icon: Users,
       hub: "Project",
       wide: true,
-      sectionIds: ["section-members"],
+      sectionIds: ["section-members", "section-cell-editing"],
     },
     {
       id: "source-sync",
@@ -1673,6 +1696,49 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-members")}
         {id && sectionsToRender.some((s) => s.id === "section-members") && (
           <MembersSection projectId={id} />
+        )}
+
+        {searchGroupLabel("section-cell-editing")}
+        {sectionsToRender.some((s) => s.id === "section-cell-editing") && (
+          <div id="section-cell-editing">
+            {/* AQU-1068. One setting answers WHO; the file's own nature answers
+                WHERE — a text file takes a cell anywhere, a subtitle file only
+                in a gap — so nothing here mentions timings or media. */}
+            <SettingsGroup label={t("projectSettings.cellEditing.sectionTitle")}>
+              <SettingsRow
+                label={<label htmlFor="cell-editing-floor">{t("projectSettings.cellEditing.label")}</label>}
+                description={t("projectSettings.cellEditing.description")}
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Select
+                      items={CELL_EDITING_FLOOR_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+                      disabled={!canEditShared}
+                      value={cellEditingFloor}
+                      onValueChange={(value) =>
+                        setCellEditingFloor((value ?? cellEditingFloor) as typeof cellEditingFloor)
+                      }
+                    >
+                      <SelectTrigger
+                        id="cell-editing-floor"
+                        data-testid="settings-cell-editing-floor"
+                        aria-label={t("projectSettings.cellEditing.label")}
+                        className="w-64 bg-background"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {CELL_EDITING_FLOOR_OPTIONS.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>{t(o.labelKey)}</SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </DisabledFieldTooltip>
+                }
+              />
+            </SettingsGroup>
+          </div>
         )}
 
         {searchGroupLabel("section-ai-instructions")}
@@ -2275,21 +2341,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   {t("projectSettings.timeline.lockLabel")}
                   <p className="mt-1 text-xs text-muted-foreground">
                     {t("projectSettings.timeline.lockHint")}
-                  </p>
-                </label>
-              </div>
-              <div className="flex items-start gap-2">
-                <Checkbox
-                  id="allow-line-creation"
-                  data-testid="settings-allow-line-creation"
-                  checked={allowLineCreation}
-                  disabled={!canEditShared}
-                  onCheckedChange={(checked) => setAllowLineCreation(checked)}
-                />
-                <label htmlFor="allow-line-creation" className="text-sm">
-                  {t("projectSettings.timeline.addLinesLabel")}
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {t("projectSettings.timeline.addLinesHint")}
                   </p>
                 </label>
               </div>

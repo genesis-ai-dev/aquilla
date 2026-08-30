@@ -21,9 +21,9 @@ describe("requiredRoleFor — target.* (translator)", () => {
 })
 
 describe("requiredRoleFor — source.* (importer / admin)", () => {
-  // Sam, 2026-08-21: create/delete dropped to CONTRIBUTOR so the
-  // `allowLineCreation` setting can admit contributors; authorize.ts
-  // conditionally re-imposes PROJECT_LEAD (see authorize-line-creation.test.ts).
+  // AQU-1068: create/delete sit at CONTRIBUTOR because this table is the
+  // LOWEST reachable floor, not the operative one — the project's
+  // `cellEditingFloor` is the real gate (see authorize-cell-editing.test.ts).
   it("returns CONTRIBUTOR for source.cell.create — the conditional floor lives in authorize", () => {
     expect(requiredRoleFor('source.cell.create')).toBe(ROLE.CONTRIBUTOR)
   })

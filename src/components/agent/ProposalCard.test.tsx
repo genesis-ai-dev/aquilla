@@ -139,9 +139,9 @@ describe("rendering", () => {
   })
 
   it("gates source.cell.create at CONTRIBUTOR now — the server arbitrates the setting (AQU-890 → 2026-08-21)", () => {
-    // The static floor dropped so the `allowLineCreation` project setting can
+    // The static floor is the lowest reachable one; the project's
     // admit contributors; whether THIS project has opted in is the server's
-    // per-event call (sync-worker line-creation-authority.ts), not a fact the
+    // per-event call (sync-worker cell-editing-authority.ts), not a fact the
     // card can know. So a contributor may try, and a viewer still may not.
     const proposal = makeProposal({
       events: [

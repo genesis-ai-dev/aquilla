@@ -475,8 +475,8 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
  * target.cell.commit (CONTRIBUTOR); PlanImport compiles to file.create +
  * source.cell.create, and the max keeps it at file.create's PROJECT_LEAD even
  * now that source.cell.create's static floor is CONTRIBUTOR (the app-side
- * `allowLineCreation` carve-out — see line-creation-authority.ts — which this
- * surface deliberately does not extend). Staging a plan you could never commit
+ * `cellEditingFloor` gate — see cell-editing-authority.ts — which the /events
+ * perimeter applies to this surface too). Staging a plan you could never commit
  * leaks the server-computed effect summary, so prepare enforces this too.
  */
 export function requiredRoleForCommand(c: Command): number {

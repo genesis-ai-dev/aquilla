@@ -174,10 +174,27 @@ describe('POST /events — authorization', () => {
     expect(body.rejected[0].status).toBe(403)
   })
 
-  it('accepts source.cell.* from a PROJECT_LEAD token', async () => {
+  it('rejects source.cell.* from a PROJECT_LEAD token while the project has not opted in', async () => {
+    // AQU-1068: the static CONTRIBUTOR floor is no longer the operative gate.
+    // `cellEditingFloor` defaults to "none", which refuses every rank — a lead
+    // included, and an owner too.
     const token = await makeToken({ role: 500 })
     const event = sourceCreate()
-    const { db, snapshot } = await makeTestDb()
+    const { db } = await makeTestDb()
+    const res = (await handleEventsWriteRequest(await makeRequest([event], token), makeEnv(db)))!
+    const body = await res.json() as any
+    expect(body.rejected).toHaveLength(1)
+    expect(body.rejected[0].status).toBe(403)
+  })
+
+  it('accepts source.cell.* from a PROJECT_LEAD token once the project opts in', async () => {
+    const token = await makeToken({ role: 500 })
+    const event = sourceCreate()
+    const { db, snapshot } = await makeTestDb({
+      project_settings: [
+        { project_id: 'proj-a', settings: JSON.stringify({ cellEditingFloor: 'project_lead' }) },
+      ],
+    })
     const res = (await handleEventsWriteRequest(await makeRequest([event], token), makeEnv(db)))!
     const body = await res.json() as any
     expect(body.accepted).toHaveLength(1)
@@ -393,10 +410,21 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
   const srcCreate = () =>
     sourceCreate({ id: 'evt-src', payload: { cellId: 'cell-1', value: 'source text' } })
 
+  // These tests are about chain-slot arbitration, not about who may restructure
+  // a file — but each seeds a `source.cell.create`, which AQU-1068 gates on the
+  // project having opted in. Opt them in so the gate stays out of the way of
+  // what they actually assert.
+  const makeChainDb = () =>
+    makeTestDb({
+      project_settings: [
+        { project_id: 'proj-a', settings: JSON.stringify({ cellEditingFloor: 'project_lead' }) },
+      ],
+    })
+
   it("two lanes' first commits share the source parent and BOTH project (separate requests)", async () => {
     const leadToken = await makeToken({ role: 500 })
     const token = await makeToken()
-    const { db, snapshot } = await makeTestDb()
+    const { db, snapshot } = await makeChainDb()
 
     await handleEventsWriteRequest(await makeRequest([srcCreate()], leadToken), makeEnv(db))
 
@@ -431,7 +459,7 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
   it('a source correction after a target commit on the same parent still projects', async () => {
     const leadToken = await makeToken({ role: 500 })
     const token = await makeToken()
-    const { db, snapshot } = await makeTestDb()
+    const { db, snapshot } = await makeChainDb()
 
     await handleEventsWriteRequest(await makeRequest([srcCreate()], leadToken), makeEnv(db))
     await handleEventsWriteRequest(
@@ -476,7 +504,7 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
     // lane head, and the next commit chains cleanly.
     const leadToken = await makeToken({ role: 500 })
     const token = await makeToken()
-    const { db, snapshot } = await makeTestDb()
+    const { db, snapshot } = await makeChainDb()
 
     await handleEventsWriteRequest(await makeRequest([srcCreate()], leadToken), makeEnv(db))
     await handleEventsWriteRequest(
@@ -560,7 +588,7 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
   it('a same-lane sibling still loses its slot (AD-2 preserved per lane)', async () => {
     const leadToken = await makeToken({ role: 500 })
     const token = await makeToken()
-    const { db, snapshot } = await makeTestDb()
+    const { db, snapshot } = await makeChainDb()
 
     await handleEventsWriteRequest(await makeRequest([srcCreate()], leadToken), makeEnv(db))
     await handleEventsWriteRequest(

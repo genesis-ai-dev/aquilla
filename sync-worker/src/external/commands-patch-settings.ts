@@ -62,6 +62,9 @@ export const POLICY_SETTINGS_KEYS: readonly string[] = [
   'allowSelfValidation',
   'harmonize_min_role',
   'contributeToGlobalTm',
+  // AQU-1068: the tier that decides who may add and remove cells. An agent
+  // that could raise this could authorise its own restructuring of a file.
+  'cellEditingFloor',
 ]
 
 const POLICY_KEY_SET = new Set(POLICY_SETTINGS_KEYS)

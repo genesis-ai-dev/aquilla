@@ -305,7 +305,7 @@ export function buildBulkSourceCellCreateStmt(
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'comments' | 'cell_backtranslations' | 'cell_links'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'comments' | 'cell_backtranslations' | 'cell_links' | 'cell_word_morph'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -852,9 +852,138 @@ export function buildEventProjectionStmts(
           )
           .bind(event.projectId, event.fileId, event.cellId, side, lane, ...gateBinds),
       )
+
+      // AQU-1068: TAKE THE CELL'S DEPENDENTS WITH IT.
+      //
+      // Nothing in the schema references `cells`, so nothing cascades — and
+      // until this feature only an EMPTY line a person had added by hand could
+      // be removed, which is precisely why that restriction existed. Removing
+      // an imported cell is the new capability, and an imported cell is exactly
+      // the one likely to carry validations, takes, pairings and comments.
+      // Left behind, every one of them points at a row that no longer exists.
+      //
+      // THIS BELONGS IN THE PROJECTION, not in the route. Projection tables are
+      // rebuilt by replaying the event log (rebuild.ts), and a rebuild wipes
+      // only `cells`, `cell_validators` and `file_section_progress` — so
+      // cleanup done anywhere else would simply never be re-applied, and the
+      // orphans would come back the first time somebody rebuilt. Replaying
+      // these is safe: deleting what is already gone is a no-op.
+      //
+      // Gated on `${gateAnd}` like the cells write above: a delete that LOST
+      // its chain slot must not strip the surviving cell of its dependents.
+      const dependentBinds = [event.projectId, event.fileId, event.cellId]
+      if (event.kind === 'source.cell.delete') {
+        // The whole cell is going. Every lane's validators go with it — the
+        // target rows are removed by their own per-lane events, but their
+        // validator rows are keyed on the cell and would outlive them.
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cell_validators
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?${gateAnd}`,
+            )
+            .bind(...dependentBinds, ...gateBinds),
+        )
+        // Takes: SOFT-deleted, the same shape `cell.audio.remove` uses (a
+        // `deleted` flag, not a DELETE). The R2 bytes outlive the row either
+        // way — an orphan sweep is separate work — and keeping the row keeps
+        // the object key discoverable for it.
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cell_audio SET deleted = 1, selected = 0
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?${gateAnd}`,
+            )
+            .bind(...dependentBinds, ...gateBinds),
+        )
+        // Pairings: TOMBSTONED (`linked = 0`), not deleted, because that is
+        // what unlinking means here — the schema comment on cell_links spells
+        // out why a hard delete would let a replayed import-time linker
+        // resurrect an edge. The cell can sit at either end of the pair.
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE cell_links SET linked = 0
+               WHERE project_id = ?
+                 AND ((from_file_id = ? AND from_cell_id = ?)
+                   OR (to_file_id = ? AND to_cell_id = ?))${gateAnd}`,
+            )
+            .bind(
+              event.projectId,
+              event.fileId,
+              event.cellId,
+              event.fileId,
+              event.cellId,
+              ...gateBinds,
+            ),
+        )
+        // Comments: soft-deleted exactly as `comment.delete` does it, so a
+        // thread on a removed cell reads as deleted rather than as a thread
+        // pointing nowhere. Replies carry the same cell scope as their root.
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE comments SET body = '', deleted_at = ?, updated_at = ?
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?
+                 AND scope_kind = 'cell' AND deleted_at IS NULL${gateAnd}`,
+            )
+            .bind(event.serverTs, event.serverTs, ...dependentBinds, ...gateBinds),
+        )
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cell_waivers
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?${gateAnd}`,
+            )
+            .bind(...dependentBinds, ...gateBinds),
+        )
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cell_backtranslations
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?${gateAnd}`,
+            )
+            .bind(...dependentBinds, ...gateBinds),
+        )
+        // Morph analysis is written by the /import-morph route, never by an
+        // event — so this DELETE is its only cleanup path anywhere. Harmless
+        // on replay for the same reason as the rest.
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cell_word_morph
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?${gateAnd}`,
+            )
+            .bind(...dependentBinds, ...gateBinds),
+        )
+      } else {
+        // A target delete removes ONE lane. Only that lane's validators go;
+        // the cell and every sibling lane stay exactly as they were.
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cell_validators
+               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND target_lang = ?${gateAnd}`,
+            )
+            .bind(...dependentBinds, lane, ...gateBinds),
+        )
+      }
+
       if (!opts?.deferFileCounters)
         stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))
-      return ['cells', 'files']
+      return event.kind === 'source.cell.delete'
+        ? [
+            'cells',
+            'files',
+            'cell_validators',
+            'cell_audio',
+            'cell_links',
+            'comments',
+            'cell_waivers',
+            'cell_backtranslations',
+            'cell_word_morph',
+          ]
+        : ['cells', 'files', 'cell_validators']
     }
 
     case 'source.cell.reorder':

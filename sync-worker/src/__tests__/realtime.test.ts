@@ -254,10 +254,13 @@ describe('parseRealtimeMessage — invalid inputs return null', () => {
 // ---------------------------------------------------------------------------
 
 describe('PROJECTION_TABLES', () => {
-  it('contains exactly 10 entries, matching the ProjectionTable union arity', () => {
+  it('contains exactly 12 entries, matching the ProjectionTable union arity', () => {
     // If you add a new ProjectionTable variant, update PROJECTION_TABLES too.
-    // This test catches the drift.
-    const expectedArity = 10 // events | cells | files | cell_validators | cell_waivers | cell_audio | comments | cell_backtranslations | assignments | assignment_cells
+    // This test catches the drift — and it did: `cell_links` had been in the
+    // union but not the Set, which silently voided every dirty message that
+    // named it, because the validator rejects the whole message when one
+    // table is unrecognised.
+    const expectedArity = 12 // events | cells | files | cell_validators | cell_waivers | cell_audio | comments | cell_backtranslations | assignments | assignment_cells | cell_links | cell_word_morph
     expect(PROJECTION_TABLES.size).toBe(expectedArity)
   })
 })

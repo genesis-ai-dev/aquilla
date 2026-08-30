@@ -8,7 +8,7 @@ import type { EventKind } from './types'
 // Tables that can be invalidated via projection.dirty messages.
 // Adding a new projection table requires adding it here so clients can
 // invalidate the corresponding query keys.
-export type ProjectionTable = 'events' | 'cells' | 'files' | 'cell_validators' | 'cell_waivers' | 'cell_audio' | 'comments' | 'cell_backtranslations' | 'assignments' | 'assignment_cells' | 'cell_links'
+export type ProjectionTable = 'events' | 'cells' | 'files' | 'cell_validators' | 'cell_waivers' | 'cell_audio' | 'comments' | 'cell_backtranslations' | 'assignments' | 'assignment_cells' | 'cell_links' | 'cell_word_morph'
 
 // Single source of truth for valid ProjectionTable runtime values. The Set
 // and the type must stay in sync — adding a new table requires updating both.
@@ -24,6 +24,13 @@ const PROJECTION_TABLES: ReadonlySet<string> = new Set<ProjectionTable>([
   'cell_backtranslations',
   'assignments',
   'assignment_cells',
+  // Was in the ProjectionTable union but never here — so every
+  // `projection.dirty` naming it was thrown away WHOLE (the validator below
+  // rejects the message if any one table is unrecognised), taking the `cells`
+  // and `files` invalidations riding with it. Found by the arity guard.
+  'cell_links',
+  // AQU-1068: a source.cell.delete now clears the cell's morph rows.
+  'cell_word_morph',
 ])
 
 // Discriminated union for client-bound Realtime messages. Adding a new

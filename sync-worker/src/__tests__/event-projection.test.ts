@@ -936,3 +936,119 @@ describe('isChainMutatingKind', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// AQU-1068 — a removed cell takes its dependents with it
+// ---------------------------------------------------------------------------
+
+describe('source.cell.delete — dependent cleanup', () => {
+  // Nothing in the schema references `cells`, so nothing cascades on its own.
+  // Until AQU-1068 that did not matter: only an EMPTY line a person had added
+  // by hand could be removed. Removing an imported cell is the new capability,
+  // and an imported cell is exactly the one carrying validations, takes,
+  // pairings and comments.
+  //
+  // This lives in the PROJECTION rather than the route because projection
+  // tables are rebuilt by replaying the event log, and a rebuild wipes only
+  // `cells`, `cell_validators` and `file_section_progress` — cleanup done
+  // anywhere else would never be re-applied.
+
+  function deleteStmts(kind: 'source.cell.delete' | 'target.cell.delete', payload: unknown = {}) {
+    const { db, recorded } = makeD1Stub()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(db, makeEvent(kind, payload), stmts)
+    return recorded
+  }
+
+  const sqlFor = (recorded: RecordedStmt[], table: string) =>
+    recorded.filter((r) => r.sql.includes(table))
+
+  it('clears every lane of validators for the cell', () => {
+    const rows = sqlFor(deleteStmts('source.cell.delete'), 'cell_validators')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].sql).toContain('DELETE FROM cell_validators')
+    // No target_lang term: the whole cell is going, so every lane goes.
+    expect(rows[0].sql).not.toContain('target_lang')
+    expect(rows[0].args).toEqual(['proj-1', 'file-a', 'cell-1'])
+  })
+
+  it('soft-deletes takes rather than dropping the rows', () => {
+    // Same shape cell.audio.remove uses. The R2 bytes outlive the row either
+    // way, and keeping it keeps the object key discoverable for a sweep.
+    const rows = sqlFor(deleteStmts('source.cell.delete'), 'cell_audio')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].sql).toContain('UPDATE cell_audio SET deleted = 1, selected = 0')
+    expect(rows[0].sql).not.toContain('DELETE FROM cell_audio')
+  })
+
+  it('tombstones pairings at either end of the link, never deleting them', () => {
+    const rows = sqlFor(deleteStmts('source.cell.delete'), 'cell_links')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].sql).toContain('UPDATE cell_links SET linked = 0')
+    expect(rows[0].sql).toContain('from_cell_id = ?')
+    expect(rows[0].sql).toContain('to_cell_id = ?')
+    expect(rows[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'file-a', 'cell-1'])
+  })
+
+  it('soft-deletes the cell-scoped comments the way comment.delete does', () => {
+    const rows = sqlFor(deleteStmts('source.cell.delete'), 'UPDATE comments')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].sql).toContain("SET body = '', deleted_at = ?")
+    expect(rows[0].sql).toContain("scope_kind = 'cell'")
+    expect(rows[0].sql).toContain('deleted_at IS NULL')
+  })
+
+  it('drops waivers, back-translations and morph rows', () => {
+    const recorded = deleteStmts('source.cell.delete')
+    for (const table of ['cell_waivers', 'cell_backtranslations', 'cell_word_morph']) {
+      const rows = sqlFor(recorded, table)
+      expect(rows, table).toHaveLength(1)
+      expect(rows[0].sql, table).toContain(`DELETE FROM ${table}`)
+      expect(rows[0].args, table).toEqual(['proj-1', 'file-a', 'cell-1'])
+    }
+  })
+
+  it('reports every table it touched, so clients invalidate all of them', () => {
+    // The realtime validator rejects a projection.dirty message WHOLE when one
+    // of its tables is unrecognised — so an unreported (or unregistered) table
+    // would take the `cells` invalidation down with it, and a collaborator
+    // would keep seeing the removed row until they reloaded.
+    const { db } = makeD1Stub()
+    const touched = buildEventProjectionStmts(db, makeEvent('source.cell.delete', {}), [])
+    expect(touched).toEqual(
+      expect.arrayContaining([
+        'cells', 'files', 'cell_validators', 'cell_audio', 'cell_links',
+        'comments', 'cell_waivers', 'cell_backtranslations', 'cell_word_morph',
+      ]),
+    )
+  })
+
+  it('a TARGET delete clears only its own lane, and touches nothing else', () => {
+    const recorded = deleteStmts('target.cell.delete', { targetLang: 'fr' })
+    const validators = sqlFor(recorded, 'cell_validators')
+    expect(validators).toHaveLength(1)
+    expect(validators[0].sql).toContain('target_lang = ?')
+    expect(validators[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'fr'])
+    // The cell itself survives a lane delete, so its takes, pairings and
+    // comments must all survive with it.
+    for (const table of ['cell_audio', 'cell_links', 'UPDATE comments', 'cell_waivers', 'cell_word_morph']) {
+      expect(sqlFor(recorded, table), table).toHaveLength(0)
+    }
+  })
+
+  it('gates every dependent write on the chain claim, like the cells write', () => {
+    // A delete that LOST its chain slot must not strip the surviving cell of
+    // its dependents.
+    const { db, recorded } = makeD1Stub()
+    buildEventProjectionStmts(db, makeEvent('source.cell.delete', {}), [], {
+      chainGate: {
+        projectId: 'proj-1', fileId: 'file-a', cellId: 'cell-1', parentKey: '<null>',
+      },
+    })
+    const dependents = recorded.filter((r) =>
+      /cell_validators|cell_audio|cell_links|UPDATE comments|cell_waivers|cell_backtranslations|cell_word_morph/.test(r.sql),
+    )
+    expect(dependents.length).toBeGreaterThan(0)
+    for (const r of dependents) expect(r.sql, r.sql).toContain('chain_claims')
+  })
+})

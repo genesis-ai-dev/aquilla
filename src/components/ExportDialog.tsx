@@ -86,6 +86,7 @@ import {
   idmlOrgEligible,
 } from "@/lib/idml/release-gate"
 import { idmlTelemetryProperties } from "@/lib/idml/telemetry"
+import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
 
 export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
@@ -402,6 +403,21 @@ export function ExportDialog({
       : option
   )), [effectiveIdmlCopy.description, effectiveIdmlCopy.label])
   const nativeOption = nativeFormatId ? formatOptions.find((f) => f.id === nativeFormatId)! : null
+
+  /**
+   * AQU-1068: how many cells in this file were ADDED here rather than imported.
+   *
+   * The native formats round-trip by substituting translations back into the
+   * client's own file — USFM by canonical ref, docx/pptx/IDML by position in
+   * the original package. A cell born in the app has nothing to substitute
+   * into, so it cannot appear in that output. That is inherent, not a bug.
+   *
+   * Saying so is what keeps it from being a silent loss: someone types a
+   * missing verse into an added row, exports, and their file quietly does not
+   * contain it. Sam settled this on 2026-08-30 — allow the inserts everywhere,
+   * and make the omission loud at the moment it applies.
+   */
+  const addedLineCount = useMemo(() => cells.filter(isUserAddedLine).length, [cells])
 
   const [format, setFormat] = useState<ExportFormat>(nativeFormatId ?? "tsv")
   const [scope, setScope] = useState<ExportScope>("file")
@@ -1759,6 +1775,8 @@ export function ExportDialog({
             <p className="text-xs text-muted-foreground text-center leading-relaxed">
               {t("importExport.dialog.nativeFormatHint", { label: t(nativeOption.labelKey) })}
               {nativeOption.lossy && ` ${t("importExport.dialog.someFormattingMayNotCarryOver")}`}
+              {addedLineCount > 0 &&
+                ` ${t("importExport.dialog.addedLinesNotIncluded", { count: addedLineCount })}`}
             </p>
           </div>
         )}

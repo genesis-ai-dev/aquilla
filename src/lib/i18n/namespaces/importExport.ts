@@ -509,6 +509,13 @@ export const importExport = defineNamespace({
     "importExport.dialog.downloadFile": "Download {fileName}",
     "importExport.dialog.nativeFormatHint": "{label} — your file in its original format, with current translations.",
     "importExport.dialog.someFormattingMayNotCarryOver": "Some inline formatting may not carry over.",
+    // AQU-1068: shown beside the native (round-trip) format only. These
+    // exports patch translations back into the client's own file, so a cell
+    // added here has nothing to be patched into and cannot appear.
+    "importExport.dialog.addedLinesNotIncluded": plural({
+      one: "{count} cell added here isn\u2019t part of the original file, so it won\u2019t be included.",
+      other: "{count} cells added here aren\u2019t part of the original file, so they won\u2019t be included.",
+    }),
     "importExport.dialog.formatOptionAriaLabel": "{label} ({ext})",
     "importExport.dialog.lossyBadge": "lossy",
     "importExport.dialog.permissionRequiredAriaLabel": "Export permission required",
@@ -1300,6 +1307,17 @@ export const importExport = defineNamespace({
       "importExport.dialog.downloadFile": {
         description: "Label of the primary download button on the Export dialog, naming the exact file it will produce.",
         placeholders: { fileName: "Filename (with extension) the download will produce — not translated." },
+      },
+      "importExport.dialog.addedLinesNotIncluded": {
+        description:
+          "Appended to the native (round-trip) format's hint in the Export dialog, and only " +
+          "when the file contains cells somebody added inside the app. Those formats work by " +
+          "putting translations back into the user's ORIGINAL file, so a cell that was never " +
+          "in that file has nowhere to go and is left out. Warns them before they download.",
+        placeholders: {
+          count:
+            "How many added cells the file has; it also selects which plural form is used.",
+        },
       },
       "importExport.dialog.nativeFormatHint": {
         description: "Caption below the primary download button, naming the file's own format.",

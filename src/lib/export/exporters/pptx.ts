@@ -23,6 +23,7 @@
 import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
 import { packageBlockKey, translationsByPackageBlock } from "../import-locators"
+import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
 
 export interface PptxExportResult {
   blob: Blob
@@ -73,6 +74,13 @@ export async function exportPptx(
   const groupToTranslation = new Map<string, string>()
 
   for (const cell of cells) {
+    // AQU-1068: a line somebody ADDED here has no place in the original
+    // package, and the legacy fallback below maps cells to paragraphs BY
+    // POSITION — so letting one into this array shifts every mapping after it
+    // and writes translations into the wrong paragraphs of the client's own
+    // document. Locator-based files are already immune (an added line has no
+    // locator, so it is simply skipped); this is the positional path's guard.
+    if (isUserAddedLine(cell)) continue
     const legacyGroup = cell.group || cell.id
     if (!groupToTranslation.has(legacyGroup)) {
       groupOrder.push(legacyGroup)

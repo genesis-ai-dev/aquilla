@@ -50,6 +50,7 @@ import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
 import { htmlToSpans, spansToRunXml } from "./docx-runs"
 import { packageBlockKey, translationsByPackageBlock } from "../import-locators"
+import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
@@ -81,22 +82,28 @@ export interface DocxExportResult {
  * A paragraph is "non-empty" iff its inner content contains a `<w:t…>…</w:t>`
  * with non-whitespace text.
  */
-export async function exportDocx(
-  rawDocxBytes: ArrayBuffer,
-  cells: CellData[],
-): Promise<DocxExportResult> {
-  const zip = await JSZip.loadAsync(rawDocxBytes)
-
-  const xml = await zip.file("word/document.xml")?.async("string")
-  if (!xml) {
-    throw new Error("Malformed DOCX: word/document.xml not found in side-car")
-  }
-
-  // Build ordered groups and their translations/html from cells in document order.
+/**
+ * The legacy, LOCATOR-LESS mapping: cells to document paragraphs by POSITION,
+ * grouped by canonical ref. Files imported before package locators existed have
+ * only this, which makes the array's contents load-bearing — every entry is a
+ * paragraph slot in the client's own document.
+ *
+ * Exported so the added-line guard below can be tested directly; the positional
+ * path is otherwise only reachable through a whole .docx package.
+ */
+export function buildLegacyGroups(cells: CellData[]): {
+  groups: string[]
+  groupToData: Map<string, { html: string; plain: string }>
+} {
   const groups: string[] = []
   const groupToData = new Map<string, { html: string; plain: string }>()
-
   for (const cell of cells) {
+    // AQU-1068: a line somebody ADDED here has no paragraph in the original
+    // package, so letting it consume a slot shifts every mapping after it and
+    // writes translations into the WRONG paragraphs of the client's document.
+    // Locator-based files are already immune — an added line has no locator, so
+    // `translationsByPackageBlock` skips it. This is the positional path's guard.
+    if (isUserAddedLine(cell)) continue
     const legacyGroup = cell.group || cell.id
     if (!groupToData.has(legacyGroup)) {
       groups.push(legacyGroup)
@@ -112,6 +119,21 @@ export async function exportDocx(
       data.html = prev ? `${prev} ${cell.translatedHtml.trim()}` : cell.translatedHtml.trim()
     }
   }
+  return { groups, groupToData }
+}
+
+export async function exportDocx(
+  rawDocxBytes: ArrayBuffer,
+  cells: CellData[],
+): Promise<DocxExportResult> {
+  const zip = await JSZip.loadAsync(rawDocxBytes)
+
+  const xml = await zip.file("word/document.xml")?.async("string")
+  if (!xml) {
+    throw new Error("Malformed DOCX: word/document.xml not found in side-car")
+  }
+
+  const { groups, groupToData } = buildLegacyGroups(cells)
   const locatedTranslations = translationsByPackageBlock(cells)
   const hasLocatedTranslations = locatedTranslations.size > 0
 

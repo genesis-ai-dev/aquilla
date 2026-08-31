@@ -44,8 +44,11 @@ const placeholdersIn = (s: string): Set<string> =>
   new Set([...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]))
 
 /** Every placeholder the English side of a key can supply, plus its count var. */
-function allowedFor(key: MessageKey): Set<string> {
+function allowedFor(key: MessageKey): Set<string> | null {
   const base = en[key]
+  // Stale translated keys (English removed the message) are not a placeholder
+  // issue — skip them so this suite fails on braces, not `undefined.matchAll`.
+  if (base === undefined) return null
   const allowed = new Set<string>()
   if (isPluralMessage(base)) {
     for (const category of PLURAL_CATEGORIES) {
@@ -83,6 +86,7 @@ describe("translated catalogs preserve placeholder integrity", () => {
       for (const [key, value] of Object.entries(catalog ?? {})) {
         if (value === undefined) continue
         const allowed = allowedFor(key as MessageKey)
+        if (allowed === null) continue
         for (const [category, form] of formsOf(value)) {
           for (const name of placeholdersIn(form)) {
             if (allowed.has(name)) continue
@@ -109,6 +113,7 @@ describe("translated catalogs preserve placeholder integrity", () => {
       for (const [key, value] of Object.entries(catalog ?? {})) {
         if (value === undefined) continue
         const base = en[key as MessageKey]
+        if (base === undefined) continue
         if (isPluralMessage(base) || isPluralMessage(value)) continue
         const expected = placeholdersIn(base)
         const actual = placeholdersIn(value)

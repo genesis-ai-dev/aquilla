@@ -8,7 +8,7 @@ import {
 } from "@legendapp/list/react"
 import {
   Check, AlertTriangle, AlertCircle,
-  MessageCircle, Play, Pause, Mic, MicOff, Sparkles, FileText,
+  MessageCircle, Play, Pause, Mic, MicOff, FileText,
   ArrowRight, Activity, NotebookPen, Pencil, ChevronDown, Music, Braces,
   Languages,
   Archive,
@@ -132,6 +132,7 @@ import {
 import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellActions"
 import { TargetValidationControl } from "./cell/TargetValidationControl"
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
+import { EDITOR_SURFACE_TOOLBAR_CLASS } from "./editor-surface-toolbar"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
 // popover (FRO-237). The component itself is no longer in the overflow popover.
@@ -843,9 +844,6 @@ interface EditorTableProps {
   onFootnoteCreated?: () => void
   /** Optional controls on the right of the chapter navigation row. */
   chapterNavTrailing?: React.ReactNode
-  /** Move chapter navigation into a shell-owned header slot. `null` reserves
-   *  the slot while it mounts; `undefined` keeps the legacy in-editor row. */
-  chapterNavPortalTarget?: HTMLElement | null
 }
 
 export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(function EditorTable({
@@ -889,7 +887,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   onVisibleFootnotesChange,
   onFootnoteCreated,
   chapterNavTrailing,
-  chapterNavPortalTarget,
 }, ref) {
   const t = useT()
   // DCS lockdown: while this project is pinned to a Door43 upstream, the
@@ -2403,38 +2400,28 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // querySelector in a mount effect would run too early and never retry.
   const stripNavSlot = useUiSlot("strip-nav")
 
-  const renderChapterNavigation = (portaled: boolean) => {
+  const renderChapterNavigation = () => {
     if (!showMilestoneNav && !chapterNavTrailing) return null
 
     return (
       <div
-        className={cn(
-          "relative flex min-w-0 items-center gap-2",
-          portaled
-            ? "max-w-[min(58vw,52rem)]"
-            : "border-b border-border bg-background/90 py-2 ps-2 pe-2 backdrop-blur-xl",
-        )}
+        data-testid="editor-chapter-row"
+        className={EDITOR_SURFACE_TOOLBAR_CLASS}
       >
-        {!portaled && showMilestoneNav ? (
+        {showMilestoneNav ? (
           <div className="hidden min-w-0 flex-1 lg:block" aria-hidden="true" />
         ) : null}
         {showMilestoneNav ? (
           <div
             data-chapter-nav-slot=""
-            className={cn(
-              "flex min-w-24 max-w-full items-center",
-              portaled
-                ? "min-w-0 shrink"
-                : "me-auto flex-1 lg:me-0 lg:flex-none lg:shrink",
-            )}
+            className="me-auto flex min-w-24 max-w-full flex-1 items-center lg:me-0 lg:flex-none lg:shrink"
           >
-            <div className={cn("min-w-0 max-w-full", portaled ? "w-auto" : "w-full lg:w-auto")}>
+            <div className="min-w-0 max-w-full w-full lg:w-auto">
               <MilestoneNavigator
                 items={milestoneNavigationItems}
                 activeKey={activeChapterLabel!}
                 activeSubsectionKey={activeSubsectionKey}
                 onSelect={handleChapterSelect}
-                compact={portaled}
               />
             </div>
           </div>
@@ -2443,12 +2430,12 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           <div
             className={cn(
               "flex shrink-0 items-center",
-              !portaled && showMilestoneNav ? "lg:flex-1 lg:justify-end" : "ms-auto",
+              showMilestoneNav ? "lg:flex-1 lg:justify-end" : "ms-auto",
             )}
           >
             {chapterNavTrailing}
           </div>
-        ) : !portaled && showMilestoneNav ? (
+        ) : showMilestoneNav ? (
           <div className="hidden min-w-0 flex-1 lg:block" aria-hidden="true" />
         ) : null}
       </div>
@@ -2476,10 +2463,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             {readOnlyLabel}
           </div>
         )}
-        {chapterNavPortalTarget
-          ? createPortal(renderChapterNavigation(true), chapterNavPortalTarget)
-          : null}
-        {chapterNavPortalTarget === undefined ? renderChapterNavigation(false) : null}
+        {renderChapterNavigation()}
         <div className={cn("grid gap-2 border-b border-border ps-2.5 pe-4 py-2 text-xs font-medium text-muted-foreground", gridCols)}>
           {/* With the character gutter on, the Source label sits over the
               gutter at the LEFT EDGE (Sam 2026-08-07) instead of floating a
@@ -2507,7 +2491,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
               </Badge>
             )}
           </div>
-          <div className="relative flex items-center justify-end gap-2 ps-6 pe-2 text-end">
+          <div data-testid="table-target-header" className="relative flex items-center gap-2 ps-6 pe-2">
             {t("editor.column.target")}
             {/* AQU-602 / AQU-583: the target-language tag doubles as the lane
                 switcher AND the entry point to change the target language.
@@ -6013,16 +5997,11 @@ function EditorRow({
                 </span>
               </AppTooltip>
             )}
-            {cell.aiDrafted && (
-              <Badge
-                variant="outline"
-                className="ms-auto h-4 shrink-0 gap-1 border-amber-500/40 bg-amber-500/10 px-1.5 text-[9px] font-medium text-amber-700 dark:text-amber-300"
-                aria-label={t("editor.ai.draftBadgeAria")}
-              >
-                <Sparkles className="size-2.5" />
-                {t("editor.ai.draftBadge")}
-              </Badge>
-            )}
+            {/* AQU-1041: no AI-draft tag here. The cell header renders the same
+                for a machine draft as for a human-typed one. The underlying
+                `cell.aiDrafted` provenance stays — the org overview's AI-drafted
+                stat, the selection bar's bulk-validate eligibility, and the
+                editor's draft-hydration rules all still read it. */}
             </>
           )}
         >

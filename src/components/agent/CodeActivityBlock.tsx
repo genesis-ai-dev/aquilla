@@ -34,7 +34,7 @@ export function CodeActivityBlock({ item }: { item: CodeActivityItem }) {
         className="flex w-full items-center gap-1.5 px-2 py-1 text-start text-[11px]"
       >
         <ChevronRight
-          className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
+          className={cn("h-3 w-3 shrink-0 text-muted-foreground", open && "rotate-90")}
         />
         <TerminalSquare className="h-3 w-3 shrink-0 text-muted-foreground" />
         <Badge variant="outline" className="px-1.5 py-0 font-mono text-[10px]">

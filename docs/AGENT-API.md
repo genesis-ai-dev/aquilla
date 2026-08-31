@@ -30,9 +30,10 @@ Status against the §6 release gates:
 Also not yet implemented, called out explicitly rather than left silent: `run_checks`, jobs
 (`get_job`), export (`prepare_export`/`get_export`), OAuth 2.1, and an MCP staging
 tool for `PlanImport` (REST-only). Full detail in `docs/api/agent-api.md` §8 and the running list
-in `docs/swarm/AGENT-API-TRACES.md`. Rate limiting is partial: `/search` (2026-07-30 pen test),
-changeset prepare/commit, and artifact upload are throttled per credential (2026-08-20 pen test);
-reads other than `/search` (project/file/cell GETs) and changeset GET/discard remain unlimited.
+in `docs/swarm/AGENT-API-TRACES.md`. Rate limiting is now complete: `/search` (2026-07-30 pen
+test), changeset prepare/commit, and artifact upload (2026-08-20 pen test), plus `/me`,
+`/projects`, project/file/cell GETs, artifact meta/content/inspect, and changeset GET/discard
+(2026-08-27 pen test) are all throttled per credential.
 
 ---
 

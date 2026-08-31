@@ -56,7 +56,9 @@ export function LanguageSwitcher({
       >
         <Globe className="size-4 shrink-0" aria-hidden />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-40">
+      {/* Opens upward like the sibling HelpMenu, but start-aligned so the
+          list grows from the globe toward the workspace, not off the rail. */}
+      <DropdownMenuContent align="start" side="top" sideOffset={4} className="min-w-40">
         <DropdownMenuRadioGroup value={locale} onValueChange={setLocale}>
           {locales.map((l) => (
             <DropdownMenuRadioItem

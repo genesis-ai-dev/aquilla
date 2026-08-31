@@ -18,6 +18,27 @@ import { ROLE } from '../events/role-policy'
 import type { ExternalEnv, StoredChangeset } from './types'
 import { validateApiCredential } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
+import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
+
+// [Pen test] API security & data exposure (2026-08-27): fetching and
+// discarding a changeset had no throttle — only prepare and commit did.
+// Narrower blast radius than the other read gaps (scoped to changesets the
+// same credential created), but closing it completes the lifecycle: every
+// external mutation/lookup on a changeset now shares one throttle regime.
+const CHANGESET_LIFECYCLE_MAX_PER_CREDENTIAL = 300
+
+async function checkChangesetLifecycleRateLimit(
+  db: AquillaDb,
+  credentialId: string,
+): Promise<Response | null> {
+  const identifier = `credential:${credentialId}`
+  const recent = await countRecentRateLimitEvents(db, 'external_changeset_lifecycle', identifier)
+  if (recent >= CHANGESET_LIFECYCLE_MAX_PER_CREDENTIAL) {
+    return errorResponse('rate_limited', 'changeset lifecycle rate limit exceeded, slow down')
+  }
+  await recordRateLimitEvent(db, 'external_changeset_lifecycle', identifier)
+  return null
+}
 
 const ROUTE_RE =
   /^\/api\/v1\/external\/projects\/([^/]+)\/changesets(?:\/([^/]+)(?:\/(commit|discard))?)?$/
@@ -37,6 +58,8 @@ async function handleGet(
   const db = env.AQUILLA_PG
   const cred = await validateApiCredential(db, bearer(request) ?? "")
   if (!cred) return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
+  const limited = await checkChangesetLifecycleRateLimit(db, cred.credentialId)
+  if (limited) return limited
 
   const cs = await loadChangeset(db, projectId, id)
   if (!cs) return errorResponse('not_found', `changeset ${id} not found`)
@@ -63,6 +86,8 @@ async function handleDiscard(
   const db = env.AQUILLA_PG
   const cred = await validateApiCredential(db, bearer(request) ?? "")
   if (!cred) return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
+  const limited = await checkChangesetLifecycleRateLimit(db, cred.credentialId)
+  if (limited) return limited
 
   const cs = await loadChangeset(db, projectId, id)
   if (!cs) return errorResponse('not_found', `changeset ${id} not found`)

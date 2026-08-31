@@ -30,7 +30,6 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { planCreatesProject, requiredRoleForChangeset } from "../lib/changeset-floor"
 import { resolveProjectRole } from "../services/project-permissions"
-import { getAssignmentMinRoleForProject } from "../services/org-permissions"
 import { ROLE, type AuthUser, type Env } from "../types"
 import { buildChangeDetails } from "../lib/changeset-approval-changes"
 
@@ -322,13 +321,11 @@ changesetApprovals.post(
       return c.json(body, status)
     }
 
-    // AQU-1037: routing carries the org's assignment floor, independent of
-    // the plan's approval floor. Projects without an org (or an explicit
-    // policy) retain the historical PROJECT_LEAD default.
-    const assignmentMinRole = await getAssignmentMinRoleForProject(c.env, cs.project_id)
+    // Routing is a lead action, so it carries its OWN floor (PROJECT_LEAD),
+    // independent of the plan's approval floor.
     const role = await resolveProjectRole(c.env, user, cs.project_id)
-    if (!role || role.level < assignmentMinRole) {
-      const { body, status } = floorDenied(assignmentMinRole, "assign")
+    if (!role || role.level < ROLE.PROJECT_LEAD) {
+      const { body, status } = floorDenied(ROLE.PROJECT_LEAD, "assign")
       return c.json(body, status)
     }
 

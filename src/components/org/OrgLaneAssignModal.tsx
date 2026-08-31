@@ -30,7 +30,6 @@ export interface OrgLaneAssignModalProps {
   jwt: string
   author: string
   allowSelfAssignment?: boolean
-  assignmentMinRole?: number
   callerUserId?: number | null
   onAssigned: () => void
   onClose: () => void
@@ -46,7 +45,6 @@ export function OrgLaneAssignModal({
   jwt,
   author,
   allowSelfAssignment = false,
-  assignmentMinRole = 500,
   callerUserId = null,
   onAssigned,
   onClose,
@@ -80,7 +78,6 @@ export function OrgLaneAssignModal({
       members={members}
       roleLevel={roleLevel}
       allowSelfAssignment={allowSelfAssignment}
-      assignmentMinRole={assignmentMinRole}
       callerUserId={callerUserId}
       selectedCellIds={EMPTY_SELECTION}
       jwt={jwt}

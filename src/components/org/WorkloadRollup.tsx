@@ -32,17 +32,7 @@ import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
  * label so a manager with assignments across multiple projects can tell
  * them apart.
  */
-export function WorkloadRollup({
-  jwt,
-  orgId,
-  action,
-  canUnassignProject = () => true,
-}: {
-  jwt: string
-  orgId: number
-  action?: ReactNode
-  canUnassignProject?: (projectId: string) => boolean
-}) {
+export function WorkloadRollup({ jwt, orgId, action }: { jwt: string; orgId: number; action?: ReactNode }) {
   const t = useT()
   const [rows, setRows] = useState<OrgWorkloadAssignment[] | null>(null)
   const [removingId, setRemovingId] = useState<string | null>(null)
@@ -116,23 +106,21 @@ export function WorkloadRollup({
                 </p>
                 <p className="text-xs text-muted-foreground tabular-nums">{pct}%</p>
               </div>
-              {canUnassignProject(a.projectId) && (
-                <AppTooltip content={t("org.workloadRollup.removeTooltip")}>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={t("org.workloadRollup.removeAriaLabel", {
-                      scope: a.scopeLabel,
-                      user: a.username ?? t("org.workloadRollup.unknownUser", { id: a.assigneeUserId }),
-                    })}
-                    disabled={removingId === a.assignmentId}
-                    onClick={() => void handleRemove(a)}
-                  >
-                    <X />
-                  </Button>
-                </AppTooltip>
-              )}
+              <AppTooltip content={t("org.workloadRollup.removeTooltip")}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t("org.workloadRollup.removeAriaLabel", {
+                    scope: a.scopeLabel,
+                    user: a.username ?? t("org.workloadRollup.unknownUser", { id: a.assigneeUserId }),
+                  })}
+                  disabled={removingId === a.assignmentId}
+                  onClick={() => void handleRemove(a)}
+                >
+                  <X />
+                </Button>
+              </AppTooltip>
             </div>
           )
         })}

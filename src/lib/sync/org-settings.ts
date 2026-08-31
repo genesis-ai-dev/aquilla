@@ -61,12 +61,6 @@ export interface OrgWideSettings {
    */
   allowSelfAssignment?: boolean
   /**
-   * AQU-1037: Minimum effective project role allowed to assign, reassign, or
-   * unassign file/chapter/target-lane work and route AI changesets. Default
-   * (when absent) = PROJECT_LEAD (500), preserving prior behavior.
-   */
-  assignmentMinRole?: number
-  /**
    * AQU-822: Minimum role level allowed to manage a project's termbase —
    * add, edit, delete, and archive concepts. Default (when absent) =
    * PROJECT_LEAD (500), the level the terminology UI has always shown the

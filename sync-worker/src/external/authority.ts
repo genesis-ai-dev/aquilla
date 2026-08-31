@@ -8,38 +8,26 @@
 //   a caller may act on a changeset when their LIVE project role is at or above
 //   the changeset's required floor,
 //
-// where the floor is `max(requiredRoleForCommand)` over the STORED commands,
-// with the current org assignment floor supplied for assignment EmitEvents.
-// The creator normally passes because prepare enforced the same floor; a
-// creator whose role or org policy has since changed is re-checked live.
+// where the floor is `max(requiredRoleForCommand)` over the STORED commands.
+// The floor function is the single source of truth (commands.ts); nothing here
+// re-derives it. The creator normally passes, because prepare enforced the same
+// floor at staging time; a creator whose role has since dropped does not, which
+// is the point of resolving the role live rather than trusting the stored one.
 //
 // This widens WHO may approve, never WHETHER approval is required: commit still
 // consumes an unconsumed ask-mode confirmation, and no agent surface can mint
 // one.
 
-import {
-  commandsContainAssignmentEvents,
-  requiredRoleForCommand,
-  type Command,
-} from './commands'
+import { requiredRoleForCommand, type Command } from './commands'
 import { errorResponse } from './errors'
 import type { StoredChangeset } from './types'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
-import {
-  DEFAULT_ASSIGNMENT_MIN_ROLE,
-  resolveAssignmentAuthority,
-} from '../events/assignment-authority'
 
 /** The floor a caller must hold to act on this plan — max over its commands. */
-export function requiredFloorForChangeset(
-  commands: readonly Command[],
-  assignmentMinRole: number = DEFAULT_ASSIGNMENT_MIN_ROLE,
-): number {
+export function requiredFloorForChangeset(commands: readonly Command[]): number {
   if (commands.length === 0) return 0
-  return Math.max(
-    ...commands.map((command) => requiredRoleForCommand(command, assignmentMinRole)),
-  )
+  return Math.max(...commands.map(requiredRoleForCommand))
 }
 
 /** True when a CreateProject plan keeps the creator rule: its authority is
@@ -63,10 +51,7 @@ export async function changesetAuthorityDenied(
     if (String(cs.createdByUserId) === String(cred.userId)) return null
     return errorResponse('permission_denied', 'only the changeset creator may access it')
   }
-  const assignmentMinRole = commandsContainAssignmentEvents(cs.commands)
-    ? (await resolveAssignmentAuthority(db, cs.projectId)).minRole
-    : DEFAULT_ASSIGNMENT_MIN_ROLE
-  const floor = requiredFloorForChangeset(cs.commands, assignmentMinRole)
+  const floor = requiredFloorForChangeset(cs.commands)
   const role = await resolveProjectRoleShared(db, { id: cred.userId }, cs.projectId)
   if (!role || role.level < floor) {
     return errorResponse('permission_denied', 'insufficient project role for this changeset', {
@@ -78,12 +63,7 @@ export async function changesetAuthorityDenied(
 
 /** Visibility filter for a list of changesets — the same rule, applied in
  *  memory against one already-resolved role level (the caller's). */
-export function visibleAtRole(
-  cs: StoredChangeset,
-  roleLevel: number,
-  userId: string,
-  assignmentMinRole: number = DEFAULT_ASSIGNMENT_MIN_ROLE,
-): boolean {
+export function visibleAtRole(cs: StoredChangeset, roleLevel: number, userId: string): boolean {
   if (isProjectCreation(cs.commands)) return String(cs.createdByUserId) === String(userId)
-  return roleLevel >= requiredFloorForChangeset(cs.commands, assignmentMinRole)
+  return roleLevel >= requiredFloorForChangeset(cs.commands)
 }

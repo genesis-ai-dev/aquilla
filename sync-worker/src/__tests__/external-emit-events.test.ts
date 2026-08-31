@@ -154,38 +154,6 @@ describe('EmitEvents — validation + floors', () => {
     expect(body.changeset.status).toBe('staged')
   })
 
-  it('uses the org assignment floor through agent prepare and commit', async () => {
-    const env = makeEnv(tdb.db)
-    const reviewer = await memberToken(tdb, 300)
-    await tdb.pg.query(
-      `INSERT INTO organizations (id, name, owner_user_id) VALUES (7, 'Test Org', $1)`,
-      [reviewer.userId],
-    )
-    await tdb.pg.query(`UPDATE projects SET org_id = 7 WHERE id = $1`, [PROJECT])
-    await tdb.pg.query(
-      `INSERT INTO org_settings (org_id, settings, version, updated_by)
-       VALUES (7, $1, 0, $2)`,
-      [JSON.stringify({ assignmentMinRole: 300 }), reviewer.userId],
-    )
-
-    const { res: prepared, body } = await prepare(env, reviewer.token, [
-      {
-        kind: 'assignment.create',
-        payload: {
-          scopeKind: 'books',
-          scope: [{ fileId: FILE }],
-          scopeLabel: 'File X',
-          assigneeUserId: reviewer.userId,
-        },
-      },
-    ])
-    expect(prepared.status).toBe(200)
-
-    const { res: committed } = await commit(env, reviewer.token, body.changeset.id)
-    expect(committed.status).toBe(200)
-    expect(await tdb.rows('assignments')).toHaveLength(1)
-  })
-
   it('rejects server-resolved pin fields supplied by the caller', async () => {
     const env = makeEnv(tdb.db)
     const reviewer = await memberToken(tdb, 300)

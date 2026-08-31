@@ -49,7 +49,6 @@ import { downloadBlob } from "@/lib/export/export-service"
 import { getProjectAssignments, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
 import { ROLE } from "@/lib/frontier/roles"
-import { canOpenAssignUi } from "@/lib/sync/role-policy"
 import {
   SectionVisibilityBadge,
   SectionVisibilityGate,
@@ -819,11 +818,7 @@ export function ProjectOverview() {
 
   const isOwner = (project?.syncRole?.level ?? 0) >= 700
   const canManage = (project?.syncRole?.level ?? 0) >= 600
-  const canAssign = canOpenAssignUi(
-    project?.syncRole?.level ?? null,
-    orgSettings.allowSelfAssignment,
-    orgSettings.assignmentMinRole,
-  )
+  const canAssign = (project?.syncRole?.level ?? 0) >= 500
   const canToggleLifecycle = (project?.syncRole?.level ?? 0) >= 500
   const isArchived = Boolean(project?.deletedAt)
 
@@ -1922,9 +1917,6 @@ export function ProjectOverview() {
                         files={project?.files ?? []}
                         jwt={jwt ?? ""}
                         author={session?.username ?? ""}
-                        roleLevel={project?.syncRole?.level ?? 0}
-                        allowSelfAssignment={orgSettings.allowSelfAssignment}
-                        assignmentMinRole={orgSettings.assignmentMinRole}
                         onAssigned={handleAssigned}
                       />
                     </div>

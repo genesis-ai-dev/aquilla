@@ -71,14 +71,11 @@ export interface EmitEventsCommand {
   events: EmitEventInput[]
 }
 
-/** Changeset floor = max authority over the batch's event kinds. Static kinds
- *  use REQUIRED_ROLE; assignment kinds use the caller-supplied org floor.
- *  Other dynamic bumps — foreign unvalidate → MAINTAINER, foreign comment
- *  mutation → FOREIGN_COMMENT_ROLE — are prepare-time checks. */
-export function emitEventsFloor(
-  cmd: EmitEventsCommand,
-  assignmentMinRole: number = ROLE.PROJECT_LEAD,
-): number {
+/** Changeset floor = max REQUIRED_ROLE over the batch's event kinds
+ *  (role-policy is the single source of truth; dynamic bumps — foreign
+ *  unvalidate → MAINTAINER, foreign comment mutation → FOREIGN_COMMENT_ROLE
+ *  — are prepare-time checks). */
+export function emitEventsFloor(cmd: EmitEventsCommand): number {
   let floor = 0
   for (const e of cmd.events) {
     // Sam, 2026-08-21: source.cell.create/delete/reorder dropped to
@@ -91,10 +88,6 @@ export function emitEventsFloor(
     const kindFloor =
       e.kind === 'source.cell.create' || e.kind === 'source.cell.delete' || e.kind === 'source.cell.reorder'
         ? ROLE.PROJECT_LEAD
-        : e.kind === 'assignment.create' ||
-            e.kind === 'assignment.reassign' ||
-            e.kind === 'assignment.unassign'
-          ? assignmentMinRole
         : (REQUIRED_ROLE[e.kind as keyof typeof REQUIRED_ROLE] ?? 0)
     floor = Math.max(floor, kindFloor)
   }

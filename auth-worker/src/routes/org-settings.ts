@@ -74,9 +74,6 @@ const PERMISSION_POLICY_KEYS: Record<string, string> = {
   rosterViewMinRole: "rosterViewMinRole",
   memberProgressViewMinRole: "memberProgressViewMinRole",
   allowSelfAssignment: "allowSelfAssignment",
-  // AQU-1037: who may assign file/chapter work or route an AI changeset.
-  // Role-ladder valued; defaults to PROJECT_LEAD in each enforcement worker.
-  assignmentMinRole: "assignmentMinRole",
   // AQU-822: who may manage a project's termbase. Role-ladder valued,
   // OWNER-only on write like the rest of this table.
   termbaseEditMinRole: "termbaseEditMinRole",

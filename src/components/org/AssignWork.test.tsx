@@ -296,26 +296,6 @@ describe("AssignWork — self-assign carve-out (AQU-496)", () => {
   })
 })
 
-describe("AssignWork — org-configured assignment floor (AQU-1037)", () => {
-  it("lets a reviewer choose another assignee when the floor is Reviewer", async () => {
-    rosterOk()
-    render(
-      <AssignWork
-        projectId="p1"
-        files={files}
-        jwt="jwt"
-        author="carol"
-        roleLevel={300}
-        assignmentMinRole={300}
-      />,
-    )
-
-    fireEvent.click(screen.getByRole("button", { name: "Assign…" }))
-    const trigger = await screen.findByRole("combobox", { name: /^assignee$/i })
-    expect((trigger as HTMLButtonElement).disabled).toBe(false)
-  })
-})
-
 // ── AQU-676: assignee picker lists project members only ─────────────────────
 describe("AssignWork — project-members-only assignee picker (AQU-676)", () => {
   it("lists project members and excludes org-baseline-only members", async () => {

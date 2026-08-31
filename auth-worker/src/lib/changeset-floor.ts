@@ -14,10 +14,12 @@
 // (role-policy, the command modules, db/shared) — no sync-worker binding, R2,
 // or Durable Object type reaches auth-worker through it.
 //
-// Org-configurable floors are resolved here before the command walk:
-// assignment EmitEvents use assignmentMinRole exactly (so lowering and raising
-// both work), while terminology PatchSettings retains its existing
-// raise-only mirror of sync-worker's private requiredRoleForOps arithmetic.
+// One value it cannot supply: the org's DYNAMIC termbase-edit floor for a
+// `terminology` PatchSettings op. sync-worker keeps that arithmetic private
+// (requiredRoleForOps), so the static floor is raised — never lowered — with
+// auth-worker's own getTermbaseEditMinRoleForProject, which sync-worker's copy
+// documents itself as mirroring. Raising can only over-enforce, and only for an
+// org that deliberately LOWERED termbaseEditMinRole below PROJECT_LEAD.
 //
 // SWARM-TODO(AQU-CMDREG-P1): once sync-worker's external/authority.ts
 // (§2.3, built in parallel) has landed, collapse the max-over-commands walk and
@@ -26,15 +28,11 @@
 // can become an exact match instead of a ceiling.
 
 import {
-  commandsContainAssignmentEvents,
   requiredRoleForCommand,
   type Command,
 } from "../../../sync-worker/src/external/commands"
 import { describeCommand } from "../../../db/shared/command-catalog"
-import {
-  getAssignmentMinRoleForProject,
-  getTermbaseEditMinRoleForProject,
-} from "../services/org-permissions"
+import { getTermbaseEditMinRoleForProject } from "../services/org-permissions"
 import { ROLE, type Env } from "../types"
 
 /** Floor for a plan whose stored commands cannot be read as the known command
@@ -129,12 +127,7 @@ export async function requiredRoleForChangeset(
 
   let floor: number
   try {
-    const assignmentMinRole = commandsContainAssignmentEvents(commands)
-      ? await getAssignmentMinRoleForProject(env, projectId)
-      : undefined
-    floor = Math.max(
-      ...commands.map((command) => requiredRoleForCommand(command, assignmentMinRole)),
-    )
+    floor = Math.max(...commands.map(requiredRoleForCommand))
   } catch {
     return UNREADABLE_PLAN_FLOOR
   }

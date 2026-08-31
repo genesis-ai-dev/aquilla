@@ -1,11 +1,7 @@
 // Tests for resolveAllowSelfAssignment (AQU-496). Mirrors
 // export-floor.test.ts's makeDb stub pattern.
 import { describe, it, expect } from "vitest"
-import {
-  DEFAULT_ASSIGNMENT_MIN_ROLE,
-  resolveAllowSelfAssignment,
-  resolveAssignmentAuthority,
-} from "../events/assignment-authority"
+import { resolveAllowSelfAssignment } from "../events/assignment-authority"
 
 function makeDb(options: {
   orgId?: number | null
@@ -66,45 +62,5 @@ describe("resolveAllowSelfAssignment", () => {
   it("returns false for malformed JSON in org_settings", async () => {
     const db = makeDb({ orgSettings: "NOT_JSON{{" })
     expect(await resolveAllowSelfAssignment(db, "p1")).toBe(false)
-  })
-})
-
-describe("resolveAssignmentAuthority (AQU-1037)", () => {
-  it("preserves the project-lead floor when the project has no org", async () => {
-    const db = makeDb({ orgId: null })
-    expect(await resolveAssignmentAuthority(db, "p1")).toEqual({
-      minRole: DEFAULT_ASSIGNMENT_MIN_ROLE,
-      allowSelfAssignment: false,
-    })
-  })
-
-  it("preserves the project-lead floor when the setting is absent", async () => {
-    const db = makeDb({ orgSettings: JSON.stringify({ allowSelfAssignment: true }) })
-    expect(await resolveAssignmentAuthority(db, "p1")).toEqual({
-      minRole: DEFAULT_ASSIGNMENT_MIN_ROLE,
-      allowSelfAssignment: true,
-    })
-  })
-
-  it("reads a configured role floor alongside self-assignment", async () => {
-    const db = makeDb({
-      orgSettings: JSON.stringify({
-        assignmentMinRole: 300,
-        allowSelfAssignment: true,
-      }),
-    })
-    expect(await resolveAssignmentAuthority(db, "p1")).toEqual({
-      minRole: 300,
-      allowSelfAssignment: true,
-    })
-  })
-
-  it("rejects out-of-ladder and non-numeric floors", async () => {
-    for (const assignmentMinRole of [0, 350, 9999, "400"]) {
-      const db = makeDb({ orgSettings: JSON.stringify({ assignmentMinRole }) })
-      expect((await resolveAssignmentAuthority(db, "p1")).minRole).toBe(
-        DEFAULT_ASSIGNMENT_MIN_ROLE,
-      )
-    }
   })
 })

@@ -1570,33 +1570,3 @@ export async function getTermbaseEditMinRoleForProject(
   return getTermbaseEditMinRole(env, project.org_id)
 }
 
-// ──────────────────────────────────────────────────────────────────────────
-// AQU-1037: configurable work-assignment floor
-//
-// Covers assignment.create/reassign/unassign in sync-worker (file, chapter,
-// and target-lane-pinned work) plus changeset routing in auth-worker. The
-// unset fallback preserves the historical PROJECT_LEAD requirement.
-// ──────────────────────────────────────────────────────────────────────────
-
-export const DEFAULT_ASSIGNMENT_MIN_ROLE = 500 // ROLE.PROJECT_LEAD
-
-/** Resolve the minimum project role allowed to assign work in an org. */
-export async function getAssignmentMinRole(env: Env, orgId: number): Promise<number> {
-  const settings = await loadOrgSettingsBlob(env, orgId)
-  return extractRoleFloor(settings, "assignmentMinRole", DEFAULT_ASSIGNMENT_MIN_ROLE)
-}
-
-/** Resolve assignment authority through a project's org. */
-export async function getAssignmentMinRoleForProject(
-  env: Env,
-  projectId: string,
-): Promise<number> {
-  const project = await env.AQUILLA_PG.prepare(
-    "SELECT org_id FROM projects WHERE id = ?",
-  )
-    .bind(projectId)
-    .first<{ org_id: number | null }>()
-  if (!project?.org_id) return DEFAULT_ASSIGNMENT_MIN_ROLE
-  return getAssignmentMinRole(env, project.org_id)
-}
-

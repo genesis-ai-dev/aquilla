@@ -479,10 +479,7 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
  * surface deliberately does not extend). Staging a plan you could never commit
  * leaks the server-computed effect summary, so prepare enforces this too.
  */
-export function requiredRoleForCommand(
-  c: Command,
-  assignmentMinRole: number = ROLE.PROJECT_LEAD,
-): number {
+export function requiredRoleForCommand(c: Command): number {
   if (c.kind === 'PlanImport') {
     return Math.max(REQUIRED_ROLE['file.create'], REQUIRED_ROLE['source.cell.create'])
   }
@@ -503,25 +500,11 @@ export function requiredRoleForCommand(
   // floors its compiled events hit at the /events perimeter (dynamic bumps,
   // e.g. foreign unvalidate → maintainer, are enforced in its prepare path).
   if (c.kind === 'EmitEvents') {
-    return emitEventsFloor(c, assignmentMinRole)
+    return emitEventsFloor(c)
   }
   if (c.kind === 'LinkMedia') {
     // Compiles to cell.audio.attach + cell.audio.select (both CONTRIBUTOR).
     return Math.max(REQUIRED_ROLE['cell.audio.attach'], REQUIRED_ROLE['cell.audio.select'])
   }
   return REQUIRED_ROLE['target.cell.commit']
-}
-
-/** Whether a plan's dynamic authority depends on the org assignment floor. */
-export function commandsContainAssignmentEvents(commands: readonly Command[]): boolean {
-  return commands.some(
-    (command) =>
-      command.kind === 'EmitEvents' &&
-      command.events.some(
-        (event) =>
-          event.kind === 'assignment.create' ||
-          event.kind === 'assignment.reassign' ||
-          event.kind === 'assignment.unassign',
-      ),
-  )
 }

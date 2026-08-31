@@ -9,12 +9,8 @@ import type { SyncTokenClaims } from "../auth"
  * AQU-496: minimal AquillaDb stub for the self-assign carve-out — mirrors
  * export-floor.test.ts's makeDb pattern (project -> org_id -> org_settings).
  */
-function makeDb(options: {
-  orgId?: number | null
-  allowSelfAssignment?: boolean
-  assignmentMinRole?: number
-}): AquillaDb {
-  const { orgId = 1, allowSelfAssignment = false, assignmentMinRole } = options
+function makeDb(options: { orgId?: number | null; allowSelfAssignment?: boolean }): AquillaDb {
+  const { orgId = 1, allowSelfAssignment = false } = options
   return {
     prepare(sql: string) {
       return {
@@ -23,12 +19,7 @@ function makeDb(options: {
             async first() {
               if (sql.includes("FROM projects")) return { org_id: orgId }
               if (sql.includes("FROM org_settings")) {
-                return {
-                  settings: JSON.stringify({
-                    allowSelfAssignment,
-                    ...(assignmentMinRole !== undefined ? { assignmentMinRole } : {}),
-                  }),
-                }
+                return { settings: JSON.stringify({ allowSelfAssignment }) }
               }
               return null
             },
@@ -483,90 +474,6 @@ describe("authorize() — assignment.create self-assign carve-out (AQU-496)", ()
     }
     const db = makeDb({ allowSelfAssignment: true })
     const result = await authorize(token, raw, SECRET, db)
-    expect(result.ok).toBe(false)
-    if (!result.ok) expect(result.status).toBe(403)
-  })
-})
-
-describe("authorize() — org-configured assignment floor (AQU-1037)", () => {
-  it("allows a contributor to assign another member when the floor is contributor", async () => {
-    const token = await makeToken({ role: 400 })
-    const raw = makeAssignmentCreate({
-      payload: {
-        assignmentId: "asg-lowered",
-        scopeKind: "books",
-        scope: [{ fileId: "file-x" }],
-        scopeLabel: "Genesis",
-        assigneeUserId: 2,
-      },
-    })
-    const result = await authorize(
-      token,
-      raw,
-      SECRET,
-      makeDb({ assignmentMinRole: 400 }),
-    )
-    expect(result.ok).toBe(true)
-  })
-
-  it("applies the same lowered floor to chapter and target-lane assignments", async () => {
-    const token = await makeToken({ role: 300 })
-    const raw = makeAssignmentCreate({
-      payload: {
-        assignmentId: "asg-lane",
-        scopeKind: "chapters",
-        scope: [{ fileId: "file-x", chapter: "GEN 1" }],
-        scopeLabel: "Genesis 1",
-        assigneeUserId: 2,
-        targetLang: "fr",
-      },
-    })
-    const result = await authorize(
-      token,
-      raw,
-      SECRET,
-      makeDb({ assignmentMinRole: 300 }),
-    )
-    expect(result.ok).toBe(true)
-  })
-
-  it("applies the configured floor to reassign and unassign", async () => {
-    const token = await makeToken({ role: 400 })
-    const common = {
-      projectId: "proj-a",
-      fileId: "file-x",
-      cellId: undefined,
-      parentId: null,
-      author: "alice",
-      clientTs: Date.now(),
-      schemaVersion: 1 as const,
-    }
-    const reassign: RawEvent<"assignment.reassign"> = {
-      ...common,
-      id: "reassign-lowered",
-      kind: "assignment.reassign",
-      payload: { assignmentId: "asg-1", assigneeUserId: 2 },
-    }
-    const unassign: RawEvent<"assignment.unassign"> = {
-      ...common,
-      id: "unassign-lowered",
-      kind: "assignment.unassign",
-      payload: { assignmentId: "asg-1" },
-    }
-    const db = makeDb({ assignmentMinRole: 400 })
-    expect((await authorize(token, reassign, SECRET, db)).ok).toBe(true)
-    expect((await authorize(token, unassign, SECRET, db)).ok).toBe(true)
-  })
-
-  it("blocks a project lead when the org raises the floor to maintainer", async () => {
-    const token = await makeToken({ role: 500 })
-    const raw = makeAssignmentCreate()
-    const result = await authorize(
-      token,
-      raw,
-      SECRET,
-      makeDb({ assignmentMinRole: 600 }),
-    )
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.status).toBe(403)
   })

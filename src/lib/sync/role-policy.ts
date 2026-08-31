@@ -230,35 +230,35 @@ export function canMutateComment(
  * `sync-worker/src/events/authorize.ts` — UX gate only, never the security
  * boundary; the server re-checks independently on every `assignment.create`.
  *
- * A caller at the org's assignmentMinRole can open it for any assignee.
- * Below that floor, CONTRIBUTOR+ can open it only when the org has opted into
- * allowSelfAssignment, and canSubmitAssignment restricts them to themselves.
+ * Leads/maintainers (>= PROJECT_LEAD) can always open it, regardless of the
+ * setting. Below that, a member (CONTRIBUTOR+) can open it ONLY when the org
+ * has opted into `allowSelfAssignment` — and even then, `canSubmitAssignment`
+ * below still restricts what they can submit to themselves only.
  */
 export function canOpenAssignUi(
   roleLevel: number | null | undefined,
   allowSelfAssignment: boolean,
-  assignmentMinRole: number = ROLE.PROJECT_LEAD,
 ): boolean {
   if (roleLevel == null) return false
-  if (roleLevel >= assignmentMinRole) return true
+  if (roleLevel >= ROLE.PROJECT_LEAD) return true
   return allowSelfAssignment && roleLevel >= ROLE.CONTRIBUTOR
 }
 
 /**
  * AQU-496: whether `roleLevel` may submit `assignment.create` assigning
- * `assigneeUserId`. Callers at assignmentMinRole may assign anyone.
- * Below-floor callers may only self-assign (assigneeUserId === callerUserId),
- * and only when allowSelfAssignment is on.
+ * `assigneeUserId`. Leads/maintainers may assign anyone. Below-lead callers
+ * may ONLY self-assign (assigneeUserId === callerUserId), and only when
+ * `allowSelfAssignment` is on — mirrors the server's `isSelfAssignCreate`
+ * check in `sync-worker/src/events/authorize.ts`.
  */
 export function canSubmitAssignment(
   roleLevel: number | null | undefined,
   allowSelfAssignment: boolean,
   callerUserId: number | null | undefined,
   assigneeUserId: number,
-  assignmentMinRole: number = ROLE.PROJECT_LEAD,
 ): boolean {
   if (roleLevel == null) return false
-  if (roleLevel >= assignmentMinRole) return true
+  if (roleLevel >= ROLE.PROJECT_LEAD) return true
   if (!allowSelfAssignment || roleLevel < ROLE.CONTRIBUTOR) return false
   return callerUserId != null && callerUserId === assigneeUserId
 }

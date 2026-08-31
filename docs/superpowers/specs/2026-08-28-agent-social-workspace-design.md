@@ -200,6 +200,24 @@ the seed + guarded in the feed transform.
 accordion; cursor-style revert-from-thread; project-knowledge agent persona;
 speculative pre-filling research; graph editing.
 
+## v3.1 — live-trial fixes (2026-08-31 review)
+
+From Ryder's first real-AI session: (1) **Auto-scroll** — all agent feeds
+adopt the stick-to-bottom contract (researched: use-stick-to-bottom /
+AI-Elements pattern): follow new content while the reader is at the bottom,
+any upward scroll breaks the follow, the ArrowDown pill (or scrolling back
+down) re-engages; the chat's previous anchor-message-to-top mode is off
+because agent runs stream tool activity below the fold. (2) **Working
+indicator** renders after the workbench tabs, not between title and tabs.
+(3) **Conversation logs** — each chat run emits one `[agent-convo]` JSON
+line (truncated messages + tool names) to worker logs; the durable copy
+remains `agent_sessions.convo`. (4) **Suggested next steps** — the system
+prompt asks for closing `NEXT: <action>` lines; the client strips them from
+the prose and renders up to two one-tap buttons on the latest settled run
+(dock, workbench chat, and Team chat via the channel composer path).
+(5) **Budget meter** shows percent-of-budget only, never raw credit
+amounts.
+
 ## Testing
 
 Vitest: personas mapping totality (every region/tool kind attributes — the social

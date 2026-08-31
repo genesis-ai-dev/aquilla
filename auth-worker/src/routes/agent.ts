@@ -1076,6 +1076,41 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
     console.error("[agent] failed to finalise agent_runs row:", err)
   }
 
+  // Conversation log — one grep-able JSON line per run so "what was the model
+  // told / what did it answer" is readable straight from worker logs (the
+  // dev-stack terminal locally, Workers observability in production). The
+  // durable copy lives in agent_sessions.convo, but compacted; this line keeps
+  // the run-shaped view. Contents are truncated so a run never floods a sink.
+  try {
+    const LOG_MSG_MAX = 2000
+    console.log(
+      "[agent-convo]",
+      JSON.stringify({
+        runId,
+        sessionId: body.sessionId ?? null,
+        projectId: body.projectId,
+        user: user.username,
+        model,
+        status,
+        promptTokens,
+        completionTokens,
+        costCents,
+        messages: convo.map((m) => ({
+          role: m.role,
+          content:
+            typeof m.content === "string" && m.content.length > LOG_MSG_MAX
+              ? `${m.content.slice(0, LOG_MSG_MAX)}…[+${m.content.length - LOG_MSG_MAX} chars]`
+              : m.content,
+          ...("tool_calls" in m && m.tool_calls
+            ? { tools: m.tool_calls.map((call) => call.function.name) }
+            : {}),
+        })),
+      }),
+    )
+  } catch {
+    /* the log line must never fail the run */
+  }
+
   // Persist the session convo (minus the per-run system prompt), compacted so
   // old tool results shrink to digests. Best-effort — a failed save costs the
   // next turn its shared context, never the run itself.

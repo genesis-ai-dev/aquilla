@@ -17,7 +17,14 @@
 import type { ReactNode } from "react"
 import { MessageCircleQuestion } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerEndOnSignal,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller"
 import { Spinner } from "@/components/ui/spinner"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { AGENT_PERSONAS } from "@/lib/agent/personas"
@@ -39,6 +46,10 @@ export interface TeamChannelProps {
   heldQuestions: number
   /** Runs of the shared conversational session, oldest first. */
   conversationRuns: readonly AgentRunUi[]
+  /** Sends a tapped next-step suggestion as the next channel message. */
+  onSuggestionSend?: (text: string) => void
+  /** Bumped on the viewer's own sends — snaps the feed back to the end. */
+  sendSignal?: number
 }
 
 function ChannelMessage({ children }: { children: ReactNode }) {
@@ -57,15 +68,23 @@ export function TeamChannel({
   onOpenQuestions,
   heldQuestions,
   conversationRuns,
+  onSuggestionSend,
+  sendSignal = 0,
 }: TeamChannelProps) {
   const { locale, t } = useI18n()
   const coordinatorName = t(AGENT_PERSONAS.coordinator.nameKey)
   return (
-    <ScrollArea className="min-h-0 flex-1">
-      <div
-        className="mx-auto flex w-full max-w-2xl flex-col gap-2 p-3"
-        data-testid="team-channel"
-      >
+    // Stick-to-bottom feed (2026-08-31 review): new messages follow while the
+    // reader is at the bottom; scrolling up breaks the follow until the
+    // ArrowDown button (or scrolling back down) re-engages it.
+    <MessageScrollerProvider autoScroll scrollEdgeThreshold={64}>
+      <MessageScroller className="min-h-0 flex-1">
+        <MessageScrollerEndOnSignal signal={sendSignal} />
+        <MessageScrollerViewport>
+          <MessageScrollerContent
+            className="mx-auto flex w-full max-w-2xl flex-col gap-2 p-3"
+            data-testid="team-channel"
+          >
         {items.map((item) => {
           if (item.kind === "dispatch") {
             const title = titleFor(item)
@@ -129,16 +148,24 @@ export function TeamChannel({
             {t("autopilot.decisions.held", { count: heldQuestions })}
           </p>
         )}
-        {conversationRuns.map((run) => (
-          // Proposals are deliberately NOT rendered here: the Chat tab remains
-          // the full working surface (Apply/Undo wiring, working set, receipts).
-          // The channel narrates the conversation; omitting renderProposal is
-          // what keeps the two surfaces from offering the same Apply twice.
-          <div key={run.localId} className="border-t border-border/40 px-2 pt-3 first:border-t-0">
-            <AgentRunView run={run} />
-          </div>
-        ))}
-      </div>
-    </ScrollArea>
+            {conversationRuns.map((run, runIndex) => (
+              // Proposals are deliberately NOT rendered here: the Chat tab remains
+              // the full working surface (Apply/Undo wiring, working set, receipts).
+              // The channel narrates the conversation; omitting renderProposal is
+              // what keeps the two surfaces from offering the same Apply twice.
+              <div key={run.localId} className="border-t border-border/40 px-2 pt-3 first:border-t-0">
+                <AgentRunView
+                  run={run}
+                  onSuggestionSend={
+                    runIndex === conversationRuns.length - 1 ? onSuggestionSend : undefined
+                  }
+                />
+              </div>
+            ))}
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <MessageScrollerButton className="shadow-sm" />
+      </MessageScroller>
+    </MessageScrollerProvider>
   )
 }

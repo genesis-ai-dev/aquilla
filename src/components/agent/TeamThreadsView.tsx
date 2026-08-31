@@ -306,11 +306,15 @@ export function TeamThreadsView({
     [runTitle],
   )
 
+  // Bumped on every own channel send (composer or suggestion tap) — TeamChannel
+  // snaps its feed back to the end so the sent message is in view.
+  const [sendSignal, setSendSignal] = useState(0)
   const sendToChannel = useCallback(
     (text: string, chips: ContextChip[]) => {
       const options = composeAgentSend({ text, chips, jwt: sessionJwt, projectId })
       if (!options) return
       send(options)
+      setSendSignal((s) => s + 1)
     },
     [sessionJwt, projectId, send],
   )
@@ -472,6 +476,8 @@ export function TeamThreadsView({
         onOpenQuestions={() => setSelected(QUESTIONS_CONVERSATION)}
         heldQuestions={Math.max(0, openCount - openDecisions.length)}
         conversationRuns={state.runs}
+        onSuggestionSend={(text) => sendToChannel(text, [])}
+        sendSignal={sendSignal}
       />
     )
   }

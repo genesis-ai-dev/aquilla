@@ -26,6 +26,7 @@ import {
   MessageScroller,
   MessageScrollerButton,
   MessageScrollerContent,
+  MessageScrollerEndOnSignal,
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
@@ -95,6 +96,10 @@ export function AgentDockView({
   const t = useT()
   const { state, send, stop, noteActivity } = useAgentSession(projectId, author)
   const [promptHintIndex, setPromptHintIndex] = useState(0)
+  // Bumped on every own-send: the scroller snaps to the end so the sent
+  // message (and the reply about to stream) is in view even if the user had
+  // scrolled up to read history.
+  const [sendSignal, setSendSignal] = useState(0)
   const composerRef = useRef<ChatComposerHandle>(null)
 
   // Teach by example in the one place the examples are useful: the empty
@@ -155,6 +160,7 @@ export function AgentDockView({
       })
       if (!options) return
       send(options)
+      setSendSignal((s) => s + 1)
       // Attachments belong to the message that carried them — clear after send.
       if (attachments.length > 0) setAttachments([])
     },
@@ -205,15 +211,20 @@ export function AgentDockView({
           </div>
         )
       ) : (
-        <MessageScrollerProvider>
+        // Stick-to-bottom (2026-08-31 review): follow new content while the
+        // reader is at the bottom; any upward scroll breaks the follow and the
+        // ArrowDown button re-engages it. scrollAnchor is deliberately OFF —
+        // anchoring the sent message to the top would hold the viewport still
+        // while tool activity streams below the fold.
+        <MessageScrollerProvider autoScroll scrollEdgeThreshold={64}>
           <MessageScroller className="flex-1">
+            <MessageScrollerEndOnSignal signal={sendSignal} />
             <MessageScrollerViewport>
               <MessageScrollerContent className="mx-auto w-full max-w-2xl gap-5 px-4 pb-3 pt-4">
-                {state.runs.map((run) => (
+                {state.runs.map((run, runIndex) => (
                   <MessageScrollerItem
                     key={run.localId}
                     messageId={run.localId}
-                    scrollAnchor
                     className="border-b border-border/40 pb-4 last:border-b-0"
                   >
                     <AgentRunView
@@ -253,6 +264,11 @@ export function AgentDockView({
                       }}
                       onReviewMemory={onReviewMemory}
                       onChangesetApplied={onApplied}
+                      onSuggestionSend={
+                        runIndex === state.runs.length - 1 && jwt
+                          ? (text) => sendPrompt(text)
+                          : undefined
+                      }
                     />
                   </MessageScrollerItem>
                 ))}

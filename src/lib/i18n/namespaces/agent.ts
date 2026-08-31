@@ -57,6 +57,7 @@ export const agent = defineNamespace({
     "agent.emptyState.dismiss": "Don't show this again",
 
     // ── Run timeline (AgentRunView) ─────────────────────────────────────
+    "agent.run.suggestionsAriaLabel": "Suggested next steps",
     "agent.run.stepRunning": "Step running",
     "agent.run.stepSucceeded": "Step succeeded",
     "agent.run.stepFailed": "Step failed",
@@ -309,6 +310,7 @@ export const agent = defineNamespace({
 
     // ── Run cost-cap meter (BudgetMeter) ────────────────────────────────
     "agent.budget.exhausted": "Run stopped at its {capCredits} credit cap ({spentCredits} spent).",
+    "agent.budget.pctUsed": "{pct}% of the run budget used",
 
     // ── Staged changeset review (ChangesetCard, ChangeList, and the
     //    full-page /approve/:changesetId gate in ApproveChangeset) ──────
@@ -627,6 +629,12 @@ export const agent = defineNamespace({
           "Button that permanently hides the first-run guide for this browser " +
           "(localStorage). Also the accessible name of that button.",
       },
+      "agent.run.suggestionsAriaLabel": {
+        description:
+          "Accessible name for the row of one-tap suggestion buttons under the " +
+          "agent's final reply — each button sends that suggested next step as " +
+          "the user's next message.",
+      },
       "agent.run.stepRunning": {
         description:
           "Accessible name for the spinner shown beside an in-progress tool-call chip " +
@@ -691,6 +699,15 @@ export const agent = defineNamespace({
         placeholders: {
           capCredits: "The run's credit cap, already formatted with its unit (e.g. '500 cr').",
           spentCredits: "Credits spent when the run stopped, already formatted with its unit.",
+        },
+      },
+      "agent.budget.pctUsed": {
+        description:
+          "Compact meter line under an agent run stating how much of the run's " +
+          "credit budget has been spent, as a percentage only (no raw credit " +
+          "amounts — review decision 2026-08-31).",
+        placeholders: {
+          pct: "Whole-number percent spent, pre-formatted; may be the literal '<1' when spend is under one percent.",
         },
       },
       "agent.changeset.moreChanges": {

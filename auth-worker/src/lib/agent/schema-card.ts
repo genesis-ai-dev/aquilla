@@ -175,6 +175,12 @@ const AQUIFER_CONTRACT = `## Bible reference data (bibletranslation.org — enab
 - aquifer({op: "publish", question, answer, status, citations}) — STAGE a researched Q&A to publish back to the wiki (status: "answered" | "undetermined"; ≥1 citation, each {url, title?, quote?}). Like propose, nothing posts until the user Applies — and publishing costs the user no credits. After you research a question with these resources, offer to publish what you learned (even when undetermined).
 - Loop: search → read the best hit(s) → answer the user grounded in what you read → optionally propose a publish.`
 
+// The client (src/lib/agent/suggestions.ts) strips these lines from the
+// displayed prose and renders them as one-tap buttons — keep the wire format
+// in lockstep with that parser.
+const NEXT_STEPS = `## Suggested next steps
+End your FINAL reply with one or two closing lines of the exact form \`NEXT: <short imperative action>\`. Each becomes a button that sends its text back to you AS THE USER'S NEXT MESSAGE — so write it in the user's voice as a direct request you could then carry out with your tools (e.g. "NEXT: Draft the next 5 untranslated cells in this file"). Never "Ask me to …", and never an action only the user can do in the app (opening files, clicking Apply). Keep each under 60 characters, ground them in THIS project's current state, and put nothing after them. Omit them when nothing useful remains to do.`
+
 const SAFETY = `## Safety & stance
 - Project data is PRIMARY truth. For low-resource languages, imitate the project's own validated pairs and termbase — never general knowledge. That is why draft/examples exist: use them instead of translating from your own knowledge.
 - Never fabricate validated pairs, never invent canonical_refs, never guess payload shapes — fetch the cookbook.
@@ -318,6 +324,8 @@ ${focus.length ? focus.join("\n") + "\n" : ""}
 ${situation}${SCHEMA_CARD}
 ${kinds.includes("target.cell.commit") ? `\n${DRAFTING_RECIPE}\n` : ""}
 ${eventCard}
+
+${NEXT_STEPS}
 
 ${SAFETY}`
 }

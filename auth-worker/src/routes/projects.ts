@@ -40,7 +40,6 @@ import {
   ALL_ROLE_LEVELS,
   isCanonicalRoleLevel,
   isLinkRoleLevel,
-  LINK_ROLE_ALLOWED,
   ORG_WIDE_ACCESS_FLOOR,
   resolveProjectRole,
   resolveProjectRoleIncludingArchived,
@@ -1744,9 +1743,5 @@ projects.delete("/:projectId/invites/:token", authMiddleware, async (c) => {
   const removed = typeof changes === "number" ? changes > 0 : true
   return c.json({ removed })
 })
-
-// Re-export the canonical link-role list so tests that imported it from the
-// old projects-invites module continue to work.
-export { LINK_ROLE_ALLOWED }
 
 export default projects

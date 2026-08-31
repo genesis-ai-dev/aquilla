@@ -213,6 +213,29 @@ run until it's fixed.
   file, `pnpm test` green before and after, run at least twice each way given the
   demonstrated flake risk.
 
+## 2026-08-31 run — reconfirmed the full `ImportDialog` orphan cluster; issue #410 still open
+
+A dead-code research pass this run (independent grep, not reusing the 2026-08-17 list)
+re-derived the same finding above and filled in the remaining file names. The full orphan
+set in `src/components/import/` — all shadowed by same-named inline functions defined
+directly inside `ImportDialog.tsx`, confirmed zero imports from `ImportDialog.tsx` or
+anywhere else except an isolated two-file internal cluster (`HelloaoPanel.tsx` →
+`ImportDialogBackButton.tsx`, `UploadPanel.tsx` → `ParatextChoice.tsx`) — is:
+`ImportLanding.tsx`, `UploadPanel.tsx`, `EBiblePanel.tsx`, `HelloaoPanel.tsx`,
+`ObsPanel.tsx`, `DcsPanel.tsx`, `MaculaPanel.tsx`, `TnPanel.tsx`, `BiblicaPanel.tsx`,
+`SdbhPanel.tsx`, `DirectionPanel.tsx`, `ImportResultPanel.tsx`, `CollisionPanel.tsx`,
+`ParatextChoice.tsx`, `ImportDialogBackButton.tsx` — 15 files, ~3,900 lines total.
+
+[genesis-ai-dev/aquilla#410](https://github.com/genesis-ai-dev/aquilla/issues/410) (the
+`TeamsList.test.tsx` order-dependent flake blocking this) is still **open**, unassigned,
+no linked PR. This run's own `pnpm test` baseline/final comparison did not trigger it
+(failure list byte-identical both times: `ArchivedProjects.test.tsx`,
+`RecordingVideoSurface.test.tsx`, unrelated to this cluster) — consistent with #410 being
+neighbor/order-dependent rather than reliably reproducing on every run. Until #410 is
+fixed, deleting this cluster still can't be proven behavior-preserving by this routine's
+own green-to-green standard; re-verify zero-importer status again before deleting once
+unblocked, since files move.
+
 ## Remaining "frontier-server" comment mention (frozen — test file)
 
 - **File**: `src/lib/frontier/roles.test.ts:24` — a code comment referencing

@@ -118,6 +118,24 @@ function MessageScrollerButton({
   )
 }
 
+/**
+ * Snaps to the end whenever `signal` changes (never on mount). Render inside
+ * the provider and bump the signal on the viewer's OWN sends: reading history
+ * must never be interrupted by streaming, but sending a message is the one
+ * act that should always bring the conversation back into view (and, with
+ * autoScroll, re-engage following for the reply).
+ */
+function MessageScrollerEndOnSignal({ signal }: { signal: number }) {
+  const { scrollToEnd } = useMessageScroller()
+  const last = React.useRef(signal)
+  React.useEffect(() => {
+    if (last.current === signal) return
+    last.current = signal
+    scrollToEnd({ behavior: "auto" })
+  }, [signal, scrollToEnd])
+  return null
+}
+
 export {
   MessageScrollerProvider,
   MessageScroller,
@@ -125,6 +143,7 @@ export {
   MessageScrollerContent,
   MessageScrollerItem,
   MessageScrollerButton,
+  MessageScrollerEndOnSignal,
   useMessageScroller,
   useMessageScrollerScrollable,
   useMessageScrollerVisibility,

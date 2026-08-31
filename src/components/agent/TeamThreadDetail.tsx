@@ -8,7 +8,13 @@
  */
 
 import { Link } from "react-router-dom"
-import { ScrollArea } from "@/components/ui/scroll-area"
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
@@ -107,9 +113,13 @@ export function TeamThreadDetail({
   const t = useT()
   const reviewHref = draftReviewHref(projectId, run.fileId, null, run.targetLang ?? "")
   return (
-    <ScrollArea className="min-h-0 flex-1" data-testid="team-thread-detail">
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-2 p-4">
-        {feed.length === 0 ? (
+    // Stick-to-bottom feed — same contract as TeamChannel: follow while at the
+    // bottom, break on upward scroll, ArrowDown re-engages.
+    <MessageScrollerProvider autoScroll scrollEdgeThreshold={64}>
+      <MessageScroller className="min-h-0 flex-1" data-testid="team-thread-detail">
+        <MessageScrollerViewport>
+          <MessageScrollerContent className="mx-auto flex w-full max-w-2xl flex-col gap-2 p-4">
+            {feed.length === 0 ? (
           feedLoading ? (
             <div className="flex flex-col gap-2">
               <Skeleton className="h-4 w-56" />
@@ -129,7 +139,10 @@ export function TeamThreadDetail({
             />
           ))
         )}
-      </div>
-    </ScrollArea>
+          </MessageScrollerContent>
+        </MessageScrollerViewport>
+        <MessageScrollerButton className="shadow-sm" />
+      </MessageScroller>
+    </MessageScrollerProvider>
   )
 }

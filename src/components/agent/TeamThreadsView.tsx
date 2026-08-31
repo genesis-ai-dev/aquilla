@@ -49,11 +49,15 @@ import { normalizePhase } from "@/lib/contextual/process-graph"
 import { DecisionCard } from "@/components/contextual/DecisionCard"
 import {
   fetchContextualRunActivity,
+  startFileContextualRun,
   type ContextualRunActivity,
   type ContextualRunRecord,
 } from "@/lib/contextual/transport"
+import { isFlagEnabled } from "@/lib/features/flags"
+import { getProject } from "@/lib/store/project-index"
 import { humanPassageLabel } from "../../../shared/span-label"
 import { AgentCardTrigger } from "./AgentCard"
+import { AgentModeControl } from "./AgentModeControl"
 import { TeamChannel } from "./TeamChannel"
 import { TeamChannelComposer } from "./TeamChannelComposer"
 import { TeamStepInspector } from "./TeamStepInspector"
@@ -81,10 +85,14 @@ export interface TeamThreadsViewProps {
 function TeamRoster({
   activePersonas,
   projectId,
+  trailing,
   t,
 }: {
   activePersonas: ReadonlySet<string>
   projectId: string
+  /** The agent-mode dial, when the experiment is on. Sits opposite the roster:
+   *  who is on the team, and how much they are allowed to do unprompted. */
+  trailing?: ReactNode
   t: TFunction
 }) {
   return (
@@ -92,6 +100,7 @@ function TeamRoster({
       <span className="text-[11px] font-medium text-foreground/90">
         {t("agent.team.rosterTitle")}
       </span>
+      {trailing && <span className="order-last ms-auto">{trailing}</span>}
       <ul className="flex items-center gap-1.5" data-testid="team-roster">
         {AGENT_PERSONA_IDS.map((id) => (
           <li key={id} className="flex items-center gap-1">
@@ -176,12 +185,32 @@ export function TeamThreadsView({
     [setSearchParams],
   )
 
+  // The agentModes experiment is DEVICE-LOCAL (it lives on the IDB project
+  // record, never in shared settings), so it is read straight from IDB rather
+  // than threaded down from ProjectWorkspace — mirrors ExperimentalFlagsSection.
+  const [agentModesEnabled, setAgentModesEnabled] = useState(false)
+  useEffect(() => {
+    let disposed = false
+    void getProject(projectId).then((local) => {
+      if (disposed) return
+      setAgentModesEnabled(isFlagEnabled(local ?? {}, "agentModes"))
+    })
+    return () => {
+      disposed = true
+    }
+  }, [projectId])
+
   const [activity, setActivity] = useState<ContextualRunActivity | null>(null)
   const [activityLoading, setActivityLoading] = useState(false)
+  // "Next passage": one span, then a park. Per-conversation, so switching
+  // conversations never shows a stale failure from another run.
+  const [nextPassageBusy, setNextPassageBusy] = useState(false)
+  const [nextPassageFailed, setNextPassageFailed] = useState(false)
   // Step inspector (the optional third column) — per selected conversation.
   const [inspectedId, setInspectedId] = useState<string | null>(null)
   useEffect(() => {
     setInspectedId(null)
+    setNextPassageFailed(false)
   }, [selectedId])
 
   const openDecisions = useMemo(() => decisions?.decisions ?? [], [decisions])
@@ -262,9 +291,14 @@ export function TeamThreadsView({
     return active
   }, [runs])
 
+  // `spanLabel` can be an opaque cell/span id when the server had no human ref
+  // to name the wave by — humanPassageLabel rejects those, so a conversation
+  // title is never a raw UUID (the "no raw ids anywhere user-facing" fix).
   const runTitle = useCallback(
     (run: ContextualRunRecord) =>
-      fileNames?.get(run.fileId) ?? run.spanLabel ?? t("agent.team.unnamedThread"),
+      fileNames?.get(run.fileId)
+      ?? humanPassageLabel(run.spanLabel)
+      ?? t("agent.team.unnamedThread"),
     [fileNames, t],
   )
   const titleFor = useCallback(
@@ -272,16 +306,48 @@ export function TeamThreadsView({
     [runTitle],
   )
 
+  // Bumped on every own channel send (composer or suggestion tap) — TeamChannel
+  // snaps its feed back to the end so the sent message is in view.
+  const [sendSignal, setSendSignal] = useState(0)
   const sendToChannel = useCallback(
     (text: string, chips: ContextChip[]) => {
       const options = composeAgentSend({ text, chips, jwt: sessionJwt, projectId })
       if (!options) return
       send(options)
+      setSendSignal((s) => s + 1)
     },
     [sessionJwt, projectId, send],
   )
 
   const canStartRuns = (roleLevel ?? 0) >= ROLE.CONTRIBUTOR
+
+  // A run that has stopped — finished, failed, stopped, or parked between
+  // waves — is exactly where "just do the next bit, then I'll look" belongs.
+  // A run still working already has momentum; another button would only race it.
+  const canAskNextPassage =
+    agentModesEnabled
+    && canStartRuns
+    && openRun !== null
+    && (openRun.status === "done"
+      || openRun.status === "failed"
+      || openRun.status === "terminated"
+      || openRun.status === "parked")
+
+  const startNextPassage = useCallback(() => {
+    if (!openRun) return
+    setNextPassageBusy(true)
+    setNextPassageFailed(false)
+    // spanLimit 1 is the whole point: the server parks after one span so the
+    // human reviews before more work — and more credit — is spent.
+    void startFileContextualRun(projectId, openRun.fileId, openRun.targetLang ?? "", 1)
+      .then(({ runId }) => {
+        retry()
+        setSelected(runThreadId(runId))
+      })
+      .catch(() => setNextPassageFailed(true))
+      .finally(() => setNextPassageBusy(false))
+  }, [openRun, projectId, retry, setSelected])
+
   const composerThread = openRun
     ? {
         runId: openRun.runId,
@@ -302,6 +368,10 @@ export function TeamThreadsView({
             : undefined,
       }
     : null
+
+  const modeControl = agentModesEnabled ? (
+    <AgentModeControl projectId={projectId} jwt={sessionJwt} roleLevel={roleLevel} />
+  ) : null
 
   const loading = runs === null && !loadFailed
   const isEmpty = channelItems.length === 0 && state.runs.length === 0
@@ -334,7 +404,12 @@ export function TeamThreadsView({
   if (isEmpty) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        <TeamRoster activePersonas={activePersonas} projectId={projectId} t={t} />
+        <TeamRoster
+          activePersonas={activePersonas}
+          projectId={projectId}
+          trailing={modeControl}
+          t={t}
+        />
         <TeamEmptyState projectId={projectId} t={t} />
         {showComposer && (
           <TeamChannelComposer
@@ -401,21 +476,50 @@ export function TeamThreadsView({
         onOpenQuestions={() => setSelected(QUESTIONS_CONVERSATION)}
         heldQuestions={Math.max(0, openCount - openDecisions.length)}
         conversationRuns={state.runs}
+        onSuggestionSend={(text) => sendToChannel(text, [])}
+        sendSignal={sendSignal}
       />
     )
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <TeamRoster activePersonas={activePersonas} projectId={projectId} t={t} />
+      <TeamRoster
+          activePersonas={activePersonas}
+          projectId={projectId}
+          trailing={modeControl}
+          t={t}
+        />
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
-          {/* Flat conversation header: name + quiet status. */}
+          {/* Flat conversation header: name + quiet status +, on a stopped
+              run, the one-more-passage affordance. */}
           <div className="flex shrink-0 items-center gap-1.5 border-b border-border/60 px-3 py-1.5">
             <span className="min-w-0 truncate text-sm font-medium">{conversationTitle}</span>
             {openRun && (
               <span className="shrink-0 text-[11px] text-muted-foreground">
                 {t(runStatusKey(openRun))}
+              </span>
+            )}
+            {canAskNextPassage && (
+              <span className="ms-auto flex shrink-0 items-center gap-1.5">
+                {nextPassageFailed && (
+                  <span role="alert" className="text-[11px] text-destructive">
+                    {t("agent.team.nextPassageFailed")}
+                  </span>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  data-testid="team-next-passage"
+                  disabled={nextPassageBusy}
+                  onClick={startNextPassage}
+                >
+                  {nextPassageBusy
+                    ? t("agent.team.nextPassageStarting")
+                    : t("agent.team.nextPassage")}
+                </Button>
               </span>
             )}
           </div>

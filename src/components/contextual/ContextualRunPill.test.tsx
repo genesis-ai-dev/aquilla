@@ -1,6 +1,13 @@
+import type { ReactElement } from "react"
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { act, render, screen, fireEvent, cleanup } from "@testing-library/react"
+import { act, render as rtlRender, screen, fireEvent, cleanup } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { ContextualRunPill } from "./ContextualRunPill"
+
+// The pill links into the run's Team conversation, so it needs a router. The
+// `wrapper` option (rather than wrapping at each call site) keeps `rerender`
+// re-wrapping correctly for the lane-switch cases below.
+const render = (ui: ReactElement) => rtlRender(ui, { wrapper: MemoryRouter })
 import {
   applyRemoteFrame as applyFrame,
   attachContextualRun,
@@ -93,6 +100,25 @@ describe("ContextualRunPill", () => {
     const resume = screen.getByRole("button", { name: "Resume drafting" })
     expect(resume.querySelector("svg.lucide-play")).toBeNull()
     expect(resume.querySelector("svg.lucide-pencil-sparkles")).not.toBeNull()
+  })
+
+  it("links into the run's own conversation once a run exists", () => {
+    // The pill is a readout; the run narrates itself in the Team surface. The
+    // link has to carry the SAME conversation id the dock and shared links
+    // use, or "open thread" would land somewhere else than clicking the row.
+    setContextualTransport(makeTransport())
+    applyRemoteFrame(frame("running", { done: 3, total: 12 }))
+    render(<ContextualRunPill projectId="p1" fileId="file-1" canControl />)
+
+    expect(screen.getByTestId("contextual-open-thread")).toHaveAttribute(
+      "href",
+      `/project/p1/agent?conversation=run%3A${RUN}`,
+    )
+  })
+
+  it("offers no thread link before a run exists to open", () => {
+    render(<ContextualRunPill projectId="p1" fileId="file-1" canControl />)
+    expect(screen.queryByTestId("contextual-open-thread")).toBeNull()
   })
 
   it("keeps Pause on the pause control — only the run/resume glyphs changed (AQU-1012)", () => {

@@ -132,8 +132,18 @@ export interface ContextualTransportSnapshot {
 
 export interface ContextualTransport {
   fetchSnapshot(projectId: string, fileId: string, targetLang?: string): Promise<ContextualTransportSnapshot>
-  /** `anchorCellId` is where the user is looking — the first wave starts there. */
-  start(projectId: string, fileId: string, anchorCellId?: string, targetLang?: string): Promise<{ runId: string }>
+  /** `anchorCellId` is where the user is looking — the first wave starts there.
+   *  `spanLimit` parks the run after N spans ("translate the next passage,
+   *  then I look"); omitted means the whole file. The store never passes it —
+   *  the affordance lives in the Team surface — but the signature carries it
+   *  so `startFileContextualRun` can go through this one entry point. */
+  start(
+    projectId: string,
+    fileId: string,
+    anchorCellId?: string,
+    targetLang?: string,
+    spanLimit?: number,
+  ): Promise<{ runId: string }>
   pause(runId: string): Promise<void>
   resume(runId: string): Promise<void>
   terminate(runId: string): Promise<void>

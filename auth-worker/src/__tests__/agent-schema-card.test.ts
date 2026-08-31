@@ -258,6 +258,18 @@ describe("buildSystemPrompt — changeset command index", () => {
   })
 })
 
+describe("buildSystemPrompt — suggested next steps", () => {
+  // The SPA's suggestions parser (src/lib/agent/suggestions.ts) keys on the
+  // literal `NEXT: ` line form — the prompt must keep teaching exactly that.
+  it("instructs the model to close with NEXT: lines, for every role", () => {
+    for (const roleLevel of [AGENT_ROLE.VIEWER, AGENT_ROLE.CONTRIBUTOR]) {
+      const prompt = buildSystemPrompt({ ...baseCtx, roleLevel })
+      expect(prompt).toContain("## Suggested next steps")
+      expect(prompt).toContain("NEXT: <short imperative action>")
+    }
+  })
+})
+
 describe("AGENT_REQUIRED_ROLE — mirror of sync-worker role-policy.ts", () => {
   it("pins the floors the agent's safety depends on", () => {
     expect(AGENT_REQUIRED_ROLE["target.cell.commit"]).toBe(400)

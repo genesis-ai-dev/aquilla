@@ -57,6 +57,7 @@ export const agent = defineNamespace({
     "agent.emptyState.dismiss": "Don't show this again",
 
     // ── Run timeline (AgentRunView) ─────────────────────────────────────
+    "agent.run.suggestionsAriaLabel": "Suggested next steps",
     "agent.run.stepRunning": "Step running",
     "agent.run.stepSucceeded": "Step succeeded",
     "agent.run.stepFailed": "Step failed",
@@ -224,6 +225,73 @@ export const agent = defineNamespace({
       "This work has finished — there is no one left in this thread to direct.",
     "agent.team.composer.scope": "{persona} · {scope}",
     "agent.team.composer.sendFailed": "Couldn't send that message. Try again.",
+    "agent.team.inspector.resize": "Resize step detail",
+
+    // ── NEW: v3 agent modes (autonomy dial + react loop + next passage) ───
+    // The agent's autonomy is a dial, not an on/off: two independent loops
+    // (initiative, react) plus a scope bound. Wording discipline for this
+    // block — never imply the team applies anything by itself. Autonomy here
+    // decides what the team STARTS working on; everything it produces is
+    // still a staged proposal behind the same human approve/reject gate.
+    "agent.mode.title": "Agent mode",
+    "agent.mode.openLabel": "Agent mode: {mode}",
+    "agent.mode.loading": "Loading agent mode…",
+    "agent.mode.unavailable": "Agent mode is unavailable right now.",
+    "agent.mode.saveFailed": "Couldn't save that. Your change was undone.",
+    "agent.mode.forbidden": "Only a project lead can change the agent mode.",
+    "agent.mode.presetsTitle": "Presets",
+    "agent.mode.preset.fullAutopilot": "Autopilot",
+    "agent.mode.preset.fullAutopilotDescription":
+      "Takes on new passages by itself and responds when you edit.",
+    "agent.mode.preset.reactOnly": "Reacting",
+    "agent.mode.preset.reactOnlyDescription":
+      "Waits for your edits, then follows up on what they imply elsewhere.",
+    "agent.mode.preset.qaOnly": "QA only",
+    "agent.mode.preset.qaOnlyDescription":
+      "Responds to your edits by checking the work — it won't redraft.",
+    "agent.mode.preset.draftOnly": "Draft only",
+    "agent.mode.preset.draftOnlyDescription":
+      "Keeps drafting ahead on its own and stays out of your edits.",
+    "agent.mode.preset.off": "Manual",
+    "agent.mode.preset.offDescription":
+      "Nothing starts unless you start it. This is the default.",
+    "agent.mode.preset.custom": "Custom",
+    "agent.mode.preset.customDescription":
+      "A combination of your own — see the switches below for what is on.",
+    "agent.mode.initiative": "Initiative loop",
+    "agent.mode.initiativeDescription": "The team may pick up new passages on its own.",
+    "agent.mode.react": "React loop",
+    "agent.mode.reactDescription":
+      "The team watches the edits you commit and follows up on them.",
+    "agent.mode.scopeTitle": "What it may work on",
+    "agent.mode.scope.full": "Everything",
+    "agent.mode.scope.qa": "Checks only",
+    "agent.mode.scope.draft": "Drafts only",
+    "agent.mode.graphTitle": "What runs",
+    "agent.mode.checkNow": "Check for updates now",
+    "agent.mode.checking": "Checking…",
+    "agent.mode.checkUnavailable":
+      "This project's server can't check for updates yet.",
+    "agent.mode.checkFailed": "Couldn't check for updates. Try again.",
+    "agent.mode.checkStarted": plural({
+      one: "Started {count} follow-up.",
+      other: "Started {count} follow-ups.",
+    }),
+    "agent.mode.checkNothing": "Nothing new to follow up on.",
+    "agent.mode.flagLabel": "Agent modes",
+    "agent.mode.flagDescription":
+      "Show the agent-mode dial in the team view, along with the next-passage button and manual update checks. The mode itself stays off until someone turns it on.",
+    // Reaction conversations: a run the team started off the back of human
+    // edits, rather than one a person asked for.
+    "agent.team.reactionPreview": "Reacted to your changes — {preview}",
+    "agent.team.reactionLabel": "Started in response to your changes",
+    // "Next passage": one span, then a park, so the human reviews before more
+    // work is spent.
+    "agent.team.nextPassage": "Next passage",
+    "agent.team.nextPassageStarting": "Starting…",
+    "agent.team.nextPassageFailed": "Couldn't start the next passage.",
+    // The editor pill's way into this run's conversation.
+    "agent.team.openThread": "Open thread",
 
     // ── Full-screen workbench (AgentWorkbench) ──────────────────────────
     "agent.workbench.newSessionAriaLabel": "New session",
@@ -242,6 +310,7 @@ export const agent = defineNamespace({
 
     // ── Run cost-cap meter (BudgetMeter) ────────────────────────────────
     "agent.budget.exhausted": "Run stopped at its {capCredits} credit cap ({spentCredits} spent).",
+    "agent.budget.pctUsed": "{pct}% of the run budget used",
 
     // ── Staged changeset review (ChangesetCard, ChangeList, and the
     //    full-page /approve/:changesetId gate in ApproveChangeset) ──────
@@ -560,6 +629,12 @@ export const agent = defineNamespace({
           "Button that permanently hides the first-run guide for this browser " +
           "(localStorage). Also the accessible name of that button.",
       },
+      "agent.run.suggestionsAriaLabel": {
+        description:
+          "Accessible name for the row of one-tap suggestion buttons under the " +
+          "agent's final reply — each button sends that suggested next step as " +
+          "the user's next message.",
+      },
       "agent.run.stepRunning": {
         description:
           "Accessible name for the spinner shown beside an in-progress tool-call chip " +
@@ -624,6 +699,15 @@ export const agent = defineNamespace({
         placeholders: {
           capCredits: "The run's credit cap, already formatted with its unit (e.g. '500 cr').",
           spentCredits: "Credits spent when the run stopped, already formatted with its unit.",
+        },
+      },
+      "agent.budget.pctUsed": {
+        description:
+          "Compact meter line under an agent run stating how much of the run's " +
+          "credit budget has been spent, as a percentage only (no raw credit " +
+          "amounts — review decision 2026-08-31).",
+        placeholders: {
+          pct: "Whole-number percent spent, pre-formatted; may be the literal '<1' when spend is under one percent.",
         },
       },
       "agent.changeset.moreChanges": {
@@ -1018,6 +1102,42 @@ export const agent = defineNamespace({
         placeholders: {
           persona: "The translated teammate name (Drafter / Reviewer / Coordinator).",
           scope: "The passage label or file name the run is working — not translated.",
+        },
+      },
+      "agent.team.inspector.resize": {
+        description:
+          "Accessible name of the drag handle on the inner edge of the step-detail " +
+          "column, which widens or narrows that column. Focusable: the arrow keys " +
+          "move it too. A verb phrase naming what is resized.",
+      },
+      // ── NEW: v3 agent modes ────────────────────────────────────────────
+      "agent.mode.openLabel": {
+        description:
+          "Accessible name for the compact button in the agent team's header " +
+          "that opens the autonomy dial. It repeats the mode name shown on the " +
+          "button so the spoken name contains the visible one — keep the mode " +
+          "placeholder in the string for that reason.",
+        placeholders: {
+          mode: "The current mode's already-translated preset name (Autopilot / Reacting / QA only / Draft only / Manual / Custom).",
+        },
+      },
+      "agent.mode.checkStarted": {
+        description:
+          "Result line under the 'Check for updates now' button in the agent-mode " +
+          "popover, reporting how many follow-up runs the manual check just " +
+          "started off the back of recent human edits. Zero is never phrased with " +
+          "this key — 'agent.mode.checkNothing' covers that case.",
+        placeholders: { count: "How many follow-up runs the check started." },
+      },
+      "agent.team.reactionPreview": {
+        description:
+          "One-line preview of a conversation the team STARTED ITSELF after seeing " +
+          "human edits land, rather than one a person asked for. The marker before " +
+          "the dash is the part that must stay recognisable at a glance — it is how " +
+          "a translator tells an uninvited follow-up from work they requested.",
+        placeholders: {
+          preview:
+            "The conversation's ordinary preview line (a status and passage, or a drafts-ready count) — already translated, inserted verbatim.",
         },
       },
     },

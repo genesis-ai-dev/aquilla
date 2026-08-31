@@ -140,6 +140,10 @@ export const realContextualTransport: ContextualTransport = {
     fileId: string,
     anchorCellId?: string,
     targetLang = "",
+    // v3 "next passage only": the run parks itself after N spans instead of
+    // working the whole file. Extra optional param rather than a widened
+    // ContextualTransport signature — the run-store never asks for it.
+    spanLimit?: number,
   ): Promise<{ runId: string }> {
     const jwt = await requireJwt()
     const res = await fetchWithTimeout(runsBase(projectId), {
@@ -150,6 +154,7 @@ export const realContextualTransport: ContextualTransport = {
         fileId,
         ...(anchorCellId ? { anchorCellId } : {}),
         ...(targetLang ? { targetLang } : {}),
+        ...(spanLimit != null && spanLimit > 0 ? { spanLimit } : {}),
       }),
     })
     if (!res.ok) return throwFromResponse(res, "start contextual run failed")
@@ -306,6 +311,8 @@ export interface ContextualRunRecord {
   updatedAt: string
   targetLang?: string
   initiatedBy?: string | null
+  /** Set when the run was started to work only N spans ("next passage only"). */
+  spanLimit?: number | null
   scopeGroup?: string | null
   anchorCellId?: string | null
   proposedDrafts?: number
@@ -473,6 +480,9 @@ function normalizeRun(value: unknown): ContextualRunRecord | null {
     ...(typeof row.targetLang === "string" ? { targetLang: row.targetLang } : {}),
     ...(typeof row.initiatedBy === "string" || row.initiatedBy === null
       ? { initiatedBy: row.initiatedBy }
+      : {}),
+    ...(typeof row.spanLimit === "number" || row.spanLimit === null
+      ? { spanLimit: row.spanLimit }
       : {}),
     ...(typeof row.scopeGroup === "string" || row.scopeGroup === null
       ? { scopeGroup: row.scopeGroup }
@@ -708,13 +718,61 @@ export async function startProjectContextualRun(
 
 /** Start a fresh file-scoped run from the inspector after a failed run. This
  * is intentionally a new run, not a claim that the server supports replaying
- * the failed run at an exact internal step. */
+ * the failed run at an exact internal step.
+ *
+ * `spanLimit` is the v3 "next passage only" affordance: 1 asks the server for
+ * one span and then a park, so the human reviews before more work is spent. */
 export async function startFileContextualRun(
   projectId: string,
   fileId: string,
   targetLang = "",
+  spanLimit?: number,
 ): Promise<{ runId: string }> {
-  return realContextualTransport.start(projectId, fileId, undefined, targetLang)
+  return realContextualTransport.start(projectId, fileId, undefined, targetLang, spanLimit)
+}
+
+/** One reaction the react-check started, or one file it deliberately passed on. */
+export interface ContextualReactCheckResult {
+  reactions: { fileId: string; runId: string }[]
+  skipped: { fileId: string; reason: string }[]
+}
+
+/**
+ * "Check for updates now" — the manual sibling of the server's 5-minute react
+ * sweep, for when waiting for the cron is the wrong answer. CONTRIBUTOR+.
+ *
+ * Returns `null` (rather than throwing) when the server predates the route,
+ * so an older backend disables the button with an explanation instead of
+ * making the whole mode control look broken.
+ */
+export async function requestReactCheck(
+  projectId: string,
+): Promise<ContextualReactCheckResult | null> {
+  const jwt = await requireJwt()
+  const res = await fetchWithTimeout(
+    `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/contextual/react-check`,
+    { method: "POST", headers: authHeaders(jwt) },
+  )
+  if (res.status === 404 || res.status === 501) return null
+  if (!res.ok) return throwFromResponse(res, "check for updates failed")
+  const body = objectValue(await res.json())
+  const reactions = Array.isArray(body?.reactions) ? body.reactions : []
+  const skipped = Array.isArray(body?.skipped) ? body.skipped : []
+  return {
+    reactions: reactions.flatMap((entry) => {
+      const row = objectValue(entry)
+      const fileId = stringValue(row?.fileId)
+      const runId = stringValue(row?.runId)
+      if (!fileId || !runId) return []
+      runProjects.set(runId, projectId)
+      return [{ fileId, runId }]
+    }),
+    skipped: skipped.flatMap((entry) => {
+      const row = objectValue(entry)
+      const fileId = stringValue(row?.fileId)
+      return fileId ? [{ fileId, reason: stringValue(row?.reason) }] : []
+    }),
+  }
 }
 
 export type ContextualRunCommand = "pause" | "resume" | "terminate"

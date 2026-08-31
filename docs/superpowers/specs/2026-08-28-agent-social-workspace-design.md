@@ -144,6 +144,80 @@ sidebar. Resolution — `| dock | conversation | optional step inspector |`:
   and selection jumps to the new conversation.
 - One shared refcounted poller (team-conversations.ts) feeds both columns.
 
+## v3 — autonomy modes + the react loop (2026-08-28 evening session, Ryder + Daniel)
+
+The functionality-exposure layer: the agent's autonomy is a dial, expressed as
+a configurable process graph with parts activated or not.
+
+**Agent mode** (per-project, stored in project settings as `agentMode`,
+defaults ALL OFF so merging with "flags off" is just the default):
+
+```ts
+agentMode: {
+  initiative: boolean   // the autopilot loop may pick up new work on its own
+  react: boolean        // watch project events and respond to human input
+  scope: "full" | "qa" | "draft"  // what work reactions/initiative may do
+}
+```
+
+UI presets over those switches: Full autopilot {initiative+react, full} ·
+React only {react, full} · QA only {react, qa} · Draft only {initiative,
+draft} · Off/manual {}. The mode control renders the switches with the
+process graph beneath (view-first; graph customization later, per the
+meeting: "we don't have to make a whole way to customize it yet").
+
+**React loop** (server, rides the existing 5-min cron `scheduled()` sweep,
+plus a manual "check for updates now" route for immediacy): for each project
+with `react` on, read the append-only events table past a per-project cursor,
+keep only HUMAN-authored expert input (target commits, validations) older
+than a debounce window, group by file, gate for relevance (heuristic v1: any
+qualifying events in a discourse file with no active/recent reaction run),
+then START a contextual run `initiatedBy: "reaction"` anchored at the
+affected cells, seeded with an auto-steering direction naming the trigger
+("Reacting to N human edits in <refs>; scope qa → verify and report, do not
+redraft unless a check fails"). Existing-run etiquette (shipped): a BUSY run
+(running/pausing/waiting) defers the reaction; a PAUSED run is never
+overridden — a person asked for quiet; a PARKED run with remaining work is
+WOKEN with the reaction steering (continuing its own conversation); an
+EXHAUSTED parked run is retired and replaced by a fresh reaction run over the
+file's current state. Premise from the meeting: "anytime you have
+human expert data injected, there are implications of that." Anti-noise: a
+reaction is a THREAD, not notifications — debounce, one open reaction per
+file, cooldown between reactions. Never throw into the cron.
+
+**Next step only**: the start route accepts `spanLimit` (run parks after N
+spans) — the "translate the next passage, then I look" button.
+
+**UI**: mode control (switches + presets + graph) in the Team surface header,
+gated by an `agentModes` experimental flag; reaction conversations badge in
+the list ("reacted to your changes", from `initiatedBy === "reaction"`);
+"check for updates" + next-passage affordances; editor pill links to its run
+conversation. Fixes from the live review: step inspector draggable/wider,
+no raw opaque ids anywhere user-facing, duplicate feed-event ids fixed at
+the seed + guarded in the feed transform.
+
+**Deferred from the session**: FAB replacing the pill + editor-side thread
+accordion; cursor-style revert-from-thread; project-knowledge agent persona;
+speculative pre-filling research; graph editing.
+
+## v3.1 — live-trial fixes (2026-08-31 review)
+
+From Ryder's first real-AI session: (1) **Auto-scroll** — all agent feeds
+adopt the stick-to-bottom contract (researched: use-stick-to-bottom /
+AI-Elements pattern): follow new content while the reader is at the bottom,
+any upward scroll breaks the follow, the ArrowDown pill (or scrolling back
+down) re-engages; the chat's previous anchor-message-to-top mode is off
+because agent runs stream tool activity below the fold. (2) **Working
+indicator** renders after the workbench tabs, not between title and tabs.
+(3) **Conversation logs** — each chat run emits one `[agent-convo]` JSON
+line (truncated messages + tool names) to worker logs; the durable copy
+remains `agent_sessions.convo`. (4) **Suggested next steps** — the system
+prompt asks for closing `NEXT: <action>` lines; the client strips them from
+the prose and renders up to two one-tap buttons on the latest settled run
+(dock, workbench chat, and Team chat via the channel composer path).
+(5) **Budget meter** shows percent-of-budget only, never raw credit
+amounts.
+
 ## Testing
 
 Vitest: personas mapping totality (every region/tool kind attributes — the social

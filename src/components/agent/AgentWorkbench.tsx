@@ -387,17 +387,6 @@ export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCel
         <div className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
           <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
           <span className="shrink-0 text-sm font-medium">{t("agentWorkspace.agent")}</span>
-          {activeRun && (
-            <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" role="status">
-              <Spinner className="h-3 w-3 shrink-0" />
-              <span className="truncate">
-                {progress ? `${progress.label} — ${progress.done}/${progress.total}` : t("agentWorkspace.working")}
-              </span>
-            </span>
-          )}
-          {state.queued.length > 0 && (
-            <span className="shrink-0 text-[11px] text-muted-foreground">{t("agentWorkspace.queued", { count: state.queued.length })}</span>
-          )}
 
           <TabsList
             variant="line"
@@ -414,6 +403,20 @@ export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCel
               {t("agentWorkspace.projectKnowledge")}
             </TabsTrigger>
           </TabsList>
+
+          {/* Live status sits AFTER the navigation (2026-08-31 review): the
+              tab row stays a stable shape whether or not a run is working. */}
+          {activeRun && (
+            <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" role="status">
+              <Spinner className="h-3 w-3 shrink-0" />
+              <span className="truncate">
+                {progress ? `${progress.label} — ${progress.done}/${progress.total}` : t("agentWorkspace.working")}
+              </span>
+            </span>
+          )}
+          {state.queued.length > 0 && (
+            <span className="shrink-0 text-[11px] text-muted-foreground">{t("agentWorkspace.queued", { count: state.queued.length })}</span>
+          )}
 
           <span className="ml-auto flex shrink-0 items-center gap-1">
             {credits && <CreditsDial {...credits} />}

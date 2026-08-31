@@ -160,6 +160,53 @@ describe("AgentDockPanel", () => {
     expect(currentPath).toBe("/project/p1/agent?conversation=team-chat")
   })
 
+  it("marks a conversation the team started off the back of your edits", async () => {
+    // A reaction run is uninvited work. The row has to admit that at a glance
+    // — quietly (a muted glyph, not an alert), which is what keeps the react
+    // loop a thread you find rather than a notification that finds you.
+    fetchContextualRuns.mockResolvedValue(
+      runsPage([runRecord({ proposedDrafts: 0, initiatedBy: "reaction" })]),
+    )
+    fetchContextualDecisions.mockResolvedValue(decisionsPage())
+    renderPanel()
+
+    const list = await screen.findByTestId("team-conversation-list")
+    expect(
+      within(list).getByLabelText("Started in response to your changes"),
+    ).toBeInTheDocument()
+    expect(
+      within(list).getByText("Reacted to your changes — Working — MRK 4:1–4:8"),
+    ).toBeInTheDocument()
+  })
+
+  it("leaves a run somebody asked for unmarked", async () => {
+    fetchContextualRuns.mockResolvedValue(runsPage([runRecord()]))
+    fetchContextualDecisions.mockResolvedValue(decisionsPage())
+    renderPanel()
+
+    const list = await screen.findByTestId("team-conversation-list")
+    expect(within(list).queryByLabelText("Started in response to your changes")).toBeNull()
+  })
+
+  it("never titles a row with a raw span id", async () => {
+    // No file name to fall back on and an opaque span label — the row must
+    // reach the generic title rather than printing a UUID.
+    fetchContextualRuns.mockResolvedValue(
+      runsPage([
+        runRecord({
+          fileId: "file-unknown",
+          spanLabel: "0b6f1f1e-4a1e-4c33-9f4a-8f2b0f5f1e77",
+        }),
+      ]),
+    )
+    fetchContextualDecisions.mockResolvedValue(decisionsPage())
+    renderPanel()
+
+    const list = await screen.findByTestId("team-conversation-list")
+    expect(within(list).getByText("Autopilot run")).toBeInTheDocument()
+    expect(within(list).queryByText(/0b6f1f1e/)).toBeNull()
+  })
+
   it("the new-conversation control heads to a fresh Team chat", async () => {
     fetchContextualRuns.mockResolvedValue(runsPage([]))
     fetchContextualDecisions.mockResolvedValue(decisionsPage())

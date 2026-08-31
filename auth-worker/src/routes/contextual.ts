@@ -5,6 +5,7 @@
 //   GET  /:projectId/contextual/runs?fileId=              snapshot for the pill (VIEWER)
 //   POST /:projectId/contextual/runs/:runId/pause|resume|terminate
 //   POST /:projectId/contextual/steering                  direction / refresh_span / note
+//   POST /:projectId/contextual/react-check               run the react watcher now
 //   GET  /:projectId/contextual/drafts?fileId=            staged drafts (VIEWER)
 //   GET  /:projectId/contextual/segmentation?fileId=      strategy + preview (VIEWER)
 //   PUT  /:projectId/contextual/segmentation?fileId=      set the strategy (PROJECT_LEAD)
@@ -94,6 +95,7 @@ import {
   type ContextualProgressFrame,
 } from "../lib/contextual/tick"
 import { decorateActivityLabels, loadCellDisplayIndex } from "../lib/contextual/activity-labels"
+import { reactCheckProject, type StartReactionRun, type WakeReactionRun } from "../lib/react-loop"
 import type { LlmCall } from "../lib/contextual/types"
 
 const contextual = new Hono<AuthHonoEnv>()
@@ -524,6 +526,171 @@ export async function sweepStrandedContextualRuns(env: Env, limit = 10): Promise
   }
 }
 
+// ── Reactions (v3 react loop) ───────────────────────────────────────────────
+
+/** `contextual_runs.initiated_by` for a run the react watcher started. Not a
+ *  username: the SPA badges these conversations as "reacted to your changes"
+ *  off exactly this value. */
+export const REACTION_INITIATOR = "reaction"
+
+/**
+ * Start one reaction run. Lives here, beside `selfTickLoop`, so a reaction
+ * goes through the SAME path a human start does — `createRun`'s refuse-second-
+ * active-run, the durable project concurrency lease, the tick loop, the
+ * activity record and the live frame. lib/react-loop.ts takes this as an
+ * injected dependency (`StartReactionRun`) rather than importing it, which is
+ * what keeps the two modules from importing each other.
+ *
+ * Guards versus the human start route: the org credit and word caps are
+ * enforced identically (they are org-scoped, so autonomous spend is capped the
+ * same way attended spend is). `runAiGuard` is NOT — it is a per-USER AI
+ * budget, and a reaction has no user to charge it to. The lane is always the
+ * default (''), matching the project-wide autopilot fan-out; reacting on a
+ * named multilingual lane is a follow-up.
+ */
+export const startReactionRun: StartReactionRun = async (env, input) => {
+  if (!env.OPENROUTER_API_KEY) return { status: "skipped", reason: "not_configured" }
+
+  let orgId = 0
+  try {
+    const projectRow = await env.AQUILLA_PG
+      .prepare("SELECT org_id FROM projects WHERE id = ?")
+      .bind(input.projectId)
+      .first<{ org_id: number | null }>()
+    orgId = projectRow?.org_id ?? 0
+  } catch {
+    /* best-effort — degrade to org 0, exactly as the start route does */
+  }
+  const credit = await creditGuard(env.AQUILLA_PG, env, orgId, "agent")
+  if (!credit.ok) return { status: "skipped", reason: `credit_cap_exceeded (${credit.reason})` }
+  const words = await wordGuard(env.AQUILLA_PG, orgId)
+  if (!words.ok) return { status: "skipped", reason: `word_cap_exceeded (${words.reason})` }
+
+  const created = await createRun(env.AQUILLA_PG, {
+    projectId: input.projectId,
+    fileId: input.fileId,
+    targetLang: "",
+    initiatedBy: REACTION_INITIATOR,
+    ...(input.anchorCellId ? { anchorCellId: input.anchorCellId } : {}),
+  })
+  if (created.status === "active_exists") {
+    return { status: "skipped", reason: "a run is already active on this file" }
+  }
+
+  // Queue the auto-steering BEFORE the driver starts: runOneTick consumes
+  // steering ahead of picking a wave, so the direction shapes the very first
+  // span rather than arriving after the reaction has already drafted.
+  const steer = await appendSteering(env.AQUILLA_PG, {
+    projectId: input.projectId,
+    fileId: input.fileId,
+    runId: created.run.id,
+    kind: "direction",
+    body: input.direction,
+    createdBy: REACTION_INITIATOR,
+  })
+  if (steer.status === "validation_failed") {
+    console.warn(`[react] auto-steering rejected for run ${created.run.id}: ${steer.message}`)
+  }
+
+  await recordRunCreated(env.AQUILLA_PG, created.run)
+  try {
+    await notifySyncWorkerOfContextualActivity(env, input.projectId, runStateFrame(created.run))
+  } catch (err) {
+    console.warn(`[react] start notify failed for run ${created.run.id}:`, err)
+  }
+  return {
+    status: "ok",
+    runId: created.run.id,
+    done: selfTickLoop(env, input.projectId, created.run.id),
+  }
+}
+
+/** Wake a PARKED run with reaction steering instead of starting a rival run.
+ *  Mirrors the human steering route's wake path (queue direction → resume →
+ *  drive) under the same budget guards as a fresh reaction start. */
+export const wakeReactionRun: WakeReactionRun = async (env, input) => {
+  if (!env.OPENROUTER_API_KEY) return { status: "skipped", reason: "not_configured" }
+
+  let orgId = 0
+  try {
+    const projectRow = await env.AQUILLA_PG
+      .prepare("SELECT org_id FROM projects WHERE id = ?")
+      .bind(input.projectId)
+      .first<{ org_id: number | null }>()
+    orgId = projectRow?.org_id ?? 0
+  } catch {
+    /* best-effort — degrade to org 0, exactly as the start route does */
+  }
+  const credit = await creditGuard(env.AQUILLA_PG, env, orgId, "agent")
+  if (!credit.ok) return { status: "skipped", reason: `credit_cap_exceeded (${credit.reason})` }
+  const words = await wordGuard(env.AQUILLA_PG, orgId)
+  if (!words.ok) return { status: "skipped", reason: `word_cap_exceeded (${words.reason})` }
+
+  // An EXHAUSTED parked run (every span settled) has nothing left to drive —
+  // waking it would consume the steering and re-park untouched. Retire it and
+  // start a fresh reaction run over the file's CURRENT state instead; the old
+  // conversation stays in the list as finished history.
+  const parked = await getRun(env.AQUILLA_PG, input.runId)
+  if (
+    parked
+    && parked.totalSpans > 0
+    && parked.doneSpans + parked.failedSpans >= parked.totalSpans
+  ) {
+    const retired = await terminateRun(env.AQUILLA_PG, input.runId)
+    if (retired.status !== "ok") {
+      return { status: "skipped", reason: `wake_failed (retire ${retired.status})` }
+    }
+    try {
+      await publishRunStateOutsideTick(env, env.AQUILLA_PG, input.projectId, retired.run)
+    } catch (err) {
+      console.warn(`[react] retire notify failed for run ${input.runId}:`, err)
+    }
+    return startReactionRun(env, {
+      projectId: input.projectId,
+      fileId: input.fileId,
+      anchorCellId: input.anchorCellId,
+      direction: input.direction,
+    })
+  }
+
+  // Queue the steering BEFORE resuming, so the woken tick's steering read
+  // picks the direction up ahead of its first wave.
+  const steer = await appendSteering(env.AQUILLA_PG, {
+    projectId: input.projectId,
+    fileId: input.fileId,
+    runId: input.runId,
+    kind: "direction",
+    body: input.direction,
+    createdBy: REACTION_INITIATOR,
+  })
+  if (steer.status === "validation_failed") {
+    return { status: "skipped", reason: "wake_failed (steering rejected)" }
+  }
+  await appendActivitySafely(env.AQUILLA_PG, {
+    runId: input.runId,
+    projectId: input.projectId,
+    fileId: input.fileId,
+    kind: "steering_queued",
+    status: "queued",
+    details: { steeringId: steer.entry.id, steeringKind: steer.entry.kind },
+  })
+
+  const resumed = await resumeRun(env.AQUILLA_PG, input.runId)
+  if (resumed.status !== "ok") {
+    return { status: "skipped", reason: `wake_failed (${resumed.status})` }
+  }
+  try {
+    await publishRunStateOutsideTick(env, env.AQUILLA_PG, input.projectId, resumed.run)
+  } catch (err) {
+    console.warn(`[react] wake notify failed for run ${input.runId}:`, err)
+  }
+  return {
+    status: "ok",
+    runId: input.runId,
+    done: selfTickLoop(env, input.projectId, input.runId),
+  }
+}
+
 // ── Routes ──────────────────────────────────────────────────────────────────
 
 const startSchema = z.object({
@@ -535,6 +702,10 @@ const startSchema = z.object({
   /** "file" (default) drafts one file; "project" fans out across every
    *  discourse file with work left. */
   scope: z.enum(["file", "project"]).optional(),
+  /** "Next step only" (v3): park after this many settled spans. Omitted means
+   *  the historical behaviour — draft the whole file. Applies to every run a
+   *  project-wide start creates, since the point is a bounded look. */
+  spanLimit: z.number().int().min(1).optional(),
 })
 
 // POST /:projectId/contextual/runs — start a run (CONTRIBUTOR: this is
@@ -651,6 +822,7 @@ contextual.post(
               roleSnapshot,
               scopeGroup,
               ...(body.anchorCellId ? { anchorCellId: body.anchorCellId } : {}),
+              ...(body.spanLimit ? { spanLimit: body.spanLimit } : {}),
             })
           } catch (err) {
             // A single corrupt/racing candidate must not strand earlier rows
@@ -710,6 +882,7 @@ contextual.post(
       initiatedBy: user.username,
       roleSnapshot,
       ...(body.anchorCellId ? { anchorCellId: body.anchorCellId } : {}),
+      ...(body.spanLimit ? { spanLimit: body.spanLimit } : {}),
     })
     if (created.status === "active_exists") {
       const { body: err, status } = errorJson(
@@ -786,6 +959,7 @@ function runSnapshot(
     initiatedBy: run.initiatedBy,
     scopeGroup: run.scopeGroup,
     anchorCellId: run.anchorCellId,
+    spanLimit: run.spanLimit,
     // Live phase/spanLabel arrive over the DO frame channel; the snapshot only
     // carries durable state, so these hydrate as null (never undefined — the
     // SPA run-store types them string | null).
@@ -1098,6 +1272,31 @@ contextual.post(
     return c.json({ steering: result.entry, ...(woken ? { wokeRunId: woken } : {}) }, 201)
   },
 )
+
+// POST /:projectId/contextual/react-check — run the react watcher for this
+// project NOW (CONTRIBUTOR, same floor as steering: it starts translation work
+// product). The 5-minute cron does the same sweep unattended; this is the
+// "check for updates now" affordance, so the answer is always the sweep's own
+// report — what it started and why it skipped everything else.
+contextual.post("/:projectId/contextual/react-check", authMiddleware, async (c) => {
+  const projectId = c.req.param("projectId") ?? ""
+  const gate = await requireRole(c, projectId, ROLE.CONTRIBUTOR)
+  if (!gate.ok) return gate.res
+
+  const result = await reactCheckProject(c.env, projectId, {
+    startRun: startReactionRun,
+    wakeRun: wakeReactionRun,
+  })
+  // Same background-driver contract as kickLoop: the reaction runs keep
+  // ticking after this Response, and _test.lastLoop is the seam tests await.
+  _test.lastLoop = result.done
+  try {
+    c.executionCtx.waitUntil(result.done)
+  } catch {
+    void result.done.catch(() => {})
+  }
+  return c.json({ reactions: result.reactions, skipped: result.skipped })
+})
 
 // GET /:projectId/contextual/drafts?fileId=&status=&targetLang= — staged drafts (VIEWER).
 contextual.get("/:projectId/contextual/drafts", authMiddleware, async (c) => {

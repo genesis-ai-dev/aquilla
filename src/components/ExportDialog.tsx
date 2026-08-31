@@ -4,6 +4,9 @@
 // CAT formats). Converting to a different format lives in a collapsed
 // "Export to another format" section (format radio + scope + advanced).
 //
+// Biblica Study Notes files skip that conversion section: export is always
+// the IDML round-trip, with optional Bible Swap shown on the same surface.
+//
 // For non-USFM formats, project scope uses useProjectCells to load every file
 // with bounded concurrency and buildProjectZip to produce a zip.
 //
@@ -20,7 +23,7 @@
 // a "Voice" filter appears letting users export only one voice's cells across
 // all camera angles.
 
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { Download, AlertTriangle, CheckCircle2 } from "lucide-react"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
@@ -66,6 +69,12 @@ import type { TextExportFormat } from "@/lib/export/project-zip-export"
 import { previewAudioByCharacter } from "@/lib/export/audio-by-character"
 import { exportMetadataCsv } from "@/lib/export/exporters/metadata-csv"
 import { injectSdbhXml } from "@/lib/parsers/sdbh"
+import { BibleSwapPanel } from "@/components/BibleSwapPanel"
+import {
+  DEFAULT_BIBLE_SWAP_SETTINGS,
+  type BibleSwapSettings,
+} from "@/lib/biblica/bible-swap/settings"
+import { BIBLICA_NOTES_PROFILE_ID } from "@/lib/import"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
@@ -373,6 +382,48 @@ export function ExportDialog({
   const [sdbhSkeleton, setSdbhSkeleton] = useState<File | null>(null)
   const hasSdbhFiles = projectFiles.some((f) => f.type === "sdbh")
 
+  // Bible Swap rides on the Biblica study-notes round-trip, so it is offered
+  // only when the active file's cells came from that importer. Those files
+  // have no conversion path — round-trip IDML plus optional swap is the
+  // whole dialog.
+  const isBiblicaStudyNotes = useMemo(
+    () =>
+      cells.some(
+        (cell) =>
+          (cell.metadata?.aquillaImport as { profileId?: string } | undefined)?.profileId ===
+          BIBLICA_NOTES_PROFILE_ID,
+      ),
+    [cells],
+  )
+  const showBibleSwap = isBiblicaStudyNotes
+  const [bibleSwap, setBibleSwap] = useState<BibleSwapSettings>(DEFAULT_BIBLE_SWAP_SETTINGS)
+
+  // Don't carry a Bible pick across a file switch — the volume it was scored
+  // against is gone.
+  useEffect(() => {
+    setBibleSwap(DEFAULT_BIBLE_SWAP_SETTINGS)
+  }, [activeFileId])
+
+  const bibleSwapRequested = showBibleSwap && bibleSwap.mode !== "none" && !!bibleSwap.bibleFile
+
+  // Score the chosen Bible against the study volume actually being exported —
+  // the imported original, not the notes-only export, since the report is about
+  // how well the two versifications line up.
+  const analyzeBibleSwap = useCallback(
+    async (bibleFile: File) => {
+      if (!activeFileId) throw new Error("No file selected to analyze.")
+      const [{ analyzeBibleSwapCompatibility }, studyBytes, bibleBytes] = await Promise.all([
+        import("@/lib/biblica/bible-swap/compatibility"),
+        fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang }),
+        bibleFile.arrayBuffer(),
+      ])
+      return analyzeBibleSwapCompatibility(bibleFile.name, new Uint8Array(bibleBytes), [
+        { fileName: activeFileName ?? activeFileId, idmlData: new Uint8Array(studyBytes) },
+      ])
+    },
+    [activeFileId, activeFileName, projectId, getToken, targetLang],
+  )
+
   // A selected format can also vanish without a file switch (sdbh-xml is
   // offered per-project, not per-file) — fall back to the always-visible tsv.
   useEffect(() => {
@@ -599,14 +650,61 @@ export function ExportDialog({
           diagnostics: result.diagnostics,
           durationMs: performance.now() - idmlTelemetryStartedAt,
         }))
-        downloadBlob(result.blob, `${baseName}.idml`)
         const fileName = `${baseName}.idml`
-        setStatus({
-          kind: "ok",
-          msg: result.report.translated === 0
-            ? t("importExport.status.downloadedIdmlUnchanged", { fileName })
-            : t("importExport.status.downloadedParagraphsTranslated", { fileName, count: result.report.translated }),
-        })
+
+        // Bible Swap (optional second pass): replace the Study Bible's English
+        // verse text with scripture from the chosen translated Bible IDML. A
+        // failure here is non-fatal — the notes-only IDML is still valid, so
+        // fall through and download that rather than losing the export.
+        let swapStatus: { kind: "ok"; msg: string } | null = null
+        let outputBlob = result.blob
+        if (bibleSwapRequested && bibleSwap.bibleFile && bibleSwap.mode !== "none") {
+          try {
+            setStatus({ kind: "busy", msg: t("importExport.bibleSwap.status.swapping") })
+            const [{ applyBibleSwapToIdml }, { createBibleSwapRunner }, { loadBibleSwapMappingPlan }] =
+              await Promise.all([
+                import("@/lib/biblica/bible-swap/swap-runner"),
+                import("@/lib/biblica/bible-swap/swap-worker-client"),
+                import("@/lib/biblica/bible-swap/mapping-loader"),
+              ])
+            const studyFileName = activeFileName ?? `${baseName}.idml`
+            const mapping = await loadBibleSwapMappingPlan(bibleSwap.language, studyFileName)
+            const bibleBytes = new Uint8Array(await bibleSwap.bibleFile.arrayBuffer())
+            const studyBytes = new Uint8Array(await result.blob.arrayBuffer())
+            const swapped = await applyBibleSwapToIdml(studyBytes, bibleBytes, {
+              swapMode: bibleSwap.mode,
+              parallelRunner: createBibleSwapRunner(),
+              language: bibleSwap.language,
+              ...(mapping ? { serializedPlan: mapping.plan, studyVolume: mapping.volume } : {}),
+            })
+            outputBlob = new Blob([swapped.idml as BlobPart], { type: "application/vnd.adobe.indesign-idml-package" })
+            swapStatus = {
+              kind: "ok",
+              msg: t("importExport.bibleSwap.status.done", {
+                fileName,
+                count: swapped.report.replacedVerses,
+                stories: swapped.report.modifiedStories,
+              }),
+            }
+          } catch (err) {
+            swapStatus = {
+              kind: "ok",
+              msg: t("importExport.bibleSwap.status.failed", {
+                reason: err instanceof Error ? err.message : String(err),
+              }),
+            }
+          }
+        }
+
+        downloadBlob(outputBlob, fileName)
+        setStatus(
+          swapStatus ?? {
+            kind: "ok",
+            msg: result.report.translated === 0
+              ? t("importExport.status.downloadedIdmlUnchanged", { fileName })
+              : t("importExport.status.downloadedParagraphsTranslated", { fileName, count: result.report.translated }),
+          },
+        )
       } else if (fmt === "audio-by-character") {
         setStatus({ kind: "busy", msg: t("importExport.status.decodingAudio") })
         const { exportAudioByCharacter } = await import("@/lib/export/audio-by-character")
@@ -883,7 +981,19 @@ export function ExportDialog({
           </div>
         )}
 
-        {/* Everything else is a conversion — tucked behind a collapse. */}
+        {/* Bible Swap sits on the round-trip itself, not behind conversion. */}
+        {showBibleSwap && (
+          <BibleSwapPanel
+            settings={bibleSwap}
+            onChange={setBibleSwap}
+            onAnalyze={analyzeBibleSwap}
+            disabled={status.kind === "busy"}
+          />
+        )}
+
+        {/* Everything else is a conversion — tucked behind a collapse.
+            Biblica study notes skip this: there is no other format to offer. */}
+        {!isBiblicaStudyNotes && (
         <details
           open={formatsOpen}
           onToggle={(e) => setFormatsOpen((e.currentTarget as HTMLDetailsElement).open)}
@@ -1228,6 +1338,7 @@ export function ExportDialog({
         </details>
           </div>
         </details>
+        )}
 
         {/* Status feedback */}
         {status.kind !== "idle" && (

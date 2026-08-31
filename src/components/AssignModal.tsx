@@ -118,6 +118,8 @@ interface AssignModalProps {
    * self-assign. Default false — leads/maintainers-only, pre-AQU-496 behavior.
    */
   allowSelfAssignment?: boolean
+  /** Org-configured floor for assigning work to anyone (default Project lead). */
+  assignmentMinRole?: number
   /**
    * AQU-496: the caller's own Frontier user id. Required to lock the assignee
    * picker to "self" when `roleLevel` is below PROJECT_LEAD — without it, a
@@ -168,6 +170,7 @@ export function AssignModal({
   members,
   roleLevel,
   allowSelfAssignment = false,
+  assignmentMinRole = ROLE.PROJECT_LEAD,
   callerUserId = null,
   selectedCellIds,
   jwt,
@@ -178,7 +181,9 @@ export function AssignModal({
   // AQU-496: below PROJECT_LEAD, the only reason this modal can be open at
   // all is the self-assign carve-out (see canOpenAssignUi gate below) — so
   // "below lead" and "self-assign mode" are equivalent here.
-  const isSelfAssignMode = roleLevel < ROLE.PROJECT_LEAD
+  const isSelfAssignMode = roleLevel < assignmentMinRole
+  const effectiveCallerUserId =
+    callerUserId ?? members.find((member) => member.username === author)?.userId ?? null
 
   const [scopeKind, setScopeKind] = useState<ScopeKind>("verses")
   const [selectedMemberId, setSelectedMemberId] = useState<string>("")
@@ -206,7 +211,11 @@ export function AssignModal({
       setScopeKind(
         selectedCellIds.size > 0 ? "selection" : activeFileId ? "verses" : "books",
       )
-      setSelectedMemberId(isSelfAssignMode && callerUserId != null ? String(callerUserId) : "")
+      setSelectedMemberId(
+        isSelfAssignMode && effectiveCallerUserId != null
+          ? String(effectiveCallerUserId)
+          : "",
+      )
       setSelectedLane(defaultLane)
       setSelectedFileIds(new Set())
       setSelectedChapters(new Set())
@@ -215,7 +224,7 @@ export function AssignModal({
       setNote("")
       setDeadlineDate(undefined)
     }
-  }, [open, selectedCellIds.size, activeFileId, isSelfAssignMode, callerUserId, defaultLane])
+  }, [open, selectedCellIds.size, activeFileId, isSelfAssignMode, effectiveCallerUserId, defaultLane])
 
   // AQU-658: derive the unit vocabulary from the active file's type so the
   // scope options and confirmation copy read correctly for non-scripture
@@ -361,7 +370,13 @@ export function AssignModal({
     // AQU-496 defense-in-depth: re-check even though the picker is already
     // locked to self in self-assign mode — the server is authoritative and
     // will 403 regardless, but this avoids a round-trip for the obvious case.
-    if (!canSubmitAssignment(roleLevel, allowSelfAssignment, callerUserId, member.userId)) {
+    if (!canSubmitAssignment(
+      roleLevel,
+      allowSelfAssignment,
+      effectiveCallerUserId,
+      member.userId,
+      assignmentMinRole,
+    )) {
       setError(t("dialog.assign.error.selfOnly"))
       return
     }
@@ -481,13 +496,13 @@ export function AssignModal({
     members, eligibleMembers, isSelfAssignMode, selectedMemberId, scopeKind, activeFileId, projectFiles,
     selectedCellIds.size, selectedChapters, selectedFileIds,
     jwt, projectId, author, note, onAssigned, onOpenChange,
-    roleLevel, allowSelfAssignment, callerUserId, deadlineDate, groupLabelByFileId,
+    roleLevel, allowSelfAssignment, assignmentMinRole, effectiveCallerUserId, deadlineDate, groupLabelByFileId,
     selectedLane, isScripture, segmentNoun, selectUnitErrorKey, t,
   ])
 
   // Role gate (AQU-496): PROJECT_LEAD (500)+ always renders; below that, only
   // when the org's allowSelfAssignment carve-out applies (canOpenAssignUi).
-  if (!canOpenAssignUi(roleLevel, allowSelfAssignment)) return null
+  if (!canOpenAssignUi(roleLevel, allowSelfAssignment, assignmentMinRole)) return null
 
   // AQU-496: in self-assign mode the picker is locked to the caller's own
   // membership row. If callerUserId couldn't be resolved (edge case — caller
@@ -495,7 +510,7 @@ export function AssignModal({
   // canSubmit stays false, so this fails closed rather than open.
   const assigneeItems = isSelfAssignMode
     ? members
-        .filter((m) => m.userId === callerUserId)
+        .filter((m) => m.userId === effectiveCallerUserId)
         .map((m) => ({
           value: String(m.userId),
           label: t("dialog.assign.assigneeSelfSuffix", { username: m.username }),

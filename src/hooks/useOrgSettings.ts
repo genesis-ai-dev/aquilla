@@ -52,6 +52,8 @@ const DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE = ROLE.MAINTAINER
 // behavior), not a role-ladder floor.
 const ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE = ROLE.OWNER
 const DEFAULT_ALLOW_SELF_ASSIGNMENT = false
+const DEFAULT_ASSIGNMENT_MIN_ROLE = ROLE.PROJECT_LEAD
+const VALID_ROLE_LEVELS = new Set<number>(Object.values(ROLE))
 
 // AQU-822: termbaseEditMinRole is the same OWNER-only permission-policy key
 // shape as the floors above, but it gates a WRITE (managing a project's
@@ -146,6 +148,11 @@ export interface UseOrgSettings {
    * `sync-worker/src/events/assignment-authority.ts`.
    */
   allowSelfAssignment: boolean
+  /**
+   * AQU-1037: effective floor for assigning work to anyone, including
+   * file/chapter/target-lane assignments and AI changeset routing.
+   */
+  assignmentMinRole: number
   /**
    * AQU-822: effective termbase-edit floor — the minimum role allowed to
    * manage a project's termbase in this org. Explicit org setting, or
@@ -265,6 +272,12 @@ export function useOrgSettings(
     ? true
     : DEFAULT_ALLOW_SELF_ASSIGNMENT
 
+  const assignmentMinRole = (() => {
+    const raw = server?.settings?.assignmentMinRole
+    if (typeof raw === "number" && VALID_ROLE_LEVELS.has(raw)) return raw
+    return DEFAULT_ASSIGNMENT_MIN_ROLE
+  })()
+
   // The effective role to check: project-resolved (AD-12 max-wins) when
   // available, falling back to org role for non-project contexts.
   const effectiveRoleLevel = projectRoleLevel ?? orgRoleLevel
@@ -375,6 +388,7 @@ export function useOrgSettings(
     canViewMemberProgress,
     memberProgressViewMinRole,
     allowSelfAssignment,
+    assignmentMinRole,
     termbaseEditMinRole,
     refresh,
     patch,

@@ -89,6 +89,29 @@ describe("requiredRoleForChangeset", () => {
     ).toBe(500)
   })
 
+  it("uses the org assignment floor for assignment EmitEvents", async () => {
+    const p = await seedProject(7)
+    await setOrgSettings(7, { assignmentMinRole: 300 })
+    expect(
+      await floor(p, [
+        { kind: "EmitEvents", events: [{ kind: "assignment.create" }] },
+      ]),
+    ).toBe(300)
+  })
+
+  it("keeps higher non-assignment floors in a mixed EmitEvents plan", async () => {
+    const p = await seedProject(7)
+    await setOrgSettings(7, { assignmentMinRole: 300 })
+    expect(
+      await floor(p, [
+        {
+          kind: "EmitEvents",
+          events: [{ kind: "assignment.create" }, { kind: "file.delete" }],
+        },
+      ]),
+    ).toBe(500)
+  })
+
   it("uses MAINTAINER for a non-terminology settings patch", async () => {
     const p = await seedProject(null)
     expect(

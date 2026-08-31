@@ -3580,6 +3580,8 @@ export function ProjectWorkspace() {
     hasFetched: orgSettingsFetched,
     // AQU-496: whether below-lead members may self-assign work.
     allowSelfAssignment,
+    // AQU-1037: org-configured floor for assigning work to anyone.
+    assignmentMinRole,
   } = useOrgSettings(
     project?.orgId ?? activeOrg?.id,
     projectOrg?.role?.level ?? null,
@@ -4460,7 +4462,11 @@ export function ProjectWorkspace() {
   // AQU-496: below PROJECT_LEAD, still allowed when the org has opted into
   // allowSelfAssignment (member may self-assign; AssignModal enforces the
   // self-only restriction on submit).
-  const canAssignWork = canOpenAssignUi(currentRoleLevel, allowSelfAssignment)
+  const canAssignWork = canOpenAssignUi(
+    currentRoleLevel,
+    allowSelfAssignment,
+    assignmentMinRole,
+  )
   // AQU-496: the caller's own Frontier user id, resolved from the project
   // member list by username — used to lock AssignModal's assignee picker to
   // "self" in self-assign mode. Null if the roster hasn't loaded yet or the
@@ -9913,6 +9919,7 @@ export function ProjectWorkspace() {
           members={projectMembers}
           roleLevel={currentRoleLevel}
           allowSelfAssignment={allowSelfAssignment}
+          assignmentMinRole={assignmentMinRole}
           callerUserId={currentUserId}
           selectedCellIds={
             assignTargetFileId != null && assignTargetFileId !== activeFileId

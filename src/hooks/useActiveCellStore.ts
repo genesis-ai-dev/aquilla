@@ -1834,6 +1834,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   const tokenFetcherRef = useRef(getToken)
   const generationRef = useRef(0)
   const inFlightRef = useRef(false)
+  const pendingSoftFetchRef = useRef(false)
   const tokenRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const tokenAttemptsRef = useRef(0)
   const cellFetchInFlightRef = useRef<Set<string>>(new Set())
@@ -1862,7 +1863,17 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       setIsError(false)
       return
     }
-    if (soft && inFlightRef.current) return
+    // AQU-1068: a soft fetch asked for while another fetch is running is
+    // QUEUED, not dropped. It used to be dropped — and on a big file the
+    // initial stream holds the flight slot for seconds, which is exactly when
+    // an insert's confirming refetch arrives. Dropping it left the new row
+    // unconfirmed (so removal refused it as unsaved) until something unrelated
+    // refetched. One flag, not a queue: every soft fetch means "catch up now",
+    // so N requests collapse into one run after the current fetch finishes.
+    if (soft && inFlightRef.current) {
+      pendingSoftFetchRef.current = true
+      return
+    }
     const gen = ++generationRef.current
     inFlightRef.current = true
     let usedCache = false
@@ -1993,7 +2004,19 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         discardedProtected = discardedCellIds.size > 0
         store.replaceRows(kept, { full: true })
       } else {
-        store.replaceRows(hardRows, { full: true })
+        // AQU-1068: the hard path replaces EVERY row, and a cold-cache open of
+        // a big file streams for seconds — long enough for someone to insert a
+        // cell mid-stream. The stream's rows were read before that insert
+        // projected, so an unprotected replace silently drops the new row from
+        // this tab (the server already has it). Same merge as the soft path:
+        // rows written after the stream began survive, and the chain re-walk
+        // inside mergeProtectedRows puts an inserted row where its anchor
+        // says. `reset()` cleared the floors when this fetch began, so a floor
+        // above startSeq here can only mean a write made during the stream.
+        store.clearConfirmedShadows(hardRows, startSeq)
+        const { rows: kept, discardedCellIds } = store.mergeProtectedRows(hardRows, startSeq)
+        discardedProtected = discardedCellIds.size > 0
+        store.replaceRows(kept, { full: true })
       }
 
       const watermark = streamTorn || discardedProtected ? null : streamMaxSeq
@@ -2008,7 +2031,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       setIsError(true)
       setIsLoading(false)
     } finally {
-      if (generationRef.current === gen) inFlightRef.current = false
+      if (generationRef.current === gen) {
+        inFlightRef.current = false
+        if (pendingSoftFetchRef.current) {
+          pendingSoftFetchRef.current = false
+          void doFetch(true)
+        }
+      }
     }
   }, [store])
 

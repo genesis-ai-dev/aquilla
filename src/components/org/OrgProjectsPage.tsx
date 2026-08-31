@@ -187,6 +187,7 @@ export function OrgProjectsPage() {
               jwt={jwt}
               author={session?.username}
               allowSelfAssignment={orgSettings.allowSelfAssignment}
+              assignmentMinRole={orgSettings.assignmentMinRole}
               onLanesChanged={portfolio.bumpRefresh}
               initialLens={statusFilter === "attention" ? "attention" : projectLens}
               loading={isPageLoading}

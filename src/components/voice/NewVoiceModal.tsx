@@ -12,7 +12,7 @@
 // Deliberately de-purpled: TTS uses the brand accent, Clone uses emerald.
 
 import { useCallback, useMemo, useState } from "react"
-import { AudioLines, Check, Plus, Sparkles, Star, Trash2, UserRound } from "lucide-react"
+import { AudioLines, Plus, Sparkles, Star, Trash2, UserRound } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
@@ -434,7 +434,7 @@ function NewVoiceModalBody({
               <div className="flex gap-2">
                 <Button type="button" size="sm" variant="ghost" onClick={onClose}>{t("common.cancel")}</Button>
                 <Button type="button" size="sm" onClick={handleSave}>
-                  {isNew ? <><Plus className="me-1 h-3.5 w-3.5" /> {t("audio.newVoice.createButton")}</> : <><Check className="me-1 h-3.5 w-3.5" /> {t("common.save")}</>}
+                  {isNew ? <><Plus className="me-1 h-3.5 w-3.5" /> {t("audio.newVoice.createButton")}</> : t("common.save")}
                 </Button>
               </div>
             </div>

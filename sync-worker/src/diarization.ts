@@ -19,7 +19,7 @@
 // of this worker (incl. any `/sync` apex prefix). Local dev needs a tunnel.
 
 import { verifyTokenForFile, WRITE_ROLE_LEVEL } from "./auth"
-import { audioObjectKey } from "./audio"
+import { audioObjectKey, isPathSafeId, safeAudioContentType } from "./audio"
 import { secureCompare as constantTimeEqual } from "./lib/secure-compare"
 
 export interface DiarizationEnv {
@@ -84,6 +84,13 @@ async function start(request: Request, env: DiarizationEnv): Promise<Response> {
   const { projectId, fileId, audioObject } = body
   if (!projectId || !fileId || !audioObject) {
     return json({ error: "missing projectId, fileId, or audioObject" }, 400)
+  }
+  // audioObject is a JSON-body field (unlike /audio, whose ids are URL-path
+  // segments) and lands directly in an R2 key via audioObjectKey — see
+  // audio.ts's isPathSafeId doc comment. Reject anything that could act as a
+  // path separator there.
+  if (!isPathSafeId(audioObject)) {
+    return json({ error: "invalid audioObject" }, 400)
   }
 
   // Auth: sync-token scoped to (projectId, fileId), same as /audio + voice-convert.
@@ -172,7 +179,11 @@ async function serveAudio(_request: Request, env: DiarizationEnv, url: URL): Pro
   return new Response(buf, {
     status: 200,
     headers: {
-      "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
+      // [Pen test] Input validation & injection (2026-08-26): same deny-list
+      // fix as /audio — this reads the identical R2 objects, so it needs the
+      // same defense-in-depth against a pre-fix or otherwise mislabeled object.
+      "Content-Type": safeAudioContentType(obj.httpMetadata?.contentType),
+      "X-Content-Type-Options": "nosniff",
       "Content-Length": String(buf.byteLength),
     },
   })

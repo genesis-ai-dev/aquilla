@@ -261,7 +261,7 @@ function OrgSwitcherOption({
         ) : item.kind === "member" && (item.viaPlatformAdmin || item.roleName === "admin") ? (
           <span className={ORG_META_CLASS}>{t("org.orgSidebar.admin")}</span>
         ) : item.kind === "member" ? (
-          <RoleLabel name={item.roleName} />
+          <RoleLabel name={item.roleName} plain className={ORG_META_CLASS} />
         ) : (
           <span className={ORG_META_CLASS}>{t("org.switcher.guestRole")}</span>
         )}

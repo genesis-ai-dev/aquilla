@@ -238,6 +238,54 @@ describe('artifacts — upload + retrieval', () => {
     expect(meta.artifact.sizeBytes).toBe(bytes.byteLength)
   })
 
+  // [Pen test] API security & data exposure (2026-08-27): meta/content/inspect
+  // had no throttle at all — only upload did.
+  it('throttles a credential that floods artifact content', async () => {
+    const token = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
+    const bytes = new TextEncoder().encode('hello')
+    const uploadRes = (await handleExternalArtifactsRequest(uploadReq(token, 'a.txt', bytes), env))!
+    const { artifactId } = (await uploadRes.json()) as { artifactId: string }
+
+    await tdb.pg.query(
+      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
+       SELECT 'external_artifact_content', $1, 1 FROM generate_series(1, 120)`,
+      [`credential:${CRED_LEAD}`],
+    )
+    const res = (await handleExternalArtifactsRequest(getReq(token, `/${artifactId}/content`), env))!
+    expect(res.status).toBe(429)
+    const body = (await res.json()) as { error: { code: string } }
+    expect(body.error.code).toBe('rate_limited')
+  })
+
+  it('throttles a credential that floods artifact meta/inspect', async () => {
+    const token = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
+    const bytes = new TextEncoder().encode('hello')
+    const uploadRes = (await handleExternalArtifactsRequest(uploadReq(token, 'a.txt', bytes), env))!
+    const { artifactId } = (await uploadRes.json()) as { artifactId: string }
+
+    await tdb.pg.query(
+      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
+       SELECT 'external_artifact_meta', $1, 1 FROM generate_series(1, 300)`,
+      [`credential:${CRED_LEAD}`],
+    )
+    const metaRes = (await handleExternalArtifactsRequest(getReq(token, `/${artifactId}`), env))!
+    expect(metaRes.status).toBe(429)
+    const inspectRes = (await handleExternalArtifactsRequest(getReq(token, `/${artifactId}/inspect`), env))!
+    expect(inspectRes.status).toBe(429)
+  })
+
+  it('does not throttle a fresh credential on meta/content/inspect', async () => {
+    const token = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
+    const bytes = new TextEncoder().encode('hello')
+    const uploadRes = (await handleExternalArtifactsRequest(uploadReq(token, 'a.txt', bytes), env))!
+    const { artifactId } = (await uploadRes.json()) as { artifactId: string }
+
+    for (const path of [`/${artifactId}`, `/${artifactId}/content`, `/${artifactId}/inspect`]) {
+      const res = (await handleExternalArtifactsRequest(getReq(token, path), env))!
+      expect(res.status).toBe(200)
+    }
+  })
+
   it('rejects an oversize upload with validation_failed (exposing the limit) and stores nothing', async () => {
     const token = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
     const big = new Uint8Array(MAX_ARTIFACT_BYTES + 1)

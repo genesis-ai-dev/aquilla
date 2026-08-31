@@ -28,7 +28,8 @@ export function readAgentWorkbenchLayout(projectId: string): Layout {
   try {
     const stored = window.localStorage.getItem(storageKey(projectId))
     const normalized = stored ? normalizeLayout(JSON.parse(stored)) : null
-    // A drag-to-collapse is an exit gesture, not the next session's layout.
+    // Ignore a zero-width agent column (legacy layouts from when collapse
+    // dismissed the workbench). The live pane is not collapsible.
     return normalized && normalized.agent > 0 ? normalized : { ...DEFAULT_LAYOUT }
   } catch {
     return { ...DEFAULT_LAYOUT }

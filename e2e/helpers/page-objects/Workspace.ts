@@ -404,7 +404,10 @@ export class Workspace {
     return target
   }
 
-  private async commitTargetCellEdit(index: number, text: string): Promise<void> {
+  private async commitTargetCellEdit(
+    index: number,
+    text: string,
+  ): Promise<{ writeMs: number; ackedAt: number }> {
     // Blurring commits immediately. Register the response waiter before the
     // blur so a fast local worker cannot complete the request first.
     const committed = this.page.waitForResponse((response) => {
@@ -415,9 +418,12 @@ export class Workspace {
         return false
       }
     }, { timeout: 20_000 })
+    const started = Date.now()
     await this.page.locator("aside").click()
     await committed
+    const ackedAt = Date.now()
     await expect(this.targetColumn(index)).toContainText(text, { timeout: 10_000 })
+    return { writeMs: ackedAt - started, ackedAt }
   }
 
   /** Click into a cell, type text, blur. Persists on blur per editor design.
@@ -435,6 +441,16 @@ export class Workspace {
     await this.activateTargetCell(index)
     await this.page.keyboard.type(text)
     await this.commitTargetCellEdit(index, text)
+  }
+
+  /** Like `editCell`, but returns blur → `POST /events` ack timing. */
+  async editCellMeasuringWrite(
+    index: number,
+    text: string,
+  ): Promise<{ writeMs: number; ackedAt: number }> {
+    await this.activateTargetCell(index)
+    await this.page.keyboard.type(text)
+    return this.commitTargetCellEdit(index, text)
   }
 
   /**

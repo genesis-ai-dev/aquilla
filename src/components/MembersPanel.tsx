@@ -334,7 +334,7 @@ function MemberScopesEditor({
         className="flex w-full items-center gap-2 px-2 py-1.5 text-start"
       >
         <ChevronRight
-          className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${
+          className={`h-3.5 w-3.5 shrink-0 text-muted-foreground ${
             expanded ? "rotate-90" : ""
           }`}
           aria-hidden

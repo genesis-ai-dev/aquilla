@@ -38,7 +38,7 @@
 
 import { useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { AlertTriangle, ArrowRight, CheckCheck, Trash2 } from "lucide-react"
+import { AlertTriangle, ArrowRight, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -264,7 +264,6 @@ export function UpstreamChangesPanel({
           <div className="flex items-center justify-between rounded border bg-muted/40 px-3 py-2">
             <span className="text-sm">{t("editor.selection.count", { count: selectedItems.length })}</span>
             <Button size="sm" onClick={() => void handleBulkRepin()}>
-              <CheckCheck className="me-1.5 h-4 w-4" />
               {t("importExport.linked.acceptAllButton", { count: selectedItems.length })}
             </Button>
           </div>
@@ -366,7 +365,7 @@ export function UpstreamChangesPanel({
                             disabled={!canRepin || busy}
                             onClick={() => void handleRepinSingle(item)}
                           >
-                            {busy ? <Spinner className="h-3.5 w-3.5" /> : <CheckCheck className="me-1 h-3.5 w-3.5" />}
+                            {busy && <Spinner className="h-3.5 w-3.5" />}
                             {t("importExport.linked.acceptButton")}
                           </Button>
                         )}

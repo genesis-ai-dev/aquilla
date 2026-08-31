@@ -8,7 +8,7 @@ import {
 } from "@legendapp/list/react"
 import {
   Check, AlertTriangle, AlertCircle,
-  MessageCircle, Play, Pause, Mic, MicOff, Sparkles, FileText,
+  MessageCircle, Play, Pause, Mic, MicOff, FileText,
   ArrowRight, Activity, NotebookPen, Pencil, ChevronDown, Music, Braces,
   Languages,
   Archive,
@@ -5997,16 +5997,11 @@ function EditorRow({
                 </span>
               </AppTooltip>
             )}
-            {cell.aiDrafted && (
-              <Badge
-                variant="outline"
-                className="ms-auto h-4 shrink-0 gap-1 border-amber-500/40 bg-amber-500/10 px-1.5 text-[9px] font-medium text-amber-700 dark:text-amber-300"
-                aria-label={t("editor.ai.draftBadgeAria")}
-              >
-                <Sparkles className="size-2.5" />
-                {t("editor.ai.draftBadge")}
-              </Badge>
-            )}
+            {/* AQU-1041: no AI-draft tag here. The cell header renders the same
+                for a machine draft as for a human-typed one. The underlying
+                `cell.aiDrafted` provenance stays — the org overview's AI-drafted
+                stat, the selection bar's bulk-validate eligibility, and the
+                editor's draft-hydration rules all still read it. */}
             </>
           )}
         >

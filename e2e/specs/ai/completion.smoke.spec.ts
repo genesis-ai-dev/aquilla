@@ -1,6 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { applyUserProviderOverride } from "../../helpers/mock-llm-server"
-import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
+import { jwtFor, openSeededProject, readProjectedCells, seedProjectWithFile } from "../../helpers/seed-project"
 
 /**
  * Verify the sparkle-button → mock LLM flow.
@@ -11,7 +11,7 @@ import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/se
  * every save, racing UI fill→blur→click) and tests only what this spec
  * is meant to verify: when configured to point at a custom OpenAI-
  * compatible endpoint, the sparkle button populates a target cell with
- * the LLM's response and marks it as requiring individual human review.
+ * the LLM's response and records the AI-draft provenance server-side.
  *
  * IDB layout: db "codex" v4, store "projects" keyed by id.
  */
@@ -37,9 +37,17 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
   await expect(
     alice.locator("[data-cell-id]").first().locator('[data-cell-type="target"]'),
   ).toContainText("Traducción de prueba", { timeout: 15_000 })
-  await expect(
-    alice.getByLabel("AI draft — individual human review required").first(),
-  ).toBeVisible({ timeout: 15_000 })
+  // AQU-1041 removed the visible AI-draft tag — the cell header renders the
+  // same as a human-typed draft (RTL: EditorTable.aiDraftBadge.test.tsx).
+  // The provenance must still cross the stack: the sparkle commit carries
+  // ai_suggestion and the sync-worker projects it as aiDrafted on the row,
+  // which bulk-validate eligibility and the org AI-drafted stat read.
+  await expect
+    .poll(async () => {
+      const cells = await readProjectedCells(await jwtFor("alice"), seeded, "target")
+      return cells.find((c) => c.cellId === seeded.cellIds[0])?.aiDrafted ?? false
+    }, { timeout: 15_000, intervals: [500, 1_000] })
+    .toBe(true)
 
   // Individual review is the approval boundary for an AI draft. The button
   // must visibly acknowledge the click immediately while the validator

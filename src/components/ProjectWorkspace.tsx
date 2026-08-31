@@ -2365,14 +2365,24 @@ export function ProjectWorkspace() {
    * import dialog say "Replace" rather than "Import") and the recorder's
    * lookup for the line being performed.
    */
+  // AQU-1068 perf: ONE materialisation pass per store version for the
+  // render-time whole-file readers below (cast map, clearable count, the
+  // character-agreement compare). Each used to call getAllCellViews() itself,
+  // which builds a fresh view for every cell — three 31k-cell builds per
+  // store bump on a Bible, several bumps per insert. Click-time readers keep
+  // their own calls; they run once per gesture, not once per version.
+  const allCellViews = useMemo(
+    () => readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews()),
+    [cellStore, cellStoreVersion],
+  )
   const castByCellId = useMemo(
     () =>
       new Map(
-        readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews())
+        allCellViews
           .filter((c) => typeof c.metadata?.cast_name === "string" && c.metadata.cast_name !== "")
           .map((c) => [c.id, c]),
       ),
-    [cellStore, cellStoreVersion],
+    [allCellViews],
   )
   const characterCount = castByCellId.size
   /**
@@ -2384,11 +2394,8 @@ export function ProjectWorkspace() {
    * an angle onto an unnamed line.
    */
   const clearableCount = useMemo(
-    () =>
-      readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews()).filter(
-        carriesCharacterSheetData,
-      ).length,
-    [cellStore, cellStoreVersion],
+    () => allCellViews.filter(carriesCharacterSheetData).length,
+    [allCellViews],
   )
 
   /**
@@ -2479,7 +2486,7 @@ export function ProjectWorkspace() {
         ? null
         : compareCharacterSources({
             cues: audioCues ?? [],
-            textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews()),
+            textCells: allCellViews,
             links: cueLinks,
             resolutions: tts.settings?.characterResolutions,
             strictCamera,
@@ -2488,8 +2495,7 @@ export function ProjectWorkspace() {
       audioCues,
       audioCharacterCount,
       characterCount,
-      cellStore,
-      cellStoreVersion,
+      allCellViews,
       cueLinks,
       tts.settings?.characterResolutions,
       characterWrite,
@@ -5034,7 +5040,15 @@ export function ProjectWorkspace() {
     const sourceLanguage = activeFile?.sourceLanguage || project?.sourceLanguage
     const targetLanguage = activeLaneTargetLanguage || activeFile?.targetLanguage || project?.targetLanguage
 
-    if (!scopeAvailable) {
+    // AQU-1068 perf: everything below the guard is O(file) — it materialises
+    // every cell view and builds the health ribbon across all of them, 31k on
+    // a Bible — and it used to run on EVERY store bump even with the
+    // workbench closed, which is where most of the insert/remove freeze
+    // lived. The workbench is this memo's only consumer and only renders on
+    // the agent surface, so while that surface is closed we return the same
+    // empty shape an unopened file gets; flipping it open recomputes in the
+    // same render, so it can never show stale data.
+    if (!scopeAvailable || !agentOpen) {
       return {
         cells: [],
         fileName: activeFile?.name,
@@ -5136,6 +5150,7 @@ export function ProjectWorkspace() {
     activeFile,
     activeLane,
     activeLaneTargetLanguage,
+    agentOpen,
     cellStoreVersion,
     cellsLoading,
     effectiveHealthMap,

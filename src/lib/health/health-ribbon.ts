@@ -191,8 +191,13 @@ export function preTranslationEvidence(
   sourceText: string,
   examples: Array<{ matchedTokens: string[] }>,
 ): { score: number; evidenceWeight: number } | null {
+  // The empty-examples check comes FIRST. Most cells have no examples (they
+  // exist only after completion has run for that cell), and tokenizing before
+  // the check made every no-example call pay the full tokenize cost just to
+  // return null — 31k verses' worth per sweep on a whole-Bible file.
+  if (examples.length === 0) return null
   const sourceTokens = new Set(tokenizeText(sourceText))
-  if (sourceTokens.size === 0 || examples.length === 0) return null
+  if (sourceTokens.size === 0) return null
 
   let bestCoverage = 0
   for (const example of examples) {

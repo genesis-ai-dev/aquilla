@@ -239,8 +239,10 @@ async function main() {
   }
 
   // ── 4. 31k Bible — the insert must be perceptibly instant ─────────────────
+  resetInsertedCells(BIBLE.file)
   setFloor(BIBLE.project, "maintainer")
   await open(BIBLE)
+  const bibleCountBefore = sourceCount(BIBLE.file)
   const bibleBefore = await rowIds()
   const anchorId = bibleBefore[1]
   // Open the menu FIRST, then time only what this round changed: the gap
@@ -264,9 +266,12 @@ async function main() {
   check("31k Bible: it lands directly after the row that was clicked",
     bibleAfter[bibleAfter.indexOf(anchorId) + 1] === bibleNew,
     `anchor at ${bibleAfter.indexOf(anchorId)}`)
+  // Against the count taken BEFORE the insert, not a hardcoded base — other
+  // scripts insert into and clean this fixture too, so its absolute count
+  // drifts and a literal here rots into a false failure.
   check("31k Bible: and stays there once the server confirms",
-    sourceCount(BIBLE.file) === 30968 + 1 || sourceCount(BIBLE.file) > 30968,
-    `${sourceCount(BIBLE.file)} source cells`)
+    sourceCount(BIBLE.file) === bibleCountBefore + 1,
+    `${bibleCountBefore} -> ${sourceCount(BIBLE.file)} source cells`)
   await page.screenshot({ path: `${SHOTS}/04-bible-inserted.png` })
 
   await browser.close()

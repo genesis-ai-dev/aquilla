@@ -133,6 +133,16 @@ describe("row lifecycle", () => {
       />,
     )
     expect(screen.getByText("2 cells · 1 to review")).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: /Accept remaining \(1\)/ })).toBeInTheDocument()
+    const acceptRemaining = screen.getByRole("button", { name: /Accept remaining \(1\)/ })
+    expect(acceptRemaining).toBeInTheDocument()
+    expect(acceptRemaining.querySelector("svg")).toBeNull()
+  })
+
+  it("Accept and Reject are text-only labeled buttons", () => {
+    render(<WorkingSetPanel rows={[row({})]} onAccept={() => {}} onReject={() => {}} />)
+    const accept = screen.getByRole("button", { name: "Accept draft for MRK 1:1" })
+    const reject = screen.getByRole("button", { name: "Reject draft for MRK 1:1" })
+    expect(accept.querySelector("svg")).toBeNull()
+    expect(reject.querySelector("svg")).toBeNull()
   })
 })

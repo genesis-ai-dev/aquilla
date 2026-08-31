@@ -71,6 +71,29 @@ projectMembers.post(
       return c.json({ error: "maintainer+ required to revoke access" }, 403)
     }
 
+    // AQU-285 (F-B6) target-level cap, mirrored from the sibling
+    // DELETE /:projectId/members/:userId (projects.ts): a caller below OWNER
+    // cannot strip the direct project_members row of a user whose CURRENT
+    // direct role is >= the caller's role. Both routes perform the identical
+    // `DELETE FROM project_members` mutation, so this endpoint must carry the
+    // same cap — without it a MAINTAINER could revoke-all a project's OWNER.
+    const existingRow = await c.env.AQUILLA_PG.prepare(
+      "SELECT role_level FROM project_members WHERE project_id = ? AND user_id = ?",
+    )
+      .bind(projectId, targetUserId)
+      .first<{ role_level: number }>()
+    if (existingRow) {
+      const targetCurrentLevel = Number(existingRow.role_level)
+      if (callerRole.level < ROLE.OWNER && targetCurrentLevel >= callerRole.level) {
+        return c.json(
+          {
+            error: `cannot revoke a member whose role (${targetCurrentLevel}) is >= your role (${callerRole.level})`,
+          },
+          403,
+        )
+      }
+    }
+
     // Load the project's owner/org context so we can enumerate grant paths.
     const projectRow = await c.env.AQUILLA_PG.prepare(
       "SELECT id, created_by, org_id FROM projects WHERE id = ?",
@@ -124,15 +147,10 @@ projectMembers.post(
       }
     }
 
-    // Remove the direct project_members row (if any).
-    const existing = await c.env.AQUILLA_PG.prepare(
-      "SELECT 1 FROM project_members WHERE project_id = ? AND user_id = ?",
-    )
-      .bind(projectId, targetUserId)
-      .first<{ 1: number }>()
-
+    // Remove the direct project_members row (if any) — reuses the row already
+    // read above for the target-level cap check.
     let removed = false
-    if (existing) {
+    if (existingRow) {
       await c.env.AQUILLA_PG.prepare(
         "DELETE FROM project_members WHERE project_id = ? AND user_id = ?",
       )

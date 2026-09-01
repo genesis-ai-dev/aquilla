@@ -12,7 +12,8 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode, ComponentProps } from "react"
 import { EditorTable } from "./EditorTable"
@@ -198,5 +199,116 @@ describe("EditorTable — terminology advisory band removed (AQU-664)", () => {
     renderTable(project, { infractions })
     await screen.findByText("sample")
     expect(document.querySelector('[data-rule-id="term:concept-1:approved"]')).not.toBeNull()
+  })
+
+  it("opens only the violation popover when a managed source term is blotted", async () => {
+    const approved: Concept = {
+      id: "concept-1",
+      sourceTerm: "sample",
+      status: "active",
+      createdAt: "2026-01-01T00:00:00Z",
+      renderings: [{ rendering: "muestra", status: "preferred" }],
+    }
+    const project: ProjectRecord = {
+      id: "proj-1",
+      name: "Test Project",
+      sourceLanguage: "en",
+      targetLanguage: "es",
+      createdAt: "2026-01-01T00:00:00Z",
+      files: [],
+      members: [],
+      terminology: [approved],
+    }
+    const infractions = new Map([
+      ["cell-1", [{
+        ruleId: "term:concept-1:approved",
+        cellId: "cell-1",
+        fileId: "file-1",
+        reason: "source-requires-target" as const,
+        spans: [{ side: "source" as const, start: 10, end: 16, matchedText: "sample" }],
+      }]],
+    ])
+    renderTable(project, {
+      infractions,
+      rules: [{
+        id: "term:concept-1:approved",
+        name: "Term: sample",
+        description: "Use an approved rendering",
+        severity: "major",
+        source: "user",
+        scope: "project",
+        check: {
+          type: "source-requires-target",
+          sourcePattern: "sample",
+          targetPattern: "muestra",
+        },
+        enabled: true,
+        createdAt: "2026-01-01T00:00:00Z",
+      }],
+    })
+
+    const blot = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>(
+        '[data-rule-id="term:concept-1:approved"]',
+      )
+      expect(element).not.toBeNull()
+      return element!
+    })
+    await userEvent.click(blot)
+
+    await screen.findByRole("button", { name: /waive/i })
+    await waitFor(() => {
+      expect(document.querySelectorAll('[data-slot="popover-content"]')).toHaveLength(1)
+    })
+    expect(screen.queryByRole("tooltip", { name: /terminology lookup/i })).toBeNull()
+  })
+
+  it("keeps the target blot popover anchored without opening cell details", async () => {
+    const project: ProjectRecord = {
+      id: "proj-1",
+      name: "Test Project",
+      sourceLanguage: "en",
+      targetLanguage: "de",
+      createdAt: "2026-01-01T00:00:00Z",
+      files: [],
+      members: [],
+      terminology: [FORBIDDEN_CONCEPT],
+    }
+    const infractions = new Map([
+      ["cell-1", [{
+        ruleId: "term:concept-1:forbidden:verboten",
+        cellId: "cell-1",
+        fileId: "file-1",
+        reason: "target-forbids" as const,
+        spans: [{ side: "target" as const, start: 0, end: 8, matchedText: "verboten" }],
+      }]],
+    ])
+    renderTable(project, {
+      infractions,
+      rules: [{
+        id: "term:concept-1:forbidden:verboten",
+        name: "Term: sample — forbidden: verboten",
+        description: "Do not use this rendering",
+        severity: "major",
+        source: "user",
+        scope: "project",
+        check: { type: "target-forbids", targetPattern: "verboten" },
+        enabled: true,
+        createdAt: "2026-01-01T00:00:00Z",
+      }],
+    })
+
+    const blot = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>(
+        '[data-target-read-view] [data-rule-id="term:concept-1:forbidden:verboten"]',
+      )
+      expect(element).not.toBeNull()
+      return element!
+    })
+    fireEvent.click(blot)
+
+    await screen.findByRole("button", { name: /waive/i })
+    expect(screen.getByRole("button", { name: "Open cell details" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Close cell details" })).toBeNull()
   })
 })

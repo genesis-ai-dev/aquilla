@@ -5723,20 +5723,17 @@ function EditorRow({
     }
   }
 
-  // Inline rule click → open expansion to issues tab and remember which rule
-  // is active so the ViolationPopover can anchor to the clicked blot.
-  // Expanding the row re-renders the editor and detaches the blot's DOM node,
-  // and a detached anchor makes the popover fall back to the viewport origin —
-  // so snapshot the rect and anchor to a virtual element instead.
+  // Inline rule click → open the violation popover at the clicked blot. Keep
+  // the row collapsed: expanding it detaches the target blot before Base UI
+  // measures the anchor, which places the popover at the viewport origin.
+  // The rule-name control inside the popover remains the explicit route into
+  // the full Issues surface.
   const openInlineRule = useCallback((ruleId: string, anchor: HTMLElement) => {
     // AQU-664: clicking commits to the full (waive-capable) popover — clear any
     // transient hover preview so the two don't stack.
     setHoveredRule(null)
-    setExpanded(true)
-    setExpansionTab("issues")
     setOpenRuleId(ruleId)
-    const rect = anchor.getBoundingClientRect()
-    setOpenRuleAnchor({ getBoundingClientRect: () => rect })
+    setOpenRuleAnchor(anchor)
   }, [])
 
   // AQU-664: hover ("wave over") a blot → snapshot its rect and preview the
@@ -7056,7 +7053,10 @@ function EditorRow({
                           <button
                             key={inf.ruleId}
                             type="button"
-                            onClick={() => setOpenRuleId(inf.ruleId)}
+                            onClick={(event) => {
+                              setOpenRuleId(inf.ruleId)
+                              setOpenRuleAnchor(event.currentTarget)
+                            }}
                             className="bg-card flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-start text-xs transition-all"
                           >
                             <Icon
@@ -7088,7 +7088,10 @@ function EditorRow({
                               <button
                                 key={`waived-${inf.ruleId}`}
                                 type="button"
-                                onClick={() => setOpenRuleId(inf.ruleId)}
+                                onClick={(event) => {
+                                  setOpenRuleId(inf.ruleId)
+                                  setOpenRuleAnchor(event.currentTarget)
+                                }}
                                 className="bg-muted flex w-full items-start gap-2 rounded-xl px-2.5 py-1.5 text-start text-xs text-muted-foreground/70 transition-all"
                               >
                                 <Check className="mt-0.5 h-3 w-3 shrink-0" />

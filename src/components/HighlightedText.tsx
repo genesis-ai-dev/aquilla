@@ -83,7 +83,13 @@ export function HighlightedText({
               key={i}
               role={onRangeClick ? "button" : undefined}
               tabIndex={onRangeClick ? 0 : undefined}
-              onClick={onRangeClick ? (e) => onRangeClick(chunk.range!.ruleId, e.currentTarget) : undefined}
+              onClick={onRangeClick ? (e) => {
+                // A terminology blot can sit inside the managed-term popover
+                // trigger. Keep this click owned by the blot so one gesture
+                // never opens both popovers (AQU-1006 review regression).
+                e.stopPropagation()
+                onRangeClick(chunk.range!.ruleId, e.currentTarget)
+              } : undefined}
               className={cn(
                 chunk.range.kind === "violation-major" && "decoration-wavy decoration-red-500 underline underline-offset-[3px]",
                 chunk.range.kind === "violation-minor" && "decoration-wavy decoration-amber-500 underline underline-offset-[3px]",

@@ -198,7 +198,7 @@ export function TermLookupPopover({
 
   return (
     <Popover>
-      <PopoverTrigger render={<span />}>{children}</PopoverTrigger>
+      <PopoverTrigger render={<span />} nativeButton={false}>{children}</PopoverTrigger>
       {content}
     </Popover>
   )

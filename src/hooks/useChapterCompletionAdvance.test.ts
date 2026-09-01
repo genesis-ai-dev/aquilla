@@ -13,8 +13,14 @@ vi.mock("@/components/ui/toast", () => ({
   },
 }))
 
-const translated = { original: "In the beginning", translated: "Au commencement", status: "unvalidated" as const }
-const empty = { original: "the earth", translated: "", status: "empty" as const }
+type TestCell = {
+  original: string
+  translated: string
+  status: "empty" | "unvalidated"
+}
+
+const translated: TestCell = { original: "In the beginning", translated: "Au commencement", status: "unvalidated" }
+const empty: TestCell = { original: "the earth", translated: "", status: "empty" }
 
 const base = {
   enabled: true,

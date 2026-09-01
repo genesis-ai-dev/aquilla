@@ -1024,14 +1024,26 @@ export const org = defineNamespace({
     // "Projects" page title → nav.projects (identical text)
     "org.orgProjectsPage.pageDescription":
       "Open a project to edit, or start a new translation workspace.",
-    // AQU-1040: designated-PM filter, sibling to the status filter in the
-    // Projects toolbar. The PM names themselves are usernames, not strings.
+    // AQU-1044: the toolbar's four narrowing dimensions (Status, PM, Role,
+    // Updated) live in one combined "Sort by" menu (ProjectSortMenu), one
+    // submenu per dimension. Reused keys:
+    // "Sort by" trigger → org.orgHome.projectsPanel.sortByLabel (identical text)
+    // "Status" submenu → org.orgHome.projectsPanel.statusLabel (identical text)
+    // "PM" submenu → org.orgProjectsDataTable.pmColumn (identical text)
+    // "Role" submenu → common.roleLabel (identical text)
+    // "Updated" submenu → org.orgProjectsDataTable.updatedColumn (identical text)
+    // Status options → org.orgHome.statusFilter.all/stalled/overdue,
+    //   org.overview.needsAttentionHeading (same keys as ProjectStatusFilter)
+    // AQU-1040: designated-PM options. The PM names themselves are usernames,
+    // not strings.
     "org.orgProjectsPage.pmFilter.all": "All PMs",
-    "org.orgProjectsPage.pmFilterAria": "Project manager filter",
-    // AQU-1042: viewer-role filter, third control in the Projects toolbar.
-    // The role option labels come from common.role.* (same keys as RoleLabel).
+    // AQU-1042: viewer-role options. The role option labels come from
+    // common.role.* (same keys as RoleLabel).
     "org.orgProjectsPage.roleFilter.all": "All roles",
-    "org.orgProjectsPage.roleFilterAria": "Role filter",
+    // AQU-1043: last-edit recency options. Fixed windows, not free-form
+    // dates; "any time" is the default.
+    "org.orgProjectsPage.updatedFilter.any": "Updated any time",
+    "org.orgProjectsPage.updatedFilter.lastDays": "Updated in last {days} days",
     // "Unassigned" PM option → org.projectOverview.unassigned (identical text)
     // Filtered-to-nothing empty title → org.orgHome.projectsPanel.noMatchingProjects
     // Zero-projects empty title → org.orgHome.projectsPanel.emptyTitle
@@ -1199,13 +1211,12 @@ export const org = defineNamespace({
         description:
           "Accessible name for the project status filter control (All / Stalled / Overdue / Needs attention) on OrgHome.",
       },
-      "org.orgProjectsPage.pmFilterAria": {
+      "org.orgProjectsPage.updatedFilter.lastDays": {
         description:
-          "Accessible name for the project-manager filter control on the org Projects page. Its options are the PM usernames present in the loaded table, plus Unassigned and an 'All PMs' default; it narrows the table alongside the status filter and the search box.",
-      },
-      "org.orgProjectsPage.roleFilterAria": {
-        description:
-          "Accessible name for the viewer-role filter control on the org Projects page. Its options are the roles the signed-in user holds across the loaded table (resolved via common.role.*), plus an 'All roles' default; it narrows the table alongside the status filter, the PM filter, and the search box.",
+          "Option label for one of the fixed recency windows in the Updated submenu of the org Projects page's combined Sort by menu.",
+        placeholders: {
+          days: "Length of the recency window in days — one of the fixed buckets 7, 30 or 90.",
+        },
       },
       "org.orgHome.originFilter.aria": {
         description:

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
-  Upload, Library, Globe, Table2, Languages, ArrowLeft, ArrowLeftRight, Tags, StickyNote, Database,
+  Upload, Library, Globe, Table2, Languages, ArrowLeft, ArrowLeftRight, StickyNote, Database,
   BookImage, BookA, BookOpen, Search, Cloud, CloudDownload,
   type LucideIcon,
 } from "lucide-react"
@@ -110,14 +110,13 @@ import {
   IMPORT_COLLISION_DUPLICATED,
 } from "@/lib/event-names"
 import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPanel"
-import { LabelImportPanel, type LabelImportResult } from "@/components/import/LabelImportPanel"
 import { PairedImportPanel } from "@/components/import/PairedImportPanel"
 import { DcsCatalogBrowser } from "@/components/dcs/DcsCatalogBrowser"
 import { importDcsResource } from "@/lib/dcs/import-dcs"
 import { DcsClient } from "@/lib/dcs/catalog"
 import type { DcsCatalogEntry, DcsCursor } from "@/lib/dcs/types"
 
-type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "biblica" | "direction" | "result" | "collision" | "spreadsheet" | "labels" | "paired" | "sdbh" | "dcs" | "gdrive"
+type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "biblica" | "direction" | "result" | "collision" | "spreadsheet" | "paired" | "sdbh" | "dcs" | "gdrive"
 
 interface ImportDialogProps {
   open: boolean
@@ -164,20 +163,6 @@ interface ImportDialogProps {
    */
   patchDcsCursor?: (cursor: DcsCursor) => Promise<boolean>
   /**
-   * AQU-314: project files for the Cell-labels panel's step-1 file picker.
-   * The panel fetches the selected file's source cells itself, so labels no
-   * longer depend on which file happens to be active in the editor.
-   */
-  projectFiles?: { id: string; name: string }[]
-  /** AQU-314: the workspace's active file — pre-selected in the picker. */
-  activeFileId?: string | null
-  /**
-   * AQU-314: called after a label apply run completes and the dialog closes.
-   * The host surfaces the result (applied/unmatched counts) as its transient
-   * status notice — the dialog itself is gone by then.
-   */
-  onLabelsImported?: (result: LabelImportResult) => void
-  /**
    * AQU-634: per-project USFM front-matter opt-out. When true, USFM imports
    * (upload, Paratext project, DCS/Door43) exclude book-name/title/TOC +
    * intro-block cells. Wired from the project's `importExcludeFrontMatter`
@@ -207,9 +192,6 @@ export function ImportDialog({
   sourceCells,
   existingFiles,
   patchDcsCursor,
-  projectFiles,
-  activeFileId,
-  onLabelsImported,
   excludeFrontMatter,
 }: ImportDialogProps) {
   const t = useT()
@@ -494,7 +476,6 @@ export function ImportDialog({
                   : screen === "tn" ? t("importExport.dialog.titleTn")
                   : screen === "biblica" ? t("importExport.landing.biblica.title")
                   : screen === "spreadsheet" ? t("importExport.dialog.titleSpreadsheet")
-                  : screen === "labels" ? t("importExport.landing.labels.title")
                   : screen === "paired" ? t("importExport.dialog.titlePaired")
                   : screen === "sdbh" ? t("importExport.landing.sdbh.title")
                   : t("importExport.landing.ebible.title")}
@@ -736,27 +717,6 @@ export function ImportDialog({
           />
         )}
 
-        {/* AQU-314: Cell labels / cast import via downloadable template */}
-        {screen === "labels" && projectFiles && projectFiles.length > 0 && (
-          <LabelImportPanel
-            projectId={projectId}
-            username={username}
-            files={projectFiles}
-            defaultFileId={activeFileId}
-            getToken={getToken}
-            onImported={(result) => {
-              onOpenChange(false)
-              onLabelsImported?.(result)
-            }}
-            onCancel={() => setScreen("landing")}
-          />
-        )}
-        {screen === "labels" && (!projectFiles || projectFiles.length === 0) && (
-          <div className="py-4 text-center text-sm text-muted-foreground">
-            {t("importExport.dialog.labelsNeedSourceFile")}
-          </div>
-        )}
-
         {/* AQU-315: Paired source+target import (translation memory) */}
         {screen === "paired" && sourceCells && sourceCells.length > 0 && (
           <PairedImportPanel
@@ -909,8 +869,6 @@ const SPECIALIZED_OPTIONS: ImportOption[] = [
     descriptionKey: "importExport.landing.macula.description" },
   { id: "paired", titleKey: "importExport.landing.paired.title", icon: ArrowLeftRight, badge: "beta",
     descriptionKey: "importExport.landing.paired.description" },
-  { id: "labels", titleKey: "importExport.landing.labels.title", icon: Tags, badge: "beta",
-    descriptionKey: "importExport.landing.labels.description" },
   { id: "tn", titleKey: "importExport.landing.tn.title", hintKey: "importExport.landing.tn.hint", icon: StickyNote, badge: "beta",
     descriptionKey: "importExport.landing.tn.description" },
   { id: "biblica", titleKey: "importExport.landing.biblica.title", hintKey: "importExport.landing.biblica.hint", icon: BookOpen, badge: "beta",

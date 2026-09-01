@@ -257,6 +257,24 @@ export interface TranscribeCellArgs {
   session: FrontierSession | null
   projectId: string
   language?: string
+  /**
+   * The slot the clip actually lives in, from a caller that knows it.
+   *
+   * AQU-646: the re-attach below assigns `slot` OUTRIGHT and its sibling-
+   * deselect is scoped to that slot, so naming the wrong one moves the clip and
+   * drops whatever was selected where it lands. The fallback under this is an
+   * INFERENCE, and an inference can only ever distinguish the two slots that
+   * existed when it was written — a clip in any third slot reads as
+   * "recording". Callers that know the slot must say so; the two that don't
+   * (the Recording tab's button, the batch runner) are both working on a cell's
+   * own selected clip, where the inference is still right.
+   *
+   * NOT read off the attachment: the recording modal hands transcription a
+   * hand-built cell stub, and adding one more field to that stub is how this
+   * class of bug has arrived three times already (SUB-49's durationMs, then the
+   * trim wipe). An explicit argument cannot be silently omitted by a stub.
+   */
+  slot?: string
 }
 
 // Test seam: transcribeCell calls transcribeAudio through this binding so
@@ -279,7 +297,7 @@ export function __setTranscribeAudioForTests(fn: typeof transcribeAudio | null):
  * was denied. Never throws — errors are stored in transcribe-status.
  */
 export async function transcribeCell(args: TranscribeCellArgs): Promise<number> {
-  const { cell, session, projectId, language } = args
+  const { cell, session, projectId, language, slot: slotArg } = args
   const audioId = cell.selectedAudioId
   if (!audioId) return 0
 
@@ -394,8 +412,10 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         // SUB-49: a generated-voice clip must not be relocated into the
         // recording slot by transcribing it (the upsert assigns `slot`
         // outright, and the sibling-deselect above it would drop the real
-        // take). Follow the clip's own slot.
-        slot: audioId === cell.selectedGeneratedVoiceAudioId ? "generatedVoice" : "recording",
+        // take). Follow the clip's own slot — stated by the caller when it
+        // knows, inferred only as a fallback. See TranscribeCellArgs.slot for
+        // why the inference cannot be trusted once a third slot exists.
+        slot: slotArg ?? (audioId === cell.selectedGeneratedVoiceAudioId ? "generatedVoice" : "recording"),
         timings,
         // Preserve attachment fields the projection UPSERT would otherwise
         // null out — belt and braces now that the projection COALESCEs them

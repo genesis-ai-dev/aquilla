@@ -6,7 +6,13 @@
 // These pin the fold so a future consumer cannot be wired to the wrong half.
 
 import { describe, it, expect } from "vitest"
-import { selectTransportForFile, videoOwnsFile, type VideoTransportInput } from "./transport"
+import {
+  selectTransportForFile,
+  videoOwnsFile,
+  virtualOwnsFile,
+  type VideoTransportInput,
+  type VirtualTransportInput,
+} from "./transport"
 import type { QueueForFile } from "./queue-scope"
 
 const idleQueue: QueueForFile = {
@@ -193,5 +199,93 @@ describe("selectTransportForFile", () => {
     )
     expect(t.progress.rate).toBe(0.5)
     expect(t.progress.volume).toBe(0.25)
+  })
+})
+
+// AQU-646 stage 3h — the third engine: a file with timings and no master.
+//
+// Sam, 2026-08-25: a VTT imported on its own has time data but no film and no
+// imported recording, so nothing wrote the playhead and pressing play did
+// nothing. These pin the fold the same way the video's are pinned, because the
+// failure mode is identical — a consumer wired to the wrong half.
+const virtual = (over: Partial<VirtualTransportInput> = {}): VirtualTransportInput => ({
+  currentSec: 12.5,
+  playing: true,
+  durationSec: 640,
+  soundingCellId: "cue-7",
+  rate: 1,
+  volume: 1,
+  ...over,
+})
+
+describe("virtualOwnsFile", () => {
+  it("owns a file with timings, no picture and no imported recording", () => {
+    expect(virtualOwnsFile(false, false, 640)).toBe(true)
+  })
+
+  // Two transports both claiming one file is the failure this module exists to
+  // prevent, so each of the others wins outright.
+  it("yields to a picture that is driving", () => {
+    expect(virtualOwnsFile(true, false, 640)).toBe(false)
+  })
+
+  it("yields to an imported source recording, which makes the queue the master", () => {
+    expect(virtualOwnsFile(false, true, 640)).toBe(false)
+  })
+
+  // Scripture, a plain document: no timeline for a playhead to run along, so a
+  // transport there would be a control that moves nothing.
+  it("declines a file with no timings at all", () => {
+    expect(virtualOwnsFile(false, false, 0)).toBe(false)
+  })
+
+  // A film whose pane is off screen has nothing to drive — this reads
+  // `videoOwnsFile`'s ANSWER, not merely whether a URL exists.
+  it("takes over when a linked film is not actually the transport", () => {
+    expect(virtualOwnsFile(videoOwnsFile("https://cdn/x.m3u8", false, false), false, 640)).toBe(true)
+  })
+})
+
+describe("selectTransportForFile — the virtual arm", () => {
+  it("reports the clock's own numbers", () => {
+    const t = selectTransportForFile(idleQueue, null, virtual())
+    expect(t.source).toBe("virtual")
+    expect(t.active).toBe(true)
+    expect(t.playing).toBe(true)
+    expect(t.kind).toBe("playing")
+    expect(t.cellId).toBe("cue-7")
+    expect(t.progress).toEqual({ currentTime: 12.5, duration: 640, rate: 1, volume: 1 })
+  })
+
+  it("is idle before it takes the file", () => {
+    const t = selectTransportForFile(idleQueue, null, virtual({ currentSec: null }))
+    expect(t.active).toBe(false)
+    expect(t.kind).toBe("idle")
+    expect(t.cellId).toBeNull()
+  })
+
+  // There is nothing to open, seek or download, so there is no cold start to
+  // protect — unlike the picture, which needs `running` to survive a seek.
+  it("never reports loading, because there is nothing to load", () => {
+    const t = selectTransportForFile(idleQueue, null, virtual({ playing: false }))
+    expect(t.kind).toBe("paused")
+    expect(t.running).toBe(false)
+  })
+
+  // THE PRECEDENCE THIS MODULE ALREADY HAD, and a third source does not get to
+  // change it: playing one take from a row's rail is the queue, on any file.
+  it("hands back to the queue whenever the queue is genuinely running", () => {
+    const t = selectTransportForFile(runningQueue, null, virtual())
+    expect(t.source).toBe("queue")
+    expect(t.progress.currentTime).toBe(4)
+  })
+
+  it("never competes with a picture", () => {
+    const t = selectTransportForFile(idleQueue, video(), virtual())
+    expect(t.source).toBe("video")
+  })
+
+  it("is the queue when nothing else is offered — every ordinary file", () => {
+    expect(selectTransportForFile(idleQueue, null, null).source).toBe("queue")
   })
 })

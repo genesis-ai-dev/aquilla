@@ -2,13 +2,13 @@
  * Importing the client's character spreadsheet onto a file's lines.
  * (AQU-646 stage 6)
  *
- * Deliberately NOT folded into LabelImportPanel, which does almost all of this
- * already. That one round-trips a template WE generate, keyed by our own cell
- * refs — "download, fill in, re-upload". This takes a FOREIGN file the client
- * authored, keyed by timestamp. The two differ in exactly one step, and merging
- * them would thread a "where did this file come from?" branch through the whole
- * flow for no gain. Everything after the row→cell match is shared:
- * `splitCastName`, `emitCastAssign`, and the camera state it carries.
+ * This replaced the ImportDialog's "Cell labels / cast" panel (removed
+ * 2026-09-01). That one round-tripped a template WE generated, keyed by our own
+ * cell refs — "download, fill in, re-upload" — which never worked for subtitle
+ * files, whose cells carry no reference. This takes a FOREIGN file the client
+ * authored, keyed by timestamp. Everything after the row→cell match is shared
+ * with the rest of the cast machinery: `splitCastName`, `emitCastAssign`, and
+ * the camera state it carries.
  *
  * TWO STEPS ON PURPOSE, like the audio-VTT dialog: the file is parsed and its
  * effect reported BEFORE anything is written. 650 cast assignments are not a

@@ -199,7 +199,8 @@ async function getWhisperWorker(): Promise<Worker> {
   p.catch(() => { if (whisperWorkerPromise === p) whisperWorkerPromise = null })
   return p
 }
-async function getKokoroWorker(): Promise<Worker> {
+/** Shared with the synth path in tts.ts so warmup and generate hit one worker. */
+export async function getKokoroWorker(): Promise<Worker> {
   if (kokoroWorkerPromise) return kokoroWorkerPromise
   const p = (async () => {
     const mod = await import("./kokoro-worker?worker")
@@ -209,7 +210,8 @@ async function getKokoroWorker(): Promise<Worker> {
   p.catch(() => { if (kokoroWorkerPromise === p) kokoroWorkerPromise = null })
   return p
 }
-async function getMmsWorker(): Promise<Worker> {
+/** Shared with the synth path in tts.ts so warmup and generate hit one worker. */
+export async function getMmsWorker(): Promise<Worker> {
   if (mmsWorkerPromise) return mmsWorkerPromise
   const p = (async () => {
     const mod = await import("./mms-worker?worker")

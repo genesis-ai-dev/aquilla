@@ -643,12 +643,41 @@ async function loadParagraphStarts(
  * shape underneath a saved segmentation. A run with imperfect boundaries still
  * translates the file; a run with no boundaries translates nothing.
  */
-export async function resolveSpanSeeds(
+/** Dry-run a stored-strategy override for the segmentation preview. Does not
+ *  write. Auto/fixed only — explicit is the AI list, which has to be generated. */
+export type SegmentationPreviewQuery = {
+  strategy: "auto" | "fixed"
+  fixedSize?: number
+}
+
+async function deriveAutoSeeds(
   db: AquillaDb,
   projectId: string,
   fileId: string,
   pairs: CellPair[],
 ): Promise<SpanSeed[]> {
+  const paragraphStartCellIds = await loadParagraphStarts(db, projectId, fileId)
+  return deriveSpanSeeds(
+    fileId,
+    pairs,
+    paragraphStartCellIds.length > 0 ? { paragraphStartCellIds } : undefined,
+  )
+}
+
+export async function resolveSpanSeeds(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  pairs: CellPair[],
+  preview?: SegmentationPreviewQuery,
+): Promise<SpanSeed[]> {
+  if (preview?.strategy === "fixed") {
+    return deriveSpanSeeds(fileId, pairs, { fixedSize: preview.fixedSize })
+  }
+  if (preview?.strategy === "auto") {
+    return deriveAutoSeeds(db, projectId, fileId, pairs)
+  }
+
   let stored: Awaited<ReturnType<typeof getFileSegmentation>> = null
   try {
     stored = await getFileSegmentation(db, projectId, fileId)
@@ -667,12 +696,30 @@ export async function resolveSpanSeeds(
     return deriveSpanSeeds(fileId, pairs, { fixedSize: stored.fixedSize })
   }
 
-  const paragraphStartCellIds = await loadParagraphStarts(db, projectId, fileId)
-  return deriveSpanSeeds(
-    fileId,
-    pairs,
-    paragraphStartCellIds.length > 0 ? { paragraphStartCellIds } : undefined,
+  return deriveAutoSeeds(db, projectId, fileId, pairs)
+}
+
+/**
+ * AQU-1087: pin a newly created run to an explicit cell set (the open chapter)
+ * BEFORE the tick loop starts, so the first wave cannot re-segment the file.
+ */
+export async function pinContextualRunToCellIds(
+  db: AquillaDb,
+  run: ContextualRun,
+  cellIds: readonly string[],
+): Promise<ContextualRun | null> {
+  const allowed = new Set(cellIds)
+  const pairs = await selectCellPairs(db, run.projectId, {
+    fileId: run.fileId,
+    targetLang: run.targetLang,
+  })
+  const scoped = pairs.filter((pair) => allowed.has(pair.cellId))
+  const seeds = orderSeedsFromAnchor(
+    await resolveSpanSeeds(db, run.projectId, run.fileId, scoped),
+    run.anchorCellId,
+    scoped,
   )
+  return setSpanCursor(db, run.id, { seeds, nextIndex: 0 })
 }
 
 function validatedExamples(pairs: CellPair[]): ExamplePair[] {

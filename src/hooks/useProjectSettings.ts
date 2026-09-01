@@ -222,6 +222,11 @@ function localSettingsFrom(
   if (record.livingMemoryEntries != null) out.livingMemoryEntries = record.livingMemoryEntries
   if (record.translationBrief != null) out.translationBrief = record.translationBrief
   if (record.draftContext != null) out.draftContext = record.draftContext
+  if (record.chapterPagingEnabled != null) out.chapterPagingEnabled = record.chapterPagingEnabled
+  if (record.chapterCompletionTrigger != null)
+    out.chapterCompletionTrigger = record.chapterCompletionTrigger
+  if (record.chapterCompletionAction != null)
+    out.chapterCompletionAction = record.chapterCompletionAction
   return out
 }
 

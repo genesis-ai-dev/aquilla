@@ -6,7 +6,7 @@ import {
   Clipboard,
   LoaderCircle,
   Pause,
-  Play,
+  PencilSparkles,
   RefreshCw,
   Square,
 } from "lucide-react"
@@ -306,7 +306,7 @@ function Disclosure({
         <Button type="button" variant="ghost" className="w-full justify-start" aria-expanded={open}>
           <ChevronDown
             data-icon="inline-start"
-            className={cn("transition-transform motion-reduce:transition-none", !open && "-rotate-90")}
+            className={cn(!open && "-rotate-90")}
             aria-hidden
           />
           {title}
@@ -424,7 +424,7 @@ function RunControls({
       )}
       {run.status === "paused" && (
         <Button type="button" size="sm" variant="outline" disabled={busy !== null} onClick={() => onCommand("resume")}>
-          <Play data-icon="inline-start" aria-hidden />
+          <PencilSparkles data-icon="inline-start" aria-hidden />
           {t("autopilot.action.resume")}
         </Button>
       )}
@@ -436,7 +436,7 @@ function RunControls({
       )}
       {run.status === "failed" && (
         <Button type="button" size="sm" disabled={busy !== null} onClick={onRetry}>
-          <Play data-icon="inline-start" aria-hidden />
+          <PencilSparkles data-icon="inline-start" aria-hidden />
           {t("autopilot.action.run")}
         </Button>
       )}

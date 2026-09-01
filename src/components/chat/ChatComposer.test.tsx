@@ -38,9 +38,10 @@ describe("ChatComposer (TipTap)", () => {
     expect(onStop).toHaveBeenCalled()
   })
 
-  it("spells out the keyboard shortcuts next to the Send control", () => {
+  it("keeps keyboard shortcuts functional without permanent help copy", () => {
     render(<ChatComposer isStreaming={false} isConfigured onSend={vi.fn()} onStop={vi.fn()} />)
-    expect(screen.getByText("Enter to send · Shift+Enter for newline")).toBeInTheDocument()
+    expect(screen.queryByText(/Enter to send/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Shift\+Enter for newline/)).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument()
     expect(screen.getByRole("textbox")).toHaveClass("min-h-9", "max-h-32", "overflow-y-auto")
   })

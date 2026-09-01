@@ -119,6 +119,10 @@ UI chrome that used to be one smoke file per click is covered under
 - Living-memory empty states and section IA (index → brief/instructions/quality/knowledge/examples panes, collapsed prediction prompt, role gates — RTL in `LivingMemoryPage.component.test.tsx`; entry points and legacy settings redirects in `ProjectSettings.subMenuIA.test.tsx` + `shell-routing.test.ts`)
 - Back-translation generation, editing, stale/provenance, and statistical-pairs comparison (`BacktranslationPanel.test.tsx`); the cross-user edit lock remains in the smoke keep-list
 - Admin console tab clicks, formatting Ctrl+B alone, breadcrumb-only nav
+- Clone-voice button on a source cell opens the New voice modal in place without switching to the Voices dock tab (`CloneVoiceModalHost.test.tsx`, `CellVoicePanel.chip.test.tsx`)
+- New-voice Kokoro speaker dropdown grouped by project target language, with a playable sample per voice (`NewVoiceModal.test.tsx`)
+- AI model consent dialog: Just Kokoro starts that model's download (Enable all is not required) (`AiModelConsentDialog.test.tsx`)
+- Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
 
 When you change one of these surfaces, update the matching `*.test.tsx`. If RTL
 is missing, add it — then delete any leftover smoke, do not park it as non-smoke.

@@ -296,6 +296,24 @@ describe("GET /contextual/segmentation", () => {
     const { viewer } = await seedTokens()
     expect((await req("GET", "/segmentation", viewer)).status).toBe(400)
   })
+
+  it("dry-runs a fixed preview without writing the stored row", async () => {
+    const { viewer } = await seedTokens()
+    const preview = await req("GET", `/segmentation?fileId=${FILE}&strategy=fixed&fixedSize=2`, viewer)
+    expect(preview.status).toBe(200)
+    const body = (await preview.json()) as {
+      segmentation: unknown
+      effective: { spanCount: number; spans: { cellCount: number; excerpt?: string }[] }
+    }
+    expect(body.segmentation).toBeNull()
+    expect(body.effective.spanCount).toBe(3)
+    expect(body.effective.spans.map((s) => s.cellCount)).toEqual([2, 2, 2])
+    expect(body.effective.spans[0]?.excerpt).toMatch(/Sentence 1/)
+
+    const stored = await req("GET", `/segmentation?fileId=${FILE}`, viewer)
+    const storedBody = (await stored.json()) as { effective: { spanCount: number } }
+    expect(storedBody.effective.spanCount).toBe(1)
+  })
 })
 
 describe("PUT /contextual/segmentation", () => {

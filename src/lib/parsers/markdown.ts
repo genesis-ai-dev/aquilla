@@ -98,8 +98,26 @@ function stripMarkdownInline(text: string): string {
     .replace(/`(.+?)`/g, "$1")
 }
 
-function markdownInlineToHtml(text: string): string {
+// [Pen test] Input validation & injection (2026-08-26): this is the one
+// importer that built HTML from untrusted document text without escaping it
+// first — every other HTML-from-text producer in the codebase (e.g.
+// renderCommentHtml in comment-helpers.ts) escapes before adding markup.
+// Literal HTML in a source .md file (`<script>...`, `<img onerror=...>`)
+// used to pass straight through into a cell's originalHtml. Rendering is
+// already sanitized downstream (DOMPurify), but ingestion should not hand
+// raw attacker HTML to every consumer of that field on the promise that
+// every future render/export path remembers to sanitize.
+function escapeHtml(text: string): string {
   return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;")
+}
+
+function markdownInlineToHtml(text: string): string {
+  return escapeHtml(text)
     .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>")
     .replace(/__(.+?)__/g, "<b>$1</b>")
     .replace(/\*(.+?)\*/g, "<i>$1</i>")

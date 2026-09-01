@@ -7,7 +7,7 @@
  * with draft text editable in place before accepting. Accept commits what's
  * in the box (the human post-edits the machine draft), through the same
  * staged-apply outbox path as ever. A job header shows bulk-run progress
- * with Stop, plus session controls (new session, back to editor).
+ * with Stop, plus a collapse control when the pane was expanded from the dock.
  */
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
@@ -18,6 +18,12 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { EditorModeToggle, type EditorLens } from "@/components/EditorModeToggle"
+import {
+  EDITOR_SURFACE_OVERFLOW_TRIGGER_CLASS,
+  EDITOR_SURFACE_TOOLBAR_CLASS,
+} from "@/components/editor-surface-toolbar"
+import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
 import type { AgentProposal } from "@/lib/agent/protocol"
 import { useAgentSession } from "@/lib/agent/session-store"
@@ -55,14 +61,22 @@ type WorkbenchTab = "sessions" | "memory"
 export interface AgentWorkbenchProps {
   /** Same wiring the dock panel gets — one source of truth in ProjectWorkspace. */
   agent: Omit<AgentDockViewProps, "suggestedActions" | "pendingPrompt" | "onPendingPromptConsumed">
-  /** Org agent-credit gauge in the header (maintainer+ only; self-hides). */
+  /** Org agent-credit gauge in the agent pane (maintainer+ only; self-hides). */
   credits?: CreditsDialProps | null
-  /** Minimize to the dock and dismiss the editor Agent tab. */
-  onClose: () => void
+  /** Header Collapse — only when the workbench was expanded from the sidebar dock. */
+  onCollapse?: () => void
   /** Jump the editor to a cell ("open" on a working-set row). */
   onJumpToCell?: (fileId: string, cellId: string) => void
   /** Reveal the file explorer while remaining in Agent mode. */
   onChooseFile?: () => void
+  /** Text / Audio / Agent switch — same control as the editor chapter row. */
+  editorMode?: {
+    lens: EditorLens
+    timeOrdered?: boolean
+    onLensChange: (lens: EditorLens) => void
+  }
+  /** File-identity ⋯ (rename / move / export / delete). Editor-only tools stay off this surface. */
+  fileMenuItems?: OverflowMenuItem[]
   /** Live document context flanking the Agent pane. */
   workspace?: {
     cells: AgentWorkbenchCell[]
@@ -96,7 +110,7 @@ export interface AgentWorkbenchProps {
   }
 }
 
-export function AgentWorkbench({ agent, credits, onClose, onJumpToCell, onChooseFile, workspace }: AgentWorkbenchProps) {
+export function AgentWorkbench({ agent, credits, onCollapse, onJumpToCell, onChooseFile, editorMode, fileMenuItems, workspace }: AgentWorkbenchProps) {
   const t = useT()
   const { state, stop, reset, decide } = useAgentSession(agent.projectId, agent.author)
   // Decisions per proposal row (key: proposalId:cellId) live in the SESSION
@@ -110,6 +124,9 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell, onChoose
   const targetScrollRef = useRef<HTMLDivElement>(null)
   const scrollSourceRef = useRef<"source" | "target" | null>(null)
   const initialLayout = useMemo(() => readAgentWorkbenchLayout(agent.projectId), [agent.projectId])
+  const handleWorkbenchTab = useCallback((next: string) => {
+    setTab(next as WorkbenchTab)
+  }, [])
 
   const rows = useMemo(() => deriveWorkingSet(state.runs, decided), [state.runs, decided])
   const pending = useMemo(() => pendingRows(rows), [rows])
@@ -360,75 +377,77 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell, onChoose
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <Tabs
-        value={tab}
-        onValueChange={(next) => setTab(next as WorkbenchTab)}
-        className="flex min-h-0 flex-1 flex-col gap-0"
-      >
-        {/* One compact workbench header: identity, navigation, and actions. */}
-        <div className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
-          <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="shrink-0 text-sm font-medium">{t("agentWorkspace.agent")}</span>
-          {activeRun && (
-            <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" role="status">
-              <Spinner className="h-3 w-3 shrink-0" />
-              <span className="truncate">
-                {progress ? `${progress.label} — ${progress.done}/${progress.total}` : t("agentWorkspace.working")}
-              </span>
+      {/* Own Tabs root for Chat/Memory so the Text/Audio/Agent switch
+          (also Tabs) is not nested. Same chrome as the editor chapter row. */}
+      <div data-testid="agent-toolbar-row" className={EDITOR_SURFACE_TOOLBAR_CLASS}>
+        <Bot className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="shrink-0 text-sm font-medium">{t("agentWorkspace.agent")}</span>
+        {activeRun && (
+          <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" role="status">
+            <Spinner className="h-3 w-3 shrink-0" />
+            <span className="truncate">
+              {progress ? `${progress.label} — ${progress.done}/${progress.total}` : t("agentWorkspace.working")}
             </span>
-          )}
-          {state.queued.length > 0 && (
-            <span className="shrink-0 text-[11px] text-muted-foreground">{t("agentWorkspace.queued", { count: state.queued.length })}</span>
-          )}
+          </span>
+        )}
+        {state.queued.length > 0 && (
+          <span className="shrink-0 text-[11px] text-muted-foreground">{t("agentWorkspace.queued", { count: state.queued.length })}</span>
+        )}
 
-          <TabsList
-            variant="line"
-            className="h-7 w-fit shrink-0 p-0"
-            aria-label={t("agentWorkspace.sections")}
-          >
-            <TabsTrigger value="sessions" className="h-full px-2 text-xs">
-              {t("agentWorkspace.chat")}
-            </TabsTrigger>
-            <TabsTrigger value="memory" className="h-full px-2 text-xs">
-              {t("agentWorkspace.projectKnowledge")}
-            </TabsTrigger>
+        <Tabs value={tab} onValueChange={handleWorkbenchTab} className="gap-0">
+          <TabsList aria-label={t("agentWorkspace.sections")}>
+            <TabsTrigger value="sessions">{t("agentWorkspace.chat")}</TabsTrigger>
+            <TabsTrigger value="memory">{t("agentWorkspace.projectKnowledge")}</TabsTrigger>
           </TabsList>
+        </Tabs>
 
-          <span className="ml-auto flex shrink-0 items-center gap-1">
-            {credits && <CreditsDial {...credits} />}
-            {state.isStreaming && (
-              <Button type="button" variant="outline" size="sm" className="h-6 text-[11px]" onClick={stop}>
-                <Square data-icon="inline-start" />
-                {t("common.stop")}
-              </Button>
-            )}
-            <AppTooltip content={t("agentWorkspace.newSessionHelp")}>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-6 text-[11px] text-muted-foreground"
-                onClick={reset}
-              >
-                <RotateCcw data-icon="inline-start" />
-                {t("agentWorkspace.newSession")}
-              </Button>
-            </AppTooltip>
+        <div className="ms-auto flex shrink-0 items-center gap-2">
+          {editorMode ? (
+            <>
+              <EditorModeToggle
+                lens={editorMode.lens}
+                onChange={editorMode.onLensChange}
+                agentActive
+                timeOrdered={editorMode.timeOrdered}
+              />
+              <OverflowMenu
+                items={fileMenuItems ?? []}
+                triggerVariant="outline"
+                triggerSize="icon"
+                triggerClassName={EDITOR_SURFACE_OVERFLOW_TRIGGER_CLASS}
+                ariaLabel="File options"
+                testId="file-options-menu"
+              />
+            </>
+          ) : null}
+          {state.isStreaming && (
+            <Button type="button" variant="outline" size="sm" onClick={stop}>
+              <Square data-icon="inline-start" />
+              {t("common.stop")}
+            </Button>
+          )}
+          {onCollapse ? (
             <AppTooltip content={t("agentWorkspace.collapseHelp")}>
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
-                className="h-6 text-[11px] text-muted-foreground"
-                onClick={onClose}
+                size="icon-sm"
+                className="text-muted-foreground"
+                onClick={onCollapse}
                 aria-label={t("agentWorkspace.collapsePane")}
               >
-                <Minimize2 data-icon="inline-start" />
-                {t("agentWorkspace.collapse")}
+                <Minimize2 />
               </Button>
             </AppTooltip>
-          </span>
+          ) : null}
         </div>
+      </div>
+
+      <Tabs
+        value={tab}
+        onValueChange={handleWorkbenchTab}
+        className="flex min-h-0 flex-1 flex-col gap-0"
+      >
 
         <TabsContent value="sessions" className="flex min-h-0 flex-1 flex-col">
           <ResizablePanelGroup
@@ -456,30 +475,25 @@ export function AgentWorkbench({ agent, credits, onClose, onJumpToCell, onChoose
 
             <ResizableHandle aria-label={t("agentWorkspace.resizeSourceAgent")} className="bg-border/70 hover:bg-primary/40" />
 
-            <ResizablePanel
-              id="agent"
-              minSize="24%"
-              collapsible
-              collapsedSize={0}
-              onResize={(size, _id, previousSize) => {
-                if (previousSize && previousSize.inPixels > 0 && size.inPixels === 0) onClose()
-              }}
-            >
+            <ResizablePanel id="agent" minSize="24%">
               <section aria-label={t("agentWorkspace.agentPane")} className="flex h-full min-h-0 flex-col bg-background">
-                <div className="flex h-9 shrink-0 items-center border-b border-border/70 px-3">
+                <div className="flex h-9 shrink-0 items-center gap-2 border-b border-border/70 px-3">
                   <span className="text-[11px] font-semibold tracking-tight text-foreground/90">{t("agentWorkspace.agent")}</span>
-                  <AppTooltip content={t("agentWorkspace.minimize")}>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      className="ml-auto h-6 w-6 rounded-md text-muted-foreground hover:text-foreground"
-                      onClick={onClose}
-                      aria-label={t("agentWorkspace.minimize")}
-                    >
-                      <Minimize2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </AppTooltip>
+                  <div className="ms-auto flex items-center gap-1" data-testid="agent-session-actions">
+                    {credits && <CreditsDial {...credits} />}
+                    <AppTooltip content={t("agentWorkspace.newSessionHelp")}>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-muted-foreground"
+                        onClick={reset}
+                        aria-label={t("agentWorkspace.newSession")}
+                      >
+                        <RotateCcw />
+                      </Button>
+                    </AppTooltip>
+                  </div>
                 </div>
                 <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                   <AgentDockView

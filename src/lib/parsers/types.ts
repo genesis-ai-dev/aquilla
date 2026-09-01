@@ -255,6 +255,12 @@ export interface Voice {
    * plain TTS, no conversion.
    */
   referenceAudioId?: string
+  /**
+   * When the clone reference was lifted from a line take, `${cellId}:${slot}`
+   * of that take. The Reference audio tab is filled only when `referenceAudioId`
+   * is set *without* this key (a recorded or uploaded clip).
+   */
+  referenceTakeKey?: string
 }
 
 export interface ProjectTtsSettings {
@@ -569,7 +575,29 @@ export interface ProjectRecord {
    *  front matter (per-project opt-out). Synced via ProjectWideSettings; absent/
    *  false imports front matter as translatable cells. */
   importExcludeFrontMatter?: boolean
+  /**
+   * AQU-1087: chapter-paged editor. Absent/false = current full-book scroll.
+   * When true, the editor shows one chapter at a time. Overlaid from
+   * ProjectWideSettings by useProject's overlaySettings.
+   */
+  chapterPagingEnabled?: boolean
+  /**
+   * AQU-1087: what counts as "this chapter is done" when paging is on.
+   * Absent → allTranslated. Ignored when chapterPagingEnabled is off.
+   */
+  chapterCompletionTrigger?: ChapterCompletionTrigger
+  /**
+   * AQU-1087: what the editor does when the completion trigger fires.
+   * Absent → prompt. Ignored when paging is off or the trigger is manual.
+   */
+  chapterCompletionAction?: ChapterCompletionAction
 }
+
+/** AQU-1087: how a chapter-paged editor decides the current chapter is done. */
+export type ChapterCompletionTrigger = "allTranslated" | "allValidated" | "manual"
+
+/** AQU-1087: what the editor does when the chapter-completion trigger fires. */
+export type ChapterCompletionAction = "prompt" | "autoAdvance" | "stay"
 
 /** A single authored guidance entry in the Living Memory page. */
 export interface LivingMemoryEntry {

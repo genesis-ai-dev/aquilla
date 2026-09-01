@@ -202,6 +202,28 @@ describe("POST /contextual/runs", () => {
     expect(body.error.details.runId).toBe(runId)
   })
 
+  it("cellIds pins the run to those cells instead of the whole file", async () => {
+    const { contrib } = await seedWorld()
+    for (const [cellId, ref, text] of [
+      ["c3", "MRK 2:1", "and the word was"],
+      ["c4", "MRK 2:2", "with God"],
+    ] as const) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
+         VALUES (?, ?, ?, 'source', ?, ?, ?, 0)`,
+      ).bind(PROJECT, FILE, cellId, text, ref, `ev-${cellId}`).run()
+    }
+    const r = await req("POST", "/runs", contrib, { fileId: FILE, cellIds: ["c3", "c4"] })
+    expect(r.status).toBe(201)
+    const { runId } = (await r.json()) as { runId: string }
+    if (_test.lastLoop) await _test.lastLoop
+    _test.lastLoop = null
+    const run = await getRun(env.AQUILLA_PG, runId)
+    expect(run?.status).toBe("parked")
+    const drafts = await listDrafts(env.AQUILLA_PG, PROJECT, FILE, "proposed")
+    expect(drafts.map((d) => d.cellId).sort()).toEqual(["c3", "c4"])
+  })
+
   it("rejects an unregistered multilingual lane and starts a registered one", async () => {
     const { contrib } = await seedWorld()
     const unregistered = await req("POST", "/runs", contrib, { fileId: FILE, targetLang: "fr" })

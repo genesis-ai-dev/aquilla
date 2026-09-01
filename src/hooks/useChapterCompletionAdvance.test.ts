@@ -17,15 +17,6 @@ type TestCell = { original: string; translated: string; status: string }
 const translated: TestCell = { original: "In the beginning", translated: "Au commencement", status: "unvalidated" }
 const empty: TestCell = { original: "the earth", translated: "", status: "empty" }
 
-const base = {
-  enabled: true,
-  fileId: "file-1",
-  pageKey: "scripture:GEN:1",
-  currentLabel: "Genesis 1",
-  next: { key: "scripture:GEN:2", label: "Genesis 2" } as const,
-  trigger: "allTranslated" as const,
-}
-
 describe("useChapterCompletionAdvance", () => {
   beforeEach(() => {
     vi.mocked(toast.add).mockImplementation((options) => (
@@ -35,31 +26,20 @@ describe("useChapterCompletionAdvance", () => {
     vi.mocked(toast.close).mockClear()
   })
 
-  it("does not prompt when the open page is already complete", () => {
+  it("offers the next chapter when the open page is already complete", () => {
+    const onAdvance = vi.fn()
     renderHook(() => useChapterCompletionAdvance({
-      ...base,
+      enabled: true,
+      fileId: "file-1",
+      pageKey: "scripture:GEN:1",
+      currentLabel: "Genesis 1",
+      next: { key: "scripture:GEN:2", label: "Genesis 2" },
+      trigger: "allTranslated",
       action: "prompt",
       cells: [translated],
-      onAdvance: vi.fn(),
+      onAdvance,
     }))
 
-    expect(toast.add).not.toHaveBeenCalled()
-  })
-
-  it("prompts on the rising edge from incomplete to complete", () => {
-    const onAdvance = vi.fn()
-    const { rerender } = renderHook(
-      ({ cells }) => useChapterCompletionAdvance({
-        ...base,
-        action: "prompt",
-        cells,
-        onAdvance,
-      }),
-      { initialProps: { cells: [empty] } },
-    )
-
-    expect(toast.add).not.toHaveBeenCalled()
-    rerender({ cells: [translated] })
     expect(toast.add).toHaveBeenCalledTimes(1)
     const options = vi.mocked(toast.add).mock.calls[0]![0] as {
       id?: string
@@ -71,17 +51,20 @@ describe("useChapterCompletionAdvance", () => {
     expect(options.actionProps.children).toBe("Next chapter")
     options.actionProps.onClick()
     expect(onAdvance).toHaveBeenCalledWith("scripture:GEN:2", undefined)
+    expect(toast.close).not.toHaveBeenCalled()
   })
 
-  it("does not prompt again when navigating onto an already complete chapter", () => {
+  it("retitles the same toast when the next chapter is also complete", () => {
     const { rerender } = renderHook(
-      ({ pageKey, currentLabel, next, cells }) => useChapterCompletionAdvance({
-        ...base,
+      ({ pageKey, currentLabel, next }) => useChapterCompletionAdvance({
+        enabled: true,
+        fileId: "file-1",
         pageKey,
         currentLabel,
         next,
+        trigger: "allTranslated",
         action: "prompt",
-        cells,
+        cells: [translated],
         onAdvance: vi.fn(),
       }),
       {
@@ -89,36 +72,39 @@ describe("useChapterCompletionAdvance", () => {
           pageKey: "scripture:GEN:1",
           currentLabel: "Genesis 1",
           next: { key: "scripture:GEN:2", label: "Genesis 2" },
-          cells: [empty],
         },
       },
     )
-
-    rerender({
-      pageKey: "scripture:GEN:1",
-      currentLabel: "Genesis 1",
-      next: { key: "scripture:GEN:2", label: "Genesis 2" },
-      cells: [translated],
-    })
-    expect(toast.add).toHaveBeenCalledTimes(1)
 
     rerender({
       pageKey: "scripture:GEN:2",
       currentLabel: "Genesis 2",
       next: { key: "scripture:GEN:3", label: "Genesis 3" },
-      cells: [translated],
     })
-    expect(toast.add).toHaveBeenCalledTimes(1)
-    expect(toast.close).toHaveBeenCalledWith(CHAPTER_COMPLETE_TOAST_ID)
+
+    expect(toast.close).not.toHaveBeenCalled()
+    expect(toast.add).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(toast.add).mock.calls[0]![0]).toMatchObject({
+      id: CHAPTER_COMPLETE_TOAST_ID,
+      title: "Genesis 1 is complete",
+      data: { pulse: false },
+    })
+    expect(vi.mocked(toast.add).mock.calls[1]![0]).toMatchObject({
+      id: CHAPTER_COMPLETE_TOAST_ID,
+      title: "Genesis 2 is complete",
+      data: { pulse: false },
+    })
   })
 
-  it("dismisses the toast when leaving for an incomplete chapter", () => {
+  it("dismisses the toast when the next chapter is not complete", () => {
     const { rerender } = renderHook(
       ({ pageKey, currentLabel, next, cells }) => useChapterCompletionAdvance({
-        ...base,
+        enabled: true,
+        fileId: "file-1",
         pageKey,
         currentLabel,
         next,
+        trigger: "allTranslated",
         action: "prompt",
         cells,
         onAdvance: vi.fn(),
@@ -128,18 +114,10 @@ describe("useChapterCompletionAdvance", () => {
           pageKey: "scripture:GEN:1",
           currentLabel: "Genesis 1",
           next: { key: "scripture:GEN:2", label: "Genesis 2" },
-          cells: [empty],
+          cells: [translated],
         },
       },
     )
-
-    rerender({
-      pageKey: "scripture:GEN:1",
-      currentLabel: "Genesis 1",
-      next: { key: "scripture:GEN:2", label: "Genesis 2" },
-      cells: [translated],
-    })
-    expect(toast.add).toHaveBeenCalledTimes(1)
 
     rerender({
       pageKey: "scripture:GEN:2",
@@ -147,13 +125,20 @@ describe("useChapterCompletionAdvance", () => {
       next: { key: "scripture:GEN:3", label: "Genesis 3" },
       cells: [empty],
     })
+
+    expect(toast.add).toHaveBeenCalledTimes(1)
     expect(toast.close).toHaveBeenCalledWith(CHAPTER_COMPLETE_TOAST_ID)
   })
 
   it("does not auto-advance a chapter that was already complete on first look", () => {
     const onAdvance = vi.fn()
     renderHook(() => useChapterCompletionAdvance({
-      ...base,
+      enabled: true,
+      fileId: "file-1",
+      pageKey: "scripture:GEN:1",
+      currentLabel: "Genesis 1",
+      next: { key: "scripture:GEN:2", label: "Genesis 2" },
+      trigger: "allTranslated",
       action: "autoAdvance",
       cells: [translated],
       onAdvance,
@@ -167,7 +152,12 @@ describe("useChapterCompletionAdvance", () => {
     const onAdvance = vi.fn()
     const { rerender } = renderHook(
       ({ cells }) => useChapterCompletionAdvance({
-        ...base,
+        enabled: true,
+        fileId: "file-1",
+        pageKey: "scripture:GEN:1",
+        currentLabel: "Genesis 1",
+        next: { key: "scripture:GEN:2", label: "Genesis 2" },
+        trigger: "allTranslated",
         action: "autoAdvance",
         cells,
         onAdvance,
@@ -181,16 +171,17 @@ describe("useChapterCompletionAdvance", () => {
   })
 
   it("stays silent when the action is stay", () => {
-    const { rerender } = renderHook(
-      ({ cells }) => useChapterCompletionAdvance({
-        ...base,
-        action: "stay",
-        cells,
-        onAdvance: vi.fn(),
-      }),
-      { initialProps: { cells: [empty] } },
-    )
-    rerender({ cells: [translated] })
+    renderHook(() => useChapterCompletionAdvance({
+      enabled: true,
+      fileId: "file-1",
+      pageKey: "scripture:GEN:1",
+      currentLabel: "Genesis 1",
+      next: { key: "scripture:GEN:2", label: "Genesis 2" },
+      trigger: "allTranslated",
+      action: "stay",
+      cells: [translated],
+      onAdvance: vi.fn(),
+    }))
 
     expect(toast.add).not.toHaveBeenCalled()
   })
@@ -199,7 +190,12 @@ describe("useChapterCompletionAdvance", () => {
     const onAdvance = vi.fn()
     const { rerender } = renderHook(
       ({ cells }) => useChapterCompletionAdvance({
-        ...base,
+        enabled: true,
+        fileId: "file-1",
+        pageKey: "scripture:GEN:1",
+        currentLabel: "Genesis 1",
+        next: { key: "scripture:GEN:2", label: "Genesis 2" },
+        trigger: "allTranslated",
         action: "autoAdvance",
         cells,
         onAdvance,
@@ -214,19 +210,17 @@ describe("useChapterCompletionAdvance", () => {
   })
 
   it("does not prompt on the last chapter", () => {
-    const { rerender } = renderHook(
-      ({ cells }) => useChapterCompletionAdvance({
-        ...base,
-        pageKey: "scripture:GEN:50",
-        currentLabel: "Genesis 50",
-        next: null,
-        action: "prompt",
-        cells,
-        onAdvance: vi.fn(),
-      }),
-      { initialProps: { cells: [empty] } },
-    )
-    rerender({ cells: [translated] })
+    renderHook(() => useChapterCompletionAdvance({
+      enabled: true,
+      fileId: "file-1",
+      pageKey: "scripture:GEN:50",
+      currentLabel: "Genesis 50",
+      next: null,
+      trigger: "allTranslated",
+      action: "prompt",
+      cells: [translated],
+      onAdvance: vi.fn(),
+    }))
 
     expect(toast.add).not.toHaveBeenCalled()
   })

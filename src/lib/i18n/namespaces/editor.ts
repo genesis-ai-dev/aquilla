@@ -2050,12 +2050,10 @@ export const editor = defineNamespace({
       },
       "editor.chapter.completeTitle": {
         description:
-          "Success toast when the open chapter page becomes complete " +
-          "(rising edge of the project's completion trigger) and there is a " +
-          "next chapter. Not shown when landing on a chapter that is already " +
-          "done. The action button on the same toast is " +
-          "editor.milestone.chapter.next. {label} is the finished chapter's " +
-          "display name.",
+          "Success toast when the open chapter page meets the project's " +
+          "completion trigger and there is a next chapter. The action button on " +
+          "the same toast is editor.milestone.chapter.next. {label} is the " +
+          "finished chapter's display name.",
         placeholders: {
           label: MILESTONE_LABEL_PLACEHOLDER,
         },

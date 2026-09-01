@@ -7,7 +7,7 @@ import {
 } from "@/lib/chapter-navigation"
 import type { ChapterCompletionAction, ChapterCompletionTrigger } from "@/lib/parsers/types"
 
-/** One toast: retitled in place while you stay; dismissed when you leave. */
+/** One toast: complete→complete retitles it in place (no pulse, no stack). */
 export const CHAPTER_COMPLETE_TOAST_ID = "chapter-complete-advance"
 
 type WorkCell = {
@@ -19,12 +19,14 @@ type WorkCell = {
 }
 
 /**
- * AQU-1087: prompt and auto-advance run only on a rising edge — the open
- * chapter becoming complete while you are on it. Landing on a chapter that
- * is already done does nothing.
+ * AQU-1087: when the open chapter page becomes complete, offer (or auto-do)
+ * the project's configured next-chapter action. Prompt can fire for a chapter
+ * that is already done when you land on it — that's the "I'm finished, now
+ * what?" case. Auto-advance only runs on a rising edge so opening a finished
+ * chapter does not skip the user's place.
  *
- * One notification. Leaving the chapter (or hitting an incomplete/last page)
- * dismisses it.
+ * One notification. Walking complete→complete keeps it up and swaps the
+ * title; landing on an incomplete or last chapter dismisses it.
  */
 export function useChapterCompletionAdvance(args: {
   enabled: boolean
@@ -54,6 +56,7 @@ export function useChapterCompletionAdvance(args: {
     : ""
 
   useEffect(() => {
+    const shouldOffer = complete && Boolean(nextRef.current) && args.action === "prompt"
     const offerNext = (label: string) => {
       toast.add({
         id: CHAPTER_COMPLETE_TOAST_ID,
@@ -80,7 +83,7 @@ export function useChapterCompletionAdvance(args: {
     }
 
     // Rows haven't landed yet — don't treat an empty page as "incomplete"
-    // or completing-on-hydrate will fire the trigger as a false rising edge.
+    // or auto-advance will skip a finished chapter the moment cells hydrate.
     if (args.cells.length === 0) return
 
     const next = nextRef.current
@@ -88,7 +91,8 @@ export function useChapterCompletionAdvance(args: {
     if (isNewPage) {
       identityRef.current = pageIdentity
       wasCompleteRef.current = complete
-      toast.close(CHAPTER_COMPLETE_TOAST_ID)
+      if (shouldOffer) offerNext(args.currentLabel)
+      else toast.close(CHAPTER_COMPLETE_TOAST_ID)
       return
     }
 

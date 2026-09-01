@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react"
-import { Upload, Library, Globe, Table2, Languages, ArrowLeftRight, Tags, StickyNote, Database, BookImage, BookA, BookOpen, Search, Cloud, type LucideIcon } from "lucide-react"
+import { Upload, Library, Globe, Table2, Languages, ArrowLeftRight, StickyNote, Database, BookImage, BookA, BookOpen, Search, Cloud, type LucideIcon } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
@@ -40,8 +40,6 @@ const SPECIALIZED_OPTIONS: ImportOption[] = [
     descriptionKey: "importExport.landing.macula.description" },
   { id: "paired", titleKey: "importExport.landing.paired.title", icon: ArrowLeftRight, badge: "beta",
     descriptionKey: "importExport.landing.paired.description" },
-  { id: "labels", titleKey: "importExport.landing.labels.title", icon: Tags, badge: "beta",
-    descriptionKey: "importExport.landing.labels.description" },
   { id: "tn", titleKey: "importExport.landing.tn.title", hintKey: "importExport.landing.tn.hint", icon: StickyNote, badge: "beta",
     descriptionKey: "importExport.landing.tn.description" },
   { id: "biblica", titleKey: "importExport.landing.biblica.title", hintKey: "importExport.landing.biblica.hint", icon: BookOpen, badge: "beta",

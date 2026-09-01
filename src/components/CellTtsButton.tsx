@@ -11,6 +11,8 @@ import { AlertCircle, Pause, Volume2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { toast } from "@/components/ui/toast"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
 import { synthesizeForCell, setTtsStatus, ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { generateAndAttachCellVoice } from "@/lib/audio/generate-voice"
@@ -29,6 +31,20 @@ import { normalizeVoiceForProvider, resolveTtsProvider, providerInfo } from "@/l
 
 interface Props {
   cellId: string
+  /**
+   * WHOSE CAST ASSIGNMENT PICKS THE VOICE — which is not always the cell the
+   * clip is written to. (2026-08-27)
+   *
+   * Character voices are assigned on the SUBTITLE rows and stored by their cell
+   * id, but on a file with an audio-cue sibling the clip must be written to the
+   * heard line performing that subtitle. When `cellId` was redirected to the
+   * cue and this did not exist, `castAssignments[cue]` was simply absent, the
+   * lookup fell through to the project default, and every character's line was
+   * generated — and durably attached — in the narrator's voice, while the
+   * character gutter in the same row went on showing the right name. Absent ⇒
+   * `cellId`, which is every arrangement without cues.
+   */
+  voiceCellId?: string
   text: string
   original?: string
   context?: string
@@ -40,6 +56,20 @@ interface Props {
   /** If set, the speaker plays this attached audio instead of synthesizing fresh. */
   generatedVoiceAudioId?: string
   attachments?: Record<string, CodexCellAttachment>
+  /**
+   * AQU-646 stage 3f: the OTHER cells this line's voice also belongs on.
+   *
+   * One subtitle can be performed by several heard lines, and Sam's ruling
+   * (2026-08-25) is that each gets the whole line so none is left silent. Only
+   * `cellId` is played back — a button can only play one clip — but the rest are
+   * generated alongside it rather than left for the user to notice.
+   *
+   * Each needs its OWN synth-and-upload: an audio id is seeded with the cell it
+   * belongs to, so the same bytes cannot simply be attached twice.
+   *
+   * Empty or absent on every ordinary file, which is one clip as before.
+   */
+  alsoAttachTo?: readonly { cellId: string; fileId: string }[]
   /** Required for resolving attached audio via sync-worker R2. */
   projectId?: string
   /** Required for the sync-worker R2 audio key. */
@@ -91,6 +121,7 @@ function rememberUrl(key: string, url: string): void {
 
 export function CellTtsButton({
   cellId,
+  voiceCellId,
   text,
   original,
   context,
@@ -101,17 +132,23 @@ export function CellTtsButton({
   cellTtsSettings,
   generatedVoiceAudioId,
   attachments,
+  alsoAttachTo,
   projectId,
   fileId,
   disabled,
   playOnly,
 }: Props) {
+  const t = useT()
   const trimmed = text.trim()
   const statusKey = ttsStatusKey(cellId)
   const status = useTtsStatus(statusKey)
   // AQU-646: honor persisted cast assignments (e.g. diarization's Speaker N →
   // cell mapping) so generate speaks in the assigned character's voice.
-  const baseVoice = resolveCastVoice(projectTtsSettings, cellId, cellTtsSettings?.voiceId)
+  // The VOICE follows the line the assignment was made on; the WRITE follows
+  // `cellId`. The recorder and the bulk run have always carried these two
+  // separately (`generateCellVoice`'s `voiceCellId`) — this button had one
+  // prop doing both jobs.
+  const baseVoice = resolveCastVoice(projectTtsSettings, voiceCellId ?? cellId, cellTtsSettings?.voiceId)
   const provider = baseVoice.provider ?? resolveTtsProvider(projectTtsSettings)
   const voice = normalizeVoiceForProvider(baseVoice, provider, { targetLanguage })
   const modelStatus = useModelStatus(provider === "mms" ? "mms" : "kokoro")
@@ -203,6 +240,67 @@ export function CellTtsButton({
               onProgress,
             })
             blob = gen.blob
+            // The other heard lines performing this same subtitle. Sequential,
+            // not parallel: they share one synth backend and one progress slot,
+            // and a second concurrent run would fight the first for both.
+            //
+            // AFTER the blob is in hand, and each one guarded — the clip the
+            // user asked to hear must not be lost because a sibling failed.
+            let alsoWritten = 0
+            let alsoFailed = 0
+            for (const also of alsoAttachTo ?? []) {
+              try {
+                await generateAndAttachCellVoice({
+                  projectId,
+                  fileId: also.fileId,
+                  cellId: also.cellId,
+                  text: trimmed,
+                  projectTtsSettings,
+                  cellVoiceId: baseVoice.id,
+                  geminiContext,
+                  session,
+                  username: session.username,
+                })
+                alsoWritten += 1
+              } catch (e) {
+                // Still swallowed on purpose — the clip the user asked to hear
+                // must not be lost because a sibling failed — but no longer
+                // SILENT. Until 2026-08-27 this was the whole handler, and
+                // because the success toast below counts only what landed, a
+                // run where every sibling failed produced no toast at all:
+                // indistinguishable from an ordinary one-clip success, with
+                // the other heard lines left silent in the dub and nothing on
+                // screen saying so.
+                alsoFailed += 1
+                console.error("[tts] sibling attach failed", also.cellId, e)
+              }
+            }
+            // AQU-646 stage 3g: ONE PRESS, MORE THAN ONE CLIP — say so.
+            //
+            // A subtitle performed by several heard lines gets voiced onto each
+            // of them (Sam, 2026-08-25, so none is left silent), but only one
+            // can be played back, so without this the rest are invisible work.
+            // Measured at ~8% of lines, which is rare enough to be worth a toast
+            // and far too common to leave unsaid.
+            //
+            // COUNTS WHAT LANDED, not what was attempted: the loop above
+            // swallows a failing sibling on purpose, and a toast claiming three
+            // when two exist would be its own small lie. `toast.add`
+            // de-duplicates by content, so pressing twice does not stack.
+            if (alsoWritten > 0) {
+              toast.add({
+                type: "success",
+                title: t("audio.tts.voicedSeveral", { count: alsoWritten + 1 }),
+                description: t("audio.tts.voicedSeveralDetail"),
+              })
+            }
+            if (alsoFailed > 0) {
+              toast.add({
+                type: "error",
+                title: t("audio.tts.siblingFailed", { count: alsoFailed }),
+                description: t("audio.tts.siblingFailedDetail"),
+              })
+            }
           } else if (provider === "omnivoice") {
             // OmniVoice has no client-side synth — there's nothing to preview
             // until the cell has durably-generated audio. Guide the user
@@ -267,6 +365,8 @@ export function CellTtsButton({
     context,
     cellLabel,
     playOnly,
+    alsoAttachTo,
+    t,
   ])
 
   // Round 5: an untranslated cell shows the button DISABLED with the reason

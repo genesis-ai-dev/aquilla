@@ -167,6 +167,73 @@ describe("file.track.set projection (stage 1: per-track overrides)", () => {
     ])
   })
 
+  // ── The junk-entry hole (2026-08-27) ───────────────────────────────────
+  //
+  // A kind-less patch for an id that does not exist used to merge an entry
+  // that nothing renders and only the GATED delete could remove. The guard is
+  // in SQL because the handler is synchronous and never loads the file's meta;
+  // a failing condition is a no-op, which is also the right answer for the
+  // race it incidentally fixes — a reorder arriving after someone else's
+  // delete no longer resurrects the track as junk.
+  it("requires the track to exist for a patch that cannot create one", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent(
+        "file.track.set",
+        { trackId: "trk-es", patch: { order: 2 } },
+        { cellId: null },
+      ),
+      [],
+    )
+    expect(recorded[0].sql).toContain("jsonb_exists")
+    // `jsonb_exists(...)` and NOT the `?` key-exists operator, which would
+    // collide with this driver's bind placeholder.
+    expect(recorded[0].sql).not.toContain("-> 'trackOverrides' ?")
+    // The id binds a third time, for the existence term.
+    expect(recorded[0].args).toEqual([
+      "trk-es",
+      "trk-es",
+      '{"order":2}',
+      "evt-1",
+      "f1",
+      "p1",
+      "trk-es",
+    ])
+  })
+
+  it("does NOT require it when the patch carries a kind, which is what creates one", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent(
+        "file.track.set",
+        { trackId: "trk-es", patch: { kind: "audio", name: "Spanish", order: 1 } },
+        { cellId: null },
+      ),
+      [],
+    )
+    expect(recorded[0].sql).not.toContain("jsonb_exists")
+    expect(recorded[0].args).toHaveLength(6)
+  })
+
+  // A derived row's first reorder legitimately has no entry yet, and
+  // drag-to-reorder ships working with the setting off.
+  it("does NOT require it for a derived row", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent(
+        "file.track.set",
+        { trackId: "target-audio", patch: { order: 3 } },
+        { cellId: null },
+      ),
+      [],
+    )
+    expect(recorded[0].sql).not.toContain("jsonb_exists")
+    expect(recorded[0].args).toHaveLength(6)
+  })
+
   it("rides the same upsert when a single field is cleared with null", () => {
     const { db, recorded } = makeRecordingDb()
     buildEventProjectionStmts(

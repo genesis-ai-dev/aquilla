@@ -332,6 +332,9 @@ export const editor = defineNamespace({
     "editor.milestone.milestone.find": "Find a milestone",
     "editor.milestone.milestone.empty": "No milestones found.",
 
+    // AQU-1087: chapter-page completion prompt (toast + Next action).
+    "editor.chapter.completeTitle": "{label} is complete",
+
     "editor.milestone.vocab.chapterPlural": "Chapters",
     "editor.milestone.vocab.slidePlural": "Slides",
     "editor.milestone.vocab.storyPlural": "Stories",
@@ -2044,6 +2047,18 @@ export const editor = defineNamespace({
       },
       "editor.milestone.chapter.next": {
         description: MILESTONE_NEXT + MILESTONE_KIND_CHAPTER,
+      },
+      "editor.chapter.completeTitle": {
+        description:
+          "Success toast when the open chapter page becomes complete " +
+          "(rising edge of the project's completion trigger) and there is a " +
+          "next chapter. Not shown when landing on a chapter that is already " +
+          "done. The action button on the same toast is " +
+          "editor.milestone.chapter.next. {label} is the finished chapter's " +
+          "display name.",
+        placeholders: {
+          label: MILESTONE_LABEL_PLACEHOLDER,
+        },
       },
       "editor.milestone.chapter.current": {
         description: MILESTONE_CURRENT + MILESTONE_KIND_CHAPTER,

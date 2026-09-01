@@ -17,14 +17,26 @@ export const audio = defineNamespace({
     "audio.newVoice.engineLabel": "Engine",
     "audio.newVoice.describeLabel": "Describe the voice",
     "audio.newVoice.describePlaceholder": "e.g. a warm older man, calm and clear",
-    "audio.newVoice.kokoroLabel": "Kokoro voice id",
+    "audio.newVoice.kokoroLabel": "Voice",
     "audio.newVoice.kokoroPlaceholder": "e.g. af_bella",
+    "audio.newVoice.kokoroGroupAmerican": "American English",
+    "audio.newVoice.kokoroGroupBritish": "British English",
+    "audio.newVoice.kokoroGenderFemale": "Female",
+    "audio.newVoice.kokoroGenderMale": "Male",
+    "audio.newVoice.kokoroEnglishOnlyHint":
+      "On-device Kokoro speaks English. Pick an American or British voice, or switch this line to OmniVoice, Gemini, or MMS.",
+    "audio.newVoice.kokoroPlaySample": "Play {name} sample",
+    "audio.newVoice.kokoroStopSample": "Stop {name} sample",
     "audio.newVoice.mmsLanguageLabel": "Language",
     "audio.newVoice.singleVoiceHint":
       "{engine} uses a single neural voice. Use the Clone tab to make it sound like a specific person.",
     "audio.newVoice.referenceLabel": "Reference audio",
+    "audio.newVoice.tabFromLine": "From a line",
+    "audio.newVoice.referenceSourceGroupLabel": "Reference clip source",
     "audio.newVoice.referenceDescription":
-      "A short clip is enough — we generate a base voice and clone it to match.",
+      "A short clip is enough (5–15s of one clear speaker) — we generate a base voice and clone it to match.",
+    "audio.newVoice.fromLineEmpty":
+      "No line audio yet. Record or generate a take first, or use Reference audio.",
     "audio.newVoice.reuseTakeSummary": "Or reuse audio from a line",
     "audio.newVoice.takeRecorded": "Recorded",
     "audio.newVoice.takeGenerated": "AI-generated",
@@ -232,6 +244,11 @@ export const audio = defineNamespace({
     "audio.clone.stopRecordingButton": "Stop ({seconds}s)",
     "audio.clone.recordButton": "Record reference",
     "audio.clone.uploadButton": "Upload audio",
+    "audio.clone.dropzoneTitle": "Add a reference clip",
+    "audio.clone.dropzoneHint":
+      "A short clip is enough (5–15s of one clear speaker) — we generate a base voice and clone it to match.",
+    "audio.clone.dropzoneDrop": "Drop to use as the reference",
+    "audio.clone.errorNotAudio": "That file isn't audio. Use a short recording.",
     "audio.clone.errorNoContext": "No project context for upload.",
     "audio.clone.errorTooLarge": "Reference clip too large (max 8 MB). Use a few seconds.",
     "audio.clone.previewTooltip": "Preview reference clip",
@@ -316,6 +333,11 @@ export const audio = defineNamespace({
     "audio.aiError.modelNotAvailableTitle": "Model not available",
     "audio.aiError.tooLargeTitle": "Too much text for this model",
     "audio.aiError.geminiKeyRequiredTitle": "Gemini API key required",
+    "audio.aiError.geminiFailedTitle": "Gemini TTS failed",
+    "audio.aiError.omnivoiceNotConfiguredTitle": "OmniVoice isn't configured",
+    "audio.aiError.omnivoiceFailedTitle": "OmniVoice TTS failed",
+    "audio.aiError.seedVcNotConfiguredTitle": "Voice cloning isn't configured",
+    "audio.aiError.seedVcFailedTitle": "Voice cloning failed",
     "audio.aiError.signInRequiredTitle": "Sign in required",
     "audio.aiError.gitProjectUnsupportedTitle": "Not yet supported on git projects",
     "audio.aiError.nothingToReadTitle": "Nothing to read aloud",
@@ -399,15 +421,19 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.engineLabel": {
         description:
-          "Form label above the row of TTS engine choice cards (e.g. OmniVoice, " +
-          "Gemini, Kokoro, MMS) — 'engine' means which speech-synthesis backend " +
-          "generates this voice's audio.",
+          "Form label above the row of TTS engine choice cards. On the TTS tab " +
+          "this is all four engines (OmniVoice, Gemini, Kokoro, MMS). On the Clone " +
+          "tab it is only the cloud engines that can clone a reference clip " +
+          "(OmniVoice, Gemini) — on-device engines are omitted, not shown disabled. " +
+          "'Engine' means which speech-synthesis backend generates this voice's audio.",
       },
       "audio.newVoice.describeLabel": {
         description:
-          "Label for a free-text field, shown only when the Gemini engine is " +
-          "selected, where the user describes in plain words how the voice should " +
-          "sound (e.g. tone, age, mood). Gemini turns this description into a voice.",
+          "Label for a free-text field, shown when the Gemini engine is selected " +
+          "(TTS tab or Clone tab). The user describes in plain words how the voice " +
+          "should sound (tone, age, mood). On a clone this describes the base take " +
+          "that is then re-voiced to match the reference clip — it is not the cloned " +
+          "identity.",
       },
       "audio.newVoice.describePlaceholder": {
         description:
@@ -416,15 +442,53 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.kokoroLabel": {
         description:
-          "Label for a text field, shown only when the Kokoro engine is selected, " +
-          "where the user enters Kokoro's own voice identifier code. 'Kokoro' is the " +
-          "engine's proper name — do not translate it.",
+          "Label for the voice-picker dropdown shown only when the Kokoro engine is " +
+          "selected. Lists Kokoro's built-in American and British speakers. 'Kokoro' " +
+          "is the engine's proper name — do not translate it if it appears nearby.",
       },
       "audio.newVoice.kokoroPlaceholder": {
         description:
           "Placeholder example inside the empty Kokoro voice-id field, showing the " +
           "format of a real id. The example code itself ('af_bella') is data, not " +
           "prose — keep it as-is; only 'e.g.' needs translating.",
+      },
+      "audio.newVoice.kokoroGroupAmerican": {
+        description:
+          "Section heading inside the Kokoro voice dropdown for American English speakers.",
+      },
+      "audio.newVoice.kokoroGroupBritish": {
+        description:
+          "Section heading inside the Kokoro voice dropdown for British English speakers.",
+      },
+      "audio.newVoice.kokoroGenderFemale": {
+        description:
+          "Short gender tag next to a female Kokoro speaker's name in the dropdown.",
+      },
+      "audio.newVoice.kokoroGenderMale": {
+        description:
+          "Short gender tag next to a male Kokoro speaker's name in the dropdown.",
+      },
+      "audio.newVoice.kokoroEnglishOnlyHint": {
+        description:
+          "Helper under the Kokoro voice dropdown when the project's target language " +
+          "is not English. Tells the user Kokoro only speaks English and names the " +
+          "other engines that can speak other languages. 'Kokoro', 'OmniVoice', " +
+          "'Gemini', and 'MMS' are engine names — do not translate them.",
+      },
+      "audio.newVoice.kokoroPlaySample": {
+        description:
+          "Accessible name of the play button that previews a Kokoro speaker. " +
+          "{name} is the speaker's given name (Heart, Bella, George).",
+        placeholders: {
+          name: "The Kokoro speaker's given name, e.g. Heart or Bella.",
+        },
+      },
+      "audio.newVoice.kokoroStopSample": {
+        description:
+          "Accessible name of the same button while that speaker's sample is playing.",
+        placeholders: {
+          name: "The Kokoro speaker's given name, e.g. Heart or Bella.",
+        },
       },
       "audio.newVoice.mmsLanguageLabel": {
         description:
@@ -447,41 +511,58 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.referenceLabel": {
         description:
-          "Form label above the reference-clip recorder/uploader shown on the Clone " +
-          "tab. 'Reference audio' is the short clip the cloned voice will be made to " +
-          "sound like.",
+          "Tab label (and formerly the field label) for recording or uploading a " +
+          "fresh reference clip on the Clone tab. Paired with audio.newVoice.tabFromLine. " +
+          "'Reference audio' is the short clip the cloned voice will be made to sound like.",
+        maxLength: 22,
+      },
+      "audio.newVoice.tabFromLine": {
+        description:
+          "Tab label on the Clone tab for picking an existing take from a project " +
+          "line as the clone reference, instead of recording or uploading a new clip. " +
+          "Paired with audio.newVoice.referenceLabel.",
+        maxLength: 18,
+      },
+      "audio.newVoice.referenceSourceGroupLabel": {
+        description:
+          "Accessible group label (not visible text) for the Reference audio / From a " +
+          "line tab pair, read by screen readers to announce what the two tabs are " +
+          "choosing between.",
       },
       "audio.newVoice.referenceDescription": {
         description:
-          "One-line helper text under the reference-clip control on the Clone tab, " +
-          "explaining that a short clip is sufficient.",
+          "Same wording as audio.clone.dropzoneHint. Kept so existing translations " +
+          "do not go missing; the live UI reads dropzoneHint inside the dashed zone.",
+      },
+      "audio.newVoice.fromLineEmpty": {
+        description:
+          "Empty-state copy on the From a line tab when this file has no recorded or " +
+          "generated takes to reuse as a clone reference.",
       },
       "audio.newVoice.reuseTakeSummary": {
         description:
-          "Collapsed `<summary>` label for a disclosure panel on the Clone tab that, " +
-          "when opened, lists audio already recorded or generated elsewhere in the " +
-          "project so the user can reuse one as the clone reference instead of " +
-          "recording fresh.",
+          "Unused in the current UI (the Clone tab now uses audio.newVoice.tabFromLine). " +
+          "Kept so existing translations do not go missing. Was the collapsed summary " +
+          "label for reusing a line's audio as the clone reference.",
       },
       "audio.newVoice.takeRecorded": {
         description:
-          "Small badge on a listed take (inside the 'reuse audio from a line' " +
-          "panel) meaning this particular clip was captured by a human with a " +
-          "microphone, as opposed to generated by TTS. Paired with " +
-          "audio.newVoice.takeGenerated.",
+          "Unused in the current UI (From a line now uses a checkmark for the " +
+          "chosen take, not a Recorded badge). Kept so existing translations do " +
+          "not go missing.",
         maxLength: 16,
       },
       "audio.newVoice.takeGenerated": {
         description:
-          "Small badge on a listed take meaning this particular clip was produced " +
-          "by AI text-to-speech generation rather than recorded by a human.",
+          "Accessible name and tooltip for a sparkle icon on a listed take meaning " +
+          "this clip was produced by AI text-to-speech rather than recorded.",
         maxLength: 16,
       },
       "audio.newVoice.liftingTake": {
         description:
-          "Transient status text shown while a reused take (see " +
-          "audio.newVoice.reuseTakeSummary) is being copied over to become this " +
-          "voice's clone reference. 'Lifting' = copying that clip into place.",
+          "Accessible name on the in-row spinner shown while a reused take " +
+          "(From a line tab) is being copied into this voice's clone reference. " +
+          "Replaces the checkmark until the copy finishes.",
       },
       "audio.newVoice.errorNoProjectContext": {
         description:
@@ -1278,6 +1359,27 @@ export const audio = defineNamespace({
           "reference clip, shown when no clip is attached yet.",
         maxLength: 20,
       },
+      "audio.clone.dropzoneTitle": {
+        description:
+          "Heading inside the empty dashed dropzone on the Clone tab's Reference " +
+          "audio panel, inviting the user to attach a clip.",
+      },
+      "audio.clone.dropzoneHint": {
+        description:
+          "Subtitle under audio.clone.dropzoneTitle. Tells the user a 5–15 second " +
+          "clip of one speaker is enough, and that we generate a base voice then " +
+          "clone it to match. Record, upload, and drag-and-drop are the zone itself.",
+      },
+      "audio.clone.dropzoneDrop": {
+        description:
+          "Temporary subtitle shown while an audio file is dragged over the " +
+          "reference dropzone, replacing audio.clone.dropzoneHint.",
+      },
+      "audio.clone.errorNotAudio": {
+        description:
+          "Inline error when a dropped or picked file is not audio (e.g. an image " +
+          "or document), telling the user to use a short recording instead.",
+      },
       "audio.clone.errorNoContext": {
         description:
           "Inline error shown if an upload is attempted with no project/file to " +
@@ -1501,6 +1603,33 @@ export const audio = defineNamespace({
         description:
           "Popover heading when a Gemini-voice TTS request fails because no Gemini " +
           "API key is configured for the project.",
+      },
+      "audio.aiError.geminiFailedTitle": {
+        description:
+          "Popover heading when Gemini TTS ran (a key was present) but the request " +
+          "failed or returned no audio. Distinct from geminiKeyRequiredTitle — the " +
+          "engine is named so it is not confused with an OmniVoice failure.",
+      },
+      "audio.aiError.omnivoiceNotConfiguredTitle": {
+        description:
+          "Popover heading when hosted OmniVoice TTS is not wired on this server " +
+          "(typical for local pnpm dev: missing OMNIVOICE_URL / OMNIVOICE_TOKEN). " +
+          "Must not be read as a Gemini-key problem.",
+      },
+      "audio.aiError.omnivoiceFailedTitle": {
+        description:
+          "Popover heading when OmniVoice TTS was configured but the synthesize " +
+          "call itself failed (Modal/upstream error).",
+      },
+      "audio.aiError.seedVcNotConfiguredTitle": {
+        description:
+          "Popover heading when a non-OmniVoice clone voice needs Seed-VC conversion " +
+          "and the sync-worker has no SEED_VC_URL / SEED_VC_TOKEN. Distinct from " +
+          "omnivoiceNotConfiguredTitle — OmniVoice clones skip this step.",
+      },
+      "audio.aiError.seedVcFailedTitle": {
+        description:
+          "Popover heading when Seed-VC voice conversion ran but failed after TTS.",
       },
       "audio.aiError.signInRequiredTitle": {
         description:

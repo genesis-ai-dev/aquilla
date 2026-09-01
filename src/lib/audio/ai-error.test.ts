@@ -71,3 +71,57 @@ describe("categorizeAiError — AI request failures (AQU-891)", () => {
     expect(result.category).toBe("daily-quota-exceeded")
   })
 })
+
+describe("categorizeAiError — names the TTS engine that failed", () => {
+  it("does not treat a local OmniVoice 503 as a missing Gemini key", () => {
+    const result = categorizeAiError("voice/tts failed (503): TTS not configured")
+    expect(result.category).toBe("omnivoice-not-configured")
+    expect(result.title).toBe("OmniVoice isn't configured")
+    expect(result.body).toMatch(/omnivoice/i)
+    expect(result.body).toMatch(/not gemini/i)
+    expect(result.body).toMatch(/will not fix/i)
+  })
+
+  it("recognizes the authored OmniVoice-not-configured body", () => {
+    const raw =
+      "This line uses OmniVoice, not Gemini. Hosted TTS isn't wired on this server — a Gemini API key will not fix it."
+    const result = categorizeAiError(raw)
+    expect(result.category).toBe("omnivoice-not-configured")
+    expect(result.title).toBe("OmniVoice isn't configured")
+  })
+
+  it("names OmniVoice on a later Modal failure", () => {
+    const result = categorizeAiError("OmniVoice TTS failed (502): upstream timeout")
+    expect(result.category).toBe("omnivoice-failed")
+    expect(result.title).toBe("OmniVoice TTS failed")
+    expect(result.body).toMatch(/not a gemini key/i)
+  })
+
+  it("names Seed-VC when clone conversion isn't wired", () => {
+    const result = categorizeAiError("voice convert failed (503): voice conversion not configured")
+    expect(result.category).toBe("seed-vc-not-configured")
+    expect(result.title).toBe("Voice cloning isn't configured")
+    expect(result.body).toMatch(/seed-vc/i)
+  })
+
+  it("names Seed-VC on a later conversion failure", () => {
+    const result = categorizeAiError("Voice cloning (Seed-VC) failed (500): gpu OOM")
+    expect(result.category).toBe("seed-vc-failed")
+    expect(result.title).toBe("Voice cloning failed")
+  })
+
+  it("keeps a missing Gemini key as Gemini, and offers OmniVoice as the alternative", () => {
+    const result = categorizeAiError(
+      "Add a Gemini API key in Project Settings before using Gemini voice generation.",
+    )
+    expect(result.category).toBe("missing-gemini-key")
+    expect(result.title).toBe("Gemini API key required")
+    expect(result.body).toMatch(/omnivoice/i)
+  })
+
+  it("names Gemini when TTS ran but returned no audio", () => {
+    const result = categorizeAiError("Gemini TTS response did not include audio data.")
+    expect(result.category).toBe("gemini-failed")
+    expect(result.title).toBe("Gemini TTS failed")
+  })
+})

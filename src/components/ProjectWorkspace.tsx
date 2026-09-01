@@ -103,6 +103,7 @@ import { EditorTable, type AudioLensContext, type BacktranslationActionSource } 
 import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
+import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
 import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
 import { videoOwnsFile } from "@/lib/audio/transport"
@@ -136,7 +137,8 @@ import {
 import { emitCastAssign, emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
-import { resolveTimingLocked } from "@/lib/sync/project-settings"
+import { resolveChapterPagingEnabled, resolveTimingLocked } from "@/lib/sync/project-settings"
+import { chapterPageProgress, filterToChapterPage } from "@/lib/chapter-navigation"
 import { buildCastAdditions, buildCastRemovals, carriesCharacterSheetData } from "@/lib/import/cast-from-speakers"
 import { ImportCharactersDialog } from "./timeline/ImportCharactersDialog"
 import { CharacterCheckDrawer, type ResolveChoice } from "./timeline/CharacterCheckDrawer"
@@ -372,6 +374,7 @@ const PROJECT_MEMORY_PATH_RE = /^\/project\/[^/]+\/memory(\/[^/]+)?$/
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _lastImportWrite: Promise<any> = Promise.resolve(undefined)
 const EMPTY_CELL_DATA: CellData[] = []
+const EMPTY_PAGE_CELL_IDS: readonly string[] = []
 
 function projectRecordsEquivalent(a: ProjectRecord | null, b: ProjectRecord | null): boolean {
   if (a === b) return true
@@ -839,6 +842,7 @@ export function ProjectWorkspace() {
   const [translateAsReadEnabled, setTranslateAsReadEnabled] = useTranslateAsReadPreference(projectId)
   const [translateAsReadActiveCellId, setTranslateAsReadActiveCellId] = useState<string | null>(null)
   const [visibleCellIds, setVisibleCellIds] = useState<string[]>([])
+  const [pageCellIds, setPageCellIds] = useState<string[] | null>(null)
   const translateAsReadEnabledRef = useRef(false)
   translateAsReadEnabledRef.current = translateAsReadEnabled
   const translateAsReadAttemptsRef = useRef(new Map<string, string>())
@@ -849,6 +853,16 @@ export function ProjectWorkspace() {
         ? current
         : next
     ))
+  }, [])
+  const handlePageCellIdsChange = useCallback((next: string[] | null) => {
+    setPageCellIds((current) => {
+      if (current === next) return current
+      if (current == null || next == null) return next
+      if (current.length === next.length && current.every((id, index) => id === next[index])) {
+        return current
+      }
+      return next
+    })
   }, [])
   const editorReturnPath = useMemo(() => {
     if (!projectId) return null
@@ -978,9 +992,9 @@ export function ProjectWorkspace() {
   /** A line that has just been created and is waiting for its row to exist so
    *  the timeline and the table can both land on it. */
   const [pendingNewCell, setPendingNewCell] = useState<{ cellId: string; thenRecord: boolean } | null>(null)
-  // "Make a character from this voice" dialog (Cast studio). Owned here so the
-  // per-cell control in the editor's source column can open it seeded to a
-  // specific line's take, and the rail's button can open it for a manual pick.
+  // "Clone voice from this take" dialog. Owned here (not inside the Voices
+  // dock tab) so the per-cell control can open NewVoiceModal in place even
+  // when the left dock is on Files or collapsed.
   const [makeCharacterOpen, setMakeCharacterOpen] = useState(false)
   const [makeCharacterSeedCellId, setMakeCharacterSeedCellId] = useState<string | null>(null)
   // FRO-192: Assign… modal
@@ -995,10 +1009,11 @@ export function ProjectWorkspace() {
   // After "Voice together" synthesizes one combined clip, hold its result so
   // the manual boundary editor can open for the user to mark per-line slices.
   const [combinedEditor, setCombinedEditor] = useState<CombinedVoiceResult | null>(null)
-  // Text vs Audio lens — the same editor over the same cells. Audio mode swaps
-  // the left rail's body for the Cast studio (VoiceSidebar: cast roster + the
-  // "make a character" dialog) and replaces each cell's SOURCE column with that
-  // line's voice controls (CellVoicePanel); all other audio chrome lives there.
+  // Text vs Audio lens — the same editor over the same cells. Audio mode
+  // surfaces the Cast studio in the Voices dock tab (VoiceSidebar) and
+  // replaces each cell's SOURCE column with that line's voice controls
+  // (CellVoicePanel). Cloning from a cell opens NewVoiceModal at the
+  // workspace root, not inside the dock.
   const [lens, setLens] = useEditorLensPreference(projectId ?? "")
   // ISSUE-3 fix: /project/:id/voice deep-link activates audio lens on mount,
   // and surfaces the Voices dock tab (where the voice controls now live).
@@ -1261,6 +1276,15 @@ export function ProjectWorkspace() {
   }, [activeFileId, cellStore, cellStoreVersion, localFileProgress, project?.id])
   const getActiveCells = useCallback(() => cellStore.getAllCellViews(), [cellStore])
   const getActiveCell = useCallback((cellId: string) => cellStore.getCellView(cellId), [cellStore])
+  const pagingOn = resolveChapterPagingEnabled(project)
+  const workPageCellIds = pagingOn ? (pageCellIds ?? EMPTY_PAGE_CELL_IDS) : null
+  const getPageCells = useCallback(
+    () => filterToChapterPage(getActiveCells(), workPageCellIds),
+    [getActiveCells, workPageCellIds],
+  )
+  useEffect(() => {
+    setPageCellIds(null)
+  }, [activeFileId])
   // Fortify pass: raw store cells carry NO audio attachments — any handler
   // that reads `cell.attachments` must merge them in first. The per-file map
   // rides a ref so early-declared callbacks can reach it without stale-closure
@@ -4028,7 +4052,7 @@ export function ProjectWorkspace() {
     // language for few-shot/completion; default lane falls back to the file's
     // (then project's) targetLanguage exactly as before. Shares the same
     // lane-aware derivation as the editor project + file metadata.
-    project?.completionSettings, project?.sourceLanguage || "", activeLaneTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
+    project?.completionSettings, project?.sourceLanguage || "", activeLaneTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getPageCells, project?.translationBrief?.l1Summary ?? undefined,
     project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
   )
 
@@ -4829,8 +4853,7 @@ export function ProjectWorkspace() {
   }, [activeFileId, cellStore, cellStoreVersion])
 
   // Phase 0.5: run the deterministic check over the open file's cells.
-  // Scope = the open file (the editor's working unit; chapters only exist as
-  // sidebar section labels). Pure + chunked — no network, no LLM.
+  // Scope = the open file, or the open chapter page when paging is on.
   const runCheck = useCallback(async () => {
     if (!activeFileId || checkRunning) return
     // One aside panel at a time (matches the existing drawer pattern).
@@ -4842,7 +4865,7 @@ export function ProjectWorkspace() {
     try {
       const result = await runDeterministicCheck({
         fileId: activeFileId,
-        cells: readAtVersion(cellStoreVersion, getActiveCells),
+        cells: readAtVersion(cellStoreVersion, getPageCells),
         rules,
         concepts: project?.terminology ?? [],
       })
@@ -4853,7 +4876,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, cellStoreVersion, getActiveCells, rules, project?.terminology])
+  }, [activeFileId, checkRunning, cellStoreVersion, getPageCells, rules, project?.terminology])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {
@@ -5022,8 +5045,11 @@ export function ProjectWorkspace() {
     }
 
     // Keep rendering bounded around the focused cell for very large files.
-    const allCells = readAtVersion(cellStoreVersion, getActiveCells).filter(
-      (cell) => cell.fileId === activeFileId,
+    const allCells = filterToChapterPage(
+      readAtVersion(cellStoreVersion, getActiveCells).filter(
+        (cell) => cell.fileId === activeFileId,
+      ),
+      workPageCellIds,
     )
     const healthRibbonByCellId = buildHealthRibbon(allCells.map((cell) => {
       const stage = cell.status === "validated"
@@ -5117,6 +5143,7 @@ export function ProjectWorkspace() {
     fileMeta.targetDirectionMode,
     fileMeta.targetTextDirection,
     focusedCellId,
+    workPageCellIds,
     getActiveCells,
     infractions,
     myScopes,
@@ -6038,13 +6065,11 @@ export function ProjectWorkspace() {
     translateAsReadAttemptsRef.current.clear()
   }, [activeFileId, activeLane])
 
-  const translateAsReadViewportCellIds = useMemo(() => (
-    visibleCellIds.length > 0
-      ? visibleCellIds
-      : agentOpen && focusedCellId
-        ? [focusedCellId]
-        : []
-  ), [agentOpen, focusedCellId, visibleCellIds])
+  const translateAsReadViewportCellIds = useMemo(() => {
+    if (workPageCellIds && workPageCellIds.length > 0) return workPageCellIds
+    if (visibleCellIds.length > 0) return visibleCellIds
+    return agentOpen && focusedCellId ? [focusedCellId] : []
+  }, [agentOpen, focusedCellId, visibleCellIds, workPageCellIds])
   const translateAsReadViewportStateKey = useMemo(() => (
     readAtVersion(cellStoreVersion, () => translateAsReadViewportCellIds
       .map((cellId) => {
@@ -6874,13 +6899,22 @@ export function ProjectWorkspace() {
     return () => { cancelled = true }
   }, [project, cellSummaries.length, cellStoreVersion, frontierSession, getActiveCells])
 
-  const actionCtx = useMemo(() => ({
-    project: project!,
-    activeFileId,
-    fileProgress,
-    canExportByOrgPolicy,
-    audioCounts,
-  }), [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts])
+  const actionCtx = useMemo(() => {
+    const progress = (() => {
+      if (!workPageCellIds || !activeFileId) return fileProgress
+      const pageCells = readAtVersion(cellStoreVersion, getPageCells)
+      const next = new Map(fileProgress)
+      next.set(activeFileId, chapterPageProgress(pageCells))
+      return next
+    })()
+    return {
+      project: project!,
+      activeFileId,
+      fileProgress: progress,
+      canExportByOrgPolicy,
+      audioCounts,
+    }
+  }, [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts, cellStoreVersion, getPageCells, workPageCellIds])
 
   const openImportFlow = useCallback(() => {
     if (!project) return
@@ -6902,7 +6936,7 @@ export function ProjectWorkspace() {
     openImport: openImportFlow,
     runCompletions: () => {
       if (!activeFileId || !project) return
-      const cells = getActiveCells()
+      const cells = getPageCells()
       const untranslated = cells.filter((c) => !c.translated.trim())
       if (untranslated.length === 0) return
       // AQU-586: honor the project's configured completion batch size (default 10).
@@ -6910,7 +6944,7 @@ export function ProjectWorkspace() {
     },
     runCompleteAll: () => {
       if (!activeFileId) return
-      const cells = getActiveCells()
+      const cells = getPageCells()
       const untranslated = cells.filter((c) => !c.translated.trim())
       if (untranslated.length === 0) return
       // No slice — draft every untranslated cell; useCompletion chunks internally.
@@ -6925,8 +6959,11 @@ export function ProjectWorkspace() {
     runBatchValidate: () => {
       if (!project?.id || !activeFileId) return
       if (!canPerform("cell.validate", project.syncRole?.level ?? null)) return
-      const eligible = cellSummaries.filter(
-        (c) => c.fileId === activeFileId && isBulkValidationEligible(c),
+      const eligible = filterToChapterPage(
+        cellSummaries.filter(
+          (c) => c.fileId === activeFileId && isBulkValidationEligible(c),
+        ),
+        workPageCellIds,
       )
       // AQU-586: cap how many eligible cells one batch-validate processes.
       // 0/undefined = validate all eligible (unchanged default behavior).
@@ -7019,7 +7056,7 @@ export function ProjectWorkspace() {
       })
     },
     navigate,
-  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId])
+  }), [activeFileId, completeBatch, getActiveCells, getPageCells, workPageCellIds, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId])
 
   // AQU-661: the dynamic primary-action button was removed; its actions now live
   // in the ⋯ overflow menu. This preserves the button's confirmation flow —
@@ -7337,6 +7374,7 @@ export function ProjectWorkspace() {
     dockTab === "voices" ||
     timelineEditorVisible ||
     lens === "audio" ||
+    makeCharacterOpen ||
     drawerRuleId !== null ||
     recordingCellId !== null ||
     exportOpen ||
@@ -8780,7 +8818,7 @@ export function ProjectWorkspace() {
               project ? (
                 <div className="flex h-full min-h-0 flex-col overflow-hidden p-2">
                   <VoiceSidebar
-                    cells={legacyCells}
+                    cells={audioMergedCells}
                     project={audioProject ?? project}
                     projectId={project.id}
                     tts={tts}
@@ -8788,12 +8826,6 @@ export function ProjectWorkspace() {
                     username={currentUsername}
                     targetLanguage={project.targetLanguage}
                     fileId={activeFileId}
-                    cloneOpen={makeCharacterOpen}
-                    onCloneOpenChange={(open) => {
-                      setMakeCharacterOpen(open)
-                      if (!open) setMakeCharacterSeedCellId(null)
-                    }}
-                    cloneSeedCellId={makeCharacterSeedCellId}
                   />
                 </div>
               ) : undefined
@@ -9298,6 +9330,7 @@ export function ProjectWorkspace() {
                 activeLane={activeLane}
                 onSetupNeeded={handleAiSetupNeeded}
                 anchorCellId={focusedCellId}
+                cellIds={pagingOn ? (pageCellIds ?? []) : undefined}
                 canControl={currentRoleLevel >= ROLE.CONTRIBUTOR}
               />
             )}
@@ -9586,6 +9619,7 @@ export function ProjectWorkspace() {
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
             onVisibleCellIdsChange={handleVisibleCellIdsChange}
+            onPageCellIdsChange={handlePageCellIdsChange}
             // Stacked mode already shows the toolbar in the media header row
             // above the timeline — don't render it twice. Chapter picker +
             // file options live in the in-editor row above Source/Target.
@@ -10146,6 +10180,23 @@ export function ProjectWorkspace() {
         onAfterReplace={rebuildSearchIndex}
         onReplaceAll={handleReplaceAll}
       />
+      {project && (
+        <CloneVoiceModalHost
+          open={makeCharacterOpen}
+          onClose={() => {
+            setMakeCharacterOpen(false)
+            setMakeCharacterSeedCellId(null)
+          }}
+          seedCellId={makeCharacterSeedCellId}
+          tts={tts}
+          projectId={project.id}
+          fileId={activeFileId}
+          session={frontierSession ?? null}
+          targetLanguage={project.targetLanguage}
+          cells={audioMergedCells}
+          roleLevel={project.syncRole?.level ?? null}
+        />
+      )}
       <SharePanel
         open={shareOpen} onOpenChange={setShareOpen}
         projectId={projectId!}

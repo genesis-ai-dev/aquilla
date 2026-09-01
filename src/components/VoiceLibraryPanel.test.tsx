@@ -213,3 +213,29 @@ describe("VoiceLibraryPanel — AQU-365 role gating", () => {
     expect(button.disabled).toBe(false)
   })
 })
+
+describe("VoiceLibraryPanel — settings sync (AQU-1001)", () => {
+  it("shows a voice that lands on settings after the initial seed", () => {
+    const onSettingsChange = vi.fn()
+    const narrator = makeVoice()
+    const settings: ProjectTtsSettings = { provider: "gemini", voices: [narrator], defaultVoiceId: narrator.id }
+    const { rerender } = render(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        settings={settings}
+        onSettingsChange={onSettingsChange}
+      />,
+    )
+    expect(screen.queryByText("Keean")).toBeNull()
+
+    const cloned: Voice = { id: "v-clone", name: "Keean", color: "#0d9488", referenceAudioId: "ref.webm" }
+    rerender(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        settings={{ ...settings, voices: [narrator, cloned] }}
+        onSettingsChange={onSettingsChange}
+      />,
+    )
+    expect(screen.getByText("Keean")).toBeTruthy()
+  })
+})

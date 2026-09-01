@@ -36,9 +36,6 @@ vi.mock("@/hooks/useProjectSettings", () => ({
       // LaneSwitcher never renders (regression found by the add-target-language
       // e2e journey — overlaySettings silently dropped the key).
       targetLanes: ["es", "swh"],
-      chapterPagingEnabled: true,
-      chapterCompletionTrigger: "allValidated",
-      chapterCompletionAction: "autoAdvance",
     },
     version: 3,
   }),
@@ -107,32 +104,5 @@ describe("useProject — algorithmicChecks settings overlay", () => {
     const { result } = renderHook(() => useProject("p-1"))
     await waitFor(() => expect(result.current.status).toBe("ready"))
     expect(result.current.project?.targetLanes).toEqual(["es", "swh"])
-  })
-
-  it("overlays synced chapter-paging settings so the editor can page (AQU-1087)", async () => {
-    global.fetch = vi.fn<typeof fetch>(async (input) => {
-      const url = typeof input === "string" ? input : (input as Request).url
-      if (url === `${API}/api/v2/projects/p-1`) {
-        return new Response(
-          JSON.stringify({
-            id: "p-1",
-            name: "Alpha",
-            gitlabProjectId: null,
-            archivedAt: null,
-            archivedBy: null,
-            role: { level: 700, name: "owner", source: "creator" },
-            files: [],
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        )
-      }
-      throw new Error(`unexpected fetch: ${url}`)
-    }) as unknown as typeof fetch
-
-    const { result } = renderHook(() => useProject("p-1"))
-    await waitFor(() => expect(result.current.status).toBe("ready"))
-    expect(result.current.project?.chapterPagingEnabled).toBe(true)
-    expect(result.current.project?.chapterCompletionTrigger).toBe("allValidated")
-    expect(result.current.project?.chapterCompletionAction).toBe("autoAdvance")
   })
 })

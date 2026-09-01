@@ -408,7 +408,7 @@ describe("start", () => {
     await attachContextualRun("p1", "file-1")
     const ok = await startContextualRun("p1", "file-1")
     expect(ok).toBe(true)
-    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "", undefined)
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "")
     expect(getContextualRunState()).toMatchObject({ runId: RUN_A, status: "running" })
   })
 
@@ -417,7 +417,7 @@ describe("start", () => {
     setContextualTransport(transport)
     await attachContextualRun("p1", "file-1", "fr")
     await startContextualRun("p1", "file-1")
-    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "fr", undefined)
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "fr")
   })
 
   it("forwards the anchor cell so the first wave starts where the user is looking", async () => {
@@ -425,14 +425,6 @@ describe("start", () => {
     setContextualTransport(transport)
     await attachContextualRun("p1", "file-1")
     await startContextualRun("p1", "file-1", "cell-42")
-    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", "cell-42", "", undefined)
-  })
-
-  it("forwards chapter-page cell ids so Autopilot stays in the visible context", async () => {
-    const transport = makeTransport()
-    setContextualTransport(transport)
-    await attachContextualRun("p1", "file-1")
-    await startContextualRun("p1", "file-1", "cell-42", undefined, ["c3", "c4"])
-    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", "cell-42", "", ["c3", "c4"])
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", "cell-42", "")
   })
 })

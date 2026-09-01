@@ -421,6 +421,13 @@ export interface ProjectRecord {
    *  turned on in project settings — see ProjectWideSettings.allowLineCreation.
    *  Deleting an empty added line is not gated on it. */
   allowLineCreation?: boolean
+  /** AQU-646 stage 2: may this project's timelines be restructured — tracks
+   *  added, deleted, foldered, recoloured? Off unless turned on; a SECOND gate
+   *  on top of the maintainer floor, so with it off the write is refused even
+   *  to an owner. Rename and drag-to-reorder are NOT gated on it. See
+   *  ProjectWideSettings.allowTrackEditing for why it diverges from its
+   *  sibling above on stranding. */
+  allowTrackEditing?: boolean
   /**
    * AQU-701: set when the user explicitly skips the voice & transcription setup
    * step ("we don't use voice or transcription"). Marks that step complete in
@@ -575,29 +582,7 @@ export interface ProjectRecord {
    *  front matter (per-project opt-out). Synced via ProjectWideSettings; absent/
    *  false imports front matter as translatable cells. */
   importExcludeFrontMatter?: boolean
-  /**
-   * AQU-1087: chapter-paged editor. Absent/false = current full-book scroll.
-   * When true, the editor shows one chapter at a time. Overlaid from
-   * ProjectWideSettings by useProject's overlaySettings.
-   */
-  chapterPagingEnabled?: boolean
-  /**
-   * AQU-1087: what counts as "this chapter is done" when paging is on.
-   * Absent → allTranslated. Ignored when chapterPagingEnabled is off.
-   */
-  chapterCompletionTrigger?: ChapterCompletionTrigger
-  /**
-   * AQU-1087: what the editor does when the completion trigger fires.
-   * Absent → prompt. Ignored when paging is off or the trigger is manual.
-   */
-  chapterCompletionAction?: ChapterCompletionAction
 }
-
-/** AQU-1087: how a chapter-paged editor decides the current chapter is done. */
-export type ChapterCompletionTrigger = "allTranslated" | "allValidated" | "manual"
-
-/** AQU-1087: what the editor does when the chapter-completion trigger fires. */
-export type ChapterCompletionAction = "prompt" | "autoAdvance" | "stay"
 
 /** A single authored guidance entry in the Living Memory page. */
 export interface LivingMemoryEntry {

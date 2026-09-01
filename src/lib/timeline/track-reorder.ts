@@ -99,10 +99,34 @@ export function orderForDrop(
 
   const moved = tracks[fromIndex]
   const rest = tracks.filter((_, index) => index !== fromIndex)
-  if (rest.length === 0) return null
+  const placed = orderForInsert(rest, toIndex)
+  if (!placed) return null
+  return { trackId: moved.id, ...placed }
+}
 
-  const before = toIndex > 0 ? rest[toIndex - 1] : undefined
-  const after = toIndex < rest.length ? rest[toIndex] : undefined
+/**
+ * The `order` for a track being INSERTED at `index` in a list it is not part
+ * of — the same midpoint arithmetic, without a row to lift out first.
+ *
+ * Split out of `orderForDrop` for AQU-646 stage 2b, where a drag can now cross
+ * into a folder: the dragged track is not among that folder's members, so there
+ * is no `fromIndex` to remove and the "read the neighbours from the list
+ * without the dragged row" step has already happened by construction.
+ *
+ * `orderForDrop` is this function plus that removal, which is what keeps one
+ * implementation of the arithmetic rather than two that drift.
+ */
+export function orderForInsert(
+  rest: readonly TimelineTrack[],
+  index: number,
+): { order: number; needsRenormalise: boolean } | null {
+  if (index < 0) return null
+  // An empty scope starts at zero, like any other list. (A folder that holds
+  // nothing yet is a normal thing to drag the first track into.)
+  if (rest.length === 0) return { order: 0, needsRenormalise: false }
+
+  const before = index > 0 ? rest[index - 1] : undefined
+  const after = index < rest.length ? rest[index] : undefined
 
   let order: number
   if (!before && after) order = after.order - 1
@@ -112,7 +136,7 @@ export function orderForDrop(
 
   const needsRenormalise =
     !Number.isFinite(order) || order === before?.order || order === after?.order
-  return { trackId: moved.id, order, needsRenormalise }
+  return { order, needsRenormalise }
 }
 
 /**

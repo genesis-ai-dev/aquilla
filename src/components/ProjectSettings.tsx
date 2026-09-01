@@ -72,8 +72,6 @@ import type {
   CompletionProvider,
   CompletionSettings,
   ContextSize,
-  ChapterCompletionAction,
-  ChapterCompletionTrigger,
   DecaySettings,
   ProjectRecord,
 } from "@/lib/parsers/types"
@@ -82,14 +80,8 @@ import {
   projectHasScriptureFiles,
   resolveBibleResourcesEnabled,
 } from "@/lib/parsers/types"
-import {
-  resolveChapterCompletionAction,
-  resolveChapterCompletionTrigger,
-  resolveChapterPagingEnabled,
-  resolveTimingLocked,
-} from "@/lib/sync/project-settings"
+import { resolveTimingLocked } from "@/lib/sync/project-settings"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
-import { ChapterPagingSection } from "./ProjectSettings/ChapterPagingSection"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
@@ -238,6 +230,8 @@ interface Baseline {
   allowSelfValidation: boolean
   /** AQU-646: may people add lines into the timeline's silences? */
   allowLineCreation: boolean
+  /** AQU-646 stage 2: may this project's timelines be restructured? */
+  allowTrackEditing: boolean
   timingLocked: boolean
   harmonize_min_role: "project_lead" | "maintainer"
   /** AQU-460: EXPLICIT persisted value only. `undefined` = no explicit choice
@@ -251,10 +245,6 @@ interface Baseline {
   /** AQU-634: when true, USFM imports exclude book-name/title/TOC + intro-block
    *  front matter. Absent/false imports front matter (the default). */
   importExcludeFrontMatter: boolean
-  /** AQU-1087: chapter-paged editor + completion trigger/action. */
-  chapterPagingEnabled: boolean
-  chapterCompletionTrigger: ChapterCompletionTrigger
-  chapterCompletionAction: ChapterCompletionAction
 }
 
 function buildBaseline(project: ProjectRecord): Baseline {
@@ -290,6 +280,10 @@ function buildBaseline(project: ProjectRecord): Baseline {
     // Off unless a project has said otherwise: the affordance is speculative
     // and underdeveloped, so absent must read as off, not as unset.
     allowLineCreation: project.allowLineCreation ?? false,
+    // Off unless a project has said otherwise. Multi-track is capability for
+    // clients who want it, and a project that never turns it on should not be
+    // able to tell it was built.
+    allowTrackEditing: project.allowTrackEditing ?? false,
     // AQU-646: absent means LOCKED, so the box starts ticked on every project
     // that predates the setting. See resolveTimingLocked.
     timingLocked: resolveTimingLocked(project),
@@ -302,9 +296,6 @@ function buildBaseline(project: ProjectRecord): Baseline {
     geminiApiKey: project.ttsSettings?.apiKey ?? "",
     precedingTargetCells: project.draftContext?.precedingTargetCells ?? DEFAULT_DRAFT_CONTEXT.precedingTargetCells,
     importExcludeFrontMatter: project.importExcludeFrontMatter ?? false,
-    chapterPagingEnabled: resolveChapterPagingEnabled(project),
-    chapterCompletionTrigger: resolveChapterCompletionTrigger(project),
-    chapterCompletionAction: resolveChapterCompletionAction(project),
   }
 }
 
@@ -476,6 +467,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [validationNamedUsers, setValidationNamedUsers] = useState<string[]>([])
   const [allowSelfValidation, setAllowSelfValidation] = useState(true)
   const [allowLineCreation, setAllowLineCreation] = useState(false)
+  const [allowTrackEditing, setAllowTrackEditing] = useState(false)
   const [timingLocked, setTimingLocked] = useState(true)
   // AQU-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
   const [harmonizeMinRole, setHarmonizeMinRole] = useState<"project_lead" | "maintainer">("project_lead")
@@ -488,11 +480,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [precedingTargetCells, setPrecedingTargetCells] = useState(DEFAULT_DRAFT_CONTEXT.precedingTargetCells)
   // AQU-634: per-project USFM front-matter opt-out.
   const [importExcludeFrontMatter, setImportExcludeFrontMatter] = useState(false)
-  const [chapterPagingEnabled, setChapterPagingEnabled] = useState(false)
-  const [chapterCompletionTrigger, setChapterCompletionTrigger] =
-    useState<ChapterCompletionTrigger>("allTranslated")
-  const [chapterCompletionAction, setChapterCompletionAction] =
-    useState<ChapterCompletionAction>("prompt")
   // Pre-merge round: the Media timeline's timing mode moved OUT of Project
   // Settings — it is FILE-level now (file.timing.set), controlled from the
   // timeline toolbar with the same maintainer floor.
@@ -542,6 +529,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setValidationNamedUsers(b.validationNamedUsers)
     setAllowSelfValidation(b.allowSelfValidation)
     setAllowLineCreation(b.allowLineCreation)
+    setAllowTrackEditing(b.allowTrackEditing)
     setTimingLocked(b.timingLocked)
     setHarmonizeMinRole(b.harmonize_min_role)
     setBibleResourcesEnabled(b.bibleResourcesEnabled)
@@ -550,9 +538,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setGeminiApiKey(b.geminiApiKey)
     setPrecedingTargetCells(b.precedingTargetCells)
     setImportExcludeFrontMatter(b.importExcludeFrontMatter)
-    setChapterPagingEnabled(b.chapterPagingEnabled)
-    setChapterCompletionTrigger(b.chapterCompletionTrigger)
-    setChapterCompletionAction(b.chapterCompletionAction)
   }, [])
 
   // Seed once when the project first loads. We intentionally don't reseed on
@@ -645,6 +630,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       JSON.stringify(validationNamedUsers) !== JSON.stringify(baseline.validationNamedUsers) ||
       allowSelfValidation !== baseline.allowSelfValidation ||
       allowLineCreation !== baseline.allowLineCreation ||
+      allowTrackEditing !== baseline.allowTrackEditing ||
       timingLocked !== baseline.timingLocked ||
       harmonizeMinRole !== baseline.harmonize_min_role ||
       bibleResourcesEnabled !== baseline.bibleResourcesEnabled ||
@@ -652,10 +638,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       !decayEqual(decaySettings, baseline.decaySettings) ||
       geminiApiKey !== baseline.geminiApiKey ||
       precedingTargetCells !== baseline.precedingTargetCells ||
-      importExcludeFrontMatter !== baseline.importExcludeFrontMatter ||
-      chapterPagingEnabled !== baseline.chapterPagingEnabled ||
-      chapterCompletionTrigger !== baseline.chapterCompletionTrigger ||
-      chapterCompletionAction !== baseline.chapterCompletionAction
+      importExcludeFrontMatter !== baseline.importExcludeFrontMatter
     )
   }, [
     baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
@@ -664,10 +647,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, allowLineCreation,
+    allowTrackEditing,
     timingLocked,
     harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
     precedingTargetCells, importExcludeFrontMatter,
-    chapterPagingEnabled, chapterCompletionTrigger, chapterCompletionAction,
   ])
 
   // Warn before browser-level navigation (back button, tab close, reload).
@@ -873,22 +856,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       }
       if (allowSelfValidation !== baseline.allowSelfValidation) { sharedUpdates.allowSelfValidation = allowSelfValidation; changedFieldLabels.push("self-validation") }
       if (allowLineCreation !== baseline.allowLineCreation) { sharedUpdates.allowLineCreation = allowLineCreation; changedFieldLabels.push("adding timeline lines") }
+      if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing; changedFieldLabels.push("timeline track editing") }
       if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked; changedFieldLabels.push("the timing lock") }
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
       if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible resources") }
       if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push("USFM front matter") }
-      if (chapterPagingEnabled !== baseline.chapterPagingEnabled) {
-        sharedUpdates.chapterPagingEnabled = chapterPagingEnabled
-        changedFieldLabels.push("chapter paging")
-      }
-      if (chapterCompletionTrigger !== baseline.chapterCompletionTrigger) {
-        sharedUpdates.chapterCompletionTrigger = chapterCompletionTrigger
-        changedFieldLabels.push("chapter completion trigger")
-      }
-      if (chapterCompletionAction !== baseline.chapterCompletionAction) {
-        sharedUpdates.chapterCompletionAction = chapterCompletionAction
-        changedFieldLabels.push("chapter completion action")
-      }
       if (precedingTargetCells !== baseline.precedingTargetCells) {
         sharedUpdates.draftContext = { precedingTargetCells }
         changedFieldLabels.push("draft context")
@@ -957,6 +929,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         validationNamedUsers,
         allowSelfValidation,
         allowLineCreation,
+        allowTrackEditing,
         timingLocked,
         harmonize_min_role: harmonizeMinRole,
         bibleResourcesEnabled,
@@ -965,9 +938,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         geminiApiKey,
         precedingTargetCells,
         importExcludeFrontMatter,
-        chapterPagingEnabled,
-        chapterCompletionTrigger,
-        chapterCompletionAction,
       }
       setBaseline(newBaseline)
       // Refresh `useProject` in the background so other components see the
@@ -1002,9 +972,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
     bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
-    precedingTargetCells, importExcludeFrontMatter,
-    chapterPagingEnabled, chapterCompletionTrigger, chapterCompletionAction,
-    getJwt, isCloudProject, t,
+    precedingTargetCells, importExcludeFrontMatter, getJwt, isCloudProject, t,
   ])
 
   const handleSaveAndClose = useCallback(async () => {
@@ -1068,7 +1036,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-languages", label: "Languages", keywords: ["languages", "target lanes", "lane", "target language", "dialect"] },
     { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
     { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
-    { id: "section-editor", label: "Editor", keywords: ["editor", "chapter", "paging", "paged", "one chapter", "next chapter", "completion", "advance", "scroll"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot"] },
@@ -1079,7 +1046,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-validation", label: "Validation", keywords: ["validation count", "approvals", "audio validation"] },
     { id: "section-decay", label: "Retrieval support", keywords: ["decay", "decay threshold", "half life", "retrieval support", "max hops", "attention threshold"] },
     { id: "section-audio-media", label: "Audio Media", keywords: ["audio media strategy", "lazy", "eager"] },
-    { id: "section-timeline", label: "Timeline", keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines"] },
+    { id: "section-timeline", label: "Timeline", keywords: ["timeline", "add line", "create cell", "silence", "dubbing", "lines", "track", "tracks", "multi-track", "folder", "colour", "color"] },
     { id: "section-git-sync", label: "Git Sync", keywords: ["git", "sync", "auto sync", "interval", "branch", "clone"], visible: hasGitOrigin },
     { id: "section-terminology", label: "Terminology", keywords: ["terminology", "termbase", "glossary", "concepts"] },
     { id: "section-termbase-sharing", label: "Term Base Sharing", keywords: ["term base", "termbase", "publish", "subscribe", "org", "shared", "glossary"], visible: SHOW_TERMBASE_SHARING_IN_SETTINGS },
@@ -1131,10 +1098,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "general",
       label: "General",
-      description: "Name, languages, editor, username, Bible resources",
+      description: "Name, languages, username, Bible resources",
       icon: SlidersHorizontal,
       hub: "Project",
-      sectionIds: ["section-project-info", "section-languages", "section-bible-resources", "section-import", "section-editor", "section-user"],
+      sectionIds: ["section-project-info", "section-languages", "section-bible-resources", "section-import", "section-user"],
     },
     {
       id: "members",
@@ -1273,8 +1240,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       "section-project-info",
       "section-languages",
       "section-bible-resources",
-      "section-import",
-      "section-editor",
       "section-user",
       "section-members",
       "section-ai-instructions",
@@ -1693,24 +1658,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               />
             </SettingsGroup>
           </div>
-        )}
-
-        {searchGroupLabel("section-editor")}
-        {sectionsToRender.some((s) => s.id === "section-editor") && (
-          <ChapterPagingSection
-            value={{
-              chapterPagingEnabled,
-              chapterCompletionTrigger,
-              chapterCompletionAction,
-            }}
-            onChange={(u) => {
-              if (u.chapterPagingEnabled !== undefined) setChapterPagingEnabled(u.chapterPagingEnabled)
-              if (u.chapterCompletionTrigger !== undefined) setChapterCompletionTrigger(u.chapterCompletionTrigger)
-              if (u.chapterCompletionAction !== undefined) setChapterCompletionAction(u.chapterCompletionAction)
-            }}
-            disabled={!canEditShared}
-            disabledTooltip={sharedDisabledTooltip ?? undefined}
-          />
         )}
 
         {searchGroupLabel("section-user")}
@@ -2355,6 +2302,27 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   {t("projectSettings.timeline.addLinesLabel")}
                   <p className="mt-1 text-xs text-muted-foreground">
                     {t("projectSettings.timeline.addLinesHint")}
+                  </p>
+                </label>
+              </div>
+              {/* AQU-646 stage 2. LAST in the card, because it is the widest
+                  claim of the three: the two above constrain what may move on
+                  a timeline, this one decides whether the timeline's own rows
+                  may be added to, grouped and recoloured at all. Off by
+                  default, and enforced on the server as well — the UI
+                  withholding a button is not a permission. */}
+              <div className="flex items-start gap-2">
+                <Checkbox
+                  id="allow-track-editing"
+                  data-testid="settings-allow-track-editing"
+                  checked={allowTrackEditing}
+                  disabled={!canEditShared}
+                  onCheckedChange={(checked) => setAllowTrackEditing(checked)}
+                />
+                <label htmlFor="allow-track-editing" className="text-sm">
+                  {t("projectSettings.timeline.trackEditingLabel")}
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {t("projectSettings.timeline.trackEditingHint")}
                   </p>
                 </label>
               </div>

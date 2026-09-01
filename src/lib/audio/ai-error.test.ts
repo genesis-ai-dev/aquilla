@@ -72,6 +72,57 @@ describe("categorizeAiError — AI request failures (AQU-891)", () => {
   })
 })
 
+// AQU-646 stage 4c: the audio failures. Every one of these reached a user as a
+// raw server fragment before this round — not because the branches below were
+// missing, but because `extractStatus` could not read the format this app
+// writes, so all of them fell through to `unknown`.
+describe("categorizeAiError — the audio failures (AQU-646 stage 4c)", () => {
+  it("reads a status written in brackets, which is how every audio error writes it", () => {
+    // The literal shape from upload.ts — the one audio error that still rides
+    // the generic status branches. tts.ts and voice-clone.ts strings are
+    // claimed by the engine-named branches (AQU-1001) tested below.
+    expect(categorizeAiError("audio upload failed (500): internal error").category).toBe(
+      "provider-unavailable",
+    )
+    expect(categorizeAiError("audio upload failed (403): insufficient role").category).toBe(
+      "provider-rejected",
+    )
+  })
+
+  // THE ORDERING TEST. OmniVoice is the default engine and answers 503 for
+  // this, so the moment brackets parse, the generic 5xx branch would claim it
+  // and tell the user to try again in a moment — advice that can never come
+  // true, on the most likely voice failure there is. (AQU-1001 renamed the
+  // category from tts-not-configured to omnivoice-not-configured; the
+  // ordering guarantee is the same.)
+  it("calls an unconfigured voice service what it is, not a temporary outage", () => {
+    const result = categorizeAiError("voice/tts failed (503): TTS not configured")
+    expect(result.category).toBe("omnivoice-not-configured")
+    expect(result.category).not.toBe("provider-unavailable")
+    expect(result.body).not.toMatch(/temporary|try again in a moment/i)
+  })
+
+  it("recognizes the TTS daily budget, which arrives as a JSON machine code", () => {
+    const raw = 'voice/tts failed (429): {"error":"tts_daily_limit_exceeded"}'
+    const result = categorizeAiError(raw)
+    expect(result.category).toBe("daily-quota-exceeded")
+    // It used to land in `unknown`, where the braces tripped
+    // `looksLikeMachineDump` and replaced it with "the AI request didn't
+    // finish" — the least useful sentence available for the one failure the
+    // user can actually wait out.
+    expect(result.body).not.toContain("{")
+    expect(result.body).toMatch(/daily/i)
+  })
+
+  // The guard the widened regex must not break: a bracketed number with no
+  // failure lead-in is still not a status.
+  it("still refuses a bare parenthesised number that is not a status", () => {
+    expect(categorizeAiError("The take (500) was the longest one").category).not.toBe(
+      "provider-unavailable",
+    )
+  })
+})
+
 describe("categorizeAiError — names the TTS engine that failed", () => {
   it("does not treat a local OmniVoice 503 as a missing Gemini key", () => {
     const result = categorizeAiError("voice/tts failed (503): TTS not configured")

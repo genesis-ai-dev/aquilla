@@ -395,7 +395,6 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     renderAt(`/project/${PROJECT_ID}/settings/general`)
     expect(screen.getByLabelText(/project title/i)).toBeTruthy()
     expect(screen.getByRole("switch", { name: /enable bible resources/i })).toBeTruthy()
-    expect(screen.getByRole("switch", { name: /one chapter at a time/i })).toBeTruthy()
     expect(screen.getByLabelText(/username/i)).toBeTruthy()
     // Form panes stay on Page size="default" (max-w-2xl, left-aligned).
     expect(screen.getByLabelText(/project title/i).closest(".max-w-2xl")).toBeTruthy()

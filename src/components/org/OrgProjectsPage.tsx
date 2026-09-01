@@ -7,8 +7,7 @@ import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
-import { ProjectStatusFilter } from "./ProjectStatusFilter"
-import { ProjectPmFilter } from "./ProjectPmFilter"
+import { ProjectSortMenu } from "./ProjectSortMenu"
 import {
   PM_FILTER_ALL,
   filterByPm,
@@ -17,7 +16,6 @@ import {
   resolvePmFilter,
   type PmFilter,
 } from "./project-pm-filter"
-import { ProjectRoleFilter } from "./ProjectRoleFilter"
 import {
   ROLE_FILTER_ALL,
   filterByRole,
@@ -25,7 +23,6 @@ import {
   roleFilterNames,
   type RoleFilter,
 } from "./project-role-filter"
-import { ProjectUpdatedFilter } from "./ProjectUpdatedFilter"
 import {
   UPDATED_FILTER_ANY,
   filterByUpdated,
@@ -210,33 +207,24 @@ export function OrgProjectsPage() {
               loading={isPageLoading}
               loadingLabel={t("org.projectsList.loadingLabel")}
               toolbarLeading={
-                // The toolbar row is a flex/wrap track: further sibling filters
-                // slot in here next to these four, no wrapper needed.
-                <>
-                  <ProjectStatusFilter
-                    value={statusFilter}
-                    onValueChange={setStatusFilter}
-                    className="bg-card"
-                  />
-                  <ProjectPmFilter
-                    value={activePmFilter}
-                    usernames={pmUsernames}
-                    showUnassigned={showUnassignedPm}
-                    onValueChange={setPmFilter}
-                    className="bg-card"
-                  />
-                  <ProjectRoleFilter
-                    value={activeRoleFilter}
-                    names={roleNames}
-                    onValueChange={setRoleFilter}
-                    className="bg-card"
-                  />
-                  <ProjectUpdatedFilter
-                    value={activeUpdatedFilter}
-                    onValueChange={setUpdatedFilter}
-                    className="bg-card"
-                  />
-                </>
+                // AQU-1044: the four narrowing dimensions (Status, PM, Role,
+                // Updated) live in one Sort by menu — one submenu each. The
+                // toolbar row is still a flex/wrap track: further sibling
+                // controls slot in next to it, no wrapper needed.
+                <ProjectSortMenu
+                  status={statusFilter}
+                  onStatusChange={setStatusFilter}
+                  pm={activePmFilter}
+                  pmUsernames={pmUsernames}
+                  showUnassignedPm={showUnassignedPm}
+                  onPmChange={setPmFilter}
+                  role={activeRoleFilter}
+                  roleNames={roleNames}
+                  onRoleChange={setRoleFilter}
+                  updated={activeUpdatedFilter}
+                  onUpdatedChange={setUpdatedFilter}
+                  className="bg-card"
+                />
               }
               toolbarTrailing={
                 !isGuestOrg && activeOrgId != null ? (

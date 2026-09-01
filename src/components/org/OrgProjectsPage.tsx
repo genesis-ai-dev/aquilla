@@ -8,6 +8,23 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { ProjectCreateDialog } from "@/components/ProjectCreateDialog"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import { ProjectStatusFilter } from "./ProjectStatusFilter"
+import { ProjectPmFilter } from "./ProjectPmFilter"
+import {
+  PM_FILTER_ALL,
+  filterByPm,
+  hasUnassignedPm,
+  pmFilterUsernames,
+  resolvePmFilter,
+  type PmFilter,
+} from "./project-pm-filter"
+import { ProjectRoleFilter } from "./ProjectRoleFilter"
+import {
+  ROLE_FILTER_ALL,
+  filterByRole,
+  resolveRoleFilter,
+  roleFilterNames,
+  type RoleFilter,
+} from "./project-role-filter"
 import {
   useOrgPortfolio,
   type StatusFilter,
@@ -51,6 +68,10 @@ export function OrgProjectsPage() {
   const orgSettings = useOrgSettings(activeOrg ? activeOrgId : null, activeOrg?.role?.level)
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
+  // AQU-1040: designated-PM narrowing, composed with the status filter below.
+  const [pmFilter, setPmFilter] = useState<PmFilter>(PM_FILTER_ALL)
+  // AQU-1042: viewer-role narrowing, composed with both filters below.
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>(ROLE_FILTER_ALL)
   const projectLens = readProjectLens()
 
   const guestOrgId = activeGuestOrg?.id ?? null
@@ -116,6 +137,23 @@ export function OrgProjectsPage() {
       ? portfolio.filterByStatus(statusFilter, guestProjects)
       : portfolio.filterByStatus(statusFilter)
   const noProjects = !isPageLoading && sourceProjects.length === 0
+  // AQU-1040: options come from every loaded row, not the status-filtered
+  // slice, so toggling status never silently drops the PM you picked. A PM that
+  // leaves the portfolio entirely falls back to "all" instead of stranding the
+  // table on an option the control no longer offers.
+  const pmUsernames = pmFilterUsernames(sourceProjects)
+  const showUnassignedPm = hasUnassignedPm(sourceProjects)
+  const activePmFilter = resolvePmFilter(pmFilter, pmUsernames, showUnassignedPm)
+  // AQU-1042: same derivation rule for the viewer-role options — every loaded
+  // row, not the filtered slice. Roleless rows ("—" in the Role column) pass
+  // only under the "all" default.
+  const roleNames = roleFilterNames(sourceProjects, portfolio.roleByProjectId)
+  const activeRoleFilter = resolveRoleFilter(roleFilter, roleNames)
+  const visibleProjects = filterByRole(
+    filterByPm(statusFilteredProjects, activePmFilter),
+    portfolio.roleByProjectId,
+    activeRoleFilter,
+  )
 
   return (
     <AppShell
@@ -140,7 +178,7 @@ export function OrgProjectsPage() {
             <p className="max-w-6xl text-sm text-destructive">{portfolio.error}</p>
           ) : (
             <OrgProjectsDataTable
-              projects={statusFilteredProjects}
+              projects={visibleProjects}
               now={portfolio.now}
               roleByProjectId={portfolio.roleByProjectId}
               defaultLaneLabelByProjectId={portfolio.defaultLaneLabelByProjectId}
@@ -154,11 +192,28 @@ export function OrgProjectsPage() {
               loading={isPageLoading}
               loadingLabel={t("org.projectsList.loadingLabel")}
               toolbarLeading={
-                <ProjectStatusFilter
-                  value={statusFilter}
-                  onValueChange={setStatusFilter}
-                  className="bg-card"
-                />
+                // The toolbar row is a flex/wrap track: sibling filters (Role,
+                // Updated) slot in here next to these two, no wrapper needed.
+                <>
+                  <ProjectStatusFilter
+                    value={statusFilter}
+                    onValueChange={setStatusFilter}
+                    className="bg-card"
+                  />
+                  <ProjectPmFilter
+                    value={activePmFilter}
+                    usernames={pmUsernames}
+                    showUnassigned={showUnassignedPm}
+                    onValueChange={setPmFilter}
+                    className="bg-card"
+                  />
+                  <ProjectRoleFilter
+                    value={activeRoleFilter}
+                    names={roleNames}
+                    onValueChange={setRoleFilter}
+                    className="bg-card"
+                  />
+                </>
               }
               toolbarTrailing={
                 !isGuestOrg && activeOrgId != null ? (
@@ -176,13 +231,17 @@ export function OrgProjectsPage() {
                   ? isGuestOrg
                     ? t("org.guestOrgHome.emptyTitle", { orgName: guestOrgName })
                     : t("org.orgHome.projectsPanel.emptyTitle")
-                  : statusFilter === "stalled"
-                    ? t("org.orgHome.emptyTitle.stalled")
-                    : statusFilter === "attention"
-                      ? t("org.orgHome.emptyTitle.attention")
-                      : statusFilter === "overdue"
-                        ? t("org.orgHome.emptyTitle.overdue")
-                        : t("org.orgHome.projectsPanel.emptyTitle")
+                  : activePmFilter !== PM_FILTER_ALL || activeRoleFilter !== ROLE_FILTER_ALL
+                    ? // AQU-1040/AQU-1042: a filter combination that matches nothing
+                      // is a filtered-empty table, not an empty org.
+                      t("org.orgHome.projectsPanel.noMatchingProjects")
+                    : statusFilter === "stalled"
+                      ? t("org.orgHome.emptyTitle.stalled")
+                      : statusFilter === "attention"
+                        ? t("org.orgHome.emptyTitle.attention")
+                        : statusFilter === "overdue"
+                          ? t("org.orgHome.emptyTitle.overdue")
+                          : t("org.orgHome.projectsPanel.emptyTitle")
               }
               emptyDescription={
                 noProjects

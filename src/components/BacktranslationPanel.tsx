@@ -322,7 +322,7 @@ export function BacktranslationPanel({
             aria-expanded={statsOpen}
             className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
           >
-            <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", statsOpen && "rotate-90")} />
+            <ChevronRight className={cn("h-3 w-3 shrink-0", statsOpen && "rotate-90")} />
             {t("editor.bt.statisticalGloss")}
             <span className="font-normal text-muted-foreground/60">{t("editor.bt.statisticalGlossSub")}</span>
           </button>
@@ -351,7 +351,7 @@ export function BacktranslationPanel({
             aria-expanded={alignmentOpen}
             className="flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
           >
-            <ChevronRight className={cn("h-3 w-3 shrink-0 transition-transform", alignmentOpen && "rotate-90")} />
+            <ChevronRight className={cn("h-3 w-3 shrink-0", alignmentOpen && "rotate-90")} />
             {t("editor.bt.alignment")}
             <span className="font-normal text-muted-foreground/60">{t("editor.bt.alignmentSub")}</span>
           </button>

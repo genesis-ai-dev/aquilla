@@ -62,3 +62,28 @@ export function idmlPointerSelectionFromPoint(
   const slot = Number(target.getAttribute("data-idml-slot"))
   return Number.isSafeInteger(slot) ? { kind: "slot", slot, offset } : null
 }
+
+/**
+ * True when `clientY` is below every painted IDML slot line — the tall empty
+ * well beside a longer source, not the caret gap after the last letter.
+ *
+ * AQU-1031: mousedown in that well still has to clamp the caret so it cannot
+ * land on ProseMirror's phantom trailing `<br>`. A mousedown on the same line
+ * as the last glyph must not be stolen, or drag-select from the end fails.
+ */
+export function idmlPointerIsBelowEditableSlots(
+  root: HTMLElement,
+  clientY: number,
+): boolean {
+  let bottom = Number.NEGATIVE_INFINITY
+  for (const slot of root.querySelectorAll<HTMLElement>("[data-idml-slot]")) {
+    const rects = slot.getClientRects()
+    for (let index = 0; index < rects.length; index += 1) {
+      const rect = rects[index]
+      if (!rect || (rect.width === 0 && rect.height === 0)) continue
+      if (rect.bottom > bottom) bottom = rect.bottom
+    }
+  }
+  if (!Number.isFinite(bottom)) return true
+  return clientY > bottom + 1
+}

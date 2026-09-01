@@ -77,7 +77,7 @@ function ToolChip({ item }: { item: ToolItem }) {
         className="flex w-full items-center gap-1.5 px-2 py-1 text-start text-[11px]"
       >
         <ChevronRight
-          className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")}
+          className={cn("h-3 w-3 shrink-0 text-muted-foreground", open && "rotate-90")}
         />
         <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
         <span className="font-mono text-muted-foreground">{labelKey ? t(labelKey) : item.tool}</span>

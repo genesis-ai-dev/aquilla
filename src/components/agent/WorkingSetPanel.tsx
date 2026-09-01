@@ -11,7 +11,7 @@
  */
 
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
-import { AlertTriangle, ArrowUpRight, Check, ListChecks, X } from "lucide-react"
+import { AlertTriangle, ArrowUpRight, ListChecks } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -225,7 +225,6 @@ export const WorkingSetPanel = forwardRef<WorkingSetPanelHandle, WorkingSetPanel
                 disabled={busy}
                 onClick={() => void onAcceptAll(valueFor)}
               >
-                <Check data-icon="inline-start" />
                 {t("agent.workingSet.acceptRemaining", { count: pending.length })}
               </Button>
             </AppTooltip>
@@ -465,7 +464,6 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
                   onClick={onAccept}
                   aria-label={t("agent.workingSet.acceptDraftAriaLabel", { ref: row.ref ?? row.cellId })}
                 >
-                  <Check data-icon="inline-start" />
                   {t("agent.accept")}
                 </Button>
                 <Button
@@ -476,7 +474,6 @@ const WorkingSetRowView = memo(function WorkingSetRowView({
                   onClick={onReject}
                   aria-label={t("agent.workingSet.rejectDraftAriaLabel", { ref: row.ref ?? row.cellId })}
                 >
-                  <X data-icon="inline-start" />
                   {t("agent.reject")}
                 </Button>
               </span>

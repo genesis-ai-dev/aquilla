@@ -8,6 +8,7 @@
 //   (b) pass audioId as sourceAudioId to /api/v1/voice/convert (use case 3).
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
+import { errorFromOmnivoiceTts } from "@/lib/audio/tts-engine-error"
 import type { SyncTokenForFile } from "../audio/upload"
 
 export interface SynthesizeCellTtsArgs {
@@ -72,7 +73,7 @@ export async function synthesizeCellTts(
 
   if (!res.ok) {
     const text = await res.text().catch(() => "")
-    throw new Error(`voice/tts failed (${res.status}): ${text || res.statusText}`)
+    throw errorFromOmnivoiceTts(res.status, text || res.statusText)
   }
 
   return (await res.json()) as SynthesizeCellTtsResult

@@ -1,5 +1,6 @@
 import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types"
 import { HAS_HOSTED_MMS_MODELS, USE_SHERPA_MMS_MODELS, isSupportedMmsLanguageCode } from "./mms-languages"
+import { defaultKokoroVoiceForLanguage, isBundledKokoroVoiceName } from "./kokoro-languages"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
 export const DEFAULT_TTS_PROVIDER: TtsProvider = "omnivoice"
@@ -45,7 +46,7 @@ export const GEMINI_TTS_VOICES: readonly { name: string; descriptionKey: Message
 ] as const
 
 export const DEFAULT_GEMINI_VOICE = "Kore"
-export const DEFAULT_KOKORO_VOICE = "af_heart"
+export { DEFAULT_KOKORO_VOICE } from "./kokoro-languages"
 export const DEFAULT_MMS_LANGUAGE = "eng"
 
 export interface TtsProviderInfo {
@@ -161,7 +162,7 @@ export function isGeminiVoiceName(value: string | undefined): boolean {
 }
 
 export function isKokoroVoiceName(value: string | undefined): boolean {
-  return Boolean(value && /^[a-z]{2}_[a-z0-9_]+$/i.test(value.trim()))
+  return isBundledKokoroVoiceName(value)
 }
 
 export function isMmsLanguageCode(value: string | undefined): boolean {
@@ -183,7 +184,7 @@ export function defaultVoiceNameForProvider(
   context: { targetLanguage?: string } = {},
 ): string {
   if (provider === "omnivoice") return ""
-  if (provider === "kokoro") return DEFAULT_KOKORO_VOICE
+  if (provider === "kokoro") return defaultKokoroVoiceForLanguage(context.targetLanguage)
   if (provider === "mms") return inferMmsLanguageCode(context.targetLanguage) ?? DEFAULT_MMS_LANGUAGE
   return DEFAULT_GEMINI_VOICE
 }
@@ -203,7 +204,9 @@ export function normalizeVoiceForProvider(
     return next
   }
   if (provider === "kokoro") {
-    if (!isKokoroVoiceName(next.voiceName)) next.voiceName = DEFAULT_KOKORO_VOICE
+    if (!isKokoroVoiceName(next.voiceName)) {
+      next.voiceName = defaultKokoroVoiceForLanguage(context.targetLanguage)
+    }
     return next
   }
   next.voiceName =

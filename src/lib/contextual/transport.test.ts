@@ -191,6 +191,16 @@ describe("start + run commands", () => {
     expect(lastRequest().url).toContain(`/runs/${RUN.runId}/terminate`)
   })
 
+  it("POSTs chapter-page cellIds when the editor is paging", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ runId: RUN.runId }))
+    await realContextualTransport.start(PROJECT_ID, FILE_ID, "c3", "", ["c3", "c4"])
+    expect(JSON.parse(lastRequest().init.body as string)).toEqual({
+      fileId: FILE_ID,
+      anchorCellId: "c3",
+      cellIds: ["c3", "c4"],
+    })
+  })
+
   it("learns a run's project from fetchSnapshot too (reload → pause without start)", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ run: RUN }))
     await realContextualTransport.fetchSnapshot(PROJECT_ID, FILE_ID)

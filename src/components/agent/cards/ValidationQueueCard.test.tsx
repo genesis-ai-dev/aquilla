@@ -49,6 +49,9 @@ describe("ValidationQueueCard", () => {
   it("offers one Validate per row and NEVER a confirm-all", () => {
     render(<ValidationQueueCard proposal={proposal} applyContext={ctx} canValidate />)
     expect(screen.getAllByRole("button", { name: /^Validate / })).toHaveLength(2)
+    for (const btn of screen.getAllByRole("button", { name: /^Validate / })) {
+      expect(btn.querySelector("svg")).toBeNull()
+    }
     expect(screen.queryByRole("button", { name: /all/i })).toBeNull()
     expect(screen.getByText(/confirm each line yourself/i)).toBeInTheDocument()
   })

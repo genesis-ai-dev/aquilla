@@ -2,8 +2,10 @@ import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 
 /**
- * Below lg (1024px), org chrome (not the editor dock) hides the in-flow
- * sidebar and opens it from a PanelLeft control to the left of the breadcrumbs.
+ * Below lg (1024px), org chrome hides the in-flow sidebar and opens it from
+ * a PanelLeft control to the left of the breadcrumbs. The editor dock uses
+ * the same sheet chrome (covered in RTL); this spec is the org navigate-and-close
+ * contract.
  *
  * This spec: set a just-under-lg viewport → land on Projects → open the sheet →
  * navigate to Teams from it → the sheet closes on the destination.

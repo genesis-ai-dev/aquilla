@@ -1,7 +1,8 @@
 // AQU-1043 — last-edit recency filter in the org Projects toolbar: fixed
 // windows with an "any time" default, never-edited ("—") rows only under that
 // default, and AND-composition with the status filter, the PM filter, the Role
-// filter, and the search box.
+// filter, and the search box. Since AQU-1044 the control lives as the Updated
+// submenu of the combined Sort by menu (ProjectSortMenu).
 
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
@@ -104,14 +105,20 @@ function renderProjectsPage(entry = "/orgs/1/projects") {
   )
 }
 
-/** Base UI Select: open the trigger, then commit the option under the pointer. */
-async function pickOption(triggerName: RegExp, optionName: string | RegExp) {
-  fireEvent.click(screen.getByRole("combobox", { name: triggerName }))
-  const option = await screen.findByRole("option", { name: optionName })
-  fireEvent.pointerMove(option)
-  fireEvent.mouseMove(option)
-  fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
-  await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+/**
+ * AQU-1044 Sort by menu: open the trigger, open the dimension's submenu,
+ * pick the radio option, then dismiss the menu tree so the next
+ * interaction starts from a closed menu.
+ */
+async function pickFilter(category: RegExp, optionName: string | RegExp) {
+  fireEvent.click(screen.getByTestId("project-sort-menu"))
+  fireEvent.click(await screen.findByRole("menuitem", { name: category }))
+  const option = await screen.findByRole("menuitemradio", { name: optionName })
+  fireEvent.click(option)
+  // An outside pointerdown dismisses the whole menu tree at once (an Escape
+  // only closes the innermost submenu), so the next pick starts closed.
+  fireEvent.pointerDown(document.body, { button: 0 })
+  await waitFor(() => expect(screen.queryAllByRole("menu")).toHaveLength(0))
 }
 
 function rowNames() {
@@ -137,17 +144,19 @@ describe("org Projects Updated filter (AQU-1043)", () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    const trigger = screen.getByRole("combobox", { name: /last updated filter/i })
-    expect(trigger).toHaveTextContent("Updated any time")
+    // At the defaults the Sort by trigger carries no active-filter badge.
+    expect(screen.queryByTestId("project-sort-menu-count")).not.toBeInTheDocument()
 
-    fireEvent.click(trigger)
-    const options = (await screen.findAllByRole("option")).map((el) => el.textContent)
-    expect(options).toEqual([
+    fireEvent.click(screen.getByTestId("project-sort-menu"))
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^updated/i }))
+    const options = await screen.findAllByRole("menuitemradio")
+    expect(options.map((el) => el.textContent)).toEqual([
       "Updated any time",
       "Updated in last 7 days",
       "Updated in last 30 days",
       "Updated in last 90 days",
     ])
+    expect(options[0]).toHaveAttribute("aria-checked", "true")
   })
 
   it("shows every row, never-edited included, under the default", async () => {
@@ -161,13 +170,13 @@ describe("org Projects Updated filter (AQU-1043)", () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    await pickOption(/last updated filter/i, "Updated in last 7 days")
+    await pickFilter(/^updated/i, "Updated in last 7 days")
     expect(rowNames()).toEqual(["Gospels"])
 
-    await pickOption(/last updated filter/i, "Updated in last 30 days")
+    await pickFilter(/^updated/i, "Updated in last 30 days")
     expect(rowNames().sort()).toEqual(["Gospels", "Ruth"])
 
-    await pickOption(/last updated filter/i, "Updated in last 90 days")
+    await pickFilter(/^updated/i, "Updated in last 90 days")
     expect(rowNames().sort()).toEqual(["Gospels", "Ruth"])
     expect(screen.queryByText("Acts")).not.toBeInTheDocument()
   })
@@ -181,11 +190,11 @@ describe("org Projects Updated filter (AQU-1043)", () => {
       "Updated in last 30 days",
       "Updated in last 90 days",
     ]) {
-      await pickOption(/last updated filter/i, window)
+      await pickFilter(/^updated/i, window)
       expect(screen.queryByText("Psalms")).not.toBeInTheDocument()
     }
 
-    await pickOption(/last updated filter/i, "Updated any time")
+    await pickFilter(/^updated/i, "Updated any time")
     expect(rowNames()).toContain("Psalms")
   })
 
@@ -193,10 +202,10 @@ describe("org Projects Updated filter (AQU-1043)", () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    await pickOption(/last updated filter/i, "Updated in last 7 days")
+    await pickFilter(/^updated/i, "Updated in last 7 days")
     expect(rowNames()).toEqual(["Gospels"])
 
-    await pickOption(/last updated filter/i, "Updated any time")
+    await pickFilter(/^updated/i, "Updated any time")
     expect(rowNames().sort()).toEqual(["Acts", "Gospels", "Psalms", "Ruth"])
   })
 
@@ -204,8 +213,8 @@ describe("org Projects Updated filter (AQU-1043)", () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    await pickOption(/last updated filter/i, "Updated in last 30 days")
-    await pickOption(/project status filter/i, "Stalled")
+    await pickFilter(/^updated/i, "Updated in last 30 days")
+    await pickFilter(/^status/i, "Stalled")
     expect(rowNames()).toEqual(["Ruth"])
   })
 
@@ -214,8 +223,8 @@ describe("org Projects Updated filter (AQU-1043)", () => {
     await screen.findByText("Gospels")
 
     // anna owns Gospels (1d) and Acts (200d); only Gospels is inside 90 days.
-    await pickOption(/project manager filter/i, "anna")
-    await pickOption(/last updated filter/i, "Updated in last 90 days")
+    await pickFilter(/^pm/i, "anna")
+    await pickFilter(/^updated/i, "Updated in last 90 days")
     expect(rowNames()).toEqual(["Gospels"])
   })
 
@@ -224,8 +233,8 @@ describe("org Projects Updated filter (AQU-1043)", () => {
     await screen.findByText("Gospels")
 
     // Viewer is contributor only on Ruth, edited 20 days ago.
-    await pickOption(/role filter/i, "Contributor")
-    await pickOption(/last updated filter/i, "Updated in last 30 days")
+    await pickFilter(/^role/i, "Contributor")
+    await pickFilter(/^updated/i, "Updated in last 30 days")
     expect(rowNames()).toEqual(["Ruth"])
   })
 
@@ -233,7 +242,7 @@ describe("org Projects Updated filter (AQU-1043)", () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    await pickOption(/last updated filter/i, "Updated in last 30 days")
+    await pickFilter(/^updated/i, "Updated in last 30 days")
     fireEvent.change(screen.getByRole("textbox", { name: /search projects/i }), {
       target: { value: "ruth" },
     })
@@ -245,14 +254,14 @@ describe("org Projects Updated filter (AQU-1043)", () => {
     await screen.findByText("Gospels")
 
     // Contributor (Ruth only) edited within 7 days — Ruth is 20 days old.
-    await pickOption(/role filter/i, "Contributor")
-    await pickOption(/last updated filter/i, "Updated in last 7 days")
+    await pickFilter(/^role/i, "Contributor")
+    await pickFilter(/^updated/i, "Updated in last 7 days")
 
     expect(screen.queryAllByTestId("project-table-name")).toHaveLength(0)
     const table = screen.getByTestId("org-projects-table")
     expect(within(table).getByText("No matching projects.")).toBeInTheDocument()
 
-    await pickOption(/last updated filter/i, "Updated any time")
+    await pickFilter(/^updated/i, "Updated any time")
     expect(rowNames()).toEqual(["Ruth"])
   })
 })

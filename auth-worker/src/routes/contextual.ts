@@ -88,7 +88,6 @@ import {
   resolveContextualModels,
   resolveOpenRouterUrl,
   resolveSpanSeeds,
-  pinContextualRunToCellIds,
   spanLabel,
   runStateFrame,
   persistContextualProgressFrame,
@@ -539,9 +538,6 @@ const startSchema = z.object({
   /** "file" (default) drafts one file; "project" fans out across every
    *  discourse file with work left. */
   scope: z.enum(["file", "project"]).optional(),
-  /** AQU-1087: pin a file-scoped run to these cells (the open chapter page).
-   *  Present (even empty) means "only these"; omit for the whole file. */
-  cellIds: z.array(z.string().min(1).max(256)).max(2000).optional(),
 })
 
 // POST /:projectId/contextual/runs — start a run (CONTRIBUTOR: this is
@@ -726,10 +722,6 @@ contextual.post(
         { runId: created.runId },
       )
       return c.json(err, status)
-    }
-
-    if (body.cellIds) {
-      await pinContextualRunToCellIds(c.env.AQUILLA_PG, created.run, body.cellIds)
     }
 
     await recordRunCreated(c.env.AQUILLA_PG, created.run)

@@ -132,19 +132,11 @@ function ToastItem({
 
   React.useEffect(() => {
     // First paint is updateKey 0 — skip. Only upserts pulse.
-    // `data.pulse === false` is a silent content swap (chapter-complete retitle).
     if (updateKey === 0) return
-    const data = toastItem.data
-    if (
-      data
-      && typeof data === "object"
-      && "pulse" in data
-      && (data as { pulse?: boolean }).pulse === false
-    ) return
     setPulsing(true)
     const settle = window.setTimeout(() => setPulsing(false), 120)
     return () => window.clearTimeout(settle)
-  }, [toastItem.data, updateKey])
+  }, [updateKey])
 
   return (
     <Toast toast={toastItem}>

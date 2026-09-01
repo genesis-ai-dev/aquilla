@@ -4,9 +4,6 @@ import {
   fetchProjectSettingsResult,
   patchProjectSettings,
   PROJECT_SETTINGS_VERSION_INITIAL,
-  resolveChapterCompletionAction,
-  resolveChapterCompletionTrigger,
-  resolveChapterPagingEnabled,
   resolveTimingLocked,
 } from "./project-settings"
 import type { TranslationBrief } from "@/lib/brief/types"
@@ -229,46 +226,5 @@ describe("resolveTimingLocked", () => {
     for (const value of [undefined, true, 0, 1, "", "false", null]) {
       expect(resolveTimingLocked({ timingLocked: value as never })).toBe(true)
     }
-  })
-})
-
-describe("resolveChapterPagingEnabled (AQU-1087)", () => {
-  it("keeps full-book scroll when the setting is absent", () => {
-    expect(resolveChapterPagingEnabled(undefined)).toBe(false)
-    expect(resolveChapterPagingEnabled(null)).toBe(false)
-    expect(resolveChapterPagingEnabled({})).toBe(false)
-  })
-
-  it("turns paging on only for an explicit true", () => {
-    expect(resolveChapterPagingEnabled({ chapterPagingEnabled: true })).toBe(true)
-    expect(resolveChapterPagingEnabled({ chapterPagingEnabled: false })).toBe(false)
-  })
-})
-
-describe("resolveChapterCompletionTrigger (AQU-1087)", () => {
-  it("defaults to allTranslated when absent or unknown", () => {
-    expect(resolveChapterCompletionTrigger(undefined)).toBe("allTranslated")
-    expect(resolveChapterCompletionTrigger({})).toBe("allTranslated")
-    expect(resolveChapterCompletionTrigger({ chapterCompletionTrigger: "nope" as never })).toBe("allTranslated")
-  })
-
-  it("returns each stored trigger", () => {
-    expect(resolveChapterCompletionTrigger({ chapterCompletionTrigger: "allTranslated" })).toBe("allTranslated")
-    expect(resolveChapterCompletionTrigger({ chapterCompletionTrigger: "allValidated" })).toBe("allValidated")
-    expect(resolveChapterCompletionTrigger({ chapterCompletionTrigger: "manual" })).toBe("manual")
-  })
-})
-
-describe("resolveChapterCompletionAction (AQU-1087)", () => {
-  it("defaults to prompt when absent or unknown", () => {
-    expect(resolveChapterCompletionAction(undefined)).toBe("prompt")
-    expect(resolveChapterCompletionAction({})).toBe("prompt")
-    expect(resolveChapterCompletionAction({ chapterCompletionAction: "teleport" as never })).toBe("prompt")
-  })
-
-  it("returns each stored action", () => {
-    expect(resolveChapterCompletionAction({ chapterCompletionAction: "prompt" })).toBe("prompt")
-    expect(resolveChapterCompletionAction({ chapterCompletionAction: "autoAdvance" })).toBe("autoAdvance")
-    expect(resolveChapterCompletionAction({ chapterCompletionAction: "stay" })).toBe("stay")
   })
 })

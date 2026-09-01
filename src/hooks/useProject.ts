@@ -76,11 +76,6 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   // AQU-634: USFM front-matter opt-out must reach the workspace so ImportDialog
   // and the target-import panel drop front matter when it's on.
   assign("importExcludeFrontMatter", settings.importExcludeFrontMatter)
-  // AQU-1087: chapter-paged editor + completion trigger/action must reach the
-  // workspace so the editor can page without a settings re-fetch.
-  assign("chapterPagingEnabled", settings.chapterPagingEnabled)
-  assign("chapterCompletionTrigger", settings.chapterCompletionTrigger)
-  assign("chapterCompletionAction", settings.chapterCompletionAction)
   if (settings.ttsSettings != null) {
     // Server carries voice profiles (no apiKey); keep any device-local apiKey.
     const merged = { ...record.ttsSettings, ...settings.ttsSettings }

@@ -347,7 +347,7 @@ export const projectSettings = defineNamespace({
       "Advance as soon as the chapter is complete.",
     "projectSettings.editor.actionStayLabel": "Stay on this chapter",
     "projectSettings.editor.actionStayDescription":
-      "Leave the translator on the finished chapter until they go to the next chapter.",
+      "Leave the translator on the finished chapter until they choose Next.",
 
     // ── User card ──
     "projectSettings.user.usernameLabel": "Username",

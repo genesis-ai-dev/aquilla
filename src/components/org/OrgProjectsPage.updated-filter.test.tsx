@@ -1,8 +1,8 @@
-// AQU-1042 — viewer-role filter in the org Projects toolbar: data-derived
-// options (ladder-ordered), exact-match narrowing, roleless ("—") rows only
-// under the all-roles default, and AND-composition with the status filter,
-// the PM filter, and the search box. Since AQU-1044 the control lives as the
-// Role submenu of the combined Sort by menu (ProjectSortMenu).
+// AQU-1043 — last-edit recency filter in the org Projects toolbar: fixed
+// windows with an "any time" default, never-edited ("—") rows only under that
+// default, and AND-composition with the status filter, the PM filter, the Role
+// filter, and the search box. Since AQU-1044 the control lives as the Updated
+// submenu of the combined Sort by menu (ProjectSortMenu).
 
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
@@ -51,14 +51,17 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
 const now = Date.now()
 const DAY = 24 * 60 * 60 * 1000
 
-/** Portfolio rows: Gospels (fresh), Ruth (fresh), Acts (fresh), Psalms
- * (30 days stale → Stalled). */
+/**
+ * The spread the ticket's repro calls for: edited this week (Gospels), a few
+ * weeks ago (Ruth — also past the 14-day Stalled threshold), long ago (Acts),
+ * and never edited at all (Psalms, whose Updated column reads "—").
+ */
 function portfolioRows() {
   return [
     { id: "gospels", name: "Gospels", ...metrics(), lastEditAt: now - DAY },
-    { id: "ruth", name: "Ruth", ...metrics(), lastEditAt: now - DAY },
-    { id: "acts", name: "Acts", ...metrics(), lastEditAt: now - DAY },
-    { id: "psalms", name: "Psalms", ...metrics(), lastEditAt: now - 30 * DAY },
+    { id: "ruth", name: "Ruth", ...metrics(), lastEditAt: now - 20 * DAY },
+    { id: "acts", name: "Acts", ...metrics(), lastEditAt: now - 200 * DAY },
+    { id: "psalms", name: "Psalms", ...metrics(), lastEditAt: null },
   ]
 }
 
@@ -78,13 +81,13 @@ function metrics() {
 const owner = { level: 700, name: "owner", source: "creator" }
 const contributor = { level: 400, name: "contributor", source: "member" }
 
-/** Viewer's roles: Gospels + Psalms owner, Ruth contributor, Acts none ("—").
- * PMs: anna on Gospels + Acts, mark on Ruth + Psalms (for composition tests). */
+/** PMs: anna on Gospels + Acts, mark on Ruth + Psalms. Viewer is owner
+ * everywhere except Ruth (contributor) — both for the composition tests. */
 function accessibleRows() {
   return [
     { id: "gospels", name: "Gospels", orgId: 1, role: owner, pm: { id: 5, username: "anna" } },
     { id: "ruth", name: "Ruth", orgId: 1, role: contributor, pm: { id: 6, username: "mark" } },
-    { id: "acts", name: "Acts", orgId: 1, role: undefined, pm: { id: 5, username: "anna" } },
+    { id: "acts", name: "Acts", orgId: 1, role: owner, pm: { id: 5, username: "anna" } },
     { id: "psalms", name: "Psalms", orgId: 1, role: owner, pm: { id: 6, username: "mark" } },
   ]
 }
@@ -118,13 +121,6 @@ async function pickFilter(category: RegExp, optionName: string | RegExp) {
   await waitFor(() => expect(screen.queryAllByRole("menu")).toHaveLength(0))
 }
 
-/** Open the Sort by menu and one dimension's submenu, returning its options. */
-async function submenuOptions(category: RegExp) {
-  fireEvent.click(screen.getByTestId("project-sort-menu"))
-  fireEvent.click(await screen.findByRole("menuitem", { name: category }))
-  return (await screen.findAllByRole("menuitemradio")).map((el) => el.textContent)
-}
-
 function rowNames() {
   return screen
     .getAllByTestId("project-table-name")
@@ -143,109 +139,129 @@ beforeEach(() => {
 })
 afterEach(() => vi.clearAllMocks())
 
-describe("org Projects Role filter (AQU-1042)", () => {
-  it("offers exactly the roles present, ladder-ordered, plus an all-roles default", async () => {
+describe("org Projects Updated filter (AQU-1043)", () => {
+  it("offers fixed recency windows and defaults to 'any time'", async () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    // Contributor (400) before Owner (700); no option for Acts's missing role.
-    expect(await submenuOptions(/^role/i)).toEqual(["All roles", "Contributor", "Owner"])
+    // At the defaults the Sort by trigger carries no active-filter badge.
+    expect(screen.queryByTestId("project-sort-menu-count")).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("project-sort-menu"))
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^updated/i }))
+    const options = await screen.findAllByRole("menuitemradio")
+    expect(options.map((el) => el.textContent)).toEqual([
+      "Updated any time",
+      "Updated in last 7 days",
+      "Updated in last 30 days",
+      "Updated in last 90 days",
+    ])
+    expect(options[0]).toHaveAttribute("aria-checked", "true")
   })
 
-  it("narrows to the picked role and restores every row when reset to all", async () => {
+  it("shows every row, never-edited included, under the default", async () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    await pickFilter(/^role/i, "Owner")
-    expect(rowNames().sort()).toEqual(["Gospels", "Psalms"])
-    expect(screen.queryByText("Ruth")).not.toBeInTheDocument()
-
-    await pickFilter(/^role/i, "All roles")
     expect(rowNames().sort()).toEqual(["Acts", "Gospels", "Psalms", "Ruth"])
   })
 
-  it("keeps roleless ('—') rows under the all default and out of every specific role", async () => {
+  it("narrows to the picked window — the 'touched this week' view the repro lacks", async () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    expect(rowNames().sort()).toEqual(["Acts", "Gospels", "Psalms", "Ruth"])
+    await pickFilter(/^updated/i, "Updated in last 7 days")
+    expect(rowNames()).toEqual(["Gospels"])
 
-    await pickFilter(/^role/i, "Contributor")
-    expect(rowNames()).toEqual(["Ruth"])
+    await pickFilter(/^updated/i, "Updated in last 30 days")
+    expect(rowNames().sort()).toEqual(["Gospels", "Ruth"])
+
+    await pickFilter(/^updated/i, "Updated in last 90 days")
+    expect(rowNames().sort()).toEqual(["Gospels", "Ruth"])
     expect(screen.queryByText("Acts")).not.toBeInTheDocument()
   })
 
-  it("composes with the status filter: only that role's stalled projects remain", async () => {
+  it("keeps never-edited ('—') rows out of every window but listed under 'any time'", async () => {
     renderProjectsPage()
-    await screen.findByText("Gospels")
+    await screen.findByText("Psalms")
 
-    await pickFilter(/^role/i, "Owner")
-    await pickFilter(/^status/i, "Stalled")
-    expect(rowNames()).toEqual(["Psalms"])
+    for (const window of [
+      "Updated in last 7 days",
+      "Updated in last 30 days",
+      "Updated in last 90 days",
+    ]) {
+      await pickFilter(/^updated/i, window)
+      expect(screen.queryByText("Psalms")).not.toBeInTheDocument()
+    }
+
+    await pickFilter(/^updated/i, "Updated any time")
+    expect(rowNames()).toContain("Psalms")
   })
 
-  it("composes with the PM filter: role Owner + PM anna leaves only Gospels", async () => {
+  it("restores the rows when reset to 'any time'", async () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    await pickFilter(/^role/i, "Owner")
-    await pickFilter(/^pm/i, "anna")
+    await pickFilter(/^updated/i, "Updated in last 7 days")
     expect(rowNames()).toEqual(["Gospels"])
+
+    await pickFilter(/^updated/i, "Updated any time")
+    expect(rowNames().sort()).toEqual(["Acts", "Gospels", "Psalms", "Ruth"])
+  })
+
+  it("composes with the status filter: Ruth is the only stalled project touched this month", async () => {
+    renderProjectsPage()
+    await screen.findByText("Gospels")
+
+    await pickFilter(/^updated/i, "Updated in last 30 days")
+    await pickFilter(/^status/i, "Stalled")
+    expect(rowNames()).toEqual(["Ruth"])
+  })
+
+  it("composes with the PM filter", async () => {
+    renderProjectsPage()
+    await screen.findByText("Gospels")
+
+    // anna owns Gospels (1d) and Acts (200d); only Gospels is inside 90 days.
+    await pickFilter(/^pm/i, "anna")
+    await pickFilter(/^updated/i, "Updated in last 90 days")
+    expect(rowNames()).toEqual(["Gospels"])
+  })
+
+  it("composes with the Role filter", async () => {
+    renderProjectsPage()
+    await screen.findByText("Gospels")
+
+    // Viewer is contributor only on Ruth, edited 20 days ago.
+    await pickFilter(/^role/i, "Contributor")
+    await pickFilter(/^updated/i, "Updated in last 30 days")
+    expect(rowNames()).toEqual(["Ruth"])
   })
 
   it("composes with the search box", async () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    await pickFilter(/^role/i, "Owner")
+    await pickFilter(/^updated/i, "Updated in last 30 days")
     fireEvent.change(screen.getByRole("textbox", { name: /search projects/i }), {
-      target: { value: "psal" },
+      target: { value: "ruth" },
     })
-    expect(rowNames()).toEqual(["Psalms"])
+    expect(rowNames()).toEqual(["Ruth"])
   })
 
   it("shows the table's empty state, not a blank table, when nothing matches", async () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
+    // Contributor (Ruth only) edited within 7 days — Ruth is 20 days old.
     await pickFilter(/^role/i, "Contributor")
-    await pickFilter(/^status/i, "Stalled")
+    await pickFilter(/^updated/i, "Updated in last 7 days")
 
     expect(screen.queryAllByTestId("project-table-name")).toHaveLength(0)
     const table = screen.getByTestId("org-projects-table")
     expect(within(table).getByText("No matching projects.")).toBeInTheDocument()
 
-    await pickFilter(/^role/i, "All roles")
-    expect(rowNames()).toEqual(["Psalms"])
-  })
-
-  it("still renders and filters on a guest org, which reuses this table", async () => {
-    // Guest rows come from the accessible-project directory, not the member
-    // portfolio (which 403s for guests).
-    getPortfolio.mockRejectedValue(new Error("guest orgs must not hit the member portfolio"))
-    fetchAccessibleProjects.mockResolvedValue([
-      {
-        id: "guest-a",
-        name: "Guest Gospel",
-        orgId: 2,
-        orgName: "Sunset Bible",
-        role: { level: 100, name: "viewer", source: "override" },
-        pm: null,
-      },
-      {
-        id: "guest-b",
-        name: "Guest Ruth",
-        orgId: 2,
-        orgName: "Sunset Bible",
-        role: { level: 300, name: "reviewer", source: "override" },
-        pm: null,
-      },
-    ])
-
-    renderProjectsPage("/orgs/2/projects")
-    await screen.findByText("Guest Gospel")
-
-    await pickFilter(/^role/i, "Reviewer")
-    expect(rowNames()).toEqual(["Guest Ruth"])
+    await pickFilter(/^updated/i, "Updated any time")
+    expect(rowNames()).toEqual(["Ruth"])
   })
 })

@@ -404,7 +404,7 @@ if (typeof window !== "undefined") {
 /** Tiny gutter badge that surfaces synth lifecycle: translating, generating,
  *  or failed. Lives in the left gutter so the loading state is anchored next
  *  to the cell that's actually working, even if the row scrolls. Errors are
- *  click-to-expand: full message + actions (set Gemini key, dismiss).
+ *  click-to-expand: full message + actions (engine-specific recovery, dismiss).
  *
  * A1: error popover body is surfaced from the first click on the badge (not
  *     just via a tooltip) and includes a plain-English recovery hint.
@@ -503,7 +503,12 @@ function SynthStatusBadge({
       error.category === "translation-not-configured" ||
       error.category === "no-source-text" ||
       error.category === "git-project-unsupported" ||
-      error.category === "sign-in-required"
+      error.category === "sign-in-required" ||
+      error.category === "omnivoice-not-configured" ||
+      error.category === "omnivoice-failed" ||
+      error.category === "seed-vc-not-configured" ||
+      error.category === "seed-vc-failed" ||
+      error.category === "gemini-failed"
     ) {
       // Soft fixes — the popover body explains what to do; no inline action.
     } else {

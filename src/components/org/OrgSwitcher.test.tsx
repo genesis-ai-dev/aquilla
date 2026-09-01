@@ -60,6 +60,9 @@ describe("OrgSwitcher", () => {
     expect(screen.getByText("Come and See")).toBeInTheDocument()
     expect(screen.getByText("Maintainer")).toBeInTheDocument()
     expect(screen.getByText("Owner")).toBeInTheDocument()
+    // Role is muted meta text, not a members-table badge.
+    expect(screen.getByText("Maintainer")).not.toHaveAttribute("data-slot", "badge")
+    expect(screen.getByText("Owner")).not.toHaveAttribute("data-slot", "badge")
     // Check is in-flow only on the selected row — no reserved empty slot on others.
     const selected = screen.getByRole("option", { name: /all organizations/i })
     expect(selected.querySelector(".lucide-check")).not.toBeNull()

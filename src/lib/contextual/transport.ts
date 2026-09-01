@@ -140,16 +140,19 @@ export const realContextualTransport: ContextualTransport = {
     fileId: string,
     anchorCellId?: string,
     targetLang = "",
+    cellIds?: readonly string[],
   ): Promise<{ runId: string }> {
     const jwt = await requireJwt()
     const res = await fetchWithTimeout(runsBase(projectId), {
       method: "POST",
       headers: authHeaders(jwt),
       // The anchor rotates the first wave to start where the user is looking.
+      // cellIds pins a chapter-page run; omit the key for whole-file work.
       body: JSON.stringify({
         fileId,
         ...(anchorCellId ? { anchorCellId } : {}),
         ...(targetLang ? { targetLang } : {}),
+        ...(cellIds ? { cellIds: [...cellIds] } : {}),
       }),
     })
     if (!res.ok) return throwFromResponse(res, "start contextual run failed")

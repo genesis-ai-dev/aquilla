@@ -1024,6 +1024,16 @@ export const org = defineNamespace({
     // "Projects" page title → nav.projects (identical text)
     "org.orgProjectsPage.pageDescription":
       "Open a project to edit, or start a new translation workspace.",
+    // AQU-1040: designated-PM filter, sibling to the status filter in the
+    // Projects toolbar. The PM names themselves are usernames, not strings.
+    "org.orgProjectsPage.pmFilter.all": "All PMs",
+    "org.orgProjectsPage.pmFilterAria": "Project manager filter",
+    // AQU-1042: viewer-role filter, third control in the Projects toolbar.
+    // The role option labels come from common.role.* (same keys as RoleLabel).
+    "org.orgProjectsPage.roleFilter.all": "All roles",
+    "org.orgProjectsPage.roleFilterAria": "Role filter",
+    // "Unassigned" PM option → org.projectOverview.unassigned (identical text)
+    // Filtered-to-nothing empty title → org.orgHome.projectsPanel.noMatchingProjects
     // Zero-projects empty title → org.orgHome.projectsPanel.emptyTitle
     // Zero-projects empty description → org.overview.emptyDescription
     // Invite-a-teammate lives on Overview (OrgSetupChecklist), not this table.
@@ -1188,6 +1198,14 @@ export const org = defineNamespace({
       "org.orgHome.projectsPanel.statusFilterAria": {
         description:
           "Accessible name for the project status filter control (All / Stalled / Overdue / Needs attention) on OrgHome.",
+      },
+      "org.orgProjectsPage.pmFilterAria": {
+        description:
+          "Accessible name for the project-manager filter control on the org Projects page. Its options are the PM usernames present in the loaded table, plus Unassigned and an 'All PMs' default; it narrows the table alongside the status filter and the search box.",
+      },
+      "org.orgProjectsPage.roleFilterAria": {
+        description:
+          "Accessible name for the viewer-role filter control on the org Projects page. Its options are the roles the signed-in user holds across the loaded table (resolved via common.role.*), plus an 'All roles' default; it narrows the table alongside the status filter, the PM filter, and the search box.",
       },
       "org.orgHome.originFilter.aria": {
         description:

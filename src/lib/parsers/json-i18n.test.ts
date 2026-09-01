@@ -39,6 +39,12 @@ async function blobText(blob: Blob): Promise<string> {
 // ─── extractJsonStrings ──────────────────────────────────────────────────────
 
 describe("extractJsonStrings", () => {
+  it("rejects a document nested deeper than the supported depth instead of overflowing the stack", () => {
+    let content = '"leaf"'
+    for (let i = 0; i < 5000; i++) content = `[${content}]`
+    expect(() => extractJsonStrings(content)).toThrow(/nesting exceeds the maximum supported depth/)
+  })
+
   it("walks nested objects depth-first in key order with dot paths", () => {
     const content = JSON.stringify({
       app: { title: "My App", menu: { file: "File", edit: "Edit" } },

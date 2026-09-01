@@ -7,6 +7,8 @@ import type {
   AlgorithmicCheckOverride,
   AudioTimingMode,
   BuiltinCheckId,
+  ChapterCompletionAction,
+  ChapterCompletionTrigger,
 } from "@/lib/parsers/types"
 import type { Concept } from "@/lib/terminology/types"
 import type { LivingMemoryEntry } from "@/lib/parsers/types"
@@ -148,6 +150,23 @@ export interface ProjectWideSettings {
    * route already refuses every write below maintainer.
    */
   timingLocked?: boolean
+  /**
+   * AQU-1087: chapter-paged editor. Absent/false = the current full-book
+   * scroll (partners on that flow are not disrupted). When true, the editor
+   * shows one chapter at a time and uses {@link chapterCompletionTrigger} /
+   * {@link chapterCompletionAction} to advance.
+   */
+  chapterPagingEnabled?: boolean
+  /**
+   * AQU-1087: what counts as "this chapter is done" when paging is on.
+   * Absent → allTranslated. Ignored when chapterPagingEnabled is off.
+   */
+  chapterCompletionTrigger?: ChapterCompletionTrigger
+  /**
+   * AQU-1087: what the editor does when the completion trigger fires.
+   * Absent → prompt. Ignored when paging is off or the trigger is manual.
+   */
+  chapterCompletionAction?: ChapterCompletionAction
 }
 
 /** Absent means dubbing — the behaviour every project had before SUB-53. */
@@ -174,6 +193,41 @@ export function resolveTimingLocked(
   settings: Pick<ProjectWideSettings, "timingLocked"> | null | undefined,
 ): boolean {
   return settings?.timingLocked !== false
+}
+
+/** Absent/false = full-book scroll — the behaviour every project had before AQU-1087. */
+export function resolveChapterPagingEnabled(
+  settings: Pick<ProjectWideSettings, "chapterPagingEnabled"> | null | undefined,
+): boolean {
+  return settings?.chapterPagingEnabled === true
+}
+
+const CHAPTER_COMPLETION_TRIGGERS: readonly ChapterCompletionTrigger[] = [
+  "allTranslated",
+  "allValidated",
+  "manual",
+]
+
+/** Absent or unknown → all verses translated. */
+export function resolveChapterCompletionTrigger(
+  settings: Pick<ProjectWideSettings, "chapterCompletionTrigger"> | null | undefined,
+): ChapterCompletionTrigger {
+  const value = settings?.chapterCompletionTrigger
+  return value && CHAPTER_COMPLETION_TRIGGERS.includes(value) ? value : "allTranslated"
+}
+
+const CHAPTER_COMPLETION_ACTIONS: readonly ChapterCompletionAction[] = [
+  "prompt",
+  "autoAdvance",
+  "stay",
+]
+
+/** Absent or unknown → offer to advance. Manual trigger ignores this. */
+export function resolveChapterCompletionAction(
+  settings: Pick<ProjectWideSettings, "chapterCompletionAction"> | null | undefined,
+): ChapterCompletionAction {
+  const value = settings?.chapterCompletionAction
+  return value && CHAPTER_COMPLETION_ACTIONS.includes(value) ? value : "prompt"
 }
 
 export interface ProjectSettingsResponse {

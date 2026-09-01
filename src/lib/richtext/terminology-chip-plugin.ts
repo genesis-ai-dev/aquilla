@@ -1,14 +1,12 @@
 /**
- * Terminology chip decoration plugin.
+ * Terminology highlight decoration plugin.
  *
  * Scans the editor doc for active Concept sourceTerm matches (case-insensitive,
- * word-boundary aware) and renders a small status-tinted chip absolutely
- * positioned at the top-right of each matched word span. The host span is
- * `position:relative`; the chip is `position:absolute` so line height is
- * NOT affected.
+ * word-boundary aware) and wraps each match in the shared, subtle terminology
+ * highlight. The matched term itself is the lookup target.
  *
  * Usage: wire into TranslatedEditor via the optional `terminologyConcepts` prop.
- * Chip click is annotated with `data-source-term` for AQU-204 (TermLookupPopover).
+ * Clicks are annotated with `data-source-term` for AQU-204 (TermLookupPopover).
  */
 
 import { Plugin, PluginKey } from "@tiptap/pm/state"
@@ -47,9 +45,7 @@ export function findTermMatches(text: string, term: string): Array<{ start: numb
 }
 
 /**
- * Build a DecorationSet with:
- *  - an inline decoration wrapping each match (adds `position:relative` host span)
- *  - a widget decoration at the match start rendering the chip
+ * Build a DecorationSet with one inline decoration wrapping each match.
  */
 export function buildTerminologyChipDecorationSet(
   doc: PMNode,
@@ -77,29 +73,9 @@ export function buildTerminologyChipDecorationSet(
         Decoration.inline(from, to, {
           class: "term-chip-host",
           "data-source-term": concept.sourceTerm,
+          "aria-label": `Managed term: ${concept.sourceTerm}`,
+          title: `Managed term: ${concept.sourceTerm}`,
         })
-      )
-
-      // Widget chip rendered at the END of the matched span. The chip is
-      // wrapped in its own `position:relative` host so the absolutely-positioned
-      // dot anchors to the term's trailing edge. Without this wrapper a widget
-      // is a *sibling* of the term span (ProseMirror inserts it between inline
-      // nodes, not inside `term-chip-host`), so `.term-chip`'s absolute offset
-      // would escape to the nearest positioned ancestor — the `position:relative`
-      // cell wrapper — and paint in the cell's top-right corner (AQU-664).
-      decorations.push(
-        Decoration.widget(to, () => {
-          const host = document.createElement("span")
-          host.className = "term-chip-host"
-          const chip = document.createElement("span")
-          chip.className = `term-chip term-chip-preferred`
-          chip.setAttribute("data-source-term", concept.sourceTerm)
-          chip.setAttribute("aria-label", `Managed term: ${concept.sourceTerm}`)
-          chip.setAttribute("title", `Managed term: ${concept.sourceTerm}`)
-          // Dot rendered via CSS content/background, text is empty
-          host.appendChild(chip)
-          return host
-        }, { side: 1 }) // side:1 → placed after the character, before any following content
       )
     }
   }

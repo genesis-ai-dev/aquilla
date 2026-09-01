@@ -202,7 +202,10 @@ describe("EditorTable — terminology advisory band removed (AQU-664)", () => {
     ])
     renderTable(project, { infractions })
     await screen.findByText("sample")
-    expect(document.querySelector('[data-rule-id="term:concept-1:approved"]')).not.toBeNull()
+    const blot = document.querySelector('[data-rule-id="term:concept-1:approved"]')
+    expect(blot).toHaveClass("terminology-highlight")
+    expect(document.querySelectorAll(".terminology-highlight").length).toBeGreaterThanOrEqual(2)
+    expect(document.querySelector(".decoration-dotted")).toBeNull()
   })
 
   it("opens only the violation toast when a managed source term is blotted", async () => {
@@ -310,6 +313,8 @@ describe("EditorTable — terminology advisory band removed (AQU-664)", () => {
       expect(element).not.toBeNull()
       return element!
     })
+    expect(blot).toHaveClass("terminology-highlight")
+    expect(blot).not.toHaveClass("underline", "decoration-wavy")
     fireEvent.click(blot)
 
     await screen.findByRole("button", { name: /waive/i })

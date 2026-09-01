@@ -3716,7 +3716,7 @@ function SourceWithTermLookup({
           concepts={activeConcepts}
           onApply={onTermApply}
         >
-          <span className="underline decoration-dotted decoration-primary/60 underline-offset-2 hover:decoration-primary">
+          <span className="terminology-highlight">
             <HighlightedText
               text={word}
               highlights={EMPTY_HIGHLIGHTS}
@@ -4236,21 +4236,13 @@ function TargetDecoratedText({
 
     const matchedText = text.slice(match.start, match.end)
     parts.push(
-      <span key={`t-${index}-term`} className="term-chip-host" data-source-term={match.term}>
-        <HighlightedText
-          text={matchedText}
-          highlights={EMPTY_HIGHLIGHTS}
-          ranges={clipRangesToTextSlice(ranges, match.start, match.end)}
-          showEvidence={false}
-          onRangeClick={onRangeClick}
-        />
-        <AppTooltip content={t("editor.term.managed", { term: match.term })}>
+      <AppTooltip key={`t-${index}-term`} content={t("editor.term.managed", { term: match.term })}>
         <span
           role={onTermChipClick ? "button" : undefined}
           tabIndex={onTermChipClick ? 0 : undefined}
           aria-label={t("editor.term.managed", { term: match.term })}
+          className="term-chip-host"
           data-source-term={match.term}
-          className="term-chip term-chip-preferred"
           onClick={onTermChipClick ? (event) => {
             event.stopPropagation()
             onTermChipClick(match.term, event.currentTarget)
@@ -4261,9 +4253,16 @@ function TargetDecoratedText({
             event.stopPropagation()
             onTermChipClick(match.term, event.currentTarget)
           } : undefined}
-        />
-        </AppTooltip>
-      </span>,
+        >
+          <HighlightedText
+            text={matchedText}
+            highlights={EMPTY_HIGHLIGHTS}
+            ranges={clipRangesToTextSlice(ranges, match.start, match.end)}
+            showEvidence={false}
+            onRangeClick={onRangeClick}
+          />
+        </span>
+      </AppTooltip>,
     )
     cursor = match.end
   })
@@ -6364,13 +6363,13 @@ function EditorRow({
                     />
                   </EditorTargetReadSurface>
                 )}
-              {/* FRO-204: Terminology chip popover — controlled via termChipState.
-                  Anchored to the chip DOM element that was clicked. Apply is
+              {/* FRO-204: Terminology highlight popover — controlled via termChipState.
+                  Anchored to the highlighted term that was clicked. Apply is
                   offered only when the target had a non-empty text selection
                   at click time (per spec).
                   We pass a dummy <span/> trigger so TermLookupPopover renders
                   the popover body; the BaseUI Popover controlled-open + external
-                  anchor positions it on the clicked chip. */}
+                  anchor positions it on the clicked highlight. */}
               {termChipState && (() => {
                 const concepts = terminologyConcepts
                 const onApply = targetHasSelectionRef.current

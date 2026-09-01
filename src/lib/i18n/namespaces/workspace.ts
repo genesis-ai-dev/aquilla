@@ -307,15 +307,6 @@ export const workspace = defineNamespace({
       "measured",
     ),
 
-    // -- ProjectWorkspace: CSV cast/character label-picker import toasts --
-    "workspace.labelPicker.noLabelsAppliedToast":
-      "No labels applied — the CSV doesn't match {fileName}. Re-download the template and try again.",
-    "workspace.labelPicker.partiallyAppliedToast": "Applied {applied} of {total} labels to {fileName}.",
-    "workspace.labelPicker.appliedToast": plural(
-      { one: "Applied {applied} label to {fileName}.", other: "Applied {applied} labels to {fileName}." },
-      "applied",
-    ),
-
     // -- WorkspaceSkeleton --
     "workspace.skeleton.loadingProject": "Loading project",
 
@@ -1378,32 +1369,6 @@ export const workspace = defineNamespace({
           "zero failures.",
         placeholders: { measured: "How many recordings were successfully measured; also selects the plural form." },
       },
-      "workspace.labelPicker.noLabelsAppliedToast": {
-        description:
-          "Warning toast after importing a cast/character CSV whose rows matched none of " +
-          "the file's speaker labels at all.",
-        placeholders: { fileName: "Name of the file the CSV was checked against — not translated." },
-      },
-      "workspace.labelPicker.partiallyAppliedToast": {
-        description:
-          "Warning toast after importing a cast/character CSV that matched some but not " +
-          "all rows against the file's speaker labels.",
-        placeholders: {
-          applied: "How many labels were successfully applied.",
-          total: "Total labels attempted (applied + unmatched).",
-          fileName: "Name of the file the labels were applied to — not translated.",
-        },
-      },
-      "workspace.labelPicker.appliedToast": {
-        description:
-          "Success toast after importing a cast/character CSV that matched every row " +
-          "against the file's speaker labels.",
-        placeholders: {
-          applied: "How many labels were applied; also selects the plural form.",
-          fileName: "Name of the file the labels were applied to — not translated.",
-        },
-      },
-
       "workspace.skeleton.loadingProject": {
         description:
           "Accessible label for the full-page loading skeleton shown while a " +

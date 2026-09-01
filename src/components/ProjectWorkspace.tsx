@@ -617,12 +617,6 @@ export function ProjectWorkspace() {
     return pending.length > 0 ? [...base, ...pending] : base
   }, [hydratedProject?.files, optimisticFiles, optimisticRenames, optimisticDeletes])
 
-  // AQU-314: id+name pairs for the Cell-labels import panel's file picker.
-  const labelPickerFiles = useMemo(
-    () => projectFiles.map((f) => ({ id: f.id, name: f.name })),
-    [projectFiles],
-  )
-
   // AQU-744: current visible file ids, readable from the long-lived WS
   // message handler without re-subscribing on every inventory change. A
   // `file.progress.updated` frame naming an id missing from this set is a
@@ -10967,31 +10961,7 @@ export function ProjectWorkspace() {
           ttsSettings={tts.settings}
           onCastUpdated={(patch) => tts.saveTts(patch)}
           existingFiles={project.files}
-          projectFiles={labelPickerFiles}
-          activeFileId={activeFileId}
           excludeFrontMatter={project.importExcludeFrontMatter}
-          onLabelsImported={(r) => {
-            if (r.applied === 0) {
-              toast.add({
-                type: "warning",
-                title: t("workspace.labelPicker.noLabelsAppliedToast", { fileName: r.fileName }),
-              })
-            } else if (r.unmatched > 0) {
-              toast.add({
-                type: "warning",
-                title: t("workspace.labelPicker.partiallyAppliedToast", {
-                  applied: r.applied,
-                  total: r.applied + r.unmatched,
-                  fileName: r.fileName,
-                }),
-              })
-            } else {
-              toast.add({
-                type: "success",
-                title: t("workspace.labelPicker.appliedToast", { applied: r.applied, fileName: r.fileName }),
-              })
-            }
-          }}
           patchDcsCursor={async (cursor) => {
             // Pin the project to the imported Door43 release (spec §8). Server
             // floor is MAINTAINER(600); a below-floor caller gets a blocked

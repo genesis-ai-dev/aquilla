@@ -72,6 +72,8 @@ import type {
   CompletionProvider,
   CompletionSettings,
   ContextSize,
+  ChapterCompletionAction,
+  ChapterCompletionTrigger,
   DecaySettings,
   ProjectRecord,
 } from "@/lib/parsers/types"
@@ -80,8 +82,14 @@ import {
   projectHasScriptureFiles,
   resolveBibleResourcesEnabled,
 } from "@/lib/parsers/types"
-import { resolveTimingLocked } from "@/lib/sync/project-settings"
+import {
+  resolveChapterCompletionAction,
+  resolveChapterCompletionTrigger,
+  resolveChapterPagingEnabled,
+  resolveTimingLocked,
+} from "@/lib/sync/project-settings"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
+import { ChapterPagingSection } from "./ProjectSettings/ChapterPagingSection"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
@@ -243,6 +251,10 @@ interface Baseline {
   /** AQU-634: when true, USFM imports exclude book-name/title/TOC + intro-block
    *  front matter. Absent/false imports front matter (the default). */
   importExcludeFrontMatter: boolean
+  /** AQU-1087: chapter-paged editor + completion trigger/action. */
+  chapterPagingEnabled: boolean
+  chapterCompletionTrigger: ChapterCompletionTrigger
+  chapterCompletionAction: ChapterCompletionAction
 }
 
 function buildBaseline(project: ProjectRecord): Baseline {
@@ -290,6 +302,9 @@ function buildBaseline(project: ProjectRecord): Baseline {
     geminiApiKey: project.ttsSettings?.apiKey ?? "",
     precedingTargetCells: project.draftContext?.precedingTargetCells ?? DEFAULT_DRAFT_CONTEXT.precedingTargetCells,
     importExcludeFrontMatter: project.importExcludeFrontMatter ?? false,
+    chapterPagingEnabled: resolveChapterPagingEnabled(project),
+    chapterCompletionTrigger: resolveChapterCompletionTrigger(project),
+    chapterCompletionAction: resolveChapterCompletionAction(project),
   }
 }
 
@@ -473,6 +488,11 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [precedingTargetCells, setPrecedingTargetCells] = useState(DEFAULT_DRAFT_CONTEXT.precedingTargetCells)
   // AQU-634: per-project USFM front-matter opt-out.
   const [importExcludeFrontMatter, setImportExcludeFrontMatter] = useState(false)
+  const [chapterPagingEnabled, setChapterPagingEnabled] = useState(false)
+  const [chapterCompletionTrigger, setChapterCompletionTrigger] =
+    useState<ChapterCompletionTrigger>("allTranslated")
+  const [chapterCompletionAction, setChapterCompletionAction] =
+    useState<ChapterCompletionAction>("prompt")
   // Pre-merge round: the Media timeline's timing mode moved OUT of Project
   // Settings — it is FILE-level now (file.timing.set), controlled from the
   // timeline toolbar with the same maintainer floor.
@@ -530,6 +550,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setGeminiApiKey(b.geminiApiKey)
     setPrecedingTargetCells(b.precedingTargetCells)
     setImportExcludeFrontMatter(b.importExcludeFrontMatter)
+    setChapterPagingEnabled(b.chapterPagingEnabled)
+    setChapterCompletionTrigger(b.chapterCompletionTrigger)
+    setChapterCompletionAction(b.chapterCompletionAction)
   }, [])
 
   // Seed once when the project first loads. We intentionally don't reseed on
@@ -629,7 +652,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       !decayEqual(decaySettings, baseline.decaySettings) ||
       geminiApiKey !== baseline.geminiApiKey ||
       precedingTargetCells !== baseline.precedingTargetCells ||
-      importExcludeFrontMatter !== baseline.importExcludeFrontMatter
+      importExcludeFrontMatter !== baseline.importExcludeFrontMatter ||
+      chapterPagingEnabled !== baseline.chapterPagingEnabled ||
+      chapterCompletionTrigger !== baseline.chapterCompletionTrigger ||
+      chapterCompletionAction !== baseline.chapterCompletionAction
     )
   }, [
     baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
@@ -641,6 +667,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     timingLocked,
     harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
     precedingTargetCells, importExcludeFrontMatter,
+    chapterPagingEnabled, chapterCompletionTrigger, chapterCompletionAction,
   ])
 
   // Warn before browser-level navigation (back button, tab close, reload).
@@ -850,6 +877,18 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
       if (bibleResourcesEnabled !== baseline.bibleResourcesEnabled) { sharedUpdates.bibleResourcesEnabled = bibleResourcesEnabled; changedFieldLabels.push("Bible resources") }
       if (importExcludeFrontMatter !== baseline.importExcludeFrontMatter) { sharedUpdates.importExcludeFrontMatter = importExcludeFrontMatter; changedFieldLabels.push("USFM front matter") }
+      if (chapterPagingEnabled !== baseline.chapterPagingEnabled) {
+        sharedUpdates.chapterPagingEnabled = chapterPagingEnabled
+        changedFieldLabels.push("chapter paging")
+      }
+      if (chapterCompletionTrigger !== baseline.chapterCompletionTrigger) {
+        sharedUpdates.chapterCompletionTrigger = chapterCompletionTrigger
+        changedFieldLabels.push("chapter completion trigger")
+      }
+      if (chapterCompletionAction !== baseline.chapterCompletionAction) {
+        sharedUpdates.chapterCompletionAction = chapterCompletionAction
+        changedFieldLabels.push("chapter completion action")
+      }
       if (precedingTargetCells !== baseline.precedingTargetCells) {
         sharedUpdates.draftContext = { precedingTargetCells }
         changedFieldLabels.push("draft context")
@@ -926,6 +965,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         geminiApiKey,
         precedingTargetCells,
         importExcludeFrontMatter,
+        chapterPagingEnabled,
+        chapterCompletionTrigger,
+        chapterCompletionAction,
       }
       setBaseline(newBaseline)
       // Refresh `useProject` in the background so other components see the
@@ -960,7 +1002,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
     bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
-    precedingTargetCells, importExcludeFrontMatter, getJwt, isCloudProject, t,
+    precedingTargetCells, importExcludeFrontMatter,
+    chapterPagingEnabled, chapterCompletionTrigger, chapterCompletionAction,
+    getJwt, isCloudProject, t,
   ])
 
   const handleSaveAndClose = useCallback(async () => {
@@ -1024,6 +1068,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-languages", label: "Languages", keywords: ["languages", "target lanes", "lane", "target language", "dialect"] },
     { id: "section-bible-resources", label: "Bible resources", keywords: ["bible resources", "aquifer", "bibletranslation", "reference", "scholarly", "translation notes"] },
     { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
+    { id: "section-editor", label: "Editor", keywords: ["editor", "chapter", "paging", "paged", "one chapter", "next chapter", "completion", "advance", "scroll"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot"] },
@@ -1086,10 +1131,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "general",
       label: "General",
-      description: "Name, languages, username, Bible resources",
+      description: "Name, languages, editor, username, Bible resources",
       icon: SlidersHorizontal,
       hub: "Project",
-      sectionIds: ["section-project-info", "section-languages", "section-bible-resources", "section-import", "section-user"],
+      sectionIds: ["section-project-info", "section-languages", "section-bible-resources", "section-import", "section-editor", "section-user"],
     },
     {
       id: "members",
@@ -1228,6 +1273,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       "section-project-info",
       "section-languages",
       "section-bible-resources",
+      "section-import",
+      "section-editor",
       "section-user",
       "section-members",
       "section-ai-instructions",
@@ -1646,6 +1693,24 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               />
             </SettingsGroup>
           </div>
+        )}
+
+        {searchGroupLabel("section-editor")}
+        {sectionsToRender.some((s) => s.id === "section-editor") && (
+          <ChapterPagingSection
+            value={{
+              chapterPagingEnabled,
+              chapterCompletionTrigger,
+              chapterCompletionAction,
+            }}
+            onChange={(u) => {
+              if (u.chapterPagingEnabled !== undefined) setChapterPagingEnabled(u.chapterPagingEnabled)
+              if (u.chapterCompletionTrigger !== undefined) setChapterCompletionTrigger(u.chapterCompletionTrigger)
+              if (u.chapterCompletionAction !== undefined) setChapterCompletionAction(u.chapterCompletionAction)
+            }}
+            disabled={!canEditShared}
+            disabledTooltip={sharedDisabledTooltip ?? undefined}
+          />
         )}
 
         {searchGroupLabel("section-user")}

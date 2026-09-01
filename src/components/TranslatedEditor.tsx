@@ -53,7 +53,10 @@ import {
   type IdmlDeleteGranularity,
   type IdmlEditorConfiguration,
 } from "@/lib/richtext/idml-editor"
-import type { IdmlPointerSelection } from "@/lib/richtext/idml-caret"
+import {
+  idmlPointerIsBelowEditableSlots,
+  type IdmlPointerSelection,
+} from "@/lib/richtext/idml-caret"
 import {
   FOOTNOTE_NODE_NAME,
   buildUsfmPlainTextMap,
@@ -750,6 +753,13 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       },
       handleClick(view, pos, event) {
         if (!idmlContext) return false
+        // AQU-1031: the slot-caret clamp is for caret placement (tall well /
+        // phantom trailing br), not for selecting text. A drag or Shift-click
+        // range must not be collapsed on mouseup.
+        const native = view.dom.ownerDocument.getSelection()
+        if (event.shiftKey || !view.state.selection.empty || (native && !native.isCollapsed)) {
+          return false
+        }
         const target = event.target instanceof HTMLElement
           ? event.target.closest<HTMLElement>("[data-idml-slot]")
           : null
@@ -792,8 +802,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
             ? event.target.closest<HTMLElement>("[data-idml-slot]")
             : null
           // Direct text/slot clicks retain their precise browser coordinates.
-          // Only blank space owned by the tall editor well needs clamping.
           if (target) return false
+          // AQU-1031: the caret gap after the last letter is on the slot's
+          // line, not in the tall well. Stealing that mousedown made
+          // drag-select fail whenever the caret was already at the end.
+          if (!idmlPointerIsBelowEditableSlots(view.dom, event.clientY)) return false
           const selectedSlot = isEditableIdmlSelection(view.state.selection)
             ? Number(view.state.selection.$from.parent.attrs.slot)
             : undefined

@@ -7,8 +7,6 @@ import type {
   AlgorithmicCheckOverride,
   AudioTimingMode,
   BuiltinCheckId,
-  ChapterCompletionAction,
-  ChapterCompletionTrigger,
 } from "@/lib/parsers/types"
 import type { Concept } from "@/lib/terminology/types"
 import type { LivingMemoryEntry } from "@/lib/parsers/types"
@@ -52,6 +50,31 @@ export interface ProjectWideSettings {
    * off can never strand a line somebody already made.
    */
   allowLineCreation?: boolean
+  /**
+   * AQU-646 stage 2: may this project's timelines be RESTRUCTURED — tracks
+   * added and deleted, grouped into folders, recoloured?
+   *
+   * OFF unless explicitly turned on, and it is a SECOND gate rather than a
+   * floor change: `file.track.set` is already maintainer-floored, so this
+   * answers *whether*, not *who*, and with it off the write is refused even to
+   * an owner. Multi-track is capability for clients who want it; a project that
+   * never turns it on should not be able to tell it was built.
+   *
+   * RENAME AND DRAG-TO-REORDER ARE DELIBERATELY NOT GATED ON THIS. Both already
+   * ship, and a new setting defaulting to off must not silently take an
+   * existing capability away from every project that has one. They stay
+   * maintainer-only, which is what they were.
+   *
+   * NOTE THE DIVERGENCE FROM `allowLineCreation` ABOVE, which is deliberate and
+   * not an oversight: that one leaves REMOVAL ungated so switching it off
+   * cannot strand a line somebody made. Here, switching off does strand — three
+   * user-added tracks become un-deletable and un-recolourable until it goes
+   * back on. That is Sam's call (2026-08-22) and it is the coherent one for a
+   * structural switch: the tracks keep working and keep playing, they simply
+   * stop being editable, which is exactly what "turn track editing off" should
+   * mean. Do not "restore consistency" with the sibling above.
+   */
+  allowTrackEditing?: boolean
   /**
    * AQU-186: minimum role level required to trigger a harmonization sweep on
    * this project. Default (absent) = project_lead (500). Configurable up to
@@ -150,23 +173,6 @@ export interface ProjectWideSettings {
    * route already refuses every write below maintainer.
    */
   timingLocked?: boolean
-  /**
-   * AQU-1087: chapter-paged editor. Absent/false = the current full-book
-   * scroll (partners on that flow are not disrupted). When true, the editor
-   * shows one chapter at a time and uses {@link chapterCompletionTrigger} /
-   * {@link chapterCompletionAction} to advance.
-   */
-  chapterPagingEnabled?: boolean
-  /**
-   * AQU-1087: what counts as "this chapter is done" when paging is on.
-   * Absent → allTranslated. Ignored when chapterPagingEnabled is off.
-   */
-  chapterCompletionTrigger?: ChapterCompletionTrigger
-  /**
-   * AQU-1087: what the editor does when the completion trigger fires.
-   * Absent → prompt. Ignored when paging is off or the trigger is manual.
-   */
-  chapterCompletionAction?: ChapterCompletionAction
 }
 
 /** Absent means dubbing — the behaviour every project had before SUB-53. */
@@ -193,41 +199,6 @@ export function resolveTimingLocked(
   settings: Pick<ProjectWideSettings, "timingLocked"> | null | undefined,
 ): boolean {
   return settings?.timingLocked !== false
-}
-
-/** Absent/false = full-book scroll — the behaviour every project had before AQU-1087. */
-export function resolveChapterPagingEnabled(
-  settings: Pick<ProjectWideSettings, "chapterPagingEnabled"> | null | undefined,
-): boolean {
-  return settings?.chapterPagingEnabled === true
-}
-
-const CHAPTER_COMPLETION_TRIGGERS: readonly ChapterCompletionTrigger[] = [
-  "allTranslated",
-  "allValidated",
-  "manual",
-]
-
-/** Absent or unknown → all verses translated. */
-export function resolveChapterCompletionTrigger(
-  settings: Pick<ProjectWideSettings, "chapterCompletionTrigger"> | null | undefined,
-): ChapterCompletionTrigger {
-  const value = settings?.chapterCompletionTrigger
-  return value && CHAPTER_COMPLETION_TRIGGERS.includes(value) ? value : "allTranslated"
-}
-
-const CHAPTER_COMPLETION_ACTIONS: readonly ChapterCompletionAction[] = [
-  "prompt",
-  "autoAdvance",
-  "stay",
-]
-
-/** Absent or unknown → offer to advance. Manual trigger ignores this. */
-export function resolveChapterCompletionAction(
-  settings: Pick<ProjectWideSettings, "chapterCompletionAction"> | null | undefined,
-): ChapterCompletionAction {
-  const value = settings?.chapterCompletionAction
-  return value && CHAPTER_COMPLETION_ACTIONS.includes(value) ? value : "prompt"
 }
 
 export interface ProjectSettingsResponse {

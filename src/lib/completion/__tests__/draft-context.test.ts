@@ -27,16 +27,6 @@ describe("gatherPrecedingContext", () => {
     ])
   })
 
-  it("does not pull a previous chapter when the caller already scoped the cell list", () => {
-    const book = [
-      cell("gen1-1", "f1", "In the beginning", "Au commencement"),
-      cell("gen1-2", "f1", "the earth was formless", "la terre etait informe"),
-      cell("gen2-1", "f1", "Thus the heavens", ""),
-    ]
-    const chapterTwo = book.filter((row) => row.id.startsWith("gen2-"))
-    expect(gatherPrecedingContext(chapterTwo, "gen2-1", 5)).toEqual([])
-  })
-
   it("never crosses a file boundary (excludes a preceding cell from another file)", () => {
     const mixed = [
       cell("x", "f2", "other src", "other tgt"), // different file, precedes target

@@ -332,9 +332,6 @@ export const editor = defineNamespace({
     "editor.milestone.milestone.find": "Find a milestone",
     "editor.milestone.milestone.empty": "No milestones found.",
 
-    // AQU-1087: chapter-page completion prompt (toast + Next action).
-    "editor.chapter.completeTitle": "{label} is complete",
-
     "editor.milestone.vocab.chapterPlural": "Chapters",
     "editor.milestone.vocab.slidePlural": "Slides",
     "editor.milestone.vocab.storyPlural": "Stories",
@@ -538,29 +535,12 @@ export const editor = defineNamespace({
       other: "Removed validations from {count} cells",
     }),
 
-    // — Attach-video dialog for a timed file ————————————————————————
-    "editor.video.title": "Attach Video",
-    "editor.video.currentlyAttached": "Currently attached",
-    "editor.video.removeAttachment": "Remove attachment",
-    "editor.video.startOffset": "Start offset (s)",
-    "editor.video.saveOffset": "Save offset",
-    "editor.video.offsetHint":
-      "Seconds to wait before cues align. If your video has an intro, set this to " +
-      "the duration of the intro so subtitles line up correctly.",
-    "editor.video.tabUrl": "From URL",
-    "editor.video.tabUpload": "Upload file",
-    "editor.video.urlLabel": "Video URL",
-    "editor.video.urlHint":
-      "Direct video URL (MP4, WebM, etc). URL syncs across collaborators.",
-    "editor.video.displayNameLabel": "Display name (optional)",
-    "editor.video.displayNamePlaceholder": "Episode 1",
-    "editor.video.saveUrl": "Save URL",
-    "editor.video.enterUrl": "Enter a video URL",
-    "editor.video.storingLocally": "Storing video locally...",
-    "editor.video.dropHint": "Drag a video file here, or",
+    // AQU-646 stage 6I: the attach-video DIALOG is gone (Sam, 2026-08-27) — it
+    // claimed to upload a video and did nothing. Only this one string outlived
+    // it, because four import panels borrow it for their own file pickers. The
+    // `editor.video.` prefix is a misnomer now; it is left alone rather than
+    // renamed, which would be churn across five files for a key name.
     "editor.video.chooseFile": "Choose file",
-    "editor.video.localOnlyHint": "Stored locally on this device only (not synced to peers).",
-    "editor.video.uploadedFallbackName": "Uploaded video",
 
     // — Timeline lens (time-ordered files) ————————————————————————
     "editor.timeline.title": "Timeline",
@@ -624,6 +604,19 @@ export const editor = defineNamespace({
     "editor.timeline.snapOffTooltip": "Snapping off",
     "editor.timeline.videoHiddenNote":
       "The linked video is hidden here — it plays on the original recording's timing, which this view no longer follows.",
+    "editor.timeline.outputLatencyNote":
+      "Bluetooth audio arrives a moment after the app sends it. The playhead is adjusted for the delay it can measure, but a little is unmeasurable — trust your ears over the line for fine timing.",
+    "editor.timeline.outputDeviceChangedToast": "Playback paused — the audio output changed.",
+    // AQU-646 stage 2: the track colour palette. Each names a PAIR — the tone
+    // recorded takes are drawn in, and the near neighbour generated voices get
+    // — so the label is the family, not either exact hue.
+    // Sam's own seven (2026-08-27), named as his spec names them.
+    "editor.timeline.colorCyan": "Cyan",
+    "editor.timeline.colorAzure": "Azure",
+    "editor.timeline.colorViolet": "Violet",
+    "editor.timeline.colorMagenta": "Magenta",
+    "editor.timeline.colorAmber": "Amber",
+    "editor.timeline.colorGreen": "Green",
     "editor.timeline.measureNote": plural({
       one: "{count} recording has no measured length — its chip is drawn at a guessed width.",
       other:
@@ -638,7 +631,6 @@ export const editor = defineNamespace({
     "editor.timeline.measureDismiss": "Dismiss for now",
 
     // — Section-scoped transcription (AQU-928) ————————————————————
-    "editor.timeline.transcribeSelectionEmpty": "No section selected",
     "editor.timeline.transcribeSelectionCount": plural({
       one: "{count} section selected",
       other: "{count} sections selected",
@@ -648,13 +640,19 @@ export const editor = defineNamespace({
       one: "Transcribe {count} section",
       other: "Transcribe {count} sections",
     }),
+    "editor.timeline.transcribeSelectionRecordings": plural({
+      one: "{count} recording",
+      other: "{count} recordings",
+    }),
     "editor.timeline.transcribeSelectionClear": "Clear selection",
     "editor.timeline.transcribeSelectionHint":
       "Ctrl/⌘-click or Shift-click chips to select more sections.",
     "editor.timeline.transcribeSelectionTooltip":
       "Run speech-to-text on the selected sections' audio only — the rest of the file is left alone.",
-    "editor.timeline.transcribeSelectionEmptyTooltip":
-      "Click a chip on the timeline to pick a section, then transcribe just that section.",
+    "editor.timeline.transcribeSelectionSharedTooltip": plural({
+      one: "Some of these sections are performed by the same heard line, so this runs {count} transcription covering all of them.",
+      other: "Some of these sections are performed by the same heard line, so this runs {count} transcriptions covering all of them.",
+    }),
     "editor.timeline.transcribeSelectionNoAudioTooltip":
       "None of the selected sections has audio to transcribe.",
     "editor.timeline.transcribeSelectionBusyTooltip":
@@ -722,6 +720,73 @@ export const editor = defineNamespace({
     "editor.timeline.sortableTrackRole": "sortable track",
     "editor.timeline.gutterReorderAria":
       "Timeline tracks — drag a name, or press Alt with the arrow keys, to reorder",
+    // AQU-646 stage 2: folders in the track gutter. (Stage 4b retired the
+    // "N tracks" sublabel — a slim folder heading has no room for a second
+    // line, and the summary band says what is inside better.)
+    "editor.timeline.gutterCollapseAria": "Narrow the track names",
+    "editor.timeline.gutterExpandAria": "Show the track names",
+    "editor.timeline.folderExpandAria": "Show the tracks in {name}",
+    "editor.timeline.folderCollapseAria": "Hide the tracks in {name}",
+    "editor.timeline.trackMenuAria": "Track options for {name}",
+    "editor.timeline.trackRename": "Rename",
+    "editor.timeline.trackColor": "Colour",
+    // AQU-646 stage 7: one hue per track, picked from six swatches, so the
+    // whole vocabulary of axes, weights and previews is gone with the picker.
+    // A colour name and a count is all this menu says now.
+    // AQU-646 stage 6H rev 2: the colour PICKER's own words. Temporary by
+    // design — Sam is using it to craft a palette, and when the palette exists
+    // this dialog and these four keys go with it.
+    "editor.timeline.trackColorCount": plural({
+      one: "Colour {count} track",
+      other: "Colour {count} tracks",
+    }),
+    "editor.timeline.trackNewFolderFrom": "New folder from this track",
+    "editor.timeline.trackNewFolderFromCount": plural({
+      one: "New folder from {count} track",
+      other: "New folder from {count} tracks",
+    }),
+    "editor.timeline.trackLeaveFolder": "Take out of folder",
+    "editor.timeline.trackLeaveFolderCount": plural({
+      one: "Take {count} track out of its folder",
+      other: "Take {count} tracks out of their folders",
+    }),
+    "editor.timeline.trackDelete": "Delete track",
+    "editor.timeline.trackDeleteFolder": "Delete folder",
+    "editor.timeline.trackDeleteCount": plural({
+      one: "Delete {count} track",
+      other: "Delete {count} tracks",
+    }),
+    "editor.timeline.trackAdd": "Add track",
+    "editor.timeline.trackAddTrack": "Audio track",
+    "editor.timeline.trackAddFolder": "Folder",
+    // "Folder" → editor.timeline.trackAddFolder (identical text)
+    // AQU-646 stage 6J: the automatic name is DATA, not copy, so it is built in
+    // code now — see `nextTrackName`. It has to be stable across locales: a
+    // track called "Track 2" is stored under that name and read back by
+    // everyone on the project, whatever language each of them is working in.
+    // The add-track dialog.
+    "editor.timeline.addTrackTitle": "Add an audio track",
+    // "Name" → common.name (identical text)
+    "editor.timeline.addTrackAlignLabel": "Line it up with",
+    "editor.timeline.addTrackAlignHint":
+      "The new track's recordings sit against this track's lines. It can't be changed afterwards.",
+    // "Add track" → editor.timeline.trackAdd (identical text)
+    // The delete confirmation.
+    "editor.timeline.deleteTrackTitle": "Delete {name}?",
+    "editor.timeline.deleteTracksTitle": plural({
+      one: "Delete {count} track?",
+      other: "Delete {count} tracks?",
+    }),
+    "editor.timeline.deleteTrackEmpty": "This track has no recordings on it.",
+    "editor.timeline.deleteTrackTakes": plural({
+      one: "{count} recording on this track will be deleted with it.",
+      other: "{count} recordings on this track will be deleted with it.",
+    }),
+    "editor.timeline.deleteFolderMembers": plural({
+      one: "The {count} track inside it will be moved out, not deleted.",
+      other: "The {count} tracks inside it will be moved out, not deleted.",
+    }),
+    // "Delete" → common.delete (identical text)
     "editor.timeline.rowsShorterAria": "Shorter rows",
     "editor.timeline.rowsShorterTooltip": "Shorter rows — fit more tracks on screen (⌘ + scroll)",
     "editor.timeline.rowsTallerAria": "Taller rows",
@@ -1343,6 +1408,108 @@ export const editor = defineNamespace({
           "Screen-reader name of the timeline's track-name gutter, which is a " +
           "reorderable list. Names the list and states both ways to reorder it. " +
           "Never visible.",
+      },
+      "editor.timeline.trackMenuAria": {
+        description:
+          "Screen-reader name of the '…' button on a timeline track's row, " +
+          "which opens the same options right-clicking the track does. Never " +
+          "visible — the button is an icon.",
+        placeholders: { name: "The track's name, as the user set it." },
+      },
+      "editor.timeline.deleteTrackTitle": {
+        description:
+          "Title of the confirmation asked before deleting a timeline track. " +
+          "Deleting really deletes: the recordings on the track go with it.",
+        placeholders: { name: "The track's name, as the user set it." },
+      },
+      "editor.timeline.deleteTracksTitle": {
+        description:
+          "The same confirmation when SEVERAL selected timeline tracks are " +
+          "being deleted at once, where naming them all would not fit. The " +
+          "line beneath states how many recordings go with them.",
+        placeholders: { count: "How many tracks are being deleted; it also selects the plural form." },
+      },
+      "editor.timeline.trackColorCount": {
+        description:
+          "Submenu label when several timeline tracks are selected at once. " +
+          "The count is how many of the selected tracks can actually take a " +
+          "colour — source rows cannot — so it may be fewer than are selected.",
+        placeholders: { count: "How many tracks will be recoloured; it also selects the plural form." },
+      },
+      "editor.timeline.trackNewFolderFromCount": {
+        description:
+          "Menu item that creates a folder containing the selected timeline " +
+          "tracks. Replaces an older 'move to folder' submenu: a folder is made " +
+          "FROM tracks, and moving into an existing one is a drag.",
+        placeholders: { count: "How many tracks go into the new folder; it also selects the plural form." },
+      },
+      "editor.timeline.trackLeaveFolderCount": {
+        description:
+          "Menu item that returns the selected timeline tracks to the top " +
+          "level, out of whatever folders they are in. The tracks are not " +
+          "deleted or changed in any other way.",
+        placeholders: { count: "How many tracks leave their folder; it also selects the plural form." },
+      },
+      "editor.timeline.trackDeleteCount": {
+        description:
+          "Menu item that deletes several selected timeline tracks at once. " +
+          "The count is how many of the selection can be deleted — the rows a " +
+          "file derives cannot — so it may be fewer than are selected. A " +
+          "confirmation follows.",
+        placeholders: { count: "How many tracks will be deleted; it also selects the plural form." },
+      },
+      "editor.timeline.deleteTrackTakes": {
+        description:
+          "The warning line in that confirmation, counting the recordings that " +
+          "will be deleted along with the track. Stated plainly because it is " +
+          "the fact the person is being asked to accept.",
+        placeholders: {
+          count:
+            "How many recordings are on the track; it also selects which plural form is used.",
+        },
+      },
+      "editor.timeline.deleteFolderMembers": {
+        description:
+          "Shown instead when the thing being deleted is a FOLDER. The tracks " +
+          "inside are not deleted with it — they return to the top level — and " +
+          "saying so is what stops the confirmation reading as a threat to them.",
+        placeholders: {
+          count:
+            "How many tracks are inside the folder; it also selects which plural form is used.",
+        },
+      },
+      "editor.timeline.addTrackAlignHint": {
+        description:
+          "Help text under the 'Line it up with' picker in the add-track " +
+          "dialog. The new track's chips are positioned against the chosen " +
+          "track's lines, and that choice is made once, at creation.",
+      },
+      "editor.timeline.gutterCollapseAria": {
+        description:
+          "Screen-reader name and tooltip of the button that narrows the " +
+          "timeline's whole track-name column to a strip of icons, giving the " +
+          "space to the tracks themselves. Affects every row at once. Doubles " +
+          "as the button's hover tooltip, so it is read as well as heard.",
+      },
+      "editor.timeline.gutterExpandAria": {
+        description:
+          "Screen-reader name and tooltip of the button that widens the " +
+          "timeline's track-name column back out, so every track's full name " +
+          "and description are readable again. Affects every row at once. " +
+          "Doubles as the button's hover tooltip.",
+      },
+      "editor.timeline.folderExpandAria": {
+        description:
+          "Screen-reader name of the triangle that opens a timeline folder and " +
+          "shows the tracks inside it. Never visible — the control is an icon.",
+        placeholders: { name: "The folder's name, as the user set it." },
+      },
+      "editor.timeline.folderCollapseAria": {
+        description:
+          "Screen-reader name of the triangle that closes a timeline folder. " +
+          "The tracks inside are hidden and the folder's own row shows a " +
+          "summary of where their audio falls. Never visible — an icon.",
+        placeholders: { name: "The folder's name, as the user set it." },
       },
       "editor.timeline.rowsShorterAria": {
         description:
@@ -2047,18 +2214,6 @@ export const editor = defineNamespace({
       },
       "editor.milestone.chapter.next": {
         description: MILESTONE_NEXT + MILESTONE_KIND_CHAPTER,
-      },
-      "editor.chapter.completeTitle": {
-        description:
-          "Success toast when the open chapter page becomes complete " +
-          "(rising edge of the project's completion trigger) and there is a " +
-          "next chapter. Not shown when landing on a chapter that is already " +
-          "done. The action button on the same toast is " +
-          "editor.milestone.chapter.next. {label} is the finished chapter's " +
-          "display name.",
-        placeholders: {
-          label: MILESTONE_LABEL_PLACEHOLDER,
-        },
       },
       "editor.milestone.chapter.current": {
         description: MILESTONE_CURRENT + MILESTONE_KIND_CHAPTER,
@@ -3179,124 +3334,13 @@ export const editor = defineNamespace({
             "The number the sentence counts; it also selects which plural form is used.",
         },
       },
-      "editor.video.title": {
-        description:
-          "Title of the dialog that links a video to a subtitle/timed file so the " +
-          "translator can watch it while timing cues. Title Case in English because " +
-          "it is a dialog title. 'Attach' rather than 'upload' — a URL is not copied.",
-        maxLength: 24,
-      },
-      "editor.video.currentlyAttached": {
-        description:
-          "Muted label above the name of the video already linked to this file. A " +
-          "state description, not an action.",
-        maxLength: 24,
-      },
-      "editor.video.removeAttachment": {
-        description:
-          "Tooltip and screen-reader name of the trash button that unlinks the " +
-          "current video. For an uploaded file it also deletes the local copy; for a " +
-          "URL nothing at the far end is touched.",
-        maxLength: 26,
-      },
-      "editor.video.startOffset": {
-        description:
-          "Label of the numeric field holding how many seconds of the video come " +
-          "BEFORE the first subtitle cue. The '(s)' is the unit abbreviation for " +
-          "seconds — keep an equivalent short unit marker.",
-        maxLength: 22,
-      },
-      "editor.video.saveOffset": {
-        description:
-          "Small button that stores the start-offset value without changing which " +
-          "video is attached. Imperative.",
-        maxLength: 18,
-      },
-      "editor.video.offsetHint": {
-        description:
-          "Help text under the start-offset field. Two sentences: what the number " +
-          "means, then the common case (a title sequence) worked through so the user " +
-          "knows what to type. 'Cues' are the timed subtitle entries.",
-      },
-      "editor.video.tabUrl": {
-        description:
-          "First of two tabs in the attach-video dialog: link a video already " +
-          "hosted somewhere by pasting its address.",
-        maxLength: 18,
-      },
-      "editor.video.tabUpload": {
-        description:
-          "Second tab: pick a video file from this computer, stored locally in the " +
-          "browser rather than on the server.",
-        maxLength: 18,
-      },
-      "editor.video.urlLabel": {
-        description:
-          "Form label for the field taking the video's web address.",
-        maxLength: 18,
-      },
-      "editor.video.urlHint": {
-        description:
-          "Help text under the video URL field. Two points: it must be a direct " +
-          "link to the video file itself (the formats in parentheses are file-format " +
-          "names and stay as-is), and unlike an upload a URL is visible to the rest " +
-          "of the team.",
-      },
-      "editor.video.displayNameLabel": {
-        description:
-          "Form label for the optional friendly name shown instead of the raw URL. " +
-          "The '(optional)' must survive — it is what tells the user they can skip it.",
-        maxLength: 28,
-      },
-      "editor.video.displayNamePlaceholder": {
-        description:
-          "Example value in the display-name field. It is a sample title, so " +
-          "translate it as a plausible episode name in the target language rather " +
-          "than as an instruction.",
-        maxLength: 20,
-      },
-      "editor.video.saveUrl": {
-        description:
-          "Full-width confirming button on the URL tab; it attaches the pasted " +
-          "address to the file. Imperative.",
-        maxLength: 18,
-      },
-      "editor.video.enterUrl": {
-        description:
-          "Validation error under the URL field when the user pressed the button " +
-          "with the field empty. Imperative — it says what to do, not what went " +
-          "wrong.",
-        maxLength: 28,
-      },
-      "editor.video.storingLocally": {
-        description:
-          "Status text while the chosen video is being written into this browser's " +
-          "local storage. 'Locally' is the reassuring part: nothing is uploaded. " +
-          "Trailing three periods are literal in the English source.",
-      },
-      "editor.video.dropHint": {
-        description:
-          "Line inside the upload drop zone offering drag-and-drop. It ends with " +
-          "'or' on purpose: the file-picker button follows immediately below and " +
-          "completes the sentence.",
-      },
+      // The one survivor of the removed attach-video dialog (stage 6I); the
+      // file pickers in the import panels are what use it now.
       "editor.video.chooseFile": {
         description:
           "Button under the drop zone that opens the operating system's file " +
           "picker. Imperative.",
         maxLength: 18,
-      },
-      "editor.video.localOnlyHint": {
-        description:
-          "Small print under the upload drop zone. The point is the limitation: an " +
-          "uploaded video stays in this browser, so teammates will not see it — " +
-          "unlike a URL. 'Peers' means the other people on the project.",
-      },
-      "editor.video.uploadedFallbackName": {
-        description:
-          "Stand-in name shown for a locally stored video whose original file name " +
-          "was not recorded. A noun phrase, not an action.",
-        maxLength: 24,
       },
       "editor.timeline.title": {
         description:
@@ -3558,6 +3602,20 @@ export const editor = defineNamespace({
           "view no longer lays clips out on that clock, so showing it would drift " +
           "against the audio. Explains an absence — not an error.",
       },
+      "editor.timeline.outputLatencyNote": {
+        description:
+          "Quiet line in the timeline chrome, shown only while the audio output " +
+          "looks like Bluetooth. The app already shifts the playhead by the delay " +
+          "the browser reports; this says the REMAINDER cannot be measured, so the " +
+          "line may still sit slightly ahead of what is heard. Not a warning and " +
+          "not an error — the person can do nothing about it, and nothing is broken.",
+      },
+      "editor.timeline.outputDeviceChangedToast": {
+        description:
+          "Toast shown when playback was stopped because the audio output device " +
+          "changed mid-playback — headphones connected or unplugged. States what " +
+          "happened and why; the person simply presses play again.",
+      },
       "editor.timeline.measureNote": {
         description:
           "Amber notice above the timeline: some recordings were saved before the app " +
@@ -3598,6 +3656,22 @@ export const editor = defineNamespace({
           "Accessible name of the small X that hides the measure notice for this " +
           "visit. 'For now' is deliberate: the notice returns next time the timeline " +
           "opens while unmeasured recordings remain. Never visible.",
+      },
+      "editor.timeline.transcribeSelectionRecordings": {
+        description:
+          "Shown beside the selected-section count when the two differ: several " +
+          "subtitles can be performed by ONE heard line (22.7% of heard lines " +
+          "cover more than one), so the recording is transcribed once and " +
+          "covers all of them. Stating both numbers is how the user learns that " +
+          "before pressing, rather than wondering afterwards.",
+        placeholders: { count: "How many recordings will actually be transcribed." },
+      },
+      "editor.timeline.transcribeSelectionSharedTooltip": {
+        description:
+          "Tooltip explaining why the section count and the recording count " +
+          "differ — the sections share a heard line, and one transcription " +
+          "covers all of them.",
+        placeholders: { count: "How many recordings will actually be transcribed." },
       },
       "editor.timeline.transcribeSelectionCount": {
         description:

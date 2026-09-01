@@ -7,6 +7,7 @@
 // and carries the lane's `retimable` flag — the source row passes false.
 
 import { Pencil } from "lucide-react"
+import { trackHueVarsFor } from "@/lib/timeline/track-colors"
 import { isVisible } from "@/lib/timeline/scale"
 import {
   slotButtonPx,
@@ -184,7 +185,20 @@ export function TimelineLane({
       : []
 
   return (
-    <div data-testid="tl-lane" data-variant={variant} className={`relative ${TL_ROW_H_CLASS} border-b border-border`}>
+    <div
+      data-testid="tl-lane"
+      data-variant={variant}
+      // AQU-646 stage 7: the row's own hue, inherited by every card inside —
+      // the same mechanism the audio lanes use, so the whole timeline is drawn
+      // from one vocabulary instead of each row hard-coding its own tints.
+      style={trackHueVarsFor(
+        variant === "dialogue" ? "source-audio"
+        : variant === "target-subtitle" ? "target-subtitles"
+        : "source-subtitles",
+        null,
+      )}
+      className={`relative ${TL_ROW_H_CLASS} border-b border-border`}
+    >
       {addSlots.map(({ span, leftPx, widthPx }) => (
         <div
           key={`add-${span.startSec}`}

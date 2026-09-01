@@ -10,8 +10,8 @@ import { defineNamespace, plural } from "./types"
  * Covers: ProjectCreateDialog.tsx, SharePanel.tsx, ProjectSettings.tsx and its
  * ProjectSettings/* sub-panels (SettingsNav, ValidationSettingsSection,
  * DecaySettingsSection, AudioMediaStrategySection, SourceLinkSection,
- * LanguagesSection, ChapterPagingSection), and the shared PermissionDeniedAlert
- * component's project-settings-originated action/role-floor keys.
+ * LanguagesSection), and the shared PermissionDeniedAlert component's
+ * project-settings-originated action/role-floor keys.
  */
 export const projectSettings = defineNamespace({
   keys: {
@@ -211,6 +211,9 @@ export const projectSettings = defineNamespace({
     "projectSettings.timeline.addLinesLabel": "Let people add new lines into the timeline's silences",
     "projectSettings.timeline.addLinesHint":
       "Off by default. With this on, a pencil appears over each stretch of the timeline that no line covers, and a microphone beside it that creates a line and starts recording. It is never offered on a file with imported audio cues \u2014 there the cues already say where the lines are. Deleting an empty line somebody added stays available either way, so turning this back off can never strand one.",
+    "projectSettings.timeline.trackEditingLabel": "Let maintainers add and edit timeline tracks",
+    "projectSettings.timeline.trackEditingHint":
+      "Off by default. With this on, a maintainer can add extra tracks to a file's timeline, group them into folders, give them colours and delete them. Deleting a track deletes every recording on it, and asks first. Renaming a track and dragging one up or down the list are not affected by this \u2014 a maintainer can always do both. Turning this back off leaves every track exactly as it is and everything still plays; it only stops the tracks being changed.",
     // model → projectSettings.advancedLlm.modelLabel
     "projectSettings.field.temperature": "temperature",
     "projectSettings.field.healthPenalty": "health penalty",
@@ -253,7 +256,7 @@ export const projectSettings = defineNamespace({
 
     // ── Settings-group index (SETTINGS_GROUPS) ──
     // "General" group label → common.general (identical text)
-    "projectSettings.group.generalDescription": "Name, languages, editor, username, Bible resources",
+    "projectSettings.group.generalDescription": "Name, languages, username, Bible resources",
     "projectSettings.group.sourceSyncLabel": "Source & sync",
     "projectSettings.group.sourceSyncDescription": "Linked source project, upstream changes, git sync",
     "projectSettings.group.aiLabel": "AI & completion",
@@ -277,7 +280,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.section.languages": "Languages",
     "projectSettings.section.bibleResources": "Bible resources",
     "projectSettings.section.import": "Import",
-    "projectSettings.section.editor": "Editor",
     "projectSettings.section.user": "User",
     "projectSettings.section.aiInstructions": "AI Instructions",
     "projectSettings.section.draftContext": "Draft Context",
@@ -313,38 +315,6 @@ export const projectSettings = defineNamespace({
       "When on, USFM imports drop the book name, running header, TOC, main title, and " +
       "introduction paragraphs. Section headings and Psalm titles still import. Off " +
       "(the default) imports front matter as translatable cells.",
-
-    // ── Editor (AQU-1087 chapter paging) ──
-    "projectSettings.editor.pagingLabel": "One chapter at a time",
-    "projectSettings.editor.pagingDescription":
-      "Show only the current chapter in the editor instead of the whole book in one " +
-      "scroll. Translators still use the chapter navigator to jump. Off (the default) " +
-      "keeps the full-book scroll.",
-    "projectSettings.editor.triggerLabel": "When a chapter is complete",
-    "projectSettings.editor.triggerDescription":
-      "How this project decides the current chapter is done. Progress and validation " +
-      "counts are unchanged — this only affects the paged editor.",
-    "projectSettings.editor.triggerTranslatedLabel": "All verses translated",
-    "projectSettings.editor.triggerTranslatedDescription":
-      "Every cell in the chapter has a translation.",
-    "projectSettings.editor.triggerValidatedLabel": "All verses validated",
-    "projectSettings.editor.triggerValidatedDescription":
-      "Every cell in the chapter meets this project's validation requirement.",
-    "projectSettings.editor.triggerManualLabel": "Manual only",
-    "projectSettings.editor.triggerManualDescription":
-      "Translators use Next chapter. Nothing auto-detects that the chapter is done.",
-    "projectSettings.editor.actionLabel": "When that happens",
-    "projectSettings.editor.actionDescription":
-      "What the editor does after the chapter meets the completion trigger.",
-    "projectSettings.editor.actionPromptLabel": "Offer to go to the next chapter",
-    "projectSettings.editor.actionPromptDescription":
-      "Show a prompt so the translator can advance or stay.",
-    "projectSettings.editor.actionAutoLabel": "Go to the next chapter automatically",
-    "projectSettings.editor.actionAutoDescription":
-      "Advance as soon as the chapter is complete.",
-    "projectSettings.editor.actionStayLabel": "Stay on this chapter",
-    "projectSettings.editor.actionStayDescription":
-      "Leave the translator on the finished chapter until they go to the next chapter.",
 
     // ── User card ──
     "projectSettings.user.usernameLabel": "Username",

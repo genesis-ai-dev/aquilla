@@ -15,6 +15,7 @@
 import type { FrontierSession } from "@/lib/frontier/types"
 import { buildAudioId, deleteCellAudio, uploadCellAudio } from "@/lib/audio/upload"
 import { audioCachePutBlob } from "@/lib/audio/bytes-cache"
+import { RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
@@ -95,6 +96,12 @@ export function validateAudioFile(file: File): string | null {
 }
 
 export interface AttachAudioFileArgs {
+  /**
+   * AQU-646 stage 3: which TRACK the file lands on, as a storage slot.
+   * Defaults to the dub row's, so the cell action rail is unchanged; the
+   * recorder passes its own target track's.
+   */
+  slot?: string
   session: FrontierSession | null
   projectId: string
   fileId: string
@@ -120,9 +127,10 @@ export interface AttachAudioFileResult {
 }
 
 /**
- * Upload `file` to R2 and attach it to `cellId` as a take in the "recording"
- * slot. Throws with a user-presentable message on every failure; the caller
- * owns the busy/error UI and fires its own `onTakeSaved`.
+ * Upload `file` to R2 and attach it to `cellId` as a take in the requested
+ * `slot`, defaulting to the dub row's. Throws with a user-presentable message
+ * on every failure; the caller owns the busy/error UI and fires its own
+ * `onTakeSaved`.
  *
  * NOT auto-transcribed, and that asymmetry with the mic recorder is deliberate
  * — do not "fix" it. A recorded take's blob is provably this line, so Whisper
@@ -132,7 +140,7 @@ export interface AttachAudioFileResult {
  * the cell.
  */
 export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<AttachAudioFileResult> {
-  const { session, projectId, fileId, cellId, file, username, label } = args
+  const { session, projectId, fileId, cellId, file, username, label, slot = RECORDING_SLOT } = args
 
   // Hard front gate, not a retry: audio bytes can NEVER be queued offline —
   // the outbox carries JSON events only and the bytes go straight to R2 by
@@ -173,7 +181,7 @@ export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<
       cellId,
       audioId: fullAudioId,
       url: result.url,
-      slot: "recording",
+      slot,
       mimeType: file.type || undefined,
       durationMs,
       label,
@@ -193,7 +201,14 @@ export async function attachAudioFileToCell(args: AttachAudioFileArgs): Promise<
   injectOptimisticAudioAttachment(fileId, cellId, {
     audioId: fullAudioId,
     url: result.url,
-    slot: "recording",
+    // THE CALLER'S SLOT, not a literal. The emit above already used it; this
+    // line did not, so an upload aimed at an added track optimistically
+    // claimed the DEFAULT dub row's selection — and could never be confirmed,
+    // because `shadowConfirmed` looks the selection up BY SLOT and would find
+    // the default row's own take there forever. See the warning in
+    // audio-attachments-bus.ts: a plain-string slot means the compiler cannot
+    // catch a hard-coded one written where a variable belongs.
+    slot,
     mimeType: file.type || null,
     voiceId: null,
     referenceAudioId: null,

@@ -154,21 +154,9 @@ import {
   verseLabelFromCanonical,
 } from "@/lib/scripture-reference"
 import {
-  cellIdsForChapterPage,
   firstActuallyVisibleIndex,
-  milestonePageForCell,
-  flattenChapterDestinations,
-  nextChapterDestination,
   resolveActiveChapterLabel,
-  resolveChapterPageKey,
-  validStoredChapterPage,
 } from "@/lib/chapter-navigation"
-import {
-  resolveChapterCompletionAction,
-  resolveChapterCompletionTrigger,
-  resolveChapterPagingEnabled,
-} from "@/lib/sync/project-settings"
-import { useChapterCompletionAdvance } from "@/hooks/useChapterCompletionAdvance"
 import { isPerfLogEnabled } from "@/lib/perf-log"
 import {
   type DirectionMode,
@@ -184,7 +172,6 @@ import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept } from "@/lib/terminology/types"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
-import { getChapterPagePref, setChapterPagePref } from "@/lib/store/chapter-page-pref"
 import { useEditorActions } from "@/context/EditorActionsContext"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { AddConceptDialog } from "./AddConceptDialog"
@@ -837,15 +824,8 @@ interface EditorTableProps {
    *  Null when the visible cell carries no ref. */
   onVisibleRefChange?: (ref: string | null) => void
   /** Emits the exact virtualized viewport so translate-as-read can remain
-   *  bounded to rows the user can currently see. When chapter paging is on,
-   *  this reports the full page (the visible context), not the virtual window. */
+   *  bounded to rows the user can currently see. */
   onVisibleCellIdsChange?: (cellIds: string[]) => void
-  /**
-   * AQU-1087: the navigator chapter currently in the table, or `null` when
-   * paging is off (whole-file work). Empty means the page has not landed yet
-   * — callers must not fall back to the full file.
-   */
-  onPageCellIdsChange?: (cellIds: string[] | null) => void
   /**
    * RACE-5: ref-backed lock check for commit-time enforcement. Reads the live
    * lock map (updated synchronously on each WS frame) so a commit queued just
@@ -909,7 +889,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   footnoteViewMode = "off",
   onVisibleRefChange,
   onVisibleCellIdsChange,
-  onPageCellIdsChange,
   onVisibleFootnotesChange,
   onFootnoteCreated,
   chapterNavTrailing,
@@ -939,30 +918,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     fileId: string | null
     label: string
     subsectionKey?: string
-  } | null>(() => {
-    if (!resolveChapterPagingEnabled(project)) return null
-    const fileId = cellStore.getFileId()
-    if (!fileId) return null
-    const stored = getChapterPagePref(fileId)
-    if (!stored) return null
-    return {
-      fileId,
-      label: stored.key,
-      ...(stored.subsectionKey ? { subsectionKey: stored.subsectionKey } : {}),
-    }
-  })
-  const pagingWasOnRef = useRef(resolveChapterPagingEnabled(project))
-  const persistChapterPage = useCallback((
-    fileId: string | null,
-    key: string,
-    subsectionKey?: string,
-  ) => {
-    if (!fileId || !key) return
-    setChapterPagePref(fileId, {
-      key,
-      ...(subsectionKey ? { subsectionKey } : {}),
-    })
-  }, [])
+  } | null>(null)
   const clearChapterNavigationSelection = useCallback(() => {
     setChapterNavigationSelection(null)
   }, [])
@@ -1028,106 +984,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [lanes, archivedLanes])
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
-  const allCellIds = useCellIds(cellStore, orderedBy, !!audioLens)
-  const cellStoreVersion = useCellStoreVersion(cellStore)
-  const pagingOn = resolveChapterPagingEnabled(project)
-  const listFileId = cellStore.getFileId()
-  const milestoneNavigation = useMemo(() =>
-    readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex(allCellIds)),
-  [allCellIds, cellStore, cellStoreVersion])
-  const milestoneKeyByCellId = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const entry of milestoneNavigation) {
-      for (const cellId of entry.cellIds) map.set(cellId, entry.key)
-    }
-    return map
-  }, [milestoneNavigation])
-  const selectedChapterLabel = chapterNavigationSelection?.fileId === listFileId
-    ? chapterNavigationSelection.label
-    : null
-  const viewportPageKey = milestoneKeyByCellId.get(
-    allCellIds[chapterVisibleIndex ?? firstVisibleIndex] ?? "",
-  ) ?? ""
-  const pageKey = resolveChapterPageKey({
-    pagingEnabled: pagingOn,
-    navigationKeys: milestoneNavigation.map((entry) => entry.key),
-    selectedKey: selectedChapterLabel,
-    viewportKey: viewportPageKey,
-  })
-  const displayCellIds = useMemo(() => cellIdsForChapterPage({
-    pagingEnabled: pagingOn,
-    allCellIds,
-    navigation: milestoneNavigation,
-    pageKey,
-    subsectionKey: pagingOn ? chapterNavigationSelection?.subsectionKey : undefined,
-  }), [
-    allCellIds,
-    chapterNavigationSelection?.subsectionKey,
-    milestoneNavigation,
-    pageKey,
-    pagingOn,
-  ])
+  const displayCellIds = useCellIds(cellStore, orderedBy, !!audioLens)
   const displayCellIdsRef = useRef<readonly string[]>(displayCellIds)
-  const pendingScrollToCellRef = useRef<{
-    cellId: string
-    flash?: boolean
-    follow?: "engage" | "release"
-  } | null>(null)
-  const releaseChapterSelection = useCallback(() => {
-    if (pagingOn) return
-    clearChapterNavigationSelection()
-  }, [clearChapterNavigationSelection, pagingOn])
-  const revealCellOnPage = useCallback((cellId: string) => {
-    const page = milestonePageForCell(milestoneNavigation, cellId)
-    if (!page || !listFileId) return false
-    setChapterNavigationSelection({
-      fileId: listFileId,
-      label: page.key,
-      ...(page.subsectionKey ? { subsectionKey: page.subsectionKey } : {}),
-    })
-    persistChapterPage(listFileId, page.key, page.subsectionKey)
-    return true
-  }, [listFileId, milestoneNavigation, persistChapterPage])
-  useLayoutEffect(() => {
-    const pagingJustEnabled = pagingOn && !pagingWasOnRef.current
-    pagingWasOnRef.current = pagingOn
-    if (!pagingOn || !pageKey || !listFileId) return
-    const stored = pagingJustEnabled
-      ? null
-      : validStoredChapterPage(milestoneNavigation, getChapterPagePref(listFileId))
-    const selection = chapterNavigationSelection?.fileId === listFileId
-      ? chapterNavigationSelection
-      : null
-    const selectionValid = selection != null
-      && milestoneNavigation.some((entry) => entry.key === selection.label)
-    if (selectionValid && selection) {
-      const current = getChapterPagePref(listFileId)
-      if (
-        current?.key !== selection.label
-        || current.subsectionKey !== selection.subsectionKey
-      ) {
-        persistChapterPage(listFileId, selection.label, selection.subsectionKey)
-      }
-      return
-    }
-    if (stored) {
-      setChapterNavigationSelection({
-        fileId: listFileId,
-        label: stored.key,
-        ...(stored.subsectionKey ? { subsectionKey: stored.subsectionKey } : {}),
-      })
-      return
-    }
-    setChapterNavigationSelection({ fileId: listFileId, label: pageKey })
-    persistChapterPage(listFileId, pageKey)
-  }, [
-    chapterNavigationSelection,
-    listFileId,
-    milestoneNavigation,
-    pageKey,
-    pagingOn,
-    persistChapterPage,
-  ])
   const selectionDragRef = useRef<{
     pointerId: number
     anchorIndex: number
@@ -1242,21 +1100,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const handleFollowRest = useCallback(() => setFollowHoverLock(false), [setFollowHoverLock])
   const followScrollToCell = useCallback((cellId: string) => {
     const index = displayCellIdsRef.current.indexOf(cellId)
-    if (index < 0) {
-      if (pagingOn && revealCellOnPage(cellId)) {
-        pendingScrollToCellRef.current = { cellId, follow: "engage" }
-      }
-      return
-    }
+    if (index < 0) return
     setFollowHoverLock(true)
     // A range picked in the segment navigator must not stay latched while
     // playback walks past it — drop it so the trigger quietly tracks the
     // sounding cell (Sam 2026-08-07), same as scrollToCellId does for jumps.
-    releaseChapterSelection()
+    clearChapterNavigationSelection()
     // 0.35: the running row rides high enough to leave reading room below.
     // Animated (Sam 2026-08-08): the follow glides instead of teleporting.
     programmaticListScroll(index, { viewPosition: 0.35, animated: true })
-  }, [pagingOn, programmaticListScroll, releaseChapterSelection, revealCellOnPage, setFollowHoverLock])
+  }, [clearChapterNavigationSelection, programmaticListScroll, setFollowHoverLock])
 
   // Durable cell audio (AD-2 cell.audio.* grammar). Per-file read; overlay each
   // visible row's attachments + selected clips at render time, rather than
@@ -1274,6 +1127,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // Combined-voice range lookup resolves through the active store at call time
   // so the editor does not keep a second full CellData[] just for audio.
   const isTimeOrdered = orderedBy === "time"
+  const cellStoreVersion = useCellStoreVersion(cellStore)
 
   useEffect(() => {
     if (!activeEditorCellId) return
@@ -1461,7 +1315,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const list = displayCellIdsRef.current
     if (index < 0 || index >= list.length) return
     const targetId = list[index]
-    releaseChapterSelection()
+    clearChapterNavigationSelection()
     handleActivateEditor(targetId)
     // Navigating to EDIT a cell releases follow — playback must not yank the
     // row out from under the caret (pre-round behavior, now explicit).
@@ -1499,7 +1353,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       }
     }
     focusWhenMounted()
-  }, [getListQueryRoot, handleActivateEditor, programmaticListScroll, releaseChapterSelection])
+  }, [clearChapterNavigationSelection, getListQueryRoot, handleActivateEditor, programmaticListScroll])
 
   // AQU-646 round 3: shared flash body — scroll-by-id and the legacy flashCell
   // both defer to the next frame (the list may still be scrolling, so the DOM
@@ -1514,20 +1368,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       window.setTimeout(() => el.classList.remove("codex-search-flash"), 1800)
     })
   }, [getListQueryRoot])
-
-  useLayoutEffect(() => {
-    const pending = pendingScrollToCellRef.current
-    if (!pending) return
-    const index = displayCellIds.indexOf(pending.cellId)
-    if (index < 0) return
-    pendingScrollToCellRef.current = null
-    programmaticListScroll(index, {
-      viewPosition: 0.5,
-      animated: false,
-      follow: pending.follow ?? "release",
-    })
-    if (pending.flash) flashCellDom(pending.cellId)
-  }, [displayCellIds, flashCellDom, programmaticListScroll])
 
   // AQU-646 round 8: two short beats on a set of rows, with NO selection — the
   // gap-click's "look here" for the lines on either side of a silence. Removing
@@ -1553,7 +1393,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   useImperativeHandle(ref, () => ({
     scrollToCellIndex(index: number) {
       if (index >= 0 && index < displayCellIds.length) {
-        releaseChapterSelection()
+        clearChapterNavigationSelection()
         programmaticListScroll(index, { viewPosition: 0.5, animated: false })
       }
     },
@@ -1563,18 +1403,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       // STORE order — but the list renders displayCellIds, which time-ordered
       // files re-sort by timing, so those jumps could land on the wrong row.
       const index = displayCellIdsRef.current.indexOf(cellId)
-      if (index < 0) {
-        if (pagingOn && revealCellOnPage(cellId)) {
-          pendingScrollToCellRef.current = {
-            cellId,
-            flash: opts?.flash,
-            follow: opts?.follow ?? "release",
-          }
-          return true
-        }
-        return false
-      }
-      releaseChapterSelection()
+      if (index < 0) return false
+      clearChapterNavigationSelection()
       // Default "release": a jump the user is INSPECTING (search, presence,
       // findings) must not have playback yank the table back a beat later.
       // Wire a (chip clicks) passes "engage" — that jump means "watch this".
@@ -1620,7 +1450,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     pulseCells(cellIds) {
       pulseCellsDom(cellIds)
     },
-  }), [cellStore, displayCellIds.length, flashCellDom, focusCellEditorByIndex, getListQueryRoot, issueFollowCommand, pagingOn, programmaticListScroll, pulseCellsDom, releaseChapterSelection, revealCellOnPage])
+  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom, pulseCellsDom, programmaticListScroll, issueFollowCommand])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
@@ -1629,7 +1459,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     const list = displayCellIdsRef.current
     if (index < 0 || index >= list.length) return
     const targetId = list[index]
-    releaseChapterSelection()
+    clearChapterNavigationSelection()
     // Grid-focus navigation is editing intent too — release follow.
     programmaticListScroll(index, { viewPosition: 0.5, animated: false, follow: "release" })
     let attempts = 0
@@ -1649,7 +1479,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       rowEl.focus()
     }
     focusWhenMounted()
-  }, [getListQueryRoot, programmaticListScroll, releaseChapterSelection])
+  }, [clearChapterNavigationSelection, getListQueryRoot, programmaticListScroll])
 
   // Resolve a navigation request from a cell editor (Up/Down/Tab) to the
   // adjacent cell and focus it. Out-of-range steps (top/bottom edge) no-op.
@@ -1940,6 +1770,17 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [cellStore])
 
   const firstVisibleCellId = displayCellIds[firstVisibleIndex] ?? null
+  const milestoneNavigation = useMemo(() =>
+    readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex(displayCellIds)),
+  [cellStore, cellStoreVersion, displayCellIds])
+
+  const milestoneKeyByCellId = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const entry of milestoneNavigation) {
+      for (const cellId of entry.cellIds) map.set(cellId, entry.key)
+    }
+    return map
+  }, [milestoneNavigation])
 
   const idmlMilestoneNavigation = useMemo(() =>
     fileType === "idml" || readAtVersion(cellStoreVersion, () => milestoneNavigation.some((entry) => {
@@ -2010,7 +1851,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     readAtVersion(cellStoreVersion, () => {
       const map = new Map<string, number>()
       let ordinal = 0
-      for (const id of allCellIds) {
+      for (const id of displayCellIds) {
         const view = cellStore.getCellView(id)
         if (!view) continue
         if (
@@ -2022,7 +1863,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       }
       return map
     }),
-  [allCellIds, cellStore, cellStoreVersion])
+  [cellStore, cellStoreVersion, displayCellIds])
 
   // p1-paragraph-ui-wiring (Task 3 + coordinator follow-up): paragraph group
   // info, keyed by the group's start cell id — drives the "Draft paragraph"
@@ -2051,7 +1892,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     readAtVersion(cellStoreVersion, () => {
       const map = new Map<string, { size: number; draftableCount: number; memberIds: string[] }>()
       const orderedCells: { id: string; fileId: string; paragraphStart?: boolean }[] = []
-      for (const id of allCellIds) {
+      for (const id of displayCellIds) {
         const view = cellStore.getCellView(id)
         if (!view) continue
         orderedCells.push({ id: view.id, fileId: view.fileId, paragraphStart: view.paragraphStart })
@@ -2066,7 +1907,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       }
       return map
     }),
-  [allCellIds, cellStore, cellStoreVersion])
+  [cellStore, cellStoreVersion, displayCellIds])
 
   const subsectionKeyByCellId = useMemo(() => {
     const map = new Map<string, string>()
@@ -2080,15 +1921,16 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [idmlMilestoneNavigation, milestoneNavigation])
   const viewportCellId = displayCellIds[chapterVisibleIndex ?? firstVisibleIndex]
   const currentSubsectionKey = subsectionKeyByCellId.get(viewportCellId ?? "")
-  const activeChapterLabel = pagingOn
-    ? pageKey
-    : resolveActiveChapterLabel(
-      milestoneNavigationItems.map((milestone) => milestone.key),
-      currentMilestoneKey,
-      selectedChapterLabel,
-    )
+  const selectedChapterLabel = chapterNavigationSelection?.fileId === audioFileId
+    ? chapterNavigationSelection.label
+    : null
+  const activeChapterLabel = resolveActiveChapterLabel(
+    milestoneNavigationItems.map((milestone) => milestone.key),
+    currentMilestoneKey,
+    selectedChapterLabel,
+  )
   const activeSubsectionKey = (
-    chapterNavigationSelection?.fileId === listFileId
+    chapterNavigationSelection?.fileId === audioFileId
     && chapterNavigationSelection.label === activeChapterLabel
     && chapterNavigationSelection.subsectionKey
   ) || currentSubsectionKey
@@ -2096,15 +1938,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const handleChapterListPointerDownCapture = useCallback((event: React.PointerEvent) => {
     // Touch/pen gestures and a mouse press on the scroll container indicate
     // manual scrolling. A normal click inside a row should not discard the
-    // chapter the user just chose. Paging keeps the picker as source of truth.
-    if (pagingOn) return
+    // chapter the user just chose.
     if (event.pointerType !== "mouse" || event.target === parentRef.current) {
       clearChapterNavigationSelection()
     }
-  }, [clearChapterNavigationSelection, pagingOn])
+  }, [clearChapterNavigationSelection])
 
   const handleChapterListKeyDownCapture = useCallback((event: React.KeyboardEvent) => {
-    if (pagingOn) return
     const target = event.target
     if (
       target instanceof HTMLElement
@@ -2121,59 +1961,25 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     ) {
       clearChapterNavigationSelection()
     }
-  }, [clearChapterNavigationSelection, pagingOn])
+  }, [clearChapterNavigationSelection])
 
   const handleChapterSelect = useCallback((key: string, subsectionKey?: string) => {
     const entry = milestoneNavigation.find((candidate) => candidate.key === key)
     const subsection = entry?.subsections.find((candidate) => candidate.key === subsectionKey)
-    if (!entry) return
+    const index = subsection?.firstIndex ?? entry?.firstIndex ?? -1
+    if (index < 0) return
     setChapterNavigationSelection({
-      fileId: listFileId,
+      fileId: audioFileId,
       label: key,
       ...(subsection ? { subsectionKey: subsection.key } : {}),
     })
-    persistChapterPage(listFileId, key, subsection?.key)
-    if (pagingOn) {
-      setFirstVisibleIndex(0)
-      setChapterVisibleIndex(0)
-      programmaticListScroll(0, { viewPosition: 0, animated: false, follow: "release" })
-      return
-    }
-    const index = subsection?.firstIndex ?? entry.firstIndex
-    if (index < 0) return
     setFirstVisibleIndex(index)
     setChapterVisibleIndex(index)
     // Picking a range mid-playback is deliberate navigation AWAY — release
     // following (its long smooth scroll used to trip the truce as a fake
     // "user scroll" and kill follow as a side effect; now it's explicit).
     programmaticListScroll(index, { viewPosition: 0, animated: true, follow: "release" })
-  }, [listFileId, milestoneNavigation, pagingOn, persistChapterPage, programmaticListScroll])
-
-  const pageWorkCells = useMemo(() =>
-    readAtVersion(cellStoreVersion, () => displayCellIds.flatMap((id) => {
-      const view = cellStore.getCellView(id)
-      return view ? [view] : []
-    })),
-  [cellStore, cellStoreVersion, displayCellIds])
-  const currentChapterLabel = milestoneNavigationItems.find((item) => item.key === pageKey)?.label
-    ?? pageKey
-  const nextChapter = useMemo(() => nextChapterDestination(
-    flattenChapterDestinations(milestoneNavigationItems),
-    pageKey,
-    pagingOn ? chapterNavigationSelection?.subsectionKey : undefined,
-  ), [chapterNavigationSelection?.subsectionKey, milestoneNavigationItems, pageKey, pagingOn])
-  useChapterCompletionAdvance({
-    enabled: pagingOn,
-    fileId: listFileId,
-    pageKey,
-    subsectionKey: pagingOn ? chapterNavigationSelection?.subsectionKey : undefined,
-    currentLabel: currentChapterLabel,
-    next: nextChapter,
-    trigger: resolveChapterCompletionTrigger(project),
-    action: resolveChapterCompletionAction(project),
-    cells: pageWorkCells,
-    onAdvance: handleChapterSelect,
-  })
+  }, [audioFileId, milestoneNavigation, programmaticListScroll])
 
   // Parallel-bibles sidebar tracking: report the first visible row's canonical
   // ref as the user scrolls. Keyed on the derived ref string
@@ -2237,26 +2043,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     setViewableIndexes((current) => areNumberArraysEqual(current, next) ? current : next)
   }, [displayCellIds.length])
 
-  useLayoutEffect(() => {
-    if (!onPageCellIdsChange) return
-    if (!pagingOn) {
-      onPageCellIdsChange(null)
-      return
-    }
-    onPageCellIdsChange([...displayCellIds])
-  }, [displayCellIds, onPageCellIdsChange, pagingOn])
-
   useEffect(() => {
     if (!onVisibleCellIdsChange) return
-
-    // AQU-1087: the open chapter page is the work context, not the virtual
-    // window of ~12 rows. Translate-as-read should draft the chapter.
-    if (pagingOn) {
-      onVisibleCellIdsChange([...displayCellIds])
-      return () => {
-        onVisibleCellIdsChange([])
-      }
-    }
 
     // LegendList does not always deliver an initial viewability callback when
     // it restores a short list whose rows all fit in the viewport. That left
@@ -2307,7 +2095,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       observer?.disconnect()
       onVisibleCellIdsChange([])
     }
-  }, [displayCellIds, onVisibleCellIdsChange, pagingOn, viewableIndexes])
+  }, [displayCellIds, onVisibleCellIdsChange, viewableIndexes])
 
   const getFootnoteDetails = useCallback(
     (cellId: string) => cellStore.getCellFootnotes(cellId),
@@ -2851,7 +2639,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           ref={listRootRef}
           className="flex min-h-0 flex-1"
           onPointerDownCapture={handleChapterListPointerDownCapture}
-          onWheelCapture={pagingOn ? undefined : clearChapterNavigationSelection}
+          onWheelCapture={clearChapterNavigationSelection}
           onKeyDownCapture={handleChapterListKeyDownCapture}
         >
           {mediaSyncActive && (
@@ -2865,7 +2653,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             />
           )}
           <LegendList
-            key={pagingOn ? `${pageKey}:${chapterNavigationSelection?.subsectionKey ?? ""}` : "full-file"}
             ref={listRef}
             refScrollView={setListScrollElement}
             data={displayCellIds}
@@ -4371,7 +4158,7 @@ function EditorRow({
   // keeps them out of MemoizedRow's React.memo compare surface.
   const {
     onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording,
-    onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, myScopes,
+    onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, audioHomeFor, myScopes,
   } = useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
   // Combine the role capability with the per-cell scope check so an out-of-scope
@@ -4511,6 +4298,15 @@ function EditorRow({
   const [expansionTab, setExpansionTab] = useState<string>("backtranslation")
   const [btAlignmentOpen, setBtAlignmentOpen] = useState(false)
   const hasSourceFootnoteMarker = (cell.original ?? "").includes("\\f")
+  // AQU-646 stage 3f: where this row's audio belongs — itself on every ordinary
+  // file, the heard lines performing it on a file with an audio-cue sibling, and
+  // NULL when a cue sibling exists but nothing performs this line. Read from
+  // context rather than a prop on purpose: MemoizedRow forwards row props one
+  // by one, so a new prop here is four edits and a silent omission away.
+  const audioHomes = audioHomeFor ? audioHomeFor(cell) : [cell]
+  /** The one the voice button plays and replays from. The rest are written too
+   *  (Sam, 2026-08-25: nothing is left silent) but only one can be heard. */
+  const audioHome = audioHomes?.[0] ?? null
   const visibleTranslated = localTargetDraft?.value ?? cell.translated
   const visibleTranslatedHtml = localTargetDraft?.valueHtml ?? cell.translatedHtml
   const idmlConfiguration = useMemo(
@@ -5747,7 +5543,42 @@ function EditorRow({
   }, [])
 
   const isMultiSelected = useIsSelected(cell.id)
-  const synthStatus = useTtsStatus(ttsStatusKey(cell.id))
+  // AQU-646 stage 4c: THE BADGE WATCHES BOTH CELLS THIS ROW CAN FILE UNDER.
+  //
+  // It used to watch only the row's own id, so on a file with an audio-cue
+  // sibling the rail's voice button — moved to `audioHome` by stage 3f, because
+  // that is where the audio belongs — wrote its failures to `synth:<cue>` while
+  // the badge listened on `synth:<subtitle>` and the two never met.
+  //
+  // MOVING IT TO `audioHome` ALONE WOULD HAVE TRADED ONE BLIND SPOT FOR THREE.
+  // Stage 3f moved the rail button and nothing else, so three producers still
+  // file under the ROW's cell: the audio lens's own CellVoicePanel (the primary
+  // per-line generate control in the lens the dubbing workflow lives in),
+  // dropping a voice from the dock onto the row, and "Voice together". None of
+  // them has an error surface of its own — CellVoicePanel reads this status
+  // only to know it is busy — so this badge is the whole of their failure
+  // reporting, and pointing it at the cue would have silenced all three.
+  //
+  // Watching both is the honest question anyway: "did anything about THIS
+  // ROW's voice fail". Where those producers should be writing is a separate
+  // question from whether the row can see them, and answering it means moving
+  // where audio LANDS, not just where a status goes.
+  const ownSynthStatus = useTtsStatus(ttsStatusKey(cell.id))
+  const homeSynthStatus = useTtsStatus(
+    audioHome && audioHome.id !== cell.id ? ttsStatusKey(audioHome.id) : undefined,
+  )
+  // A RUN IN FLIGHT OUTRANKS AN ERROR, the same precedence the recorder's
+  // button uses: with a stale failure on one key and a fresh attempt on the
+  // other, showing the failure would announce the outcome of something still
+  // running.
+  const synthStatus =
+    ownSynthStatus.kind === "loading" || ownSynthStatus.kind === "synthesizing"
+      ? ownSynthStatus
+      : homeSynthStatus.kind === "loading" || homeSynthStatus.kind === "synthesizing"
+        ? homeSynthStatus
+        : ownSynthStatus.kind === "error"
+          ? ownSynthStatus
+          : homeSynthStatus
   const isSynthBusy = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
   const isSynthError = synthStatus.kind === "error"
 
@@ -6140,8 +5971,37 @@ function EditorRow({
                 20px above its translation — the target lane can't be made
                 conditional to match, because it also reserves the strip the
                 floating action rail occupies. */}
-            <div data-testid="source-context-line" data-context-kind={contextIsTimecode ? "timecode" : undefined} className={cn("mb-1 flex h-4 items-center gap-1 text-xs text-muted-foreground", contextIsTimecode ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
-              <span>{cell.context}</span>
+            <div data-testid="source-context-line" className={cn("mb-1 flex h-4 items-center gap-2 text-xs text-muted-foreground", showCellLabel ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
+              {/* AQU-646: the character, on the SOURCE side too (Sam,
+                  2026-08-26) — "put that character label also in the top left
+                  of source cells… we'll just scoot the time range over".
+
+                  THE SAME VALUE THE TARGET CORNER SHOWS, deliberately: the two
+                  names in this app are not interchangeable (the sheet's
+                  `cast_name` is what the timeline, the recorder and the exports
+                  print), and Sam's call was that these two corners agree with
+                  each other rather than with those. It therefore rides the
+                  same "Show cell labels" preference and goes blank in the same
+                  places.
+
+                  `dir="auto"` because the lane is forced LTR for timecodes and
+                  a name is not a timecode. The width cap is what does the
+                  scooting: a long character name truncates rather than pushing
+                  the timing out of the row. */}
+              {showCellLabel && (
+                <AppTooltip content={labelText} disabled={!labelText}>
+                  <span data-testid="source-cell-label" dir="auto" className="max-w-[45%] shrink-0 truncate">
+                    {labelText}
+                  </span>
+                </AppTooltip>
+              )}
+              {/* A TIMECODE IS NOT SHOWN HERE ANY MORE (Sam, 2026-08-27,
+                  relaying the client): it moved to the foot of the cell — see
+                  `source-timing-line` — so the character label has this corner
+                  to itself. Other context, a scripture reference like
+                  "GEN 1:1", still belongs at the top: it names what the line IS
+                  rather than when it happens, and it is centred as it was. */}
+              {!contextIsTimecode && <span className="min-w-0 truncate">{cell.context}</span>}
             </div>
             <SourceReferenceAttachments metadata={cell.metadata} />
             {sourceEditing ? (
@@ -6183,6 +6043,23 @@ function EditorRow({
             )}
             {cellExamples.length > 0 && (
               <ExamplePanel examples={cellExamples} />
+            )}
+            {/* THE TIMING, AT THE FOOT OF THE CELL. Rendered ONLY for a
+                timecode, and that asymmetry with the lane above is deliberate:
+                the top lane is reserved even when empty because its 20px is
+                what keeps the source and target columns' first lines on one
+                baseline, while nothing below the text mirrors anything — so an
+                always-on strip here would be wasted height on every scripture
+                row in the app. */}
+            {contextIsTimecode && (
+              <div
+                data-testid="source-timing-line"
+                data-context-kind="timecode"
+                className="mt-1 flex h-4 items-center justify-start text-left text-xs text-muted-foreground"
+                dir="ltr"
+              >
+                <span className="min-w-0 truncate">{cell.context}</span>
+              </div>
             )}
           </div>
         )}
@@ -6720,8 +6597,26 @@ function EditorRow({
               {/* Round 5: no playOnly — generating here durably attaches the
                   voice; an untranslated line shows the button disabled with
                   the reason instead of hiding it. */}
+              {/* AQU-646 stage 3f: THE VOICE GOES WHERE THE AUDIO LIVES.
+                  The mic a few pixels away already redirects to the heard line
+                  performing this subtitle; this button did not, so a generated
+                  voice landed on the subtitle cell — which the timeline cannot
+                  draw, because it resolves takes over the cues. Two buttons in
+                  one row putting their audio in two different places.
+
+                  The WORDS are still this row's own translation, which is where
+                  they live and always did. Only the destination moves. */}
               <CellTtsButton
-                cellId={cell.id}
+                cellId={audioHome?.id ?? cell.id}
+                // …BUT THE VOICE STILL COMES OFF THIS ROW. Character voices are
+                // assigned on the subtitle and stored by ITS cell id, so handing
+                // the cue's id to the cast lookup — which redirecting `cellId`
+                // alone did — found no assignment and fell through to the
+                // project default. Every character's line was generated, and
+                // durably attached, in the narrator's voice, while the character
+                // gutter in the same row went on showing the right name
+                // (2026-08-27).
+                voiceCellId={cell.id}
                 text={visibleTranslated}
                 original={effectiveSourceText(cell)}
                 context={cell.context}
@@ -6730,11 +6625,24 @@ function EditorRow({
                 targetLanguage={project.targetLanguage}
                 projectTtsSettings={project.ttsSettings}
                 cellTtsSettings={cell.ttsSettings}
-                generatedVoiceAudioId={cell.selectedGeneratedVoiceAudioId}
-                attachments={cell.attachments}
+                // OFF THE HOME, NOT OFF THE ROW. This is a replay button
+                // before it is a generate one, and the clip it replays lives
+                // where it was written — read these off the subtitle and it
+                // finds nothing and re-synthesizes on every press.
+                generatedVoiceAudioId={audioHome?.selectedGeneratedVoiceAudioId}
+                attachments={audioHome?.attachments ?? cell.attachments}
                 projectId={project.id}
-                fileId={cell.fileId}
-                disabled={!editable}
+                fileId={audioHome?.fileId ?? cell.fileId}
+                // Sam, 2026-08-25: a subtitle performed by two heard lines
+                // voices BOTH, so neither is left silent. Only the first is
+                // played back; the rest are generated alongside it.
+                alsoAttachTo={audioHomes
+                  ?.slice(1)
+                  .map((c) => ({ cellId: c.id, fileId: c.fileId }))}
+                // A cue sibling exists but nothing performs this line — about
+                // ten an episode. There is nowhere to put a voice, and writing
+                // it to the subtitle is exactly the bug above.
+                disabled={!editable || audioHomes === null}
               />
 
               {editable && !isLoading && (

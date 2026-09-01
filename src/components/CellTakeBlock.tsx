@@ -140,7 +140,10 @@ export function CellTakeBlock({
         cellId: owner.id,
         audioId: selectedAudioId,
         url: attachment.url,
-        slot: selectedAudioId === owner.selectedGeneratedVoiceAudioId ? "generatedVoice" : "recording",
+        // AQU-646: the clip's own slot, inferred only when it is absent (a
+        // hand-built stub). This attach assigns `slot` outright and deselects
+        // the clip's siblings in that slot, so guessing it moves the take.
+        slot: attachment.slot ?? (selectedAudioId === owner.selectedGeneratedVoiceAudioId ? "generatedVoice" : "recording"),
         timings: nextTimings,
         ...(attachment.durationMs != null ? { durationMs: attachment.durationMs } : {}),
         ...(attachment.voiceId ? { voiceId: attachment.voiceId } : {}),

@@ -14,7 +14,6 @@
 import { describe, it, expect } from "vitest"
 import { canPerform } from "@/lib/sync/role-policy"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
-import { filterToChapterPage } from "@/lib/chapter-navigation"
 
 // ---------------------------------------------------------------------------
 // Helper that mirrors the batch-validate filter logic in ProjectWorkspace.tsx
@@ -67,16 +66,6 @@ describe("AQU-288: batch-validate cell filter", () => {
   it("excludes untouched AI drafts until a human reviews them", () => {
     const result = filterValidatableCells(cells, FILE_A)
     expect(result.find((c) => c.id === "c6")).toBeUndefined()
-  })
-})
-
-describe("AQU-1087: batch-validate stays on the open chapter page", () => {
-  it("drops eligible cells that are not on the current page", () => {
-    const eligible = [
-      { id: "c1", fileId: "file-a", translated: "human", targetEventId: "evt-1" },
-      { id: "c2", fileId: "file-a", translated: "human", targetEventId: "evt-2" },
-    ]
-    expect(filterToChapterPage(eligible, ["c1"]).map((c) => c.id)).toEqual(["c1"])
   })
 })
 

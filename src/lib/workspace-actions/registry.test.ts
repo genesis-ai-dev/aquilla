@@ -231,3 +231,48 @@ describe("getVisibleActions", () => {
     expect(visible.map((a) => a.id)).toEqual(["b"])
   })
 })
+
+// ── The two audio actions are gated on audioCounts (2026-08-27) ─────────────
+//
+// `ctx()` never set `audioCounts`, so nothing pinned what these numbers do —
+// which is how "Transcribe all recordings" came to be hidden outright on every
+// file with an audio-cue sibling without a test noticing. On those files the
+// count was computed over subtitle rows, which never carry a `selectedAudioId`,
+// so it was permanently 0 and this predicate removed the item from the menu.
+// A hidden item has no disabled state and no explanation: it simply is not
+// there.
+describe("the audio actions are gated on their counts", () => {
+  const find = (id: string) => workspaceActions.find((a) => a.id === id)!
+
+  it("offers each action only when there is work for it", () => {
+    const transcribe = find("transcribe-all")
+    const synth = find("synth-all")
+    const counts = (untranscribed: number, unsynthesized: number) =>
+      ctx({ activeFileId: "f1", audioCounts: { untranscribed, unsynthesized } })
+
+    expect(transcribe.isAvailable!(counts(3, 0))).toBe(true)
+    expect(transcribe.isAvailable!(counts(0, 3))).toBe(false)
+    expect(synth.isAvailable!(counts(0, 3))).toBe(true)
+    expect(synth.isAvailable!(counts(3, 0))).toBe(false)
+  })
+
+  it("offers neither with no file open, whatever the counts say", () => {
+    const open = { audioCounts: { untranscribed: 5, unsynthesized: 5 } }
+    expect(find("transcribe-all").isAvailable!(ctx({ ...open, activeFileId: null }))).toBe(false)
+    expect(find("synth-all").isAvailable!(ctx({ ...open, activeFileId: null }))).toBe(false)
+  })
+
+  it("treats absent counts as no work rather than throwing", () => {
+    const bare = ctx({ activeFileId: "f1" })
+    expect(find("transcribe-all").isAvailable!(bare)).toBe(false)
+    expect(find("synth-all").isAvailable!(bare)).toBe(false)
+  })
+
+  // The number in the confirmation dialog is the number the user consents to,
+  // so it has to be the same one the gate used.
+  it("confirms with the count it was gated on", () => {
+    const c = ctx({ activeFileId: "f1", audioCounts: { untranscribed: 7, unsynthesized: 4 } })
+    expect(find("transcribe-all").requiresConfirmation!.description(c, t)).toContain("7")
+    expect(find("synth-all").requiresConfirmation!.description(c, t)).toContain("4")
+  })
+})

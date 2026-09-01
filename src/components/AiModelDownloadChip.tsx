@@ -87,7 +87,7 @@ export function AiModelDownloadChip() {
   }, [readyFlash, whisper.kind, kokoro.kind, mms.kind])
 
   const byId: Record<ModelId, typeof whisper> = { whisper, kokoro, mms }
-  const rows: ModelView[] = MODEL_ORDER.flatMap((id) => {
+  const rows: ModelView[] = MODEL_ORDER.flatMap((id): ModelView[] => {
     const status = byId[id]
     if (status.kind === "downloading") {
       return [{ id, label: LABELS[id], loaded: status.loaded, total: status.total, ready: false }]

@@ -18,6 +18,9 @@ import type { ProjectTtsApi } from "@/hooks/useProjectTts"
 import { renderWithTooltips } from "@/test-utils/tooltip"
 
 const modalProps: { last: NewVoiceModalProps | null } = { last: null }
+// Read through a call so TS can't keep the `last = null` reset narrowed to
+// null across the render that (invisibly to the checker) reassigns it.
+const lastModalProps = (): NewVoiceModalProps | null => modalProps.last
 vi.mock("./NewVoiceModal", () => ({
   NewVoiceModal: (props: NewVoiceModalProps) => {
     modalProps.last = props
@@ -103,12 +106,12 @@ describe("CloneVoiceModalHost", () => {
     const modal = screen.getByTestId("new-voice-modal")
     expect(modal.getAttribute("data-mode")).toBe("clone")
     expect(modal.getAttribute("data-seed")).toBe("cell-1")
-    expect(modalProps.last?.voice).toBeNull()
-    expect(modalProps.last?.provider).toBe("gemini")
+    expect(lastModalProps()?.voice).toBeNull()
+    expect(lastModalProps()?.provider).toBe("gemini")
   })
 
   it("persists a created voice onto the project library", () => {
-    const saveTts = vi.fn(async () => {})
+    const saveTts = vi.fn(async (_overrides: Partial<ProjectTtsSettings>) => {})
     modalProps.last = null
     renderWithTooltips(
       <CloneVoiceModalHost
@@ -129,9 +132,9 @@ describe("CloneVoiceModalHost", () => {
     }
     modalProps.last!.onSave(created)
     expect(saveTts).toHaveBeenCalledTimes(1)
-    const patch = saveTts.mock.calls[0][0]
-    expect(patch.voices).toEqual([narrator, created])
-    expect(patch.defaultVoiceId).toBe(narrator.id)
+    const patch = saveTts.mock.calls[0]?.[0]
+    expect(patch?.voices).toEqual([narrator, created])
+    expect(patch?.defaultVoiceId).toBe(narrator.id)
   })
 
   it("does not persist when the caller is below the maintainer floor", () => {

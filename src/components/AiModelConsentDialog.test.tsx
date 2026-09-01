@@ -12,11 +12,12 @@ import {
   KOKORO_MODEL,
   requestAiModelConsent,
 } from "@/lib/audio/ai-consent"
+import type { PrefetchOptions } from "@/lib/audio/prefetch"
 
-const prefetchAiModels = vi.fn(async () => undefined)
+const prefetchAiModels = vi.fn(async (_opts?: PrefetchOptions) => undefined)
 
 vi.mock("@/lib/audio/prefetch", () => ({
-  prefetchAiModels: (...args: unknown[]) => prefetchAiModels(...args),
+  prefetchAiModels: (opts?: PrefetchOptions) => prefetchAiModels(opts),
 }))
 
 import { AiModelConsentDialog } from "./AiModelConsentDialog"
@@ -55,8 +56,8 @@ describe("AiModelConsentDialog", () => {
       expect.objectContaining({ models: ["kokoro"] }),
     )
     expect(prefetchAiModels.mock.calls.some((c) => {
-      const opts = c[0] as { models?: string[] }
-      return (opts.models ?? []).includes("whisper") || (opts.models ?? []).includes("mms")
+      const models = c[0]?.models ?? []
+      return models.includes("whisper") || models.includes("mms")
     })).toBe(false)
   })
 

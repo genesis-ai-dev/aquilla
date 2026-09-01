@@ -11,12 +11,13 @@
  * asserts the band no longer appears.
  */
 
-import { describe, it, expect, vi } from "vitest"
+import { afterEach, describe, it, expect, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode, ComponentProps } from "react"
 import { EditorTable } from "./EditorTable"
+import { Toaster, toast } from "@/components/ui/toast"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import type { CellData } from "@/hooks/useCells"
@@ -124,6 +125,7 @@ function renderTable(
   const qc = new QueryClient()
   return render(
     <QueryClientProvider client={qc}>
+      <Toaster />
       <EditorActionsProvider value={{}}>
         <EditorTable
           project={project}
@@ -148,6 +150,8 @@ function renderTable(
     </QueryClientProvider>,
   )
 }
+
+afterEach(() => toast.close())
 
 describe("EditorTable — terminology advisory band removed (AQU-664)", () => {
   it("does not render the amber 'Terminology advisory' band for a forbidden rendering", async () => {
@@ -201,7 +205,7 @@ describe("EditorTable — terminology advisory band removed (AQU-664)", () => {
     expect(document.querySelector('[data-rule-id="term:concept-1:approved"]')).not.toBeNull()
   })
 
-  it("opens only the violation popover when a managed source term is blotted", async () => {
+  it("opens only the violation toast when a managed source term is blotted", async () => {
     const approved: Concept = {
       id: "concept-1",
       sourceTerm: "sample",
@@ -258,12 +262,13 @@ describe("EditorTable — terminology advisory band removed (AQU-664)", () => {
 
     await screen.findByRole("button", { name: /waive/i })
     await waitFor(() => {
-      expect(document.querySelectorAll('[data-slot="popover-content"]')).toHaveLength(1)
+      expect(document.querySelectorAll('[data-slot="toast"]')).toHaveLength(1)
     })
+    expect(document.querySelector('[data-slot="popover-content"]')).toBeNull()
     expect(screen.queryByRole("tooltip", { name: /terminology lookup/i })).toBeNull()
   })
 
-  it("keeps the target blot popover anchored without opening cell details", async () => {
+  it("shows the target blot violation in a bottom-right toast without opening details", async () => {
     const project: ProjectRecord = {
       id: "proj-1",
       name: "Test Project",
@@ -308,6 +313,12 @@ describe("EditorTable — terminology advisory band removed (AQU-664)", () => {
     fireEvent.click(blot)
 
     await screen.findByRole("button", { name: /waive/i })
+    expect(document.querySelector('[data-slot="toast-viewport"]')).toHaveClass(
+      "bottom-4",
+      "sm:right-4",
+      "sm:left-auto",
+    )
+    expect(document.querySelectorAll('[data-slot="toast"]')).toHaveLength(1)
     expect(screen.getByRole("button", { name: "Open cell details" })).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Close cell details" })).toBeNull()
   })

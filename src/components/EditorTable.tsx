@@ -177,7 +177,7 @@ import {
 } from "@/lib/text-direction"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { selectTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
-import { ViolationPopover, type ViolationAnchor } from "./ViolationPopover"
+import { ViolationToast } from "./ViolationToast"
 import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
@@ -4418,11 +4418,13 @@ function EditorRow({
     return latest?.selection?.draftText
   }, [remoteCellPresence])
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
-  const [openRuleAnchor, setOpenRuleAnchor] = useState<ViolationAnchor | null>(null)
   // AQU-664: hover ("wave over") a violation blot → preview its rule
   // explanation. Separate from the click path (openRuleId) so a light,
   // non-interactive popover appears on hover and dismisses on mouse-out.
-  const [hoveredRule, setHoveredRule] = useState<{ ruleId: string; anchor: ViolationAnchor } | null>(null)
+  const [hoveredRule, setHoveredRule] = useState<{
+    ruleId: string
+    anchor: { getBoundingClientRect: () => DOMRect }
+  } | null>(null)
   // AQU-664: live editor text, published on a short debounce by TranslatedEditor
   // so terminology blots recompute off the live buffer (not the ~1.2s commit).
   const [liveTargetText, setLiveTargetText] = useState<string | null>(null)
@@ -5723,17 +5725,12 @@ function EditorRow({
     }
   }
 
-  // Inline rule click → open the violation popover at the clicked blot. Keep
-  // the row collapsed: expanding it detaches the target blot before Base UI
-  // measures the anchor, which places the popover at the viewport origin.
-  // The rule-name control inside the popover remains the explicit route into
-  // the full Issues surface.
-  const openInlineRule = useCallback((ruleId: string, anchor: HTMLElement) => {
-    // AQU-664: clicking commits to the full (waive-capable) popover — clear any
-    // transient hover preview so the two don't stack.
+  // Inline rule click → open the standard bottom-right violation toast. Keep
+  // the row collapsed and clear the transient hover preview so one gesture
+  // produces one violation surface.
+  const openInlineRule = useCallback((ruleId: string, _anchor: HTMLElement) => {
     setHoveredRule(null)
     setOpenRuleId(ruleId)
-    setOpenRuleAnchor(anchor)
   }, [])
 
   // AQU-664: hover ("wave over") a blot → snapshot its rect and preview the
@@ -7053,10 +7050,7 @@ function EditorRow({
                           <button
                             key={inf.ruleId}
                             type="button"
-                            onClick={(event) => {
-                              setOpenRuleId(inf.ruleId)
-                              setOpenRuleAnchor(event.currentTarget)
-                            }}
+                            onClick={() => setOpenRuleId(inf.ruleId)}
                             className="bg-card flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-start text-xs transition-all"
                           >
                             <Icon
@@ -7088,10 +7082,7 @@ function EditorRow({
                               <button
                                 key={`waived-${inf.ruleId}`}
                                 type="button"
-                                onClick={(event) => {
-                                  setOpenRuleId(inf.ruleId)
-                                  setOpenRuleAnchor(event.currentTarget)
-                                }}
+                                onClick={() => setOpenRuleId(inf.ruleId)}
                                 className="bg-muted flex w-full items-start gap-2 rounded-xl px-2.5 py-1.5 text-start text-xs text-muted-foreground/70 transition-all"
                               >
                                 <Check className="mt-0.5 h-3 w-3 shrink-0" />
@@ -7133,21 +7124,16 @@ function EditorRow({
         const rule = ruleMap.get(openRuleId)
         if (!inf || !rule) return null
         return (
-          <ViolationPopover
+          <ViolationToast
             open
             onOpenChange={(next) => {
-              if (!next) {
-                setOpenRuleId(null)
-                setOpenRuleAnchor(null)
-              }
+              if (!next) setOpenRuleId(null)
             }}
             infraction={inf}
             ruleName={translateRuleName(rule, t)}
             waivers={cell.waivers ?? []}
-            anchor={openRuleAnchor}
             onOpenRule={(ruleId) => {
               setOpenRuleId(null)
-              setOpenRuleAnchor(null)
               onInfractionClick?.(ruleId)
             }}
             onWaive={handleWaive}
@@ -7157,10 +7143,10 @@ function EditorRow({
       })()}
 
       {/* AQU-664: hover ("wave over") preview of a violation blot's rule
-          explanation. Non-interactive and separate from the click popover — it
+          explanation. Non-interactive and separate from the click toast — it
           appears on mouse-in and dismisses on mouse-out (see handleRuleHover /
           TranslatedEditor's blot hover handlers). Suppressed while the click
-          popover is open so the two never stack. */}
+          toast is open so the two never stack. */}
       {hoveredRule && !openRuleId && (() => {
         const inf = blotInfractions.find((i) => i.ruleId === hoveredRule.ruleId)
         const rule = ruleMap.get(hoveredRule.ruleId)

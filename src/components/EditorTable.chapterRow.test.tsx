@@ -213,7 +213,7 @@ describe("EditorTable chapter row", () => {
     expect(onVisibleCellIdsChange).toHaveBeenCalledWith(["gen2-1"])
   })
 
-  it("offers Next chapter when the open page is already complete", () => {
+  it("does not offer a complete toast when the open chapter is already translated", () => {
     renderTable(undefined, {
       paging: true,
       toaster: true,
@@ -225,67 +225,8 @@ describe("EditorTable chapter row", () => {
       ],
     })
 
-    expect(screen.getByText("Genesis 1 is complete")).toBeVisible()
-    const toastNext = screen.getAllByRole("button", { name: "Next chapter" }).find(
-      (button) => button.closest("[data-slot='toast']"),
-    )
-    expect(toastNext).toBeTruthy()
-    fireEvent.click(toastNext!)
-
-    expect(screen.getByRole("combobox", { name: /Current chapter: Genesis 2/ })).toBeVisible()
-    expect(document.querySelector("[data-cell-id='gen2-1']")).toBeTruthy()
     expect(screen.queryByText("Genesis 1 is complete")).toBeNull()
-    expect(screen.getByText("Genesis 2 is complete")).toBeVisible()
-    expect(document.querySelectorAll("[data-slot='toast']")).toHaveLength(1)
-    expect(document.querySelector("[data-pulsing]")).toBeNull()
-  })
-
-  it("retitles the same toast when the next chapter is also complete", () => {
-    renderTable(undefined, {
-      paging: true,
-      toaster: true,
-      rows: [
-        ...makeRows("gen1-1", "GEN 1:1"),
-        ...makeRows("gen1-2", "GEN 1:2"),
-        ...makeRows("gen2-1", "GEN 2:1"),
-        ...makeRows("gen3-1", "GEN 3:1"),
-      ],
-    })
-
-    const navNext = screen.getAllByRole("button", { name: "Next chapter" }).find(
-      (button) => !button.closest("[data-slot='toast']"),
-    )
-    expect(navNext).toBeTruthy()
-    fireEvent.click(navNext!)
-
-    expect(screen.getByRole("combobox", { name: /Current chapter: Genesis 2/ })).toBeVisible()
-    expect(screen.queryByText("Genesis 1 is complete")).toBeNull()
-    expect(screen.getByText("Genesis 2 is complete")).toBeVisible()
-    expect(document.querySelectorAll("[data-slot='toast']")).toHaveLength(1)
-    expect(document.querySelector("[data-pulsing]")).toBeNull()
-  })
-
-  it("dismisses the toast when the next chapter is not complete", () => {
-    renderTable(undefined, {
-      paging: true,
-      toaster: true,
-      rows: [
-        ...makeRows("gen1-1", "GEN 1:1"),
-        ...makeRows("gen1-2", "GEN 1:2"),
-        ...makeRows("gen2-1", "GEN 2:1", ""),
-      ],
-    })
-
-    expect(screen.getByText("Genesis 1 is complete")).toBeVisible()
-    const navNext = screen.getAllByRole("button", { name: "Next chapter" }).find(
-      (button) => !button.closest("[data-slot='toast']"),
-    )
-    expect(navNext).toBeTruthy()
-    fireEvent.click(navNext!)
-
-    expect(screen.getByRole("combobox", { name: /Current chapter: Genesis 2/ })).toBeVisible()
-    expect(screen.queryByText("Genesis 1 is complete")).toBeNull()
-    expect(screen.queryByText("Genesis 2 is complete")).toBeNull()
+    expect(document.querySelector("[data-slot='toast']")).toBeNull()
   })
 
   it("restores the last open chapter after the editor remounts", () => {

@@ -46,8 +46,6 @@ interface PillProps {
   /** Cell the user is looking at. Sent on start so the first wave begins
    *  there — same total work, but the first results land on screen. */
   anchorCellId?: string | null
-  /** AQU-1087: when set, Autopilot drafts only these cells (the open chapter). */
-  cellIds?: readonly string[] | null
 }
 
 const PILL_BASE =
@@ -81,7 +79,6 @@ function ContextualRunPillScoped({
   onSetupNeeded,
   onSpanClick,
   anchorCellId,
-  cellIds,
   canControl = false,
   activeLane = "",
 }: PillProps) {
@@ -240,13 +237,7 @@ function ContextualRunPillScoped({
                   return
                 }
               }
-              const started = await startContextualRun(
-                projectId,
-                fileId,
-                anchorCellId ?? undefined,
-                activeLane,
-                cellIds ?? undefined,
-              )
+              const started = await startContextualRun(projectId, fileId, anchorCellId ?? undefined, activeLane)
               if (!started) {
                 setControlError(t("autopilot.pill.startFailed"))
               }
@@ -491,14 +482,13 @@ function ContextualRunPillScoped({
  * and wires span-label clicks to the editor's scroll request. Must render
  * inside EditorScrollProvider (it does — the editor viewport wrapper is).
  */
-export function ContextualRunPillMount({ projectId, fileId, activeLane, onSetupNeeded, anchorCellId, cellIds, canControl }: {
+export function ContextualRunPillMount({ projectId, fileId, activeLane, onSetupNeeded, anchorCellId, canControl }: {
   projectId: string
   fileId: string
   activeLane: string
   canControl: boolean
   onSetupNeeded?: () => void
   anchorCellId?: string | null
-  cellIds?: readonly string[] | null
 }) {
   const { requestScrollToSection } = useEditorScroll()
 
@@ -516,7 +506,6 @@ export function ContextualRunPillMount({ projectId, fileId, activeLane, onSetupN
       activeLane={activeLane}
       onSetupNeeded={onSetupNeeded}
       anchorCellId={anchorCellId}
-      cellIds={cellIds}
       canControl={canControl}
       onSpanClick={(label) => requestScrollToSection(label, fileId)}
     />

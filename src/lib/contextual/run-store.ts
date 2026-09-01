@@ -133,7 +133,7 @@ export interface ContextualTransportSnapshot {
 export interface ContextualTransport {
   fetchSnapshot(projectId: string, fileId: string, targetLang?: string): Promise<ContextualTransportSnapshot>
   /** `anchorCellId` is where the user is looking — the first wave starts there. */
-  start(projectId: string, fileId: string, anchorCellId?: string, targetLang?: string): Promise<{ runId: string }>
+  start(projectId: string, fileId: string, anchorCellId?: string, targetLang?: string, cellIds?: readonly string[]): Promise<{ runId: string }>
   pause(runId: string): Promise<void>
   resume(runId: string): Promise<void>
   terminate(runId: string): Promise<void>
@@ -498,12 +498,14 @@ export async function attachContextualRun(
  * Start a run. `anchorCellId` is where the user is looking: the server rotates
  * the first wave to begin there, so the first drafts land on screen rather
  * than at the top of a file the user may be nowhere near.
+ * When `cellIds` is passed (chapter paging), the run is pinned to those cells.
  */
 export async function startContextualRun(
   projectId: string,
   fileId: string,
   anchorCellId?: string,
   targetLang?: string,
+  cellIds?: readonly string[],
 ): Promise<boolean> {
   if (targetLang !== undefined) _attachedTargetLang = targetLang
   if (_attachedProjectId !== projectId || _attachedFileId !== fileId) {
@@ -526,6 +528,7 @@ export async function startContextualRun(
       fileId,
       anchorCellId,
       _attachedTargetLang,
+      cellIds,
     )
     if (
       _attachedProjectId === projectId &&

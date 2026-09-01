@@ -1887,7 +1887,7 @@ export function AudioRecordingModal({
                       onClick={save}
                       className="h-[52px] w-full text-sm font-semibold"
                     >
-                      <Check className="mr-1.5 h-4 w-4" /> {t("common.save")}
+                      {t("common.save")}
                     </Button>
                   </span>
                 </AppTooltip>
@@ -1980,8 +1980,6 @@ export function AudioRecordingModal({
                         <Spinner className="mr-1.5 size-3.5" />
                       ) : ttsShowFailure ? (
                         <AlertCircle className="mr-1.5 h-3.5 w-3.5" />
-                      ) : ttsDone ? (
-                        <Check className="mr-1.5 h-3.5 w-3.5 text-emerald-500" />
                       ) : (
                         <Sparkles className="mr-1.5 h-3.5 w-3.5" />
                       )}
@@ -2094,7 +2092,7 @@ export function AudioRecordingModal({
                   className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground"
                 >
                   {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums">{listedTakeCount}</span>
-                  <ChevronUp className={cn("h-3.5 w-3.5 transition-transform", takesOpen && "rotate-180")} />
+                  <ChevronUp className={cn("h-3.5 w-3.5", takesOpen && "rotate-180")} />
                 </Button>
               ) : (
                 <span data-testid="rec-takes-count" className="shrink-0 px-1 text-xs font-medium">

@@ -4781,7 +4781,6 @@ export const zh_Hant: Catalog = {
   "workspace.denoise.removedBadge": "已移除雜訊",
   "workspace.denoise.revertTooltip": "切換回原始錄音",
   "workspace.denoise.revertButton": "還原",
-  "workspace.chatComposer.keyboardHint": "Enter 送出 · Shift+Enter 換行",
   "workspace.chatComposer.queueTooltip": "排入佇列 — 會在目前的作業結束後送出",
   "workspace.chatComposer.queueMessage": "把訊息排入佇列",
   "workspace.chatMarkdown.copyCode": "複製程式碼",

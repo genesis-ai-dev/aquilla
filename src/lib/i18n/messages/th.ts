@@ -4225,7 +4225,6 @@ export const th: Catalog = {
   "workspace.denoise.removedBadge": "ลบเสียงรบกวนแล้ว",
   "workspace.denoise.revertTooltip": "สลับกลับไปที่การบันทึกเดิม",
   "workspace.denoise.revertButton": "ยกเลิก",
-  "workspace.chatComposer.keyboardHint": "Enter เพื่อส่ง · Shift+Enter สำหรับบรรทัดใหม่",
   "workspace.chatComposer.queueTooltip": "คิว — ส่งเมื่อการรันปัจจุบันเสร็จสิ้น",
   "workspace.chatComposer.queueMessage": "ข้อความในคิว",
   "workspace.chatMarkdown.copyCode": "คัดลอกโค้ด",

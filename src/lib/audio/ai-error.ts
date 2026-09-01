@@ -19,9 +19,20 @@
 // never itself translated, so the matches must not be run through `t()`.
 
 import { t } from "@/lib/i18n/standalone"
+import {
+  OMNIVOICE_FAILED_BODY,
+  OMNIVOICE_NOT_CONFIGURED_BODY,
+  SEED_VC_FAILED_BODY,
+  SEED_VC_NOT_CONFIGURED_BODY,
+} from "./tts-engine-error"
 
 export type ErrorCategory =
   | "missing-gemini-key"
+  | "gemini-failed"
+  | "omnivoice-not-configured"
+  | "omnivoice-failed"
+  | "seed-vc-not-configured"
+  | "seed-vc-failed"
   | "consent-denied"
   | "no-source-text"
   | "translation-not-configured"
@@ -127,12 +138,71 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     }
   }
 
+  // Hosted TTS / clone conversion — name the engine BEFORE the Gemini-key
+  // heuristic. A local sync-worker 503 ("TTS not configured") is OmniVoice,
+  // not a missing Google key; sending people to Gemini settings is a lie.
+  if (
+    m.includes("this line uses omnivoice") ||
+    m.includes("tts not configured") ||
+    (m.includes("voice/tts") && (status === 503 || m.includes("not configured")))
+  ) {
+    return {
+      category: "omnivoice-not-configured",
+      title: t("audio.aiError.omnivoiceNotConfiguredTitle"),
+      body: OMNIVOICE_NOT_CONFIGURED_BODY,
+      raw,
+    }
+  }
+  if (
+    m.includes("omnivoice tts failed") ||
+    m.includes("omnivoice couldn't generate") ||
+    m.includes("voice/tts failed")
+  ) {
+    return {
+      category: "omnivoice-failed",
+      title: t("audio.aiError.omnivoiceFailedTitle"),
+      body: OMNIVOICE_FAILED_BODY,
+      raw,
+    }
+  }
+  if (
+    m.includes("this clone voice needs seed-vc") ||
+    m.includes("voice conversion not configured")
+  ) {
+    return {
+      category: "seed-vc-not-configured",
+      title: t("audio.aiError.seedVcNotConfiguredTitle"),
+      body: SEED_VC_NOT_CONFIGURED_BODY,
+      raw,
+    }
+  }
+  if (
+    m.includes("voice cloning (seed-vc) failed") ||
+    m.includes("voice cloning (seed-vc) couldn't") ||
+    m.includes("voice convert failed")
+  ) {
+    return {
+      category: "seed-vc-failed",
+      title: t("audio.aiError.seedVcFailedTitle"),
+      body: SEED_VC_FAILED_BODY,
+      raw,
+    }
+  }
+
   if (m.includes("api key") || m.includes("api_key") || m.includes("apikey") ||
-      m.includes("gemini") && m.includes("key")) {
+      (m.includes("gemini") && m.includes("key"))) {
     return {
       category: "missing-gemini-key",
       title: t("audio.aiError.geminiKeyRequiredTitle"),
-      body: "Add your Gemini API key to use Gemini voices, or switch this project to a local TTS provider (Kokoro or MMS).",
+      body: "Add a Gemini API key to use this Gemini voice, or switch the line to OmniVoice (hosted, no key) or a local engine (Kokoro or MMS).",
+      raw,
+    }
+  }
+  if (m.includes("gemini tts failed") || (m.includes("gemini") && m.includes("did not include audio"))) {
+    return {
+      category: "gemini-failed",
+      title: t("audio.aiError.geminiFailedTitle"),
+      body: "Gemini couldn't generate this line. Check the API key, or switch this voice to OmniVoice.",
       raw,
     }
   }

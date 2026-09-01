@@ -1575,7 +1575,7 @@ export function ExportDialog({
                   <details className="group/unrec" data-testid="export-unrecorded">
                     <summary className="cursor-pointer list-none text-muted-foreground hover:text-foreground transition-colors">
                       <span className="inline-flex items-center gap-1">
-                        <ChevronRight className="h-3 w-3 transition-transform group-open/unrec:rotate-90" aria-hidden="true" />
+                        <ChevronRight className="h-3 w-3 group-open/unrec:rotate-90" aria-hidden="true" />
                         {t("importExport.dialog.unrecordedCharacterCount", { count: unrecorded.length })}
                       </span>
                     </summary>
@@ -1693,7 +1693,7 @@ export function ExportDialog({
             >
               <summary className="flex cursor-pointer list-none items-baseline gap-2 select-none">
                 <span
-                  className="inline-block text-muted-foreground transition-transform group-open/sec:rotate-90"
+                  className="inline-block text-muted-foreground group-open/sec:rotate-90"
                   aria-hidden="true"
                 >
                   ›
@@ -1783,7 +1783,7 @@ export function ExportDialog({
                     2026-08-20). */}
                 <summary className="flex cursor-pointer list-none items-baseline gap-2 select-none">
                   <span
-                    className="inline-block text-muted-foreground transition-transform group-open/sec:rotate-90"
+                    className="inline-block text-muted-foreground group-open/sec:rotate-90"
                     aria-hidden="true"
                   >
                     ›
@@ -1924,7 +1924,7 @@ export function ExportDialog({
           >
             <span
               className={
-                "inline-block transition-transform " +
+                "inline-block " +
                 ((isDubbingFile ? openSection === "fold" : formatsOpen) ? "rotate-90" : "rotate-0")
               }
               aria-hidden="true"
@@ -2139,7 +2139,7 @@ export function ExportDialog({
           <summary className="text-xs font-medium text-muted-foreground select-none list-none flex items-center gap-1 hover:text-foreground transition-colors">
             <span
               className={
-                "inline-block transition-transform " +
+                "inline-block " +
                 (advancedOpen ? "rotate-90" : "rotate-0")
               }
               aria-hidden="true"

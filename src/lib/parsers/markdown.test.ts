@@ -81,4 +81,12 @@ describe("extractMarkdownStrings", () => {
     const result = extractMarkdownStrings(md)
     expect(result[0].translated).toBe("")
   })
+
+  it("escapes literal HTML in the source text before adding markdown markup", () => {
+    const md = "Click <img src=x onerror=alert(1)> and **bold**"
+    const result = extractMarkdownStrings(md)
+    expect(result[0].originalHtml).toBe(
+      "Click &lt;img src=x onerror=alert(1)&gt; and <b>bold</b>",
+    )
+  })
 })

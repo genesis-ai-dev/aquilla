@@ -88,4 +88,22 @@ describe("POST /api/v1/diarization/start", () => {
     expect(res.status).toBe(200)
     expect(getCalls()).toBe(1)
   })
+
+  // [Pen test] API security & data exposure (2026-08-27): audioObject is a
+  // JSON-body field that lands directly in an R2 key (audioObjectKey) — it
+  // must be rejected if it could act as a path separator, matching the
+  // isPathSafeId convention already enforced on projectId/fileId elsewhere.
+  it("rejects an audioObject that could smuggle a path separator", async () => {
+    const env = await makeEnv()
+    const getCalls = stubModal()
+    const contributorToken = await makeToken({ role: 400 })
+    const req = new Request("https://w/api/v1/diarization/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${contributorToken}` },
+      body: JSON.stringify({ projectId: "p1", fileId: "f1", audioObject: "../other-project/secret.webm" }),
+    })
+    const res = (await handleDiarizationRequest(req, env))!
+    expect(res.status).toBe(400)
+    expect(getCalls()).toBe(0)
+  })
 })

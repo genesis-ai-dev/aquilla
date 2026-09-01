@@ -455,10 +455,11 @@ describe("AudioRecordingModal — a failed generation says so (stage 4c)", () =>
     setTtsStatus(KEY, { kind: "error", message: NOT_CONFIGURED })
     renderModal(cellWith("bonjour"))
     const line = screen.getByTestId("rec-tts-error")
-    // What it IS, then what to do about it — and the way out that actually
-    // works from a browser.
-    expect(line).toHaveTextContent(/Voice generation isn't set up/i)
-    expect(line).toHaveTextContent(/Kokoro|MMS/)
+    // What it IS, then what to do about it. AQU-1001 names the engine: the
+    // default engine's 503 reads as OmniVoice not configured, never as a
+    // missing Gemini key.
+    expect(line).toHaveTextContent(/OmniVoice isn't configured/i)
+    expect(line).toHaveTextContent(/will not fix/i)
     // NOT the raw fragment. That is support's text, not the performer's, and it
     // lives in the tooltip.
     expect(line.textContent).not.toContain("503")

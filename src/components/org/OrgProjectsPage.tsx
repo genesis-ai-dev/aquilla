@@ -25,6 +25,13 @@ import {
   roleFilterNames,
   type RoleFilter,
 } from "./project-role-filter"
+import { ProjectUpdatedFilter } from "./ProjectUpdatedFilter"
+import {
+  UPDATED_FILTER_ANY,
+  filterByUpdated,
+  resolveUpdatedFilter,
+  type UpdatedFilter,
+} from "./project-updated-filter"
 import {
   useOrgPortfolio,
   type StatusFilter,
@@ -72,6 +79,8 @@ export function OrgProjectsPage() {
   const [pmFilter, setPmFilter] = useState<PmFilter>(PM_FILTER_ALL)
   // AQU-1042: viewer-role narrowing, composed with both filters below.
   const [roleFilter, setRoleFilter] = useState<RoleFilter>(ROLE_FILTER_ALL)
+  // AQU-1043: last-edit recency narrowing, composed with all three below.
+  const [updatedFilter, setUpdatedFilter] = useState<UpdatedFilter>(UPDATED_FILTER_ANY)
   const projectLens = readProjectLens()
 
   const guestOrgId = activeGuestOrg?.id ?? null
@@ -149,10 +158,19 @@ export function OrgProjectsPage() {
   // only under the "all" default.
   const roleNames = roleFilterNames(sourceProjects, portfolio.roleByProjectId)
   const activeRoleFilter = resolveRoleFilter(roleFilter, roleNames)
-  const visibleProjects = filterByRole(
-    filterByPm(statusFilteredProjects, activePmFilter),
-    portfolio.roleByProjectId,
-    activeRoleFilter,
+  // AQU-1043: fixed recency windows, so nothing to derive from the rows — only
+  // a guard against a value outside the offered buckets. Filtered last, against
+  // the portfolio's frozen `now`, so the window and the Updated column's
+  // relative times are read off the same clock.
+  const activeUpdatedFilter = resolveUpdatedFilter(updatedFilter)
+  const visibleProjects = filterByUpdated(
+    filterByRole(
+      filterByPm(statusFilteredProjects, activePmFilter),
+      portfolio.roleByProjectId,
+      activeRoleFilter,
+    ),
+    activeUpdatedFilter,
+    portfolio.now,
   )
 
   return (
@@ -192,8 +210,8 @@ export function OrgProjectsPage() {
               loading={isPageLoading}
               loadingLabel={t("org.projectsList.loadingLabel")}
               toolbarLeading={
-                // The toolbar row is a flex/wrap track: sibling filters (Role,
-                // Updated) slot in here next to these two, no wrapper needed.
+                // The toolbar row is a flex/wrap track: further sibling filters
+                // slot in here next to these four, no wrapper needed.
                 <>
                   <ProjectStatusFilter
                     value={statusFilter}
@@ -211,6 +229,11 @@ export function OrgProjectsPage() {
                     value={activeRoleFilter}
                     names={roleNames}
                     onValueChange={setRoleFilter}
+                    className="bg-card"
+                  />
+                  <ProjectUpdatedFilter
+                    value={activeUpdatedFilter}
+                    onValueChange={setUpdatedFilter}
                     className="bg-card"
                   />
                 </>
@@ -231,9 +254,11 @@ export function OrgProjectsPage() {
                   ? isGuestOrg
                     ? t("org.guestOrgHome.emptyTitle", { orgName: guestOrgName })
                     : t("org.orgHome.projectsPanel.emptyTitle")
-                  : activePmFilter !== PM_FILTER_ALL || activeRoleFilter !== ROLE_FILTER_ALL
-                    ? // AQU-1040/AQU-1042: a filter combination that matches nothing
-                      // is a filtered-empty table, not an empty org.
+                  : activePmFilter !== PM_FILTER_ALL ||
+                      activeRoleFilter !== ROLE_FILTER_ALL ||
+                      activeUpdatedFilter !== UPDATED_FILTER_ANY
+                    ? // AQU-1040/AQU-1042/AQU-1043: a filter combination that matches
+                      // nothing is a filtered-empty table, not an empty org.
                       t("org.orgHome.projectsPanel.noMatchingProjects")
                     : statusFilter === "stalled"
                       ? t("org.orgHome.emptyTitle.stalled")

@@ -1032,6 +1032,11 @@ export const org = defineNamespace({
     // The role option labels come from common.role.* (same keys as RoleLabel).
     "org.orgProjectsPage.roleFilter.all": "All roles",
     "org.orgProjectsPage.roleFilterAria": "Role filter",
+    // AQU-1043: last-edit recency filter, fourth control in the Projects
+    // toolbar. Fixed windows, not free-form dates; "any time" is the default.
+    "org.orgProjectsPage.updatedFilter.any": "Updated any time",
+    "org.orgProjectsPage.updatedFilter.lastDays": "Updated in last {days} days",
+    "org.orgProjectsPage.updatedFilterAria": "Last updated filter",
     // "Unassigned" PM option → org.projectOverview.unassigned (identical text)
     // Filtered-to-nothing empty title → org.orgHome.projectsPanel.noMatchingProjects
     // Zero-projects empty title → org.orgHome.projectsPanel.emptyTitle
@@ -1206,6 +1211,17 @@ export const org = defineNamespace({
       "org.orgProjectsPage.roleFilterAria": {
         description:
           "Accessible name for the viewer-role filter control on the org Projects page. Its options are the roles the signed-in user holds across the loaded table (resolved via common.role.*), plus an 'All roles' default; it narrows the table alongside the status filter, the PM filter, and the search box.",
+      },
+      "org.orgProjectsPage.updatedFilterAria": {
+        description:
+          "Accessible name for the last-updated recency filter control on the org Projects page. Its options are fixed windows (last 7 / 30 / 90 days) plus an 'Updated any time' default; it narrows the table by each project's last-edit time alongside the status, PM and Role filters and the search box.",
+      },
+      "org.orgProjectsPage.updatedFilter.lastDays": {
+        description:
+          "Option label for one of the last-updated filter's fixed recency windows on the org Projects page.",
+        placeholders: {
+          days: "Length of the recency window in days — one of the fixed buckets 7, 30 or 90.",
+        },
       },
       "org.orgHome.originFilter.aria": {
         description:

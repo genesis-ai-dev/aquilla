@@ -9,7 +9,7 @@ import { useState, type ReactElement } from "react"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
-import { AlertCircle, Check, Copy, X } from "lucide-react"
+import { AlertCircle, Check, Copy } from "lucide-react"
 import type { ActionableError } from "@/lib/audio/ai-error"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -92,9 +92,8 @@ export function CellAiStatusPopover({ trigger, error, actions, onDismiss }: Prop
               size="sm"
               variant="ghost"
               onClick={onDismiss}
-              className="h-7 gap-1 px-2 text-[11px]"
+              className="h-7 px-2 text-[11px]"
             >
-              <X className="h-3 w-3" />
               {t("common.dismiss")}
             </Button>
           )}

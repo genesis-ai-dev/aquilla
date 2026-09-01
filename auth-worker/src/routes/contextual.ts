@@ -7,6 +7,7 @@
 //   POST /:projectId/contextual/steering                  direction / refresh_span / note
 //   GET  /:projectId/contextual/drafts?fileId=            staged drafts (VIEWER)
 //   GET  /:projectId/contextual/segmentation?fileId=      strategy + preview (VIEWER)
+//        optional &strategy=auto|fixed&fixedSize=N        dry-run preview, no write
 //   PUT  /:projectId/contextual/segmentation?fileId=      set the strategy (PROJECT_LEAD)
 //   POST /:projectId/contextual/segmentation/generate     AI re-segmentation (PROJECT_LEAD)
 //   POST /:projectId/contextual/drafts/:draftId/review    {action: applied|rejected}
@@ -87,12 +88,15 @@ import {
   resolveContextualModels,
   resolveOpenRouterUrl,
   resolveSpanSeeds,
+  pinContextualRunToCellIds,
   spanLabel,
   runStateFrame,
   persistContextualProgressFrame,
   MAX_WAVE_CONCURRENCY,
   type ContextualProgressFrame,
+  type SegmentationPreviewQuery,
 } from "../lib/contextual/tick"
+import { friendlyScriptureLabel } from "../../../shared/span-label"
 import { decorateActivityLabels, loadCellDisplayIndex } from "../lib/contextual/activity-labels"
 import type { LlmCall } from "../lib/contextual/types"
 
@@ -535,6 +539,9 @@ const startSchema = z.object({
   /** "file" (default) drafts one file; "project" fans out across every
    *  discourse file with work left. */
   scope: z.enum(["file", "project"]).optional(),
+  /** AQU-1087: pin a file-scoped run to these cells (the open chapter page).
+   *  Present (even empty) means "only these"; omit for the whole file. */
+  cellIds: z.array(z.string().min(1).max(256)).max(2000).optional(),
 })
 
 // POST /:projectId/contextual/runs — start a run (CONTRIBUTOR: this is
@@ -719,6 +726,10 @@ contextual.post(
         { runId: created.runId },
       )
       return c.json(err, status)
+    }
+
+    if (body.cellIds) {
+      await pinContextualRunToCellIds(c.env.AQUILLA_PG, created.run, body.cellIds)
     }
 
     await recordRunCreated(c.env.AQUILLA_PG, created.run)
@@ -1212,6 +1223,27 @@ contextual.post(
  *  the count is always exact, the list is a sample. */
 const SEGMENTATION_PREVIEW_LIMIT = 60
 
+function parseSegmentationPreviewQuery(
+  strategy: string | undefined,
+  fixedSizeRaw: string | undefined,
+): SegmentationPreviewQuery | { error: string } | undefined {
+  if (!strategy) return undefined
+  if (strategy !== "auto" && strategy !== "fixed") {
+    return { error: "strategy must be auto or fixed" }
+  }
+  if (strategy === "auto") return { strategy: "auto" }
+  const fixedSize = Number.parseInt(fixedSizeRaw ?? "", 10)
+  if (!Number.isFinite(fixedSize) || fixedSize < MIN_SEGMENT_SIZE || fixedSize > MAX_SEGMENT_SIZE) {
+    return { error: `fixedSize must be between ${MIN_SEGMENT_SIZE} and ${MAX_SEGMENT_SIZE}` }
+  }
+  return { strategy: "fixed", fixedSize }
+}
+
+function spanExcerpt(startCellId: string, pairs: { cellId: string; source: string }[]): string {
+  const source = pairs.find((pair) => pair.cellId === startCellId)?.source ?? ""
+  return source.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 120)
+}
+
 const segmentationBoundarySchema = z.object({
   startCellId: z.string().min(1),
   endCellId: z.string().min(1),
@@ -1239,22 +1271,30 @@ contextual.get("/:projectId/contextual/segmentation", authMiddleware, async (c) 
     return c.json(body, status)
   }
 
+  const preview = parseSegmentationPreviewQuery(c.req.query("strategy"), c.req.query("fixedSize"))
+  if (preview && "error" in preview) {
+    const { body, status } = errorJson("validation_failed", preview.error, 400)
+    return c.json(body, status)
+  }
+
   const db = c.env.AQUILLA_PG
   const [segmentation, pairs] = await Promise.all([
     getFileSegmentation(db, projectId, fileId),
     selectCellPairs(db, projectId, { fileId }),
   ])
-  const seeds = await resolveSpanSeeds(db, projectId, fileId, pairs)
+  const seeds = await resolveSpanSeeds(db, projectId, fileId, pairs, preview)
   const order = new Map(pairs.map((p, i) => [p.cellId, i]))
   const spans = seeds.map((seed) => {
     const start = order.get(seed.startCellId)
     const end = order.get(seed.endCellId)
+    const rawLabel = spanLabel(seed, pairs)
     return {
       startCellId: seed.startCellId,
       endCellId: seed.endCellId,
       seedSource: seed.seedSource,
       cellCount: start === undefined || end === undefined ? 0 : end - start + 1,
-      label: spanLabel(seed, pairs),
+      label: rawLabel ? friendlyScriptureLabel(rawLabel) : rawLabel,
+      excerpt: spanExcerpt(seed.startCellId, pairs),
     }
   })
 

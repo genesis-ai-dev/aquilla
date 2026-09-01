@@ -137,7 +137,8 @@ import {
 import { emitCastAssign, emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
-import { resolveTimingLocked } from "@/lib/sync/project-settings"
+import { resolveChapterPagingEnabled, resolveTimingLocked } from "@/lib/sync/project-settings"
+import { chapterPageProgress, filterToChapterPage } from "@/lib/chapter-navigation"
 import { buildCastAdditions, buildCastRemovals, carriesCharacterSheetData } from "@/lib/import/cast-from-speakers"
 import { ImportCharactersDialog } from "./timeline/ImportCharactersDialog"
 import { CharacterCheckDrawer, type ResolveChoice } from "./timeline/CharacterCheckDrawer"
@@ -185,7 +186,7 @@ import { getVoiceLibrary, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Bot, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical } from "lucide-react"
+import { Film, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical } from "lucide-react"
 import { toast } from "@/components/ui/toast"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { AgentWorkbench } from "./agent/AgentWorkbench"
@@ -202,7 +203,7 @@ import { InactiveProjectBanner } from "./InactiveProjectBanner"
 import { OfflineBanner } from "./OfflineBanner"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { restoreProject } from "@/lib/store/project-index"
-import { AppShell } from "./AppShell"
+import { AppShell, useIsLgUp } from "./AppShell"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
@@ -258,6 +259,7 @@ import { useTimingModeAck } from "@/hooks/useTimingModeAck"
 import { PeerPresence } from "./PeerPresence"
 import { ViewSettingsMenu, type ViewSettingsMenuHandle } from "./ViewSettingsMenu"
 import type { OverflowMenuItem } from "./OverflowMenu"
+import { fileOptionsForAgentSurface } from "./editor-surface-toolbar"
 import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
 import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
@@ -372,6 +374,7 @@ const PROJECT_MEMORY_PATH_RE = /^\/project\/[^/]+\/memory(\/[^/]+)?$/
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _lastImportWrite: Promise<any> = Promise.resolve(undefined)
 const EMPTY_CELL_DATA: CellData[] = []
+const EMPTY_PAGE_CELL_IDS: readonly string[] = []
 
 function projectRecordsEquivalent(a: ProjectRecord | null, b: ProjectRecord | null): boolean {
   if (a === b) return true
@@ -839,6 +842,7 @@ export function ProjectWorkspace() {
   const [translateAsReadEnabled, setTranslateAsReadEnabled] = useTranslateAsReadPreference(projectId)
   const [translateAsReadActiveCellId, setTranslateAsReadActiveCellId] = useState<string | null>(null)
   const [visibleCellIds, setVisibleCellIds] = useState<string[]>([])
+  const [pageCellIds, setPageCellIds] = useState<string[] | null>(null)
   const translateAsReadEnabledRef = useRef(false)
   translateAsReadEnabledRef.current = translateAsReadEnabled
   const translateAsReadAttemptsRef = useRef(new Map<string, string>())
@@ -850,8 +854,16 @@ export function ProjectWorkspace() {
         : next
     ))
   }, [])
-  const [editorHeaderNavTarget, setEditorHeaderNavTarget] = useState<HTMLDivElement | null>(null)
-
+  const handlePageCellIdsChange = useCallback((next: string[] | null) => {
+    setPageCellIds((current) => {
+      if (current === next) return current
+      if (current == null || next == null) return next
+      if (current.length === next.length && current.every((id, index) => id === next[index])) {
+        return current
+      }
+      return next
+    })
+  }, [])
   const editorReturnPath = useMemo(() => {
     if (!projectId) return null
     if (centerSurface === "editor") return workspaceReturnPath(projectId, activeFileId)
@@ -888,6 +900,12 @@ export function ProjectWorkspace() {
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
   // FRO-308: left dock active tab (null = collapsed rail only)
   const [dockTab, setDockTab] = useState<DockTab | null>("files")
+  const lgUp = useIsLgUp()
+  // The mobile sheet is an overlay, not a rail — keep a tab selected so the
+  // sheet opens onto the files list instead of a 40px icon strip.
+  useEffect(() => {
+    if (!lgUp && dockTab === null) setDockTab("files")
+  }, [lgUp, dockTab])
   // Agent editor tab is in the strip while the workbench is open. Minimize
   // and the tab's × dismiss it. Switching to a file tab leaves the surface
   // but keeps the tab until then.
@@ -946,12 +964,15 @@ export function ProjectWorkspace() {
   useEffect(() => {
     writeAgentTabOpen(projectId, agentTabOpen)
   }, [projectId, agentTabOpen])
-  const openAgentTab = useCallback(() => {
+  const [agentExpandedFromDock, setAgentExpandedFromDock] = useState(false)
+  const openAgentTab = useCallback((origin?: "sidebar" | "editor") => {
+    if (origin) setAgentExpandedFromDock(origin === "sidebar")
     setAgentTabOpen(true)
     openOverlay("agent")
   }, [openOverlay])
   const closeAgentTab = useCallback(() => {
     setAgentTabOpen(false)
+    setAgentExpandedFromDock(false)
     if (centerSurface === "agent" && projectId) {
       navigate(editorReturnPath ?? `/project/${projectId}/editor`)
     }
@@ -962,7 +983,7 @@ export function ProjectWorkspace() {
   const [pendingChip, setPendingChip] = useState<ContextChip | null>(null)
   const handleAskAiFromSelection = useCallback((chip: ContextChip) => {
     setPendingChip(chip)
-    openAgentTab()
+    openAgentTab("editor")
   }, [openAgentTab])
   // FRO-309: expanded search results overlay in the main area
   const [searchExpandedQuery, setSearchExpandedQuery] = useState<string | null>(null)
@@ -1255,6 +1276,15 @@ export function ProjectWorkspace() {
   }, [activeFileId, cellStore, cellStoreVersion, localFileProgress, project?.id])
   const getActiveCells = useCallback(() => cellStore.getAllCellViews(), [cellStore])
   const getActiveCell = useCallback((cellId: string) => cellStore.getCellView(cellId), [cellStore])
+  const pagingOn = resolveChapterPagingEnabled(project)
+  const workPageCellIds = pagingOn ? (pageCellIds ?? EMPTY_PAGE_CELL_IDS) : null
+  const getPageCells = useCallback(
+    () => filterToChapterPage(getActiveCells(), workPageCellIds),
+    [getActiveCells, workPageCellIds],
+  )
+  useEffect(() => {
+    setPageCellIds(null)
+  }, [activeFileId])
   // Fortify pass: raw store cells carry NO audio attachments — any handler
   // that reads `cell.attachments` must merge them in first. The per-file map
   // rides a ref so early-declared callbacks can reach it without stale-closure
@@ -4022,7 +4052,7 @@ export function ProjectWorkspace() {
     // language for few-shot/completion; default lane falls back to the file's
     // (then project's) targetLanguage exactly as before. Shares the same
     // lane-aware derivation as the editor project + file metadata.
-    project?.completionSettings, project?.sourceLanguage || "", activeLaneTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
+    project?.completionSettings, project?.sourceLanguage || "", activeLaneTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getPageCells, project?.translationBrief?.l1Summary ?? undefined,
     project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
   )
 
@@ -4823,8 +4853,7 @@ export function ProjectWorkspace() {
   }, [activeFileId, cellStore, cellStoreVersion])
 
   // Phase 0.5: run the deterministic check over the open file's cells.
-  // Scope = the open file (the editor's working unit; chapters only exist as
-  // sidebar section labels). Pure + chunked — no network, no LLM.
+  // Scope = the open file, or the open chapter page when paging is on.
   const runCheck = useCallback(async () => {
     if (!activeFileId || checkRunning) return
     // One aside panel at a time (matches the existing drawer pattern).
@@ -4836,7 +4865,7 @@ export function ProjectWorkspace() {
     try {
       const result = await runDeterministicCheck({
         fileId: activeFileId,
-        cells: readAtVersion(cellStoreVersion, getActiveCells),
+        cells: readAtVersion(cellStoreVersion, getPageCells),
         rules,
         concepts: project?.terminology ?? [],
       })
@@ -4847,7 +4876,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, cellStoreVersion, getActiveCells, rules, project?.terminology])
+  }, [activeFileId, checkRunning, cellStoreVersion, getPageCells, rules, project?.terminology])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {
@@ -5016,8 +5045,11 @@ export function ProjectWorkspace() {
     }
 
     // Keep rendering bounded around the focused cell for very large files.
-    const allCells = readAtVersion(cellStoreVersion, getActiveCells).filter(
-      (cell) => cell.fileId === activeFileId,
+    const allCells = filterToChapterPage(
+      readAtVersion(cellStoreVersion, getActiveCells).filter(
+        (cell) => cell.fileId === activeFileId,
+      ),
+      workPageCellIds,
     )
     const healthRibbonByCellId = buildHealthRibbon(allCells.map((cell) => {
       const stage = cell.status === "validated"
@@ -5111,6 +5143,7 @@ export function ProjectWorkspace() {
     fileMeta.targetDirectionMode,
     fileMeta.targetTextDirection,
     focusedCellId,
+    workPageCellIds,
     getActiveCells,
     infractions,
     myScopes,
@@ -6032,13 +6065,11 @@ export function ProjectWorkspace() {
     translateAsReadAttemptsRef.current.clear()
   }, [activeFileId, activeLane])
 
-  const translateAsReadViewportCellIds = useMemo(() => (
-    visibleCellIds.length > 0
-      ? visibleCellIds
-      : agentOpen && focusedCellId
-        ? [focusedCellId]
-        : []
-  ), [agentOpen, focusedCellId, visibleCellIds])
+  const translateAsReadViewportCellIds = useMemo(() => {
+    if (workPageCellIds && workPageCellIds.length > 0) return workPageCellIds
+    if (visibleCellIds.length > 0) return visibleCellIds
+    return agentOpen && focusedCellId ? [focusedCellId] : []
+  }, [agentOpen, focusedCellId, visibleCellIds, workPageCellIds])
   const translateAsReadViewportStateKey = useMemo(() => (
     readAtVersion(cellStoreVersion, () => translateAsReadViewportCellIds
       .map((cellId) => {
@@ -6868,13 +6899,22 @@ export function ProjectWorkspace() {
     return () => { cancelled = true }
   }, [project, cellSummaries.length, cellStoreVersion, frontierSession, getActiveCells])
 
-  const actionCtx = useMemo(() => ({
-    project: project!,
-    activeFileId,
-    fileProgress,
-    canExportByOrgPolicy,
-    audioCounts,
-  }), [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts])
+  const actionCtx = useMemo(() => {
+    const progress = (() => {
+      if (!workPageCellIds || !activeFileId) return fileProgress
+      const pageCells = readAtVersion(cellStoreVersion, getPageCells)
+      const next = new Map(fileProgress)
+      next.set(activeFileId, chapterPageProgress(pageCells))
+      return next
+    })()
+    return {
+      project: project!,
+      activeFileId,
+      fileProgress: progress,
+      canExportByOrgPolicy,
+      audioCounts,
+    }
+  }, [project, activeFileId, fileProgress, canExportByOrgPolicy, audioCounts, cellStoreVersion, getPageCells, workPageCellIds])
 
   const openImportFlow = useCallback(() => {
     if (!project) return
@@ -6896,7 +6936,7 @@ export function ProjectWorkspace() {
     openImport: openImportFlow,
     runCompletions: () => {
       if (!activeFileId || !project) return
-      const cells = getActiveCells()
+      const cells = getPageCells()
       const untranslated = cells.filter((c) => !c.translated.trim())
       if (untranslated.length === 0) return
       // AQU-586: honor the project's configured completion batch size (default 10).
@@ -6904,7 +6944,7 @@ export function ProjectWorkspace() {
     },
     runCompleteAll: () => {
       if (!activeFileId) return
-      const cells = getActiveCells()
+      const cells = getPageCells()
       const untranslated = cells.filter((c) => !c.translated.trim())
       if (untranslated.length === 0) return
       // No slice — draft every untranslated cell; useCompletion chunks internally.
@@ -6919,8 +6959,11 @@ export function ProjectWorkspace() {
     runBatchValidate: () => {
       if (!project?.id || !activeFileId) return
       if (!canPerform("cell.validate", project.syncRole?.level ?? null)) return
-      const eligible = cellSummaries.filter(
-        (c) => c.fileId === activeFileId && isBulkValidationEligible(c),
+      const eligible = filterToChapterPage(
+        cellSummaries.filter(
+          (c) => c.fileId === activeFileId && isBulkValidationEligible(c),
+        ),
+        workPageCellIds,
       )
       // AQU-586: cap how many eligible cells one batch-validate processes.
       // 0/undefined = validate all eligible (unchanged default behavior).
@@ -7013,7 +7056,7 @@ export function ProjectWorkspace() {
       })
     },
     navigate,
-  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId])
+  }), [activeFileId, completeBatch, getActiveCells, getPageCells, workPageCellIds, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId])
 
   // AQU-661: the dynamic primary-action button was removed; its actions now live
   // in the ⋯ overflow menu. This preserves the button's confirmation flow —
@@ -8676,7 +8719,7 @@ export function ProjectWorkspace() {
         switchLens(l)
         if (l === "audio") setDockTab("voices")
       }}
-      onAgentSelect={openAgentTab}
+      onAgentSelect={() => openAgentTab("editor")}
       timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
       checkOpen={checkOpen}
       checkRunning={checkRunning}
@@ -8739,7 +8782,7 @@ export function ProjectWorkspace() {
         railCollapsed={dockTab === null}
         dockStorageKey={projectId}
         logoAccessory={
-          dockTab !== null ? (
+          dockTab !== null && lgUp ? (
             <AppTooltip content={t("workspace.sidebar.collapse")} side="bottom">
               <Button
                 type="button"
@@ -8899,7 +8942,7 @@ export function ProjectWorkspace() {
                 pendingChip={pendingChip}
                 onPendingChipConsumed={() => setPendingChip(null)}
                 credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
-                onExpand={openAgentTab}
+                onExpand={() => openAgentTab("sidebar")}
                 expanded={centerSurface === "agent"}
               />
             }
@@ -8944,13 +8987,6 @@ export function ProjectWorkspace() {
             surfaceLabel={workspaceBreadcrumb.surfaceLabel}
             editorHref={workspaceBreadcrumb.editorHref}
           >
-            {centerSurface === "editor" && activeFileId ? (
-              <div
-                ref={setEditorHeaderNavTarget}
-                className="flex min-w-0 max-w-[min(58vw,52rem)] items-center"
-                data-editor-header-navigation=""
-              />
-            ) : null}
             {/* AQU-615: Door43 upstream-sync badge — visible hint that source
                 cells are managed by a DCS link. Self-gated: renders nothing
                 when project_settings has no dcsUpstream cursor. */}
@@ -8961,9 +8997,9 @@ export function ProjectWorkspace() {
                 onClick={openProjectSettings}
               />
             )}
-
             {/* AQU-661: file-scoped actions live in the chapter-row File options
-                menu; Import is a header button. */}
+                menu; Import + Settings stay as header buttons on this
+                breadcrumb row. */}
           </WorkspaceHeader>
         }
         aboveCard={
@@ -8981,7 +9017,6 @@ export function ProjectWorkspace() {
                 ? [{
                     id: "agent",
                     label: t("nav.dock.agentTab"),
-                    icon: Bot,
                     active: centerSurface === "agent",
                     onActivate: () => openOverlay("agent"),
                     onClose: closeAgentTab,
@@ -9229,8 +9264,18 @@ export function ProjectWorkspace() {
               onPendingChipConsumed: () => setPendingChip(null),
             }}
             credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
-            onClose={closeAgentTab}
+            onCollapse={agentExpandedFromDock ? closeAgentTab : undefined}
             onChooseFile={() => setDockTab("files")}
+            editorMode={{
+              lens,
+              timeOrdered: activeFile ? fileOrderedBy(activeFile) === "time" : false,
+              onLensChange: (next) => {
+                switchLens(next)
+                if (next === "audio") setDockTab("voices")
+                closeAgentTab()
+              },
+            }}
+            fileMenuItems={fileOptionsForAgentSurface(fileMenuItems)}
             onJumpToCell={(fileId, cellId) =>
               navigate(`/project/${projectId}/editor/file/${fileId}?cellId=${encodeURIComponent(cellId)}`)
             }
@@ -9285,11 +9330,12 @@ export function ProjectWorkspace() {
                 activeLane={activeLane}
                 onSetupNeeded={handleAiSetupNeeded}
                 anchorCellId={focusedCellId}
+                cellIds={pagingOn ? (pageCellIds ?? []) : undefined}
                 canControl={currentRoleLevel >= ROLE.CONTRIBUTOR}
               />
             )}
             {timelineStacked ? (
-              <div className="relative flex shrink-0 items-center justify-end gap-3 border-b border-border bg-background/90 py-2 ps-2 pe-2 backdrop-blur-xl">
+              <div className="relative flex shrink-0 items-center justify-end gap-2 border-b border-border bg-background/90 p-2 backdrop-blur-xl">
                 {fileChapterToolbar}
               </div>
             ) : null}
@@ -9573,10 +9619,11 @@ export function ProjectWorkspace() {
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
             onVisibleCellIdsChange={handleVisibleCellIdsChange}
+            onPageCellIdsChange={handlePageCellIdsChange}
             // Stacked mode already shows the toolbar in the media header row
-            // above the timeline — don't render it twice.
+            // above the timeline — don't render it twice. Chapter picker +
+            // file options live in the in-editor row above Source/Target.
             chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
-            chapterNavPortalTarget={editorHeaderNavTarget}
           />
               </div>
               </div>

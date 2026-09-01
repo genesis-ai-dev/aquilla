@@ -4246,7 +4246,6 @@ export const ar: Catalog = {
   "workspace.denoise.removedBadge": "تمت إزالة الضوضاء",
   "workspace.denoise.revertTooltip": "العودة إلى التسجيل الأصلي",
   "workspace.denoise.revertButton": "التراجع",
-  "workspace.chatComposer.keyboardHint": "Enter للإرسال · Shift+Enter للسطر الجديد",
   "workspace.chatComposer.queueTooltip": "وضع في قائمة الانتظار — يُرسل عند انتهاء التشغيل الحالي",
   "workspace.chatComposer.queueMessage": "وضع رسالة في قائمة الانتظار",
   "workspace.chatMarkdown.copyCode": "نسخ الكود",

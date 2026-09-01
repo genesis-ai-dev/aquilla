@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import {
   MilestoneNavigator,
+  MilestoneSplitToggle,
   VOCABULARIES,
   type MilestoneNavigationItem,
 } from "./ChapterNavigator"
@@ -240,6 +241,29 @@ describe("MilestoneNavigator", () => {
     expect(subsection).toHaveClass("ps-6")
     fireEvent.click(screen.getByText("Cells 101–117"))
     expect(onSelect).toHaveBeenCalledWith("story:u363", "story:u363:range:c102")
+  })
+
+  it("pages a whole milestone at a time when split view is on", () => {
+    const onSelect = vi.fn()
+    render(
+      <MilestoneNavigator
+        items={stories}
+        activeKey="story:u44d21"
+        activeSubsectionKey="story:u44d21:range:c1"
+        onSelect={onSelect}
+        pageByMilestone
+      />,
+    )
+
+    // The trigger names the division, not a 50-cell slice inside it.
+    expect(screen.getByRole("combobox", { name: /Current story: Story u44d21\. Choose story/ }))
+      .toBeInTheDocument()
+    expect(screen.queryByRole("combobox", { name: /cells 1–1/ })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Next story" }))
+    expect(onSelect).toHaveBeenCalledWith("story:u363")
+    expect(onSelect).not.toHaveBeenCalledWith("story:u44d21", expect.anything())
+    expect(onSelect).not.toHaveBeenCalledWith("story:u363", expect.anything())
   })
 
   it("expands a split milestone in place instead of navigating to it", () => {
@@ -512,5 +536,24 @@ describe("MilestoneNavigator label keys (finding 3)", () => {
       target: { value: "zzz" },
     })
     expect(screen.getByText("No stories found.")).toBeInTheDocument()
+  })
+})
+
+describe("MilestoneSplitToggle", () => {
+  it("names the control and reports whether paging is on", () => {
+    const onPressedChange = vi.fn()
+    const { rerender } = render(
+      <MilestoneSplitToggle pressed={false} onPressedChange={onPressedChange} />,
+    )
+    const toggle = screen.getByRole("button", { name: "Split into milestones" })
+    expect(toggle).toHaveAttribute("aria-pressed", "false")
+    fireEvent.click(toggle)
+    expect(onPressedChange).toHaveBeenCalledWith(true)
+
+    rerender(<MilestoneSplitToggle pressed onPressedChange={onPressedChange} />)
+    expect(screen.getByRole("button", { name: "Split into milestones" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
   })
 })

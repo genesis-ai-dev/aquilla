@@ -61,6 +61,17 @@ describe("changed-file E2E impact selection", () => {
     ], specs).specs).toContain("e2e/specs/projects/project-settings.smoke.spec.ts")
   })
 
+  it("maps a format parser to the import journey rather than shared runtime", () => {
+    for (const file of [
+      "src/lib/parsers/biblica-ebl.ts",
+      "src/lib/biblica/ebl/notes.ts",
+    ]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain(
+        "e2e/specs/editor/import-and-edit.smoke.spec.ts",
+      )
+    }
+  })
+
   it("uses core sentinels for unclassified runtime code", () => {
     expect(selectAffectedE2E(["src/context/AppContext.tsx"], specs).specs).toEqual([
       "e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts",

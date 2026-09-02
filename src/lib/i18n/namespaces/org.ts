@@ -1100,6 +1100,7 @@ export const org = defineNamespace({
     "org.projectOverview.plan.summaryInProgressLabel": plural({ one: "in progress", other: "in progress" }),
     "org.projectOverview.plan.emptyTitle": "Nothing to plan yet",
     "org.projectOverview.plan.loading": "Loading the plan\u2026",
+    "org.projectOverview.plan.saveFailed": "That change could not be saved, so it has been undone. Try again.",
     "org.projectOverview.plan.errorTitle": "The plan could not be loaded",
     "org.projectOverview.plan.error": "Something went wrong reading this project's plan. Nothing has been lost \u2014 try again.",
     "org.projectOverview.plan.importSource": "Import source",

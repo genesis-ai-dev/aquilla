@@ -116,7 +116,7 @@ async function readPlan(
   db: AquillaDb,
   projectId: string,
   lane: string,
-): Promise<{ units: PlanUnit[]; revision: number; validationCount: number; planUpdatedAt: number }> {
+): Promise<{ units: PlanUnit[]; revision: number; validationCount: number; planUpdatedAt: number; progressUpdatedAt: number }> {
   const validationCount = await readValidationCount(db, projectId)
   const { results } = await db
     .prepare(readPlanUnitsSql())
@@ -125,16 +125,18 @@ async function readPlan(
   const rows = results ?? []
   let revision = 0
   let planUpdatedAt = 0
+  let progressUpdatedAt = 0
   const withBook = rows.map((row) => {
     revision = Math.max(revision, Number(row.revision) || 0)
     planUpdatedAt = Math.max(planUpdatedAt, Number(row.plan_updated_at) || 0)
+    progressUpdatedAt = Math.max(progressUpdatedAt, Number(row.progress_updated_at) || 0)
     return {
       unit: toUnit(row, validationCount),
       book: row.section_key || row.file_book_code || null,
     }
   })
   withBook.sort((x, y) => compareUnits(x.unit, y.unit, x.book, y.book))
-  return { units: withBook.map((x) => x.unit), revision, validationCount, planUpdatedAt }
+  return { units: withBook.map((x) => x.unit), revision, validationCount, planUpdatedAt, progressUpdatedAt }
 }
 
 export async function handlePlanRequest(
@@ -160,11 +162,15 @@ export async function handlePlanRequest(
   const lane = (url.searchParams.get('lane') ?? '').trim()
 
   if (request.method === 'GET') {
-    const { units, revision, validationCount, planUpdatedAt } = await readPlan(db, projectId, lane)
-    // Plan writes never advance the event sequence, so the projection's
-    // revision alone would let a stale board survive a date change. The
-    // newest plan_units.updated_at is the second half of the identity.
-    const etag = `"plan:${projectId}:${lane}:${revision}:${planUpdatedAt}:${units.length}:v${validationCount}"`
+    const { units, revision, validationCount, planUpdatedAt, progressUpdatedAt } =
+      await readPlan(db, projectId, lane)
+    // THREE CLOCKS, because none of them alone moves for every change worth
+    // re-reading. `revision` tracks the event sequence; plan writes never
+    // advance it, so a date change needs the newest plan_units.updated_at; and
+    // a progress BACKFILL advances neither, so filling in audio counts and
+    // activity needs the newest projection updated_at or a client caches an
+    // audio-less board forever.
+    const etag = `"plan:${projectId}:${lane}:${revision}:${planUpdatedAt}:${progressUpdatedAt}:${units.length}:v${validationCount}"`
     if (request.headers.get('If-None-Match') === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
     }

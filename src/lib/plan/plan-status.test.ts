@@ -311,3 +311,34 @@ describe("filterPlanUnits", () => {
     expect(filterPlanUnits(input, {})).not.toBe(input)
   })
 })
+
+describe("sortUnitsInGroup is a total order", () => {
+  const mk = (sectionKey: string, fileName: string): PlanUnit => ({
+    fileId: fileName, fileName, sectionKey,
+    totalCount: 1, filledCount: 0, validatedCount: 0,
+    audioCount: 0, audioValidatedCount: 0, lastEditAt: null,
+    targetDate: null, doneAt: null, doneBy: null,
+  })
+
+  it("puts books before files rather than cycling between them", () => {
+    // The cycle this pins: Genesis < Exodus by canonical ordinal,
+    // Exodus < "Fdoc" by label, "Fdoc" < Genesis by label. With that
+    // comparator the answer depended on the input order.
+    const gen = mk("GEN", "Bible")
+    const exo = mk("EXO", "Bible")
+    const doc = mk("", "Fdoc")
+    const a = sortUnitsInGroup([gen, exo, doc]).map((u) => u.sectionKey || u.fileName)
+    const b = sortUnitsInGroup([doc, exo, gen]).map((u) => u.sectionKey || u.fileName)
+    const c = sortUnitsInGroup([exo, doc, gen]).map((u) => u.sectionKey || u.fileName)
+    expect(a).toEqual(["GEN", "EXO", "Fdoc"])
+    expect(b).toEqual(a)
+    expect(c).toEqual(a)
+  })
+
+  it("still orders books canonically and files by name", () => {
+    const out = sortUnitsInGroup([
+      mk("", "Zeta"), mk("EXO", "Bible"), mk("", "Alpha"), mk("GEN", "Bible"),
+    ]).map((u) => u.sectionKey || u.fileName)
+    expect(out).toEqual(["GEN", "EXO", "Alpha", "Zeta"])
+  })
+})

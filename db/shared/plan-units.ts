@@ -94,6 +94,7 @@ export interface PlanUnitRow {
   target_date: string | null
   done_at: number | null
   done_by: string | null
+  progress_updated_at: number | string | null
   plan_updated_at: number | null
   plan_updated_by: string | null
 }
@@ -128,6 +129,11 @@ export function readPlanUnitsSql(extraScope = ""): string {
             COALESCE(pd.audio_validated_count, 0) AS audio_validated_count,
             COALESCE(pl.last_edit_at, pd.last_edit_at) AS last_edit_at,
             GREATEST(COALESCE(pl.revision, 0), COALESCE(pd.revision, 0)) AS revision,
+            -- The projection stamps this on every recompute. A backfill can
+            -- fill in audio counts and activity WITHOUT advancing the event
+            -- sequence, so the revision alone would leave the plan ETag
+            -- byte-identical and a client caching an audio-less board forever.
+            GREATEST(COALESCE(pl.updated_at, 0), COALESCE(pd.updated_at, 0)) AS progress_updated_at,
             pu.target_date, pu.done_at, pu.done_by,
             pu.updated_at AS plan_updated_at, pu.updated_by AS plan_updated_by
        FROM units u

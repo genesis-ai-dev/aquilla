@@ -244,3 +244,30 @@ describe("GET .../plan — caching and auth", () => {
     expect((await get(db, { role: 100 })).status).toBe(200)
   })
 })
+
+describe("the ETag samples every clock that can change the board", () => {
+  it("changes when a backfill fills in audio without any new event", async () => {
+    // A progress recompute advances neither the event sequence nor
+    // plan_units.updated_at, so an ETag built from those two alone stayed
+    // byte-identical while the numbers underneath it changed — and a client
+    // holding an audio-less board would 304 onto it forever.
+    const db = await makeTestDb({
+      files: [file("f1", { cell_count: 10 })],
+      file_section_progress: [progress("f1", "file", "", { total_count: 10, filled_count: 4 })],
+    }).then((r) => r.db)
+
+    const before = await get(db)
+    const tag = before.headers.get("ETag")!
+    expect((await get(db, { headers: { "If-None-Match": tag } })).status).toBe(304)
+
+    await db.prepare(
+      `UPDATE file_section_progress SET audio_count = 5, updated_at = updated_at + 1000
+        WHERE project_id = ? AND file_id = ?`,
+    ).bind(P, "f1").run()
+
+    const after = await get(db, { headers: { "If-None-Match": tag } })
+    expect(after.status).toBe(200)
+    expect(after.headers.get("ETag")).not.toBe(tag)
+    expect((await after.json() as PlanResponse).units[0].audioCount).toBe(5)
+  })
+})

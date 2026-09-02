@@ -110,8 +110,17 @@ export function sortUnitsInGroup(units: readonly PlanUnit[]): PlanUnit[] {
     }
     // Same date (or both undated): canonical book order where both are books,
     // so Genesis precedes Exodus rather than sorting alphabetically.
+    //
+    // BOOKS AND NON-BOOKS ARE SEPARATED FIRST, and that is not tidiness. When
+    // the ordinal applied only to book-vs-book and everything else fell back
+    // to the label, a group holding books and files had a NON-TRANSITIVE
+    // comparator: Genesis < Exodus by ordinal, Exodus < "Fdoc" by label, and
+    // "Fdoc" < Genesis by label — a cycle, so the result depended on the input
+    // order and on the sort implementation. Books ahead of files gives every
+    // pair one consistent rule.
     const aBook = isKnownBookCode(a.sectionKey)
     const bBook = isKnownBookCode(b.sectionKey)
+    if (aBook !== bBook) return aBook ? -1 : 1
     if (aBook && bBook) {
       const d = getBookOrdinal(a.sectionKey) - getBookOrdinal(b.sectionKey)
       if (d !== 0) return d

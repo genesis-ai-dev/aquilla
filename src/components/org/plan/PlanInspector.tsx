@@ -70,9 +70,15 @@ export function PlanInspector({
     ? "org.projectOverview.plan.chapterCount"
     : "org.projectOverview.plan.sectionCount"
 
+  // A rejected write used to roll back in silence: the optimistic value
+  // appeared, the server refused it, the row snapped back, and nothing said
+  // why. Setting a date is cheap to retry — but only if you know it failed.
+  const [failed, setFailed] = useState(false)
   const patch = async (p: Omit<PlanUnitPatch, "fileId" | "sectionKey">) => {
     setBusy(true)
-    await onPatch({ fileId: unit.fileId, sectionKey: unit.sectionKey, ...p })
+    setFailed(false)
+    const ok = await onPatch({ fileId: unit.fileId, sectionKey: unit.sectionKey, ...p })
+    setFailed(!ok)
     setBusy(false)
   }
 
@@ -119,6 +125,12 @@ export function PlanInspector({
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-4">
+        {failed && (
+          <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[13px]"
+             role="alert" data-testid="plan-patch-failed">
+            {t("org.projectOverview.plan.saveFailed")}
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-2.5">
           <PlanStatusPill status={status} now={now} />
           {note && (

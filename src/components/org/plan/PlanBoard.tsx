@@ -424,30 +424,37 @@ export function PlanBoard({
               const folded = collapsed.has(group.status)
               return (
                 <section key={group.status} data-testid={`plan-group-${group.status}`}>
-                  <button
-                    type="button"
-                    // NOT `plan-group-toggle-*`: tests select groups with a
-                    // `[data-testid^="plan-group-"]` prefix, which that would
-                    // shadow. Same trap the date column hit.
-                    data-testid={`plan-fold-${group.status}`}
-                    aria-expanded={!folded}
-                    onClick={() => toggleGroup(group.status)}
-                    className="flex w-full items-center gap-2.5 border-y bg-muted px-[17px] py-[11px] text-start transition-colors first:border-t-0 hover:bg-muted/70"
-                  >
-                    {folded
-                      ? <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
-                      : <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />}
-                    <span className={`h-[7px] w-[7px] shrink-0 rounded-full ${tone.dot}`} aria-hidden />
-                    <h3 className={`text-[12.5px] font-semibold ${tone.text}`}>
+                  {/*
+                    * The HEADING WRAPS THE BUTTON, not the other way round. A
+                    * button may only contain phrasing content, and an <h3> is
+                    * flow content — nesting it inside made the markup invalid
+                    * and dropped every group out of heading navigation, which
+                    * is how a screen-reader user skims a page like this.
+                    */}
+                  <h3 className="contents">
+                    <button
+                      type="button"
+                      // NOT `plan-group-toggle-*`: tests select groups with a
+                      // `[data-testid^="plan-group-"]` prefix, which that would
+                      // shadow. Same trap the date column hit.
+                      data-testid={`plan-fold-${group.status}`}
+                      aria-expanded={!folded}
+                      onClick={() => toggleGroup(group.status)}
+                      className={`flex w-full items-center gap-2.5 border-y bg-muted px-[17px] py-[11px] text-start text-[12.5px] font-semibold transition-colors first:border-t-0 hover:bg-muted/70 ${tone.text}`}
+                    >
+                      {folded
+                        ? <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+                        : <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />}
+                      <span className={`h-[7px] w-[7px] shrink-0 rounded-full ${tone.dot}`} aria-hidden />
                       {t(PLAN_STATUS_LABEL_KEY[group.status] as never)}
-                    </h3>
-                    <span className="rounded-full border bg-card px-[7px] text-[11px] font-bold tabular-nums text-muted-foreground">
-                      {group.units.length}
-                    </span>
-                    <span className="ms-auto hidden text-[11.5px] text-muted-foreground sm:block">
-                      {t(GROUP_HINT_KEY[group.status] as never)}
-                    </span>
-                  </button>
+                      <span className="rounded-full border bg-card px-[7px] text-[11px] font-bold tabular-nums text-muted-foreground">
+                        {group.units.length}
+                      </span>
+                      <span className="ms-auto hidden font-normal text-[11.5px] text-muted-foreground sm:block">
+                        {t(GROUP_HINT_KEY[group.status] as never)}
+                      </span>
+                    </button>
+                  </h3>
                   {!folded && <ul className="divide-y">{group.units.map(renderRow)}</ul>}
                 </section>
               )

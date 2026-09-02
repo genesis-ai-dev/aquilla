@@ -80,7 +80,11 @@ export interface TranslationRule {
   description: string
   severity: "major" | "minor"
   source: "algorithmic" | "llm" | "user"
-  scope: "project" | "org"
+  scope: "project" | "org" | "lane"
+  /** For lane-scoped rules (AQU-609): the target-language lane this rule
+   *  applies to. `''` is the project-default lane (matching the cells/lanes
+   *  convention from AQU-538). Only meaningful when `scope === "lane"`. */
+  lane?: string
   check: RuleCheck
   enabled: boolean
   createdAt: string

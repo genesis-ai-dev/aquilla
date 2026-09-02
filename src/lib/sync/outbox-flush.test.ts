@@ -133,6 +133,82 @@ describe("flushOutboxBatch", () => {
     expect(await outboxPendingCount()).toBe(1)
   })
 
+  it("drains an inactive owner's rows with only that owner's credential", async () => {
+    setActiveOutboxOwner("alice")
+    await enqueueOutboxEvent(makeEvent("alice-event", "f1", { author: "alice" }))
+    setActiveOutboxOwner("bob")
+    await enqueueOutboxEvent(makeEvent("bob-event", "f1", { author: "bob" }))
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ accepted: [{ id: "alice-event" }], rejected: [] }),
+    )
+
+    const result = await flushOutboxBatch({
+      getTokenForFile: async () => ({ token: "alice-sync-token", status: 200 }),
+      ownerScope: {
+        ownerKey: "alice",
+        isSessionCurrent: async () => true,
+      },
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect(result).toMatchObject({ posted: 1, accepted: 1 })
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer alice-sync-token")
+    expect(JSON.parse(init.body as string).events.map((event: CqrsRawEvent) => event.id)).toEqual(["alice-event"])
+    expect((await peekPendingOutboxBatch(10)).map((record) => record.id)).toEqual(["bob-event"])
+    expect(await outboxPendingCount({ ownerKey: "alice" })).toBe(0)
+  })
+
+  it("cancels an inactive send when its exact stored JWT changes during minting", async () => {
+    setActiveOutboxOwner("alice")
+    await enqueueOutboxEvent(makeEvent("alice-event", "f1"))
+    setActiveOutboxOwner("bob")
+    let currentJwt = "alice-jwt-1"
+    let resolveMint!: (result: TokenMintResult) => void
+    const mint = vi.fn(() => new Promise<TokenMintResult>((resolve) => { resolveMint = resolve }))
+    const fetchMock = vi.fn()
+
+    const flushing = flushOutboxBatch({
+      getTokenForFile: mint,
+      ownerScope: {
+        ownerKey: "alice",
+        isSessionCurrent: async () => currentJwt === "alice-jwt-1",
+      },
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    await vi.waitFor(() => expect(mint).toHaveBeenCalledOnce())
+    currentJwt = "alice-jwt-2"
+    resolveMint({ token: "token-from-jwt-1", status: 200 })
+
+    await expect(flushing).resolves.toMatchObject({ posted: 0, accepted: 0 })
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(await outboxPendingCount({ ownerKey: "alice" })).toBe(1)
+  })
+
+  it("does not remove a different owner's replacement row from a stale server acknowledgement", async () => {
+    setActiveOutboxOwner("alice")
+    await enqueueOutboxEvent(makeEvent("shared-id", "f1", { author: "alice" }))
+    const fetchMock = vi.fn(async () => {
+      setActiveOutboxOwner("bob")
+      await enqueueOutboxEvent(makeEvent("shared-id", "f1", { author: "bob" }))
+      return jsonResponse({ accepted: [{ id: "shared-id" }], rejected: [] })
+    })
+
+    await flushOutboxBatch({
+      getTokenForFile: async () => ({ token: "alice-sync-token", status: 200 }),
+      ownerScope: {
+        ownerKey: "alice",
+        isSessionCurrent: async () => true,
+      },
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+
+    expect((await peekPendingOutboxBatch(10)).map((record) => ({
+      id: record.id,
+      author: record.event.author,
+    }))).toEqual([{ id: "shared-id", author: "bob" }])
+  })
+
   // -- Happy path ------------------------------------------------------------
 
   it("POSTs 3 events with bearer auth; removes all from outbox on full accept", async () => {

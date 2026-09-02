@@ -1223,6 +1223,9 @@ export const editor = defineNamespace({
     "editor.lane.setTargetLanguage": "Set target language",
     "editor.lane.changeTargetLanguage": "Change target language",
     "editor.lane.changeTargetLanguageItem": "Change target language…",
+    "editor.lane.searchPlaceholder": "Search lanes…",
+    "editor.lane.searchAriaLabel": "Search lanes",
+    "editor.lane.searchEmpty": "No lanes found.",
     "editor.lane.showArchived": "Show archived ({count})",
     "editor.empty.noMediaSegments": "No media segments yet",
     "editor.empty.mediaLayerHint":
@@ -4280,6 +4283,10 @@ export const editor = defineNamespace({
           "Menu item inside the lane switcher that opens the target-language " +
           "editor. Trailing ellipsis means 'opens a further dialog' — keep it.",
         maxLength: 28,
+      },
+      "editor.lane.searchAriaLabel": {
+        description:
+          "Accessible label for the search field inside every lane-picker combobox (editor lane switcher, rule scope picker, rules lane filter). Filters the lane list as the user types.",
       },
       "editor.lane.showArchived": {
         description:

@@ -40,6 +40,12 @@ import {
 } from "../types"
 import { resolveProjectRole, isLinkRoleLevel } from "../services/project-permissions"
 import { hashPasswordWerkzeugScrypt, verifyPasswordWerkzeugScrypt } from "../utils/password"
+import {
+  ACCESS_LINK_REDEEM_MAX_PER_IP,
+  countRecentEvents,
+  ipIdentifier,
+  recordAuthEvent,
+} from "../utils/rate-limit"
 
 const accessLinks = new Hono<AuthHonoEnv>()
 
@@ -185,6 +191,18 @@ accessLinks.post("/:token/redeem", zValidator("json", redeemSchema), async (c) =
 
   const token = c.req.param("token")
   const { pin } = c.req.valid("json")
+  const ipIdent = ipIdentifier(c.req.header("CF-Connecting-IP") || "unknown")
+
+  // Per-IP throttle, in addition to the per-token lockout below — checked
+  // before touching the DB for the token lookup so a throttled caller can't
+  // keep using this endpoint as a token/PIN oracle. See the [Pen test]
+  // comment on ACCESS_LINK_REDEEM_MAX_PER_IP for why this exists.
+  const ipFailures = await countRecentEvents(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, {
+    onlyFailures: true,
+  })
+  if (ipFailures >= ACCESS_LINK_REDEEM_MAX_PER_IP) {
+    return c.json({ error: "Too many attempts. Please try again later." }, 429)
+  }
 
   const link = await c.env.AQUILLA_PG.prepare(
     `SELECT token, project_id, user_id, pin_hash, role_level, created_by,
@@ -198,10 +216,22 @@ accessLinks.post("/:token/redeem", zValidator("json", redeemSchema), async (c) =
   // Unknown / revoked / expired / locked all collapse to the same dead-link
   // response — no branch is observable to the caller.
   const now = new Date()
-  if (!link) return c.json(DEAD_LINK, 401)
-  if (link.revoked_at) return c.json(DEAD_LINK, 401)
-  if (link.expires_at && new Date(link.expires_at) < now) return c.json(DEAD_LINK, 401)
-  if (link.locked_until && new Date(link.locked_until) > now) return c.json(DEAD_LINK, 401)
+  if (!link) {
+    await recordAuthEvent(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, false)
+    return c.json(DEAD_LINK, 401)
+  }
+  if (link.revoked_at) {
+    await recordAuthEvent(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, false)
+    return c.json(DEAD_LINK, 401)
+  }
+  if (link.expires_at && new Date(link.expires_at) < now) {
+    await recordAuthEvent(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, false)
+    return c.json(DEAD_LINK, 401)
+  }
+  if (link.locked_until && new Date(link.locked_until) > now) {
+    await recordAuthEvent(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, false)
+    return c.json(DEAD_LINK, 401)
+  }
 
   let pinOk = false
   try {
@@ -236,6 +266,7 @@ accessLinks.post("/:token/redeem", zValidator("json", redeemSchema), async (c) =
     } catch (err) {
       console.error("[access-links] attempt bump failed:", err)
     }
+    await recordAuthEvent(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, false)
     return c.json(DEAD_LINK, 401)
   }
 
@@ -249,8 +280,10 @@ accessLinks.post("/:token/redeem", zValidator("json", redeemSchema), async (c) =
     .first<{ username: string }>()
   if (!boundUser) {
     // Bound account was deleted after mint — the link is dead.
+    await recordAuthEvent(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, false)
     return c.json(DEAD_LINK, 401)
   }
+  await recordAuthEvent(c.env.AQUILLA_PG, "access_link_redeem", ipIdent, true)
 
   try {
     await c.env.AQUILLA_PG.prepare(

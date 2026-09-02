@@ -222,8 +222,10 @@ describe("org Projects Updated filter (AQU-1043)", () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    // anna owns Gospels (1d) and Acts (200d); only Gospels is inside 90 days.
-    await pickFilter(/^pm/i, "anna")
+    // anna is the mocked viewer, so her slice is the pinned "Managed by me"
+    // option (AQU-1027). She owns Gospels (1d) and Acts (200d); only Gospels
+    // is inside 90 days.
+    await pickFilter(/^pm/i, "Managed by me")
     await pickFilter(/^updated/i, "Updated in last 90 days")
     expect(rowNames()).toEqual(["Gospels"])
   })

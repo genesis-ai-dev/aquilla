@@ -59,6 +59,14 @@ let dbPromise: Promise<IDBDatabase> | null = null
 let activeOwnerKey: string | null | undefined
 let activeOwnerVersion = 0
 
+/**
+ * Explicit account boundary for background work. Foreground callers omit this
+ * and continue to follow the currently published account boundary.
+ */
+export interface OutboxOwnerScope {
+  ownerKey: string | null
+}
+
 /** Set synchronously with the app's published account boundary. */
 export function setActiveOutboxOwner(ownerKey: string | null): void {
   if (activeOwnerKey === ownerKey) return
@@ -77,6 +85,17 @@ function belongsToOwner(
   ownerKey: string | null | undefined,
 ): boolean {
   return ownerKey === undefined || record.ownerKey === ownerKey
+}
+
+function ownerForScope(scope?: OutboxOwnerScope): string | null | undefined {
+  return scope ? scope.ownerKey : activeOwnerKey
+}
+
+function belongsToMutationScope(
+  record: Pick<OutboxRecord, "ownerKey">,
+  scope?: OutboxOwnerScope,
+): boolean {
+  return !scope || record.ownerKey === scope.ownerKey
 }
 
 /**
@@ -258,6 +277,7 @@ export async function enqueueOutboxEvents(events: CqrsRawEvent[]): Promise<void>
 export async function markOutboxAttempt(
   ids: string[],
   outcome: { error: OutboxAttemptError | null; at?: number },
+  scope?: OutboxOwnerScope,
 ): Promise<void> {
   if (ids.length === 0) return
   let db: IDBDatabase
@@ -278,7 +298,7 @@ export async function markOutboxAttempt(
       const getReq = store.get(id)
       getReq.onsuccess = () => {
         const rec = getReq.result as Partial<OutboxRecord> | undefined
-        if (!rec || !rec.id || !rec.event) return
+        if (!rec || !rec.id || !rec.event || !belongsToMutationScope(rec, scope)) return
         const newAttempts = (rec.attempts ?? 0) + 1
         const next: OutboxRecord = {
           id: rec.id,
@@ -313,6 +333,7 @@ export async function markOutboxAttempt(
 export async function stampOutboxError(
   ids: string[],
   error: OutboxAttemptError,
+  scope?: OutboxOwnerScope,
 ): Promise<void> {
   if (ids.length === 0) return
   let db: IDBDatabase
@@ -331,7 +352,7 @@ export async function stampOutboxError(
       const getReq = store.get(id)
       getReq.onsuccess = () => {
         const rec = getReq.result as Partial<OutboxRecord> | undefined
-        if (!rec || !rec.id || !rec.event) return
+        if (!rec || !rec.id || !rec.event || !belongsToMutationScope(rec, scope)) return
         const next: OutboxRecord = {
           id: rec.id,
           enqueuedAt: rec.enqueuedAt ?? Date.now(),
@@ -350,8 +371,11 @@ export async function stampOutboxError(
 }
 
 /** Oldest-first rows (all statuses), at most `limit`. */
-export async function peekOutboxBatch(limit: number): Promise<OutboxRecord[]> {
-  const ownerKey = activeOwnerKey
+export async function peekOutboxBatch(
+  limit: number,
+  scope?: OutboxOwnerScope,
+): Promise<OutboxRecord[]> {
+  const ownerKey = ownerForScope(scope)
   try {
     const db = await openDb()
     return await new Promise((resolve, reject) => {
@@ -506,8 +530,11 @@ export async function getOutboxRecordsForCell(
 }
 
 /** Oldest-first rows with status `pending` only, at most `limit`. Used by the flusher. */
-export async function peekPendingOutboxBatch(limit: number): Promise<OutboxRecord[]> {
-  const ownerKey = activeOwnerKey
+export async function peekPendingOutboxBatch(
+  limit: number,
+  scope?: OutboxOwnerScope,
+): Promise<OutboxRecord[]> {
+  const ownerKey = ownerForScope(scope)
   try {
     const db = await openDb()
     return await new Promise((resolve, reject) => {
@@ -534,8 +561,8 @@ export async function peekPendingOutboxBatch(limit: number): Promise<OutboxRecor
 }
 
 /** Count of records that have permanently failed (exceeded retry cap). */
-export async function outboxFailedCount(): Promise<number> {
-  const ownerKey = activeOwnerKey
+export async function outboxFailedCount(scope?: OutboxOwnerScope): Promise<number> {
+  const ownerKey = ownerForScope(scope)
   try {
     const db = await openDb()
     return await new Promise((resolve, reject) => {
@@ -571,6 +598,7 @@ export async function outboxFailedCount(): Promise<number> {
 export async function quarantineOutboxEvents(
   ids: string[],
   error: OutboxAttemptError,
+  scope?: OutboxOwnerScope,
 ): Promise<void> {
   if (ids.length === 0) return
   let db: IDBDatabase
@@ -589,7 +617,7 @@ export async function quarantineOutboxEvents(
       const getReq = store.get(id)
       getReq.onsuccess = () => {
         const rec = getReq.result as Partial<OutboxRecord> | undefined
-        if (!rec || !rec.id || !rec.event) return
+        if (!rec || !rec.id || !rec.event || !belongsToMutationScope(rec, scope)) return
         const next: OutboxRecord = {
           id: rec.id,
           enqueuedAt: rec.enqueuedAt ?? Date.now(),
@@ -615,7 +643,10 @@ export async function quarantineOutboxEvents(
  * (reset backoff + force a flush) so the retry happens immediately rather than
  * after the next backoff window.
  */
-export async function requeueOutboxEvents(ids: string[]): Promise<void> {
+export async function requeueOutboxEvents(
+  ids: string[],
+  scope?: OutboxOwnerScope,
+): Promise<void> {
   if (ids.length === 0) return
   let db: IDBDatabase
   try {
@@ -632,7 +663,7 @@ export async function requeueOutboxEvents(ids: string[]): Promise<void> {
       const getReq = store.get(id)
       getReq.onsuccess = () => {
         const rec = getReq.result as Partial<OutboxRecord> | undefined
-        if (!rec || !rec.id || !rec.event) return
+        if (!rec || !rec.id || !rec.event || !belongsToMutationScope(rec, scope)) return
         const next: OutboxRecord = {
           id: rec.id,
           enqueuedAt: rec.enqueuedAt ?? Date.now(),
@@ -658,7 +689,10 @@ export async function requeueOutboxEvents(ids: string[]): Promise<void> {
  * the record keeps its status/lastError and stays in the inspector (where it
  * can be retried or discarded). No-op for ids that don't exist.
  */
-export async function acknowledgeOutboxEvents(ids: string[]): Promise<void> {
+export async function acknowledgeOutboxEvents(
+  ids: string[],
+  scope?: OutboxOwnerScope,
+): Promise<void> {
   if (ids.length === 0) return
   let db: IDBDatabase
   try {
@@ -676,7 +710,7 @@ export async function acknowledgeOutboxEvents(ids: string[]): Promise<void> {
       const getReq = store.get(id)
       getReq.onsuccess = () => {
         const rec = getReq.result as OutboxRecord | undefined
-        if (!rec || !rec.id || !rec.event) return
+        if (!rec || !rec.id || !rec.event || !belongsToMutationScope(rec, scope)) return
         store.put({ ...rec, acknowledgedAt: at })
       }
     }
@@ -694,8 +728,10 @@ export async function acknowledgeOutboxEvents(ids: string[]): Promise<void> {
  * after the max-attempt cap would have been reached under the old policy.
  * The caller should also call flushNow() to drain immediately.
  */
-export async function requeueTransientlyFailedOutboxEvents(): Promise<void> {
-  const ownerKey = activeOwnerKey
+export async function requeueTransientlyFailedOutboxEvents(
+  scope?: OutboxOwnerScope,
+): Promise<void> {
+  const ownerKey = ownerForScope(scope)
   let db: IDBDatabase
   try {
     db = await openDb()
@@ -738,7 +774,10 @@ export async function requeueTransientlyFailedOutboxEvents(): Promise<void> {
   notifyOutboxChanged()
 }
 
-export async function removeOutboxEvents(ids: string[]): Promise<void> {
+export async function removeOutboxEvents(
+  ids: string[],
+  scope?: OutboxOwnerScope,
+): Promise<void> {
   if (ids.length === 0) return
   const db = await openDb()
   await new Promise<void>((resolve, reject) => {
@@ -747,14 +786,22 @@ export async function removeOutboxEvents(ids: string[]): Promise<void> {
     tx.oncomplete = () => resolve()
     const store = tx.objectStore(STORE)
     for (const id of ids) {
-      store.delete(id)
+      if (!scope) {
+        store.delete(id)
+        continue
+      }
+      const request = store.get(id)
+      request.onsuccess = () => {
+        const record = request.result as OutboxRecord | undefined
+        if (record && belongsToMutationScope(record, scope)) store.delete(id)
+      }
     }
   })
   notifyOutboxChanged()
 }
 
-export async function outboxPendingCount(): Promise<number> {
-  const ownerKey = activeOwnerKey
+export async function outboxPendingCount(scope?: OutboxOwnerScope): Promise<number> {
+  const ownerKey = ownerForScope(scope)
   try {
     const db = await openDb()
     return await new Promise((resolve, reject) => {

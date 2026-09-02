@@ -82,9 +82,14 @@ pass. For each oversized issue:
 1. Split it into **tracer-bullet vertical slices** — each independently shippable and verifiable
    (lean on the `to-issues` skill's slicing discipline if helpful).
 2. `save_issue` to create each slice as a **sub-issue** (`parentId` = the big issue), in the same
-   project + team, **status `Triage`** — new issues are never created in `Todo` (see AGENTS.md →
-   "Agent-ready vs. human-in-the-loop"), priority inherited, with a one-line scope + acceptance
-   criterion.
+   project + team, **from the team's issue template** (`template`: `Bug Report` / `Feature
+   Request` / `Task` — fill the template's section headings in the description; the template
+   applies the category label), **status `Triage`** — new issues are never created in `Todo`
+   (see AGENTS.md → "Agent-ready vs. human-in-the-loop"; ⚠️ the templates embed `Todo`, so
+   pass `state: Triage` explicitly and confirm the response says `Triage`), **unassigned**
+   (the team rotation auto-assigns at create time — if the response shows an assignee, clear
+   it with a follow-up `assignee: null` save), priority inherited, with a one-line scope +
+   acceptance criterion.
 3. Leave the parent as a tracking umbrella (do not work it directly; its children carry the work).
 4. Comment on the parent listing the sub-issues created.
 5. The slices now sit in the human queue, so **this run does not work them** (they are not

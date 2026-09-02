@@ -1,4 +1,4 @@
-import type { ComponentType, ReactNode, Ref } from "react"
+import { useId, type ComponentType, type ReactNode, type Ref } from "react"
 import type { VariantProps } from "class-variance-authority"
 import { MoreHorizontal } from "lucide-react"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -19,6 +19,13 @@ export interface OverflowMenuItem {
   icon?: ComponentType<{ className?: string }>
   /** Optional trailing badge (e.g. check-file finding count). */
   badge?: ReactNode
+  /**
+   * One-line explanation rendered under the label and exposed as the item's
+   * accessible description. Use it when the label alone cannot say what the
+   * item does (AQU-1078: "Draft as you read" needs its guarantees spelled out
+   * where the user reads them, not in a hover tooltip a touch user never sees).
+   */
+  description?: string
   onClick?: () => void
   checked?: boolean
   onCheckedChange?: (checked: boolean) => void
@@ -59,8 +66,39 @@ interface Props {
  * scaling sideways with every new feature.
  */
 function OverflowMenuPanel({ items }: { items: OverflowMenuItem[] }) {
+  const menuId = useId()
+  // The description sits inside the item so it reads as part of it, but it is
+  // wired through aria-describedby (and hidden from name-from-content) so the
+  // accessible NAME stays the bare label and the copy lands in the DESCRIPTION.
+  const describedBy = (item: OverflowMenuItem) =>
+    item.description ? `${menuId}-${item.id}-description` : undefined
+  const body = (item: OverflowMenuItem) => (
+    <>
+      {item.icon && <item.icon className="h-4 w-4" />}
+      {item.description ? (
+        <span className="flex min-w-0 flex-1 flex-col">
+          <span>{item.label}</span>
+          <span
+            id={describedBy(item)}
+            aria-hidden="true"
+            className="text-xs font-normal text-muted-foreground whitespace-normal"
+          >
+            {item.description}
+          </span>
+        </span>
+      ) : (
+        <span className="flex-1">{item.label}</span>
+      )}
+      {item.badge}
+    </>
+  )
+  // DropdownMenuContent sizes itself to its anchor with a 192px floor and clips
+  // overflow, so a wrapping description cannot widen it on its own. Give the
+  // panel a wider floor when any item carries one; the description then wraps
+  // to the width it is given instead of squeezing the label into two lines.
+  const hasDescription = items.some((item) => item.description)
   return (
-    <DropdownMenuContent align="end" className="min-w-48">
+    <DropdownMenuContent align="end" className={hasDescription ? "min-w-80" : "min-w-48"}>
       <DropdownMenuGroup>
         {items.map((item) =>
           item.type === "separator" ? (
@@ -70,22 +108,20 @@ function OverflowMenuPanel({ items }: { items: OverflowMenuItem[] }) {
               key={item.id}
               checked={item.checked}
               disabled={item.disabled}
+              aria-describedby={describedBy(item)}
               onCheckedChange={(checked) => item.onCheckedChange?.(checked)}
             >
-              {item.icon && <item.icon className="h-4 w-4" />}
-              <span className="flex-1">{item.label}</span>
-              {item.badge}
+              {body(item)}
             </DropdownMenuCheckboxItem>
           ) : (
             <DropdownMenuItem
               key={item.id}
               disabled={item.disabled}
               variant={item.destructive ? "destructive" : "default"}
+              aria-describedby={describedBy(item)}
               onClick={item.onClick}
             >
-              {item.icon && <item.icon className="h-4 w-4" />}
-              <span className="flex-1">{item.label}</span>
-              {item.badge}
+              {body(item)}
             </DropdownMenuItem>
           ),
         )}

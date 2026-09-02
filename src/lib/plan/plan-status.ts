@@ -219,6 +219,51 @@ export function planPct(part: number, whole: number): number {
   return whole > 0 ? Math.round((part / whole) * 100) : 0
 }
 
+/** What the reader has narrowed the board to. Both are ephemeral by design. */
+export interface PlanFilter {
+  /** Free text; matched against the unit's label and its section key. */
+  query?: string
+  /** Only units nobody has given a target date and nobody has marked done. */
+  needsDateOnly?: boolean
+}
+
+/**
+ * Does this unit still need a date from a planner?
+ *
+ * A unit already marked Done is excluded even with no date on it. The filter
+ * exists to be a scheduling to-do list, and something finished is not on it.
+ */
+export function planUnitNeedsDate(u: Pick<PlanUnit, "targetDate" | "doneAt">): boolean {
+  return u.targetDate == null && u.doneAt == null
+}
+
+/**
+ * Narrow the board.
+ *
+ * The query matches the unit's DISPLAY LABEL and its section key, so both
+ * "Genesis" and "GEN" find Genesis — a PM who knows the book codes should not
+ * have to spell the name out. Case-insensitive, trimmed, and an empty or
+ * whitespace-only query passes everything through, matching how every other
+ * filter box in this app behaves.
+ *
+ * The file name is deliberately NOT matched. On a whole-Bible import every one
+ * of the sixty-six book units shares one file name, so typing it would select
+ * all of them at once and look like the filter had failed.
+ */
+export function filterPlanUnits(units: readonly PlanUnit[], filter: PlanFilter): PlanUnit[] {
+  const q = (filter.query ?? "").trim().toLowerCase()
+  const needsDateOnly = filter.needsDateOnly === true
+  if (!q && !needsDateOnly) return [...units]
+  return units.filter((u) => {
+    if (needsDateOnly && !planUnitNeedsDate(u)) return false
+    if (!q) return true
+    return (
+      planUnitLabel(u).toLowerCase().includes(q) ||
+      u.sectionKey.toLowerCase().includes(q)
+    )
+  })
+}
+
 /** Does this project track audio at all? Drives whether audio bars render. */
 export function planHasAudio(units: readonly PlanUnit[]): boolean {
   return units.some((u) => u.audioCount > 0)

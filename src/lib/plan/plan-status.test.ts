@@ -11,6 +11,7 @@ import {
   PLAN_GROUP_ORDER,
   type PlanUnit,
   planUnitNote,
+  filterPlanUnits,
 } from "./plan-status"
 
 function unit(over: Partial<PlanUnit> = {}): PlanUnit {
@@ -242,5 +243,63 @@ describe("planUnitNote", () => {
 
   it("has nothing to add about an untouched, undated unit", () => {
     expect(planUnitNote(base, NOW)).toBeNull()
+  })
+})
+
+describe("filterPlanUnits", () => {
+  const u = (over: Partial<PlanUnit>): PlanUnit => ({
+    fileId: "f", fileName: "Whole Bible.usfm", sectionKey: "",
+    totalCount: 10, filledCount: 0, validatedCount: 0,
+    audioCount: 0, audioValidatedCount: 0, lastEditAt: null,
+    targetDate: null, doneAt: null, doneBy: null, ...over,
+  })
+  const GEN = u({ sectionKey: "GEN" })
+  const EXO = u({ sectionKey: "EXO", targetDate: "2026-08-10" })
+  const EP1 = u({ fileId: "e1", fileName: "Episode 1 — The Wedding" })
+
+  it("passes everything through for an empty or whitespace query", () => {
+    expect(filterPlanUnits([GEN, EXO], {})).toHaveLength(2)
+    expect(filterPlanUnits([GEN, EXO], { query: "   " })).toHaveLength(2)
+  })
+
+  it("matches the display label, not the raw section key alone", () => {
+    expect(filterPlanUnits([GEN, EXO], { query: "genes" })).toEqual([GEN])
+  })
+
+  it("also matches the book code, so a PM need not spell the name out", () => {
+    expect(filterPlanUnits([GEN, EXO], { query: "exo" })).toEqual([EXO])
+  })
+
+  it("is case-insensitive in both directions", () => {
+    expect(filterPlanUnits([GEN], { query: "GENESIS" })).toEqual([GEN])
+    expect(filterPlanUnits([EP1], { query: "wedding" })).toEqual([EP1])
+  })
+
+  it("never matches on the file name of a book unit", () => {
+    // Every one of a whole-Bible import's 66 units shares one file name, so
+    // matching it would select all of them and look like the filter broke.
+    expect(filterPlanUnits([GEN, EXO], { query: "Whole Bible" })).toEqual([])
+  })
+
+  it("still finds a file-grain unit, whose label IS its file name", () => {
+    expect(filterPlanUnits([EP1], { query: "episode" })).toEqual([EP1])
+  })
+
+  it("narrows to units nobody has given a date", () => {
+    expect(filterPlanUnits([GEN, EXO], { needsDateOnly: true })).toEqual([GEN])
+  })
+
+  it("treats a finished unit as needing no date, even with none set", () => {
+    const done = u({ sectionKey: "LEV", doneAt: 1 })
+    expect(filterPlanUnits([GEN, done], { needsDateOnly: true })).toEqual([GEN])
+  })
+
+  it("applies both narrowings together", () => {
+    expect(filterPlanUnits([GEN, EXO], { query: "e", needsDateOnly: true })).toEqual([GEN])
+  })
+
+  it("returns a copy, never the caller's array", () => {
+    const input = [GEN]
+    expect(filterPlanUnits(input, {})).not.toBe(input)
   })
 })

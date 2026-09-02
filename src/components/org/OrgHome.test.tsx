@@ -712,17 +712,18 @@ describe("OrgOverview / OrgProjects", () => {
     expect(screen.getByText("New Testament")).toBeInTheDocument()
   })
 
-  it("filters to stalled projects via the status select", async () => {
+  it("filters to stalled projects via the Sort by menu's Status submenu", async () => {
     renderMemberProjects()
     await waitFor(() => expect(screen.getByText("New Testament")).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole("combobox", { name: /project status filter/i }))
-    const option = await screen.findByRole("option", { name: "Stalled" })
-    fireEvent.pointerMove(option)
-    fireEvent.mouseMove(option)
-    fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
+    // AQU-1044: on the Projects page the status filter lives in the combined
+    // Sort by menu (ProjectSortMenu), one submenu per dimension.
+    fireEvent.click(screen.getByTestId("project-sort-menu"))
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^status/i }))
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Stalled" }))
+    fireEvent.pointerDown(document.body, { button: 0 })
     await waitFor(() => {
-      expect(screen.queryByRole("listbox")).toBeNull()
+      expect(screen.queryAllByRole("menu")).toHaveLength(0)
     })
 
     // Legacy Translation is 30 days stale; New Testament was just edited.
@@ -730,17 +731,16 @@ describe("OrgOverview / OrgProjects", () => {
     expect(screen.queryByText("New Testament")).not.toBeInTheDocument()
   })
 
-  it("filters to projects that need attention via the status select", async () => {
+  it("filters to projects that need attention via the Sort by menu's Status submenu", async () => {
     renderMemberProjects()
     await waitFor(() => expect(screen.getByText("New Testament")).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole("combobox", { name: /project status filter/i }))
-    const option = await screen.findByRole("option", { name: "Needs attention" })
-    fireEvent.pointerMove(option)
-    fireEvent.mouseMove(option)
-    fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
+    fireEvent.click(screen.getByTestId("project-sort-menu"))
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^status/i }))
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Needs attention" }))
+    fireEvent.pointerDown(document.body, { button: 0 })
     await waitFor(() => {
-      expect(screen.queryByRole("listbox")).toBeNull()
+      expect(screen.queryAllByRole("menu")).toHaveLength(0)
     })
 
     // Legacy Translation is overdue + stalled; New Testament is healthy.

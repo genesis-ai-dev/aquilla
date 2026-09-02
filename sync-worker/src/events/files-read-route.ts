@@ -80,7 +80,10 @@ interface FileSummary {
    *  draws the three defaults. Patch fields stay widened (`kind: string`)
    *  because a newer client may have persisted a kind this build cannot name;
    *  the route's job is to forward it intact, not to judge it. */
-  trackOverrides: Record<string, { kind?: string; name?: string; order?: number; groupId?: string }> | null
+  trackOverrides: Record<
+    string,
+    { kind?: string; name?: string; order?: number; groupId?: string; color?: string; sourceTrackId?: string }
+  > | null
   cellCount: number
   approvedCount: number
   /** Target cells with content (TRIM(value) != ''): the "translated" count. */

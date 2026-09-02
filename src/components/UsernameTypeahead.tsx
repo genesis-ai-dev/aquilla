@@ -421,7 +421,6 @@ export function UsernameTypeahead({
                     }
                     className="mt-1 inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
                   >
-                    <Check className="h-3 w-3" />{" "}
                     {t("workspace.typeahead.addUser", { username: exactFoundUser.username })}
                   </button>
                 </>

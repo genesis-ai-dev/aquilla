@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react"
-import { Check, Undo2, Send, AlertTriangle } from "lucide-react"
+import { Undo2, Send, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -226,7 +226,7 @@ export function CommentThread({ thread, currentTranslated, canReply = true, canR
                   onClick={handleCloseWithReply}
                   disabled={!replyText.trim()}
                 >
-                  <Check className="me-1 h-3 w-3" /> {t("comments.thread.closeWithReply")}
+                  {t("comments.thread.closeWithReply")}
                 </ResolveAction>
               )}
               {(canResolve || showResolveDenied) && (

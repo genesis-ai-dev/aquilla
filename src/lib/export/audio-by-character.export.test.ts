@@ -308,6 +308,163 @@ describe("what is actually inside the zip", () => {
     expect(samples.length).toBe(RATE * 6 + RATE * 0.25)
   })
 
+  // ── The mix contains what you hear (Sam, 2026-08-27) ─────────────────────
+  //
+  // `startSec` is the take's AUDIBLE start — anchor plus head trim — so laying
+  // the whole recording there put every take late by exactly its head trim,
+  // with the trimmed material audible in front of it. `take-margins.ts` gives
+  // every recorded take one at birth, so this was nearly every take in the
+  // deliverable, and no fixture in this file set a trim before today.
+  it("lays only the audible part of a trimmed take, at the second the timeline draws it", async () => {
+    const trimmedCell = cell({
+      id: "c1", startTime: 10, endTime: 12,
+      selectedAudioId: "a1",
+      attachments: {
+        // A one-second clip, of which the middle half second is audible.
+        a1: { url: "frontier-audio://a1.wav", type: "audio/wav", durationMs: 1000, trimStartMs: 250, trimEndMs: 750 },
+      },
+    })
+    const result = await exportAudioByCharacter({
+      cells: [trimmedCell], settings: SETTINGS, projectId: "p1", langCode: "swh",
+      fetchBytes: async () => new Uint8Array([1, 2, 3, 4]),
+      // Ramp, so which slice landed is identifiable rather than just its length.
+      decode: async () => Float32Array.from({ length: RATE }, (_, i) => i / RATE),
+      resolveName: () => "PETER",
+    })
+    const { samples } = await readWav(result.blob, "swh_PETER.wav")
+    // Audible from 10.25s (anchor 10 + 250 ms head trim) …
+    expect(samples[RATE * 10 + RATE * 0.25 - 1]).toBe(0)
+    expect(samples[RATE * 10 + RATE * 0.25]).toBeGreaterThan(0)
+    // …and the first sample laid is the one at 250 ms into the clip, not 0.
+    expect(samples[RATE * 10 + RATE * 0.25]).toBeCloseTo(Math.round(0.25 * 32767), -2)
+    // …for half a second, then silence.
+    expect(samples[RATE * 10 + RATE * 0.74]).toBeGreaterThan(0)
+    expect(samples[RATE * 10 + RATE * 0.76] ?? 0).toBe(0)
+  })
+
+  // The other half of the same change: two cells CAN share one audio id and
+  // still be different audio, because an imported file is split per cue by
+  // giving each cell its own window into it (`attach-media.ts`). Collapsing
+  // those exported one cue's slice for all of them.
+  it("keeps two slices of one imported clip apart", async () => {
+    const shared = (trimStartMs: number, trimEndMs: number) => ({
+      url: "frontier-audio://import.wav", type: "audio/wav", durationMs: 1000, trimStartMs, trimEndMs,
+    })
+    const decodes: number[] = []
+    const result = await exportAudioByCharacter({
+      cells: [
+        cell({ id: "c1", startTime: 5, endTime: 6, selectedAudioId: "import", attachments: { import: shared(0, 250) } }),
+        cell({ id: "c2", startTime: 30, endTime: 31, selectedAudioId: "import", attachments: { import: shared(750, 1000) } }),
+      ],
+      settings: SETTINGS, projectId: "p1", langCode: "swh",
+      fetchBytes: async () => new Uint8Array([1, 2, 3, 4]),
+      decode: async () => { decodes.push(1); return new Float32Array(RATE).fill(1) },
+      resolveName: () => "CROWD",
+    })
+    // Still ONE fetch and decode — the cache is keyed on the audio id.
+    expect(decodes).toHaveLength(1)
+    const { samples } = await readWav(result.blob, "swh_CROWD.wav")
+    // But TWO placements, each a quarter second long, at their own cues.
+    expect(samples[RATE * 5]).toBe(32767)
+    expect(samples[RATE * 5 + RATE * 0.3] ?? 0).toBe(0)
+    expect(samples[RATE * 30 + RATE * 0.75]).toBe(32767)
+  })
+
+  // ── How long a character's track runs (Sam, 2026-08-27) ──────────────────
+  //
+  // "Whichever is longest": the later of where the audio stops and where the
+  // last line that character speaks was supposed to end. The first half is
+  // computed from the placed audio; the second was being fed the TAKE's own
+  // audible end rather than the CUE's window, so the comparison compared a
+  // number with itself. Nothing distinguished the two until these.
+  const trackSeconds = (samples: Int16Array) => samples.length / RATE
+
+  it("runs to the end of the LINE when the take stops short of it", async () => {
+    // A one-second take on a four-second line. The track should hold the line,
+    // not stop a moment after the voice does.
+    const short = cell({
+      id: "c1", startTime: 10, endTime: 14,
+      selectedAudioId: "a1",
+      attachments: { a1: { url: "frontier-audio://a1.wav", type: "audio/wav", durationMs: 1000 } },
+    })
+    const result = await exportAudioByCharacter({
+      cells: [short], settings: SETTINGS, projectId: "p1", langCode: "swh",
+      fetchBytes: async () => new Uint8Array([1, 2, 3, 4]),
+      decode: async () => new Float32Array(RATE).fill(1),
+      resolveName: () => "PETER",
+    })
+    const { samples } = await readWav(result.blob, "swh_PETER.wav")
+    // 14s of line + the tail pad — NOT 11s, which is where the audio stops.
+    expect(trackSeconds(samples)).toBeCloseTo(14.25, 2)
+  })
+
+  it("runs to the end of the AUDIO when a take overruns its line", async () => {
+    const overrun = cell({
+      id: "c1", startTime: 10, endTime: 11,
+      selectedAudioId: "a1",
+      attachments: { a1: { url: "frontier-audio://a1.wav", type: "audio/wav", durationMs: 3000 } },
+    })
+    const result = await exportAudioByCharacter({
+      cells: [overrun], settings: SETTINGS, projectId: "p1", langCode: "swh",
+      fetchBytes: async () => new Uint8Array([1, 2, 3, 4]),
+      decode: async () => new Float32Array(RATE * 3).fill(1),
+      resolveName: () => "PETER",
+    })
+    const { samples } = await readWav(result.blob, "swh_PETER.wav")
+    // Losing recorded audio to save silence is the wrong trade in a mix.
+    expect(trackSeconds(samples)).toBeCloseTo(13.25, 2)
+  })
+
+  // The case that made this worth fixing: an imported clip's trim window is an
+  // offset into a long file, so the take's "audible end" can be minutes past
+  // the episode. The line's window is not.
+  it("does not run minutes past the episode for a cue that slices a long import", async () => {
+    const sliced = cell({
+      id: "c1", startTime: 5, endTime: 6,
+      selectedAudioId: "a1",
+      attachments: {
+        a1: {
+          url: "frontier-audio://import.wav", type: "audio/wav",
+          durationMs: 600_000, trimStartMs: 0, trimEndMs: 600_000,
+        },
+      },
+    })
+    const result = await exportAudioByCharacter({
+      cells: [sliced], settings: SETTINGS, projectId: "p1", langCode: "swh",
+      fetchBytes: async () => new Uint8Array([1, 2, 3, 4]),
+      decode: async () => new Float32Array(RATE).fill(1),
+      resolveName: () => "CROWD",
+    })
+    const { samples } = await readWav(result.blob, "swh_CROWD.wav")
+    // Six seconds and a quarter, not ten minutes of silence.
+    expect(trackSeconds(samples)).toBeCloseTo(6.25, 2)
+  })
+
+  // Two characters whose names differ only by case are two files to this
+  // sanitiser and ONE file to macOS and Windows, so the second replaced the
+  // first on extraction (2026-08-27). Same rule as the per-line folder names.
+  it("keeps two characters apart when their names differ only by case", async () => {
+    const timedFor = (id: string, at: number) =>
+      cell({
+        id, startTime: at, endTime: at + 1,
+        selectedAudioId: `a-${id}`,
+        attachments: { [`a-${id}`]: { url: `frontier-audio://a-${id}.wav`, type: "audio/wav" } },
+      })
+    const result = await exportAudioByCharacter({
+      cells: [timedFor("c1", 5), timedFor("c2", 9)],
+      settings: SETTINGS, projectId: "p1", langCode: "swh",
+      fetchBytes: async () => new Uint8Array([1, 2, 3, 4]),
+      decode: async () => new Float32Array(RATE).fill(1),
+      resolveName: (c) => (c.id === "c1" ? "Jesus" : "JESUS"),
+    })
+    const zip = await JSZip.loadAsync(result.blob)
+    const names = Object.keys(zip.files).sort()
+    expect(names).toHaveLength(2)
+    // Distinct even once the filesystem folds their case.
+    expect(new Set(names.map((n) => n.toLowerCase())).size).toBe(2)
+    expect(result.characters).toBe(2)
+  })
+
   it("places a take shared by several lines ONCE, at the earliest of them", async () => {
     // A combined "voice together" clip hangs off every cell it covers. The old
     // export concatenated it once per cell; placed on a timeline that would be

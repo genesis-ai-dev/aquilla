@@ -3,7 +3,7 @@
 // master/overlay playback elements rely on.
 
 import { describe, expect, it } from "vitest"
-import { activeTargetForCell, sourceClipAudioForCell } from "./track-audio"
+import { activeTargetForCell, resolveTargetAudio, sourceClipAudioForCell } from "./track-audio"
 import type { CellData } from "@/hooks/useCells"
 
 const SOURCE_ID = "audio-file-9-1700000000-src1.mp3"
@@ -126,5 +126,91 @@ describe("activeTargetForCell", () => {
       attachments: { [TAKE_ID]: att("frontier-audio://take") },
     })
     expect(activeTargetForCell(c)).toBeNull()
+  })
+})
+
+// ── AQU-646 stage 3: resolving a take on an ADDED target track ──────────────
+//
+// An added track stores every take — recorded and generated alike — in one slot
+// of its own, so what a take IS comes off the attachment rather than off which
+// slot it sits in. These cases pin both halves of that, plus the thing that
+// must NOT change: the default track's resolution is byte-for-byte what it was.
+
+describe("resolveTargetAudio — an added track's own slot", () => {
+  const TRK = "019fd21a-a5a4-75d1-b8c4-3b60072a4fc2"
+  const TRK_TAKE = "audio-sec-1-1700000003-t2.webm"
+
+  it("reads the selection out of the slot map", () => {
+    const c = cell({
+      selectedBySlot: { [TRK]: TRK_TAKE },
+      attachments: { [TRK_TAKE]: att("frontier-audio://t2") },
+    })
+    expect(resolveTargetAudio(c, TRK)).toEqual({
+      audioId: TRK_TAKE,
+      url: "frontier-audio://t2",
+      kind: "take",
+    })
+  })
+
+  // ONE SLOT HOLDS BOTH KINDS, so the tone comes from the take. `voiceId` is
+  // set unconditionally by all three paths that mint a generated voice, which
+  // is what makes this sound rather than a guess.
+  it("calls a take with a voiceId generated, in the same slot", () => {
+    const c = cell({
+      selectedBySlot: { [TRK]: TRK_TAKE },
+      attachments: { [TRK_TAKE]: { ...att("frontier-audio://t2"), voiceId: "v-1" } },
+    })
+    expect(resolveTargetAudio(c, TRK)?.kind).toBe("generated")
+  })
+
+  it("finds nothing when that track has no selected take on this line", () => {
+    const c = cell({
+      selectedAudioId: TAKE_ID,
+      attachments: { [TAKE_ID]: att("frontier-audio://tk") },
+    })
+    expect(resolveTargetAudio(c, TRK)).toBeNull()
+  })
+
+  it("ignores a deleted take rather than pointing at it", () => {
+    const c = cell({
+      selectedBySlot: { [TRK]: TRK_TAKE },
+      attachments: { [TRK_TAKE]: att("frontier-audio://t2", true) },
+    })
+    expect(resolveTargetAudio(c, TRK)).toBeNull()
+  })
+
+  // THE SEEDING GUARD IS DELIBERATELY ABSENT on a track slot. It exists only to
+  // keep the shared imported SOURCE clip — which lives in the recording slot,
+  // seeded with the fileId — from passing as a dub. Import writes the two
+  // legacy slots and nothing else, so a track slot can never hold it.
+  it("does not require a cell-seeded id, unlike the default track", () => {
+    const fileSeeded = "audio-file-9-1700000000-src1.mp3"
+    const c = cell({
+      selectedBySlot: { [TRK]: fileSeeded },
+      attachments: { [fileSeeded]: att("frontier-audio://src") },
+    })
+    expect(resolveTargetAudio(c, TRK)?.audioId).toBe(fileSeeded)
+  })
+
+  // The other half of that: the DEFAULT track still refuses it, which is the
+  // behaviour every existing project depends on.
+  it("still keeps the source clip out of the default track's chips", () => {
+    const fileSeeded = "audio-file-9-1700000000-src1.mp3"
+    const c = cell({
+      selectedAudioId: fileSeeded,
+      attachments: { [fileSeeded]: att("frontier-audio://src") },
+    })
+    expect(resolveTargetAudio(c)).toBeNull()
+  })
+
+  it("resolves the default track exactly as before, slot named or not", () => {
+    const c = cell({
+      selectedAudioId: TAKE_ID,
+      selectedGeneratedVoiceAudioId: GEN_ID,
+      attachments: { [TAKE_ID]: att("frontier-audio://tk"), [GEN_ID]: att("frontier-audio://gv") },
+    })
+    const expected = { audioId: TAKE_ID, url: "frontier-audio://tk", kind: "take" }
+    expect(resolveTargetAudio(c)).toEqual(expected)
+    expect(resolveTargetAudio(c, "recording")).toEqual(expected)
   })
 })

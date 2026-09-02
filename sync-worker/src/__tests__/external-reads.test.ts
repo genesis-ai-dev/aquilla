@@ -201,6 +201,91 @@ describe("external read surface", () => {
     })
   })
 
+  // [Pen test] API security & data exposure (2026-08-27): /me, /projects,
+  // /files, /files/:fileId/cells, and /cells/:cellId/history had no throttle
+  // at all until this fix — only /search did.
+  describe("read rate limiting", () => {
+    it("throttles a credential that floods /me", async () => {
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
+      await testDb.pg.query(
+        `INSERT INTO auth_rate_limit_events (kind, identifier, success)
+         SELECT 'external_read', $1, 1 FROM generate_series(1, 300)`,
+        [`credential:${CRED_1}`],
+      )
+      const res = await handleExternalReadRequest(req("/api/v1/external/me", token), env(testDb))
+      expect(res!.status).toBe(429)
+      const body = (await res!.json()) as { error: { code: string } }
+      expect(body.error.code).toBe("rate_limited")
+    })
+
+    it("throttles a credential that floods /projects", async () => {
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
+      await testDb.pg.query(
+        `INSERT INTO auth_rate_limit_events (kind, identifier, success)
+         SELECT 'external_read', $1, 1 FROM generate_series(1, 300)`,
+        [`credential:${CRED_1}`],
+      )
+      const res = await handleExternalReadRequest(req("/api/v1/external/projects", token), env(testDb))
+      expect(res!.status).toBe(429)
+    })
+
+    it("throttles a credential that floods /files", async () => {
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
+      await testDb.pg.query(
+        `INSERT INTO auth_rate_limit_events (kind, identifier, success)
+         SELECT 'external_read', $1, 1 FROM generate_series(1, 300)`,
+        [`credential:${CRED_1}`],
+      )
+      const res = await handleExternalReadRequest(
+        req("/api/v1/external/projects/proj-a/files", token),
+        env(testDb),
+      )
+      expect(res!.status).toBe(429)
+    })
+
+    it("throttles a credential that floods /files/:fileId/cells", async () => {
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
+      await testDb.pg.query(
+        `INSERT INTO auth_rate_limit_events (kind, identifier, success)
+         SELECT 'external_read', $1, 1 FROM generate_series(1, 300)`,
+        [`credential:${CRED_1}`],
+      )
+      const res = await handleExternalReadRequest(
+        req("/api/v1/external/projects/proj-a/files/file-x/cells", token),
+        env(testDb),
+      )
+      expect(res!.status).toBe(429)
+    })
+
+    it("throttles a credential that floods /cells/:cellId/history", async () => {
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
+      await testDb.pg.query(
+        `INSERT INTO auth_rate_limit_events (kind, identifier, success)
+         SELECT 'external_read', $1, 1 FROM generate_series(1, 300)`,
+        [`credential:${CRED_1}`],
+      )
+      const res = await handleExternalReadRequest(
+        req("/api/v1/external/projects/proj-a/cells/cell-1/history", token),
+        env(testDb),
+      )
+      expect(res!.status).toBe(429)
+    })
+
+    it("does not throttle a fresh credential across these routes", async () => {
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
+      for (const path of [
+        "/api/v1/external/me",
+        "/api/v1/external/projects",
+        "/api/v1/external/projects/proj-a/files",
+        "/api/v1/external/projects/proj-a/files/file-x/cells",
+        "/api/v1/external/projects/proj-a/cells/cell-1/history",
+      ]) {
+        const res = await handleExternalReadRequest(req(path, token), env(testDb))
+        expect(res!.status).toBe(200)
+      }
+    })
+  })
+
   describe("permission and scope errors", () => {
     it("wrong-project-scoped credential -> scope_denied", async () => {
       const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-b" })

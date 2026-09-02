@@ -78,6 +78,48 @@ export function subtitleSpanSec(cell: CellData): SpanSec | null {
 /** A dub chip can't be trimmed shorter than this (matches card MIN_DUR_SEC). */
 export const MIN_TARGET_LEN_SEC = 0.2
 
+// ── STILL TOUCHING THE SECTION ──────────────────────────────────────────────
+//
+// One definition, three callers. The rule below is the end-based bound agreed
+// on 2026-08-05: a chip may slide back into the previous section's space, but
+// its END may not move before its section's START and its START may not move
+// past the section's END — so a take always keeps some audible contact with
+// the line it performs.
+//
+// It lived as two inline expressions inside `proposeSpan`'s MOVE arm, and the
+// two TRIM arms enforced no part of it. That is escapable, and Sam found the
+// escape (2026-08-27): drag a chip to the move clamp's limit, then pull the
+// near trim handle past it, and the audible span leaves its section entirely.
+// The result persists, syncs and exports; only the next move gesture snaps it
+// back. Extracted here so the three arms cannot drift apart again.
+
+/**
+ * The slack an audible span must keep inside its section.
+ *
+ * Scaled by the section, so a very short one cannot pin a chip (the round-7
+ * fix) — but floored, so a zero-length section still grips something.
+ */
+export function sectionGripSec(section: SpanSec): number {
+  return Math.min(0.05, Math.max(0.001, (section.end - section.start) / 2))
+}
+
+/** The highest an audible START may sit and still reach into its section. */
+export function maxAudibleStartSec(section: SpanSec): number {
+  return Math.max(section.start, section.end - sectionGripSec(section))
+}
+
+/**
+ * The lowest an audible END may sit and still reach into its section.
+ *
+ * DELIBERATELY NOT clamped to `section.end`: on a sub-millisecond section the
+ * 0.001 grip floor exceeds half the section, so a `Math.min` here would quietly
+ * LOOSEN the bound the move arm has always applied. Kept literal, which is what
+ * makes the move arm's rewrite in these terms a provable no-op.
+ */
+export function minAudibleEndSec(section: SpanSec): number {
+  return section.start + sectionGripSec(section)
+}
+
 /**
  * AQU-646: below this, a section is very likely a mistake — a rounding gap
  * between two cues rather than a place anyone meant to put something. The user
@@ -99,6 +141,13 @@ export const MIN_USEFUL_REGION_SEC = 0.5
  * question about whether a button has anywhere to sit.
  */
 export const MIN_ADDABLE_SPAN_SEC = 0.2
+
+/** What `targetChipGeom` needs off a take: its length, its trims, and — since
+ *  AQU-646 stage 3 — its own placement. */
+export type ChipAtt = Pick<
+  CodexCellAttachment,
+  "durationMs" | "trimStartMs" | "trimEndMs" | "targetOffsetMs"
+>
 
 export interface TargetChipGeom {
   /** File-second where the CLIP'S SAMPLE ZERO sits (the round-7 formalization —
@@ -125,7 +174,28 @@ export interface TargetChipGeom {
  * cell until someone next drags it, which is exactly today's behavior — better
  * than a migration that silently MOVES takes it guessed wrong about.
  */
-function targetAnchorSec(cell: CellData, section: SpanSec): number {
+function targetAnchorSec(cell: CellData, section: SpanSec, att?: ChipAtt): number {
+  // AQU-646 stage 3: THE TAKE'S OWN PLACEMENT WINS.
+  //
+  // Every rung below this one is per-CELL, which was exact while a line could
+  // hold a single dub. With extra target-audio tracks two takes share a line,
+  // and reading the cell would make dragging one chip move the other — so the
+  // take is asked first, and the cell answers only for takes made before there
+  // was anywhere else to put it.
+  //
+  // `!= null` and not truthiness: an offset of exactly 0 is legal and common
+  // (a take that starts precisely on its line) and must stay distinguishable
+  // from "never placed by hand".
+  const ownMs = att?.targetOffsetMs
+  if (ownMs != null && Number.isFinite(ownMs)) return section.start + ownMs / 1000
+  return cellAnchorSec(cell, section)
+}
+
+/** The pre-stage-3 ladder, unchanged, and permanent rather than a migration
+ *  step: `rebuild.ts` replays historical `cell.lane.retime` events into
+ *  `cells.metadata` forever, so these rungs answer for every take that has
+ *  never been placed through `cell.audio.place`. */
+function cellAnchorSec(cell: CellData, section: SpanSec): number {
   // `!= null`, not truthiness: an offset of exactly 0 is legal and common (a
   // take that starts flush with its line), and would otherwise fall through to
   // the legacy branch and then to the section start.
@@ -163,11 +233,11 @@ export function targetOffsetMsFor(cell: CellData, anchorSec: number): number {
  */
 export function targetChipGeom(
   cell: CellData,
-  att: Pick<CodexCellAttachment, "durationMs" | "trimStartMs" | "trimEndMs"> | undefined,
+  att: ChipAtt | undefined,
 ): TargetChipGeom | null {
   const section = sectionSpanSec(cell)
   if (!section) return null
-  const anchor = targetAnchorSec(cell, section)
+  const anchor = targetAnchorSec(cell, section, att)
   const trimStartSec =
     att?.trimStartMs != null && Number.isFinite(att.trimStartMs) && att.trimStartMs > 0
       ? att.trimStartMs / 1000
@@ -197,7 +267,7 @@ export function targetChipGeom(
 /** When (file seconds) a section's dub is due to fire = its AUDIBLE start. */
 export function targetDueSec(
   cell: CellData,
-  att?: Pick<CodexCellAttachment, "durationMs" | "trimStartMs" | "trimEndMs">,
+  att?: ChipAtt,
 ): number | null {
   return targetChipGeom(cell, att)?.start ?? null
 }
@@ -276,4 +346,55 @@ export function chipTrespass(
     head: o.headSec != null && span.start < section.start,
     tail: o.tailSec != null && span.end > section.end,
   }
+}
+
+/**
+ * Where a MUTUALLY-trespassing pair of chips meets when both are drawn short
+ * at rest (2026-08-27, Sam's dual-overlap-across-a-gap round). When both chips
+ * of a pair are at fault, each one's edge lies inside the other, so neither is
+ * a valid place for its neighbour to stop. They used to retreat to their OWN
+ * section borders — right when the sections touch (one shared border, the pair
+ * meets »|« on it), wrong when a gap separates them: two red chips would paint
+ * 0.4s apart while warning about an overlap the rest state now HID, and no
+ * hover could ever show it, because each chip expanded alone against the
+ * other's distant cut.
+ *
+ * THE ANSWER IS ALWAYS INSIDE BOTH CHIPS. That is the invariant, and the
+ * section borders are only a PREFERENCE within it: meet at the midpoint of the
+ * pair's audible overlap, biased to the stretch between the sections' facing
+ * borders when that stretch exists inside the overlap. When the sections touch
+ * it still collapses to exactly the shared border, so the adjacent case keeps
+ * its old cut byte for byte, and when a gap separates them the answer still
+ * lands in the gap.
+ *
+ * An earlier version of this claimed that both chips trespassing guarantees the
+ * border zone is never empty. IT DOES NOT (2026-08-27). That holds only while
+ * `prev.sectionEnd <= next.sectionStart`, and overlapping cues are a real thing
+ * in a source VTT — `TimelineLane` says so in as many words. When two sections
+ * overlap by more than the next chip's own length, the border bounds invert far
+ * enough that their midpoint lands PAST that chip's end: `paintedStart` then
+ * exceeded `paintedEnd` and the chip rendered as a 10px stub seconds from its
+ * own audio, jumping there the moment the pointer left. Hence both full spans
+ * as arguments — without the far edges this function had no way to keep its
+ * answer inside the things it was cutting.
+ *
+ * The midpoint, not a split weighted by how far each chip trespassed: the cut
+ * is a paint affordance, not a verdict — blame already lives in the warning —
+ * and a midpoint holds still while one chip is dragged near it.
+ */
+export function dualFaultMeetSec(
+  prev: { chipStartSec: number; chipEndSec: number; sectionEndSec: number },
+  next: { chipStartSec: number; chipEndSec: number; sectionStartSec: number },
+): number {
+  // The chips' actual intersection — the only region where ONE cut leaves both
+  // painted boxes inside their own audio.
+  const overlapLo = Math.max(prev.chipStartSec, next.chipStartSec)
+  const overlapHi = Math.min(prev.chipEndSec, next.chipEndSec)
+  // Preferred: also between the sections' facing borders. When those borders
+  // cross — overlapping cues — the preference is simply unavailable, and the
+  // overlap's own midpoint is the answer.
+  const lo = Math.max(overlapLo, prev.sectionEndSec)
+  const hi = Math.min(overlapHi, next.sectionStartSec)
+  const mid = lo <= hi ? (lo + hi) / 2 : (overlapLo + overlapHi) / 2
+  return Math.min(Math.max(mid, overlapLo), overlapHi)
 }

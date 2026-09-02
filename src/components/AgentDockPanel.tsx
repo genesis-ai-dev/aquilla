@@ -86,7 +86,7 @@ export function AgentDockPanel({
         <Bot className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="text-xs font-medium">{t("agent.dock.title")}</span>
         <span className="ms-auto flex items-center gap-1">
-          {/* When the workbench owns the session, its header shows the dial —
+          {/* When the workbench owns the session, the agent pane shows the dial —
               a second copy here would compete for the same click/popover. */}
           {credits && !expanded && <CreditsDial {...credits} />}
           {onExpand && !expanded && (

@@ -35,6 +35,7 @@ import {
   useOrgPortfolio,
   type StatusFilter,
 } from "@/hooks/useOrgPortfolio"
+import { useProjectDirectory } from "@/hooks/useProjectDirectory"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { partitionSharedProjects, toSharedPortfolioRow } from "@/lib/frontier/shared-projects"
@@ -62,6 +63,7 @@ export function OrgProjectsPage() {
     orgs,
     accessibleProjects,
     isLoading: orgLoading,
+    accessibleProjectsLoading,
   } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
   const jwt = session?.jwt ?? null
@@ -80,7 +82,17 @@ export function OrgProjectsPage() {
   const [roleFilter, setRoleFilter] = useState<RoleFilter>(ROLE_FILTER_ALL)
   // AQU-1043: last-edit recency narrowing, composed with all three below.
   const [updatedFilter, setUpdatedFilter] = useState<UpdatedFilter>(UPDATED_FILTER_ANY)
+  const [projectQuery, setProjectQuery] = useState("")
+  const [directoryTick, setDirectoryTick] = useState(0)
   const projectLens = readProjectLens()
+
+  const directory = useProjectDirectory({
+    jwt,
+    enabled: Boolean(jwt) && activeOrgId != null && !isGuestOrg,
+    query: projectQuery,
+    orgIds: activeOrgId != null ? [activeOrgId] : [],
+    refreshKey: directoryTick,
+  })
 
   const guestOrgId = activeGuestOrg?.id ?? null
   const guestOrgName =
@@ -91,6 +103,7 @@ export function OrgProjectsPage() {
 
   const guestProjects = useMemo(() => {
     if (!isGuestOrg || guestOrgId == null) return []
+    const queryNorm = projectQuery.trim().toLowerCase()
     return partitionSharedProjects(
       accessibleProjects,
       orgs,
@@ -109,7 +122,17 @@ export function OrgProjectsPage() {
             : false,
         }
       })
-  }, [isGuestOrg, guestOrgId, accessibleProjects, orgs, activeOrgId, username])
+      .filter((row) =>
+        queryNorm === ""
+          ? true
+          : `${row.name} ${row.orgName ?? ""} ${row.pm?.username ?? ""}`.toLowerCase().includes(queryNorm),
+      )
+  }, [isGuestOrg, guestOrgId, accessibleProjects, orgs, activeOrgId, username, projectQuery])
+
+  const pmByProjectId = useMemo(
+    () => new Map(accessibleProjects.map((project) => [project.id, project.pm ?? null])),
+    [accessibleProjects],
+  )
 
   function handleCreated(project: ProjectRecord) {
     void portfolio.refreshAccessibleProjects()
@@ -137,13 +160,23 @@ export function OrgProjectsPage() {
     )
   }
 
-  const isPageLoading = sessionLoading || orgLoading || portfolio.isLoading
-  const sourceProjects = isGuestOrg ? guestProjects : portfolio.projects
+  const isPageLoading =
+    sessionLoading ||
+    orgLoading ||
+    accessibleProjectsLoading ||
+    (isGuestOrg
+      ? false
+      : directory.loading && directory.projects.length === 0)
+  const memberProjects = directory.projects.map((project) => ({
+    ...project,
+    orgId: project.orgId ?? activeOrgId ?? undefined,
+    orgName: activeOrg?.name ?? "Workspace",
+    pm: pmByProjectId.has(project.id) ? pmByProjectId.get(project.id) ?? null : project.pm,
+  }))
+  const sourceProjects = isGuestOrg ? guestProjects : memberProjects
   const statusFilteredProjects = isPageLoading
     ? []
-    : isGuestOrg
-      ? portfolio.filterByStatus(statusFilter, guestProjects)
-      : portfolio.filterByStatus(statusFilter)
+    : portfolio.filterByStatus(statusFilter, sourceProjects)
   const noProjects = !isPageLoading && sourceProjects.length === 0
   // AQU-1040: options come from every loaded row, not the status-filtered
   // slice, so toggling status never silently drops the PM you picked. A PM that
@@ -196,8 +229,8 @@ export function OrgProjectsPage() {
               inset={false}
             />
           </div>
-          {portfolio.error ? (
-            <p className="max-w-6xl text-sm text-destructive">{portfolio.error}</p>
+          {portfolio.error || directory.error ? (
+            <p className="max-w-6xl text-sm text-destructive">{directory.error ?? portfolio.error}</p>
           ) : (
             <OrgProjectsDataTable
               projects={visibleProjects}
@@ -210,10 +243,19 @@ export function OrgProjectsPage() {
               author={session?.username}
               allowSelfAssignment={orgSettings.allowSelfAssignment}
               viewerUsername={username}
-              onLanesChanged={portfolio.bumpRefresh}
+              onLanesChanged={() => {
+                portfolio.bumpRefresh()
+                setDirectoryTick((tick) => tick + 1)
+              }}
               initialLens={statusFilter === "attention" ? "attention" : projectLens}
               loading={isPageLoading}
               loadingLabel={t("org.projectsList.loadingLabel")}
+              searchValue={projectQuery}
+              onSearchChange={setProjectQuery}
+              searching={!isGuestOrg && directory.searching}
+              hasMore={!isGuestOrg && directory.hasMore}
+              onLoadMore={directory.loadMore}
+              loadingMore={directory.loadingMore}
               toolbarLeading={
                 // AQU-1044: the four narrowing dimensions (Status, PM, Role,
                 // Updated) live in one Sort by menu — one submenu each. The

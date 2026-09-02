@@ -23,8 +23,6 @@ import {
   getOrCreateUserOrg,
   getOrgGroupDetail,
   getOrgDeletedFiles,
-  getOrgPortfolio,
-  getOrgPortfolios,
   getOrgMemberRole,
   getRosterViewMinRole,
   groupExistsInOrg,
@@ -35,9 +33,12 @@ import {
   listUserDirectMembershipsInOrg,
   listProjectGrantOrgIds,
   listPlatformAdminOrgsPage,
+  listOrgPortfolioPage,
   listUserOrgs,
   clampOrgDirectoryLimit,
+  clampProjectDirectoryLimit,
   decodeOrgDirectoryCursor,
+  decodeProjectDirectoryCursor,
   removeGroupMember,
   renameOrg,
   updateGroup,
@@ -296,14 +297,17 @@ orgs.get("/:orgId", async (c) => {
 
 const portfolioBatchBody = z.object({
   orgIds: z.array(z.number().int().positive()).max(100),
+  q: z.string().max(200).optional(),
+  limit: z.number().int().positive().max(100).optional(),
+  cursor: z.string().optional(),
 })
 
 /** POST /api/v2/orgs/portfolio — batched per-project rollups for all-org views. */
 orgs.post("/portfolio", zValidator("json", portfolioBatchBody), async (c) => {
   const user = c.get("user")
-  const { orgIds } = c.req.valid("json")
+  const { orgIds, q: qRaw, limit: limitNum, cursor: cursorRaw } = c.req.valid("json")
   const uniqueOrgIds = [...new Set(orgIds)]
-  if (uniqueOrgIds.length === 0) return c.json({ portfolios: [] })
+  if (uniqueOrgIds.length === 0) return c.json({ portfolios: [], nextCursor: null })
 
   const isAdmin = isPlatformAdminEmail(c.env, user.email)
   if (!isAdmin) {
@@ -317,10 +321,23 @@ orgs.post("/portfolio", zValidator("json", portfolioBatchBody), async (c) => {
     }
   }
 
+  const q = (qRaw ?? "").trim().toLowerCase()
+  const pickerMode = limitNum != null || cursorRaw != null || q !== ""
+  const cursor = cursorRaw ? decodeProjectDirectoryCursor(cursorRaw) : null
+  if (cursorRaw && !cursor) return c.json({ error: "invalid cursor" }, 400)
+  const page = pickerMode
+    ? { q, limit: clampProjectDirectoryLimit(limitNum != null ? String(limitNum) : undefined), cursor }
+    : null
+
   // AQU-745: scope each org's rollup to the projects this caller can actually
   // see — a sub-maintainer member must not enumerate every project name in the
   // org via the dashboard. Maintainer+ / platform admins still see all.
-  const rows = await getOrgPortfolios(c.env, uniqueOrgIds, { userId: user.id, isAdmin })
+  const { projects: rows, nextCursor } = await listOrgPortfolioPage(
+    c.env,
+    uniqueOrgIds,
+    { userId: user.id, isAdmin },
+    page,
+  )
   const byOrg = new Map<number, typeof rows>()
   for (const row of rows) {
     const list = byOrg.get(row.orgId)
@@ -333,6 +350,7 @@ orgs.post("/portfolio", zValidator("json", portfolioBatchBody), async (c) => {
       orgId,
       projects: (byOrg.get(orgId) ?? []).map(({ orgId: _orgId, ...project }) => project),
     })),
+    nextCursor,
   })
 })
 
@@ -347,8 +365,26 @@ orgs.get("/:orgId/portfolio", async (c) => {
   // all when Maintainer+/admin) so the org dashboard never leaks project names
   // a regular member has no access to.
   const isAdmin = isPlatformAdminEmail(c.env, user.email)
-  const projects = await getOrgPortfolio(c.env, orgId, { userId: user.id, isAdmin })
-  return c.json({ projects })
+  const qRaw = (c.req.query("q") ?? "").trim()
+  const q = qRaw.toLowerCase()
+  const limitRaw = c.req.query("limit")
+  const cursorRaw = c.req.query("cursor")
+  const pickerMode = limitRaw != null || cursorRaw != null || qRaw !== ""
+  const cursor = cursorRaw ? decodeProjectDirectoryCursor(cursorRaw) : null
+  if (cursorRaw && !cursor) return c.json({ error: "invalid cursor" }, 400)
+  const page = pickerMode
+    ? { q, limit: clampProjectDirectoryLimit(limitRaw), cursor }
+    : null
+  const { projects, nextCursor } = await listOrgPortfolioPage(
+    c.env,
+    [orgId],
+    { userId: user.id, isAdmin },
+    page,
+  )
+  return c.json({
+    projects: projects.map(({ orgId: _orgId, ...project }) => project),
+    nextCursor,
+  })
 })
 
 /**

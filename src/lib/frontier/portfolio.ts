@@ -95,6 +95,73 @@ export async function getPortfolio(jwt: string, orgId: number): Promise<Portfoli
   return ((await res.json()) as { projects: PortfolioProject[] }).projects
 }
 
+export const PORTFOLIO_PAGE_SIZE = 40
+
+export interface PortfolioDirectoryPage {
+  projects: PortfolioProject[]
+  nextCursor: string | null
+}
+
+export async function getPortfolioPage(
+  jwt: string,
+  orgId: number,
+  opts: {
+    q?: string
+    limit?: number
+    cursor?: string | null
+    signal?: AbortSignal
+  } = {},
+): Promise<PortfolioDirectoryPage> {
+  const params = new URLSearchParams()
+  const q = opts.q?.trim()
+  if (q) params.set("q", q)
+  params.set("limit", String(opts.limit ?? PORTFOLIO_PAGE_SIZE))
+  if (opts.cursor) params.set("cursor", opts.cursor)
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/orgs/${orgId}/portfolio?${params}`,
+    { headers: { Authorization: `Bearer ${jwt}` }, signal: opts.signal },
+  )
+  if (!res.ok) throw new UserError(res.status, "", "org")
+  const body = (await res.json()) as { projects: PortfolioProject[]; nextCursor?: string | null }
+  return { projects: body.projects ?? [], nextCursor: body.nextCursor ?? null }
+}
+
+export async function getPortfoliosPage(
+  jwt: string,
+  orgIds: number[],
+  opts: {
+    q?: string
+    limit?: number
+    cursor?: string | null
+    signal?: AbortSignal
+  } = {},
+): Promise<{ projects: Array<PortfolioProject & { orgId: number }>; nextCursor: string | null }> {
+  const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
+  if (uniqueOrgIds.length === 0) return { projects: [], nextCursor: null }
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/portfolio`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
+    signal: opts.signal,
+    body: JSON.stringify({
+      orgIds: uniqueOrgIds,
+      q: opts.q?.trim() || undefined,
+      limit: opts.limit ?? PORTFOLIO_PAGE_SIZE,
+      cursor: opts.cursor || undefined,
+    }),
+  })
+  if (!res.ok) throw new UserError(res.status, "", "org")
+  const body = (await res.json()) as {
+    portfolios: OrgPortfolio[]
+    nextCursor?: string | null
+  }
+  return {
+    projects: (body.portfolios ?? []).flatMap((portfolio) =>
+      portfolio.projects.map((project) => ({ ...project, orgId: portfolio.orgId })),
+    ),
+    nextCursor: body.nextCursor ?? null,
+  }
+}
+
 export async function getPortfolios(jwt: string, orgIds: number[]): Promise<OrgPortfolio[]> {
   const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
   if (uniqueOrgIds.length === 0) return []

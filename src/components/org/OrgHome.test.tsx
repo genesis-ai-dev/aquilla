@@ -85,13 +85,31 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
       targetLanguage: null,
     },
   ]
+  const getPortfolio = vi.fn(async () => projects)
+  const getPortfolios = vi.fn(async () => [{ orgId: 1, projects }])
   return {
     ...actual,
-    getPortfolio: vi.fn(async () => projects),
-    // AQU-883: the all-orgs dashboard fans out through getPortfolios; tests
-    // that exercise that scope override this (default matches the member
-    // overview fixture so overview assertions stay hermetic).
-    getPortfolios: vi.fn(async () => [{ orgId: 1, projects }]),
+    getPortfolio,
+    getPortfolios,
+    getPortfolioPage: vi.fn(async (_jwt: string, _orgId: number, opts?: { q?: string }) => {
+      const list = await getPortfolio()
+      const q = opts?.q?.trim().toLowerCase() ?? ""
+      return {
+        projects: q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list,
+        nextCursor: null,
+      }
+    }),
+    getPortfoliosPage: vi.fn(async (_jwt: string, orgIds: number[], opts?: { q?: string }) => {
+      const portfolios = await getPortfolios(_jwt, orgIds)
+      const list = portfolios.flatMap(({ orgId, projects: rows }) =>
+        rows.map((project) => ({ ...project, orgId })),
+      )
+      const q = opts?.q?.trim().toLowerCase() ?? ""
+      return {
+        projects: q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list,
+        nextCursor: null,
+      }
+    }),
   }
 })
 
@@ -167,7 +185,7 @@ beforeEach(async () => {
   vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
   const { getWorkload } = await import("@/lib/sync/assignments")
   vi.mocked(getWorkload).mockResolvedValue([])
-  const { getPortfolio } = await import("@/lib/frontier/portfolio")
+  const { getPortfolio, getPortfolioPage, getPortfolios, getPortfoliosPage } = await import("@/lib/frontier/portfolio")
   vi.mocked(getPortfolio).mockImplementation(async () => {
     const now = Date.now()
     return [
@@ -202,6 +220,26 @@ beforeEach(async () => {
         targetLanguage: null,
       },
     ]
+  })
+  vi.mocked(getPortfolios).mockImplementation(async () => [{ orgId: 1, projects: await getPortfolio("jwt", 1) }])
+  vi.mocked(getPortfolioPage).mockImplementation(async (_jwt, _orgId, opts) => {
+    const list = await getPortfolio("jwt", 1)
+    const q = opts?.q?.trim().toLowerCase() ?? ""
+    return {
+      projects: q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list,
+      nextCursor: null,
+    }
+  })
+  vi.mocked(getPortfoliosPage).mockImplementation(async (_jwt, orgIds, opts) => {
+    const portfolios = await getPortfolios("jwt", orgIds)
+    const list = portfolios.flatMap(({ orgId, projects: rows }) =>
+      rows.map((project) => ({ ...project, orgId })),
+    )
+    const q = opts?.q?.trim().toLowerCase() ?? ""
+    return {
+      projects: q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list,
+      nextCursor: null,
+    }
   })
   // Reset to the default (no invites); the pending-invites test overrides this.
   // restoreAllMocks does not reset vi.fn implementations, so without this a
@@ -407,11 +445,16 @@ describe("ProjectTable", () => {
 
 describe("OrgOverview / OrgProjects", () => {
   it("never paints a false-empty projects page while the current portfolio is unresolved", async () => {
-    const { getPortfolio } = await import("@/lib/frontier/portfolio")
+    const { getPortfolio, getPortfolioPage } = await import("@/lib/frontier/portfolio")
     let resolvePortfolio!: (projects: PortfolioProject[]) => void
-    vi.mocked(getPortfolio).mockImplementation(
-      () => new Promise((resolve) => { resolvePortfolio = resolve }),
-    )
+    const pending = new Promise<PortfolioProject[]>((resolve) => {
+      resolvePortfolio = resolve
+    })
+    vi.mocked(getPortfolio).mockImplementation(() => pending)
+    vi.mocked(getPortfolioPage).mockImplementation(async () => ({
+      projects: await pending,
+      nextCursor: null,
+    }))
 
     const container = document.createElement("div")
     document.body.appendChild(container)
@@ -448,6 +491,7 @@ describe("OrgOverview / OrgProjects", () => {
 
       // Keep subsequent refetches empty so the empty-state isn't replaced by default mock data.
       vi.mocked(getPortfolio).mockResolvedValue([])
+      vi.mocked(getPortfolioPage).mockResolvedValue({ projects: [], nextCursor: null })
       await act(async () => { resolvePortfolio([]) })
       await waitFor(() =>
         expect(screen.queryByRole("status", { name: "Loading projects" })).not.toBeInTheDocument(),
@@ -697,7 +741,9 @@ describe("OrgOverview / OrgProjects", () => {
       target: { value: "testament" },
     })
 
-    expect(screen.queryByText("Legacy Translation")).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByText("Legacy Translation")).not.toBeInTheDocument()
+    })
     expect(screen.getByText("New Testament")).toBeInTheDocument()
   })
 
@@ -936,8 +982,14 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
   ) {
     const { listMyOrgs } = await import("@/lib/frontier/orgs")
     vi.mocked(listMyOrgs).mockResolvedValue(twoOrgs)
-    const { getPortfolios } = await import("@/lib/frontier/portfolio")
+    const { getPortfolios, getPortfoliosPage } = await import("@/lib/frontier/portfolio")
     vi.mocked(getPortfolios).mockResolvedValue(portfolios as never)
+    vi.mocked(getPortfoliosPage).mockImplementation(async () => {
+      const list = (portfolios as Array<{ orgId: number; projects: Array<{ name: string }> }>).flatMap(
+        ({ orgId, projects: rows }) => rows.map((project) => ({ ...project, orgId })),
+      )
+      return { projects: list, nextCursor: null }
+    })
     return render(
       <MemoryRouter initialEntries={["/orgs/all"]}>
         <OrgProvider><OrgHome /></OrgProvider>

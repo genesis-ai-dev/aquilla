@@ -77,6 +77,55 @@ describe("platform-admin cross-tenant access", () => {
     expect(((await denied.json()) as { projects: unknown[] }).projects).toHaveLength(0)
   })
 
+  it("GET /projects is accessible-only so an admin's session boot is not O(all projects)", async () => {
+    await seedForeignOrg()
+    await seedUser(7, "root")
+
+    const res = await app.request("/api/v2/projects", { headers: authHeader(await jwtFor("root")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      projects: Array<{ id: string }>
+      nextCursor: string | null
+    }
+    expect(body.projects).toEqual([])
+    expect(body.nextCursor).toBeNull()
+  })
+
+  it("GET /projects?limit= pages the tenancy catalog for a platform admin", async () => {
+    await seedForeignOrg()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('pb', 'Mark', 1, 1), ('pc', 'Acts', 1, 1)",
+    ).run()
+    await seedUser(7, "root")
+
+    const first = await app.request("/api/v2/projects?limit=1", { headers: authHeader(await jwtFor("root")) }, env)
+    expect(first.status).toBe(200)
+    const firstBody = (await first.json()) as {
+      projects: Array<{ id: string; name: string; role: { source: string } }>
+      nextCursor: string | null
+    }
+    expect(firstBody.projects).toHaveLength(1)
+    expect(firstBody.projects[0]).toMatchObject({ id: "pc", name: "Acts", role: { source: "platform" } })
+    expect(firstBody.nextCursor).toBeTruthy()
+
+    const second = await app.request(
+      `/api/v2/projects?limit=1&cursor=${encodeURIComponent(firstBody.nextCursor!)}`,
+      { headers: authHeader(await jwtFor("root")) },
+      env,
+    )
+    const secondBody = (await second.json()) as {
+      projects: Array<{ id: string; name: string }>
+      nextCursor: string | null
+    }
+    expect(secondBody.projects).toHaveLength(1)
+    expect(secondBody.projects[0]).toMatchObject({ id: "pa", name: "John" })
+    expect(secondBody.nextCursor).toBeTruthy()
+
+    const search = await app.request("/api/v2/projects?q=mar", { headers: authHeader(await jwtFor("root")) }, env)
+    const searchBody = (await search.json()) as { projects: Array<{ id: string; name: string }> }
+    expect(searchBody.projects).toEqual([expect.objectContaining({ id: "pb", name: "Mark" })])
+  })
+
   it("passes org-route guards on a foreign org (portfolio) but not for outsiders", async () => {
     await seedForeignOrg()
     await seedUser(7, "root")

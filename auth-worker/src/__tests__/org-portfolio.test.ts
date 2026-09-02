@@ -249,11 +249,65 @@ describe("POST /api/v2/orgs/portfolio", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
       portfolios: Array<{ orgId: number; projects: Array<{ id: string; name: string }> }>
+      nextCursor: string | null
     }
     expect(body.portfolios).toEqual([
       { orgId: 2, projects: [expect.objectContaining({ id: "pb", name: "Luke" })] },
       { orgId: 1, projects: [expect.objectContaining({ id: "pa", name: "John" })] },
     ])
+    expect(body.nextCursor).toBeNull()
+  })
+
+  it("pages and searches with limit/cursor/q instead of dumping every project", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1), ('pb', 'Mark', 1, 1), ('pc', 'Acts', 1, 1)",
+    ).run()
+
+    const first = await app.request("/api/v2/orgs/1/portfolio?limit=1", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(first.status).toBe(200)
+    const firstBody = (await first.json()) as {
+      projects: Array<{ id: string; name: string }>
+      nextCursor: string | null
+    }
+    expect(firstBody.projects).toEqual([expect.objectContaining({ id: "pc", name: "Acts" })])
+    expect(firstBody.nextCursor).toBeTruthy()
+
+    const second = await app.request(
+      `/api/v2/orgs/1/portfolio?limit=1&cursor=${encodeURIComponent(firstBody.nextCursor!)}`,
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    const secondBody = (await second.json()) as {
+      projects: Array<{ id: string; name: string }>
+      nextCursor: string | null
+    }
+    expect(secondBody.projects).toEqual([expect.objectContaining({ id: "pa", name: "John" })])
+    expect(secondBody.nextCursor).toBeTruthy()
+
+    const search = await app.request("/api/v2/orgs/1/portfolio?q=mar", { headers: authHeader(await jwtFor("wendi")) }, env)
+    const searchBody = (await search.json()) as { projects: Array<{ id: string; name: string }> }
+    expect(searchBody.projects).toEqual([expect.objectContaining({ id: "pb", name: "Mark" })])
+
+    const batched = await app.request(
+      "/api/v2/orgs/portfolio",
+      {
+        method: "POST",
+        headers: { ...authHeader(await jwtFor("wendi")), "Content-Type": "application/json" },
+        body: JSON.stringify({ orgIds: [1], limit: 1 }),
+      },
+      env,
+    )
+    const batchedBody = (await batched.json()) as {
+      portfolios: Array<{ orgId: number; projects: Array<{ id: string; name: string }> }>
+      nextCursor: string | null
+    }
+    expect(batchedBody.portfolios).toEqual([
+      { orgId: 1, projects: [expect.objectContaining({ id: "pc", name: "Acts" })] },
+    ])
+    expect(batchedBody.nextCursor).toBeTruthy()
   })
 })
 

@@ -144,6 +144,29 @@ export function clampOrgDirectoryLimit(raw: string | undefined): number {
   return Math.min(ORG_DIRECTORY_MAX_LIMIT, Math.max(1, Math.floor(n)))
 }
 
+/** Same page size as the org switcher — project tables and pickers share it. */
+export const PROJECT_DIRECTORY_DEFAULT_LIMIT = ORG_DIRECTORY_DEFAULT_LIMIT
+export const PROJECT_DIRECTORY_MAX_LIMIT = ORG_DIRECTORY_MAX_LIMIT
+
+export const clampProjectDirectoryLimit = clampOrgDirectoryLimit
+
+export function encodeProjectDirectoryCursor(id: string, name: string): string {
+  return `${encodeURIComponent(id)}:${encodeURIComponent(name)}`
+}
+
+export function decodeProjectDirectoryCursor(raw: string): { id: string; name: string } | null {
+  const sep = raw.indexOf(":")
+  if (sep < 0) return null
+  try {
+    const id = decodeURIComponent(raw.slice(0, sep))
+    const name = decodeURIComponent(raw.slice(sep + 1))
+    if (!id) return null
+    return { id, name }
+  } catch {
+    return null
+  }
+}
+
 /**
  * One page of orgs the caller does not already reach via membership or a
  * project grant. Used by GET /orgs?limit= for the switcher's infinite list —
@@ -1061,10 +1084,20 @@ function validatedFromHistogram(raw: LaneDbRow["validator_histogram"], threshold
  * file per lane since migration 0055) — a SUM, not new bookkeeping. Lanes are
  * ordered default ('') first, then by tag, for deterministic output.
  */
-async function fetchPortfolioLanes(env: Env, orgIds: number[]): Promise<Map<string, PortfolioLane[]>> {
+async function fetchPortfolioLanes(
+  env: Env,
+  orgIds: number[],
+  projectIds?: readonly string[],
+): Promise<Map<string, PortfolioLane[]>> {
   const byProject = new Map<string, PortfolioLane[]>()
   if (orgIds.length === 0) return byProject
   const placeholders = orgIds.map(() => "?").join(", ")
+  const projectFilter =
+    projectIds != null && projectIds.length > 0
+      ? ` AND p.id IN (${projectIds.map(() => "?").join(", ")})`
+      : ""
+  const orgBinds: unknown[] = [...orgIds]
+  const projectBinds: unknown[] = projectIds != null && projectIds.length > 0 ? [...projectIds] : []
   const [laneRows, settingsRows] = await Promise.all([
     env.AQUILLA_PG.prepare(
       `SELECT fsp.project_id AS project_id, fsp.target_lang AS target_lang,
@@ -1072,16 +1105,16 @@ async function fetchPortfolioLanes(env: Env, orgIds: number[]): Promise<Map<stri
               fsp.validator_histogram AS validator_histogram, fsp.updated_at AS updated_at
          FROM file_section_progress fsp
          JOIN projects p ON p.id = fsp.project_id
-        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL AND fsp.scope = 'file'`,
-    ).bind(...orgIds).all<LaneDbRow>(),
+        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL AND fsp.scope = 'file'${projectFilter}`,
+    ).bind(...orgBinds, ...projectBinds).all<LaneDbRow>(),
     env.AQUILLA_PG.prepare(
       `SELECT ps.project_id AS project_id,
               ps.validation_count AS validation_count,
               ps.target_lanes AS target_lanes
          FROM project_settings ps
          JOIN projects p ON p.id = ps.project_id
-        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL`,
-    ).bind(...orgIds).all<PortfolioSettingsDbRow>(),
+        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL${projectFilter}`,
+    ).bind(...orgBinds, ...projectBinds).all<PortfolioSettingsDbRow>(),
   ])
   const thresholds = readValidationCounts(settingsRows.results ?? [])
   // Accumulate one lane entry per (project, target_lang).
@@ -1161,22 +1194,42 @@ const PORTFOLIO_VISIBILITY_PREDICATE = `(
                         AND om.role_level >= ${ORG_WIDE_ACCESS_FLOOR})
         )`
 
-/** Per-project rollup over the org's non-archived projects (derive-on-read, one GROUP BY). */
-export async function getOrgPortfolio(
+export type PortfolioPageOpts = {
+  q: string
+  limit: number
+  cursor: { id: string; name: string } | null
+}
+
+/**
+ * One page (or the full set) of visible portfolio rows across `orgIds`,
+ * ordered by name. Used by the org / all-orgs project tables so search and
+ * infinite scroll do not dump every project to the client.
+ */
+export async function listOrgPortfolioPage(
   env: Env,
-  orgId: number,
+  orgIds: number[],
   viewer: { userId: number; isAdmin: boolean },
-): Promise<PortfolioRow[]> {
-  // Perf (dashboard 15s timeout fix):
-  //  - The AQU-523 language pair reads the STORED generated columns on
-  //    project_settings (migration 0054) — never (settings::jsonb)->>'…'
-  //    inline: settings blobs run to ~6 MB and the inline extraction
-  //    re-parsed that JSON on every file-fan-out row (~100x per project).
-  //  - au: the previous 3 correlated cell_audio subqueries re-scanned and
-  //    re-sorted cell_audio (~300k rows) per project; one MATERIALIZED
-  //    grouped pass replaces them. It joins 1:1 on project_id, so MAX()
-  //    collapses the file fan-out without affecting the SUMs (same for the
-  //    1:1 project_settings join).
+  page: PortfolioPageOpts | null,
+): Promise<{ projects: OrgPortfolioRow[]; nextCursor: string | null }> {
+  const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
+  if (uniqueOrgIds.length === 0) return { projects: [], nextCursor: null }
+
+  const placeholders = uniqueOrgIds.map(() => "?").join(", ")
+  const extraWhere: string[] = []
+  const extraBinds: unknown[] = []
+  if (page?.q) {
+    extraWhere.push("strpos(lower(p.name), ?) > 0")
+    extraBinds.push(page.q)
+  }
+  if (page?.cursor) {
+    extraWhere.push("(lower(p.name) > ? OR (lower(p.name) = ? AND p.id > ?))")
+    extraBinds.push(page.cursor.name.toLowerCase(), page.cursor.name.toLowerCase(), page.cursor.id)
+  }
+  const extraWhereSql = extraWhere.length > 0 ? ` AND ${extraWhere.join(" AND ")}` : ""
+  const orderSql = page ? "LOWER(p.name), p.id" : "p.org_id, LOWER(p.name)"
+  const limitSql = page ? " LIMIT ?" : ""
+  if (page) extraBinds.push(page.limit + 1)
+
   const rows = await env.AQUILLA_PG.prepare(
     `WITH au AS MATERIALIZED (
        SELECT ca.project_id,
@@ -1186,7 +1239,7 @@ export async function getOrgPortfolio(
               COALESCE(SUM(ca.duration_ms) FILTER (WHERE ca.selected = 1), 0) AS recorded_ms
          FROM cell_audio ca
         WHERE ca.deleted = 0
-          AND ca.project_id IN (SELECT id FROM projects WHERE org_id = ?)
+          AND ca.project_id IN (SELECT id FROM projects WHERE org_id IN (${placeholders}))
         GROUP BY ca.project_id
      )
      SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
@@ -1204,16 +1257,41 @@ export async function getOrgPortfolio(
        LEFT JOIN files f ON f.project_id = p.id
        LEFT JOIN project_settings ps ON ps.project_id = p.id
        LEFT JOIN au ON au.project_id = p.id
-      WHERE p.org_id = ? AND p.archived_at IS NULL
+      WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL
         AND ${PORTFOLIO_VISIBILITY_PREDICATE}
-      GROUP BY p.id, p.name
-      ORDER BY LOWER(p.name)`,
+        ${extraWhereSql}
+      GROUP BY p.org_id, p.id, p.name
+      ORDER BY ${orderSql}
+      ${limitSql}`,
   ).bind(
-    orgId, orgId,
+    ...uniqueOrgIds, ...uniqueOrgIds,
     viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId,
+    ...extraBinds,
   ).all<PortfolioDbRow>()
-  const lanesByProject = await fetchPortfolioLanes(env, [orgId])
-  return (rows.results ?? []).map((r) => mapPortfolioRow(r, lanesByProject))
+
+  const list = rows.results ?? []
+  const hasMore = page != null && list.length > page.limit
+  const pageRows = hasMore ? list.slice(0, page.limit) : list
+  const last = pageRows[pageRows.length - 1]
+  const lanesByProject = await fetchPortfolioLanes(
+    env,
+    uniqueOrgIds,
+    page ? pageRows.map((row) => row.id) : undefined,
+  )
+  return {
+    projects: pageRows.map((row) => ({ ...mapPortfolioRow(row, lanesByProject), orgId: row.org_id })),
+    nextCursor: hasMore && last ? encodeProjectDirectoryCursor(last.id, last.name) : null,
+  }
+}
+
+/** Per-project rollup over the org's non-archived projects (derive-on-read, one GROUP BY). */
+export async function getOrgPortfolio(
+  env: Env,
+  orgId: number,
+  viewer: { userId: number; isAdmin: boolean },
+): Promise<PortfolioRow[]> {
+  const { projects } = await listOrgPortfolioPage(env, [orgId], viewer, null)
+  return projects.map(({ orgId: _orgId, ...project }) => project)
 }
 
 /**
@@ -1268,51 +1346,8 @@ export async function getOrgPortfolios(
   orgIds: number[],
   viewer: { userId: number; isAdmin: boolean },
 ): Promise<OrgPortfolioRow[]> {
-  const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
-  if (uniqueOrgIds.length === 0) return []
-  const placeholders = uniqueOrgIds.map(() => "?").join(", ")
-  // One set-based aggregate keeps the request to a fixed number of database
-  // round trips regardless of organization count. The expensive cell_audio
-  // scan is still bounded to projects in the authorized org set. Lane metadata
-  // uses the small generated project_settings projections, so this no longer
-  // transfers/parses hundreds of MB of full settings blobs for large accounts.
-  const rows = await env.AQUILLA_PG.prepare(
-    `WITH au AS MATERIALIZED (
-       SELECT ca.project_id,
-              COUNT(DISTINCT ca.cell_id) AS audio_cells,
-              COUNT(DISTINCT ca.cell_id) FILTER (WHERE ca.selected = 1 AND ca.approved = 1)
-                AS validated_audio_cells,
-              COALESCE(SUM(ca.duration_ms) FILTER (WHERE ca.selected = 1), 0) AS recorded_ms
-         FROM cell_audio ca
-        WHERE ca.deleted = 0
-          AND ca.project_id IN (SELECT id FROM projects WHERE org_id IN (${placeholders}))
-        GROUP BY ca.project_id
-     )
-     SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
-            COALESCE(SUM(f.cell_count), 0)          AS total_cells,
-            COALESCE(SUM(f.approved_count), 0)      AS validated_cells,
-            COALESCE(SUM(f.filled_count), 0)        AS filled_cells,
-            COALESCE(SUM(f.ai_drafted_count), 0)    AS ai_drafted_cells,
-            MAX(f.last_edit_at)                     AS last_edit_at,
-            MAX(ps.source_language)                 AS source_language,
-            MAX(ps.target_language)                 AS target_language,
-            COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
-            COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
-            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms
-       FROM projects p
-       LEFT JOIN files f ON f.project_id = p.id
-       LEFT JOIN project_settings ps ON ps.project_id = p.id
-       LEFT JOIN au ON au.project_id = p.id
-      WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL
-        AND ${PORTFOLIO_VISIBILITY_PREDICATE}
-      GROUP BY p.org_id, p.id, p.name
-      ORDER BY p.org_id, LOWER(p.name)`,
-  ).bind(
-    ...uniqueOrgIds, ...uniqueOrgIds,
-    viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId,
-  ).all<PortfolioDbRow>()
-  const lanesByProject = await fetchPortfolioLanes(env, uniqueOrgIds)
-  return (rows.results ?? []).map((row) => ({ ...mapPortfolioRow(row, lanesByProject), orgId: row.org_id }))
+  const { projects } = await listOrgPortfolioPage(env, orgIds, viewer, null)
+  return projects
 }
 
 export interface ProjectAccessBreakdown {

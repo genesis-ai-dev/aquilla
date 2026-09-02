@@ -544,14 +544,20 @@ export function OrgProjectsDataTable({
               )
         }
         emptyState={(table) => {
-          const search = String(table.getState().globalFilter ?? "").trim()
+          const search = (searchValue ?? String(table.getState().globalFilter ?? "")).trim()
           if (search) {
             return (
               <div className="flex flex-col items-center gap-3 py-10">
                 <p className="text-center text-sm text-muted-foreground">
                   {t("org.orgProjectsDataTable.noSearchMatch")}
                 </p>
-                <Button variant="outline" onClick={() => table.setGlobalFilter("")}>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    table.setGlobalFilter("")
+                    onSearchChange?.("")
+                  }}
+                >
                   {t("common.clear")}
                 </Button>
               </div>

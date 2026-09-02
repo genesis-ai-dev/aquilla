@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { getPortfolio, validatedPct, attentionRank, audioPct, audioValidatedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "./portfolio"
+import { getPortfolio, getPortfolioPage, getPortfoliosPage, validatedPct, attentionRank, audioPct, audioValidatedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "./portfolio"
 
 const ORIG = global.fetch
 
@@ -31,6 +31,58 @@ describe("getPortfolio", () => {
     expect(err).toBeInstanceOf(Error)
     expect((err as Error).message).not.toMatch(/HTTP\s*403/)
     expect((err as Error).name).toBe("UserError")
+  })
+})
+
+describe("getPortfolioPage / getPortfoliosPage", () => {
+  it("GETs …/portfolio with limit, q, and cursor", async () => {
+    let calledUrl = ""
+    global.fetch = vi.fn(async (input: unknown) => {
+      calledUrl = typeof input === "string" ? input : (input as Request).url
+      return new Response(
+        JSON.stringify({ projects: [project({ id: "p1", name: "Mark" })], nextCursor: "p1:Mark" }),
+        { status: 200 },
+      )
+    }) as unknown as typeof fetch
+
+    const page = await getPortfolioPage("jwt", 1, { q: "mar", limit: 40, cursor: "a:Acts" })
+    expect(calledUrl).toContain("/api/v2/orgs/1/portfolio?")
+    expect(calledUrl).toContain("q=mar")
+    expect(calledUrl).toContain("limit=40")
+    expect(calledUrl).toContain("cursor=a%3AActs")
+    expect(page).toEqual({
+      projects: [project({ id: "p1", name: "Mark" })],
+      nextCursor: "p1:Mark",
+    })
+  })
+
+  it("POSTs …/orgs/portfolio with orgIds, limit, q, and cursor and flattens rows", async () => {
+    let calledUrl = ""
+    let calledBody: unknown
+    global.fetch = vi.fn(async (input: unknown, init?: RequestInit) => {
+      calledUrl = typeof input === "string" ? input : (input as Request).url
+      calledBody = JSON.parse(String(init?.body))
+      return new Response(
+        JSON.stringify({
+          portfolios: [{ orgId: 1, projects: [project({ id: "p1", name: "Mark" })] }],
+          nextCursor: "p1:Mark",
+        }),
+        { status: 200 },
+      )
+    }) as unknown as typeof fetch
+
+    const page = await getPortfoliosPage("jwt", [1, 1], { q: "mar", limit: 40, cursor: "a:Acts" })
+    expect(calledUrl).toMatch(/\/api\/v2\/orgs\/portfolio$/)
+    expect(calledBody).toEqual({
+      orgIds: [1],
+      q: "mar",
+      limit: 40,
+      cursor: "a:Acts",
+    })
+    expect(page).toEqual({
+      projects: [{ ...project({ id: "p1", name: "Mark" }), orgId: 1 }],
+      nextCursor: "p1:Mark",
+    })
   })
 })
 

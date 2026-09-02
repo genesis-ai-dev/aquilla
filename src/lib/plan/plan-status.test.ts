@@ -1,0 +1,202 @@
+import { describe, it, expect } from "vitest"
+import {
+  planUnitStatus,
+  planUnitLabel,
+  planUnitId,
+  planUnitHasContent,
+  sortUnitsInGroup,
+  groupPlanUnits,
+  planSummary,
+  planHasAudio,
+  PLAN_GROUP_ORDER,
+  type PlanUnit,
+} from "./plan-status"
+
+function unit(over: Partial<PlanUnit> = {}): PlanUnit {
+  return {
+    fileId: "f1",
+    fileName: "Gospels",
+    sectionKey: "",
+    totalCount: 100,
+    filledCount: 0,
+    validatedCount: 0,
+    audioCount: 0,
+    audioValidatedCount: 0,
+    lastEditAt: null,
+    targetDate: null,
+    doneAt: null,
+    doneBy: null,
+    ...over,
+  }
+}
+
+// 2026-09-02T09:00Z. Deadlines are UTC-midnight parses, so the AoE boundary
+// for a date D is D + 36h.
+const NOW = Date.parse("2026-09-02T09:00:00Z")
+
+describe("planUnitStatus", () => {
+  it("marks an untouched unit not started", () => {
+    expect(planUnitStatus(unit(), NOW)).toBe("not_started")
+  })
+
+  it("counts audio as content, not just text", () => {
+    expect(planUnitStatus(unit({ audioCount: 3 }), NOW)).toBe("in_progress")
+    expect(planUnitStatus(unit({ filledCount: 3 }), NOW)).toBe("in_progress")
+  })
+
+  it("lets the Done mark outrank the numbers", () => {
+    // The whole point of an explicit mark: Done at 12% validated is a
+    // judgment, not a bug, and the bars stay visible beside it.
+    const u = unit({ filledCount: 94, validatedCount: 12, doneAt: NOW, doneBy: "randall" })
+    expect(planUnitStatus(u, NOW)).toBe("done")
+  })
+
+  it("lets Done outrank an overdue target too", () => {
+    const u = unit({ targetDate: "2026-01-01", doneAt: NOW, doneBy: "randall" })
+    expect(planUnitStatus(u, NOW)).toBe("done")
+  })
+
+  it("is not overdue on the target day anywhere on Earth", () => {
+    // Due today: still the 2nd in UTC-12, so not late.
+    expect(planUnitStatus(unit({ targetDate: "2026-09-02", filledCount: 1 }), NOW)).toBe("soon")
+  })
+
+  it("holds off until the AoE grace has fully elapsed", () => {
+    const due = Date.parse("2026-09-02T00:00:00Z")
+    const AOE = (24 + 12) * 60 * 60 * 1000
+    const u = unit({ targetDate: "2026-09-02", filledCount: 1 })
+    expect(planUnitStatus(u, due + AOE - 1)).toBe("soon")
+    expect(planUnitStatus(u, due + AOE)).toBe("overdue")
+  })
+
+  it("marks a past target overdue even with no content", () => {
+    expect(planUnitStatus(unit({ targetDate: "2026-08-01" }), NOW)).toBe("overdue")
+  })
+
+  it("calls a target inside the seven-day window due soon", () => {
+    expect(planUnitStatus(unit({ targetDate: "2026-09-06", filledCount: 1 }), NOW)).toBe("soon")
+  })
+
+  it("leaves a distant target as ordinary progress", () => {
+    expect(planUnitStatus(unit({ targetDate: "2026-12-01", filledCount: 1 }), NOW)).toBe("in_progress")
+  })
+
+  it("does not promote an untouched unit to in progress just because it has a date", () => {
+    expect(planUnitStatus(unit({ targetDate: "2026-12-01" }), NOW)).toBe("not_started")
+  })
+
+  it("ignores an unparseable target rather than throwing", () => {
+    expect(planUnitStatus(unit({ targetDate: "not-a-date", filledCount: 1 }), NOW)).toBe("in_progress")
+  })
+})
+
+describe("labels and identity", () => {
+  it("names a book unit by its book name, not its code", () => {
+    expect(planUnitLabel({ fileName: "Whole Bible", sectionKey: "GEN" })).toBe("Genesis")
+  })
+
+  it("falls back to the file name for a file-grain unit", () => {
+    expect(planUnitLabel({ fileName: "Episode 1", sectionKey: "" })).toBe("Episode 1")
+  })
+
+  it("shows an unrecognised key verbatim rather than pretending", () => {
+    expect(planUnitLabel({ fileName: "Stories", sectionKey: "OBS" })).toBe("OBS")
+  })
+
+  it("keys a unit by file and section together", () => {
+    expect(planUnitId({ fileId: "f1", sectionKey: "GEN" })).toBe("f1:GEN")
+    expect(planUnitId({ fileId: "f1", sectionKey: "" })).toBe("f1:")
+  })
+
+  it("treats any content as started", () => {
+    expect(planUnitHasContent({ filledCount: 0, audioCount: 0 })).toBe(false)
+    expect(planUnitHasContent({ filledCount: 0, audioCount: 1 })).toBe(true)
+  })
+})
+
+describe("sortUnitsInGroup", () => {
+  it("puts the soonest target first and undated units last", () => {
+    const rows = [
+      unit({ fileId: "c", fileName: "C", targetDate: null }),
+      unit({ fileId: "a", fileName: "A", targetDate: "2026-12-01" }),
+      unit({ fileId: "b", fileName: "B", targetDate: "2026-09-10" }),
+    ]
+    expect(sortUnitsInGroup(rows).map((u) => u.fileName)).toEqual(["B", "A", "C"])
+  })
+
+  it("breaks a tie between books by canonical order, not alphabet", () => {
+    const rows = [
+      unit({ fileId: "f", sectionKey: "EXO", targetDate: "2026-09-10" }),
+      unit({ fileId: "f", sectionKey: "GEN", targetDate: "2026-09-10" }),
+    ]
+    // Alphabetically Exodus precedes Genesis; canonically it does not.
+    expect(sortUnitsInGroup(rows).map((u) => u.sectionKey)).toEqual(["GEN", "EXO"])
+  })
+
+  it("orders undated units by label", () => {
+    const rows = [
+      unit({ fileId: "b", fileName: "Beta" }),
+      unit({ fileId: "a", fileName: "Alpha" }),
+    ]
+    expect(sortUnitsInGroup(rows).map((u) => u.fileName)).toEqual(["Alpha", "Beta"])
+  })
+
+  it("does not mutate its input", () => {
+    const rows = [unit({ fileName: "B", targetDate: "2026-12-01" }), unit({ fileName: "A", targetDate: "2026-09-10" })]
+    const before = rows.map((u) => u.fileName)
+    sortUnitsInGroup(rows)
+    expect(rows.map((u) => u.fileName)).toEqual(before)
+  })
+})
+
+describe("groupPlanUnits", () => {
+  it("orders groups by urgency and drops empty ones", () => {
+    const rows = [
+      unit({ fileId: "1", fileName: "Done", doneAt: NOW, doneBy: "r" }),
+      unit({ fileId: "2", fileName: "Late", targetDate: "2026-08-01" }),
+      unit({ fileId: "3", fileName: "Fresh" }),
+    ]
+    const groups = groupPlanUnits(rows, NOW)
+    expect(groups.map((g) => g.status)).toEqual(["overdue", "not_started", "done"])
+    expect(groups.map((g) => g.units.length)).toEqual([1, 1, 1])
+  })
+
+  it("never emits a group outside the declared order", () => {
+    const rows = [unit({ filledCount: 1 }), unit({ fileId: "2", targetDate: "2026-08-01" })]
+    for (const g of groupPlanUnits(rows, NOW)) {
+      expect(PLAN_GROUP_ORDER).toContain(g.status)
+    }
+  })
+
+  it("returns nothing for an empty plan", () => {
+    expect(groupPlanUnits([], NOW)).toEqual([])
+  })
+})
+
+describe("planSummary", () => {
+  it("counts done, overdue and in-flight without naming the unit", () => {
+    const rows = [
+      unit({ fileId: "1", doneAt: NOW, doneBy: "r" }),
+      unit({ fileId: "2", doneAt: NOW, doneBy: "r" }),
+      unit({ fileId: "3", targetDate: "2026-08-01" }),
+      unit({ fileId: "4", filledCount: 5 }),
+      unit({ fileId: "5", targetDate: "2026-09-06", filledCount: 2 }),
+      unit({ fileId: "6" }),
+    ]
+    expect(planSummary(rows, NOW)).toEqual({ total: 6, done: 2, overdue: 1, inFlight: 2 })
+  })
+
+  it("is all zeroes for an empty plan", () => {
+    expect(planSummary([], NOW)).toEqual({ total: 0, done: 0, overdue: 0, inFlight: 0 })
+  })
+})
+
+describe("planHasAudio", () => {
+  it("is false for a text-only project so audio bars can hide entirely", () => {
+    expect(planHasAudio([unit(), unit({ fileId: "2", filledCount: 9 })])).toBe(false)
+  })
+
+  it("is true as soon as one unit has a recording", () => {
+    expect(planHasAudio([unit(), unit({ fileId: "2", audioCount: 1 })])).toBe(true)
+  })
+})

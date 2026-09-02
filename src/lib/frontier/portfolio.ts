@@ -171,8 +171,13 @@ export type DeadlineStatus = "overdue" | "soon" | "ok"
  *   - A project due TODAY is never "overdue" during that calendar day anywhere.
  *   - A project due YESTERDAY is always "overdue" (more than 36h has passed).
  */
-function isDeadlineOverdue(deadlineUtcMidnight: number, nowMs: number): boolean {
-  const AOE_GRACE_MS = (24 + 12) * 60 * 60 * 1000 // 36 hours
+/** 1 day + 12 hours: the grace that makes a date AoE (see the block above). */
+export const AOE_GRACE_MS = (24 + 12) * 60 * 60 * 1000
+
+/** How far ahead of its AoE end a date counts as "due soon". */
+export const DEADLINE_SOON_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+
+export function isDeadlineOverdue(deadlineUtcMidnight: number, nowMs: number): boolean {
   return nowMs >= deadlineUtcMidnight + AOE_GRACE_MS
 }
 
@@ -183,7 +188,7 @@ export function deadlineStatus(p: PortfolioProject, now: number): DeadlineStatus
   if (Number.isNaN(t)) return null
   if (isDeadlineOverdue(t, now)) return "overdue"
   // "soon": within 7 days, measured from AoE end-of-deadline-day to now
-  if (t + (24 + 12) * 60 * 60 * 1000 - now <= 7 * 24 * 60 * 60 * 1000) return "soon"
+  if (t + AOE_GRACE_MS - now <= DEADLINE_SOON_WINDOW_MS) return "soon"
   return "ok"
 }
 

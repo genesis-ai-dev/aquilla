@@ -1,8 +1,13 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
-import { ensureAuthState, injectAdditionalSession } from "../../helpers/auth"
+import { ensureAuthState, injectAdditionalSession, injectSessions } from "../../helpers/auth"
 import { AccountSwitcherPage } from "../../helpers/page-objects/AccountSwitcher"
 import { seedUser } from "../../helpers/seed"
-import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
+import {
+  jwtFor,
+  openSeededProject,
+  readSeededFileEvents,
+  seedProjectWithFile,
+} from "../../helpers/seed-project"
 
 /**
  * AccountSwitcher dropdown — sidebar username button.
@@ -78,6 +83,99 @@ test("logging out promotes another signed-in account", async ({ alice }) => {
 
   await expect(alice.getByRole("button", { name: /Account menu: bob/i })).toBeVisible({
     timeout: 10_000,
+  })
+})
+
+test("inactive account outbox drains with its own JWT while another account is active", async ({ alice }) => {
+  test.setTimeout(120_000)
+  const aliceSession = await ensureAuthState("alice")
+  const bobSession = await ensureAuthState("bob")
+  const seeded = await seedProjectWithFile(aliceSession.jwt, {
+    name: `Inactive outbox owner ${Date.now()}`,
+  })
+
+  await alice.goto("/orgs/all")
+  await injectSessions(alice, [aliceSession, bobSession], "bob")
+  await expect(alice.getByRole("button", { name: /Account menu: bob/i })).toBeVisible()
+
+  const eventId = crypto.randomUUID()
+  const renamedFile = `alice-inactive-${eventId.slice(0, 8)}.md`
+  const delivered = alice.waitForResponse((response) => {
+    if (response.request().method() !== "POST" || new URL(response.url()).pathname !== "/events") {
+      return false
+    }
+    try {
+      const body = response.request().postDataJSON() as { events?: Array<{ id?: string }> }
+      return body.events?.some((event) => event.id === eventId) ?? false
+    } catch {
+      return false
+    }
+  }, { timeout: 30_000 })
+
+  await alice.evaluate(async ({ eventId, projectId, fileId, renamedFile }) => {
+    const open = indexedDB.open("aquilla-cqrs-outbox", 3)
+    open.onupgradeneeded = () => {
+      if (!open.result.objectStoreNames.contains("outbox")) {
+        const store = open.result.createObjectStore("outbox", { keyPath: "id" })
+        store.createIndex("enqueuedAt", "enqueuedAt", { unique: false })
+      }
+    }
+    await new Promise<void>((resolve, reject) => {
+      open.onsuccess = () => resolve()
+      open.onerror = () => reject(open.error)
+    })
+    const db = open.result
+    const tx = db.transaction("outbox", "readwrite")
+    tx.objectStore("outbox").put({
+      id: eventId,
+      enqueuedAt: Date.now(),
+      attempts: 0,
+      lastAttemptAt: null,
+      lastError: null,
+      status: "pending",
+      ownerKey: "alice",
+      event: {
+        id: eventId,
+        schemaVersion: 1,
+        kind: "file.rename",
+        projectId,
+        fileId,
+        parentId: null,
+        // Deliberately hostile client metadata: the sync-worker must author
+        // from Alice's verified token, never this field or active Bob.
+        author: "bob",
+        payload: { name: renamedFile },
+        clientTs: Date.now(),
+      },
+    })
+    await new Promise<void>((resolve, reject) => {
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => reject(tx.error)
+    })
+    db.close()
+  }, {
+    eventId,
+    projectId: seeded.projectId,
+    fileId: seeded.fileId,
+    renamedFile,
+  })
+
+  const response = await delivered
+  expect(response.ok(), await response.text()).toBe(true)
+  await expect.poll(async () => {
+    const event = (await readSeededFileEvents(
+      aliceSession.jwt,
+      seeded.projectId,
+      seeded.fileId,
+    )).find((candidate) => candidate.id === eventId)
+    return event ? { kind: event.kind, author: event.author, payload: event.payload } : null
+  }, {
+    timeout: 30_000,
+    message: "Alice's inactive outbox event should reach the real event log under Alice's identity",
+  }).toEqual({
+    kind: "file.rename",
+    author: "alice",
+    payload: { name: renamedFile },
   })
 })
 

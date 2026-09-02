@@ -6,7 +6,7 @@ export const segmentation = defineNamespace({
     "segmentation.title": "Segmentation",
     "segmentation.description":
       "How this file is divided into passages. The AI translator drafts one passage at a time and reads the passages around it for context, so where the divisions fall shapes every draft.",
-    "segmentation.currentHeading": "Now",
+    "segmentation.currentHeading": "Current passages",
     "segmentation.currentSummary": "{spanCount} passages across {cellCount} segments",
     "segmentation.sourceAuto": "From the file's own structure",
     "segmentation.sourceFixed": "Every {size} segments",
@@ -73,9 +73,9 @@ export const segmentation = defineNamespace({
       },
       "segmentation.currentHeading": {
         description:
-          "Small heading over the summary of the file's CURRENT division. Adverb of " +
-          "time ('as things stand'), not a noun.",
-        maxLength: 16,
+          "Small heading over the summary of the file's CURRENT division. Noun phrase, " +
+          "sentence case — not all-caps.",
+        maxLength: 24,
       },
       "segmentation.currentSummary": {
         description:

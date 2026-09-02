@@ -41,7 +41,26 @@
 // no `files.meta.trackOverrides` entry and no exported project anywhere has
 // ever carried the old "subtitles" spelling. Once a single one does, a rename
 // here stops being a rename and becomes a migration of stored deltas.
-export type TrackKind = "source-subtitles" | "source-audio" | "target-subtitles" | "target-audio"
+//
+// THE UNION IS SPLIT IN TWO, AND THE SPLIT IS LOAD-BEARING. A DERIVED kind is
+// one the FILE produces from its own shape — those four, and only those four,
+// have a frozen seat in TRACK_KIND_ORDER and an id reserved in
+// DEFAULT_TRACK_IDS. An ADDED kind is one a user picks when they make a track,
+// and it has neither: it can never be derived, so inventing a dummy seat for it
+// would be inventing a number that nothing reads. Keeping them apart is what
+// lets `Record<DerivedTrackKind, number>` stay exhaustive and honest instead of
+// growing filler entries every time the palette of addable tracks widens.
+export type DerivedTrackKind = "source-subtitles" | "source-audio" | "target-subtitles" | "target-audio"
+
+/** What a user can make. `"audio"` is deliberately NOT `"target-audio"`: the
+ *  derived row of that kind is the file's own dub track, whose takes live in the
+ *  `"recording"` slot and whose alignment comes from the file's cells. An added
+ *  audio track has neither — it carries a `sourceTrackId` saying what it lines
+ *  up against, and (from stage 3) its own slot. Same lane, different contract,
+ *  so a different kind. */
+export type AddedTrackKind = "folder" | "audio"
+
+export type TrackKind = DerivedTrackKind | AddedTrackKind
 
 export interface TimelineTrack {
   /** Defaults use their kind as the id; user-added tracks carry a generated
@@ -52,9 +71,23 @@ export interface TimelineTrack {
   name: string
   /** A sort key, not an index — negative and fractional values are legal so a
    *  future reorder can drop a track between two others without renumbering
-   *  everything below it. */
+   *  everything below it.
+   *
+   *  SCOPED, from stage 2 on: a top-level track's order ranks it among the
+   *  other top-level rows, and a folder member's ranks it among its siblings.
+   *  Comparing across scopes is meaningless — see track-groups.ts. Existing
+   *  data is unaffected: every persisted order today is top-level, and with no
+   *  folders "scoped" and "global" are the same statement. */
   order: number
   groupId?: string | null
+  /** A palette ID from track-colors.ts, or null/absent for the default pair.
+   *  An ID rather than colour values, because what a palette entry looks like
+   *  is this build's business — see the note on PersistedTrackPatch.color. */
+  color?: string | null
+  /** Which track's cells this one's chips line up with. Set once, at creation,
+   *  on added tracks only: a derived row's alignment comes from the file, so
+   *  there is nothing here to override. */
+  sourceTrackId?: string | null
 }
 
 /**
@@ -73,15 +106,33 @@ export interface PersistedTrackPatch {
   name?: string
   order?: number
   groupId?: string
+  /** A palette ID, NOT colour values — and widened to `string` for the same
+   *  reason `kind` is. Which hues an ID stands for is decided by whichever
+   *  build is drawing, exactly as TRACK_RENDER already decides what the derived
+   *  rows look like. Storing hex here would freeze one build's palette into
+   *  every project's data and make a future restyle a migration; storing an ID
+   *  this build cannot name simply falls back to the default pair, and the
+   *  newer client that wrote it still sees what it meant. */
+  color?: string
+  sourceTrackId?: string
 }
 
 export type PersistedTrackOverrides = Record<string, PersistedTrackPatch>
 
 export const TRACK_KIND_LABELS: Record<TrackKind, string> = {
-  "source-subtitles": "Source subtitles",
+  // Sam, 2026-08-24: "text", not "subtitles". The row holds the file's source
+  // text whatever it came from — a subtitle import, a transcript, an ordinary
+  // document — and calling every one of them a subtitle names the narrowest
+  // case. THE KIND STRINGS ARE UNCHANGED: they are persisted in
+  // files.meta.trackOverrides and renaming one would be a migration. This is
+  // only what the row is CALLED, which is per-track data a rename overrides —
+  // so a project that wants "Subtitles" back simply renames it.
+  "source-subtitles": "Source text",
   "source-audio": "Source audio",
-  "target-subtitles": "Target subtitles",
+  "target-subtitles": "Target text",
   "target-audio": "Target audio",
+  folder: "Folder",
+  audio: "Audio",
 }
 
 /**
@@ -95,20 +146,27 @@ export const TRACK_KIND_LABELS: Record<TrackKind, string> = {
  * which the next reorder or rename would then write against. Reserving all four
  * kinds means a delta naming one this file does not derive is simply ignored.
  *
+ * ONLY THE DERIVED KINDS ARE IDS. It used to be every kind, because every kind
+ * was derived; now that a user can make a `folder` or an `audio` track, the two
+ * sets have come apart and aliasing them would reserve `"folder"` as a track id
+ * — which would make a user-added track that happened to be handed that id
+ * unbuildable, and for no reason: nothing ever DERIVES a folder, so there is no
+ * derived row for a delta to collide with.
+ *
  * HAND-MIRRORED with `TRACK_KINDS`/`DEFAULT_TRACK_IDS` in
  * sync-worker/src/events/handlers/file-track-set.ts: the packages share no
  * code, so both sides must be edited together. Drift the other way — a kind the
  * client will happily persist that the server rejects — wedges the outbox on a
  * permanently-failing event.
  */
-const TRACK_KINDS: readonly TrackKind[] = [
+const DERIVED_TRACK_KINDS: readonly DerivedTrackKind[] = [
   "source-subtitles",
   "source-audio",
   "target-subtitles",
   "target-audio",
 ]
 
-export const DEFAULT_TRACK_IDS: ReadonlySet<string> = new Set<string>(TRACK_KINDS)
+export const DEFAULT_TRACK_IDS: ReadonlySet<string> = new Set<string>(DERIVED_TRACK_KINDS)
 
 /** The canonical seat of each kind. Derivation uses THESE and never the array
  *  index, so the numbers a file's rows carry do not shift underneath a user's
@@ -126,7 +184,7 @@ export const DEFAULT_TRACK_IDS: ReadonlySet<string> = new Set<string>(TRACK_KIND
  *  `trackOverrides` entry exists anywhere. SEQUENCING CONSTRAINT: this renumber
  *  must ship in the same release as the drag-to-reorder that starts emitting.
  *  Ship the drag first and the window closes. */
-const TRACK_KIND_ORDER: Record<TrackKind, number> = {
+const TRACK_KIND_ORDER: Record<DerivedTrackKind, number> = {
   "source-subtitles": 0,
   "target-subtitles": 1,
   "source-audio": 2,
@@ -143,8 +201,8 @@ export interface TrackDerivationContext {
   /** The file was imported from subtitles: its cells are timed text, and the
    *  translation of that text is a row in its own right. */
   isSubtitleImport: boolean
-  /** The file has media cells — a dubbing project, where the rows have always
-   *  been Subtitles / Source audio / Target audio. */
+  /** The file has media cells — a dubbing project, whose three rows are
+   *  Source text / Source audio / Target audio. */
   hasMediaCells: boolean
   /** An audio-cue sibling file exists for this file, so there are cues for a
    *  Source-audio row to draw. */
@@ -171,7 +229,7 @@ const overrideOrder = (value: unknown): number | null =>
 const isPatchObject = (value: unknown): boolean =>
   typeof value === "object" && value !== null && !Array.isArray(value)
 
-const trackRow = (kind: TrackKind, name: string = TRACK_KIND_LABELS[kind]): TimelineTrack => ({
+const trackRow = (kind: DerivedTrackKind, name: string = TRACK_KIND_LABELS[kind]): TimelineTrack => ({
   id: kind,
   kind,
   name,
@@ -189,11 +247,17 @@ const trackRow = (kind: TrackKind, name: string = TRACK_KIND_LABELS[kind]): Time
  * With no context (the fileless caller) or with media cells, this is the
  * three-row shape the editor has drawn since it shipped, rows and labels
  * unchanged: every existing dubbing project must see NOTHING different after
- * stage 2. Note the source row is named "Subtitles" here and not
- * TRACK_KIND_LABELS["source-subtitles"] — deliberately, and not a bug: a
- * track's `name` is per-track DATA, the gutter has always read "Subtitles" on a
- * dubbing file, and the four-way label map exists for the kinds a user picks
- * from, not to dictate what an existing row is called.
+ * stage 2.
+ *
+ * The source row used to spell its own name here — the literal "Subtitles",
+ * overriding the kind's label, because a dubbing file's gutter had read that
+ * since the editor shipped. The 2026-08-24 rename removed the override rather
+ * than editing it: with both spellings becoming "Source text" the divergence
+ * had nothing left to express, and one name for one kind is the simpler thing
+ * to keep true. Both file shapes now take the label from the kind.
+ *
+ * A PROJECT THAT WANTS "Subtitles" BACK RENAMES THE ROW — that is data, it
+ * wins over anything derived here, and this function never sees it.
  *
  * THE LITERALS BELOW ARE WRITTEN IN SEAT ORDER, AND THAT IS A CONTRACT, NOT
  * TIDINESS. This function does not sort — only mergeTrackOverrides does — so
@@ -213,15 +277,15 @@ export function deriveDefaultTracks(context?: TrackDerivationContext | null): Ti
   // the file was drawn as a moment ago, and it never hides a row.
   //
   // THE STAGE-3 RESEAT MUST NOT BE VISIBLE IN THIS SHAPE. These three rows'
-  // orders went [0, 1, 3] → [0, 2, 3] — same rows, same sequence, same
-  // "Subtitles" label, still ascending — and a dubbing file cannot observe the
+  // orders went [0, 1, 3] → [0, 2, 3] — same rows, same sequence, still
+  // ascending — and a dubbing file cannot observe the
   // difference: nothing derives seat 1 on a file with no Target-subtitles row,
   // and with no persisted overrides (the state every existing project is in)
   // these numbers are never compared against anything but each other. That
   // invisibility is the guarantee the whole renumber hangs on; it is the
   // highest-blast-radius part of the change and tracks.test.ts pins it twice.
   if (!context || context.hasMediaCells || !context.isSubtitleImport) {
-    return [trackRow("source-subtitles", "Subtitles"), trackRow("source-audio"), trackRow("target-audio")]
+    return [trackRow("source-subtitles"), trackRow("source-audio"), trackRow("target-audio")]
   }
 
   return [
@@ -303,14 +367,22 @@ export function mergeTrackOverrides(
     const seat = seats.get(id)
     if (seat !== undefined) {
       const target = tracks[seat]
-      // `kind` is ignored on a default: its identity is derived from the row
-      // the editor draws, so a stored kind could only ever be a lie about it.
+      // `kind` and `sourceTrackId` are ignored on a default: both are derived
+      // from the row the editor draws — its identity and what its chips line up
+      // with — so a stored value could only ever be a lie about it. (The server
+      // refuses both on a reserved id, so this branch is defence in depth
+      // against data that predates that rule or arrives from a newer client.)
       const name = overrideString(patch.name)
       if (name !== null) target.name = name
       const order = overrideOrder(patch.order)
       if (order !== null) target.order = order
       const groupId = overrideString(patch.groupId)
       if (groupId !== null) target.groupId = groupId
+      // Colour IS honoured on a default, and has to be: the default target-audio
+      // row is the one every existing project is looking at, and it is the first
+      // track anyone will recolour.
+      const color = overrideString(patch.color)
+      if (color !== null) target.color = color
       continue
     }
     // A reserved id the caller left out of `defaults` stays reserved — a delta
@@ -338,6 +410,11 @@ export function mergeTrackOverrides(
       name: overrideString(patch.name) ?? TRACK_KIND_LABELS[patch.kind],
       order,
       groupId: overrideString(patch.groupId),
+      color: overrideString(patch.color),
+      // Self-reference is dropped rather than rejected — the track still
+      // exists, it just aligns to nothing, which is exactly how a groupId
+      // naming a track this build cannot see already behaves.
+      sourceTrackId: overrideString(patch.sourceTrackId) === id ? null : overrideString(patch.sourceTrackId),
     })
   }
 

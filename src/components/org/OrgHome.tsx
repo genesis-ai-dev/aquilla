@@ -22,7 +22,7 @@ import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { OrgCreateDialog } from "./OrgCreateDialog"
 import { LaneChips } from "./LaneChips"
 import { ProjectMetricHeader } from "./ProjectMetricHeader"
-import { displayLanes } from "./project-lanes"
+import { displayLanes, resolveDefaultLaneLabel } from "./project-lanes"
 import { ProjectStatusFilter } from "./ProjectStatusFilter"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import type { StatusFilter } from "@/hooks/useOrgPortfolio"
@@ -485,7 +485,7 @@ export function ProjectTable({
                   <LaneChips
                     projectId={p.id}
                     lanes={displayLanes(p)}
-                    defaultLaneLabel={defaultLaneLabelByProjectId?.get(p.id) ?? ""}
+                    defaultLaneLabel={resolveDefaultLaneLabel(p, defaultLaneLabelByProjectId?.get(p.id))}
                     maxVisible={2}
                     className="w-full"
                   />
@@ -772,8 +772,11 @@ export function OrgHome() {
   // invitee still gets the same projects table, just without fake 0/0/0 stats.
   const showOrgRollup = orgs.length > 0
   // AQU-538 §3.2: the '' (default) lane chip is labeled with the project's
-  // target language — portfolio alone doesn't join file languages; empty map
-  // falls back to generic "Default" labels.
+  // target language. This all-orgs view has no per-file language hints to join,
+  // so the map stays empty — AQU-606: `resolveDefaultLaneLabel` reads the
+  // project-level `targetLanguage` off the row itself, so the chip still shows
+  // the real language and only a genuinely untargeted project falls back to the
+  // neutral placeholder.
   const defaultLaneLabelByProjectId = new Map<string, string>()
 
   const orgSummaries: OrgPortfolioSummary[] = orgs

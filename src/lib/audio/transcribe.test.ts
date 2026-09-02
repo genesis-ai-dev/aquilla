@@ -310,3 +310,49 @@ describe("transcribeCell — dub take on a media cell (SUB-29)", () => {
     expect(input).not.toHaveProperty("transcription") // source text untouched
   })
 })
+
+// AQU-646: the re-attach below assigns `slot` OUTRIGHT and its sibling-deselect
+// is scoped to that slot, so naming the wrong one relocates the clip and drops
+// whatever was selected where it lands. The slot used to be INFERRED from which
+// of the cell's two selection pointers matched the clip — which reads any clip
+// the caller hands over in a stub (the recording modal builds one) as
+// "recording", and cannot see a third slot at all. Callers now state it.
+describe("transcribeCell — the slot is stated, not guessed", () => {
+  it("uses the caller's slot verbatim, even when the cell looks like a plain recording", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    __setTranscribeAudioForTests(fakeTranscribe(["hola"]))
+
+    // Exactly the shape the recording modal hands over: selectedAudioId set,
+    // no selectedGeneratedVoiceAudioId, and an attachment with no slot on it.
+    await transcribeCell({
+      cell: makeCell(), session, projectId: "proj-1", slot: "generatedVoice",
+    })
+
+    const input = emitCellAudioAttach.mock.calls[0][0] as Record<string, unknown>
+    expect(input.slot).toBe("generatedVoice")
+  })
+
+  it("carries a target track's own slot instead of collapsing it to recording", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    __setTranscribeAudioForTests(fakeTranscribe(["hola"]))
+
+    await transcribeCell({
+      cell: makeCell(), session, projectId: "proj-1", slot: "trk-2f9c11ab",
+    })
+
+    // The whole point: a third slot survives. The old inference answered
+    // "recording" here, which would have evicted the first track's take.
+    const input = emitCellAudioAttach.mock.calls[0][0] as Record<string, unknown>
+    expect(input.slot).toBe("trk-2f9c11ab")
+  })
+
+  it("still infers when no slot is given, so the untouched callers behave as before", async () => {
+    await audioCachePut(AUDIO_ID, EXT, new Uint8Array([1, 2, 3]))
+    __setTranscribeAudioForTests(fakeTranscribe(["hola"]))
+
+    await transcribeCell({ cell: makeCell(), session, projectId: "proj-1" })
+
+    const input = emitCellAudioAttach.mock.calls[0][0] as Record<string, unknown>
+    expect(input.slot).toBe("recording")
+  })
+})

@@ -50,6 +50,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'cell.retime': { startMs: 0, endMs: 1000 },
     'cell.audio.rename': { audioId: 'audio-1.wav', label: 'Take 3' },
     'cell.audio.trim': { audioId: 'audio-1.wav', trimStartMs: 250, trimEndMs: 3000 },
+    'cell.audio.place': { audioId: 'audio-1.wav', targetOffsetMs: -250 },
     'cell.link.set': {
       kind: 'text-audio',
       toFileId: 'file-audio-cues',

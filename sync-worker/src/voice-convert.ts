@@ -182,6 +182,12 @@ export async function handleVoiceConvertRequest(
     sourceBytes = await blob.arrayBuffer()
     sourceType = blob.type || sourceType
   } else if (typeof sourceAudioId === "string" && sourceAudioId) {
+    // sourceAudioId is a form field (unlike /audio's URL-path ids) and lands
+    // directly in an R2 key via audioObjectKey — see audio.ts's isPathSafeId
+    // doc comment, which names this exact call site.
+    if (!isPathSafeId(sourceAudioId)) {
+      return new Response("invalid sourceAudioId", { status: 400 })
+    }
     const obj = await env.SNAPSHOTS.get(audioObjectKey(env, projectId, fileId, sourceAudioId))
     if (!obj) return new Response("source audio not found", { status: 404 })
     sourceBytes = await obj.arrayBuffer()

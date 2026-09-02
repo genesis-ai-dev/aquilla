@@ -9,10 +9,11 @@
 // THIS FILE IS ONLY THE KEYING. Everything downstream already exists —
 // `splitCastName` pulls "JESUS.  (On)" apart, `emitCastAssign` writes the name
 // AND the camera state, `EditorTable`'s cast gutter and `ExportDialog`'s voice
-// filter both read `metadata.cast_name` directly. The one thing the existing
-// cast importer (LabelImportPanel) cannot do is take a FOREIGN sheet: it
-// round-trips a template we generate, keyed by our own cell refs. The client's
-// sheet is keyed by timestamp. That difference is this module.
+// filter both read `metadata.cast_name` directly. The earlier cast importer
+// (the ImportDialog's "Cell labels / cast" panel, removed 2026-09-01) could not
+// take a FOREIGN sheet: it round-tripped a template we generated, keyed by our
+// own cell refs. The client's sheet is keyed by timestamp. That difference is
+// this module.
 //
 // THE REFUSAL IS DIRECTIONAL, AND THAT IS THE WHOLE SAFETY STORY. A cell with
 // no row is fine and silent — a line nobody wrote a character for. A ROW with

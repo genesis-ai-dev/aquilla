@@ -466,7 +466,7 @@ export function OutboxInspectorPopover({ trigger, records, pendingCount, onRetry
                         <ChevronRight
                           aria-hidden
                           className={cn(
-                            "mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform",
+                            "mt-0.5 size-3.5 shrink-0 text-muted-foreground",
                             isOpen && "rotate-90",
                             !hasMore && "opacity-0",
                           )}

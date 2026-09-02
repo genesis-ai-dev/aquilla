@@ -587,13 +587,13 @@ export const nav = defineNamespace({
       "nav.shell.openSidebar": {
         description:
           "Tooltip and accessible name for the PanelLeft control to the left of the " +
-          "org breadcrumbs. Below the lg breakpoint (1024px), outside the editor, it opens the " +
-          "org sidebar in a left sheet.",
+          "header breadcrumbs. Below the lg breakpoint (1024px) it opens the org sidebar " +
+          "or the editor dock in a left sheet.",
       },
       "nav.shell.navigation": {
         description:
-          "Accessible title of the mobile org-sidebar sheet. Not visible; announced " +
-          "when the sheet opens so the overlay has a dialog name.",
+          "Accessible title of the mobile sidebar sheet (org chrome or editor dock). " +
+          "Not visible; announced when the sheet opens so the overlay has a dialog name.",
       },
 
       // -- SidebarProjectSection --

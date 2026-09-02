@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import { fireEvent, render, screen, within } from "@testing-library/react"
-import { Bot, Scale } from "lucide-react"
+import { Scale } from "lucide-react"
 import { TabStrip } from "./TabStrip"
 
 describe("TabStrip surface tabs", () => {
@@ -16,7 +16,6 @@ describe("TabStrip surface tabs", () => {
           {
             id: "agent",
             label: "Agent",
-            icon: Bot,
             active: false,
             onActivate: vi.fn(),
             onClose: vi.fn(),
@@ -26,7 +25,9 @@ describe("TabStrip surface tabs", () => {
     )
 
     expect(screen.getByRole("tab", { name: /GEN\.usfm/i })).toHaveAttribute("aria-selected", "true")
-    expect(screen.getByRole("tab", { name: /^Agent/ })).toHaveAttribute("aria-selected", "false")
+    const agentTab = screen.getByRole("tab", { name: /^Agent/ })
+    expect(agentTab).toHaveAttribute("aria-selected", "false")
+    expect(agentTab.querySelectorAll("svg")).toHaveLength(1)
   })
 
   it("activates a surface tab on click", () => {
@@ -42,7 +43,6 @@ describe("TabStrip surface tabs", () => {
           {
             id: "agent",
             label: "Agent",
-            icon: Bot,
             active: false,
             onActivate,
             onClose: vi.fn(),
@@ -68,7 +68,6 @@ describe("TabStrip surface tabs", () => {
           {
             id: "agent",
             label: "Agent",
-            icon: Bot,
             active: true,
             onActivate: vi.fn(),
             onClose,
@@ -101,7 +100,6 @@ describe("TabStrip surface tabs", () => {
           {
             id: "agent",
             label: "Agent",
-            icon: Bot,
             active: false,
             onActivate: vi.fn(),
             onClose: vi.fn(),

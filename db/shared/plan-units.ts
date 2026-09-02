@@ -113,6 +113,10 @@ export interface PlanUnitRow {
  * files.cell_count, the same last resort the progress read uses.
  */
 export function readPlanUnitsSql(extraScope = ""): string {
+  // `extraScope` MUST land in a WHERE clause. Appended after the last LEFT
+  // JOIN it would silently extend that join's ON condition instead — every
+  // unit would still come back, and a caller reading the first row would get
+  // the wrong one. The `TRUE` base keeps the composition safe when empty.
   return `WITH units AS (${planUnitsSql("f.project_id = ?")})
      SELECT u.project_id, u.file_id, u.file_name, u.file_role, u.file_kind,
             u.file_book_code, u.section_key,
@@ -140,7 +144,7 @@ export function readPlanUnitsSql(extraScope = ""): string {
        LEFT JOIN plan_units pu
          ON pu.project_id = u.project_id AND pu.file_id = u.file_id
         AND pu.section_key = u.section_key
-      ${extraScope}`
+      WHERE TRUE ${extraScope}`
 }
 
 /** Does this (file, sectionKey) name a real unit of this project? */

@@ -231,6 +231,32 @@ describe("patch semantics", () => {
     expect(row!.done_by).toBe("randall")
   })
 
+  it("returns the unit it was asked about, not merely the first one", async () => {
+    // Regression: the re-read appended its filter after a LEFT JOIN's ON
+    // clause instead of a WHERE, so every unit came back and the caller took
+    // row zero. A project with one file hid it; a whole-Bible file did not —
+    // marking Luke done answered with Genesis.
+    const { db } = await seed({
+      file_section_progress: ["MRK", "LUK", "JHN"].map((book) => ({
+        project_id: P, file_id: "f1", scope: "book", section_key: book, target_lang: "",
+        total_count: 10, filled_count: 4, validator_histogram: "{}",
+        audio_count: 0, audio_validated_count: 0, last_edit_at: null, revision: 3, updated_at: TS,
+      })),
+    })
+    const res = await post(db, { fileId: "f1", sectionKey: "LUK", done: true })
+    expect(res.status).toBe(200)
+    const { unit } = (await res.json()) as { unit: PlanUnit }
+    expect(unit.sectionKey).toBe("LUK")
+    expect(unit.doneAt).toBeGreaterThan(0)
+
+    // ...and only that unit was marked.
+    const marked = await db
+      .prepare(`SELECT section_key FROM plan_units WHERE project_id = ? AND done_at IS NOT NULL`)
+      .bind(P)
+      .all<{ section_key: string }>()
+    expect((marked.results ?? []).map((r) => r.section_key)).toEqual(["LUK"])
+  })
+
   it("returns the unit with its progress, not just the plan fields", async () => {
     const { db } = await seed()
     const res = await post(db, { fileId: "f1", sectionKey: "", targetDate: "2026-11-01" })

@@ -6,7 +6,7 @@ export interface ProgressReadEnv {
 }
 
 interface ProgressRow {
-  scope: 'file' | 'section'
+  scope: 'file' | 'section' | 'book'
   section_key: string
   total_count: number | string
   filled_count: number | string
@@ -50,7 +50,7 @@ const BOOK_ORDER = [
   'GEN','EXO','LEV','NUM','DEU','JOS','JDG','RUT','1SA','2SA','1KI','2KI','1CH','2CH','EZR','NEH','EST','JOB','PSA','PRO','ECC','SNG','ISA','JER','LAM','EZK','DAN','HOS','JOL','AMO','OBA','JON','MIC','NAM','HAB','ZEP','HAG','ZEC','MAL',
   'MAT','MRK','LUK','JHN','ACT','ROM','1CO','2CO','GAL','EPH','PHP','COL','1TH','2TH','1TI','2TI','TIT','PHM','HEB','JAS','1PE','2PE','1JN','2JN','3JN','JUD','REV',
 ]
-const BOOK_INDEX = new Map(BOOK_ORDER.map((book, index) => [book, index]))
+export const BOOK_INDEX = new Map(BOOK_ORDER.map((book, index) => [book, index]))
 
 function parseHistogram(raw: ProgressRow['validator_histogram']): Map<number, number> {
   let value: unknown = raw
@@ -69,7 +69,7 @@ function parseHistogram(raw: ProgressRow['validator_histogram']): Map<number, nu
   return out
 }
 
-function counts(row: ProgressRow, validationCount: number): ProgressCounts {
+export function counts(row: ProgressRow, validationCount: number): ProgressCounts {
   const histogram = parseHistogram(row.validator_histogram)
   const levelCap = Math.min(MAX_VALIDATION_LEVELS, Math.max(1, validationCount))
   const validationLevels = Array.from({ length: levelCap }, (_, index) => {
@@ -123,7 +123,7 @@ function compareCanonicalRefs(a: string, b: string): number {
     || a.localeCompare(b)
 }
 
-async function readValidationCount(db: AquillaDb, projectId: string): Promise<number> {
+export async function readValidationCount(db: AquillaDb, projectId: string): Promise<number> {
   const row = await db
     .prepare('SELECT settings FROM project_settings WHERE project_id = ?')
     .bind(projectId)

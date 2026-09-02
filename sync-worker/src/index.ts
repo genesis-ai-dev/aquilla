@@ -37,6 +37,7 @@ import { handleSessionChangesetsRequest } from "./external/session-routes"
 import { handleExternalArtifactsRequest } from "./external/artifacts-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleProgressReadRequest } from "./events/progress-read-route"
+import { handlePlanRequest } from "./events/plan-route"
 import { handleBulkImportRequest } from "./events/import-route"
 import { handleImportReconcileRequest } from "./events/import-reconcile-route"
 import { handleBulkMorphImportRequest } from "./events/import-morph-route"
@@ -315,6 +316,10 @@ const worker = {
     if (filesReadResponse) return withCors(filesReadResponse, request)
     const progressReadResponse = await handleProgressReadRequest(request, env)
     if (progressReadResponse) return withCors(progressReadResponse, request)
+
+    // AQU-1092…1098: the project's plan board (units + target dates + Done).
+    const planResponse = await handlePlanRequest(request, env)
+    if (planResponse) return withCors(planResponse, request)
     const cellsReadResponse = await handleCellsReadRequest(request, env)
     if (cellsReadResponse) return withCors(cellsReadResponse, request)
     const cellConfidenceResponse = await handleCellConfidenceRequest(request, env)

@@ -69,11 +69,18 @@ describe('file_section_progress projection', () => {
       validator_histogram: Record<string, number>
       revision: number
     }>('file_section_progress')
-    expect(projected).toHaveLength(3)
+    // file + GEN 1 + GEN 2 + the AQU-1093 book row for GEN.
+    expect(projected).toHaveLength(4)
     expect(projected.find((row) => row.scope === 'file')).toMatchObject({
       total_count: 3,
       filled_count: 2,
       revision: 7,
+    })
+    // The book row sums its chapters: GEN 1 (2 cells) + GEN 2 (1).
+    expect(projected.find((row) => row.scope === 'book')).toMatchObject({
+      section_key: 'GEN',
+      total_count: 3,
+      filled_count: 2,
     })
     expect(projected.find((row) => row.section_key === 'GEN 1')).toMatchObject({
       total_count: 2,
@@ -103,7 +110,7 @@ describe('file_section_progress projection', () => {
   it('full rebuild removes section rows that no longer exist', async () => {
     const { db, pg, rows } = await fixture()
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
-    expect(await rows('file_section_progress')).toHaveLength(3)
+    expect(await rows('file_section_progress')).toHaveLength(4)
 
     await pg.query(
       `UPDATE cells SET canonical_ref = NULL
@@ -112,10 +119,12 @@ describe('file_section_progress projection', () => {
     )
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 101))
 
+    // GEN 2 goes; the GEN book row survives because GEN 1 still has verses.
     const projected = await rows<{ scope: string; section_key: string }>('file_section_progress')
-    expect(projected).toHaveLength(2)
+    expect(projected).toHaveLength(3)
     expect(projected.some((row) => row.section_key === 'GEN 2')).toBe(false)
     expect(projected.some((row) => row.scope === 'file')).toBe(true)
+    expect(projected.some((row) => row.scope === 'book' && row.section_key === 'GEN')).toBe(true)
   })
 })
 

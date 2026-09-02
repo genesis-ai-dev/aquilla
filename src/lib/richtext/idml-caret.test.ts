@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { idmlPointerSelectionFromPoint } from "@/lib/richtext/idml-caret"
+import {
+  idmlPointerIsBelowEditableSlots,
+  idmlPointerSelectionFromPoint,
+} from "@/lib/richtext/idml-caret"
 
 const originalCaretRangeFromPoint = (
   document as Document & { caretRangeFromPoint?: (x: number, y: number) => Range | null }
@@ -79,5 +82,45 @@ describe("IDML read-surface pointer selection", () => {
       clientY: 1,
       target: slot,
     })).toBeNull()
+  })
+})
+
+function mockClientRects(element: Element, bottom: number, height = 16): void {
+  const rect = {
+    top: bottom - height,
+    bottom,
+    left: 0,
+    right: 80,
+    width: 80,
+    height,
+    x: 0,
+    y: bottom - height,
+    toJSON: () => ({}),
+  } as DOMRect
+  vi.spyOn(element, "getClientRects").mockReturnValue([rect] as unknown as DOMRectList)
+}
+
+describe("idmlPointerIsBelowEditableSlots", () => {
+  it("treats a pointer on the last letter's line as not in the tall well", () => {
+    document.body.innerHTML = `<div id="root"><span data-idml-slot="0">hello</span></div>`
+    const root = document.querySelector<HTMLElement>("#root")!
+    mockClientRects(root.querySelector("[data-idml-slot]")!, 20)
+    expect(idmlPointerIsBelowEditableSlots(root, 12)).toBe(false)
+    expect(idmlPointerIsBelowEditableSlots(root, 20)).toBe(false)
+  })
+
+  it("treats a pointer below every slot line as the tall blank well", () => {
+    document.body.innerHTML = `<div id="root"><span data-idml-slot="0">hello</span></div>`
+    const root = document.querySelector<HTMLElement>("#root")!
+    mockClientRects(root.querySelector("[data-idml-slot]")!, 20)
+    expect(idmlPointerIsBelowEditableSlots(root, 22)).toBe(true)
+  })
+
+  it("treats a well with no painted slot boxes as below the text", () => {
+    document.body.innerHTML = `<div id="root"><span data-idml-slot="0"></span></div>`
+    const root = document.querySelector<HTMLElement>("#root")!
+    vi.spyOn(root.querySelector("[data-idml-slot]")!, "getClientRects")
+      .mockReturnValue([] as unknown as DOMRectList)
+    expect(idmlPointerIsBelowEditableSlots(root, 8)).toBe(true)
   })
 })

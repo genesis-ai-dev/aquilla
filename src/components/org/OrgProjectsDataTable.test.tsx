@@ -188,6 +188,24 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     expect(position & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
   })
 
+  it("labels a migrated project's default lane from the project target language (AQU-606)", () => {
+    // Post-lanes-migration shape: the target lives on project settings and no
+    // per-file hint reaches the table, so the chip used to read "Default".
+    const p = baseProject({ id: "p6", name: "Migrated", totalCells: 100, filledCells: 25, targetLanguage: "French" })
+    renderTable([p], { defaultLabels: {} })
+
+    const chip = screen.getByTestId("lane-chip-p6-")
+    expect(chip).toHaveTextContent("French")
+    expect(chip).not.toHaveTextContent("Default")
+  })
+
+  it("shows the neutral placeholder when the project has no target language (AQU-606)", () => {
+    const p = baseProject({ id: "p7", name: "Untargeted", totalCells: 100, filledCells: 25 })
+    renderTable([p], { defaultLabels: {} })
+
+    expect(screen.getByTestId("lane-chip-p7-")).toHaveTextContent("Default")
+  })
+
   it("renders a single chip for a project with no lane breakdown (single-lane, no regression)", () => {
     const p = baseProject({ id: "p2", name: "Ruth", totalCells: 200, filledCells: 100 })
     renderTable([p], { defaultLabels: { p2: "sw" } })

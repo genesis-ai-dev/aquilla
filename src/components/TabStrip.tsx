@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { FileText, Scale, X, type LucideIcon } from "lucide-react"
+import { FileText, X, type LucideIcon } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { looksLikeUuid } from "@/lib/uuid"
@@ -156,7 +156,7 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
         )
       })}
       {surfaceTabs.map((surfaceTab) => {
-        const Icon = surfaceTab.icon ?? Scale
+        const Icon = surfaceTab.icon
         const active = surfaceTab.active
         return (
           <div
@@ -166,13 +166,15 @@ export function TabStrip({ tabs, activeTabId, files, onActivate, onClose, surfac
             className={tabClasses(active)}
           >
             <div className="relative flex min-w-0 flex-1 items-center gap-1 overflow-hidden pe-1">
-              <Icon
-                aria-hidden
-                className={cn(
-                  "block h-3.5 w-3.5 shrink-0",
-                  active ? "text-foreground" : "text-muted-foreground/70",
-                )}
-              />
+              {Icon ? (
+                <Icon
+                  aria-hidden
+                  className={cn(
+                    "block h-3.5 w-3.5 shrink-0",
+                    active ? "text-foreground" : "text-muted-foreground/70",
+                  )}
+                />
+              ) : null}
               <button
                 type="button"
                 onClick={surfaceTab.onActivate}

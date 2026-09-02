@@ -19,7 +19,7 @@
 // of this worker (incl. any `/sync` apex prefix). Local dev needs a tunnel.
 
 import { verifyTokenForFile, WRITE_ROLE_LEVEL } from "./auth"
-import { audioObjectKey, safeAudioContentType } from "./audio"
+import { audioObjectKey, isPathSafeId, safeAudioContentType } from "./audio"
 import { secureCompare as constantTimeEqual } from "./lib/secure-compare"
 
 export interface DiarizationEnv {
@@ -84,6 +84,13 @@ async function start(request: Request, env: DiarizationEnv): Promise<Response> {
   const { projectId, fileId, audioObject } = body
   if (!projectId || !fileId || !audioObject) {
     return json({ error: "missing projectId, fileId, or audioObject" }, 400)
+  }
+  // audioObject is a JSON-body field (unlike /audio, whose ids are URL-path
+  // segments) and lands directly in an R2 key via audioObjectKey — see
+  // audio.ts's isPathSafeId doc comment. Reject anything that could act as a
+  // path separator there.
+  if (!isPathSafeId(audioObject)) {
+    return json({ error: "invalid audioObject" }, 400)
   }
 
   // Auth: sync-token scoped to (projectId, fileId), same as /audio + voice-convert.

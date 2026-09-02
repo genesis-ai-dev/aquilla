@@ -28,27 +28,51 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 /** Muted, slightly faded — the default disabled:opacity-50 washes these out. */
 const disabledChrome = "cursor-default text-muted-foreground/70 disabled:opacity-100"
 
-export function NavHistoryControls() {
+type HistoryOrientation = "horizontal" | "vertical"
+type ChromeSide = "bottom" | "right"
+
+export function NavHistoryControls({
+  orientation = "horizontal",
+}: {
+  /** Vertical in the collapsed 40px dock rail so the clock and arrows aren't clipped. */
+  orientation?: HistoryOrientation
+} = {}) {
   const nav = useNavHistory()
   const t = useT()
+  const vertical = orientation === "vertical"
+  const tooltipSide: ChromeSide = vertical ? "right" : "bottom"
   if (!nav) return null
   return (
-    <div className="flex items-center gap-1" role="group" aria-label={t("nav.historyControls.groupLabel")}>
-      <HistoryMenuButton nav={nav} />
-      <ButtonGroup>
-        <NavArrowButton direction="back" nav={nav} />
-        <NavArrowButton direction="forward" nav={nav} />
+    <div
+      className={cn("flex items-center gap-1", vertical && "flex-col")}
+      role="group"
+      aria-label={t("nav.historyControls.groupLabel")}
+      data-orientation={orientation}
+    >
+      <HistoryMenuButton nav={nav} tooltipSide={tooltipSide} menuSide={tooltipSide} />
+      <ButtonGroup orientation={orientation}>
+        <NavArrowButton direction="back" nav={nav} tooltipSide={tooltipSide} />
+        <NavArrowButton direction="forward" nav={nav} tooltipSide={tooltipSide} />
       </ButtonGroup>
     </div>
   )
 }
 
-function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
+function HistoryMenuButton({
+  nav,
+  tooltipSide,
+  menuSide,
+}: {
+  nav: NavHistoryValue
+  tooltipSide: ChromeSide
+  menuSide: ChromeSide
+}) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const list = nav.recent.slice(0, MAX_RECENT_VISITS)
@@ -57,7 +81,7 @@ function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
 
   if (!hasRecent) {
     return (
-      <AppTooltip content={t("nav.historyControls.noPreviouslyViewed")} side="bottom" disabled={open}>
+      <AppTooltip content={t("nav.historyControls.noPreviouslyViewed")} side={tooltipSide} disabled={open}>
         <Button
           type="button"
           variant="ghost"
@@ -74,7 +98,7 @@ function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <AppTooltip content={previouslyViewedLabel} side="bottom" disabled={open}>
+      <AppTooltip content={previouslyViewedLabel} side={tooltipSide} disabled={open}>
         <DropdownMenuTrigger
           render={
             <Button
@@ -88,7 +112,12 @@ function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
           }
         />
       </AppTooltip>
-      <DropdownMenuContent align="end" side="bottom" sideOffset={4} className="min-w-56 w-max max-w-96 text-sm">
+      <DropdownMenuContent
+        align={menuSide === "right" ? "start" : "end"}
+        side={menuSide}
+        sideOffset={4}
+        className="min-w-56 w-max max-w-96 text-sm"
+      >
         <DropdownMenuGroup>
           <DropdownMenuLabel className="px-2 py-1 text-sm font-normal">
             {previouslyViewedLabel}
@@ -144,7 +173,15 @@ function RecentItem({ entry, onPick }: { entry: RecentEntity; onPick: () => void
   )
 }
 
-function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav: NavHistoryValue }) {
+function NavArrowButton({
+  direction,
+  nav,
+  tooltipSide,
+}: {
+  direction: "back" | "forward"
+  nav: NavHistoryValue
+  tooltipSide: ChromeSide
+}) {
   const t = useT()
   const isBack = direction === "back"
   const enabled = isBack ? nav.canGoBack : nav.canGoForward
@@ -161,7 +198,7 @@ function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav
           ? plainLabel
           : t(isBack ? "nav.historyControls.noBackHistory" : "nav.historyControls.noForwardHistory")
       }
-      side="bottom"
+      side={tooltipSide}
     >
       <Button
         type="button"

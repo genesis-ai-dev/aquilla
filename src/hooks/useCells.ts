@@ -114,6 +114,15 @@ export interface CellData {
    */
   hasOwnTake?: boolean
   selectedGeneratedVoiceAudioId?: string
+  /**
+   * AQU-646 stage 3: the active clip in EVERY slot, keyed by slot.
+   *
+   * The two fields above are its `recording` and `generatedVoice` entries, kept
+   * because most of the app reads them. An extra target-audio track addresses
+   * its takes by its own track id, and only this map can say which of them is
+   * selected. Absent wherever audio has not been merged in.
+   */
+  selectedBySlot?: Record<string, string>
   audioTimings?: Record<string, WordTiming[]>
   ttsSettings?: CellTtsSettings
   startTime?: number

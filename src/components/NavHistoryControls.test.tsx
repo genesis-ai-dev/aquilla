@@ -39,4 +39,16 @@ describe("NavHistoryControls", () => {
     expect(forward).toHaveAttribute("data-variant", "ghost")
     expect(previouslyViewed).toHaveAttribute("data-variant", "ghost")
   })
+
+  it("stacks the clock above the arrows when orientation is vertical", () => {
+    render(<NavHistoryControls orientation="vertical" />)
+
+    const group = screen.getByRole("group", { name: "Page history" })
+    expect(group).toHaveAttribute("data-orientation", "vertical")
+    expect(group).toHaveClass("flex-col")
+
+    const back = screen.getByRole("button", { name: "Back to Alpha" })
+    const arrowGroup = back.closest("[data-slot=button-group]")
+    expect(arrowGroup).toHaveAttribute("data-orientation", "vertical")
+  })
 })

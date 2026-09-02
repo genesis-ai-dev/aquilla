@@ -193,6 +193,8 @@ async function handleExternalMe(request: Request, env: ExternalReadsEnv): Promis
   if (!env.AQUILLA_PG) return externalError("job_failed", "AQUILLA_PG not configured", 500)
   const authed = await authenticateCredential(request, env)
   if (!authed.ok) return authed.response
+  const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential.credentialId)
+  if (limited) return limited
   const cred = authed.credential
   return Response.json({
     userId: cred.userId,
@@ -220,6 +222,8 @@ async function handleExternalProjects(request: Request, env: ExternalReadsEnv): 
   if (!env.AQUILLA_PG) return externalError("job_failed", "AQUILLA_PG not configured", 500)
   const authed = await authenticateCredential(request, env)
   if (!authed.ok) return authed.response
+  const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential.credentialId)
+  if (limited) return limited
   const projects = await listProjectsForCredential(env.AQUILLA_PG, authed.credential)
   return Response.json({ data: projects, nextCursor: null })
 }
@@ -235,6 +239,29 @@ async function handleExternalProjects(request: Request, env: ExternalReadsEnv): 
 // nothing. Wide enough that a legitimate agent looping searches every few
 // seconds never trips it; tight enough to blunt a leaked-PAT query flood.
 const SEARCH_MAX_PER_CREDENTIAL = 300
+
+// [Pen test] API security & data exposure (2026-08-27): /me, /projects,
+// /files, /files/:fileId/cells, and /cells/:cellId/history had NO throttle —
+// discovery-route.ts's own error-code docs admitted rate limiting was
+// "enforced on /search, changeset prepare, changeset commit, and artifact
+// upload" only, i.e. every other external route was explicitly excluded. A
+// leaked or malicious PAT could scrape a project's entire file/cell/history
+// graph without limit. Same cap and per-credential scoping as search — these
+// are comparably cheap, paginated reads.
+const READ_MAX_PER_CREDENTIAL = 300
+
+/** Shared throttle for the plain read routes below. Returns a 429 Response if
+ *  the credential is over budget (and records nothing further), else records
+ *  this call and returns null. */
+async function checkReadRateLimit(db: AquillaDb, credentialId: string): Promise<Response | null> {
+  const identifier = `credential:${credentialId}`
+  const recent = await countRecentRateLimitEvents(db, "external_read", identifier)
+  if (recent >= READ_MAX_PER_CREDENTIAL) {
+    return externalError("rate_limited", "read rate limit exceeded, slow down", 429)
+  }
+  await recordRateLimitEvent(db, "external_read", identifier)
+  return null
+}
 
 async function handleExternalSearch(
   request: Request,
@@ -318,6 +345,10 @@ async function handleExternalFiles(
 ): Promise<Response> {
   const authed = await authenticateAndScope(request, env, projectId)
   if (!authed.ok) return authed.response
+  if (env.AQUILLA_PG) {
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    if (limited) return limited
+  }
 
   const url = new URL(request.url)
   const { limit, offset } = parsePageParams(url)
@@ -351,6 +382,10 @@ async function handleExternalFileCells(
 ): Promise<Response> {
   const authed = await authenticateAndScope(request, env, projectId)
   if (!authed.ok) return authed.response
+  if (env.AQUILLA_PG) {
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    if (limited) return limited
+  }
 
   // since/limit/cursor (and the cellIds fast-path param and the AQU-538
   // lane=<tag> target-lane filter) are supported natively by the internal
@@ -440,6 +475,10 @@ async function handleExternalCellHistory(
 ): Promise<Response> {
   const authed = await authenticateAndScope(request, env, projectId)
   if (!authed.ok) return authed.response
+  if (env.AQUILLA_PG) {
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    if (limited) return limited
+  }
 
   const url = new URL(request.url)
   const { limit, offset } = parsePageParams(url, { defaultLimit: 50, maxLimit: HISTORY_MAX_LIMIT })

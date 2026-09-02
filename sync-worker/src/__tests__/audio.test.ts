@@ -291,7 +291,7 @@ describe("audio R2 endpoints", () => {
 
     // A bad type stored before this fix (or by another path) is also
     // sanitized on the way out, not just on the way in.
-    await env.SNAPSHOTS.put(key, new TextEncoder().encode("<script>x</script>").buffer, {
+    await env.SNAPSHOTS.put(key, new TextEncoder().encode("<script>x</script>"), {
       httpMetadata: { contentType: "text/html" },
     })
     const getAfterDirectWrite = (await handleAudioRequest(

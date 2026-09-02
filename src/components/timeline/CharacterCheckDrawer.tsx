@@ -694,7 +694,7 @@ export function CharacterCheckDrawer({
                   <Check className="h-3.5 w-3.5" />
                   {t("editor.timeline.characterCheckResolvedToggle", { count: resolved.length })}
                   <ChevronRight
-                    className={cn("h-3 w-3 transition-transform", showResolved && "rotate-90")}
+                    className={cn("h-3 w-3", showResolved && "rotate-90")}
                   />
                 </button>
                 {showResolved && (

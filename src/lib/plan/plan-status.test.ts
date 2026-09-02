@@ -295,7 +295,15 @@ describe("filterPlanUnits", () => {
   })
 
   it("applies both narrowings together", () => {
-    expect(filterPlanUnits([GEN, EXO], { query: "e", needsDateOnly: true })).toEqual([GEN])
+    // Each narrowing must exclude something the OTHER would have kept, or the
+    // result is decided by one of them alone and the combination is untested.
+    // "i" matches Genesis and Leviticus but NOT Exodus; needsDate excludes
+    // Leviticus (done) and Exodus (dated). Only Genesis survives both, and
+    // each narrowing alone lets something through that the other rejects.
+    const done = u({ sectionKey: "LEV", doneAt: 1 })
+    expect(filterPlanUnits([GEN, EXO, done], { query: "i" })).toEqual([GEN, done])
+    expect(filterPlanUnits([GEN, EXO, done], { needsDateOnly: true })).toEqual([GEN])
+    expect(filterPlanUnits([GEN, EXO, done], { query: "i", needsDateOnly: true })).toEqual([GEN])
   })
 
   it("returns a copy, never the caller's array", () => {

@@ -7,8 +7,8 @@ const NOW = Date.parse("2026-09-02T09:00:00Z")
 function unit(over: Partial<PlanUnit> = {}): PlanUnit {
   return {
     fileId: "f1", fileName: "Mark", sectionKey: "",
-    totalCount: 100, filledCount: 72, validatedCount: 31,
-    audioCount: 44, audioValidatedCount: 12, lastEditAt: null,
+    totalCount: 400, filledCount: 288, validatedCount: 124,
+    audioCount: 176, audioValidatedCount: 48, lastEditAt: null,
     targetDate: null, doneAt: null, doneBy: null,
     ...over,
   } as PlanUnit
@@ -23,8 +23,13 @@ describe("planRowsToCsv", () => {
   })
 
   it("writes percentages, not raw counts", () => {
+    // The denominator is deliberately NOT 100. With 100 cells a percentage
+    // equals its own numerator, so this assertion passed just as happily
+    // against `pct = (part) => part` — it named the property without testing
+    // it. 288/400 = 72, 124/400 = 31, 176/400 = 44, 48/400 = 12.
     const [, row] = planRowsToCsv([unit()], NOW).split("\r\n")
     expect(row).toContain("72,31,44,12")
+    expect(row).not.toContain("288")
   })
 
   it("names a book unit by its book name", () => {

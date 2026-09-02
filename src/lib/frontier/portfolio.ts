@@ -235,5 +235,11 @@ export function attentionRank(p: PortfolioProject, now: number): number {
   const ageMs = p.lastEditAt != null ? now - p.lastEditAt : Infinity
   const stale = ageMs > 14 * 24 * 60 * 60 * 1000 ? 1 : 0
   const overdue = deadlineStatus(p, now) === "overdue" ? 1 : 0
-  return overdue * 2000 + stale * 1000 + (1 - validatedPct(p)) * 100
+  // AQU-1097: a project whose own deadline holds but whose units are already
+  // late sorts between "overdue" and "stalled" — more urgent than idle work,
+  // less urgent than a blown deadline. Without this the status column could
+  // show a reason the sort did not rank, so ordering by Status left the
+  // flagged rows scattered.
+  const behindPlan = !overdue && (p.unitsOverdue ?? 0) > 0 ? 1 : 0
+  return overdue * 2000 + behindPlan * 1500 + stale * 1000 + (1 - validatedPct(p)) * 100
 }

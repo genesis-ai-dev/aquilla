@@ -1,9 +1,27 @@
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { PlanInspector } from "./PlanInspector"
 import type { PlanUnit } from "@/lib/plan/plan-status"
 
+// Every test below used to pass getToken={null}, which short-circuits
+// usePlanUnitSections before it fetches — so the whole AQU-1098 breakdown (the
+// hook, the chapter labels, the chapters-vs-sections heading, the per-chapter
+// bars) rendered in no test at all. Mocking the progress read exercises it.
+vi.mock("@/lib/progress/file-progress-resource", () => ({
+  getFileProgress: vi.fn(),
+}))
+const { getFileProgress } = await import("@/lib/progress/file-progress-resource")
+
 const NOW = Date.parse("2026-09-02T09:00:00Z")
+
+const section = (key: string, over: Record<string, number> = {}) => ({
+  key, totalCount: 40, filledCount: 40, validatedCount: 10,
+  validationLevels: [10], audioCount: 0, audioValidatedCount: 0, ...over,
+})
+
+beforeEach(() => {
+  vi.mocked(getFileProgress).mockReset()
+})
 
 function unit(over: Partial<PlanUnit> = {}): PlanUnit {
   return {
@@ -15,16 +33,24 @@ function unit(over: Partial<PlanUnit> = {}): PlanUnit {
   } as PlanUnit
 }
 
-function renderInspector(u: PlanUnit, canPlan = true, showAudio = false) {
+function renderInspector(u: PlanUnit, canPlan = true, showAudio = false, getToken: (() => Promise<string | null>) | null = null) {
   const onPatch = vi.fn().mockResolvedValue(true)
   const onClose = vi.fn()
   const onStep = vi.fn()
   render(
     <PlanInspector unit={u} now={NOW} canPlan={canPlan} showAudio={showAudio}
-      projectId="p1" getToken={null} lane="" languageLabel="Tok Pisin"
+      projectId="p1" getToken={getToken} lane="" languageLabel="Tok Pisin"
       onPatch={onPatch} onClose={onClose} onStep={onStep} />,
   )
   return { onPatch, onClose, onStep }
+}
+
+const withSections = (sections: ReturnType<typeof section>[]) => {
+  vi.mocked(getFileProgress).mockResolvedValue({
+    fileId: "f1", revision: 1, validationCount: 1,
+    file: section(""), sections,
+  } as never)
+  return async () => "tok"
 }
 
 describe("access adapts the content", () => {
@@ -144,5 +170,54 @@ describe("progress and navigation", () => {
     const { onClose } = renderInspector(unit())
     fireEvent.click(screen.getByTestId("plan-inspector-close"))
     expect(onClose).toHaveBeenCalled()
+  })
+})
+
+describe("the chapter breakdown (AQU-1098)", () => {
+  it("lists a book's own chapters, numbered, and nothing from another book", async () => {
+    const getToken = withSections([section("GEN 1"), section("GEN 2"), section("EXO 1")])
+    renderInspector(unit({ sectionKey: "GEN", fileName: "Whole Bible" }), true, false, getToken)
+    await waitFor(() => expect(screen.getByTestId("plan-sections")).toBeInTheDocument())
+    expect(screen.getByTestId("plan-section-GEN 1")).toHaveTextContent("1")
+    expect(screen.getByTestId("plan-section-GEN 2")).toBeInTheDocument()
+    expect(screen.queryByTestId("plan-section-EXO 1")).toBeNull()
+    expect(screen.getByText("Progress by chapter")).toBeInTheDocument()
+  })
+
+  it("keeps a one-chapter book, whose section key IS its book code", async () => {
+    const getToken = withSections([section("TIT")])
+    renderInspector(unit({ sectionKey: "TIT", fileName: "Whole Bible" }), true, false, getToken)
+    await waitFor(() => expect(screen.getByTestId("plan-section-TIT")).toBeInTheDocument())
+  })
+
+  it("calls them sections, not chapters, when the unit is not a book", async () => {
+    const getToken = withSections([section("Scene 1"), section("Scene 2")])
+    renderInspector(unit({ sectionKey: "", fileName: "Episode 1" }), true, false, getToken)
+    await waitFor(() => expect(screen.getByText("Progress by section")).toBeInTheDocument())
+    expect(screen.queryByText("Progress by chapter")).toBeNull()
+  })
+
+  it("refuses to list a media file's five-minute time buckets", async () => {
+    const getToken = withSections([section("t:0"), section("t:1")])
+    renderInspector(unit({ sectionKey: "", fileName: "Day 12.mp3" }), true, false, getToken)
+    await waitFor(() => expect(getFileProgress).toHaveBeenCalled())
+    expect(screen.queryByTestId("plan-sections")).toBeNull()
+  })
+
+  it("counts the chapters it found into the header meta line", async () => {
+    const getToken = withSections([section("GEN 1"), section("GEN 2"), section("GEN 3")])
+    renderInspector(unit({ sectionKey: "GEN", fileName: "Whole Bible" }), true, false, getToken)
+    await waitFor(() =>
+      expect(screen.getByTestId("plan-inspector-meta")).toHaveTextContent("3 chapters"))
+  })
+
+  it("draws an audio bar per chapter only where the project records audio", async () => {
+    const getToken = withSections([section("GEN 1", { audioCount: 20, audioValidatedCount: 5 })])
+    renderInspector(unit({ sectionKey: "GEN", fileName: "Whole Bible" }), true, true, getToken)
+    await waitFor(() => expect(screen.getByTestId("plan-section-GEN 1")).toBeInTheDocument())
+    const row = screen.getByTestId("plan-section-GEN 1")
+    expect(row.querySelector('[aria-label^="Audio"]')).toHaveAttribute(
+      "aria-label", "Audio 50% recorded, 13% validated",
+    )
   })
 })

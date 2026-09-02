@@ -180,3 +180,24 @@ describe("empty state", () => {
     expect(empty.textContent).toMatch(/episodes or documents/)
   })
 })
+
+describe("the row note versus the inspector note", () => {
+  it("shows last activity, not 'no target date', when the date column already says it", () => {
+    // The date cell renders an em dash for an undated unit. Repeating the fact
+    // in words below it cost a 66-row board its only per-row varying signal.
+    const editedAt = Date.parse("2026-09-02T08:00:00Z")
+    renderBoard([
+      unit({ fileId: "a", fileName: "Numbers", filledCount: 40, lastEditAt: editedAt }),
+    ])
+    const row = screen.getByTestId("plan-row-a-")
+    expect(row).not.toHaveTextContent("no target date")
+    expect(row).toHaveTextContent(/hour|minute/)
+  })
+
+  it("still spells out how late an overdue unit is", () => {
+    renderBoard([
+      unit({ fileId: "b", fileName: "Exodus", filledCount: 40, targetDate: "2026-08-10" }),
+    ])
+    expect(screen.getByTestId("plan-row-b-")).toHaveTextContent("23 days late")
+  })
+})

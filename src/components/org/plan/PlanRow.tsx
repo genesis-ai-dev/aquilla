@@ -14,7 +14,7 @@ import { useT, useI18n } from "@/lib/i18n/I18nProvider"
 import { fmtDeadlineDate } from "@/lib/format-date"
 import { planPct, planUnitLabel, planUnitStatus, type PlanUnit } from "@/lib/plan/plan-status"
 import { PlanBar } from "./PlanBar"
-import { usePlanUnitNote } from "./use-plan-note"
+import { usePlanRowNote } from "./use-plan-note"
 
 export function PlanRow({ unit, now, selected, showAudio, onSelect }: {
   unit: PlanUnit
@@ -30,7 +30,7 @@ export function PlanRow({ unit, now, selected, showAudio, onSelect }: {
   const validated = planPct(unit.validatedCount, unit.totalCount)
   const recorded = planPct(unit.audioCount, unit.totalCount)
   const audioValidated = planPct(unit.audioValidatedCount, unit.totalCount)
-  const note = usePlanUnitNote(unit, now)
+  const note = usePlanRowNote(unit, now)
 
   return (
     <li>

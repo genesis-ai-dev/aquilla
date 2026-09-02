@@ -25,7 +25,7 @@ import type { PlanUnitPatch } from "@/lib/sync/plan"
 import { usePlanUnitSections, type PlanSection } from "@/hooks/usePlanUnitSections"
 import { PlanStatusPill } from "./PlanStatusPill"
 import { PlanBar } from "./PlanBar"
-import { usePlanUnitNote } from "./use-plan-note"
+import { usePlanStatusNote } from "./use-plan-note"
 
 /**
  * Mounted with a `key` per unit by its caller, so stepping to another unit
@@ -57,7 +57,7 @@ export function PlanInspector({
   const [confirmingDone, setConfirmingDone] = useState(false)
   const [busy, setBusy] = useState(false)
   const status = planUnitStatus(unit, now)
-  const note = usePlanUnitNote(unit, now)
+  const note = usePlanStatusNote(unit, now)
   const validatedPct = planPct(unit.validatedCount, unit.totalCount)
   const { sections } = usePlanUnitSections({ projectId, unit, getToken, lane })
 

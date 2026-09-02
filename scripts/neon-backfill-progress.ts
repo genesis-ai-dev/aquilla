@@ -23,10 +23,13 @@ async function main(): Promise<void> {
   const db = makePostgres(connectionString(), 1)
   try {
     const missingOnly = process.argv.includes('--missing-only')
-    // AQU-1093: `--missing-books` re-runs only files whose projection predates
-    // book rows / audio counts. A Scripture file is stale when it has no book
-    // row at all; every file is stale when it has no file row. Lets the
-    // post-deploy backfill be resumed or re-run without redoing the whole DB.
+    // AQU-1093/1098: `--missing-books` re-runs only files whose projection
+    // predates book rows / audio counts. Three ways to be stale: no file row at
+    // all; Scripture with no book row; or live takes on disk while the file row
+    // still reports zero audio. That third clause matters — a dubbing file is
+    // not Scripture and does have a file row, so without it the selector calls
+    // every media project done while its audio counts sit at zero forever.
+    // Lets the post-deploy backfill be resumed without redoing the whole DB.
     const missingBooks = process.argv.includes('--missing-books')
     const scoped = missingOnly || missingBooks
     const { results: files } = await db
@@ -49,6 +52,18 @@ async function main(): Promise<void> {
                    SELECT 1 FROM file_section_progress p2
                     WHERE p2.project_id = f.project_id AND p2.file_id = f.id
                       AND p2.scope = 'book'
+                 )
+               )
+               OR (
+                 EXISTS (
+                   SELECT 1 FROM cell_audio ca
+                    WHERE ca.project_id = f.project_id AND ca.file_id = f.id
+                      AND ca.deleted = 0
+                 )
+                 AND EXISTS (
+                   SELECT 1 FROM file_section_progress p3
+                    WHERE p3.project_id = f.project_id AND p3.file_id = f.id
+                      AND p3.scope = 'file' AND p3.audio_count = 0
                  )
                )
             ORDER BY f.project_id, f.id`

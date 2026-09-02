@@ -150,6 +150,13 @@ export const PROJECT_DIRECTORY_MAX_LIMIT = ORG_DIRECTORY_MAX_LIMIT
 
 export const clampProjectDirectoryLimit = clampOrgDirectoryLimit
 
+/** Same page size as the org switcher / project tables. */
+export const TEAM_DIRECTORY_DEFAULT_LIMIT = ORG_DIRECTORY_DEFAULT_LIMIT
+export const TEAM_DIRECTORY_MAX_LIMIT = ORG_DIRECTORY_MAX_LIMIT
+export const clampTeamDirectoryLimit = clampOrgDirectoryLimit
+export const encodeTeamDirectoryCursor = encodeOrgDirectoryCursor
+export const decodeTeamDirectoryCursor = decodeOrgDirectoryCursor
+
 export function encodeProjectDirectoryCursor(id: string, name: string): string {
   return `${encodeURIComponent(id)}:${encodeURIComponent(name)}`
 }
@@ -762,12 +769,74 @@ export interface OrgGroupSummary {
   isInternal: boolean
 }
 
-/** Groups in an org, with counts and whether the viewer is a member. */
-export async function listOrgGroups(
+export type TeamDirectoryVisibility = "all" | "internal" | "public"
+
+export type TeamDirectoryPageOpts = {
+  q: string
+  limit: number
+  cursor: { id: number; name: string } | null
+  visibility: TeamDirectoryVisibility
+}
+
+type OrgGroupDbRow = {
+  id: number
+  name: string
+  is_internal: number | boolean
+  member_count: number
+  project_count: number
+  viewer_is_member: number
+}
+
+function mapOrgGroupRow(r: OrgGroupDbRow): OrgGroupSummary {
+  return {
+    id: r.id,
+    name: r.name,
+    memberCount: r.member_count,
+    projectCount: r.project_count,
+    viewerIsMember: r.viewer_is_member === 1,
+    isInternal: r.is_internal === 1 || r.is_internal === true,
+  }
+}
+
+export function parseTeamDirectoryVisibility(raw: string | undefined): TeamDirectoryVisibility {
+  if (raw === "internal" || raw === "public" || raw === "all") return raw
+  return "all"
+}
+
+/**
+ * One page (or the full set) of teams in an org, ordered by name. Used by the
+ * org Teams table so search and infinite scroll do not dump every group.
+ * `memberOnly` is the AQU-789 gate: non-maintainers only see teams they belong to.
+ */
+export async function listOrgGroupsPage(
   env: Env,
   orgId: number,
   viewerId: number,
-): Promise<OrgGroupSummary[]> {
+  page: TeamDirectoryPageOpts | null,
+  access: { memberOnly: boolean },
+): Promise<{ groups: OrgGroupSummary[]; nextCursor: string | null }> {
+  const extraWhere: string[] = []
+  const extraBinds: unknown[] = []
+  if (access.memberOnly) {
+    extraWhere.push(
+      "EXISTS (SELECT 1 FROM group_members gm_vis WHERE gm_vis.group_id = g.id AND gm_vis.user_id = ?)",
+    )
+    extraBinds.push(viewerId)
+  }
+  if (page?.q) {
+    extraWhere.push("strpos(lower(g.name), ?) > 0")
+    extraBinds.push(page.q)
+  }
+  if (page?.visibility === "internal") extraWhere.push("g.is_internal IS TRUE")
+  else if (page?.visibility === "public") extraWhere.push("g.is_internal IS NOT TRUE")
+  if (page?.cursor) {
+    extraWhere.push("(lower(g.name) > ? OR (lower(g.name) = ? AND g.id > ?))")
+    extraBinds.push(page.cursor.name.toLowerCase(), page.cursor.name.toLowerCase(), page.cursor.id)
+  }
+  const extraWhereSql = extraWhere.length > 0 ? ` AND ${extraWhere.join(" AND ")}` : ""
+  const limitSql = page ? " LIMIT ?" : ""
+  if (page) extraBinds.push(page.limit + 1)
+
   const rows = await env.AQUILLA_PG.prepare(
     `SELECT g.id AS id, g.name AS name, g.is_internal AS is_internal,
             (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id) AS member_count,
@@ -775,19 +844,31 @@ export async function listOrgGroups(
             (EXISTS (SELECT 1 FROM group_members gm2 WHERE gm2.group_id = g.id AND gm2.user_id = ?))::int AS viewer_is_member
        FROM groups g
       WHERE g.org_id = ?
-      ORDER BY LOWER(g.name)`,
+        ${extraWhereSql}
+      ORDER BY LOWER(g.name), g.id
+      ${limitSql}`,
   )
-    .bind(viewerId, orgId)
-    .all<{ id: number; name: string; is_internal: number | boolean; member_count: number; project_count: number; viewer_is_member: number }>()
+    .bind(viewerId, orgId, ...extraBinds)
+    .all<OrgGroupDbRow>()
 
-  return (rows.results ?? []).map((r) => ({
-    id: r.id,
-    name: r.name,
-    memberCount: r.member_count,
-    projectCount: r.project_count,
-    viewerIsMember: r.viewer_is_member === 1,
-    isInternal: r.is_internal === 1 || r.is_internal === true,
-  }))
+  const list = rows.results ?? []
+  const hasMore = page != null && list.length > page.limit
+  const pageRows = hasMore ? list.slice(0, page.limit) : list
+  const last = pageRows[pageRows.length - 1]
+  return {
+    groups: pageRows.map(mapOrgGroupRow),
+    nextCursor: hasMore && last ? encodeTeamDirectoryCursor(last.id, last.name) : null,
+  }
+}
+
+/** Groups in an org, with counts and whether the viewer is a member. */
+export async function listOrgGroups(
+  env: Env,
+  orgId: number,
+  viewerId: number,
+): Promise<OrgGroupSummary[]> {
+  const { groups } = await listOrgGroupsPage(env, orgId, viewerId, null, { memberOnly: false })
+  return groups
 }
 
 /** ISO-8601 for JSON; Hyperdrive may hand back a Date or a timestamp string. */

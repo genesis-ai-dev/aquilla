@@ -186,6 +186,8 @@ interface DataTableProps<TData, TValue> {
   hasMore?: boolean
   onLoadMore?: () => void
   loadingMore?: boolean
+  /** `data-testid` on the infinite-scroll sentinel. */
+  loadMoreTestId?: string
 }
 
 function DataTable<TData, TValue>({
@@ -216,6 +218,7 @@ function DataTable<TData, TValue>({
   hasMore = false,
   onLoadMore,
   loadingMore = false,
+  loadMoreTestId = "project-directory-load-more",
 }: DataTableProps<TData, TValue>) {
   const t = useT()
   const [sorting, setSorting] = React.useState<SortingState>(
@@ -415,6 +418,7 @@ function DataTable<TData, TValue>({
                         disabled={!hasMore || loadingMore}
                         loading={loadingMore}
                         onVisible={onLoadMore}
+                        testId={loadMoreTestId}
                       />
                     ) : null}
                   </TableCell>
@@ -432,10 +436,12 @@ function LoadMoreSentinel({
   disabled,
   loading,
   onVisible,
+  testId,
 }: {
   disabled: boolean
   loading: boolean
   onVisible: () => void
+  testId: string
 }) {
   const t = useT()
   const ref = React.useRef<HTMLDivElement>(null)
@@ -454,7 +460,7 @@ function LoadMoreSentinel({
     <div
       ref={ref}
       role="status"
-      data-testid="project-directory-load-more"
+      data-testid={testId}
       className="flex items-center justify-center gap-2 text-xs text-muted-foreground"
     >
       {loading ? (

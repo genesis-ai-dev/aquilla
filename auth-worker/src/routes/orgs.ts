@@ -27,7 +27,7 @@ import {
   getRosterViewMinRole,
   groupExistsInOrg,
   listEffectiveMembersForOrg,
-  listOrgGroups,
+  listOrgGroupsPage,
   listOrgMembersWithUsers,
   listPendingInvitesInOrg,
   listUserDirectMembershipsInOrg,
@@ -37,8 +37,11 @@ import {
   listUserOrgs,
   clampOrgDirectoryLimit,
   clampProjectDirectoryLimit,
+  clampTeamDirectoryLimit,
   decodeOrgDirectoryCursor,
   decodeProjectDirectoryCursor,
+  decodeTeamDirectoryCursor,
+  parseTeamDirectoryVisibility,
   removeGroupMember,
   renameOrg,
   updateGroup,
@@ -527,15 +530,36 @@ orgs.get("/:orgId/groups", async (c) => {
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
   const role = await getEffectiveOrgRole(c.env, orgId, user)
   if (role == null) return c.json({ error: "not an org member" }, 403)
-  const groups = await listOrgGroups(c.env, orgId, user.id)
   // AQU-789: the Teams list must agree with the team-detail visibility gate
   // (AQU-748). A non-maintainer can only open a team they belong to, so listing
   // teams they aren't in produces the "phantom membership" bug — a team shows in
   // the list but its detail 404s ("it says I have a team but I'm not part of
   // it"). Filter the list to the viewer's own teams for non-maintainers;
   // maintainers+ see every team, matching their detail access.
-  const visible = role >= ROLE.MAINTAINER ? groups : groups.filter((g) => g.viewerIsMember)
-  return c.json({ groups: visible })
+  const memberOnly = role < ROLE.MAINTAINER
+  const qRaw = (c.req.query("q") ?? "").trim()
+  const q = qRaw.toLowerCase()
+  const limitRaw = c.req.query("limit")
+  const cursorRaw = c.req.query("cursor")
+  const pickerMode = limitRaw != null || cursorRaw != null || qRaw !== ""
+  const cursor = cursorRaw ? decodeTeamDirectoryCursor(cursorRaw) : null
+  if (cursorRaw && !cursor) return c.json({ error: "invalid cursor" }, 400)
+  const page = pickerMode
+    ? {
+        q,
+        limit: clampTeamDirectoryLimit(limitRaw),
+        cursor,
+        visibility: parseTeamDirectoryVisibility(c.req.query("visibility")),
+      }
+    : null
+  const { groups, nextCursor } = await listOrgGroupsPage(
+    c.env,
+    orgId,
+    user.id,
+    page,
+    { memberOnly },
+  )
+  return c.json({ groups, nextCursor })
 })
 
 /** GET /api/v2/orgs/:orgId/groups/:groupId — read-only team detail. */

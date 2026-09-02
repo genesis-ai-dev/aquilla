@@ -9,6 +9,7 @@
 // blob is the converted clip, fetched back from R2).
 
 import { synthesizeForCell } from "./tts"
+import { GENERATED_VOICE_SLOT } from "@/lib/timeline/track-slots"
 import { canEncodeOpus, encodeMonoToWebmOpus } from "./opus-encode"
 import { decodeToMono48k, TARGET_RATE } from "./decode-mono"
 import { audioCachePutBlob } from "./bytes-cache"
@@ -28,6 +29,17 @@ import type { GeminiTtsContext } from "./gemini-tts"
 import type { SynthOptions } from "./tts"
 
 export interface GenerateAndAttachArgs {
+  /**
+   * AQU-646 stage 3: which TRACK the voice lands on, as a storage slot.
+   *
+   * Defaults to `"generatedVoice"` — the default dub row's, unchanged. An added
+   * track passes its own id: its ONE slot holds recorded and generated takes
+   * alike, so a voice generated there simply becomes that track's selected
+   * take, deselecting whatever held it, through the per-(cell, slot) rule the
+   * server already enforces. No slot-juggling, because there is nothing to
+   * juggle against.
+   */
+  slot?: string
   projectId: string
   fileId: string
   cellId: string
@@ -86,7 +98,7 @@ export async function generateAndAttachCellVoice(
       audioId: result.objectName,
       url: result.url,
       durationMs: Math.round(result.durationSeconds * 1000),
-      slot: "generatedVoice",
+      slot: args.slot ?? GENERATED_VOICE_SLOT,
       mimeType: "audio/wav",
       voiceId: voice.id,
       ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
@@ -98,7 +110,7 @@ export async function generateAndAttachCellVoice(
     injectOptimisticAudioAttachment(args.fileId, args.cellId, {
       audioId: result.objectName,
       url: result.url,
-      slot: "generatedVoice",
+      slot: args.slot ?? GENERATED_VOICE_SLOT,
       mimeType: "audio/wav",
       voiceId: voice.id,
       referenceAudioId: voice.referenceAudioId ?? null,
@@ -239,7 +251,7 @@ export async function generateAndAttachCellVoice(
     cellId: args.cellId,
     audioId: objectName,
     url,
-    slot: "generatedVoice",
+    slot: args.slot ?? GENERATED_VOICE_SLOT,
     mimeType: generatedMimeType,
     voiceId: voice.id,
     ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
@@ -251,7 +263,7 @@ export async function generateAndAttachCellVoice(
   injectOptimisticAudioAttachment(args.fileId, args.cellId, {
     audioId: objectName,
     url,
-    slot: "generatedVoice",
+    slot: args.slot ?? GENERATED_VOICE_SLOT,
     mimeType: generatedMimeType,
     voiceId: voice.id,
     referenceAudioId: voice.referenceAudioId ?? null,

@@ -10,7 +10,7 @@ import {
 } from "react"
 import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
-import { ChevronDown, ChevronLeft, ChevronRight, CheckIcon, CornerDownRight } from "lucide-react"
+import { ChevronLeft, ChevronRight, CheckIcon, CornerDownRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
 import {
@@ -59,8 +59,10 @@ interface NavigationRow {
   subsection?: MilestoneNavigationSubsection
 }
 
-// Estimate only — real height comes from measureElement (no locked style.height).
+// Fixed row heights so open doesn't wait on measureElement. Nested cell-range
+// rows are one line of label plus the same two-line progress column.
 const MILESTONE_ROW_HEIGHT_PX = 48
+const SUBSECTION_ROW_HEIGHT_PX = 40
 
 /** Matches EditorTable: picker is absolutely centered from lg up. */
 const LG_MIN_WIDTH_QUERY = "(min-width: 1024px)"
@@ -269,7 +271,10 @@ function VirtualizedMilestoneList({
     enabled: open,
     count: filteredItems.length,
     getScrollElement: () => scrollElementRef.current,
-    estimateSize: () => MILESTONE_ROW_HEIGHT_PX,
+    getItemKey: (index) => filteredItems[index]?.key ?? index,
+    estimateSize: (index) => (
+      filteredItems[index]?.subsection ? SUBSECTION_ROW_HEIGHT_PX : MILESTONE_ROW_HEIGHT_PX
+    ),
     overscan: 12,
     initialRect: { width: 320, height: 360 },
     // happy-dom reports 0×0 for CSS-sized scrollports; coerce so rows mount.
@@ -292,10 +297,17 @@ function VirtualizedMilestoneList({
     [virtualizer],
   )
 
+  const didScrollOnOpenRef = useRef(false)
   useEffect(() => {
-    if (!open || filteredItems.length === 0) return
+    if (!open) {
+      didScrollOnOpenRef.current = false
+      return
+    }
+    if (didScrollOnOpenRef.current || filteredItems.length === 0) return
     const index = filteredItems.findIndex((row) => row.key === activeRowKey)
     if (index < 0) return
+    // Once per open — expanding a nested story must not re-scroll the list.
+    didScrollOnOpenRef.current = true
     queueMicrotask(() => {
       virtualizer.scrollToIndex(index, { align: "center" })
     })
@@ -329,7 +341,6 @@ function VirtualizedMilestoneList({
                 key={row.key}
                 index={virtualItem.index}
                 data-index={virtualItem.index}
-                ref={virtualizer.measureElement}
                 value={row}
                 data-checked={isActive || undefined}
                 {...(subsection ? { "data-milestone-subsection": "" } : {})}
@@ -346,6 +357,7 @@ function VirtualizedMilestoneList({
                   left: 0,
                   right: 0,
                   width: "auto",
+                  height: virtualItem.size,
                   transform: `translateY(${virtualItem.start}px)`,
                 }}
               >
@@ -376,11 +388,11 @@ function VirtualizedMilestoneList({
                   </>
                 )}
                 {expandable ? (
-                  <ChevronDown
+                  <ChevronRight
                     aria-hidden="true"
                     className={cn(
-                      "size-4 shrink-0 text-muted-foreground transition-transform",
-                      expandedKey === row.milestone.key && "rotate-180",
+                      "size-4 shrink-0 text-muted-foreground",
+                      expandedKey === row.milestone.key && "rotate-90",
                     )}
                   />
                 ) : isActive ? (
@@ -396,6 +408,9 @@ function VirtualizedMilestoneList({
     </div>
   )
 }
+
+/** Keep collapsed inner borders at full strength; fade only the chevron, harder than Button's 50%. */
+const STEP_BUTTON_CLASS = "disabled:opacity-100 disabled:[&>svg]:opacity-30"
 
 export function MilestoneNavigator({
   items,
@@ -525,6 +540,7 @@ export function MilestoneNavigator({
           size="icon"
           disabled={!canGoPrevious}
           aria-label={t(vocabulary.previous)}
+          className={STEP_BUTTON_CLASS}
           onClick={() => {
             const destination = destinations[activeDestinationIndex - 1]
             if (destination) choose(destination.milestoneKey, destination.subsectionKey)
@@ -588,8 +604,8 @@ export function MilestoneNavigator({
                 // button (w-8, p-0, label hidden, chevron centered). xl+: fixed
                 // width with start-aligned label regardless of squeeze.
                 className={cn(
-                  "flex h-8 min-w-8 w-auto max-w-full shrink items-center justify-center gap-2 overflow-hidden px-2.5 data-[icon-only]:w-8 data-[icon-only]:shrink-0 data-[icon-only]:gap-0 data-[icon-only]:p-0 [&>svg:last-child]:shrink-0",
-                  !compact && "xl:w-56 xl:min-w-56 xl:shrink-0 xl:justify-start xl:px-2.5 xl:data-[icon-only]:w-56 xl:data-[icon-only]:gap-2 xl:data-[icon-only]:p-2.5 xl:[&>svg:last-child]:ms-auto",
+                  "flex h-8 min-w-8 w-auto max-w-full shrink items-center justify-center gap-1 overflow-hidden px-2 data-[icon-only]:w-8 data-[icon-only]:shrink-0 data-[icon-only]:gap-0 data-[icon-only]:p-0 [&>svg:last-child]:shrink-0",
+                  !compact && "xl:w-56 xl:min-w-56 xl:shrink-0 xl:justify-start xl:gap-1.5 xl:ps-2.5 xl:pe-2 xl:data-[icon-only]:w-56 xl:data-[icon-only]:gap-1.5 xl:data-[icon-only]:ps-2.5 xl:data-[icon-only]:pe-2 xl:[&>svg:last-child]:ms-auto",
                 )}
                 aria-label={
                   activeSubsection
@@ -660,6 +676,7 @@ export function MilestoneNavigator({
           size="icon"
           disabled={!canGoNext}
           aria-label={t(vocabulary.next)}
+          className={STEP_BUTTON_CLASS}
           onClick={() => {
             const destination = destinations[activeDestinationIndex + 1]
             if (destination) choose(destination.milestoneKey, destination.subsectionKey)

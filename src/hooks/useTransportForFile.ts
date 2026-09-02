@@ -10,6 +10,7 @@ import { useQueueForFile } from "@/lib/audio/play-queue"
 import {
   selectTransportForFile,
   videoOwnsFile,
+  virtualOwnsFile,
   type TransportForFile,
 } from "@/lib/audio/transport"
 import {
@@ -21,6 +22,12 @@ import {
   useVideoVolume,
 } from "@/lib/timeline/video-clock"
 import { useVideoDurationSec } from "@/lib/timeline/video-duration"
+import {
+  useVirtualClockPlaying,
+  useVirtualClockRate,
+  useVirtualClockSec,
+  useVirtualClockVolume,
+} from "@/lib/timeline/virtual-clock"
 
 export interface UseTransportForFileArgs {
   /** This file's cell ids — the queue's scope guard, unchanged. */
@@ -34,6 +41,14 @@ export interface UseTransportForFileArgs {
   /** Whether the video pane is actually mounted. The pane registers the
    *  controller, so without it there is nothing to drive — see `videoOwnsFile`. */
   paneOnScreen: boolean
+  /**
+   * AQU-646 stage 3h: the end of the last cue, for a file that has timings and
+   * no master. 0 or absent means there is no timeline to run a playhead along,
+   * which is every arrangement this does not apply to.
+   */
+  timelineDurationSec?: number
+  /** The line the playhead is on, over the cells that actually hold takes. */
+  virtualSoundingCellId?: string | null
 }
 
 /**
@@ -48,6 +63,8 @@ export function useTransportForFile({
   coreMediaUrl,
   anyCellClockIsFileTime,
   paneOnScreen,
+  timelineDurationSec = 0,
+  virtualSoundingCellId = null,
 }: UseTransportForFileArgs): TransportForFile {
   const queue = useQueueForFile(cellIds)
   const currentSec = useVideoClockSec()
@@ -58,6 +75,16 @@ export function useTransportForFile({
   const volume = useVideoVolume()
   const buffering = useVideoBuffering()
   const ownedByVideo = videoOwnsFile(coreMediaUrl, anyCellClockIsFileTime, paneOnScreen)
+  // Unconditional, like the video's — these are cheap module subscriptions, and
+  // the CHOICE is made in the pure selector, so a file gaining or losing its
+  // picture can never change the number of hooks called.
+  const virtualSec = useVirtualClockSec()
+  const virtualPlaying = useVirtualClockPlaying()
+  const virtualRate = useVirtualClockRate()
+  const virtualVolume = useVirtualClockVolume()
+  // Reads `ownedByVideo`, not `coreMediaUrl`: a film whose pane is off screen
+  // has nothing to drive, so the virtual clock is correct there.
+  const ownedByVirtual = virtualOwnsFile(ownedByVideo, anyCellClockIsFileTime, timelineDurationSec)
 
   return useMemo(
     () =>
@@ -66,7 +93,21 @@ export function useTransportForFile({
         ownedByVideo
           ? { currentSec, playing, durationSec, soundingCellId, rate, volume, buffering }
           : null,
+        ownedByVirtual
+          ? {
+              currentSec: virtualSec,
+              playing: virtualPlaying,
+              durationSec: timelineDurationSec,
+              soundingCellId: virtualSoundingCellId,
+              rate: virtualRate,
+              volume: virtualVolume,
+            }
+          : null,
       ),
-    [queue, ownedByVideo, currentSec, playing, durationSec, soundingCellId, rate, volume, buffering],
+    [
+      queue, ownedByVideo, currentSec, playing, durationSec, soundingCellId, rate, volume, buffering,
+      ownedByVirtual, virtualSec, virtualPlaying, virtualRate, virtualVolume, timelineDurationSec,
+      virtualSoundingCellId,
+    ],
   )
 }

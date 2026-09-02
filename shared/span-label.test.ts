@@ -3,6 +3,7 @@ import {
   cellDisplayTag,
   collapseListToRange,
   formatSpanRange,
+  friendlyScriptureLabel,
   humanPassageLabel,
   isOpaqueId,
   joinPassageLabels,
@@ -49,5 +50,13 @@ describe("span-label", () => {
     expect(joinPassageLabels(["LUK 1:1–1:8", "LUK 1:9–1:15"])).toBe("LUK 1:1–1:8 · LUK 1:9–1:15")
     expect(joinPassageLabels(["1", "2", "12"])).toBe("1–12")
     expect(joinPassageLabels(["01920000-0000-7000-8000-000000000001"])).toBeNull()
+  })
+
+  it("expands USFM codes so a preview can say Genesis instead of GEN", () => {
+    expect(friendlyScriptureLabel("GEN 1:1")).toBe("Genesis 1:1")
+    expect(friendlyScriptureLabel("GEN 1:1–GEN 1:8")).toBe("Genesis 1:1–8")
+    expect(friendlyScriptureLabel("GEN 1:1–1:8")).toBe("Genesis 1:1–8")
+    expect(friendlyScriptureLabel("GEN 1:31–GEN 2:4")).toBe("Genesis 1:31–2:4")
+    expect(friendlyScriptureLabel("1–12")).toBe("1–12")
   })
 })

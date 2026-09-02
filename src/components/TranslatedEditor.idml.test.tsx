@@ -264,6 +264,204 @@ describe("TranslatedEditor — protected IDML mode", () => {
     ).toBe(true)
   })
 
+  it("does not collapse an IDML text range on click (AQU-1031)", async () => {
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-keep-range"
+        initialPlain={"asd\tSecond"}
+        initialHtml={SOURCE_HTML.replace(">Source</span>", ">asd</span>")}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={() => {}}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+    const firstSlot = surface.querySelector("span[data-idml-slot=\"0\"]")!
+    const slotPosition = positionOf(editor, "idmlSlot")
+    const from = slotPosition + 1
+    const to = from + 3
+
+    act(() => {
+      editor.commands.setTextSelection({ from, to })
+    })
+    expect(editor.state.selection.empty).toBe(false)
+
+    const preventDefault = vi.fn()
+    const clickEvent = {
+      target: firstSlot,
+      shiftKey: false,
+      preventDefault,
+    } as unknown as MouseEvent
+    let handled: boolean | void = undefined
+    act(() => {
+      handled = editor.view.someProp("handleClick", (handler) => handler(
+        editor.view,
+        to,
+        clickEvent,
+      ))
+    })
+
+    // someProp only surfaces a truthy claim; returning false here is
+    // indistinguishable from "no handler" and must not collapse the range.
+    expect(handled).toBeFalsy()
+    expect(preventDefault).not.toHaveBeenCalled()
+    expect(editor.state.selection.from).toBe(from)
+    expect(editor.state.selection.to).toBe(to)
+  })
+
+  it("lets Shift-click extend an IDML selection instead of clamping the caret", async () => {
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-shift-click"
+        initialPlain={"asd\tSecond"}
+        initialHtml={SOURCE_HTML.replace(">Source</span>", ">asd</span>")}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={() => {}}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+    const firstSlot = surface.querySelector("span[data-idml-slot=\"0\"]")!
+    const slotPosition = positionOf(editor, "idmlSlot")
+    const caret = slotPosition + 1 + 3
+    act(() => {
+      editor.commands.setTextSelection(caret)
+    })
+
+    const preventDefault = vi.fn()
+    const clickEvent = {
+      target: firstSlot,
+      shiftKey: true,
+      preventDefault,
+    } as unknown as MouseEvent
+    let handled: boolean | void = undefined
+    act(() => {
+      handled = editor.view.someProp("handleClick", (handler) => handler(
+        editor.view,
+        slotPosition + 1,
+        clickEvent,
+      ))
+    })
+
+    expect(handled).toBeFalsy()
+    expect(preventDefault).not.toHaveBeenCalled()
+    expect(editor.state.selection.from).toBe(caret)
+    expect(editor.state.selection.to).toBe(caret)
+  })
+
+  it("does not steal mousedown on the last letter's line (AQU-1031)", async () => {
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-end-line-mousedown"
+        initialPlain={"asd\tSecond"}
+        initialHtml={SOURCE_HTML.replace(">Source</span>", ">asd</span>")}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={() => {}}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+    const firstSlot = surface.querySelector("span[data-idml-slot=\"0\"]")!
+    const slotPosition = positionOf(editor, "idmlSlot")
+    const slot = editor.state.doc.nodeAt(slotPosition)!
+    const end = slotPosition + 1 + slot.content.size
+    act(() => {
+      editor.commands.setTextSelection(end)
+      const rect = {
+        top: 0,
+        bottom: 16,
+        left: 0,
+        right: 40,
+        width: 40,
+        height: 16,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect
+      for (const slotEl of surface.querySelectorAll("[data-idml-slot]")) {
+        vi.spyOn(slotEl, "getClientRects").mockReturnValue([rect] as unknown as DOMRectList)
+      }
+    })
+
+    const preventDefault = vi.fn()
+    const mouseEvent = {
+      target: surface,
+      clientY: 8,
+      preventDefault,
+    } as unknown as MouseEvent
+    let handled: boolean | void = undefined
+    act(() => {
+      handled = editor.view.someProp("handleDOMEvents", (handlers) => (
+        handlers.mousedown?.(editor.view, mouseEvent)
+      ))
+    })
+
+    expect(handled).toBeFalsy()
+    expect(preventDefault).not.toHaveBeenCalled()
+    expect(editor.state.selection.from).toBe(end)
+    expect(firstSlot).toBeTruthy()
+  })
+
+  it("still clamps mousedown in the tall blank well below the slot line", async () => {
+    const { container } = render(
+      <TranslatedEditor
+        cellId="idml-well-mousedown"
+        initialPlain={"asd\tSecond"}
+        initialHtml={SOURCE_HTML.replace(">Source</span>", ">asd</span>")}
+        idmlConfiguration={CONFIGURATION}
+        onCommit={() => {}}
+      />,
+    )
+    await act(async () => { await Promise.resolve() })
+    const surface = container.querySelector(".ProseMirror") as EditorSurface
+    const editor = surface.editor!
+    const firstSlot = surface.querySelector("span[data-idml-slot=\"0\"]")!
+    const slotPosition = positionOf(editor, "idmlSlot")
+    const slot = editor.state.doc.nodeAt(slotPosition)!
+    const end = slotPosition + 1 + slot.content.size
+    act(() => {
+      editor.commands.setTextSelection(slotPosition + 1)
+      const rect = {
+        top: 0,
+        bottom: 16,
+        left: 0,
+        right: 40,
+        width: 40,
+        height: 16,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      } as DOMRect
+      for (const slotEl of surface.querySelectorAll("[data-idml-slot]")) {
+        vi.spyOn(slotEl, "getClientRects").mockReturnValue([rect] as unknown as DOMRectList)
+      }
+    })
+
+    const preventDefault = vi.fn()
+    const mouseEvent = {
+      target: surface,
+      clientY: 80,
+      preventDefault,
+    } as unknown as MouseEvent
+    let handled: boolean | void = undefined
+    act(() => {
+      handled = editor.view.someProp("handleDOMEvents", (handlers) => (
+        handlers.mousedown?.(editor.view, mouseEvent)
+      ))
+    })
+
+    expect(handled).toBe(true)
+    expect(preventDefault).toHaveBeenCalled()
+    expect(editor.state.selection.empty).toBe(true)
+    expect(editor.state.selection.from).toBe(end)
+    expect(editor.state.selection.$from.parent.attrs.slot).toBe(0)
+    expect(firstSlot.contains(window.getSelection()?.anchorNode ?? document.body)
+      || window.getSelection()?.anchorNode === firstSlot).toBe(true)
+  })
+
   it("pastes Unicode and line breaks into an empty slot without importing clipboard markup", async () => {
     const onCommit = vi.fn()
     const emptyTargetHtml = SOURCE_HTML

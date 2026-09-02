@@ -137,7 +137,7 @@ export function FileRow(props: FileRowProps) {
                 onClick={(e) => { e.stopPropagation(); onToggleExpand() }}
                 aria-label={expanded ? t("nav.fileRow.collapse") : t("nav.fileRow.expand")}
               >
-                <ChevronRight className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")} />
+                <ChevronRight className={cn("h-3 w-3", expanded && "rotate-90")} />
               </button>
             </AppTooltip>
           ) : (

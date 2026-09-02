@@ -1,9 +1,25 @@
 #!/usr/bin/env sh
 
-echo "[pre-push] running changed-file E2E gate (pnpm run test:e2e:affected)…"
 # Preserve Git's ref update stream before pnpm/vitest inherit stdin.
 E2E_PUSH_REFS=$(cat)
 export E2E_PUSH_REFS
+
+# Credential gate — cheap, so it runs before the expensive E2E gate. A leaked
+# secret is the one push mistake that can't be walked back once it's on a
+# public remote, so block the push (rotate + remove, don't just delete the file).
+echo "[pre-push] scanning tracked files for credentials (pnpm run scan:secrets)…"
+pnpm run scan:secrets
+status=$?
+if [ $status -ne 0 ]; then
+  echo ""
+  echo "❌ Secret scan found a possible credential. Push blocked."
+  echo "   Rotate the credential, remove it from the working tree, then re-push."
+  echo "   Bypass (NOT recommended): git push --no-verify"
+  exit $status
+fi
+echo "[pre-push] ✅ secret scan clean"
+
+echo "[pre-push] running changed-file E2E gate (pnpm run test:e2e:affected)…"
 pnpm run test:e2e:affected
 status=$?
 

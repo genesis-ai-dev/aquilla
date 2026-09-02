@@ -31,6 +31,7 @@ import { LaneChips } from "./LaneChips"
 import { ProjectLaneSubRows } from "./ProjectLaneSubRows"
 import { OrgLaneAssignModal } from "./OrgLaneAssignModal"
 import { displayLanes, resolveDefaultLaneLabel } from "./project-lanes"
+import { isManagedBy } from "./project-pm-filter"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
@@ -85,6 +86,7 @@ export function OrgProjectsDataTable({
   orgId = null,
   jwt,
   author,
+  viewerUsername = null,
   allowSelfAssignment = false,
   callerUserId = null,
   onLanesChanged,
@@ -118,6 +120,12 @@ export function OrgProjectsDataTable({
   jwt?: string | null
   /** Current username — stamped as the assignment event author. */
   author?: string
+  /**
+   * AQU-1027: signed-in username, used only to mark the PM column's own row
+   * "(you)". Deliberately separate from `author`, which happens to hold the
+   * same value but means "who to credit for an assignment event".
+   */
+  viewerUsername?: string | null
   allowSelfAssignment?: boolean
   callerUserId?: number | null
   /** Called after an assign/staff lane action, so the parent can refetch the
@@ -349,7 +357,19 @@ export function OrgProjectsDataTable({
                   username={username}
                   size="xs"
                   nameClassName="font-normal"
-                />
+                >
+                  {/* AQU-1027: lets a PM spot their own projects while
+                      scrolling the unfiltered list. Reuses the existing
+                      "(you)" string rather than minting a second one. */}
+                  {isManagedBy(row.original, viewerUsername) && (
+                    <span
+                      data-testid="project-pm-you"
+                      className="shrink-0 text-xs text-muted-foreground"
+                    >
+                      {t("editor.validation.you")}
+                    </span>
+                  )}
+                </UsernameWithAvatar>
               )
             },
           },
@@ -418,6 +438,7 @@ export function OrgProjectsDataTable({
       toggleExpand,
       defaultLaneLabelByProjectId,
       embedded,
+      viewerUsername,
       t,
     ],
   )

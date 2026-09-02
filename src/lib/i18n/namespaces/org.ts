@@ -1037,6 +1037,11 @@ export const org = defineNamespace({
     // AQU-1040: designated-PM options. The PM names themselves are usernames,
     // not strings.
     "org.orgProjectsPage.pmFilter.all": "All PMs",
+    // AQU-1027: identity option pinned above the named PMs. PM designation
+    // (projects.pm_user_id) is a different thing from the file assignments
+    // behind "Assigned to me", so this is the only surface that exposes it.
+    "org.orgProjectsPage.pmFilter.mine": "Managed by me",
+    "org.orgProjectsPage.pmFilter.mineEmptyTitle": "You don’t manage any projects here.",
     // AQU-1042: viewer-role options. The role option labels come from
     // common.role.* (same keys as RoleLabel).
     "org.orgProjectsPage.roleFilter.all": "All roles",
@@ -1045,6 +1050,7 @@ export const org = defineNamespace({
     "org.orgProjectsPage.updatedFilter.any": "Updated any time",
     "org.orgProjectsPage.updatedFilter.lastDays": "Updated in last {days} days",
     // "Unassigned" PM option → org.projectOverview.unassigned (identical text)
+    // "(you)" marker on the PM column's own row → editor.validation.you
     // Filtered-to-nothing empty title → org.orgHome.projectsPanel.noMatchingProjects
     // Zero-projects empty title → org.orgHome.projectsPanel.emptyTitle
     // Zero-projects empty description → org.overview.emptyDescription

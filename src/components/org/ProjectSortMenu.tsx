@@ -16,6 +16,7 @@ import type { StatusFilter } from "@/hooks/useOrgPortfolio"
 import { STATUS_FILTERS } from "./project-status-filter"
 import {
   PM_FILTER_ALL,
+  PM_FILTER_MINE,
   PM_FILTER_UNASSIGNED,
   pmFilterFor,
   type PmFilter,
@@ -47,6 +48,7 @@ export function ProjectSortMenu({
   pm,
   pmUsernames,
   showUnassignedPm,
+  viewerUsername = null,
   onPmChange,
   role,
   roleNames,
@@ -58,10 +60,16 @@ export function ProjectSortMenu({
   status: StatusFilter
   onStatusChange: (value: StatusFilter) => void
   pm: PmFilter
-  /** PMs present in the loaded rows — see `pmFilterUsernames`. */
+  /** PMs present in the loaded rows, viewer excluded — see `pmFilterUsernames`. */
   pmUsernames: readonly string[]
   /** Whether any loaded row has no designated PM. */
   showUnassignedPm: boolean
+  /**
+   * AQU-1027: signed-in username; enables the pinned "Managed by me" option.
+   * Offered even when the viewer manages nothing here, so the answer is an
+   * empty table rather than the option quietly not being there.
+   */
+  viewerUsername?: string | null
   onPmChange: (value: PmFilter) => void
   role: RoleFilter
   /** Canonical role names present in the loaded rows — see `roleFilterNames`. */
@@ -79,6 +87,12 @@ export function ProjectSortMenu({
   }))
   const pmItems = [
     { value: PM_FILTER_ALL as PmFilter, label: t("org.orgProjectsPage.pmFilter.all") },
+    // AQU-1027: pinned directly under the reset default — a PM holding 50 of
+    // 150 projects should not have to hunt for their own name among the rest.
+    // The viewer is absent from `pmUsernames` by design (see pmFilterUsernames).
+    ...(viewerUsername?.trim()
+      ? [{ value: PM_FILTER_MINE as PmFilter, label: t("org.orgProjectsPage.pmFilter.mine") }]
+      : []),
     ...pmUsernames.map((username) => ({ value: pmFilterFor(username), label: username })),
     // Unassigned last, mirroring the PM column's "missing sorts last" rule.
     ...(showUnassignedPm

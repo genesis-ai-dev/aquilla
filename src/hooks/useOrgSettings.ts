@@ -14,6 +14,49 @@ import {
 import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 import type { OrgProviderKeys } from "@/lib/sync/org-settings"
 
+// ─── Cross-instance sync ───────────────────────────────────────────────────
+// Several surfaces mount their own useOrgSettings for the SAME org at the same
+// time: ProjectWorkspace (rule evaluation → health → editor underlines),
+// RulesSection / Living Memory (management), RulesPage, settings dialogs. Each
+// instance fetched once on mount and nothing else ever invalidated it, so an
+// org rule created or promoted on the rules page never reached the
+// already-mounted editor until a full reload — org rules looked "not applied"
+// while project rules (which share the parent's project state) applied at once.
+//
+// Every CONFIRMED write now fans out to the sibling instances of that org.
+// Kept cheap on purpose: only server responses (ok / conflict) are broadcast,
+// never the optimistic write; the writer is excluded; receivers drop anything
+// not newer than what they hold (the server bumps `version` on every write).
+// Net cost of a write is one extra render per sibling, and nothing at all on
+// the per-keystroke path.
+type OrgSettingsListener = (next: OrgSettingsResponse) => void
+const orgSettingsListeners = new Map<number, Set<OrgSettingsListener>>()
+
+function subscribeOrgSettings(orgId: number, listener: OrgSettingsListener): () => void {
+  let set = orgSettingsListeners.get(orgId)
+  if (!set) {
+    set = new Set()
+    orgSettingsListeners.set(orgId, set)
+  }
+  set.add(listener)
+  return () => {
+    set.delete(listener)
+    if (set.size === 0) orgSettingsListeners.delete(orgId)
+  }
+}
+
+function broadcastOrgSettings(
+  orgId: number,
+  next: OrgSettingsResponse,
+  except: OrgSettingsListener,
+): void {
+  const set = orgSettingsListeners.get(orgId)
+  if (!set) return
+  for (const listener of set) {
+    if (listener !== except) listener(next)
+  }
+}
+
 // Floor aligned with the server's SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER (600)
 // in auth-worker/src/routes/org-settings.ts. Lowering this to PROJECT_LEAD (500)
 // would re-open the AQU-255 silent-divergence window (editable controls + a 403
@@ -194,6 +237,21 @@ export function useOrgSettings(
   const aliveRef = useRef(true)
   useEffect(() => () => { aliveRef.current = false }, [])
 
+  // Receiver side of the cross-instance sync (see the registry above): adopt a
+  // sibling's confirmed server response only when it is newer than ours.
+  const adoptFromSibling = useCallback((next: OrgSettingsResponse) => {
+    if (!aliveRef.current) return
+    const current = serverRef.current
+    if (current && current.version >= next.version) return
+    writeServer(next)
+    setHasFetched(true)
+  }, [writeServer])
+
+  useEffect(() => {
+    if (!orgId) return
+    return subscribeOrgSettings(orgId, adoptFromSibling)
+  }, [orgId, adoptFromSibling])
+
   // Serialize writes to avoid version conflicts.
   const writeChainRef = useRef<Promise<unknown>>(Promise.resolve())
   const runSerialized = useCallback(<T,>(fn: () => Promise<T>): Promise<T> => {
@@ -305,9 +363,13 @@ export function useOrgSettings(
 
         const result = await patchOrgSettings(jwt, orgId, merged, baseVersion)
 
-        if (result.kind === "ok") writeServer(result.value)
-        else if (result.kind === "conflict") writeServer(result.latest)
-        else {
+        if (result.kind === "ok") {
+          writeServer(result.value)
+          broadcastOrgSettings(orgId, result.value, adoptFromSibling)
+        } else if (result.kind === "conflict") {
+          writeServer(result.latest)
+          broadcastOrgSettings(orgId, result.latest, adoptFromSibling)
+        } else {
           // Forbidden (role check failed at the API layer) or error: roll back
           // the optimistic write to the pre-write snapshot, then re-fetch truth.
           // Without this the rejected value lingered until an unrelated refresh
@@ -318,7 +380,7 @@ export function useOrgSettings(
         return result
       })
     },
-    [orgId, jwt, canEdit, runSerialized, writeServer, refresh, t],
+    [orgId, jwt, canEdit, runSerialized, writeServer, refresh, adoptFromSibling, t],
   )
 
   const canRequestPromotion =

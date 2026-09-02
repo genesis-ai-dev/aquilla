@@ -1,0 +1,46 @@
+// AQU-1095/1096: a unit's status, as a dot plus a word.
+//
+// Never colour alone — "overdue" has to survive a greyscale print and a
+// colour-blind reader, so the word carries the meaning and the colour only
+// reinforces it.
+
+import { useT } from "@/lib/i18n/I18nProvider"
+import { planUnitStatus, type PlanUnit, type PlanUnitStatus } from "@/lib/plan/plan-status"
+
+const TONE: Record<PlanUnitStatus, { dot: string; text: string; bg: string }> = {
+  done: { dot: "bg-emerald-500", text: "text-emerald-700 dark:text-emerald-400", bg: "bg-emerald-500/10" },
+  overdue: { dot: "bg-destructive", text: "text-destructive", bg: "bg-destructive/10" },
+  soon: { dot: "bg-amber-500", text: "text-amber-700 dark:text-amber-400", bg: "bg-amber-500/10" },
+  in_progress: { dot: "bg-primary", text: "text-primary", bg: "bg-primary/10" },
+  not_started: { dot: "bg-muted-foreground/50", text: "text-muted-foreground", bg: "bg-muted" },
+}
+
+export const PLAN_STATUS_LABEL_KEY: Record<PlanUnitStatus, string> = {
+  done: "org.projectOverview.plan.statusDone",
+  overdue: "org.projectOverview.plan.statusOverdue",
+  soon: "org.projectOverview.plan.statusSoon",
+  in_progress: "org.projectOverview.plan.statusInProgress",
+  not_started: "org.projectOverview.plan.statusNotStarted",
+}
+
+export function PlanStatusPill({ status, unit, now, compact = false }: {
+  status?: PlanUnitStatus
+  unit?: PlanUnit
+  now: number
+  compact?: boolean
+}) {
+  const t = useT()
+  const resolved = status ?? (unit ? planUnitStatus(unit, now) : "not_started")
+  const tone = TONE[resolved]
+  return (
+    <span
+      data-testid={`plan-status-${resolved}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-medium ${tone.bg} ${tone.text} ${
+        compact ? "text-[11px]" : "text-xs"
+      }`}
+    >
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${tone.dot}`} aria-hidden />
+      {t(PLAN_STATUS_LABEL_KEY[resolved] as never)}
+    </span>
+  )
+}

@@ -1087,6 +1087,32 @@ export const org = defineNamespace({
     // "Project settings" aria-label → editor.navTitle.projectSettings (identical text)
     "org.projectOverview.archiveDialogTitle": "Archive project",
     "org.projectOverview.filterProgressByLanguageAriaLabel": "Filter progress by language",
+    // ── AQU-1092…1098: the plan board ──────────────────────────────────
+    // Copy is deliberately unit-agnostic. A planning unit is a Bible book in
+    // one project, a dub episode in another, a document in a third — so
+    // nothing here may say "books".
+    "org.projectOverview.plan.heading": "Plan",
+    "org.projectOverview.plan.regionAria": "Planning units, grouped by status",
+    "org.projectOverview.plan.summaryDone": "{done} of {total} done",
+    "org.projectOverview.plan.summaryOverdue": plural({
+      one: "{count} overdue",
+      other: "{count} overdue",
+    }),
+    "org.projectOverview.plan.empty": "Nothing to plan yet. Import a source and its books, episodes or documents appear here.",
+    "org.projectOverview.plan.keyboardHint": "Arrow keys move between units \u00b7 Esc closes",
+    "org.projectOverview.plan.cellCount": plural({ one: "{count} cell", other: "{count} cells" }),
+    "org.projectOverview.plan.textBarsAria": "Text {translated}% translated, {validated}% validated",
+    "org.projectOverview.plan.audioBarsAria": "Audio {recorded}% recorded, {validated}% validated",
+    "org.projectOverview.plan.statusDone": "Done",
+    "org.projectOverview.plan.statusOverdue": "Overdue",
+    "org.projectOverview.plan.statusSoon": "Due soon",
+    "org.projectOverview.plan.statusInProgress": "In progress",
+    "org.projectOverview.plan.statusNotStarted": "Not started",
+    "org.projectOverview.plan.groupHintOverdue": "past target, not marked done",
+    "org.projectOverview.plan.groupHintSoon": "target within a week",
+    "org.projectOverview.plan.groupHintInProgress": "active, comfortably ahead",
+    "org.projectOverview.plan.groupHintNotStarted": "no content yet",
+    "org.projectOverview.plan.groupHintDone": "marked complete by a manager",
 
     // -- TeamDetail: single team's page. Most call-site strings here reuse
     // existing org.teamDetail.* / org.teamForm.* / common.* keys already
@@ -2025,6 +2051,74 @@ export const org = defineNamespace({
       "org.projectOverview.filterProgressByLanguageAriaLabel": {
         description:
           "Accessible name for the segmented All/per-lane tabs that filter the Progress card's stats by target language, shown only when the project has more than one lane.",
+      },
+      "org.projectOverview.plan.heading": {
+        description: "Heading of the project dashboard's plan table. Neutral on purpose: rows are Bible books, dub episodes or documents depending on the project, so this must never say 'Books'.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.regionAria": {
+        description: "Screen-reader name for the plan list region, which arrow keys navigate.",
+      },
+      "org.projectOverview.plan.summaryDone": {
+        description: "Summary above the plan table: how many units are marked finished.",
+        placeholders: { done: "Units marked done — a number.", total: "Units in the project — a number." },
+      },
+      "org.projectOverview.plan.summaryOverdue": {
+        description: "Summary badge: units past their target date with no Done mark.",
+        placeholders: { count: "Overdue units — a number." },
+      },
+      "org.projectOverview.plan.empty": {
+        description: "Shown when a project has no plannable files yet.",
+      },
+      "org.projectOverview.plan.keyboardHint": {
+        description: "Hint shown while a unit is selected, describing keyboard navigation.",
+      },
+      "org.projectOverview.plan.cellCount": {
+        description: "Secondary line under a unit's name: how many cells it contains.",
+        placeholders: { count: "Cells in the unit — a number." },
+      },
+      "org.projectOverview.plan.textBarsAria": {
+        description: "Screen-reader label for the two stacked text-progress bars on a plan row.",
+        placeholders: { translated: "Percent translated — a number.", validated: "Percent validated — a number." },
+      },
+      "org.projectOverview.plan.audioBarsAria": {
+        description: "Screen-reader label for the two stacked audio-progress bars on a plan row.",
+        placeholders: { recorded: "Percent recorded — a number.", validated: "Percent validated — a number." },
+      },
+      "org.projectOverview.plan.statusDone": {
+        description: "Status of a unit a manager has explicitly marked finished. Can read Done even when its bars are below 100%.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.statusOverdue": {
+        description: "Status of a unit past its target date with no Done mark.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.statusSoon": {
+        description: "Status of a unit whose target date is within a week.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.statusInProgress": {
+        description: "Status of a unit with content that is comfortably ahead of its target.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.statusNotStarted": {
+        description: "Status of a unit with no translated text and no recorded audio yet.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.groupHintOverdue": {
+        description: "Right-aligned hint on the Overdue group header, explaining what puts a unit there.",
+      },
+      "org.projectOverview.plan.groupHintSoon": {
+        description: "Hint on the Due soon group header.",
+      },
+      "org.projectOverview.plan.groupHintInProgress": {
+        description: "Hint on the In progress group header.",
+      },
+      "org.projectOverview.plan.groupHintNotStarted": {
+        description: "Hint on the Not started group header.",
+      },
+      "org.projectOverview.plan.groupHintDone": {
+        description: "Hint on the Done group header, stressing that the mark is a human judgment.",
       },
       "org.memberActivityPanel.fileRollupSummary": {
         description:

@@ -232,6 +232,8 @@ import { OfflineBanner } from "./OfflineBanner"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell, useIsLgUp } from "./AppShell"
+import { SignedOutWorkspace } from "./org/SignedOutWorkspace"
+import { OrgBreadcrumb } from "./org/OrgBreadcrumb"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
@@ -3739,6 +3741,10 @@ export function ProjectWorkspace() {
     refresh,
     patchSettings as Parameters<typeof useRules>[2],
     orgRules,
+    undefined,
+    // AQU-609: every consumer of this instance's `rules` evaluates against the
+    // active lane's cell view, so lane-scoped rules for other lanes drop here.
+    activeLane,
   )
   const {
     comments: allProjectComments,
@@ -9284,18 +9290,9 @@ export function ProjectWorkspace() {
   if (status === "loading") return <WorkspaceSkeleton />
   if (status === "no-session") {
     return (
-      <div className="p-8 text-muted-foreground">
-        <RichMessage
-          k="workspace.status.notOnDevice"
-          values={{
-            signIn: (
-              <button className="underline" onClick={goToProjects}>
-                {t("auth.login.submitDefault")}
-              </button>
-            ),
-          }}
-        />
-      </div>
+      <SignedOutWorkspace
+        header={<OrgBreadcrumb section={project?.name ?? t("common.project")} orgId={project?.orgId} />}
+      />
     )
   }
   // RES-5: distinguish server-unreachable from a genuinely missing project.

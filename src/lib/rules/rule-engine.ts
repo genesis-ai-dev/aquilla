@@ -16,6 +16,56 @@ function compile(pattern: string, flags: string): RegExp | null {
   return re
 }
 
+/**
+ * AQU-609: restrict a merged rules array to the given target-language lane.
+ * Lane-scoped rules apply only when their `lane` matches (`''` = the
+ * project-default lane, same convention as cells/AQU-538); org, project,
+ * builtin, and terminology rules apply in every lane. Callers evaluating
+ * against a lane-bound cell view (editor, health, drafting, autopilot) filter
+ * here; management surfaces keep the full list.
+ */
+export function rulesForLane(
+  rules: TranslationRule[],
+  lane: string,
+): TranslationRule[] {
+  return rules.filter((r) => r.scope !== "lane" || (r.lane ?? "") === lane)
+}
+
+/**
+ * Distinct lanes currently holding at least one lane-scoped rule, in
+ * first-appearance order. Drives the Rules-surface lane filter: a project can
+ * carry 150+ target lanes, so the filter lists only lanes that actually have
+ * rules (an archived lane with a leftover rule still shows, on purpose).
+ */
+export function lanesWithRules(rules: TranslationRule[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const r of rules) {
+    if (r.scope !== "lane") continue
+    const lane = r.lane ?? ""
+    if (seen.has(lane)) continue
+    seen.add(lane)
+    out.push(lane)
+  }
+  return out
+}
+
+/**
+ * Apply the Rules-surface lane filter. `"all"` = every rule, `"project"` =
+ * only rules that apply in every lane, `"lane:<tag>"` = only that lane's
+ * rules (`"lane:"` = the default lane). Display-only — evaluation filtering
+ * is `rulesForLane` above.
+ */
+export function filterRulesForDisplay(
+  rules: TranslationRule[],
+  filter: string,
+): TranslationRule[] {
+  if (filter === "all") return rules
+  if (filter === "project") return rules.filter((r) => r.scope !== "lane")
+  const lane = filter.slice("lane:".length)
+  return rules.filter((r) => r.scope === "lane" && (r.lane ?? "") === lane)
+}
+
 export function checkRules(
   fileCells: Map<string, CellData[]>,
   rules: TranslationRule[]

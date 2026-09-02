@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { checkRules, checkRulesForCell } from "./rule-engine"
+import { checkRules, checkRulesForCell, rulesForLane, lanesWithRules, filterRulesForDisplay } from "./rule-engine"
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 
@@ -354,5 +354,65 @@ describe("non-builtin infractions carry a reason code, not a rule-name-embedded 
     const rules = [makeRule({ id: "r1", check: { type: "source-target-match", pattern: "https?://\\S+" } })]
     const inf = checkRules(cells, rules).get("c1")![0]
     expect(inf.reason).toBe("source-target-match")
+  })
+})
+
+// AQU-609: lane scoping. WHY: a lane-scoped rule encodes a constraint that is
+// only true of ONE target language (e.g. a French typography rule); letting it
+// fire on another lane's drafts would flag correct translations as violations,
+// and dropping it from its own lane would silently stop enforcing it.
+describe("rulesForLane", () => {
+  const orgRule = makeRule({ id: "org", scope: "org", check: { type: "target-forbids", targetPattern: "x" } })
+  const projectRule = makeRule({ id: "proj", scope: "project", check: { type: "target-forbids", targetPattern: "x" } })
+  const frRule = makeRule({ id: "fr", scope: "lane", lane: "fr", check: { type: "target-forbids", targetPattern: "x" } })
+  const defaultLaneRule = makeRule({ id: "def", scope: "lane", lane: "", check: { type: "target-forbids", targetPattern: "x" } })
+
+  it("keeps org and project rules in every lane, lane rules only in their own", () => {
+    const all = [orgRule, projectRule, frRule, defaultLaneRule]
+    expect(rulesForLane(all, "fr").map((r) => r.id)).toEqual(["org", "proj", "fr"])
+    expect(rulesForLane(all, "es").map((r) => r.id)).toEqual(["org", "proj"])
+    expect(rulesForLane(all, "").map((r) => r.id)).toEqual(["org", "proj", "def"])
+  })
+
+  it("treats a lane rule with no lane field as the default lane", () => {
+    const bare = makeRule({ id: "bare", scope: "lane", check: { type: "target-forbids", targetPattern: "x" } })
+    expect(rulesForLane([bare], "").map((r) => r.id)).toEqual(["bare"])
+    expect(rulesForLane([bare], "fr")).toEqual([])
+  })
+
+  it("lane-filtered rules compose with checkRules end to end", () => {
+    // A real settings-shaped rules array through the real engine: the French
+    // lane's forbidden pattern must not flag the Spanish lane's draft.
+    const cells = new Map([["f1", [
+      makeCell({ id: "c1", translated: "el texto malo", status: "validated", original: "src" }),
+    ]]])
+    const frForbids = makeRule({ id: "fr-ban", scope: "lane", lane: "fr", check: { type: "target-forbids", targetPattern: "malo" } })
+    expect(checkRules(cells, rulesForLane([frForbids], "es")).size).toBe(0)
+    expect(checkRules(cells, rulesForLane([frForbids], "fr")).get("c1")).toHaveLength(1)
+  })
+})
+
+
+// AQU-609: the Rules-surface lane filter. WHY: with up to ~150 target lanes a
+// filter over ALL project lanes would be as unusable as the unfiltered list —
+// options must derive from lanes that actually hold rules, and the filter is
+// display-only (evaluation stays with rulesForLane).
+describe("lane display filter", () => {
+  const proj = makeRule({ id: "p1", scope: "project", check: { type: "target-forbids", targetPattern: "x" } })
+  const fr1 = makeRule({ id: "fr1", scope: "lane", lane: "fr", check: { type: "target-forbids", targetPattern: "x" } })
+  const fr2 = makeRule({ id: "fr2", scope: "lane", lane: "fr", check: { type: "target-forbids", targetPattern: "y" } })
+  const def = makeRule({ id: "def", scope: "lane", lane: "", check: { type: "target-forbids", targetPattern: "z" } })
+
+  it("lanesWithRules lists each lane once, in first appearance order, ignoring non-lane rules", () => {
+    expect(lanesWithRules([proj, fr1, def, fr2])).toEqual(["fr", ""])
+    expect(lanesWithRules([proj])).toEqual([])
+  })
+
+  it("filterRulesForDisplay: all / project-wide / one lane (incl. the default lane)", () => {
+    const rules = [proj, fr1, fr2, def]
+    expect(filterRulesForDisplay(rules, "all").map((r) => r.id)).toEqual(["p1", "fr1", "fr2", "def"])
+    expect(filterRulesForDisplay(rules, "project").map((r) => r.id)).toEqual(["p1"])
+    expect(filterRulesForDisplay(rules, "lane:fr").map((r) => r.id)).toEqual(["fr1", "fr2"])
+    expect(filterRulesForDisplay(rules, "lane:").map((r) => r.id)).toEqual(["def"])
   })
 })

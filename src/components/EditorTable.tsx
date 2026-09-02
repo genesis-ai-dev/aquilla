@@ -11,7 +11,6 @@ import {
   MessageCircle, Play, Pause, Mic, MicOff, FileText,
   ArrowRight, Activity, NotebookPen, Pencil, ChevronDown, Music, Braces,
   Languages,
-  Archive,
   Lock,
   Pilcrow,
   PilcrowRight,
@@ -25,6 +24,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Badge, badgeVariants } from "@/components/ui/badge"
+import { LaneCombobox } from "@/components/LaneCombobox"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import {
@@ -109,7 +109,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -971,16 +970,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // ignores it once the cell is off screen or no longer rendered.
   const lastActiveEditorCellIdRef = useRef<string | null>(null)
   const [hoveredFootnote, setHoveredFootnote] = useState<{ cellId: string; index: number } | null>(null)
-  // AQU-601: the lane switcher hides archived lanes by default; this reveals
-  // them within the open dropdown so a retired lane stays reachable.
-  const [showArchivedLanes, setShowArchivedLanes] = useState(false)
-  const laneSwitcher = useMemo(() => {
-    const all = lanes ?? []
-    return {
-      visible: all.filter((l) => !isLaneArchived(l, archivedLanes)),
-      archived: all.filter((l) => isLaneArchived(l, archivedLanes)),
-    }
-  }, [lanes, archivedLanes])
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
   const displayCellIds = useCellIds(cellStore, orderedBy, !!audioLens)
@@ -2518,101 +2507,65 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             lanes.length > 1 &&
             onLaneChange &&
             canSwitchLanes(project.syncRole?.level) ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <button
-                      type="button"
-                      data-testid="lane-switcher"
-                      data-active-lane={activeLane}
-                      aria-label={t("editor.lane.activeAria")}
-                      className={cn(
-                        badgeVariants({ variant: "secondary" }),
-                        "gap-1 text-[10px] font-normal normal-case tracking-normal transition-colors hover:bg-muted-foreground/20 hover:text-foreground",
-                      )}
-                    />
-                  }
-                >
-                  {/* AQU-583: on the default lane with no project target set,
-                      `project.targetLanguage` is empty — prompt to set one rather
-                      than showing a blank pill. A named lane always has a tag. */}
-                  {project.targetLanguage || t("editor.lane.setTargetLanguage")}
-                  <ChevronDown className="h-2.5 w-2.5" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="min-w-[8rem]">
-                  {/* Active lanes, shown by default. */}
-                  {laneSwitcher.visible.map((lane) => {
-                    const active = lane === activeLane
-                    const label = lane === "" ? (defaultLaneLabel || t("editor.column.target")) : lane
-                    return (
-                      <DropdownMenuItem
-                        key={lane || "__default__"}
-                        data-testid={`lane-option-${lane}`}
-                        data-active={active ? "true" : undefined}
-                        onClick={() => onLaneChange(lane)}
-                        className="justify-between gap-2 text-xs"
-                      >
-                        {label}
-                        {active && <Check className="h-3.5 w-3.5" />}
-                      </DropdownMenuItem>
-                    )
-                  })}
-                  {/* AQU-601: archived lanes are hidden behind a reveal so a
-                      retired lane stops cluttering the switcher yet stays
-                      reachable. If the active lane is itself archived we expand
-                      automatically so the current selection is always visible. */}
-                  {laneSwitcher.archived.length > 0 && (
-                    <>
-                      <DropdownMenuSeparator />
-                      {showArchivedLanes || isLaneArchived(activeLane, archivedLanes) ? (
-                        laneSwitcher.archived.map((lane) => {
-                          const active = lane === activeLane
-                          return (
-                            <DropdownMenuItem
-                              key={lane}
-                              data-testid={`lane-option-${lane}`}
-                              data-active={active ? "true" : undefined}
-                              data-archived="true"
-                              onClick={() => onLaneChange(lane)}
-                              className="justify-between gap-2 text-xs text-muted-foreground"
-                            >
-                              <span className="flex items-center gap-1.5">
-                                <Archive className="h-3 w-3" />
-                                {lane}
-                              </span>
-                              {active && <Check className="h-3.5 w-3.5" />}
-                            </DropdownMenuItem>
-                          )
-                        })
-                      ) : (
-                        <DropdownMenuItem
-                          data-testid="lane-show-archived"
-                          closeOnClick={false}
-                          onClick={() => setShowArchivedLanes(true)}
-                          className="gap-1.5 text-xs text-muted-foreground"
+              /* AQU-609: the switcher is a searchable combobox — client
+                 projects carry 150+ lanes, and lane switching is a combobox
+                 by explicit client request. Archived-lane semantics (AQU-601)
+                 live in LaneCombobox: hidden behind a reveal while browsing,
+                 searchable always, auto-revealed when the active lane is
+                 archived. */
+              <LaneCombobox
+                options={(lanes ?? []).map((lane) => ({
+                  value: lane,
+                  label: lane === "" ? (defaultLaneLabel || t("editor.column.target")) : lane,
+                  archived: isLaneArchived(lane, archivedLanes),
+                  testId: lane,
+                }))}
+                value={activeLane}
+                onValueChange={onLaneChange}
+                searchPlaceholder={t("editor.lane.searchPlaceholder")}
+                searchAriaLabel={t("editor.lane.searchAriaLabel")}
+                emptyText={t("editor.lane.searchEmpty")}
+                align="end"
+                trigger={
+                  <button
+                    type="button"
+                    data-testid="lane-switcher"
+                    data-active-lane={activeLane}
+                    aria-label={t("editor.lane.activeAria")}
+                    className={cn(
+                      badgeVariants({ variant: "secondary" }),
+                      "gap-1 text-[10px] font-normal normal-case tracking-normal transition-colors hover:bg-muted-foreground/20 hover:text-foreground",
+                    )}
+                  >
+                    {/* AQU-583: on the default lane with no project target set,
+                        `project.targetLanguage` is empty — prompt to set one
+                        rather than showing a blank pill. A named lane always
+                        has a tag. */}
+                    {project.targetLanguage || t("editor.lane.setTargetLanguage")}
+                    <ChevronDown className="h-2.5 w-2.5" />
+                  </button>
+                }
+                footer={
+                  onEditTargetLanguage
+                    ? (close) => (
+                        /* AQU-583: manage the default target language from the
+                           switcher. */
+                        <button
+                          type="button"
+                          data-testid="edit-target-language"
+                          onClick={() => {
+                            close()
+                            onEditTargetLanguage()
+                          }}
+                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
                         >
-                          <Archive className="h-3 w-3" />
-                          {t("editor.lane.showArchived", { count: laneSwitcher.archived.length })}
-                        </DropdownMenuItem>
-                      )}
-                    </>
-                  )}
-                  {/* AQU-583: manage the default target language from the switcher. */}
-                  {onEditTargetLanguage && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        data-testid="edit-target-language"
-                        onClick={onEditTargetLanguage}
-                        className="gap-2 text-xs"
-                      >
-                        <Languages className="h-3.5 w-3.5" />
-                        {t("editor.lane.changeTargetLanguageItem")}
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                          <Languages className="h-3.5 w-3.5" />
+                          {t("editor.lane.changeTargetLanguageItem")}
+                        </button>
+                      )
+                    : undefined
+                }
+              />
             ) : onEditTargetLanguage ? (
               <button
                 type="button"

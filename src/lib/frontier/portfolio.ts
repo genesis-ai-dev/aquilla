@@ -64,6 +64,16 @@ export interface PortfolioProject {
    * endpoint). Absent/null ⇒ unassigned (sorts last under the PM lens).
    */
   pm?: { id: number; username: string } | null
+  /**
+   * AQU-1097: planning units — the rows a manager plans by (a book inside a
+   * whole-Bible import, a file otherwise). Optional because a server that
+   * predates the plan board sends none, and the org table then shows no plan
+   * column rather than a misleading "0 of 0".
+   */
+  unitsTotal?: number
+  unitsDone?: number
+  /** Past their target date with no Done mark. Counted server-side. */
+  unitsOverdue?: number
 }
 
 /**

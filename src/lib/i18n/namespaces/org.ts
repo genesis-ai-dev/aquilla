@@ -1015,6 +1015,15 @@ export const org = defineNamespace({
     // "Assign work" menu item → dialog.assign.title (identical text)
     // "Add member" menu item → org.teamDetail.addMemberButton (identical text)
     "org.orgProjectsDataTable.noSearchMatch": "No projects match your search.",
+    // AQU-1097: the plan rollup. Never says "books" — a unit is a book, an
+    // episode or a document depending on the project.
+    "org.orgProjectsDataTable.unitsColumn": "Done",
+    "org.orgProjectsDataTable.unitsDoneValue": "{done} of {total}",
+    "org.orgProjectsDataTable.unitsDoneAria": "{done} of {total} units marked done",
+    "org.orgProjectsDataTable.unitsOverdueTooltip": plural({
+      one: "{count} unit is past its target date",
+      other: "{count} units are past their target date",
+    }),
     // "Clear" → common.clear (identical text)
 
     // -- OrgProjectsPage: single-org projects list page --
@@ -1770,6 +1779,28 @@ export const org = defineNamespace({
           "(project row: Assign work / Add member; archived-file row: Restore) — shared by " +
           "the org projects data table and the Archived projects/files tables.",
         placeholders: { name: "The project's or file's name — not translated." },
+      },
+      "org.orgProjectsDataTable.unitsColumn": {
+        description:
+          "Column header on the org projects table: how many of a project's planning " +
+          "units a manager has marked finished. Deliberately neutral — a unit is a Bible " +
+          "book, a dub episode or a document depending on the project, so this must never " +
+          "say 'Books'.",
+        maxLength: 12,
+      },
+      "org.orgProjectsDataTable.unitsDoneValue": {
+        description: "Cell value for the Done column, e.g. '5 of 66'.",
+        placeholders: { done: "Units marked done — a number.", total: "Units in the project — a number." },
+      },
+      "org.orgProjectsDataTable.unitsDoneAria": {
+        description: "Screen-reader label for the Done column cell.",
+        placeholders: { done: "Units marked done — a number.", total: "Units in the project — a number." },
+      },
+      "org.orgProjectsDataTable.unitsOverdueTooltip": {
+        description:
+          "Tooltip on the red badge beside the Done count: how many units are past their " +
+          "target date without a Done mark.",
+        placeholders: { count: "Overdue units — a number." },
       },
       "org.sharedProjectsPage.scopedDescription": {
         description:

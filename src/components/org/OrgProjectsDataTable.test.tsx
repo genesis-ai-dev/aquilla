@@ -313,3 +313,42 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
     expect(screen.getByTestId("assign-open-p1-")).toBeInTheDocument()
   })
 })
+
+// AQU-1097: the plan rollup column — "which units are done" at org scale, so a
+// PM overseeing several language projects does not have to open each one.
+describe("units done column", () => {
+  it("shows how many units are done out of the total", () => {
+    renderTable([baseProject({ id: "p1", name: "Tok Pisin", unitsTotal: 66, unitsDone: 5 })])
+    expect(screen.getByTestId("project-table-units-value")).toHaveTextContent("5 of 66")
+  })
+
+  it("never names the unit, because it varies by project", () => {
+    // A unit is a book here, an episode in a dub, a document elsewhere. The
+    // column must read the same for all three.
+    renderTable([baseProject({ id: "p1", unitsTotal: 12, unitsDone: 3 })])
+    expect(screen.getByTestId("project-table-units-value").textContent).not.toMatch(/book/i)
+  })
+
+  it("shows a dash rather than '0 of 0' when there is nothing to plan", () => {
+    renderTable([baseProject({ id: "p1", unitsTotal: 0, unitsDone: 0 })])
+    expect(screen.getByTestId("project-table-units-value")).toHaveTextContent("—")
+    expect(screen.queryByTestId("project-table-units-overdue")).toBeNull()
+  })
+
+  it("shows a dash for a server that predates the plan board", () => {
+    // unitsTotal absent entirely — degrade quietly rather than claim 0 of 0.
+    renderTable([baseProject({ id: "p1" })])
+    expect(screen.getByTestId("project-table-units-value")).toHaveTextContent("—")
+  })
+
+  it("flags overdue units beside the count", () => {
+    renderTable([baseProject({ id: "p1", unitsTotal: 66, unitsDone: 5, unitsOverdue: 2 })])
+    expect(screen.getByTestId("project-table-units-overdue")).toHaveTextContent("2")
+    expect(screen.getByTestId("project-table-units-value")).toHaveAttribute("data-units-overdue", "true")
+  })
+
+  it("shows no flag when every unit is on time", () => {
+    renderTable([baseProject({ id: "p1", unitsTotal: 66, unitsDone: 5, unitsOverdue: 0 })])
+    expect(screen.queryByTestId("project-table-units-overdue")).toBeNull()
+  })
+})

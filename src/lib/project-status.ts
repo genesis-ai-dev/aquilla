@@ -44,5 +44,11 @@ export function portfolioAttentionReasons(p: PortfolioProject, now: number): Pro
   if (portfolioActivityStatus(p, now) === "stalled") {
     reasons.push({ kind: "stalled", label: PROJECT_STATUS_LABEL.stalled })
   }
+  // AQU-1097: a project can be comfortably inside its own deadline while units
+  // inside it are already late. That is the thing a PM overseeing many
+  // languages needs to see without opening each project.
+  if (dl !== "overdue" && (p.unitsOverdue ?? 0) > 0) {
+    reasons.push({ kind: "overdue", label: PROJECT_STATUS_LABEL.overdue })
+  }
   return reasons
 }

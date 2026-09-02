@@ -40,7 +40,7 @@ export function PlanRow({ unit, now, selected, showAudio, onSelect }: {
         data-selected={selected ? "true" : undefined}
         aria-current={selected ? "true" : undefined}
         onClick={onSelect}
-        className={`grid w-full grid-cols-1 items-center gap-2 px-[17px] py-3 text-start transition-colors hover:bg-muted/60 md:grid-cols-[minmax(150px,1.1fr)_minmax(190px,1.4fr)_minmax(130px,0.8fr)] md:gap-4 ${
+        className={`grid w-full grid-cols-1 items-center gap-2 px-[17px] py-3 text-start transition-colors hover:bg-muted/60 md:grid-cols-[minmax(150px,1fr)_minmax(240px,1.8fr)_minmax(130px,0.7fr)] md:gap-4 ${
           selected ? "bg-muted shadow-[inset_3px_0_0_var(--color-primary)]" : ""
         }`}
       >
@@ -53,7 +53,7 @@ export function PlanRow({ unit, now, selected, showAudio, onSelect }: {
           </span>
         </span>
 
-        <span className="flex flex-col gap-[5px]">
+        <span className="flex flex-col gap-1.5">
           <PlanBar
             label={t("org.projectOverview.plan.textBarLabel")}
             outer={translated}

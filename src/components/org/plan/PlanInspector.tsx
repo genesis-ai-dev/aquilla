@@ -15,7 +15,6 @@ import { useT, useI18n } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { DatePicker, deadlineStringToDate, dateToDeadlineString } from "@/components/ui/date-picker"
-import { Progress, ProgressLabel, ProgressValue } from "@/components/ui/progress"
 import { X, ChevronUp, ChevronDown } from "lucide-react"
 import { fmtDeadlineDate } from "@/lib/format-date"
 import { formatRelativeTime } from "@/lib/i18n/format"
@@ -227,29 +226,31 @@ export function PlanInspector({
           )}
         </div>
 
-        {/* Progress */}
+        {/* Progress — the same two bars the row draws, with room to breathe. */}
         <div className="flex flex-col gap-2">
           <Label>{t("org.projectOverview.plan.progress")}</Label>
-          <div className="flex flex-col gap-3">
-            <Progress value={planPct(unit.filledCount, unit.totalCount)}>
-              <ProgressLabel>{t("org.projectOverview.plan.textTranslated")}</ProgressLabel>
-              <ProgressValue />
-            </Progress>
-            <Progress value={validatedPct}>
-              <ProgressLabel>{t("org.projectOverview.plan.textValidated")}</ProgressLabel>
-              <ProgressValue />
-            </Progress>
+          <div className="flex flex-col gap-2" data-testid="plan-inspector-bars">
+            <PlanBar
+              label={t("org.projectOverview.plan.textBarLabel")}
+              outer={planPct(unit.filledCount, unit.totalCount)}
+              inner={validatedPct}
+              tone="text"
+              aria={t("org.projectOverview.plan.textBarsAria", {
+                translated: planPct(unit.filledCount, unit.totalCount),
+                validated: validatedPct,
+              })}
+            />
             {showAudio && (
-              <>
-                <Progress value={planPct(unit.audioCount, unit.totalCount)}>
-                  <ProgressLabel>{t("org.projectOverview.plan.audioRecorded")}</ProgressLabel>
-                  <ProgressValue />
-                </Progress>
-                <Progress value={planPct(unit.audioValidatedCount, unit.totalCount)}>
-                  <ProgressLabel>{t("org.projectOverview.plan.audioValidated")}</ProgressLabel>
-                  <ProgressValue />
-                </Progress>
-              </>
+              <PlanBar
+                label={t("org.projectOverview.plan.audioBarLabel")}
+                outer={planPct(unit.audioCount, unit.totalCount)}
+                inner={planPct(unit.audioValidatedCount, unit.totalCount)}
+                tone="audio"
+                aria={t("org.projectOverview.plan.audioBarsAria", {
+                  recorded: planPct(unit.audioCount, unit.totalCount),
+                  validated: planPct(unit.audioValidatedCount, unit.totalCount),
+                })}
+              />
             )}
           </div>
           <p className="text-[11.5px] text-muted-foreground" data-testid="plan-last-activity">

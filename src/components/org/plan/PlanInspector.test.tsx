@@ -91,7 +91,8 @@ describe("marking done", () => {
     // hidden, so a reader can judge it.
     renderInspector(unit({ doneAt: NOW, doneBy: "randall", validatedCount: 31 }))
     expect(screen.getByTestId("plan-done-provenance")).toBeInTheDocument()
-    expect(screen.getByText("31%")).toBeInTheDocument()
+    expect(screen.getByTestId("plan-inspector-bars").querySelector('[aria-label^="Text"]'))
+      .toHaveAttribute("aria-label", "Text 72% translated, 31% validated")
   })
 })
 
@@ -113,13 +114,17 @@ describe("target date", () => {
 describe("progress and navigation", () => {
   it("hides audio bars on a text-only project", () => {
     renderInspector(unit(), true, false)
-    expect(screen.queryByText("Audio recorded")).toBeNull()
-    expect(screen.getByText("Text translated")).toBeInTheDocument()
+    const bars = screen.getByTestId("plan-inspector-bars")
+    expect(bars.querySelector('[aria-label^="Audio"]')).toBeNull()
+    expect(bars.querySelector('[aria-label^="Text"]')).toHaveAttribute(
+      "aria-label", "Text 72% translated, 31% validated",
+    )
   })
 
   it("shows audio bars where audio exists", () => {
     renderInspector(unit({ audioCount: 40, audioValidatedCount: 10 }), true, true)
-    expect(screen.getByText("Audio recorded")).toBeInTheDocument()
+    expect(screen.getByTestId("plan-inspector-bars").querySelector('[aria-label^="Audio"]'))
+      .toHaveAttribute("aria-label", "Audio 40% recorded, 10% validated")
   })
 
   it("says plainly when a unit has never been touched", () => {

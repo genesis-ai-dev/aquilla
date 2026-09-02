@@ -105,6 +105,14 @@ export const STRING_REPLACEMENTS: Array<{ find: string | RegExp; replace: string
   { find: /tamil-alignment/g, replace: "example-alignment", note: "real project slug" },
   { find: /nagamese-pilgrims-progress/g, replace: "example-book", note: "real project slug" },
   { find: /hindi-pilgrims-progress/g, replace: "example-book-2", note: "real project slug" },
+  // Partner terms in shared files the module doesn't own (i18n catalogs, a test
+  // fixture, docs). Safe to genericize in the public tree now that the whole
+  // Biblica module + feature is excluded — these are orphaned/unused there.
+  { find: /Biblica(?!l)/g, replace: "Partner", note: "partner name (i18n/tests/docs)" },
+  { find: /Reach4Life/g, replace: "PartnerEd", note: "partner product name" },
+  { find: /reach4life/g, replace: "partnered", note: "partner product key" },
+  { find: /Reach 4 Life/g, replace: "Partner Edition", note: "partner product name" },
+  { find: /privacy@frontierrnd\.com/g, replace: "privacy@example.com", note: "privacy contact email" },
   // NOTE: no blanket "biblica" rewrite here — that would inconsistently mangle
   // the deferred-but-functional Biblica feature. Biblica is handled wholesale by
   // the seam refactor (see README "Pending: Biblica"); until then the FORBIDDEN

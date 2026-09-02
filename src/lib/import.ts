@@ -1244,8 +1244,8 @@ export const BIBLICA_NOTES_PROFILE_ID = "builtin:biblica-study-notes"
 export const TREASURE_HUNT_PROFILE_ID = "builtin:biblica-treasure-hunt"
 
 /**
- * Reach4Life is a third template again — a teenagers' workbook wrapped around
- * the NIrV, organized by lesson rather than by chapter.
+ * A third partner edition uses another template again — a workbook organized by
+ * lesson rather than by chapter.
  */
 export const REACH4LIFE_PROFILE_ID = "builtin:biblica-reach4life"
 

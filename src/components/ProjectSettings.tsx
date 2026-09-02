@@ -999,7 +999,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // closure in happy-dom — so exhaustive-deps is the only guard, and it is a
     // warning among hundreds. `timingLocked` had the same hole: the timing
     // LOCK, the one safeguard AQU-646 added, could silently fail to save.
-    cellEditingFloor, timingLocked,
+    // `allowTrackEditing` arrived with PR #474 carrying the same hole, and the
+    // merge that brought it here is where it became visible — dev's own
+    // handleSave list never named it either.
+    cellEditingFloor, timingLocked, allowTrackEditing,
     bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
     precedingTargetCells, importExcludeFrontMatter, getJwt, isCloudProject, t,
   ])

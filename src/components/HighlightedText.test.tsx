@@ -101,7 +101,7 @@ describe("HighlightedText zero-width and clamped ranges", () => {
     expect(range?.textContent).toBe(".")
   })
 
-  it("uses the shared blue highlight for terminology ranges", () => {
+  it("combines the blue term highlight with the severity blot", () => {
     const { container } = render(
       <HighlightedText
         text="managed term"
@@ -116,7 +116,11 @@ describe("HighlightedText zero-width and clamped ranges", () => {
 
     const range = container.querySelector('[data-rule-id="term:concept-1:approved"]')
     expect(range).toHaveClass("terminology-highlight")
-    expect(range).not.toHaveClass("underline", "decoration-wavy")
+    expect(range).toHaveClass(
+      "underline",
+      "decoration-wavy",
+      "decoration-red-500",
+    )
   })
 
   it("keeps severity underlines for non-terminology ranges", () => {

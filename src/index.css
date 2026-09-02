@@ -374,12 +374,8 @@ textarea,
   box-decoration-break: clone;
 }
 
-/* Terminology violations use the same highlight instead of stacking a
-   severity underline and a superscript marker on the managed-term cue. */
-.violation-blot-term {
-  text-decoration-line: none;
-}
-
+/* Keep the old superscript marker removed. The background marks a managed
+   term, while the existing severity underline marks a terminology violation. */
 .violation-blot-term::after {
   content: none;
 }

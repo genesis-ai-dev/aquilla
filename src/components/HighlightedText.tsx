@@ -93,10 +93,9 @@ export function HighlightedText({
               } : undefined}
               className={cn(
                 isTerminologyRange && "terminology-highlight",
-                isTerminologyRange && chunk.range.kind === "violation-waived" && "opacity-60",
-                !isTerminologyRange && chunk.range.kind === "violation-major" && "decoration-wavy decoration-red-500 underline underline-offset-[3px]",
-                !isTerminologyRange && chunk.range.kind === "violation-minor" && "decoration-wavy decoration-amber-500 underline underline-offset-[3px]",
-                !isTerminologyRange && chunk.range.kind === "violation-waived" && "decoration-wavy decoration-muted-foreground/60 underline underline-offset-[3px] opacity-60",
+                chunk.range.kind === "violation-major" && "decoration-wavy decoration-red-500 underline underline-offset-[3px]",
+                chunk.range.kind === "violation-minor" && "decoration-wavy decoration-amber-500 underline underline-offset-[3px]",
+                chunk.range.kind === "violation-waived" && "decoration-wavy decoration-muted-foreground/60 underline underline-offset-[3px] opacity-60",
               )}
               data-rule-id={chunk.range.ruleId}
             >

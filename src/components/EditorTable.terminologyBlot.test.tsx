@@ -204,6 +204,7 @@ describe("EditorTable — terminology advisory band removed (AQU-664)", () => {
     await screen.findByText("sample")
     const blot = document.querySelector('[data-rule-id="term:concept-1:approved"]')
     expect(blot).toHaveClass("terminology-highlight")
+    expect(blot).toHaveClass("underline", "decoration-wavy", "decoration-red-500")
     expect(document.querySelectorAll(".terminology-highlight").length).toBeGreaterThanOrEqual(2)
     expect(document.querySelector(".decoration-dotted")).toBeNull()
   })
@@ -314,7 +315,7 @@ describe("EditorTable — terminology advisory band removed (AQU-664)", () => {
       return element!
     })
     expect(blot).toHaveClass("terminology-highlight")
-    expect(blot).not.toHaveClass("underline", "decoration-wavy")
+    expect(blot).toHaveClass("underline", "decoration-wavy", "decoration-red-500")
     fireEvent.click(blot)
 
     await screen.findByRole("button", { name: /waive/i })

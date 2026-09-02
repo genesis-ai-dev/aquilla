@@ -1197,6 +1197,9 @@ export const editor = defineNamespace({
     "editor.source.editText": "Edit source text",
     "editor.source.doneEditing": "Done editing source",
     "editor.source.locked": "Source is locked",
+    "editor.source.addRowAbove": "Add a row above",
+    "editor.source.addRowBelow": "Add a row below",
+    "editor.source.addRowFailed": "Could not add the row — please try again",
     "editor.source.placeholder": "Source text…",
     "editor.source.formattingBadge": "formatting",
     "editor.source.idmlProtected":
@@ -4283,6 +4286,25 @@ export const editor = defineNamespace({
           "Screen-reader name of the padlock shown where the source pencil would " +
           "be when source text cannot be edited (for example the source is pinned " +
           "to an external repository). The tooltip beside it gives the reason.",
+      },
+      "editor.source.addRowAbove": {
+        description:
+          "Tooltip and screen-reader name of the '+' handle on the TOP edge of a " +
+          "row whose source text is open for editing. Pressing it inserts a new, " +
+          "empty row before this one — typically to write a section heading. " +
+          "Imperative.",
+        maxLength: 24,
+      },
+      "editor.source.addRowBelow": {
+        description:
+          "The same handle on the BOTTOM edge of the row; it inserts a new, empty " +
+          "row after this one. Imperative.",
+        maxLength: 24,
+      },
+      "editor.source.addRowFailed": {
+        description:
+          "Error toast shown when inserting a new row did not succeed and nothing " +
+          "was added. Invites the user to retry.",
       },
       "editor.source.placeholder": {
         description:

@@ -194,6 +194,7 @@ import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/ex
 import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 import { defaultFootnoteRef } from "@/lib/footnotes/refs"
 import { displayedSourceText, effectiveSourceText, projectedSourceValue, sourceCommitFields, sourceEditorSeed } from "@/lib/cell-text"
+import { claimSourceEdit } from "@/lib/editor/pending-source-edit"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { hasMeaningfulRichText } from "@/lib/richtext/editor-content"
@@ -2786,6 +2787,58 @@ function RowStructureCorner({
   )
 }
 
+/**
+ * AQU-888 — the two "+" handles a source cell shows while its pencil is open.
+ *
+ * Distinct from `RowStructureCorner` above, and the difference is what each one
+ * is asking. That one offers a stretch of FILM with no line on it, so it can be
+ * absent ("no room, no add") and has to name a time span. This one inserts into
+ * an anchor chain, where there is always room between two rows, so the only
+ * question is which side — hence a handle sitting on each boundary rather than
+ * one button with a menu.
+ *
+ * `onMouseDown` preventDefault is load-bearing: the source editor closes on
+ * blur, and without it the click that inserts the row would first tear down the
+ * editor that offered it, which reads as the button having done nothing.
+ */
+function SourceRowInsertHandles({
+  cellId,
+  onInsert,
+}: {
+  cellId: string
+  onInsert(cellId: string, position: "above" | "below"): void
+}) {
+  const t = useT()
+  // Half-visible at rest and full on row hover — the same rest state
+  // RowStructureCorner uses, so the two structural affordances read as one
+  // family. The row-level `.group` is the hover target (the pencil above rides
+  // the same selector); a wrapper of its own can't be, since anything covering
+  // the cell would have to swallow clicks meant for the editor.
+  const handle =
+    "absolute end-8 z-20 flex h-5 w-5 items-center justify-center rounded-md border border-border bg-background text-muted-foreground opacity-50 shadow-sm transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 [.group:hover_&]:opacity-100"
+  return (
+    <>
+      {(["above", "below"] as const).map((position) => (
+        <button
+          key={position}
+          type="button"
+          data-testid={`source-row-insert-${position}-${cellId}`}
+          title={position === "above" ? t("editor.source.addRowAbove") : t("editor.source.addRowBelow")}
+          aria-label={position === "above" ? t("editor.source.addRowAbove") : t("editor.source.addRowBelow")}
+          className={cn(handle, position === "above" ? "-top-2.5" : "-bottom-2.5")}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={(e) => {
+            e.stopPropagation()
+            onInsert(cellId, position)
+          }}
+        >
+          {position === "above" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />}
+        </button>
+      ))}
+    </>
+  )
+}
+
 interface CellStoreRowProps {
   cellId: string
   cellStore: CellStore
@@ -4112,6 +4165,7 @@ function EditorRow({
   const {
     onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording,
     onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, audioHomeFor, myScopes,
+    onInsertSourceRow,
   } = useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
   // Combine the role capability with the per-cell scope check so an out-of-scope
@@ -4180,7 +4234,10 @@ function EditorRow({
   // propagates to downstream linked projects. `sourceDraft` is a LOCAL optimistic
   // hold of the just-committed text (kept out of the target-only optimistic-shadow
   // machinery in useCells) shown until the projection round-trips.
-  const [sourceEditing, setSourceEditing] = useState(false)
+  // AQU-888: a row inserted from the "+" opens ready to type in. The claim is
+  // one-shot and read in the initializer, so it costs a mount rather than a
+  // render of every other row (see lib/editor/pending-source-edit.ts).
+  const [sourceEditing, setSourceEditing] = useState(() => claimSourceEdit(cell.id))
   const [sourceDraft, setSourceDraft] = useState<{ value: string; valueHtml: string } | null>(null)
   // AQU-646: a media cell's editable source text is its TRANSCRIPTION. The
   // stored value is the import FILENAME — an import record, not prose — so for
@@ -5876,6 +5933,17 @@ function EditorRow({
                 onTermApply={handleTermApply}
                 onToolbarMouseDown={handleToolbarMouseDown}
                 onToolbarMouseUp={handleToolbarMouseUp}
+              />
+            )}
+            {/* AQU-888: while the pencil is OPEN, the row grows a "+" at each
+                of its boundaries — the section-header affordance Biblica ETT
+                asked for. Scoped to edit mode deliberately: reading a file
+                should not be a field of insert buttons, and someone who has
+                opened the source lane is by definition authoring it. */}
+            {sourceEditing && canEditSourceForCell && onInsertSourceRow && (
+              <SourceRowInsertHandles
+                cellId={cell.id}
+                onInsert={onInsertSourceRow}
               />
             )}
             {/* Source-edit affordance (project_lead+, non-live projects). Emits

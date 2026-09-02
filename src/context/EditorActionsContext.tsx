@@ -99,6 +99,21 @@ export interface EditorActionsContextValue {
   audioHomeFor?: (
     cell: import("@/hooks/useCells").CellData,
   ) => readonly import("@/hooks/useCells").CellData[] | null
+  /**
+   * AQU-888: insert a blank row above or below `cellId` — the "+" the source
+   * cell grows while its pencil is open, which Biblica ETT uses to write a
+   * section header between two verses. Creates the source cell AND its paired
+   * target row, and the new row opens with its source editor focused.
+   *
+   * Undefined where row creation isn't permitted, which is what makes the "+"
+   * absent rather than disabled: the workspace resolves the same
+   * project_lead-or-`allowLineCreation` question the server enforces per event,
+   * so an offered "+" is one the server will honour.
+   *
+   * Context rather than a row prop: rows only forward it, and the workspace
+   * keeps it identity-stable through a ref.
+   */
+  onInsertSourceRow?: (cellId: string, position: "above" | "below") => void
 }
 
 const EditorActionsContext = createContext<EditorActionsContextValue>({})

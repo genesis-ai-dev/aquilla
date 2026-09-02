@@ -170,6 +170,7 @@ import { CueLinkDrawer } from "./timeline/CueLinkDrawer"
 import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
 import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
+import { requestSourceEdit } from "@/lib/editor/pending-source-edit"
 import { MIN_ADDABLE_SPAN_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import {
@@ -5969,6 +5970,150 @@ export function ProjectWorkspace() {
     return () => window.clearTimeout(t)
   }, [pendingNewCell])
 
+  /**
+   * AQU-888: add a row to a TEXT file from the "+" a source cell grows while
+   * its pencil is open — the section-header affordance Biblica ETT asked for
+   * (design settled on the 2026-08-12 call). Sibling of `handleAddLine` above,
+   * which is the same act on a timed file; the two differ in what they have to
+   * find room in. A timed file's insert has to name a stretch of silence, so it
+   * can be refused ("no room, no add"); an anchor chain always has room between
+   * two rows, so this one only has to be told which side.
+   *
+   * ONE batch of three events:
+   *   - `source.cell.create`, blank, anchored on the row that will precede it;
+   *   - `source.cell.reorder` re-pointing whatever used to follow that row onto
+   *     the new one — without it the successor stays anchored to the same
+   *     predecessor, walkAnchorChain buckets the two siblings under one anchor
+   *     and emits the lower event id (and its whole subtree — the rest of the
+   *     file) first, so the new row silently lands at the TAIL. Invisible on
+   *     screen, where display order is store order, until the file is exported;
+   *   - `target.cell.commit`, empty, which IS the paired target row the issue
+   *     asks for. Its `sourceEventId` pin is the reason the batch pre-generates
+   *     the create's id rather than reading it back.
+   *
+   * The new row opens ready to type through a short-lived claim
+   * (`requestSourceEdit`), collected by its own row as it mounts — see
+   * lib/editor/pending-source-edit.ts for why that isn't a prop.
+   */
+  const handleInsertSourceRow = useCallback(
+    async (anchorCellId: string, position: "above" | "below"): Promise<void> => {
+      if (!project?.id || !activeFileId) return
+      const cells = getActiveCells()
+      const index = cells.findIndex((c) => c.id === anchorCellId)
+      if (index < 0) return
+      // Both directions reduce to the same (predecessor, successor) pair.
+      const before = position === "above" ? (cells[index - 1] ?? null) : cells[index]
+      const after = position === "above" ? cells[index] : (cells[index + 1] ?? null)
+      const cellId = uuidv7()
+      const sourceEventId = uuidv7()
+      // Inserting at the HEAD leaves two rows claiming a null anchor; the old
+      // head has to be re-pointed at the new row so exactly one does.
+      const oldHead = before ? null : cellStore.getChainHeadCellId()
+      const successor = before && after ? after : null
+      try {
+        await enqueueEvents([
+          {
+            kind: "source.cell.create" as const,
+            id: sourceEventId,
+            projectId: project.id,
+            fileId: activeFileId,
+            cellId,
+            parentId: null,
+            author: currentUsername,
+            payload: {
+              cellId,
+              anchorCellId: before?.id ?? null,
+              value: "",
+              // Only where the file actually uses sequence numbers, and then
+              // fractionally, so the row lands between its neighbours without
+              // renumbering the rest. An untimed text file has none, and
+              // writing a bare 0 into one would invent an ordering key that
+              // disagrees with the anchor chain the file is really ordered by.
+              ...(before?.sequenceIndex != null || after?.sequenceIndex != null
+                ? { sequenceIndex: sequenceBetween(before?.sequenceIndex, after?.sequenceIndex) }
+                : {}),
+              // The one durable signal that a person made this row rather than
+              // an import — the same mark the timeline's added lines carry, so
+              // `isUserAddedLine` recognises both.
+              metadata: { aquillaOrigin: userLineOrigin() },
+            },
+          },
+          ...(oldHead
+            ? [
+                {
+                  kind: "source.cell.reorder" as const,
+                  projectId: project.id,
+                  fileId: activeFileId,
+                  cellId: oldHead.cellId,
+                  parentId: oldHead.eventId,
+                  author: currentUsername,
+                  payload: { anchorCellId: cellId },
+                },
+              ]
+            : []),
+          ...(successor?.sourceEventId
+            ? [
+                {
+                  kind: "source.cell.reorder" as const,
+                  projectId: project.id,
+                  fileId: activeFileId,
+                  cellId: successor.id,
+                  parentId: successor.sourceEventId,
+                  author: currentUsername,
+                  payload: { anchorCellId: cellId },
+                },
+              ]
+            : []),
+          {
+            kind: "target.cell.commit" as const,
+            projectId: project.id,
+            fileId: activeFileId,
+            cellId,
+            parentId: null,
+            author: currentUsername,
+            payload: {
+              value: "",
+              valueHtml: "",
+              sourceEventId,
+              ...(activeLane ? { targetLang: activeLane } : {}),
+            },
+          },
+        ])
+      } catch {
+        toast.add({ type: "error", title: t("editor.source.addRowFailed") })
+        return
+      }
+      // Claim BEFORE the row can mount: revalidate is what brings it into
+      // being, and the claim has to be waiting when it does.
+      requestSourceEdit(cellId)
+      pendingCellScrollRef.current = { cellId, flash: true }
+      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      await refreshOutboxPending()
+      revalidateCells()
+    },
+    [
+      project?.id, activeFileId, activeLane, currentUsername, getActiveCells, cellStore,
+      getTokenForProjectFile, refreshOutboxPending, revalidateCells, t,
+    ],
+  )
+
+  // Ref-wrapped for the same reason the cast handlers are: `editorActionsValue`
+  // must not churn on every store bump, or every row in the table re-renders to
+  // hand one row a callback it forwards without calling.
+  const handleInsertSourceRowRef = useRef(handleInsertSourceRow)
+  handleInsertSourceRowRef.current = handleInsertSourceRow
+  const handleInsertSourceRowStable = useCallback(
+    (cellId: string, position: "above" | "below") => {
+      void handleInsertSourceRowRef.current(cellId, position)
+    },
+    [],
+  )
+  // Row creation belongs to the text table; a file with footage has the
+  // timed insert strip instead (see the comment in `editorActionsValue`).
+  // FILE shape only — the role question is `canEditSource` in the row, which a
+  // read-only or git-imported project already answers false.
+  const canInsertSourceRows = !activeFile?.coreMediaUrl
+
   // FRO perf cleanup: the five openers above are pure pass-throughs through
   // EditorTable -> MemoizedRow -> EditorRow with no intermediate consumer, so
   // they've been moved off the row prop bag into EditorActionsContext. All
@@ -6002,7 +6147,15 @@ export function ProjectWorkspace() {
     onTakeSaved: handleTakeSaved, // AQU-646: a take gives a text-less line a target row
     audioHomeFor, // AQU-646 stage 3f: where this row's audio belongs
     myScopes, // AQU-633: per-cell validate scope gate
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes])
+    // AQU-888: the source cell's "+". Undefined — so the handles are ABSENT
+    // rather than disabled — wherever this file isn't the surface that owns
+    // row creation. A timed file's rows are inserted into stretches of film by
+    // the table's own insert strip (AQU-646), which has to answer "is there
+    // room", and two doors onto one act would drift; the ROLE half of the gate
+    // is `canEditSource` inside the row, since the "+" only exists while the
+    // source pencil is open and that pencil is already project_lead-and-above.
+    onInsertSourceRow: canInsertSourceRows ? handleInsertSourceRowStable : undefined,
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes, canInsertSourceRows, handleInsertSourceRowStable])
 
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return

@@ -4,15 +4,7 @@
  * Props:
  *   sourceTerm  — the source-side token the user is hovering / querying
  *   concepts    — the subscribed concept set to search (provided by caller)
- *   onApply     — called with a rendering string when the user clicks Apply
- *
- * The Apply affordance is shown only when onApply is provided AND the caller
- * signals that the target cell is focused with text selected (pass onApply
- * as undefined / undefined to make the popover read-only).
- *
- * SWARM-TODO: Editor-mount of this popover (wiring to EditorTable.tsx hover
- * events + target-cell focus/selection state) is owned by the glue agent.
- * This file is intentionally self-contained.
+ *   onViewConcept — opens the matching concept in Terminology
  */
 
 import { cn } from "@/lib/utils"
@@ -22,16 +14,22 @@ import type { Concept, TermRendering } from "@/lib/terminology/types"
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 
+function normalizeLookupTerm(value: string): string {
+  return value
+    .trim()
+    .toLocaleLowerCase()
+    .replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "")
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // Single rendering row within the popover
 // ────────────────────────────────────────────────────────────────────────────
 
 interface RenderingLineProps {
   rendering: TermRendering
-  onApply?: (rendering: string) => void
 }
 
-function RenderingLine({ rendering, onApply }: RenderingLineProps) {
+function RenderingLine({ rendering }: RenderingLineProps) {
   const t = useT()
   const isForbidden = rendering.status === "forbidden"
 
@@ -61,18 +59,6 @@ function RenderingLine({ rendering, onApply }: RenderingLineProps) {
       >
         {rendering.rendering}
       </span>
-
-      {/* Apply affordance — hidden for forbidden; only when onApply is provided */}
-      {!isForbidden && onApply && (
-        <Button
-          variant="outline"
-          size="xs"
-          aria-label={t("terminology.lookup.applyAria", { rendering: rendering.rendering })}
-          onClick={() => onApply(rendering.rendering)}
-        >
-          {t("terminology.lookup.applyButton")}
-        </Button>
-      )}
     </div>
   )
 }
@@ -83,10 +69,11 @@ function RenderingLine({ rendering, onApply }: RenderingLineProps) {
 
 interface ConceptPanelProps {
   concept: Concept
-  onApply?: (rendering: string) => void
+  onViewConcept?: (conceptId: string) => void
 }
 
-function ConceptPanel({ concept, onApply }: ConceptPanelProps) {
+function ConceptPanel({ concept, onViewConcept }: ConceptPanelProps) {
+  const t = useT()
   // Preferred first, admitted second, forbidden last
   const ordered = [...concept.renderings].sort((a, b) => {
     const rank: Record<string, number> = { preferred: 0, admitted: 1, forbidden: 2 }
@@ -103,7 +90,7 @@ function ConceptPanel({ concept, onApply }: ConceptPanelProps) {
       {/* Renderings list */}
       <div className="space-y-1.5">
         {ordered.map((r, i) => (
-          <RenderingLine key={i} rendering={r} onApply={onApply} />
+          <RenderingLine key={i} rendering={r} />
         ))}
       </div>
 
@@ -112,6 +99,19 @@ function ConceptPanel({ concept, onApply }: ConceptPanelProps) {
         <p className="text-xs text-muted-foreground border-t pt-2">
           {concept.notes}
         </p>
+      )}
+
+      {onViewConcept && (
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          className="w-full"
+          onClick={() => onViewConcept(concept.id)}
+        >
+          {t("terminology.livingMemory.goToTerminologyAria")}
+          <span className="sr-only"> {concept.sourceTerm}</span>
+        </Button>
       )}
     </div>
   )
@@ -126,14 +126,12 @@ export interface TermLookupPopoverProps {
   sourceTerm: string
   /** Full concept set to search (caller provides, from subscribed termbases). */
   concepts: Concept[]
-  /**
-   * When provided, Apply buttons appear on preferred/admitted renderings.
-   * Omit or pass undefined to make the popover strictly read-only (per spec:
-   * Apply is visible only when the target cell is focused with text selected).
-   */
-  onApply?: (rendering: string) => void
+  /** Opens a matching concept in the Terminology page. */
+  onViewConcept?: (conceptId: string) => void
   /** The trigger element — whatever the caller wraps. */
-  children: React.ReactNode
+  children: React.ReactElement
+  /** True when the trigger renders a native button instead of an inline element. */
+  triggerIsNativeButton?: boolean
   /**
    * AQU-204 — controlled mode. When `open` is provided the popover is
    * controlled by the caller (chip-click flow). `onOpenChange` is fired
@@ -148,8 +146,9 @@ export interface TermLookupPopoverProps {
 export function TermLookupPopover({
   sourceTerm,
   concepts,
-  onApply,
+  onViewConcept,
   children,
+  triggerIsNativeButton = false,
   open,
   onOpenChange,
   anchor,
@@ -157,11 +156,16 @@ export function TermLookupPopover({
   const t = useT()
   const isControlled = open !== undefined
 
-  // Find matching active concepts (case-insensitive substring match on sourceTerm)
+  // The highlighted token keeps its visible punctuation, but punctuation at
+  // either edge does not belong to the terminology entry's source term.
+  const normalizedSourceTerm = normalizeLookupTerm(sourceTerm)
   const matches = concepts.filter(
-    (c) =>
-      c.status === "active" &&
-      c.sourceTerm.toLowerCase().includes(sourceTerm.toLowerCase()),
+    (concept) => {
+      if (concept.status !== "active" || !normalizedSourceTerm) return false
+      const normalizedConceptTerm = normalizeLookupTerm(concept.sourceTerm)
+      return normalizedConceptTerm.includes(normalizedSourceTerm) ||
+        normalizedSourceTerm.includes(normalizedConceptTerm)
+    },
   )
 
   // No matches → just render trigger with no popover decoration
@@ -181,7 +185,11 @@ export function TermLookupPopover({
         aria-label={t("terminology.lookup.tooltipAria", { term: sourceTerm })}
       >
         {matches.map((concept) => (
-          <ConceptPanel key={concept.id} concept={concept} onApply={onApply} />
+          <ConceptPanel
+            key={concept.id}
+            concept={concept}
+            onViewConcept={onViewConcept}
+          />
         ))}
       </div>
     </PopoverContent>
@@ -198,7 +206,10 @@ export function TermLookupPopover({
 
   return (
     <Popover>
-      <PopoverTrigger render={<span />} nativeButton={false}>{children}</PopoverTrigger>
+      <PopoverTrigger
+        nativeButton={triggerIsNativeButton}
+        render={children}
+      />
       {content}
     </Popover>
   )

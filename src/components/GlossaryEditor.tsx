@@ -87,8 +87,8 @@ export function GlossaryEditor({
 }: GlossaryEditorProps = {}) {
   const t = useT()
   const { id } = useParams<{ id: string }>()
-  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const ownedProject = useProject(id!, {
     initialProject: workspaceProject,
     enabled: workspaceProject == null,
@@ -157,7 +157,7 @@ export function GlossaryEditor({
 
   const [showArchived, setShowArchived] = useState(false)
   const [view, setView] = useState<"glossary" | "violations">("glossary")
-  const [selectedConceptId, setSelectedConceptId] = useState<string | null>(null)
+  const selectedConceptId = searchParams.get("concept")
   const [suggestRequested, setSuggestRequested] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [newSource, setNewSource] = useState("")
@@ -336,8 +336,24 @@ export function GlossaryEditor({
 
   const handleOpenDetails = useCallback((conceptId: string) => {
     setCellDataRequested(true)
-    setSelectedConceptId(conceptId)
-  }, [])
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      next.set("concept", conceptId)
+      return next
+    })
+  }, [setSearchParams])
+
+  const handleCloseDetails = useCallback(() => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      next.delete("concept")
+      return next
+    })
+  }, [setSearchParams])
+
+  useEffect(() => {
+    if (selectedConcept) setCellDataRequested(true)
+  }, [selectedConcept])
 
   useEffect(() => {
     const fromUrl = searchParams.get("concept")
@@ -393,7 +409,7 @@ export function GlossaryEditor({
         canEdit={!hasOrigin || (project?.syncRole?.level ?? 0) >= 400}
         projectId={id!}
         username={frontierSession?.username ?? project?.username ?? "local"}
-        onClose={() => setSelectedConceptId(null)}
+        onClose={handleCloseDetails}
         onCellCommitted={() => {}}
         onOptimisticEdit={(cellId, patch) => {
           setOptimisticTargets((current) => ({ ...current, [cellId]: patch }))

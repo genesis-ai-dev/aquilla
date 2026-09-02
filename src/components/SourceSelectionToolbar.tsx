@@ -17,7 +17,7 @@ export interface SourceSelectionToolbarProps {
   onAddToTermbase?: (draft: ConceptDraft) => void | Promise<void>
   addConceptBlockedReason?: string | null
   onAddOpenChange?: (open: boolean) => void
-  onTermApply: (rendering: string) => void
+  onViewConcept?: (conceptId: string) => void
   /** AQU-260: called on mousedown so the parent suppresses selectionchange clearing. */
   onToolbarMouseDown?: () => void
   /** AQU-260: called on mouseup/mouseleave so the parent resets the guard. */
@@ -31,7 +31,7 @@ export function SourceSelectionToolbar({
   onAddToTermbase,
   addConceptBlockedReason,
   onAddOpenChange,
-  onTermApply,
+  onViewConcept,
   onToolbarMouseDown,
   onToolbarMouseUp,
 }: SourceSelectionToolbarProps) {
@@ -55,7 +55,7 @@ export function SourceSelectionToolbar({
 
   return (
     <div
-      className="absolute right-1 top-0 z-10 flex items-center gap-0.5 rounded-md bg-card p-1"
+      className="absolute right-1 top-0 z-20 flex items-center gap-0.5 rounded-md bg-card p-1"
       dir="ltr"
       onMouseUp={(e) => {
         e.stopPropagation()
@@ -64,7 +64,12 @@ export function SourceSelectionToolbar({
       onMouseLeave={onToolbarMouseUp}
     >
       {hasMatch && (
-        <TermLookupPopover sourceTerm={sourceSelection} concepts={activeConcepts} onApply={onTermApply}>
+        <TermLookupPopover
+          sourceTerm={sourceSelection}
+          concepts={activeConcepts}
+          onViewConcept={onViewConcept}
+          triggerIsNativeButton
+        >
           <Button type="button" size="xs" variant="ghost" onMouseDown={handleButtonMouseDown}>
             <BookOpen className="size-3" aria-hidden />
             {t("workspace.sourceSelection.viewTerm")}

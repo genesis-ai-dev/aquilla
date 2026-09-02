@@ -308,6 +308,7 @@ export function AgentContextPane({
                           tabIndex={canEditCell ? 0 : undefined}
                           editable={canEditCell}
                           empty={!text}
+                          preserveWhitespace={Boolean(cell.idmlConfiguration)}
                           onClick={() => canEditCell && setEditingCellId(cell.cellId)}
                           onKeyDown={(event) => {
                             if (!canEditCell || event.key !== "Enter") return

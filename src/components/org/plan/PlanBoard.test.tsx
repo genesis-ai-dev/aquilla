@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { PlanBoard } from "./PlanBoard"
 import type { PlanUnit } from "@/lib/plan/plan-status"
@@ -17,7 +17,7 @@ function unit(over: Partial<PlanUnit> = {}): PlanUnit {
 
 function renderBoard(units: PlanUnit[], selectedId: string | null = null) {
   const onSelect = vi.fn()
-  render(<PlanBoard units={units} now={NOW} selectedId={selectedId} onSelect={onSelect} />)
+  render(<PlanBoard units={units} now={NOW} projectId="p1" selectedId={selectedId} onSelect={onSelect} />)
   return { onSelect }
 }
 
@@ -55,7 +55,9 @@ describe("grouping", () => {
       unit({ fileId: "late", fileName: "Later", targetDate: "2026-12-01", filledCount: 1 }),
       unit({ fileId: "soonish", fileName: "Sooner", targetDate: "2026-10-01", filledCount: 1 }),
     ])
-    const rows = within(screen.getByTestId("plan-group-in_progress")).getAllByRole("button")
+    // Rows specifically — the group header is itself a button now (it folds),
+    // so a bare getAllByRole("button") would hand back the header first.
+    const rows = within(screen.getByTestId("plan-group-in_progress")).getAllByTestId(/^plan-row-/)
     expect(rows[0]).toHaveTextContent("Sooner")
   })
 })
@@ -199,5 +201,170 @@ describe("the row note versus the inspector note", () => {
       unit({ fileId: "b", fileName: "Exodus", filledCount: 40, targetDate: "2026-08-10" }),
     ])
     expect(screen.getByTestId("plan-row-b-")).toHaveTextContent("23 days late")
+  })
+})
+
+// ── AQU-1096: the list controls ──────────────────────────────────────────────
+
+const BOOKS = [
+  unit({ fileId: "b", sectionKey: "GEN", fileName: "Bible.usfm", filledCount: 40 }),
+  unit({ fileId: "b", sectionKey: "EXO", fileName: "Bible.usfm", filledCount: 40, targetDate: "2026-08-10" }),
+  unit({ fileId: "b", sectionKey: "LEV", fileName: "Bible.usfm", doneAt: NOW, doneBy: "randall" }),
+]
+const rowCount = () => screen.queryAllByTestId(/^plan-row-/).length
+
+beforeEach(() => localStorage.clear())
+
+describe("filtering by name", () => {
+  it("narrows to the matching unit and drops the groups it emptied", () => {
+    renderBoard(BOOKS)
+    expect(rowCount()).toBe(3)
+    fireEvent.change(screen.getByTestId("plan-filter"), { target: { value: "genesis" } })
+    expect(rowCount()).toBe(1)
+    expect(screen.getByTestId("plan-row-b-GEN")).toBeInTheDocument()
+    expect(screen.queryByTestId("plan-group-done")).toBeNull()
+  })
+
+  it("matches the book code too", () => {
+    renderBoard(BOOKS)
+    fireEvent.change(screen.getByTestId("plan-filter"), { target: { value: "exo" } })
+    expect(screen.getByTestId("plan-row-b-EXO")).toBeInTheDocument()
+    expect(rowCount()).toBe(1)
+  })
+
+  it("restores every row when cleared", () => {
+    renderBoard(BOOKS)
+    fireEvent.change(screen.getByTestId("plan-filter"), { target: { value: "genesis" } })
+    fireEvent.click(screen.getByTestId("plan-filter-clear"))
+    expect(rowCount()).toBe(3)
+    expect(screen.queryByTestId("plan-filter-clear")).toBeNull()
+  })
+
+  it("shows the filter-miss state, NOT the nothing-to-plan-yet one", () => {
+    // Two different problems with two different ways out: one is answered by
+    // clearing a filter, the other by importing a source.
+    renderBoard(BOOKS)
+    fireEvent.change(screen.getByTestId("plan-filter"), { target: { value: "zzz" } })
+    expect(screen.getByTestId("plan-no-match")).toBeInTheDocument()
+    expect(screen.queryByTestId("plan-empty")).toBeNull()
+    fireEvent.click(screen.getByTestId("plan-clear-filters"))
+    expect(rowCount()).toBe(3)
+  })
+
+  it("KEEPS THE SUMMARY PROJECT-WIDE while filtered", () => {
+    // The load-bearing invariant. "1 of 1 done" under a filter that hid the
+    // other two would be a lie, and the strip is the one thing on this card a
+    // reader trusts without checking.
+    renderBoard(BOOKS)
+    fireEvent.change(screen.getByTestId("plan-filter"), { target: { value: "genesis" } })
+    expect(screen.getByTestId("plan-summary")).toHaveTextContent("1 of 3 done")
+    expect(screen.getByTestId("plan-filter-note")).toHaveTextContent("Showing 1 of 3.")
+  })
+})
+
+describe("needs a date", () => {
+  it("shows only units nobody has dated, and never a finished one", () => {
+    renderBoard(BOOKS)
+    fireEvent.click(screen.getByTestId("plan-needs-date"))
+    // GEN has no date; EXO has one; LEV is done, so it needs no date.
+    expect(screen.getByTestId("plan-row-b-GEN")).toBeInTheDocument()
+    expect(rowCount()).toBe(1)
+    expect(screen.getByTestId("plan-needs-date")).toHaveAttribute("aria-pressed", "true")
+  })
+
+  it("toggles back off", () => {
+    renderBoard(BOOKS)
+    fireEvent.click(screen.getByTestId("plan-needs-date"))
+    fireEvent.click(screen.getByTestId("plan-needs-date"))
+    expect(rowCount()).toBe(3)
+  })
+})
+
+describe("the Status / Order arrangement", () => {
+  it("drops the group headers and puts a status pill on every row", () => {
+    renderBoard(BOOKS)
+    expect(screen.queryByTestId("plan-order-list")).toBeNull()
+    fireEvent.click(screen.getByTestId("plan-view-order"))
+    expect(screen.getByTestId("plan-order-list")).toBeInTheDocument()
+    expect(screen.queryByTestId("plan-group-done")).toBeNull()
+    // Every row now carries its own status, since no header does.
+    expect(screen.getAllByTestId(/^plan-status-/).length).toBe(3)
+    expect(rowCount()).toBe(3)
+  })
+
+  it("keeps the order the server sent, which is canonical", () => {
+    renderBoard(BOOKS)
+    fireEvent.click(screen.getByTestId("plan-view-order"))
+    const rows = within(screen.getByTestId("plan-order-list")).getAllByTestId(/^plan-row-/)
+    expect(rows.map((r) => r.getAttribute("data-testid"))).toEqual([
+      "plan-row-b-GEN", "plan-row-b-EXO", "plan-row-b-LEV",
+    ])
+  })
+
+  it("persists globally, so it survives a remount", () => {
+    const { unmount } = render(
+      <PlanBoard units={BOOKS} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()} />,
+    )
+    fireEvent.click(screen.getByTestId("plan-view-order"))
+    unmount()
+    render(<PlanBoard units={BOOKS} now={NOW} projectId="OTHER" selectedId={null} onSelect={vi.fn()} />)
+    expect(screen.getByTestId("plan-order-list")).toBeInTheDocument()
+  })
+})
+
+describe("folding a group away", () => {
+  it("hides its rows but keeps its header and count", () => {
+    renderBoard(BOOKS)
+    expect(rowCount()).toBe(3)
+    fireEvent.click(screen.getByTestId("plan-fold-done"))
+    expect(rowCount()).toBe(2)
+    expect(screen.getByTestId("plan-group-done")).toHaveTextContent("Done")
+    expect(screen.getByTestId("plan-fold-done")).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("leaves the summary alone — a fold hides rows, it does not change facts", () => {
+    renderBoard(BOOKS)
+    fireEvent.click(screen.getByTestId("plan-fold-done"))
+    expect(screen.getByTestId("plan-summary")).toHaveTextContent("1 of 3 done")
+  })
+
+  it("is scoped to the project, so another project's folds are its own", () => {
+    const { unmount } = render(
+      <PlanBoard units={BOOKS} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()} />,
+    )
+    fireEvent.click(screen.getByTestId("plan-fold-done"))
+    expect(rowCount()).toBe(2)
+    unmount()
+    render(<PlanBoard units={BOOKS} now={NOW} projectId="p2" selectedId={null} onSelect={vi.fn()} />)
+    expect(rowCount()).toBe(3)
+  })
+})
+
+describe("arrow keys walk only what is on screen", () => {
+  const region = () => screen.getByRole("region", { name: /Planning units/ })
+
+  it("skips a row the filter hid", () => {
+    const { onSelect } = renderBoard(BOOKS)
+    fireEvent.change(screen.getByTestId("plan-filter"), { target: { value: "genesis" } })
+    fireEvent.keyDown(region(), { key: "ArrowDown" })
+    // Only Genesis is visible, so stepping cannot land on Exodus or Leviticus.
+    expect(onSelect).toHaveBeenCalledWith("b:GEN")
+  })
+
+  it("clamps at the last VISIBLE row rather than stepping into a fold", () => {
+    // Visible order is Overdue (Exodus) then In progress (Genesis) then Done
+    // (Leviticus). Fold Done and Genesis becomes the last row on screen, so
+    // ArrowDown from it must stay put instead of moving the inspector to
+    // Leviticus, which nobody can see.
+    const onSelect = vi.fn()
+    render(
+      <PlanBoard units={BOOKS} now={NOW} projectId="p1" selectedId="b:GEN" onSelect={onSelect} />,
+    )
+    fireEvent.keyDown(region(), { key: "ArrowDown" })
+    expect(onSelect).toHaveBeenLastCalledWith("b:LEV")  // unfolded: steps into Done
+
+    fireEvent.click(screen.getByTestId("plan-fold-done"))
+    fireEvent.keyDown(region(), { key: "ArrowDown" })
+    expect(onSelect).toHaveBeenLastCalledWith("b:GEN")  // folded: clamps
   })
 })

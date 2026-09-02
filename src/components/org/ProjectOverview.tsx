@@ -1360,6 +1360,7 @@ export function ProjectOverview() {
               <PlanBoard
                 units={planUnits}
                 now={tableNow}
+                projectId={id ?? null}
                 selectedId={selectedPlanUnitId}
                 onSelect={setSelectedPlanUnitId}
                 emptyAction={

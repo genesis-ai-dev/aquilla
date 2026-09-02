@@ -14,13 +14,20 @@ import { useT, useI18n } from "@/lib/i18n/I18nProvider"
 import { fmtDeadlineDate } from "@/lib/format-date"
 import { planPct, planUnitLabel, planUnitStatus, type PlanUnit } from "@/lib/plan/plan-status"
 import { PlanBar } from "./PlanBar"
+import { PlanStatusPill } from "./PlanStatusPill"
 import { usePlanRowNote } from "./use-plan-note"
 
-export function PlanRow({ unit, now, selected, showAudio, onSelect }: {
+export function PlanRow({ unit, now, selected, showAudio, showStatus = false, onSelect }: {
   unit: PlanUnit
   now: number
   selected: boolean
   showAudio: boolean
+  /**
+   * Order mode only. With no group header above it the row has to say its own
+   * status, and it says it beside the name rather than in a fourth column, so
+   * the grid is identical in both arrangements.
+   */
+  showStatus?: boolean
   onSelect: () => void
 }) {
   const t = useT()
@@ -45,8 +52,11 @@ export function PlanRow({ unit, now, selected, showAudio, onSelect }: {
         }`}
       >
         <span className="flex min-w-0 flex-col gap-0.5">
-          <span className="truncate text-[13.5px] font-semibold text-foreground">
-            {planUnitLabel(unit)}
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-[13.5px] font-semibold text-foreground">
+              {planUnitLabel(unit)}
+            </span>
+            {showStatus && <PlanStatusPill status={status} now={now} compact />}
           </span>
           <span className="text-[11.5px] tabular-nums text-muted-foreground">
             {t("org.projectOverview.plan.cellCount", { count: unit.totalCount })}

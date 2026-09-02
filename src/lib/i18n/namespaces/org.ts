@@ -1148,6 +1148,18 @@ export const org = defineNamespace({
     "org.projectOverview.plan.markedOn": "marked {date}",
     "org.projectOverview.plan.daysUntil": plural({ one: "in {count} day", other: "in {count} days" }),
     "org.projectOverview.plan.noTargetDate": "no target date",
+    // AQU-1096: the list controls. Neutral throughout — the orphaned
+    // filterFiles* keys say "files", which this surface never does.
+    "org.projectOverview.plan.filterPlaceholder": "Filter by name\u2026",
+    "org.projectOverview.plan.filterAria": "Filter the plan by name",
+    "org.projectOverview.plan.clearFilter": "Clear filter",
+    "org.projectOverview.plan.noMatchTitle": "Nothing matches",
+    "org.projectOverview.plan.noMatch": "No unit matches the filters you have set. Clear them to see the whole plan again.",
+    "org.projectOverview.plan.showingCount": "Showing {shown} of {total}.",
+    "org.projectOverview.plan.viewStatus": "Status",
+    "org.projectOverview.plan.viewOrder": "Order",
+    "org.projectOverview.plan.needsDate": "Needs a date",
+    "org.projectOverview.plan.needsDateTooltip": "Show only the units nobody has given a target date yet.",
     "org.projectOverview.plan.chapters": "Chapters",
     "org.projectOverview.plan.sections": "Sections",
     "org.projectOverview.plan.chapterCount": plural({ one: "{count} chapter", other: "{count} chapters" }),
@@ -2310,6 +2322,38 @@ export const org = defineNamespace({
       },
       "org.projectOverview.plan.noTargetDate": {
         description: "Note beside a started unit that nobody has given a target date.",
+      },
+      "org.projectOverview.plan.filterPlaceholder": {
+        description:
+          "Placeholder in the plan's filter box. Ends in an ellipsis; the matching aria-label does not. Matches a unit's displayed name and its book code.",
+        maxLength: 24,
+      },
+      "org.projectOverview.plan.filterAria": {
+        description:
+          "Accessible name for the plan's filter box. Says what typing here does; unlike the visible placeholder it must NOT end in an ellipsis.",
+      },
+      "org.projectOverview.plan.showingCount": {
+        description:
+          "Footer line under a filtered plan, saying how much of it is on screen. The summary pills above always count the WHOLE project, so this is the only place the filtered figure appears.",
+        placeholders: {
+          shown: "Units passing the filter \u2014 a number.",
+          total: "Units in the project \u2014 a number.",
+        },
+      },
+      "org.projectOverview.plan.viewStatus": {
+        description:
+          "Button that arranges the plan grouped by status (the default). Paired with 'Order'.",
+        maxLength: 12,
+      },
+      "org.projectOverview.plan.viewOrder": {
+        description:
+          "Button that arranges the plan as one flat list in canonical order \u2014 Bible book order, or file order. Paired with 'Status'.",
+        maxLength: 12,
+      },
+      "org.projectOverview.plan.needsDate": {
+        description:
+          "Toggle that narrows the plan to units with no target date and no Done mark \u2014 a planner's to-do list.",
+        maxLength: 16,
       },
       "org.projectOverview.plan.chapters": {
         description: "Inspector heading over the per-chapter breakdown of a Bible book.",

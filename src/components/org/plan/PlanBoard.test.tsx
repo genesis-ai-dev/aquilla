@@ -77,15 +77,53 @@ describe("summary", () => {
   })
 })
 
+describe("the date column", () => {
+  it("shows a unit's target date, which is the reason the board exists", () => {
+    renderBoard([unit({ targetDate: "2026-11-01", filledCount: 5 })])
+    // Uses the app's own deadline formatting, which drops the year in-year.
+    expect(screen.getByTestId("plan-date-f1-")).toHaveTextContent("November 1")
+  })
+
+  it("shows a dash when nothing is planned yet", () => {
+    renderBoard([unit({ filledCount: 5 })])
+    expect(screen.getByTestId("plan-date-f1-")).toHaveTextContent("—")
+  })
+
+  it("says how late an overdue unit is", () => {
+    // The date alone does not answer "how bad is this".
+    renderBoard([unit({ targetDate: "2026-08-01" })])
+    expect(screen.getByText(/days late/)).toBeInTheDocument()
+  })
+
+  it("says when a done unit was marked, rather than how stale it is", () => {
+    renderBoard([unit({ doneAt: Date.parse("2026-08-20T00:00:00Z"), doneBy: "r" })])
+    // Scoped to the row: the Done group header also contains the word "marked".
+    const row = screen.getByTestId("plan-row-f1-")
+    expect(within(row).getByText(/^marked /)).toBeInTheDocument()
+  })
+
+  it("does not repeat the group's status on every row", () => {
+    // The group header already says it; thirty-one identical chips are noise.
+    renderBoard([unit({ filledCount: 5 }), unit({ fileId: "b", filledCount: 5 })])
+    const rows = screen.getAllByTestId(/^plan-row-f1-|^plan-row-b-/)
+    for (const r of rows) expect(r.textContent).not.toMatch(/In progress/)
+    expect(within(screen.getByTestId("plan-group-in_progress")).getByText("In progress")).toBeInTheDocument()
+  })
+})
+
 describe("audio columns", () => {
   it("hides audio bars entirely on a text-only project", () => {
     renderBoard([unit({ filledCount: 50 })])
     expect(screen.queryByLabelText(/^Audio/)).toBeNull()
+    expect(screen.queryByText("AUD")).toBeNull()
   })
 
   it("shows them as soon as one unit has a recording", () => {
     renderBoard([unit({ filledCount: 50, audioCount: 20, audioValidatedCount: 5 })])
     expect(screen.getByLabelText(/^Audio/)).toBeInTheDocument()
+    // Labelled, so "20/5%" is not a riddle.
+    expect(screen.getByText("AUD")).toBeInTheDocument()
+    expect(screen.getByText("TXT")).toBeInTheDocument()
   })
 })
 

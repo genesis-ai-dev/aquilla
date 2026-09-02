@@ -1140,6 +1140,11 @@ export const org = defineNamespace({
     "org.projectOverview.plan.lastActivity": "Last activity {date}.",
     "org.projectOverview.plan.noActivity": "No activity yet.",
     "org.projectOverview.plan.resizeInspector": "Resize the details panel",
+    "org.projectOverview.plan.textBarLabel": "TXT",
+    "org.projectOverview.plan.audioBarLabel": "AUD",
+    "org.projectOverview.plan.noTargetShort": "\u2014",
+    "org.projectOverview.plan.daysLate": plural({ one: "{count} day late", other: "{count} days late" }),
+    "org.projectOverview.plan.markedOn": "marked {date}",
 
     // -- TeamDetail: single team's page. Most call-site strings here reuse
     // existing org.teamDetail.* / org.teamForm.* / common.* keys already
@@ -2244,6 +2249,34 @@ export const org = defineNamespace({
       "org.projectOverview.plan.noActivity": {
         description: "Shown when a unit has never been edited.",
         maxLength: 24,
+      },
+      "org.projectOverview.plan.textBarLabel": {
+        description:
+          "Three-letter label beside a plan row's text-progress bars. Abbreviated because it " +
+          "repeats on every row; keep it very short.",
+        maxLength: 4,
+      },
+      "org.projectOverview.plan.audioBarLabel": {
+        description:
+          "Three-letter label beside a plan row's audio-progress bars. Abbreviated because it " +
+          "repeats on every row; keep it very short.",
+        maxLength: 4,
+      },
+      "org.projectOverview.plan.noTargetShort": {
+        description:
+          "Placeholder in a plan row's date column when the unit has no target date. An em " +
+          "dash; translate only if the language uses a different absent-value mark.",
+        maxLength: 3,
+      },
+      "org.projectOverview.plan.daysLate": {
+        description:
+          "Under an overdue unit's target date: how far past it the unit is, counted from the " +
+          "end of the target day everywhere on Earth.",
+        placeholders: { count: "Whole days late — a number." },
+      },
+      "org.projectOverview.plan.markedOn": {
+        description: "Under a finished unit's date: when a manager marked it done.",
+        placeholders: { date: "A short calendar date, already formatted." },
       },
       "org.memberActivityPanel.fileRollupSummary": {
         description:

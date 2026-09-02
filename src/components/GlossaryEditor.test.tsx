@@ -55,9 +55,12 @@ beforeEach(() => {
   } as unknown as ProjectRecord
 })
 
-function renderEditor(props: React.ComponentProps<typeof GlossaryEditor> = {}) {
+function renderEditor(
+  props: React.ComponentProps<typeof GlossaryEditor> = {},
+  initialEntry = "/project/p1/terminology",
+) {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <GlossaryEditor {...props} />
     </MemoryRouter>,
   )
@@ -79,6 +82,15 @@ describe("GlossaryEditor", () => {
     renderEditor()
     expect(screen.getByText("grace")).toBeInTheDocument()
     expect(screen.getByText("favor")).toBeInTheDocument()
+  })
+
+  it("opens the concept named by the terminology deep link", async () => {
+    renderEditor({}, "/project/p1/terminology?concept=c1")
+
+    expect(
+      await screen.findByRole("button", { name: /close detail/i }),
+    ).toBeInTheDocument()
+    expect(screen.getByText("grace")).toBeInTheDocument()
   })
 
   it("renders the workspace-owned glossary immediately without a duplicate project resolve", () => {

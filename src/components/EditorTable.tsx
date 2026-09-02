@@ -3422,7 +3422,7 @@ interface SourceWithTermLookupProps {
   showEvidence: boolean
   onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
   concepts: Concept[]
-  onTermApply: (rendering: string) => void
+  onViewConcept?: (conceptId: string) => void
   /** Render as an inline span (used per-segment by UsfmSourceText). */
   inline?: boolean
   /** When true, note chips stay markers because detail is shown in a panel. */
@@ -3437,7 +3437,7 @@ function SourceWithTermLookup({
   showEvidence,
   onRangeClick,
   concepts,
-  onTermApply,
+  onViewConcept,
   inline = false,
 }: SourceWithTermLookupProps) {
   // All hooks must run unconditionally before any early return.
@@ -3502,7 +3502,7 @@ function SourceWithTermLookup({
           key={`term-${i}`}
           sourceTerm={word}
           concepts={activeConcepts}
-          onApply={onTermApply}
+          onViewConcept={onViewConcept}
         >
           <span className="underline decoration-dotted decoration-primary/60 underline-offset-2 hover:decoration-primary">
             {word}
@@ -4157,7 +4157,8 @@ function EditorRow({
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
   const {
-    onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording,
+    onInfractionClick, onOpenComments, onOpenHistory, onOpenTerminologyConcept,
+    onAiSetupNeeded, onOpenRecording,
     onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, audioHomeFor, myScopes,
   } = useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
@@ -4202,11 +4203,6 @@ function EditorRow({
   const examplesExpanded = false
   // FRO-204: chip click state for TermLookupPopover on target editor chips.
   const [termChipState, setTermChipState] = useState<{ term: string; anchor: HTMLElement } | null>(null)
-  // Track whether the target editor has a non-empty text selection when a chip is clicked.
-  const targetHasSelectionRef = useRef(false)
-  // The exact selected target text captured at chip-click time, so Apply can
-  // REPLACE that selection (spec 2c) rather than append. Cleared when no selection.
-  const targetSelectionTextRef = useRef("")
   // Add-from-selection (Slice 5): the source-side text the user has selected,
   // surfaced as an "Add to termbase" affordance. Null when nothing selected.
   const [sourceSelection, setSourceSelection] = useState<string | null>(null)
@@ -4776,26 +4772,6 @@ function EditorRow({
     return () => window.cancelAnimationFrame(frame)
   }, [sourceEditing])
 
-  // Terminology apply (spec 2c): REPLACE the active target selection with the
-  // chosen rendering. The Apply affordance is only surfaced when there was a
-  // non-empty selection at chip-click time (see handleTermChipClick), and the
-  // selected text is captured in targetSelectionTextRef. We replace the first
-  // occurrence of that selected text in the current target plain text. When
-  // there is no selection (defensive fallback), we append so the translator
-  // can still chain multiple terms. Uses the same commit path as keyboard edits.
-  const handleTermApply = useCallback((rendering: string) => {
-    const existing = visibleTranslated ?? ""
-    const selected = targetSelectionTextRef.current
-    let next: string
-    if (selected && existing.includes(selected)) {
-      next = existing.replace(selected, rendering)
-    } else {
-      const trimmed = existing.trim()
-      next = trimmed ? `${trimmed} ${rendering}` : rendering
-    }
-    handleEditorCommit({ value: next, valueHtml: next })
-  }, [visibleTranslated, handleEditorCommit])
-
   const captureFootnoteAnchor = useCallback(() => {
     pendingFootnoteAnchorRef.current = translatedEditorRef.current?.getFootnoteInsertionAnchor() ?? null
   }, [])
@@ -4943,14 +4919,8 @@ function EditorRow({
     return () => document.removeEventListener("selectionchange", handleSelectionChange)
   }, [sourceSelection, showAddConceptDialog])
 
-  // FRO-204: Chip click handler for terminology chips in the target (TranslatedEditor).
-  // Records whether the target editor had a non-empty text selection at click time
-  // so we can conditionally surface the Apply affordance in the popover.
+  // FRO-204: Chip click handler for terminology chips in the target.
   const handleTermChipClick = useCallback((term: string, anchor: HTMLElement) => {
-    const sel = window.getSelection()
-    const selText = sel && !sel.isCollapsed ? sel.toString() : ""
-    targetHasSelectionRef.current = selText.trim().length > 0
-    targetSelectionTextRef.current = selText
     setTermChipState({ term, anchor })
   }, [])
 
@@ -5920,7 +5890,7 @@ function EditorRow({
                 concepts={terminologyConcepts}
                 onAskAi={handleAskAiFromSelection}
                 onAddToTermbase={onAddConceptFromSelection ? handleAddSelectionToTermbase : undefined}
-                onTermApply={handleTermApply}
+                onViewConcept={onOpenTerminologyConcept}
                 onToolbarMouseDown={handleToolbarMouseDown}
                 onToolbarMouseUp={handleToolbarMouseUp}
               />
@@ -6036,7 +6006,7 @@ function EditorRow({
                 showEvidence={examplesExpanded}
                 onRangeClick={openInlineRule}
                 concepts={terminologyConcepts}
-                onTermApply={handleTermApply}
+                onViewConcept={onOpenTerminologyConcept}
                 footnotePanelActive={footnotePanelActive}
                 footnoteNumberOffset={sourceFootnoteNumberOffset}
               />
@@ -6241,30 +6211,22 @@ function EditorRow({
                   </EditorTargetReadSurface>
                 )}
               {/* FRO-204: Terminology chip popover — controlled via termChipState.
-                  Anchored to the chip DOM element that was clicked. Apply is
-                  offered only when the target had a non-empty text selection
-                  at click time (per spec).
+                  Anchored to the chip DOM element that was clicked.
                   We pass a dummy <span/> trigger so TermLookupPopover renders
                   the popover body; the BaseUI Popover controlled-open + external
                   anchor positions it on the clicked chip. */}
-              {termChipState && (() => {
-                const concepts = terminologyConcepts
-                const onApply = targetHasSelectionRef.current
-                  ? (rendering: string) => { handleTermApply(rendering); setTermChipState(null) }
-                  : undefined
-                return (
-                  <TermLookupPopover
-                    sourceTerm={termChipState.term}
-                    concepts={concepts}
-                    onApply={onApply}
-                    open
-                    onOpenChange={(isOpen: boolean) => { if (!isOpen) setTermChipState(null) }}
-                    anchor={termChipState.anchor}
-                  >
-                    <span />
-                  </TermLookupPopover>
-                )
-              })()}
+              {termChipState && (
+                <TermLookupPopover
+                  sourceTerm={termChipState.term}
+                  concepts={terminologyConcepts}
+                  onViewConcept={onOpenTerminologyConcept}
+                  open
+                  onOpenChange={(isOpen: boolean) => { if (!isOpen) setTermChipState(null) }}
+                  anchor={termChipState.anchor}
+                >
+                  <span />
+                </TermLookupPopover>
+              )}
               {/* Streaming preview overlay — visible while the LLM is
                   running and the target is still empty. Once committed text
                   is present, the editor becomes the single visible layer even

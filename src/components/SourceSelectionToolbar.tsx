@@ -15,7 +15,7 @@ export interface SourceSelectionToolbarProps {
   concepts: Concept[]
   onAskAi: () => void
   onAddToTermbase?: () => void
-  onTermApply: (rendering: string) => void
+  onViewConcept?: (conceptId: string) => void
   /** AQU-260: called on mousedown so the parent suppresses selectionchange clearing. */
   onToolbarMouseDown?: () => void
   /** AQU-260: called on mouseup/mouseleave so the parent resets the guard. */
@@ -27,7 +27,7 @@ export function SourceSelectionToolbar({
   concepts,
   onAskAi,
   onAddToTermbase,
-  onTermApply,
+  onViewConcept,
   onToolbarMouseDown,
   onToolbarMouseUp,
 }: SourceSelectionToolbarProps) {
@@ -57,7 +57,11 @@ export function SourceSelectionToolbar({
       onMouseLeave={onToolbarMouseUp}
     >
       {hasMatch && (
-        <TermLookupPopover sourceTerm={sourceSelection} concepts={activeConcepts} onApply={onTermApply}>
+        <TermLookupPopover
+          sourceTerm={sourceSelection}
+          concepts={activeConcepts}
+          onViewConcept={onViewConcept}
+        >
           <Button type="button" size="xs" variant="ghost" onMouseDown={handleButtonMouseDown}>
             <BookOpen className="size-3" aria-hidden />
             {t("workspace.sourceSelection.viewTerm")}

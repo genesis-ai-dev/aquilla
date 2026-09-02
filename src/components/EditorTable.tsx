@@ -170,6 +170,7 @@ import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
 import type { Concept } from "@/lib/terminology/types"
+import { applyRenderingToTarget } from "@/lib/terminology/apply-rendering"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { useEditorActions } from "@/context/EditorActionsContext"
@@ -3413,6 +3414,13 @@ interface EditorRowProps {
 // When no concepts are configured the component falls back to a plain
 // HighlightedText so there's zero overhead on projects that don't use
 // the terminology feature.
+//
+// AQU-1102: these source-column lookups are READ-ONLY — no `onApply` is
+// threaded in. Apply may only mutate the target when the translator has the
+// *target* cell focused with a text selection (AQU-204), and clicking a source
+// token collapses any such selection into the source column, so an Apply here
+// could only ever write into an untouched target. Surfacing a term for review
+// belongs in the issues / right-hand panel, not in the translation text.
 // ────────────────────────────────────────────────────────────────────────────
 
 interface SourceWithTermLookupProps {
@@ -3422,7 +3430,6 @@ interface SourceWithTermLookupProps {
   showEvidence: boolean
   onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
   concepts: Concept[]
-  onTermApply: (rendering: string) => void
   /** Render as an inline span (used per-segment by UsfmSourceText). */
   inline?: boolean
   /** When true, note chips stay markers because detail is shown in a panel. */
@@ -3437,7 +3444,6 @@ function SourceWithTermLookup({
   showEvidence,
   onRangeClick,
   concepts,
-  onTermApply,
   inline = false,
 }: SourceWithTermLookupProps) {
   // All hooks must run unconditionally before any early return.
@@ -3502,7 +3508,6 @@ function SourceWithTermLookup({
           key={`term-${i}`}
           sourceTerm={word}
           concepts={activeConcepts}
-          onApply={onTermApply}
         >
           <span className="underline decoration-dotted decoration-primary/60 underline-offset-2 hover:decoration-primary">
             {word}
@@ -4779,22 +4784,25 @@ function EditorRow({
   // Terminology apply (spec 2c): REPLACE the active target selection with the
   // chosen rendering. The Apply affordance is only surfaced when there was a
   // non-empty selection at chip-click time (see handleTermChipClick), and the
-  // selected text is captured in targetSelectionTextRef. We replace the first
-  // occurrence of that selected text in the current target plain text. When
-  // there is no selection (defensive fallback), we append so the translator
-  // can still chain multiple terms. Uses the same commit path as keyboard edits.
+  // selected text is captured in targetSelectionTextRef.
+  //
+  // AQU-1102: there is deliberately NO fallback. This used to append the
+  // rendering to the target whenever no selection had been captured, which is
+  // how the read-only source-column and source-selection lookups ended up
+  // rewriting translations nobody had touched. With no usable selection this is
+  // a no-op — never a write. `applyRenderingToTarget` also performs the
+  // replacement against the stored HTML, so the translator's existing rich
+  // formatting survives instead of being flattened to plain text.
   const handleTermApply = useCallback((rendering: string) => {
-    const existing = visibleTranslated ?? ""
-    const selected = targetSelectionTextRef.current
-    let next: string
-    if (selected && existing.includes(selected)) {
-      next = existing.replace(selected, rendering)
-    } else {
-      const trimmed = existing.trim()
-      next = trimmed ? `${trimmed} ${rendering}` : rendering
-    }
-    handleEditorCommit({ value: next, valueHtml: next })
-  }, [visibleTranslated, handleEditorCommit])
+    const next = applyRenderingToTarget({
+      selectedText: targetSelectionTextRef.current,
+      plain: visibleTranslated ?? "",
+      html: visibleTranslatedHtml,
+      rendering,
+    })
+    if (!next) return
+    handleEditorCommit(next)
+  }, [visibleTranslated, visibleTranslatedHtml, handleEditorCommit])
 
   const captureFootnoteAnchor = useCallback(() => {
     pendingFootnoteAnchorRef.current = translatedEditorRef.current?.getFootnoteInsertionAnchor() ?? null
@@ -5920,7 +5928,6 @@ function EditorRow({
                 concepts={terminologyConcepts}
                 onAskAi={handleAskAiFromSelection}
                 onAddToTermbase={onAddConceptFromSelection ? handleAddSelectionToTermbase : undefined}
-                onTermApply={handleTermApply}
                 onToolbarMouseDown={handleToolbarMouseDown}
                 onToolbarMouseUp={handleToolbarMouseUp}
               />
@@ -6036,7 +6043,6 @@ function EditorRow({
                 showEvidence={examplesExpanded}
                 onRangeClick={openInlineRule}
                 concepts={terminologyConcepts}
-                onTermApply={handleTermApply}
                 footnotePanelActive={footnotePanelActive}
                 footnoteNumberOffset={sourceFootnoteNumberOffset}
               />

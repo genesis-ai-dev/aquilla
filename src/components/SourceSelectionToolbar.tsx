@@ -3,6 +3,12 @@
 // Ask AI (push the selection into the agent chat as a chip) and Add to termbase
 // (existing terminology flow). A "View term" lookup appears when the selection
 // matches an active concept.
+//
+// AQU-1102: that lookup is READ-ONLY and takes no `onApply`. Apply may only
+// mutate the target when the translator has the *target* cell focused with a
+// text selection (AQU-204) — and by construction a source selection means the
+// target has none, so an Apply button here could only ever write into an
+// untouched target. The affordance is therefore absent, not merely disabled.
 import { useMemo } from "react"
 import { BookOpen, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -15,7 +21,6 @@ export interface SourceSelectionToolbarProps {
   concepts: Concept[]
   onAskAi: () => void
   onAddToTermbase?: () => void
-  onTermApply: (rendering: string) => void
   /** AQU-260: called on mousedown so the parent suppresses selectionchange clearing. */
   onToolbarMouseDown?: () => void
   /** AQU-260: called on mouseup/mouseleave so the parent resets the guard. */
@@ -27,7 +32,6 @@ export function SourceSelectionToolbar({
   concepts,
   onAskAi,
   onAddToTermbase,
-  onTermApply,
   onToolbarMouseDown,
   onToolbarMouseUp,
 }: SourceSelectionToolbarProps) {
@@ -56,8 +60,9 @@ export function SourceSelectionToolbar({
       onMouseUp={onToolbarMouseUp}
       onMouseLeave={onToolbarMouseUp}
     >
+      {/* AQU-1102: no `onApply` — read-only lookup. */}
       {hasMatch && (
-        <TermLookupPopover sourceTerm={sourceSelection} concepts={activeConcepts} onApply={onTermApply}>
+        <TermLookupPopover sourceTerm={sourceSelection} concepts={activeConcepts}>
           <Button type="button" size="xs" variant="ghost" onMouseDown={handleButtonMouseDown}>
             <BookOpen className="size-3" aria-hidden />
             {t("workspace.sourceSelection.viewTerm")}

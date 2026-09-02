@@ -271,6 +271,25 @@ describe("POST /api/v1/voice/convert", () => {
     expect(res.status).toBe(200)
   })
 
+  // [Pen test] API security & data exposure (2026-08-27): sourceAudioId is a
+  // form field that lands directly in an R2 key (audioObjectKey) — it must be
+  // rejected if it could act as a path separator, matching the isPathSafeId
+  // check already enforced on projectId/fileId a few lines above it.
+  it("rejects a sourceAudioId that could smuggle a path separator", async () => {
+    const env = makeEnv()
+    env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
+    const modalCalls = stubModal(() => new Response(new Uint8Array([1]).buffer, { status: 200 }))
+
+    const form = new FormData()
+    form.append("projectId", "p1")
+    form.append("fileId", "f1")
+    form.append("referenceAudioId", "ref1.wav")
+    form.append("sourceAudioId", "../other-project/secret.webm")
+    const res = (await call(env, convertReq(form, await makeToken())))!
+    expect(res.status).toBe(400)
+    expect(modalCalls).toHaveLength(0)
+  })
+
   it("400 when neither a source file nor sourceAudioId is given", async () => {
     const env = makeEnv()
     env.SNAPSHOTS._seed(voiceRefObjectKey(env, "p1", "ref1.wav"), new Uint8Array([9]), "audio/wav")
@@ -367,5 +386,24 @@ describe("GET/PUT /api/v1/voice/reference/:projectId/:referenceAudioId", () => {
     const token = await makeToken({ projectId: "other" })
     const res = (await callRef(env, refReq("GET", "ref1.webm", token)))!
     expect(res.status).toBe(403)
+  })
+
+  it("coerces a declared text/html Content-Type to a safe type", async () => {
+    const env = makeEnv()
+    const token = await makeToken()
+    const put = (await callRef(
+      env,
+      new Request("https://w/api/v1/voice/reference/p1/evil.html", {
+        method: "PUT",
+        body: new TextEncoder().encode("<script>alert(1)</script>"),
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "text/html" },
+      }),
+    ))!
+    expect(put.status).toBe(200)
+
+    const get = (await callRef(env, refReq("GET", "evil.html", token)))!
+    expect(get.status).toBe(200)
+    expect(get.headers.get("Content-Type")).toBe("application/octet-stream")
+    expect(get.headers.get("X-Content-Type-Options")).toBe("nosniff")
   })
 })

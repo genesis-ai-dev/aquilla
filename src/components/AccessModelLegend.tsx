@@ -65,7 +65,7 @@ export function AccessModelLegend({ open, onToggle }: AccessModelLegendProps) {
         aria-expanded={open}
       >
         <span
-          className={`inline-block transition-transform duration-150 ${open ? "rotate-90" : ""}`}
+          className={`inline-block ${open ? "rotate-90" : ""}`}
           aria-hidden
         >
           ▶

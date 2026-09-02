@@ -209,7 +209,7 @@ export function MembersMatrixCellEditor({
                   >
                     {sourceBadge}
                   </TooltipTrigger>
-                  <TooltipContent side="bottom">
+                  <TooltipContent>
                     {sourceHint}
                   </TooltipContent>
                 </Tooltip>
@@ -226,7 +226,7 @@ export function MembersMatrixCellEditor({
                   >
                     <GitMerge className="h-2.5 w-2.5" />
                   </TooltipTrigger>
-                  <TooltipContent side="bottom" className="max-w-[200px]">
+                  <TooltipContent className="max-w-[200px]">
                     <p className="font-medium mb-1 text-[10px]">
                       {t("org.membersMatrixCellEditor.alsoHasAccessVia")}
                     </p>

@@ -98,11 +98,7 @@ export function ValidationQueueCard({ proposal, applyContext, onApplied, canVali
                       ref: ev.display.canonicalRef ?? ev.cellId ?? "cell",
                     })}
                   >
-                  {state === "applying" ? (
-                    <Spinner className="size-3" />
-                  ) : (
-                    <Check data-icon="inline-start" />
-                  )}
+                  {state === "applying" && <Spinner className="size-3" />}
                   {t("editor.selection.validate")}
                 </Button>
                 </AppTooltip>

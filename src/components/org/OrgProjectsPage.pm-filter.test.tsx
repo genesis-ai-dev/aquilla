@@ -1,6 +1,7 @@
-// AQU-1040 — dedicated PM filter in the org Projects toolbar: data-derived
-// options, exact-match narrowing, Unassigned, and AND-composition with the
-// status filter and the search box.
+// AQU-1040 — PM filter in the org Projects toolbar: data-derived options,
+// exact-match narrowing, Unassigned, and AND-composition with the status
+// filter and the search box. Since AQU-1044 the control lives as the PM
+// submenu of the combined Sort by menu (ProjectSortMenu).
 //
 // AQU-1027 — the mocked viewer ("anna") is also a PM in these fixtures, so she
 // is reached through the pinned "Managed by me" option rather than by name;
@@ -101,14 +102,27 @@ function renderProjectsPage(entry = "/orgs/1/projects") {
   )
 }
 
-/** Base UI Select: open the trigger, then commit the option under the pointer. */
-async function pickOption(triggerName: RegExp, optionName: string | RegExp) {
-  fireEvent.click(screen.getByRole("combobox", { name: triggerName }))
-  const option = await screen.findByRole("option", { name: optionName })
-  fireEvent.pointerMove(option)
-  fireEvent.mouseMove(option)
-  fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
-  await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+/**
+ * AQU-1044 Sort by menu: open the trigger, open the dimension's submenu,
+ * pick the radio option, then dismiss the menu tree so the next
+ * interaction starts from a closed menu.
+ */
+async function pickFilter(category: RegExp, optionName: string | RegExp) {
+  fireEvent.click(screen.getByTestId("project-sort-menu"))
+  fireEvent.click(await screen.findByRole("menuitem", { name: category }))
+  const option = await screen.findByRole("menuitemradio", { name: optionName })
+  fireEvent.click(option)
+  // An outside pointerdown dismisses the whole menu tree at once (an Escape
+  // only closes the innermost submenu), so the next pick starts closed.
+  fireEvent.pointerDown(document.body, { button: 0 })
+  await waitFor(() => expect(screen.queryAllByRole("menu")).toHaveLength(0))
+}
+
+/** Open the Sort by menu and one dimension's submenu, returning its options. */
+async function submenuOptions(category: RegExp) {
+  fireEvent.click(screen.getByTestId("project-sort-menu"))
+  fireEvent.click(await screen.findByRole("menuitem", { name: category }))
+  return (await screen.findAllByRole("menuitemradio")).map((el) => el.textContent)
 }
 
 function rowNames() {
@@ -134,20 +148,18 @@ describe("org Projects PM filter (AQU-1040)", () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    fireEvent.click(screen.getByRole("combobox", { name: /project manager filter/i }))
-    const options = (await screen.findAllByRole("option")).map((el) => el.textContent)
-    expect(options).toEqual(["All PMs", "Managed by me", "mark", "Unassigned"])
+    expect(await submenuOptions(/^pm/i)).toEqual(["All PMs", "Managed by me", "mark", "Unassigned"])
   })
 
   it("narrows to one PM's projects and restores them when reset to all", async () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    await pickOption(/project manager filter/i, "mark")
+    await pickFilter(/^pm/i, "mark")
     expect(rowNames()).toEqual(["Ruth"])
     expect(screen.queryByText("Gospels")).not.toBeInTheDocument()
 
-    await pickOption(/project manager filter/i, "All PMs")
+    await pickFilter(/^pm/i, "All PMs")
     expect(rowNames().sort()).toEqual(["Acts", "Gospels", "Psalms", "Ruth"])
   })
 
@@ -155,7 +167,7 @@ describe("org Projects PM filter (AQU-1040)", () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    await pickOption(/project manager filter/i, "Unassigned")
+    await pickFilter(/^pm/i, "Unassigned")
     expect(rowNames()).toEqual(["Acts"])
   })
 
@@ -163,8 +175,8 @@ describe("org Projects PM filter (AQU-1040)", () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    await pickOption(/project manager filter/i, "Managed by me")
-    await pickOption(/project status filter/i, "Stalled")
+    await pickFilter(/^pm/i, "Managed by me")
+    await pickFilter(/^status/i, "Stalled")
     expect(rowNames()).toEqual(["Psalms"])
   })
 
@@ -172,7 +184,7 @@ describe("org Projects PM filter (AQU-1040)", () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    await pickOption(/project manager filter/i, "Managed by me")
+    await pickFilter(/^pm/i, "Managed by me")
     fireEvent.change(screen.getByRole("textbox", { name: /search projects/i }), {
       target: { value: "psal" },
     })
@@ -183,8 +195,8 @@ describe("org Projects PM filter (AQU-1040)", () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    await pickOption(/project manager filter/i, "mark")
-    await pickOption(/project status filter/i, "Stalled")
+    await pickFilter(/^pm/i, "mark")
+    await pickFilter(/^status/i, "Stalled")
 
     expect(screen.queryAllByTestId("project-table-name")).toHaveLength(0)
     const table = screen.getByTestId("org-projects-table")
@@ -217,10 +229,10 @@ describe("org Projects PM filter (AQU-1040)", () => {
     renderProjectsPage("/orgs/2/projects")
     await screen.findByText("Guest Gospel")
 
-    await pickOption(/project manager filter/i, "Managed by me")
+    await pickFilter(/^pm/i, "Managed by me")
     expect(rowNames()).toEqual(["Guest Gospel"])
 
-    await pickOption(/project manager filter/i, "Unassigned")
+    await pickFilter(/^pm/i, "Unassigned")
     expect(rowNames()).toEqual(["Guest Ruth"])
   })
 
@@ -231,9 +243,7 @@ describe("org Projects PM filter (AQU-1040)", () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    fireEvent.click(screen.getByRole("combobox", { name: /project manager filter/i }))
-    const options = (await screen.findAllByRole("option")).map((el) => el.textContent)
-    expect(options).toEqual(["All PMs", "Managed by me", "mark"])
+    expect(await submenuOptions(/^pm/i)).toEqual(["All PMs", "Managed by me", "mark"])
   })
 })
 
@@ -242,8 +252,7 @@ describe("org Projects \"Managed by me\" (AQU-1027)", () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    fireEvent.click(screen.getByRole("combobox", { name: /project manager filter/i }))
-    const options = (await screen.findAllByRole("option")).map((el) => el.textContent)
+    const options = await submenuOptions(/^pm/i)
     expect(options[1]).toBe("Managed by me")
     // The viewer is never also listed by name — that would be the same person twice.
     expect(options).not.toContain("anna")
@@ -253,7 +262,7 @@ describe("org Projects \"Managed by me\" (AQU-1027)", () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    await pickOption(/project manager filter/i, "Managed by me")
+    await pickFilter(/^pm/i, "Managed by me")
     expect(rowNames().sort()).toEqual(["Gospels", "Psalms"])
     expect(screen.queryByText("Ruth")).not.toBeInTheDocument()
     expect(screen.queryByText("Acts")).not.toBeInTheDocument()
@@ -268,7 +277,7 @@ describe("org Projects \"Managed by me\" (AQU-1027)", () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    await pickOption(/project manager filter/i, "Managed by me")
+    await pickFilter(/^pm/i, "Managed by me")
     expect(rowNames().sort()).toEqual(["Gospels", "Psalms"])
   })
 
@@ -281,7 +290,7 @@ describe("org Projects \"Managed by me\" (AQU-1027)", () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    await pickOption(/project manager filter/i, "Managed by me")
+    await pickFilter(/^pm/i, "Managed by me")
 
     expect(screen.queryAllByTestId("project-table-name")).toHaveLength(0)
     for (const name of ["Gospels", "Ruth", "Acts", "Psalms"]) {
@@ -295,8 +304,8 @@ describe("org Projects \"Managed by me\" (AQU-1027)", () => {
     renderProjectsPage()
     await screen.findByText("Gospels")
 
-    await pickOption(/project manager filter/i, "Managed by me")
-    await pickOption(/project status filter/i, "Overdue")
+    await pickFilter(/^pm/i, "Managed by me")
+    await pickFilter(/^status/i, "Overdue")
 
     const table = screen.getByTestId("org-projects-table")
     expect(within(table).getByText("No matching projects.")).toBeInTheDocument()

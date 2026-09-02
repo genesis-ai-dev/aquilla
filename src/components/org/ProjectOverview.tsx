@@ -102,6 +102,7 @@ import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate } from "@/lib/i18n/format"
 import { SegmentTabs } from "@/components/ui/tabs"
+import { SignedOutWorkspace } from "./SignedOutWorkspace"
 
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
 const FILE_ROW_CAP = 12
@@ -421,7 +422,7 @@ function ChapterRow({
         onClick={toggle}
         aria-expanded={open}
       >
-        <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+        <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground", open && "rotate-90")} />
         <span className="w-10 shrink-0 text-muted-foreground">
           {t("org.projectOverview.chapterAbbrevLabel", { chapter: chapter.chapterLabel })}
         </span>
@@ -477,7 +478,7 @@ function BookRow({
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >
-        <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
+        <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground", open && "rotate-90")} />
         <span className="w-10 shrink-0">{book.book}</span>
         <MiniRollupBar filledPct={book.filledPct} approvedPct={book.approvedPct} />
         <span className="text-[10px] tabular-nums text-muted-foreground">
@@ -972,6 +973,14 @@ export function ProjectOverview() {
       project?.targetLanguage ?? project?.sourceLanguage ?? null
     )
 
+  if (status === "no-session") {
+    return (
+      <SignedOutWorkspace
+        header={<OrgBreadcrumb section={project?.name ?? t("common.project")} orgId={project?.orgId} />}
+      />
+    )
+  }
+
   const nonReadyContent =
     status === "loading" ? (
       <LoadingTemplate
@@ -992,18 +1001,6 @@ export function ProjectOverview() {
           className="shrink-0 bg-amber-800 text-white hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600"
         >
           {t("common.retry")}
-        </Button>
-      </div>
-    ) : status === "no-session" ? (
-      <div className="rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
-        <p>{t("org.projectOverview.signInMessage")}</p>
-        <Button
-          type="button"
-          variant="outline"
-          className="mt-3"
-          onClick={() => navigate(`/login?next=${encodeURIComponent(`/projects/${id}`)}`)}
-        >
-          {t("auth.login.title")}
         </Button>
       </div>
     ) : null
@@ -1765,7 +1762,7 @@ export function ProjectOverview() {
                                   onClick={() => void toggleFileRollup(f)}
                                   className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent/40 hover:text-foreground"
                                 >
-                                  <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isExpanded && "rotate-90")} />
+                                  <ChevronRight className={cn("h-3.5 w-3.5", isExpanded && "rotate-90")} />
                                 </button>
                                 {/* AQU-491: full name was hover-only (tooltip); ExpandableName
                                     adds a click-to-reveal Popover so a truncated file name is

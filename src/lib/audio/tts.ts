@@ -15,11 +15,12 @@ import { synthesizeGeminiTtsToWavBlob, type GeminiTtsContext } from "./gemini-tt
 import { floatPcmToWavBlob } from "./wav"
 import { resolveVoice } from "./voices"
 import { resolveApiKey } from "@/lib/store/user-api-keys"
-import { noteModelDownloading, noteModelDownloadSettled } from "./prefetch"
+import { getKokoroWorker, getMmsWorker, noteModelDownloading, noteModelDownloadSettled } from "./prefetch"
 import {
   normalizeVoiceForProvider,
   resolveTtsProvider,
 } from "./tts-providers"
+import { friendlyKokoroError } from "./phonemizer-browser-env"
 
 export type TtsStatus =
   | { kind: "idle" }
@@ -81,34 +82,7 @@ export function useAnyGeminiKeyError(): boolean {
   )
 }
 
-let workerPromise: Promise<Worker> | null = null
-let mmsWorkerPromise: Promise<Worker> | null = null
 let workerSeq = 0
-
-async function getWorker(): Promise<Worker> {
-  if (workerPromise) return workerPromise
-  // Clear on rejection so retries can re-attempt — see notes in transcribe.ts.
-  const p = (async () => {
-    const mod = await import("./kokoro-worker?worker")
-    const Ctor = mod.default as new () => Worker
-    return new Ctor()
-  })()
-  workerPromise = p
-  p.catch(() => { if (workerPromise === p) workerPromise = null })
-  return p
-}
-
-async function getMmsWorker(): Promise<Worker> {
-  if (mmsWorkerPromise) return mmsWorkerPromise
-  const p = (async () => {
-    const mod = await import("./mms-worker?worker")
-    const Ctor = mod.default as new () => Worker
-    return new Ctor()
-  })()
-  mmsWorkerPromise = p
-  p.catch(() => { if (mmsWorkerPromise === p) mmsWorkerPromise = null })
-  return p
-}
 
 export interface SynthOptions {
   /** Resolved voice (from the project library + per-cell voiceId). */
@@ -178,7 +152,7 @@ export async function synthesizeToWavBlob(
   // Kokoro fallback (default for any unknown provider).
   const consented = await requestAiModelConsent(KOKORO_MODEL)
   if (!consented) throw new AiModelConsentDeniedError(KOKORO_MODEL.id)
-  const worker = await getWorker()
+  const worker = await getKokoroWorker()
   const requestId = `tts-${++workerSeq}`
   const result = await new Promise<ResultMessage>((resolve, reject) => {
     const onMessage = (event: MessageEvent<ResultMessage | ErrorMessage | ProgressMessage>) => {
@@ -191,7 +165,7 @@ export async function synthesizeToWavBlob(
       }
       worker.removeEventListener("message", onMessage)
       if (m.type === "result") { noteModelDownloadSettled("kokoro", true); resolve(m) }
-      else { noteModelDownloadSettled("kokoro", false); reject(new Error(m.message)) }
+      else { noteModelDownloadSettled("kokoro", false); reject(new Error(friendlyKokoroError(m.message))) }
     }
     worker.addEventListener("message", onMessage)
     const req: SynthRequest = {

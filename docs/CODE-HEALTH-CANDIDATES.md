@@ -4,6 +4,50 @@ Bigger opportunities spotted during `/code-health` runs that exceeded that run's
 (one theme, ≤300 lines, ≤8 files). Not done yet — pick one up in a future run. Prune entries
 a later run completes.
 
+## `src/components/org/ArchivedProjects.test.tsx` — flaky in the full `pnpm test` run
+
+Spotted in the 2026-08-28 run's baseline (unrelated to that run's `milestones.ts` change —
+reproduced with zero diff against `dev`, twice). "lists archived projects in a table and
+restores on click" and/or "lists recently deleted files with a project column and restores
+on click" intermittently fail with `getByRole("menuitem", { name: "Restore" })` not found
+(the dropdown menu wasn't open yet when the assertion ran) when run inside the full 939-file
+suite; count varied 2–3 failing tests across repeated full-suite runs. Not reproduced by
+running the file in isolation (not attempted this run — full-suite reproduction was already
+consistent enough to treat as pre-existing and out of scope). Likely the same family of
+issue as the `TeamsList.test.tsx` full-suite-only flake filed as
+[#410](https://github.com/genesis-ai-dev/aquilla/issues/410) (test-isolation/ordering
+sensitivity under vitest's worker sharding), though this one appears without any file-count
+change, so it may be a distinct root cause (a race between the click and the menu's open
+animation/portal mount, not sharding). Needs a `/diagnose` pass or a human to add a
+`findByRole`/`waitFor` around the menu-open step in that test — out of scope here since this
+routine never modifies test files.
+
+## ESLint `globalIgnores(['dist', '.claude'])` doesn't reach nested `packages/*/dist`
+
+- **Found**: 2026-08-26 run, while diffing `pnpm lint` output against baseline for the
+  `milestones.ts` non-null-assertion pass. `eslint.config.js:27` ignores a bare `dist`,
+  expected (per ESLint's doc'd "no-slash pattern matches at any depth") to cover
+  `packages/idml-roundtrip/dist/` too — but it doesn't: once that gitignored package is
+  built (`pnpm build` runs `tsc -b`, which compiles it as a project reference),
+  `packages/idml-roundtrip/dist/engine.js` and `legacy.js` show up in `pnpm lint` with an
+  `Unused eslint-disable directive (no-control-regex)` warning baked into the compiled
+  output. Confirmed by `rm -rf packages/idml-roundtrip/dist && pnpm lint`: problem count
+  drops back to exactly the pre-build baseline (780 problems, identical file list).
+- **Friction**: `pnpm lint` is stateful depending on whether `packages/idml-roundtrip`
+  has been built locally in this checkout — a contributor who runs `pnpm build` before
+  `pnpm lint` sees 2 extra warnings a contributor who doesn't never sees, purely from
+  build-artifact non-determinism in the checkout, not from source changes.
+- **Why deferred**: `eslint.config.js` is config, not one of this run's rotation themes,
+  and touching the ignore pattern needs its own verification pass (confirm it actually
+  excludes the nested dist without accidentally widening scope elsewhere) — out of budget
+  for a run already spending its diff on `milestones.ts`.
+- **Proof needed**: change `globalIgnores(['dist', '.claude'])` to a pattern that also
+  matches nested package `dist/` dirs (e.g. add `'**/dist'` alongside the existing
+  `'dist'` top-level entry, or confirm why the documented any-depth semantics aren't
+  applying here — worth reading the `eslint/config` `globalIgnores` implementation before
+  changing the pattern). Verify with the same `rm -rf packages/*/dist && pnpm build &&
+  pnpm lint` byte-diff technique used to confirm this finding.
+
 ## "D1 is the live datastore" comment drift
 
 - **Status**: `src/hooks/` and `src/components/` slice done in the 2026-08-11 run (7 files).
@@ -83,8 +127,17 @@ safe to drop without changing runtime behavior). Not attempted this run to keep 
 diff to one dedicated, carefully-checked file per the queued candidate's own caution
 about bulk-edit transcription risk in dense assertion clusters. Grouped by file for a
 future pass (verify each still applies — code moves):
-  - `src/lib/import/milestones.ts` (7 sites: lines ~144, 173, 217, 219, 270×2, 328, 417)
-    — the densest cluster, same shape as word-diff.ts, good next candidate.
+  - **Status**: `src/lib/import/milestones.ts` done in the 2026-08-26 run — all 9
+    array-index non-null assertions removed (`fallback[index]!` sites at lines 144, 173,
+    217, 219, 270×2, 328×2, 417; the actual count was 9, not the 7 estimated here). The
+    `fileId!` assertion at line 401 was left alone — it narrows a `string | undefined`
+    via disjunctive control flow (`!fileId && !groupId` guard) that TS can't re-derive
+    locally, a genuinely different case from the indexing no-ops. `npx tsc --noEmit`
+    scoped check clean, `pnpm test` full-suite failure list matched baseline (2
+    pre-existing flaky UI-timing failures, different specific files each run — confirmed
+    flaky, not a regression), `pnpm lint` problem list byte-identical to baseline once
+    accounting for an unrelated `packages/idml-roundtrip/dist` build-artifact warning
+    (see new entry below), no test file touched.
   - `src/lib/milestone-navigation.ts` (5 sites: ~85, 86, 110, 114, 126)
   - `src/lib/biblica/treasure-hunt/notes.ts:173`, `note-rules.ts` (~179, 205),
     `reach4life/notes.ts:153`

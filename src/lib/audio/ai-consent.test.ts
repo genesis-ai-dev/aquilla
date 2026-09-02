@@ -55,6 +55,19 @@ describe("requestAiModelConsent", () => {
     expect(await b).toBe(true)
   })
 
+  it("a later dialog close cannot undo accept for coalesced waiters", async () => {
+    const { result } = renderHook(() => usePendingAiConsent())
+    const a = requestAiModelConsent(KOKORO_MODEL)
+    const b = requestAiModelConsent(KOKORO_MODEL)
+    await act(async () => {})
+    const req = result.current!
+    act(() => { req.resolve(true) })
+    act(() => { req.resolve(false) })
+    expect(await a).toBe(true)
+    expect(await b).toBe(true)
+    await expect(requestAiModelConsent(KOKORO_MODEL)).resolves.toBe(true)
+  })
+
   it("AiModelConsentDeniedError carries the model id", () => {
     const e = new AiModelConsentDeniedError("whisper")
     expect(e.modelId).toBe("whisper")

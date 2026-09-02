@@ -57,7 +57,7 @@ export interface SeededProject {
   cellIds: string[]
 }
 
-async function mintSyncToken(jwt: string, projectId: string, fileId: string): Promise<string> {
+export async function mintSyncToken(jwt: string, projectId: string, fileId: string): Promise<string> {
   const r = await fetch(`${FRONTIER_BASE}/api/v2/sync-token`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
@@ -65,6 +65,29 @@ async function mintSyncToken(jwt: string, projectId: string, fileId: string): Pr
   })
   if (!r.ok) throw new Error(`sync-token failed: HTTP ${r.status} — ${await r.text()}`)
   return ((await r.json()) as { token: string }).token
+}
+
+export interface SeededFileEvent {
+  id: string
+  kind: string
+  author: string
+  payload: unknown
+}
+
+/** Read the real event log through the same JWT → sync-token boundary as the SPA. */
+export async function readSeededFileEvents(
+  jwt: string,
+  projectId: string,
+  fileId: string,
+): Promise<SeededFileEvent[]> {
+  const token = await mintSyncToken(jwt, projectId, fileId)
+  const response = await fetch(`${SYNC_BASE}/events?fileId=${encodeURIComponent(fileId)}&limit=200`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) {
+    throw new Error(`event read failed: HTTP ${response.status} — ${await response.text()}`)
+  }
+  return ((await response.json()) as { events: SeededFileEvent[] }).events
 }
 
 /** Create a project and import a markdown fixture entirely server-side.
@@ -133,6 +156,34 @@ export async function seedProjectWithFile(
   })
 
   return { projectId, projectName, fileId, fileName, cellIds: strings.map((s) => s.id) }
+}
+
+/** The projected-row fields specs assert on; the route returns more. */
+export interface ProjectedCellRow {
+  cellId: string
+  side: "source" | "target"
+  value: string
+  validated: boolean
+  aiDrafted: boolean
+}
+
+/** Read a seeded file's cell rows straight from the sync-worker projection —
+ * the authoritative post-event state, not the DOM. Use this for provenance
+ * flags with no visible chrome (AQU-1041 removed the AI-draft tag from the
+ * cell header, but `aiDrafted` still crosses commit → projection → reads). */
+export async function readProjectedCells(
+  jwt: string,
+  seeded: Pick<SeededProject, "projectId" | "fileId">,
+  side?: "source" | "target",
+): Promise<ProjectedCellRow[]> {
+  const token = await mintSyncToken(jwt, seeded.projectId, seeded.fileId)
+  const url = new URL(
+    `${SYNC_BASE}/api/v1/projects/${seeded.projectId}/files/${seeded.fileId}/cells`,
+  )
+  if (side) url.searchParams.set("side", side)
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (!r.ok) throw new Error(`cells read failed: HTTP ${r.status} — ${await r.text()}`)
+  return ((await r.json()) as { cells: ProjectedCellRow[] }).cells
 }
 
 /** Navigate an authed page straight into the seeded file's editor and wait

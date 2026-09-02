@@ -157,7 +157,7 @@ export function ExpandableFileList({
                       }
                     >
                       <ChevronDown
-                        className={cn("h-3 w-3 transition-transform", isCollapsed && "-rotate-90")}
+                        className={cn("h-3 w-3", isCollapsed && "-rotate-90")}
                       />
                       {isEditingCorpus ? (
                         <input

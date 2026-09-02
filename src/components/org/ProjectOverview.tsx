@@ -30,7 +30,7 @@ import { AssignWork } from "./AssignWork"
 import { MemberActivityPanel } from "./MemberActivityPanel"
 import { ProjectAutopilotPanel } from "./ProjectAutopilotPanel"
 import { isFlagEnabled } from "@/lib/features/flags"
-import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, audioValidatedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
+import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { downloadBlob } from "@/lib/export/export-service"
 import { PlanBoard } from "./plan/PlanBoard"
@@ -1215,18 +1215,27 @@ export function ProjectOverview() {
                          * exists. `cell_audio.approved` landed with AQU-508 and the org
                          * portfolio counts it (auth-worker org-permissions: audio cells
                          * whose SELECTED take is approved), so this reads a real number.
-                         * Denominator is `audioCells`, not `totalCells` — "how much of the
-                         * recorded audio is validated", the audio analogue of
-                         * validated-of-translated. Greyed with the cross-lane tooltip like
-                         * "Has Audio": takes hang off the cell, not a language lane, so
-                         * there is nothing per-lane to show.
+                         *
+                         * AQU-1093: denominator is `totalCells`, like every other tile
+                         * here AND like the plan board below, whose audio bar divides by
+                         * every cell in the unit. It used to divide by `audioCells`, so
+                         * one project reported two different audio-validated percentages
+                         * on one page. The share of RECORDED audio that is validated is
+                         * the more natural reviewer's question, so it survives in the
+                         * tooltip rather than being dropped.
+                         *
+                         * Greyed with the cross-lane tooltip like "Has Audio": takes hang
+                         * off the cell, not a language lane, so there is nothing per-lane
+                         * to show.
                          */}
                         {statVisible("audio-validated") && (
                           <StatTile
                             label={t("org.projectOverview.audioValidated")}
                             pct={audioValidatedPct(audio)}
                             colorClass={activeLane ? "text-muted-foreground/60" : "text-sky-700"}
-                            tooltip={activeLane ? CROSS_LANE_TOOLTIP : t("org.projectOverview.audioValidatedTooltip")}
+                            tooltip={activeLane ? CROSS_LANE_TOOLTIP : t("org.projectOverview.audioValidatedTooltip", {
+                              ofRecorded: Math.round(audioValidatedOfRecordedPct(audio) * 100),
+                            })}
                           />
                         )}
                       </>

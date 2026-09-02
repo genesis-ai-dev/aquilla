@@ -145,20 +145,48 @@ export function aiDraftedPct(p: PortfolioProject): number {
   return p.totalCells > 0 ? p.aiDraftedCells / p.totalCells : 0
 }
 
+/**
+ * WHY BOTH AUDIO FRACTIONS CLAMP AND THE TEXT ONES DO NOT.
+ *
+ * The text counts and their denominator come from the same rows, so
+ * `filledCells <= totalCells` is structurally true. The audio counts do not:
+ * `auth-worker/src/services/org-permissions.ts` builds them in a `cell_audio`
+ * CTE keyed on `project_id` ALONE, while `totalCells` is `SUM(files.cell_count)`
+ * — the two are never joined. Audio left behind on a tombstoned or re-imported
+ * file therefore counts in the numerator and not the denominator, and `StatTile`
+ * renders `Math.round(pct * 100)` with no ceiling of its own. Without the clamp
+ * that is a tile reading "140%".
+ */
+
 /** fraction of cells that have audio, 0..1 (0 when no cells). */
 export function audioPct(p: PortfolioProject): number {
-  return p.totalCells > 0 ? p.audioCells / p.totalCells : 0
+  return p.totalCells > 0 ? Math.min(1, p.audioCells / p.totalCells) : 0
 }
 
 /**
- * AQU-508: fraction of audio-covered cells whose selected take is validated,
- * 0..1 (0 when no cells have audio). Denominator is `audioCells`, not
- * `totalCells`, so this reads as "how much of the recorded audio is validated"
- * — the audio analogue of validated-of-translated, and meaningful only where
- * audio exists.
+ * AQU-508/AQU-1093: fraction of ALL cells whose selected take is validated,
+ * 0..1 (0 when the project has no cells).
+ *
+ * Denominator is `totalCells`, matching every sibling here and — the reason it
+ * changed — matching the plan board, whose per-unit bars and CSV divide audio
+ * validated by every cell in the unit. AQU-1093 requires the Progress card's
+ * audio tiles to stay consistent with what the rows sum to, and until this
+ * changed the two surfaces reported different percentages for one project on
+ * one page. The share of RECORDED audio that is validated is still worth
+ * knowing, so the tile's tooltip carries it as a second sentence.
  */
 export function audioValidatedPct(p: PortfolioProject): number {
-  return p.audioCells > 0 ? p.validatedAudioCells / p.audioCells : 0
+  return p.totalCells > 0 ? Math.min(1, p.validatedAudioCells / p.totalCells) : 0
+}
+
+/**
+ * The old `audioValidatedPct`: validated audio as a share of the audio that
+ * actually exists, 0..1 (0 when nothing is recorded). A reviewer's question —
+ * "of what we have recorded, how much have we checked" — rather than a
+ * progress-toward-done one, which is why it lives in a tooltip and not a tile.
+ */
+export function audioValidatedOfRecordedPct(p: PortfolioProject): number {
+  return p.audioCells > 0 ? Math.min(1, p.validatedAudioCells / p.audioCells) : 0
 }
 
 /** total recorded minutes (selected live clips), rounded. */

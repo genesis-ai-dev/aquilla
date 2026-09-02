@@ -378,7 +378,7 @@ export const org = defineNamespace({
       "Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status.",
     "org.projectOverview.audioValidated": "Audio Validated",
     "org.projectOverview.audioValidatedTooltip":
-      "How much of the recorded audio has been validated. Counted against cells that have audio, not every cell.",
+      "Share of every cell whose selected recording has been validated \u2014 counted the same way as Validated, so it agrees with the Plan below. Of the audio actually recorded, {ofRecorded}% is validated.",
     "org.projectOverview.crossLaneTooltip": "Cross-language stat — not broken down per language.",
     "org.projectOverview.cellsSuffix": "cells",
     "org.projectOverview.laneDefaultFallback": "Default",
@@ -2090,6 +2090,13 @@ export const org = defineNamespace({
       "org.projectOverview.filterProgressByLanguageAriaLabel": {
         description:
           "Accessible name for the segmented All/per-lane tabs that filter the Progress card's stats by target language, shown only when the project has more than one lane.",
+      },
+      "org.projectOverview.audioValidatedTooltip": {
+        description:
+          "Tooltip on the Progress card's Audio Validated tile. Explains that the tile counts against every cell (like the Validated tile and the Plan board's bars), then gives the other ratio a reviewer usually wants.",
+        placeholders: {
+          ofRecorded: "Validated audio as a percentage of the audio actually recorded \u2014 a whole number, no % sign.",
+        },
       },
       "org.projectOverview.plan.heading": {
         description: "Heading of the project dashboard's plan table. Neutral on purpose: rows are Bible books, dub episodes or documents depending on the project, so this must never say 'Books'.",

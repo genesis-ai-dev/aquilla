@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { getPortfolio, validatedPct, attentionRank, audioPct, audioValidatedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "./portfolio"
+import { getPortfolio, validatedPct, attentionRank, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "./portfolio"
 
 const ORIG = global.fetch
 
@@ -76,13 +76,38 @@ describe("audioPct", () => {
   })
 })
 
-describe("audioValidatedPct (AQU-508)", () => {
-  it("is validated audio over covered audio, not over total cells", () => {
-    expect(audioValidatedPct(project({ totalCells: 200, audioCells: 50, validatedAudioCells: 20 }))).toBe(0.4)
+describe("audioValidatedPct (AQU-508 / AQU-1093)", () => {
+  it("is validated audio over EVERY cell, so it agrees with the plan board", () => {
+    // AQU-1093: the plan board's per-unit bars and CSV divide audio validated
+    // by every cell in the unit. This tile used to divide by audioCells, which
+    // made one project report two different percentages on one page.
+    expect(audioValidatedPct(project({ totalCells: 200, audioCells: 50, validatedAudioCells: 20 }))).toBe(0.1)
   })
 
-  it("returns 0 when no cells have audio (avoids divide-by-zero)", () => {
+  it("returns 0 for a project with no cells (avoids divide-by-zero)", () => {
+    expect(audioValidatedPct(project({ totalCells: 0, audioCells: 0, validatedAudioCells: 0 }))).toBe(0)
+  })
+
+  it("returns 0 when nothing is recorded, rather than dividing by a stale count", () => {
     expect(audioValidatedPct(project({ totalCells: 100, audioCells: 0, validatedAudioCells: 0 }))).toBe(0)
+  })
+
+  it("clamps at 1 when audio outlives the files it was counted against", () => {
+    // The two counts come from different tables with no join: audio on a
+    // tombstoned file lands in the numerator and not the denominator. StatTile
+    // has no ceiling of its own, so without this the tile renders "140%".
+    expect(audioValidatedPct(project({ totalCells: 10, audioCells: 14, validatedAudioCells: 14 }))).toBe(1)
+    expect(audioPct(project({ totalCells: 10, audioCells: 14 }))).toBe(1)
+  })
+})
+
+describe("audioValidatedOfRecordedPct", () => {
+  it("keeps the reviewer's ratio the tile no longer shows", () => {
+    expect(audioValidatedOfRecordedPct(project({ totalCells: 200, audioCells: 50, validatedAudioCells: 20 }))).toBe(0.4)
+  })
+
+  it("returns 0 when nothing has been recorded", () => {
+    expect(audioValidatedOfRecordedPct(project({ totalCells: 100, audioCells: 0, validatedAudioCells: 0 }))).toBe(0)
   })
 })
 

@@ -1,6 +1,11 @@
 import { useEffect, useState, useRef, useCallback } from "react"
 import { flushOutboxBatch, type StaleSiblingEntry, type TokenMintResult } from "@/lib/sync/outbox-flush"
-import { outboxPendingCount, outboxFailedCount, subscribeToOutbox, requeueTransientlyFailedOutboxEvents } from "@/lib/sync/outbox"
+import {
+  outboxPendingCount,
+  outboxFailedCount,
+  subscribeToOutbox,
+  requeueTransientlyFailedOutboxEvents,
+} from "@/lib/sync/outbox"
 
 const BASE_INTERVAL_MS = 5000
 const MAX_BACKOFF_MS = 60_000
@@ -23,6 +28,89 @@ export interface DrainCycleResult {
 }
 
 type FlushResult = Awaited<ReturnType<typeof import("@/lib/sync/outbox-flush").flushOutboxBatch>>
+
+export interface OutboxFlushTarget {
+  ownerKey: string
+  /** Exact JWT (or another exact credential generation) for retry isolation. */
+  authEpoch: string
+  getTokenForFile: (projectId: string, fileId: string) => Promise<TokenMintResult>
+  isSessionCurrent: () => Promise<boolean>
+  /** UI and identified telemetry belong only to the account currently shown. */
+  shouldSurface: () => boolean
+}
+
+export interface TargetRetryState {
+  authEpoch: string
+  failures: number
+  nextAttemptAt: number
+}
+
+/**
+ * Fair, bounded all-account drain. Every eligible account gets one batch per
+ * round, so a large queue cannot starve another account. Retry/auth state is
+ * isolated per owner+JWT: one rejected credential never blocks healthy ones.
+ * Even 401s use bounded backoff rather than a permanent park because identity
+ * outages can transiently misreport a still-valid JWT as unauthorized.
+ */
+export async function drainFlushTargets(
+  targets: OutboxFlushTarget[],
+  retryStates: Map<string, TargetRetryState>,
+  flush: (target: OutboxFlushTarget) => Promise<FlushResult>,
+  now: () => number = Date.now,
+): Promise<DrainCycleResult> {
+  let madeProgress = false
+  let postedAny = false
+  let sawAuthError = false
+  let calls = 0
+  let candidates = [...targets]
+
+  const liveOwners = new Set(targets.map((target) => target.ownerKey))
+  for (const ownerKey of retryStates.keys()) {
+    if (!liveOwners.has(ownerKey)) retryStates.delete(ownerKey)
+  }
+
+  while (candidates.length > 0 && calls < MAX_DRAIN_ITERATIONS) {
+    const nextRound: OutboxFlushTarget[] = []
+    for (const target of candidates) {
+      if (calls >= MAX_DRAIN_ITERATIONS) break
+      let retry = retryStates.get(target.ownerKey)
+      if (!retry || retry.authEpoch !== target.authEpoch) {
+        retry = {
+          authEpoch: target.authEpoch,
+          failures: 0,
+          nextAttemptAt: 0,
+        }
+        retryStates.set(target.ownerKey, retry)
+      }
+      if (retry.nextAttemptAt > now()) continue
+
+      const result = await flush(target)
+      calls += 1
+      const foreground = target.shouldSurface()
+      const progressed = result.accepted > 0 || result.quarantined > 0
+      madeProgress ||= progressed && foreground
+      postedAny ||= result.posted > 0 && foreground
+      sawAuthError ||= result.authError && foreground
+
+      const failedHard = result.authError || (result.posted > 0 && !progressed)
+      if (failedHard) {
+        retry.failures = Math.min(8, retry.failures + 1)
+        retry.nextAttemptAt = now() + Math.min(
+          MAX_BACKOFF_MS,
+          BASE_INTERVAL_MS * (2 ** retry.failures),
+        )
+        continue
+      }
+
+      retry.failures = 0
+      retry.nextAttemptAt = 0
+      if (progressed) nextRound.push(target)
+    }
+    candidates = nextRound
+  }
+
+  return { iterations: calls, madeProgress, postedAny, sawAuthError }
+}
 
 export async function drainCycle(
   flush: () => Promise<FlushResult>,
@@ -59,6 +147,12 @@ export interface UseOutboxFlusherOptions {
    *  flusher resets its backoff and forces an immediate flush so a recovered
    *  session drains the queue promptly instead of waiting out the backoff. */
   authEpoch?: string | number | null
+  /** When present, replaces the active-only transport with a credential-bearing
+   *  snapshot of every stored account. Foreground queue counts remain scoped to
+   *  the active account. */
+  getFlushTargets?: () => Promise<OutboxFlushTarget[]>
+  /** Wakes the lock owner when sessions are added, removed, or refreshed. */
+  subscribeFlushTargets?: (listener: () => void) => () => void
 }
 
 /**
@@ -114,6 +208,11 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
   const backoffExp = useRef(0)
   const tokenRef = useRef(options.getTokenForFile)
   tokenRef.current = options.getTokenForFile
+  const targetsRef = useRef(options.getFlushTargets)
+  targetsRef.current = options.getFlushTargets
+  const subscribeTargetsRef = useRef(options.subscribeFlushTargets)
+  subscribeTargetsRef.current = options.subscribeFlushTargets
+  const targetRetryStates = useRef(new Map<string, TargetRetryState>())
   const authEpochRef = useRef(options.authEpoch)
   authEpochRef.current = options.authEpoch
   // Resolver for the lock loop's current sleep, so flushNow() can cut a long
@@ -138,11 +237,28 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
 
   const flushNow = useCallback(() => {
     backoffExp.current = 0
+    for (const retry of targetRetryStates.current.values()) {
+      // Explicit retry/reconnect may recover network, 5xx, and even a 401 that
+      // an unhealthy identity dependency transiently misreported.
+      retry.nextAttemptAt = 0
+    }
     setFailureStreak(0)
     // Wake an in-progress backoff sleep (locks path) or trigger a tick
     // (interval fallback). Whichever is active fires; the other is a no-op.
     wakeRef.current?.()
     tickRef.current?.()
+  }, [])
+
+  const requeueTransientForEligibleOwners = useCallback(async () => {
+    const getTargets = targetsRef.current
+    if (!getTargets) {
+      await requeueTransientlyFailedOutboxEvents()
+      return
+    }
+    const targets = await getTargets()
+    await Promise.all(targets.map((target) =>
+      requeueTransientlyFailedOutboxEvents({ ownerKey: target.ownerKey }),
+    ))
   }, [])
 
   useEffect(() => {
@@ -172,6 +288,16 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
   }, [refreshPending, options.enabled])
 
   useEffect(() => {
+    if (!options.enabled || !options.getFlushTargets) return
+    return subscribeTargetsRef.current?.(() => {
+      // A fresh target snapshot will reset only owner entries whose JWT epoch
+      // changed and remove logged-out owners. Do not clear unrelated retries.
+      wakeRef.current?.()
+      tickRef.current?.()
+    })
+  }, [options.enabled, options.getFlushTargets])
+
+  useEffect(() => {
     if (!options.enabled) {
       setFailureStreak(0)
       backoffExp.current = 0
@@ -183,31 +309,64 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
     const runFlushCycle = async () => {
       const cycleEpoch = authEpochRef.current
       const tokenForCycle = tokenRef.current
-      const { madeProgress, postedAny, sawAuthError } = await drainCycle(() => {
-        if (cancelled || authEpochRef.current !== cycleEpoch) {
-          return Promise.resolve({
-            posted: 0, accepted: 0, networkError: false, authError: false,
-            quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0,
+      const onStaleSiblings = (entries: StaleSiblingEntry[]) => {
+        if (entries.length === 0 || cancelled) return
+        setStaleSiblingCount((n) => n + entries.length)
+        // Latest-batch wins. We deliberately don't merge with prior entries:
+        // the banner shows one click-through target at a time, and stacking
+        // ancient stale entries on top of fresh ones makes the action
+        // ambiguous. The user dismisses (or clicks through) to clear.
+        setStaleSiblingEntries(entries)
+      }
+      const onStaleSource = (entries: Array<{ id: string; currentSourceEventId: string }>) => {
+        if (cancelled) return
+        setStaleSourceCount((n) => n + entries.length)
+      }
+
+      let result: DrainCycleResult
+      const getTargets = targetsRef.current
+      if (getTargets) {
+        const targets = await getTargets()
+        if (cancelled) return
+        result = await drainFlushTargets(
+          targets,
+          targetRetryStates.current,
+          (target) => {
+            if (cancelled) {
+              return Promise.resolve({
+                posted: 0, accepted: 0, networkError: false, authError: false,
+                quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0,
+              })
+            }
+            return flushOutboxBatch({
+              getTokenForFile: target.getTokenForFile,
+              ownerScope: {
+                ownerKey: target.ownerKey,
+                isSessionCurrent: target.isSessionCurrent,
+                shouldSurface: target.shouldSurface,
+              },
+              onStaleSiblings,
+              onStaleSource,
+            })
+          },
+        )
+      } else {
+        result = await drainCycle(() => {
+          if (cancelled || authEpochRef.current !== cycleEpoch) {
+            return Promise.resolve({
+              posted: 0, accepted: 0, networkError: false, authError: false,
+              quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0,
+            })
+          }
+          return flushOutboxBatch({
+            getTokenForFile: tokenForCycle,
+            onStaleSiblings,
+            onStaleSource,
           })
-        }
-        return flushOutboxBatch({
-          getTokenForFile: tokenForCycle,
-          onStaleSiblings: (entries) => {
-            if (entries.length === 0 || cancelled || authEpochRef.current !== cycleEpoch) return
-            setStaleSiblingCount((n) => n + entries.length)
-            // Latest-batch wins. We deliberately don't merge with prior entries:
-            // the banner shows one click-through target at a time, and stacking
-            // ancient stale entries on top of fresh ones makes the action
-            // ambiguous. The user dismisses (or clicks through) to clear.
-            setStaleSiblingEntries(entries)
-          },
-          onStaleSource: (entries) => {
-            if (cancelled || authEpochRef.current !== cycleEpoch) return
-            setStaleSourceCount((n) => n + entries.length)
-          },
         })
-      })
-      if (cancelled || authEpochRef.current !== cycleEpoch) return
+      }
+      if (cancelled || (!getTargets && authEpochRef.current !== cycleEpoch)) return
+      const { madeProgress, postedAny, sawAuthError } = result
       await refreshPending()
       // failedHard: we attempted to post something but accepted nothing.
       // An empty queue (postedAny=false) is NOT a failure — no backoff needed.
@@ -297,11 +456,11 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
     if (!options.enabled) return
     if (typeof window === "undefined") return
     const onOnline = () => {
-      void requeueTransientlyFailedOutboxEvents().then(() => flushNow())
+      void requeueTransientForEligibleOwners().then(() => flushNow())
     }
     window.addEventListener("online", onOnline)
     return () => window.removeEventListener("online", onOnline)
-  }, [options.enabled, flushNow])
+  }, [options.enabled, flushNow, requeueTransientForEligibleOwners])
 
   // Auth identity changed (sign-in / re-auth / account switch) → a previously
   // un-mintable queue may now succeed; requeue transient failures, reset backoff
@@ -313,9 +472,9 @@ export function useOutboxFlusher(options: UseOutboxFlusherOptions): {
       prevEpoch.current = options.authEpoch
       // RES-2: auth epoch change may fix token-mint failures that stamped status
       // on records without burning the budget. Revive them so they retry now.
-      void requeueTransientlyFailedOutboxEvents().then(() => flushNow())
+      void requeueTransientForEligibleOwners().then(() => flushNow())
     }
-  }, [options.enabled, options.authEpoch, flushNow])
+  }, [options.enabled, options.authEpoch, flushNow, requeueTransientForEligibleOwners])
 
   return {
     pendingCount: pending,

@@ -6,9 +6,11 @@ import {
   MIN_CHIP_LABEL_H_PX,
   SLOT_BUTTON_MAX_PX,
   SLOT_BUTTON_MIN_PX,
+  FOLDER_ROW_H_PX,
   chipPadPx,
   chipHeightPx,
   clampRowHeight,
+  folderRowHPx,
   slotButtonPx,
 } from "./row-metrics"
 
@@ -87,5 +89,28 @@ describe("slotButtonPx", () => {
 
   it("falls back to the full size on a junk height rather than a floor", () => {
     expect(slotButtonPx(Number.NaN)).toBe(SLOT_BUTTON_MAX_PX)
+  })
+})
+
+// AQU-646 stage 4b: folders are slim fixed headings, never taller than the
+// tracks around them.
+describe("folderRowHPx", () => {
+  it("is a fixed 28px heading at the default dial — and stays 28 however tall the dial goes", () => {
+    expect(folderRowHPx(ROW_H_DEFAULT)).toBe(FOLDER_ROW_H_PX)
+    expect(folderRowHPx(ROW_H_MAX)).toBe(FOLDER_ROW_H_PX)
+  })
+
+  it("never stands taller than the tracks: at the 24px dial floor it is 24 too", () => {
+    // Sam's clamp ruling — at extreme compression everything gets uniformly
+    // small; a heading sticking up above the rows it is "less than" would
+    // invert the hierarchy it exists to express.
+    expect(folderRowHPx(ROW_H_MIN)).toBe(ROW_H_MIN)
+  })
+
+  it("answers through the dial's own clamp on junk input", () => {
+    // clampRowHeight turns non-finite into the 66px default, and 66 > 28.
+    expect(folderRowHPx(Number.NaN)).toBe(FOLDER_ROW_H_PX)
+    // A sub-floor dial value clamps up to 24 first, then wins against 28.
+    expect(folderRowHPx(1)).toBe(ROW_H_MIN)
   })
 })

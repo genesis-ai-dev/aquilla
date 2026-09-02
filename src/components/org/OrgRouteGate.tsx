@@ -10,24 +10,43 @@
  * nowhere to land). Loading must not use that header chrome — it flashes a
  * second profile in the navbar before the destination sidebar switcher
  * appears.
+ *
+ * AQU-1046: with no session at all, the gate must not classify membership from
+ * the (empty) org lists and fall through to not-found — that painted
+ * "Organization not found" plus a stray "Log in" in the gate chrome for a user
+ * who just logged out on `/orgs/:id`. Signed-out visitors get the canonical
+ * `SignedOutWorkspace` (route-preserving sign-in link) before any org check,
+ * matching OrgHome / OrgOverview / ProjectOverview / ProjectWorkspace.
  */
 import type { ReactNode } from "react"
 import { Link, Navigate, Outlet, useLocation, useParams } from "react-router-dom"
 import { AlertTriangle } from "lucide-react"
 import { useActiveOrg } from "@/context/OrgContext"
+import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { orgKeyFromParam, ALL_ORGS_PARAM, orgHomePath, orgProjectsPath, parseOrgPath } from "@/lib/navigation/org-paths"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { Button } from "@/components/ui/button"
 import { NotFoundIcon } from "@/components/ui/empty"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { OrgBreadcrumb } from "./OrgBreadcrumb"
+import { SignedOutWorkspace } from "./SignedOutWorkspace"
 
 export function OrgRouteGate() {
   const t = useT()
   const { orgId: orgIdParam } = useParams<{ orgId: string }>()
   const orgKey = orgKeyFromParam(orgIdParam)
   const { orgs, guestOrgs, isLoading, accessibleProjectsLoading, error } = useActiveOrg()
+  const { session, loading: sessionLoading } = useFrontierSession()
+  const jwt = session?.jwt ?? null
   const location = useLocation()
+
+  // Signed-out state: session finished loading but no JWT. Membership can't be
+  // judged from empty org lists, and the not-found / error chrome is for
+  // signed-in users who really lack access. Sign-in keeps the current path.
+  if (!sessionLoading && !jwt) {
+    return <SignedOutWorkspace header={<OrgBreadcrumb section="Overview" isProjectsLanding />} />
+  }
 
   // `/orgs/all` is a sibling route — this gate only mounts for `:orgId`.
   if (orgKey == null || orgKey === ALL_ORGS_PARAM) {

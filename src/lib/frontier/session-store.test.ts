@@ -31,7 +31,8 @@ describe("session-store", () => {
 import {
   listSessions, addSession, activateSession, removeSession,
   loadActiveSession, sessionKey, subscribeSession, patchSessionEmails,
-  loadAccountsSnapshot, publishDataOwner,
+  loadAccountsSnapshot, publishDataOwner, listStoredSessions,
+  isStoredSessionCurrent,
 } from "./session-store"
 
 function mkSession(overrides: Partial<FrontierSession> = {}): FrontierSession {
@@ -109,6 +110,24 @@ describe("multi-account envelope", () => {
 
     expect((await listSessions()).map((s) => s.username).sort()).toEqual(["alice", "bob"])
     expect((await loadActiveSession())?.username).toBe("bob")
+  })
+
+  it("provides exact credential snapshots and rejects removed or rotated JWTs", async () => {
+    await addSession(mkSession({ username: "alice", jwt: "alice-jwt-1" }))
+    await addSession(mkSession({ username: "bob", jwt: "bob-jwt" }))
+
+    expect((await listStoredSessions()).map(({ key, session }) => [key, session.jwt]).sort()).toEqual([
+      ["alice", "alice-jwt-1"],
+      ["bob", "bob-jwt"],
+    ])
+    expect(await isStoredSessionCurrent("alice", "alice-jwt-1")).toBe(true)
+
+    await addSession(mkSession({ username: "alice", jwt: "alice-jwt-2" }))
+    expect(await isStoredSessionCurrent("alice", "alice-jwt-1")).toBe(false)
+    expect(await isStoredSessionCurrent("alice", "alice-jwt-2")).toBe(true)
+
+    await removeSession("alice")
+    expect(await isStoredSessionCurrent("alice", "alice-jwt-2")).toBe(false)
   })
 
   it("keeps the last published data owner until the matching transition completes", async () => {

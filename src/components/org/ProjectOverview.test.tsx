@@ -394,11 +394,11 @@ describe("ProjectOverview load states", () => {
 
     renderOverview()
 
-    expect(await screen.findByText(/sign in to open this project from the cloud/i)).toBeInTheDocument()
+    expect(await screen.findByText(/sign in to see your workspace/i)).toBeInTheDocument()
     expect(screen.queryByText("Loading…")).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }))
-    expect(navigate).toHaveBeenCalledWith("/login?next=%2Fprojects%2Fp1")
+    const signIn = screen.getByRole("link", { name: /^sign in$/i })
+    expect(signIn).toHaveAttribute("href", "/login?next=%2Fprojects%2Fp1")
   })
 })
 

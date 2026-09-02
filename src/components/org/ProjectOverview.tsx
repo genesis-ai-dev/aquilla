@@ -102,6 +102,7 @@ import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate } from "@/lib/i18n/format"
 import { SegmentTabs } from "@/components/ui/tabs"
+import { SignedOutWorkspace } from "./SignedOutWorkspace"
 
 /** Max per-file rows shown on the overview; the rest are counted as "+N more". */
 const FILE_ROW_CAP = 12
@@ -972,6 +973,14 @@ export function ProjectOverview() {
       project?.targetLanguage ?? project?.sourceLanguage ?? null
     )
 
+  if (status === "no-session") {
+    return (
+      <SignedOutWorkspace
+        header={<OrgBreadcrumb section={project?.name ?? t("common.project")} orgId={project?.orgId} />}
+      />
+    )
+  }
+
   const nonReadyContent =
     status === "loading" ? (
       <LoadingTemplate
@@ -992,18 +1001,6 @@ export function ProjectOverview() {
           className="shrink-0 bg-amber-800 text-white hover:bg-amber-700 dark:bg-amber-700 dark:hover:bg-amber-600"
         >
           {t("common.retry")}
-        </Button>
-      </div>
-    ) : status === "no-session" ? (
-      <div className="rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
-        <p>{t("org.projectOverview.signInMessage")}</p>
-        <Button
-          type="button"
-          variant="outline"
-          className="mt-3"
-          onClick={() => navigate(`/login?next=${encodeURIComponent(`/projects/${id}`)}`)}
-        >
-          {t("auth.login.title")}
         </Button>
       </div>
     ) : null

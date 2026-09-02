@@ -73,6 +73,33 @@ describe("TimelineCard", () => {
     expect(onRetime).toHaveBeenCalledWith("c1", 2, 4)
   })
 
+  // AQU-646 stage 2. This is a REGRESSION TEST FOR A LIVE BUG, not hardening:
+  // before the guard, a right-press began a real drag and `pointerup` emitted,
+  // so right-dragging across a card rewrote its timing. It surfaced because
+  // right-click now has to reach a context-menu trigger instead of being
+  // swallowed by a drag that was never meant to start.
+  it("does not begin a drag on the secondary button", () => {
+    const onRetime = vi.fn()
+    render(<TimelineCard cell={cell()} {...base} variant="subtitle" selected onSelect={() => {}} onRetime={onRetime} />)
+    const el = screen.getByTestId("tl-card-c1")
+    fireEvent.pointerDown(el, { clientX: 100, pointerId: 1, button: 2 })
+    fireEvent.pointerMove(window, { clientX: 140 })
+    fireEvent.pointerUp(window, { clientX: 140 })
+    expect(onRetime).not.toHaveBeenCalled()
+  })
+
+  // A macOS ctrl+click is BUTTON 0, so the button check alone does not catch
+  // it — and it is the gesture that opens the context menu.
+  it("does not begin a drag on a macOS ctrl+click, which is button 0", () => {
+    const onRetime = vi.fn()
+    render(<TimelineCard cell={cell()} {...base} variant="subtitle" selected onSelect={() => {}} onRetime={onRetime} />)
+    const el = screen.getByTestId("tl-card-c1")
+    fireEvent.pointerDown(el, { clientX: 100, pointerId: 1, button: 0, ctrlKey: true })
+    fireEvent.pointerMove(window, { clientX: 140 })
+    fireEvent.pointerUp(window, { clientX: 140 })
+    expect(onRetime).not.toHaveBeenCalled()
+  })
+
   // ── SUB-11: live millisecond readout while dragging ───────────────────────
 
   it("shows a live drag chip with the exact times release would commit", () => {
@@ -513,5 +540,36 @@ describe("TimelineCard", () => {
       expect(card).toHaveTextContent("Go get the man")
       fireEvent.pointerUp(window, { clientX: 140 })
     })
+  })
+})
+
+// ── Pointing at a chip must not dim it (2026-08-27) ────────────────────────
+//
+// A dialogue card already wears the track's `--tl-track-gen` fill, and a hover
+// is the same CSS property — so it REPLACES that fill rather than layering
+// over it. The card used the lightest rung, `--tl-track-hover`, which sits
+// BELOW the fill: pointing at a chip made it fainter. Visible on source audio,
+// whose ladder is lighter again (.24 dropping to .12), but every row had it.
+//
+// Asserted on the class rather than on a colour because happy-dom resolves no
+// custom properties at all — `style.backgroundColor` is empty here whatever
+// the rung. The value relationship itself is pinned in track-colors.test.ts.
+describe("TimelineCard — the hover rung", () => {
+  it("hovers a dialogue card with the FILLED rung, not the lighter one", () => {
+    render(<TimelineCard cell={cell()} {...base} onSelect={() => {}} onRetime={() => {}} />)
+    const el = screen.getByTestId("tl-card-c1")
+    expect(el.className).toContain("hover:bg-[color:var(--tl-track-hover-fill)]")
+    expect(el.className).not.toContain("hover:bg-[color:var(--tl-track-hover)]")
+  })
+
+  // A non-dialogue card carries no track fill, so it keeps the plain grey it
+  // has always had — this rung is only for chips with something to beat.
+  it("leaves a text card's own hover alone", () => {
+    render(
+      <TimelineCard cell={cell()} {...base} variant="subtitle" onSelect={() => {}} onRetime={() => {}} />,
+    )
+    const el = screen.getByTestId("tl-card-c1")
+    expect(el.className).toContain("hover:bg-muted/30")
+    expect(el.className).not.toContain("--tl-track-hover")
   })
 })

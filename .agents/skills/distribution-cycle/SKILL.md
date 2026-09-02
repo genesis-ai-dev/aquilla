@@ -45,3 +45,9 @@ A single doc-mode recording session produces:
 - **Don't record broken flows** — stage as `fixme` until the journey is green.
 - **Outward-facing actions are human-gated** — the published asset, the schedule, and all community posts.
 - Keep this skill and its specs thin; the value is the persona→money-moment discipline, not volume.
+
+## Thumbnails & posters (per published video)
+Every published video (doc walkthrough, promo, YouTube cut) needs a thumbnail — it drives click-through more than the title does. Generate it inside the human-gated asset set: scrape reference thumbnails from admired channels in the niche, find the shared pattern (face position, expression, <=3-4 big words, high contrast, readable at phone size), then generate ~3 variants with an image model to A/B test. Full workflow: the global `edit-video` skill's REFERENCE (`#thumbnails`).
+
+## The general (non-app) lane
+The cycle above assumes a feature with a live-app money moment. For assets that are NOT the app — a founder VSL, talking-head lead-gen, or a motion-graphics explainer — run the same loop (persona -> hook -> human gate -> Postiz), but produce the video with the global `edit-video` skill instead of `record-docs-video` / `record-promo-video`. Same brand kit, same gate. This is the path for the aquilla-marketing repo and for general (non-aquilla) lead-gen videos.

@@ -27,6 +27,18 @@ describe("TTS provider normalization", () => {
     expect(normalizeVoiceForProvider(geminiVoice, "kokoro").voiceName).toBe(DEFAULT_KOKORO_VOICE)
   })
 
+  it("does not treat a BCP-47 tag as a Kokoro voice id", () => {
+    const tagged: Voice = { ...geminiVoice, voiceName: "en-us" }
+    expect(normalizeVoiceForProvider(tagged, "kokoro").voiceName).toBe(DEFAULT_KOKORO_VOICE)
+  })
+
+  it("picks a British Kokoro voice when the target language is en-gb", () => {
+    expect(defaultVoiceNameForProvider("kokoro", { targetLanguage: "en-gb" })).toBe("bf_emma")
+    expect(
+      normalizeVoiceForProvider(geminiVoice, "kokoro", { targetLanguage: "en-GB" }).voiceName,
+    ).toBe("bf_emma")
+  })
+
   it("does not pass Gemini voice ids to MMS", () => {
     expect(normalizeVoiceForProvider(geminiVoice, "mms").voiceName).toBe(DEFAULT_MMS_LANGUAGE)
   })

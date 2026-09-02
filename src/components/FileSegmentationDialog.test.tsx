@@ -36,8 +36,8 @@ function snapshot(over: Partial<SegmentationSnapshot> = {}): SegmentationSnapsho
       spanCount: 2,
       cellCount: 14,
       spans: [
-        { startCellId: "c1", endCellId: "c8", seedSource: "canonical-ref", cellCount: 8, label: "MRK 1:1–1:8" },
-        { startCellId: "c9", endCellId: "c14", seedSource: "canonical-ref", cellCount: 6, label: "MRK 2:1–2:6" },
+        { startCellId: "c1", endCellId: "c8", seedSource: "canonical-ref", cellCount: 8, label: "MRK 1:1–1:8", excerpt: "The beginning of the gospel of Jesus Christ." },
+        { startCellId: "c9", endCellId: "c14", seedSource: "canonical-ref", cellCount: 6, label: "MRK 2:1–2:6", excerpt: "When He had come back to Capernaum." },
       ],
       truncated: false,
     },
@@ -75,9 +75,48 @@ describe("FileSegmentationDialog", () => {
   it("renders the server's span count and preview labels verbatim", async () => {
     renderDialog()
     await waitFor(() => expect(screen.getByText(/2 passages across 14 segments/)).toBeTruthy())
+    expect(screen.getByText("Current passages")).toBeTruthy()
     expect(screen.getByText("MRK 1:1–1:8")).toBeTruthy()
     expect(screen.getByText("MRK 2:1–2:6")).toBeTruthy()
+    expect(screen.getByText(/beginning of the gospel/i)).toBeTruthy()
     expect(fetchSegmentation).toHaveBeenCalledWith("p1", "f1")
+  })
+
+  it("live-previews a fixed cut without saving", async () => {
+    fetchSegmentation
+      .mockResolvedValueOnce(snapshot())
+      .mockResolvedValueOnce(
+        snapshot({
+          effective: {
+            seedSource: "chunk",
+            spanCount: 2,
+            cellCount: 14,
+            spans: [
+              {
+                startCellId: "c1", endCellId: "c6", seedSource: "chunk", cellCount: 6,
+                label: "Genesis 1:1–6",
+                excerpt: "In the beginning God created the heavens and the earth.",
+              },
+              {
+                startCellId: "c7", endCellId: "c14", seedSource: "chunk", cellCount: 8,
+                label: "Genesis 1:7–2:6",
+                excerpt: "And God made the expanse.",
+              },
+            ],
+            truncated: false,
+          },
+        }),
+      )
+    renderDialog()
+    await waitFor(() => expect(screen.getByText("MRK 1:1–1:8")).toBeTruthy())
+
+    await userEvent.click(screen.getByRole("radio", { name: /Every N segments/i }))
+    await waitFor(() =>
+      expect(fetchSegmentation).toHaveBeenCalledWith("p1", "f1", { strategy: "fixed", fixedSize: 10 }),
+    )
+    await waitFor(() => expect(screen.getByText("Genesis 1:1–6")).toBeTruthy())
+    expect(screen.getByText(/In the beginning God created/)).toBeTruthy()
+    expect(saveSegmentation).not.toHaveBeenCalled()
   })
 
   it("names the stored strategy when one is set", async () => {

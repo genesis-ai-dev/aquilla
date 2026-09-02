@@ -51,6 +51,31 @@ export interface ProjectWideSettings {
    */
   allowLineCreation?: boolean
   /**
+   * AQU-646 stage 2: may this project's timelines be RESTRUCTURED — tracks
+   * added and deleted, grouped into folders, recoloured?
+   *
+   * OFF unless explicitly turned on, and it is a SECOND gate rather than a
+   * floor change: `file.track.set` is already maintainer-floored, so this
+   * answers *whether*, not *who*, and with it off the write is refused even to
+   * an owner. Multi-track is capability for clients who want it; a project that
+   * never turns it on should not be able to tell it was built.
+   *
+   * RENAME AND DRAG-TO-REORDER ARE DELIBERATELY NOT GATED ON THIS. Both already
+   * ship, and a new setting defaulting to off must not silently take an
+   * existing capability away from every project that has one. They stay
+   * maintainer-only, which is what they were.
+   *
+   * NOTE THE DIVERGENCE FROM `allowLineCreation` ABOVE, which is deliberate and
+   * not an oversight: that one leaves REMOVAL ungated so switching it off
+   * cannot strand a line somebody made. Here, switching off does strand — three
+   * user-added tracks become un-deletable and un-recolourable until it goes
+   * back on. That is Sam's call (2026-08-22) and it is the coherent one for a
+   * structural switch: the tracks keep working and keep playing, they simply
+   * stop being editable, which is exactly what "turn track editing off" should
+   * mean. Do not "restore consistency" with the sibling above.
+   */
+  allowTrackEditing?: boolean
+  /**
    * AQU-186: minimum role level required to trigger a harmonization sweep on
    * this project. Default (absent) = project_lead (500). Configurable up to
    * maintainer (600); lowering below project_lead is not allowed (hard floor).

@@ -8,6 +8,7 @@ import { useMemo, useSyncExternalStore } from "react"
 import type { CellData } from "@/hooks/useCells"
 import { fetchCellAudio, getCellAudioStreamUrl, parseFrontierAudioUrl, audioIdSeededWith, probeCellAudioPresent } from "./upload"
 import { activeTargetForCell, resolveTargetAudio, sourceClipAudioForCell } from "./track-audio"
+import { isDefaultTrackSlot, RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
 import { effectiveAttachmentDurationMs, targetChipGeom, targetDueSec } from "@/lib/timeline/lane-timing"
 import { hasTiming, sortByLens } from "@/lib/timeline/derive"
 import { buildProgramme, slotAtProgrammeSec, type Programme, type ProgrammeSlot } from "@/lib/timeline/programme"
@@ -216,15 +217,35 @@ export function useQueueForFile(cellIds: ReadonlySet<string>): QueueForFile {
 export interface TrackAudibility {
   source: boolean
   target: boolean
+  /**
+   * AQU-646 stage 3: one flag per ADDED track, keyed by its slot.
+   *
+   * `source` and `target` stay real fields rather than becoming two more map
+   * entries, so `loadAudibility`'s existing parse keeps reading every
+   * preference already on disk — every project in the app has one.
+   *
+   * ABSENT MEANS AUDIBLE, the same default-on rule the two named flags use. A
+   * brand-new track is heard without anybody having to opt in, and a flag can
+   * only ever be there because someone switched it off.
+   */
+  bySlot?: Record<string, boolean>
 }
 
 let audibility: TrackAudibility = { source: true, target: true }
 const audibilityListeners = new Set<() => void>()
 
 export function setQueueAudibility(next: TrackAudibility): void {
-  audibility = { source: Boolean(next.source), target: Boolean(next.target) }
+  audibility = {
+    source: Boolean(next.source),
+    target: Boolean(next.target),
+    ...(next.bySlot ? { bySlot: { ...next.bySlot } } : {}),
+  }
   if (currentAudio) currentAudio.muted = !audibility.source
-  for (const e of overlayPool) if (e.element) e.element.muted = !audibility.target
+  // PER ENTRY now, not one blanket flag. Adding `slot` to `OverlayEntry` is
+  // what gave this sweep something to discriminate on — before it, every
+  // overlay in the pool followed the single `target` boolean and there was no
+  // way to silence one track and not another.
+  for (const e of overlayPool) if (e.element) e.element.muted = !slotAudible(audibility, e.slot)
   for (const l of audibilityListeners) l()
 }
 
@@ -257,6 +278,20 @@ let currentSeq = 0
 
 interface OverlayEntry {
   cellId: string
+  /**
+   * AQU-646 stage 3: WHICH TRACK this overlay belongs to.
+   *
+   * Everything below used to be keyed by `cellId` alone, which was exact while
+   * a line could hold one dub. Extra target-audio tracks mean a line can hold
+   * several AND THEY SHOULD ALL SOUND — so the key becomes (cell, slot).
+   * Without it three separate places actively suppress the second take:
+   * `soundingKeys` below, `planTargetOverlay`'s already-sounding guard, and
+   * `executeFire`'s "re-firing a cell replaces its own entry".
+   *
+   * It is also the discriminator per-track MUTING needs: the audibility sweep
+   * had nothing on an entry to tell it which track's flag applied.
+   */
+  slot: string
   audioId: string
   /** Null while the src resolves — the entry exists from the synchronous
    *  moment of fire so membership doubles as the re-entry guard. */
@@ -268,17 +303,51 @@ interface OverlayEntry {
 }
 
 const overlayPool: OverlayEntry[] = []
-/** Realistic dialogue overlap is ≤2; one slack slot. Oldest-evicted. */
-const MAX_OVERLAYS = 3
+/** Realistic dialogue overlap is ≤2; one slack slot. Oldest-evicted. PER TRACK
+ *  since stage 3 — see `overlayCapacity`. */
+const MAX_OVERLAYS_PER_TRACK = 3
 
-function soundingCellIds(): ReadonlySet<string> {
-  return new Set(overlayPool.map((e) => e.cellId))
+/**
+ * The target slots currently on screen, published by the timeline.
+ *
+ * A module-level setter rather than a parameter threaded through every
+ * `planTargetOverlay` call site — the same shape `setQueueTimingMode` uses, and
+ * for the same reason: the call sites are many and none of them has any other
+ * business knowing about tracks.
+ */
+let targetSlots: readonly string[] = [RECORDING_SLOT]
+
+export function setQueueTargetSlots(slots: readonly string[]): void {
+  targetSlots = slots.length > 0 ? slots : [RECORDING_SLOT]
+}
+
+export function getQueueTargetSlots(): readonly string[] {
+  return targetSlots
+}
+
+/** Three slots per sounding track. With one track this is the 3 that shipped;
+ *  with N it is what stops N tracks evicting each other on every line. */
+function overlayCapacity(): number {
+  return MAX_OVERLAYS_PER_TRACK * Math.max(1, targetSlots.length)
+}
+
+/** The (cell, slot) pairs currently sounding. A cell alone is not enough: two
+ *  takes on one line, on different tracks, are the point of multi-track. */
+function soundingKeys(): ReadonlySet<string> {
+  return new Set(overlayPool.map((e) => `${e.cellId}\u0000${e.slot}`))
+}
+
+export function overlayKey(cellId: string, slot: string): string {
+  return `${cellId}\u0000${slot}`
 }
 
 /** Round 6: a dub whose start lies AHEAD of the clock — armed here, fired by
  *  the master's ontimeupdate when the clock crosses it. Invariant: non-null
  *  iff the last applied overlay plan was "arm". */
-let pendingDub: { cellId: string; dueSec: number } | null = null
+/** AQU-646 stage 3: ONE PER TRACK. It was a single slot, which was exact while
+ *  a line could hold one dub; with several tracks, arming track 2's take would
+ *  have thrown away track 1's arm and the first would never have fired. */
+let pendingDubs: Array<{ cellId: string; slot: string; dueSec: number }> = []
 
 /** Meeting 2026-08-05 (end-based drag bounds): a dub belonging to a LATER
  *  section whose audible start falls inside the CURRENT section's window — a
@@ -286,7 +355,7 @@ let pendingDub: { cellId: string; dueSec: number } | null = null
  *  pendingDub (both slots legitimately coexist); the master tick is the ONLY
  *  fire point. Derived state: unconditionally recomputed at every point the
  *  current cell/position/cells change, so it can never go stale. Dubbing-only. */
-let pendingEarlyDub: { cellId: string; dueSec: number } | null = null
+let pendingEarlyDubs: Array<{ cellId: string; slot: string; dueSec: number }> = []
 
 // AQU-646: mutable current-segment state, readable by the element handlers.
 // With seamless same-clip advance the element OUTLIVES the cell it was opened
@@ -360,8 +429,8 @@ function disposeCurrent(): void {
   // Everything resets with the master element — including any armed dub.
   // (Overlay removal alone deliberately does NOT clear pendingDub: a
   // previous dub ending is unrelated to the next section's armed one.)
-  pendingDub = null
-  pendingEarlyDub = null
+  pendingDubs = []
+  pendingEarlyDubs = []
   disposeAllOverlays()
   if (currentAudio) {
     // Detach handlers BEFORE clearing src: setting src="" re-runs the media
@@ -1228,8 +1297,8 @@ async function progPlaySlot(
   // The dub side rides the overlay pool, so the speaker buttons, rate and
   // volume keep applying to it exactly as they do in dubbing mode.
   disposeAllOverlays()
-  pendingDub = null
-  pendingEarlyDub = null // belt-and-braces: dubbing-only state, dead in audio-first
+  pendingDubs = []
+  pendingEarlyDubs = [] // belt-and-braces: dubbing-only state, dead in audio-first
 
   const target = slot.targetWindow ? activeTargetForCell(cell) : null
   const dubDue = Boolean(slot.targetWindow && target && into < slot.targetLenSec)
@@ -1572,6 +1641,8 @@ export type TargetOverlayPlan =
   | {
       kind: "fire"
       cellId: string
+      /** AQU-646 stage 3: which track this fire belongs to. */
+      slot: string
       audioId: string
       url: string
       /** Where to join the CLIP (its own clock): trimStart + progress-into-dub. */
@@ -1615,18 +1686,40 @@ export function planTargetOverlay(
   sounding: ReadonlySet<string>,
   reason: "advance" | "seek",
   masterSec: number,
-  opts?: TargetOverlayOptions,
+  opts?: TargetOverlayOptions & {
+    /** AQU-646 stage 3: which TRACK to plan for. Absent = the default dub row,
+     *  which is byte-for-byte the behaviour that shipped. */
+    slot?: string
+  },
 ): TargetOverlayPlan {
   const cell = cells[index]
+  const slot = opts?.slot ?? RECORDING_SLOT
+  const isDefaultSlot = isDefaultTrackSlot(slot)
   // `activeTargetForCell` gates on medium:"media"; `resolveTargetAudio` is the
   // same resolution without that gate, and is already what the video-first
   // timeline draws its dub chips from.
-  const target = cell ? (opts?.masterIsExternal ? resolveTargetAudio(cell) : activeTargetForCell(cell)) : null
-  const needsSourceClip = !opts?.masterIsExternal
+  //
+  // An ADDED track always uses the ungated resolver at its own slot: the media
+  // gate exists to stop a mixed file putting dubs on every subtitle cue, and a
+  // track that was aligned deliberately has already answered that question.
+  const target = cell
+    ? !isDefaultSlot
+      ? resolveTargetAudio(cell, slot)
+      : opts?.masterIsExternal
+        ? resolveTargetAudio(cell)
+        : activeTargetForCell(cell)
+    : null
+  // An added track's takes stand alone — there is no shared source clip in
+  // their slot for them to be "the dub over", which is exactly the case the
+  // external-master exemption already covers.
+  const needsSourceClip = !opts?.masterIsExternal && isDefaultSlot
   if (!cell || !target || (needsSourceClip && !sourceClipAudioForCell(cell))) {
     return reason === "seek" ? { kind: "silence" } : { kind: "keep" }
   }
-  if (reason === "advance" && sounding.has(cell.id)) return { kind: "keep" }
+  // (cell, slot), not cell: two takes on ONE line, on DIFFERENT tracks, are
+  // the point of multi-track — suppressing the second is what this key change
+  // exists to stop.
+  if (reason === "advance" && sounding.has(overlayKey(cell.id, slot))) return { kind: "keep" }
   const att = cell.attachments?.[target.audioId]
   const geom = targetChipGeom(cell, att)
   const dueSec = geom?.start ?? cell.startTime ?? 0
@@ -1643,6 +1736,7 @@ export function planTargetOverlay(
   return {
     kind: "fire",
     cellId: cell.id,
+    slot,
     audioId: target.audioId,
     url: target.url,
     startAtClipSec: trimStartSec + intoDubSec,
@@ -1664,16 +1758,20 @@ export function planEarlyDub(
   cells: CellData[],
   index: number,
   sounding: ReadonlySet<string>,
+  slot: string = RECORDING_SLOT,
 ): { cellId: string; dueSec: number } | null {
   const cell = cells[index]
   const windowEnd = cell ? trimWindowForCell(cell)?.end : null
   if (windowEnd == null) return null
+  const isDefaultSlot = isDefaultTrackSlot(slot)
   for (let i = index + 1; i < cells.length; i++) {
     const next = cells[i]
-    const target = activeTargetForCell(next)
+    const target = isDefaultSlot ? activeTargetForCell(next) : resolveTargetAudio(next, slot)
     // Dub-less / take-only sections can't fire an overlay — keep scanning.
-    if (!target || !sourceClipAudioForCell(next)) continue
-    if (sounding.has(next.id)) return null // already ringing — never re-arm
+    // The source-clip requirement is the DEFAULT track's rule; an added
+    // track's takes stand alone.
+    if (!target || (isDefaultSlot && !sourceClipAudioForCell(next))) continue
+    if (sounding.has(overlayKey(next.id, slot))) return null // already ringing
     const due = targetChipGeom(next, next.attachments?.[target.audioId])?.start ?? next.startTime ?? 0
     return due < windowEnd ? { cellId: next.id, dueSec: due } : null
   }
@@ -1685,27 +1783,40 @@ export function planEarlyDub(
  *  due already in the past is fine (the next tick fires it at offset). */
 function armEarlyDub(): void {
   if (timingMode !== "dubbing") {
-    pendingEarlyDub = null
+    pendingEarlyDubs = []
     return
   }
-  pendingEarlyDub = planEarlyDub(activeContext?.cells ?? [], currentIndex, soundingCellIds())
+  // One candidate per track: a backward-slid take on track 2 must not be
+  // displaced by the absence of one on track 1.
+  pendingEarlyDubs = targetSlots.flatMap((slot) => {
+    const early = planEarlyDub(activeContext?.cells ?? [], currentIndex, soundingKeys(), slot)
+    return early ? [{ ...early, slot }] : []
+  })
 }
 
 /** QA/debug snapshot — a read-only view of the dub machinery for browser
  *  passes (overlay elements are never in the DOM, so there is nothing to
  *  query otherwise). Not for product code. */
 export function getDubDebugSnapshot(): {
-  pendingDub: { cellId: string; dueSec: number } | null
-  pendingEarlyDub: { cellId: string; dueSec: number } | null
-  pool: { cellId: string; audioId: string; clipSec: number | null }[]
+  pendingDub: { cellId: string; slot: string; dueSec: number } | null
+  pendingEarlyDub: { cellId: string; slot: string; dueSec: number } | null
+  pool: { cellId: string; slot: string; audioId: string; clipSec: number | null; muted: boolean }[]
 } {
   return {
-    pendingDub: pendingDub ? { ...pendingDub } : null,
-    pendingEarlyDub: pendingEarlyDub ? { ...pendingEarlyDub } : null,
+    // The dev seam keeps its singular shape — it is a debugging read, and the
+    // first arm is what a human wants to see. `pool` below already lists all.
+    pendingDub: pendingDubs[0] ? { ...pendingDubs[0] } : null,
+    pendingEarlyDub: pendingEarlyDubs[0] ? { ...pendingEarlyDubs[0] } : null,
     pool: overlayPool.map((e) => ({
       cellId: e.cellId,
+      // AQU-646 stage 3: WHICH TRACK, and whether it is muted. Two takes on one
+      // line is the thing this stage made possible, and "both are sounding, and
+      // muting one silences exactly one" is not observable from outside without
+      // these two fields — the browser pass asserts on them directly.
+      slot: e.slot,
       audioId: e.audioId,
       clipSec: e.element ? e.element.currentTime : null,
+      muted: e.element ? e.element.muted : false,
     })),
   }
 }
@@ -1723,45 +1834,96 @@ if (import.meta.env.DEV && typeof window !== "undefined") {
 /** Execute an overlay plan. Overlay failures are non-fatal — a dub that can't
  *  load just doesn't sound; the master keeps the clock. Every applied plan
  *  overwrites `pendingDub` (the arm invariant). */
-function applyTargetOverlay(plan: TargetOverlayPlan): void {
+function applyTargetOverlay(
+  plan: TargetOverlayPlan,
+  slot: string = RECORDING_SLOT,
+  opts?: { alreadySilenced?: boolean },
+): void {
+  // Stage 3: each track owns its own arm, so a plan only ever clears or sets
+  // ITS OWN. Clearing the list wholesale — which is what the single slot
+  // amounted to — would drop another track's pending fire on the floor.
+  const others = pendingDubs.filter((d) => d.slot !== slot)
   if (plan.kind === "keep") {
-    pendingDub = null
+    pendingDubs = others
     return
   }
   if (plan.kind === "silence") {
-    pendingDub = null
-    disposeAllOverlays()
+    pendingDubs = others
+    if (!opts?.alreadySilenced) disposeAllOverlays()
     return
   }
   if (plan.kind === "arm") {
     // The dub's start is ahead of the clock — the tick fires it. An armed
     // "keep" lets an overhanging previous dub ring until this one is due.
-    pendingDub = { cellId: plan.cellId, dueSec: plan.dueSec }
-    if (plan.overlay === "silence") disposeAllOverlays()
+    pendingDubs = [...others, { cellId: plan.cellId, slot, dueSec: plan.dueSec }]
+    if (plan.overlay === "silence" && !opts?.alreadySilenced) disposeAllOverlays()
     return
   }
-  pendingDub = null
-  executeFire(plan)
+  pendingDubs = others
+  executeFire(plan, opts)
+}
+
+/**
+ * Plan and apply for EVERY track on screen. (AQU-646 stage 3)
+ *
+ * The call sites all wanted "put the right dub audio on for this moment", which
+ * used to mean one plan and now means one per track. Keeping the fan-out here
+ * rather than at each of the eight call sites is what stopped this change from
+ * touching all of them.
+ */
+function applyTargetOverlays(
+  cells: CellData[],
+  index: number,
+  reason: "advance" | "seek",
+  masterSec: number,
+  opts?: TargetOverlayOptions,
+): void {
+  // A SEEK MEANS "ONLY WHAT BELONGS AT THIS MOMENT SOUNDS" — and it has to be
+  // done ONCE, before any track fires.
+  //
+  // This is the bug a live pass caught and no unit test would have: each
+  // track's plan carries `exclusive` on a seek, so looping them meant track 2's
+  // fire disposed track 1's the instant after it started. Exactly one dub
+  // sounded, and WHICH one depended on the order the slots happened to be in.
+  const alreadySilenced = reason === "seek"
+  if (alreadySilenced) disposeAllOverlays()
+  for (const slot of targetSlots) {
+    applyTargetOverlay(
+      planTargetOverlay(cells, index, soundingKeys(), reason, masterSec, { ...opts, slot }),
+      slot,
+      { alreadySilenced },
+    )
+  }
 }
 
 /** The fire body, callable WITHOUT touching `pendingDub` — the early-dub tick
  *  fires a LATER section's dub while the current section's own dub can still
  *  be legitimately armed; running it through applyTargetOverlay would clobber
  *  that arm. */
-function executeFire(plan: Extract<TargetOverlayPlan, { kind: "fire" }>): void {
+function executeFire(
+  plan: Extract<TargetOverlayPlan, { kind: "fire" }>,
+  opts?: { alreadySilenced?: boolean },
+): void {
   const ctx = activeContext
   if (!ctx) return
   const cell = ctx.cells.find((c) => c.id === plan.cellId)
   if (!cell) return
-  // Seek semantics: only the landing section's dub sounds.
-  if (plan.exclusive) disposeAllOverlays()
-  // Re-firing a cell replaces its own entry — never an echo.
-  const prior = overlayPool.find((e) => e.cellId === plan.cellId)
+  // Seek semantics: only the landing section's dub sounds. The fan-out has
+  // already done this once for the whole moment — see `applyTargetOverlays`.
+  if (plan.exclusive && !opts?.alreadySilenced) disposeAllOverlays()
+  // Re-firing a cell ON THE SAME TRACK replaces its own entry — never an echo.
+  //
+  // (cell, slot), not cell: matching on the cell alone would have made track
+  // 2's take evict track 1's the instant it fired, so only ever one of them
+  // would sound. That is one of the three places that silently enforced "one
+  // dub per line".
+  const prior = overlayPool.find((e) => e.cellId === plan.cellId && e.slot === plan.slot)
   if (prior) removeOverlayEntry(prior)
   // Bounded pool: evict the OLDEST ringing dub at the cap.
-  while (overlayPool.length >= MAX_OVERLAYS) removeOverlayEntry(overlayPool[0])
+  while (overlayPool.length >= overlayCapacity()) removeOverlayEntry(overlayPool[0])
   const entry: OverlayEntry = {
     cellId: plan.cellId,
+    slot: plan.slot,
     audioId: plan.audioId,
     element: null,
     url: null,
@@ -1819,7 +1981,7 @@ function wireOverlayElement(
   // the pool, so rate/volume/audibility sweeps that ran meanwhile missed it.
   audio.playbackRate = progress.rate
   audio.volume = progress.volume
-  audio.muted = !audibility.target
+  audio.muted = !slotAudible(audibility, entry.slot)
   const applySeek = () => {
     const d = audio.duration
     // A RECORDED take is a MediaRecorder webm, and that container carries no
@@ -2038,10 +2200,14 @@ function progCueTarget(
   const ctx = activeContext
   const win = slot.targetWindow
   if (!ctx || !win) return
+  // Audio-first cues ONE dub per verse — the default track's — so its pool
+  // entries carry that slot. See progCueTarget's caller for why Free timing is
+  // deliberately single-track for now.
   const prior = overlayPool.find((e) => e.cellId === slot.cellId)
   if (prior) removeOverlayEntry(prior)
   const entry: OverlayEntry = {
     cellId: slot.cellId,
+    slot: RECORDING_SLOT,
     audioId: target.audioId,
     element: null,
     url: null,
@@ -2185,9 +2351,7 @@ function adoptCell(
     audio.currentTime = seekTo
     setProgress({ currentTime: seekTo })
   }
-  applyTargetOverlay(
-    planTargetOverlay(ctx.cells, index, soundingCellIds(), overlayReason, overlayAtSec ?? seekTo ?? audio.currentTime),
-  )
+  applyTargetOverlays(ctx.cells, index, overlayReason, overlayAtSec ?? seekTo ?? audio.currentTime)
   armEarlyDub()
 }
 
@@ -2330,26 +2494,28 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
     // Round 6: an ARMED dub fires the moment the clock crosses its start.
     // Checked BEFORE the window-end advance — a due within one ~250ms tick of
     // the section end would otherwise be dropped by the advance's replan.
-    if (pendingDub && audio.currentTime >= pendingDub.dueSec) {
-      applyTargetOverlay(
-        planTargetOverlay(activeContext?.cells ?? [], currentIndex, soundingCellIds(), "advance", audio.currentTime),
-      )
+    if (pendingDubs.some((d) => audio.currentTime >= d.dueSec)) {
+      applyTargetOverlays(activeContext?.cells ?? [], currentIndex, "advance", audio.currentTime)
     }
     // A LATER section's backward-slid dub fires here too — planTargetOverlay
     // at the EARLY cell's index supplies the trim-aware offset, past-end
     // suppression, and the sounding guard for free; executeFire (not
     // applyTargetOverlay) leaves the current cell's own arm untouched.
-    if (pendingEarlyDub && audio.currentTime >= pendingEarlyDub.dueSec) {
-      const early = pendingEarlyDub
-      pendingEarlyDub = null
+    const dueEarly = pendingEarlyDubs.filter((d) => audio.currentTime >= d.dueSec)
+    if (dueEarly.length > 0) {
+      pendingEarlyDubs = pendingEarlyDubs.filter((d) => !dueEarly.includes(d))
       const cells = activeContext?.cells ?? []
-      const earlyIdx = cells.findIndex((c) => c.id === early.cellId)
-      const plan =
-        earlyIdx >= 0
-          ? planTargetOverlay(cells, earlyIdx, soundingCellIds(), "advance", audio.currentTime)
-          : null
-      if (plan?.kind === "fire") executeFire(plan)
-      armEarlyDub() // self-healing: the next candidate, or null
+      for (const early of dueEarly) {
+        const earlyIdx = cells.findIndex((c) => c.id === early.cellId)
+        const plan =
+          earlyIdx >= 0
+            ? planTargetOverlay(cells, earlyIdx, soundingKeys(), "advance", audio.currentTime, {
+                slot: early.slot,
+              })
+            : null
+        if (plan?.kind === "fire") executeFire(plan)
+      }
+      armEarlyDub() // self-healing: the next candidates, or none
     }
     // A media segment's window ends before the shared clip does — treat
     // reaching the window end as this cell's "ended" and advance.
@@ -2406,9 +2572,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
           await audio.play()
           // Round 6: the src swap reset the element's position — re-derive
           // the dub/arm state for wherever the clock actually is now.
-          applyTargetOverlay(
-            planTargetOverlay(activeContext?.cells ?? [], currentIndex, soundingCellIds(), "seek", audio.currentTime),
-          )
+          applyTargetOverlays(activeContext?.cells ?? [], currentIndex, "seek", audio.currentTime)
           armEarlyDub()
         } catch (e) {
           if (seq !== currentSeq) return
@@ -2424,9 +2588,7 @@ async function playAt(index: number, opts: { atSeconds?: number; autoplay?: bool
   // Fresh element = everything reset (disposeCurrent killed any overlay) —
   // fire or arm this cell's dub. Cued-not-playing elements just cue it too
   // (the executor only starts it when the master is playing).
-  applyTargetOverlay(
-    planTargetOverlay(ctx.cells, index, soundingCellIds(), "seek", opts.atSeconds ?? currentTrim?.start ?? 0),
-  )
+  applyTargetOverlays(ctx.cells, index, "seek", opts.atSeconds ?? currentTrim?.start ?? 0)
   armEarlyDub()
 
   if (!autoplay || !dubbingWantPlay) {
@@ -2553,7 +2715,7 @@ export function seekQueueToTime(seconds: number, opts: { play?: boolean } = {}):
     seekQueue(plan.seconds)
     // Same cell, new position — re-derive the dub for it (join mid-clip,
     // re-arm ahead of it, or cut).
-    applyTargetOverlay(planTargetOverlay(ctx.cells, plan.index, soundingCellIds(), "seek", plan.seconds))
+    applyTargetOverlays(ctx.cells, plan.index, "seek", plan.seconds)
     armEarlyDub()
     syncPlayState(wantPlay)
     return
@@ -2867,13 +3029,15 @@ export function updateQueueCells(cells: CellData[]): void {
   }
   // Round 6/7: an armed dub's due time is a snapshot — refresh it (trim-aware)
   // if the chip was dragged or trimmed while we were waiting on it.
-  if (pendingDub) {
-    const cellId = pendingDub.cellId
-    const cell = cells.find((c) => c.id === cellId)
-    const target = cell ? activeTargetForCell(cell) : null
-    const due = cell ? targetDueSec(cell, target ? cell.attachments?.[target.audioId] : undefined) : null
-    if (due != null) pendingDub = { cellId, dueSec: due }
-  }
+  pendingDubs = pendingDubs.map((armed) => {
+    const cell = cells.find((c) => c.id === armed.cellId)
+    if (!cell) return armed
+    const target = isDefaultTrackSlot(armed.slot)
+      ? activeTargetForCell(cell)
+      : resolveTargetAudio(cell, armed.slot)
+    const due = targetDueSec(cell, target ? cell.attachments?.[target.audioId] : undefined)
+    return due != null ? { ...armed, dueSec: due } : armed
+  })
   // The early-dub slot re-derives wholesale — a mid-play drag, take swap or
   // delete simply changes what (if anything) it points at.
   armEarlyDub()
@@ -2927,7 +3091,7 @@ export function startExternalDubs(ctx: PlayContext): void {
 export function stopExternalDubs(): void {
   if (!externalDubs) return
   externalDubs = null
-  pendingDub = null
+  pendingDubs = []
   disposeAllOverlays()
 }
 
@@ -2971,13 +3135,20 @@ export function tickExternalDubs(sec: number): void {
   externalDubs.lastSec = sec
   if (seeked) disposeAllOverlays()
 
-  const sounding = soundingCellIds()
+  // Stage 3: every cell × every TRACK. Still one stateless sweep — the driver
+  // needed no state of its own, so the fan-out is the whole change here.
+  const sounding = soundingKeys()
   for (let i = 0; i < ctx.cells.length; i++) {
-    // `advance` even on a scrub: `seek` means "silence everything else", which
-    // the dispose above has already done, and asking for it per cell would
-    // make each cell cancel the one before it.
-    const plan = planTargetOverlay(ctx.cells, i, sounding, "advance", sec, { masterIsExternal: true })
-    if (plan.kind === "fire") executeFire(plan)
+    for (const slot of targetSlots) {
+      // `advance` even on a scrub: `seek` means "silence everything else",
+      // which the dispose above has already done, and asking for it per cell
+      // would make each cell cancel the one before it.
+      const plan = planTargetOverlay(ctx.cells, i, sounding, "advance", sec, {
+        masterIsExternal: true,
+        slot,
+      })
+      if (plan.kind === "fire") executeFire(plan)
+    }
   }
 }
 

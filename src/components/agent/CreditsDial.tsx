@@ -1,6 +1,6 @@
 /**
  * CreditsDial — at-a-glance org agent-credit gauge for the agent surfaces
- * (dock panel + workbench headers).
+ * (dock panel + workbench agent pane).
  *
  * A small ring shows today's agent-rail spend against the org's agent daily
  * cap; clicking opens a popover with the full breakdown (agent day/week +

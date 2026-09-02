@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest"
 import {
   chipOverflowState,
   chipOverlaps,
+  dualFaultMeetSec,
   effectiveAttachmentDurationMs,
   subtitleSpanSec,
   targetChipGeom,
@@ -139,6 +140,69 @@ describe("targetChipGeom — the anchor is relative to the cell (round 8)", () =
     expect(
       targetChipGeom(cell({ startTime: 15, endTime: 25, metadata: meta }), { durationMs: 4000 })?.anchor,
     ).toBe(12)
+  })
+})
+
+// ── AQU-646 stage 3: the placement moves onto the TAKE ─────────────────────
+//
+// The reason it had to is one test: two takes share a line once extra target
+// tracks exist, and a per-cell anchor would make dragging one chip move the
+// other. Everything else here defends the fallback, which stays permanent
+// because `rebuild.ts` keeps replaying historical `cell.lane.retime` events
+// into the cell's metadata forever.
+
+describe("targetChipGeom — the take's own placement (stage 3)", () => {
+  it("uses the take's offset in preference to the cell's", () => {
+    const g = targetChipGeom(
+      cell({ metadata: { target_offset_ms: 2000 } }),
+      { durationMs: 4000, targetOffsetMs: 500 },
+    )
+    expect(g).toMatchObject({ anchor: 10.5, start: 10.5, end: 14.5 })
+  })
+
+  // THE BUG THIS EXISTS TO FIX. Two takes, one line: each sits where IT was
+  // placed. Reading the cell would give them both the same anchor, so dragging
+  // one would visibly move the other.
+  it("keeps two takes on ONE line independently placed", () => {
+    const line = cell({ metadata: { target_offset_ms: 2000 } })
+    const a = targetChipGeom(line, { durationMs: 4000, targetOffsetMs: 0 })
+    const b = targetChipGeom(line, { durationMs: 4000, targetOffsetMs: 3000 })
+    expect(a?.anchor).toBe(10)
+    expect(b?.anchor).toBe(13)
+  })
+
+  it("still follows the line when the line moves", () => {
+    const att = { durationMs: 4000, targetOffsetMs: 1000 }
+    expect(targetChipGeom(cell({}), att)?.anchor).toBe(11)
+    expect(targetChipGeom(cell({ startTime: 15, endTime: 25 }), att)?.anchor).toBe(16)
+  })
+
+  // `!= null`, not truthiness — a take placed exactly on its line's start is
+  // the common case, and `0` must not fall through to the cell's own anchor.
+  it("treats a take offset of exactly 0 as a placement", () => {
+    const g = targetChipGeom(
+      cell({ metadata: { target_offset_ms: 5000 } }),
+      { durationMs: 4000, targetOffsetMs: 0 },
+    )
+    expect(g).toMatchObject({ anchor: 10 })
+  })
+
+  it("falls back to the cell for a take that has never been placed", () => {
+    const g = targetChipGeom(cell({ metadata: { target_offset_ms: 2000 } }), { durationMs: 4000 })
+    expect(g).toMatchObject({ anchor: 12 })
+  })
+
+  it("ignores a non-finite offset rather than drawing the chip nowhere", () => {
+    const g = targetChipGeom(
+      cell({ metadata: { target_offset_ms: 2000 } }),
+      { durationMs: 4000, targetOffsetMs: Number.NaN },
+    )
+    expect(g).toMatchObject({ anchor: 12 })
+  })
+
+  it("a negative take offset leads the line", () => {
+    const g = targetChipGeom(cell({}), { durationMs: 4000, targetOffsetMs: -1500 })
+    expect(g).toMatchObject({ anchor: 8.5, start: 8.5, end: 12.5 })
   })
 })
 
@@ -277,5 +341,86 @@ describe("chipOverlaps", () => {
       headSec: null,
       tailSec: expect.closeTo(0.1, 5),
     })
+  })
+})
+
+describe("dualFaultMeetSec — where a mutually-offending pair meets (2026-08-27)", () => {
+  /** Both chips in full, because the answer must land inside BOTH of them —
+   *  the far edges are what makes that checkable. The starts and ends here are
+   *  the ones each case's own comment already describes. */
+  const meet = (
+    prevChip: [number, number], nextChip: [number, number],
+    prevSectionEnd: number, nextSectionStart: number,
+  ) =>
+    dualFaultMeetSec(
+      { chipStartSec: prevChip[0], chipEndSec: prevChip[1], sectionEndSec: prevSectionEnd },
+      { chipStartSec: nextChip[0], chipEndSec: nextChip[1], sectionStartSec: nextSectionStart },
+    )
+
+  /** The invariant, asserted as a property rather than a number, so it survives
+   *  a future retune of where inside the overlap the pair meets. */
+  const expectInsideBoth = (at: number, prevChip: [number, number], nextChip: [number, number]) => {
+    expect(at).toBeGreaterThanOrEqual(Math.max(prevChip[0], nextChip[0]))
+    expect(at).toBeLessThanOrEqual(Math.min(prevChip[1], nextChip[1]))
+  }
+
+  it("touching sections collapse to the shared border — the 2026-08-08 cut, unchanged", () => {
+    // Sections [10,20]/[20,30]; chips [10,24] and [17,27].
+    expect(meet([10, 24], [17, 27], 20, 20)).toBe(20)
+  })
+
+  it("across a gap, the pair meets at the midpoint of their overlap", () => {
+    // Sam's screenshots, in round seconds: sections end 83.0 / start 83.4,
+    // chips end 83.3 / start 83.1 — the overlap [83.1, 83.3] sits wholly
+    // inside the gap, so its own midpoint is the meet.
+    expect(meet([80.6, 83.3], [83.1, 85.2], 83.0, 83.4)).toBeCloseTo(83.2)
+  })
+
+  it("an overlap reaching outside the gap is clamped to the borders first", () => {
+    // Gap [19,21]; the next chip reaches back to 18, INSIDE the previous
+    // section — the meet must not follow it in there. Zone [19, 20] → 19.5.
+    expect(meet([10, 20], [18, 28], 19, 21)).toBeCloseTo(19.5)
+    // Mirror: the previous chip reaches past the next SECTION's start.
+    expect(meet([10, 22], [20, 30], 19, 21)).toBeCloseTo(20.5)
+    // Both ends spill past the gap: the whole gap is the zone.
+    expect(meet([10, 22], [18, 30], 19, 21)).toBeCloseTo(20)
+  })
+
+  it("overlapping SECTIONS meet between the crossed borders", () => {
+    // Sections [10,21]/[19,30] overlap; chips [10,23] and [17,27]. lo/hi
+    // invert (21 > 19) and the midpoint lands between the borders — one point,
+    // so the painted pair stays disjoint, which the old per-border cuts
+    // (end at 21, start at 19) did not.
+    expect(meet([10, 23], [17, 27], 21, 19)).toBeCloseTo(20)
+  })
+
+  // …AND WHEN THEY OVERLAP FAR ENOUGH, the border zone is not merely inverted
+  // but unusable: its midpoint lands outside the chips entirely. Sections
+  // [10,20]/[12,30] with chips [10,21]/[11,13] returned 16 — three seconds past
+  // the second chip's own end — so `paintedStart` exceeded `paintedEnd` and it
+  // rendered as a 10px stub over silence, jumping there as the pointer left.
+  it("stays inside both chips when the sections overlap past the next chip's end", () => {
+    const prevChip: [number, number] = [10, 21]
+    const nextChip: [number, number] = [11, 13]
+    const at = meet(prevChip, nextChip, 20, 12)
+    expectInsideBoth(at, prevChip, nextChip)
+    expect(at).toBeCloseTo(12)
+  })
+
+  // The property the four cases above share, stated once: wherever the borders
+  // fall, the cut is somewhere both chips actually have audio.
+  it("never answers outside the overlap, whatever the borders do", () => {
+    const cases: [[number, number], [number, number], number, number][] = [
+      [[10, 24], [17, 27], 20, 20],
+      [[80.6, 83.3], [83.1, 85.2], 83.0, 83.4],
+      [[10, 22], [18, 30], 19, 21],
+      [[10, 23], [17, 27], 21, 19],
+      [[10, 21], [11, 13], 20, 12],
+      // Sections crossed the other way, and a next chip that ends very early.
+      [[0, 30], [5, 6], 25, 1],
+    ]
+    for (const [prevChip, nextChip, prevSectionEnd, nextSectionStart] of cases) {
+      expectInsideBoth(meet(prevChip, nextChip, prevSectionEnd, nextSectionStart), prevChip, nextChip)
+    }
   })
 })

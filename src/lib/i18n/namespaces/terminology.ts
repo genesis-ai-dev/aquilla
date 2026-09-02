@@ -230,21 +230,17 @@ export const terminology = defineNamespace({
     }),
 
     // ── EquivalentsPanel.tsx ─────────────────────────────────────────────────
-    "terminology.equivalents.sourceBoth": "χ² + EM agree",
-    "terminology.equivalents.sourceEm": "EM only",
-    "terminology.equivalents.sourceChi2": "χ² only",
     "terminology.equivalents.promoteTooltip":
-      "Promote to a managed rendering (crosses the deterministic line)",
-    "terminology.equivalents.promoteButton": "Promote",
-    "terminology.equivalents.managedSubtitle": "(your decisions)",
-    "terminology.equivalents.noManagedRenderings": "No managed renderings yet for “{term}”.",
-    "terminology.equivalents.aiAssumedHeading": "AI-assumed",
-    "terminology.equivalents.aiAssumedSubtitle": "(predicted)",
+      "Add this suggestion as an approved translation",
+    "terminology.equivalents.promoteButton": "Add",
+    "terminology.equivalents.approvedHeading": "Approved translations",
+    "terminology.equivalents.noManagedRenderings": "No approved translations yet for “{term}”.",
+    "terminology.equivalents.suggestedHeading": "Suggested translations",
+    "terminology.equivalents.suggestedSubtitle":
+      "Based on translated examples in this project",
     "terminology.equivalents.noPredicted":
-      "No predicted equivalents — the corpus has too little signal yet.",
-    "terminology.equivalents.confidenceHigh": "HIGH",
-    "terminology.equivalents.confidenceAmber": "AMBER",
-    "terminology.equivalents.confidenceLow": "LOW",
+      "There are not enough translated examples to suggest a translation yet.",
+    "terminology.equivalents.confidence": "{confidence} confidence",
 
     // ── TermLookupPopover.tsx ────────────────────────────────────────────────
     "terminology.lookup.applyAria": "Apply rendering: {rendering}",
@@ -637,6 +633,15 @@ export const terminology = defineNamespace({
           "Empty-state line in the Managed panel; {term} is the concept's own source " +
           "headword, shown inside curly quotes (not translated).",
         placeholders: { term: "The concept's source headword, verbatim (not translated)." },
+      },
+      "terminology.equivalents.confidence": {
+        description:
+          "Confidence label beside a suggested translation; {confidence} is a " +
+          "locale-formatted percentage showing how consistently the source term and " +
+          "suggestion occur together across the project's translated examples.",
+        placeholders: {
+          confidence: "A locale-formatted percentage, such as 67%.",
+        },
       },
       "terminology.lookup.applyAria": {
         description:

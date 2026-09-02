@@ -18,8 +18,9 @@ export interface ProjectMemberRole {
    *   - "org":      user has an org_members row for this project's org
    *   - "creator":  user is the project's `created_by`
    *
-   * "gitlab" was a v1 legacy field for GitLab pass-through projects. The D1
-   * schema has no gitlab_project_id column and auth-worker never returns it.
+   * "gitlab" was a v1 legacy field for GitLab pass-through projects. The
+   * Postgres schema has no gitlab_project_id column and auth-worker never
+   * returns it.
    */
   source: "override" | "group" | "creator" | "org";
 }

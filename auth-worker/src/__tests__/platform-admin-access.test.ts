@@ -89,7 +89,7 @@ describe("platform-admin cross-tenant access", () => {
     expect(denied.status).toBe(403)
   })
 
-  it("GET /orgs appends foreign orgs AFTER genuine memberships, flagged viaPlatformAdmin", async () => {
+  it("GET /orgs is memberships-only so an admin's session boot is not O(all orgs)", async () => {
     await seedForeignOrg()
     await seedUser(7, "root")
     // Explicit personal org (explicit-id seeds don't advance the serial
@@ -101,15 +101,35 @@ describe("platform-admin cross-tenant access", () => {
     const res = await app.request("/api/v2/orgs", { headers: authHeader(await jwtFor("root")) }, env)
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
-      orgs: Array<{ id: number; name: string | null; role: { level: number; name: string }; viaPlatformAdmin?: boolean }>
+      orgs: Array<{ id: number; name: string | null; viaPlatformAdmin?: boolean }>
+      nextCursor: string | null
     }
-    // First entry must stay a genuine membership even though "CAS" sorts
-    // before "Zz root workspace" (the SPA defaults its active org to orgs[0]
-    // — an admin's fresh session must not land in a foreign org).
+    // First entry must stay a genuine membership (the SPA defaults its active
+    // org to orgs[0] — an admin's fresh session must not land in a foreign org).
+    expect(body.orgs).toHaveLength(1)
+    expect(body.orgs[0]).toMatchObject({ id: 2, name: "Zz root workspace" })
+    expect(body.orgs[0].viaPlatformAdmin).toBeUndefined()
+    expect(body.nextCursor).toBeNull()
+  })
+
+  it("GET /orgs?limit= pages foreign orgs AFTER memberships, flagged viaPlatformAdmin", async () => {
+    await seedForeignOrg()
+    await seedUser(7, "root")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (2, 'Zz root workspace', 7)",
+    ).run()
+
+    const res = await app.request("/api/v2/orgs?limit=40", { headers: authHeader(await jwtFor("root")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      orgs: Array<{ id: number; name: string | null; role: { level: number; name: string }; viaPlatformAdmin?: boolean }>
+      nextCursor: string | null
+    }
     expect(body.orgs).toHaveLength(2)
     expect(body.orgs[0]).toMatchObject({ id: 2, name: "Zz root workspace" })
     expect(body.orgs[0].viaPlatformAdmin).toBeUndefined()
     expect(body.orgs[1]).toMatchObject({ id: 1, name: "CAS", role: { level: 700, name: "admin" }, viaPlatformAdmin: true })
+    expect(body.nextCursor).toBeNull()
   })
 
   it("GET /orgs omits a foreign org the admin already reaches via a project grant", async () => {
@@ -124,13 +144,70 @@ describe("platform-admin cross-tenant access", () => {
       "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('pa', 7, 400, 1)",
     ).run()
 
-    const res = await app.request("/api/v2/orgs", { headers: authHeader(await jwtFor("root")) }, env)
+    const res = await app.request("/api/v2/orgs?limit=40", { headers: authHeader(await jwtFor("root")) }, env)
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
       orgs: Array<{ id: number; name: string | null; viaPlatformAdmin?: boolean }>
     }
     expect(body.orgs.map((o) => o.id)).toEqual([2])
     expect(body.orgs[0].viaPlatformAdmin).toBeUndefined()
+  })
+
+  it("GET /orgs/:orgId hydrates a foreign org for a platform admin", async () => {
+    await seedForeignOrg()
+    await seedUser(7, "root")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (2, 'Zz root workspace', 7)",
+    ).run()
+
+    const res = await app.request("/api/v2/orgs/1", { headers: authHeader(await jwtFor("root")) }, env)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({
+      id: 1,
+      name: "CAS",
+      role: { level: 700, name: "admin" },
+      viaPlatformAdmin: true,
+    })
+  })
+
+  it("GET /orgs?q= searches the catalog and paginates with cursor", async () => {
+    await seedUser(7, "root")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (2, 'Root workspace', 7)",
+    ).run()
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (10, 'Alpha Org', 1), (11, 'Beta Org', 1), (12, 'Gamma Org', 1)",
+    ).run()
+
+    const first = await app.request("/api/v2/orgs?limit=1", { headers: authHeader(await jwtFor("root")) }, env)
+    const firstBody = (await first.json()) as {
+      orgs: Array<{ id: number; name: string | null; viaPlatformAdmin?: boolean }>
+      nextCursor: string | null
+    }
+    // Membership + first catalog row; more remain.
+    expect(firstBody.orgs[0]).toMatchObject({ id: 2, name: "Root workspace" })
+    expect(firstBody.orgs[0].viaPlatformAdmin).toBeUndefined()
+    expect(firstBody.orgs).toHaveLength(2)
+    expect(firstBody.orgs[1].viaPlatformAdmin).toBe(true)
+    expect(firstBody.nextCursor).toBeTruthy()
+
+    const second = await app.request(
+      `/api/v2/orgs?limit=1&cursor=${encodeURIComponent(firstBody.nextCursor as string)}`,
+      { headers: authHeader(await jwtFor("root")) },
+      env,
+    )
+    const secondBody = (await second.json()) as {
+      orgs: Array<{ id: number; viaPlatformAdmin?: boolean }>
+      nextCursor: string | null
+    }
+    expect(secondBody.orgs).toHaveLength(1)
+    expect(secondBody.orgs[0].viaPlatformAdmin).toBe(true)
+    expect(secondBody.orgs[0].id).not.toBe(firstBody.orgs[1].id)
+
+    const search = await app.request("/api/v2/orgs?q=beta&limit=40", { headers: authHeader(await jwtFor("root")) }, env)
+    const searchBody = (await search.json()) as { orgs: Array<{ name: string | null }> }
+    expect(searchBody.orgs.map((o) => o.name)).toEqual(["Beta Org"])
   })
 })
 

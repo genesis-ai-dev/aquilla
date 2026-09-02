@@ -19,11 +19,21 @@ async function openOrgSwitcher(name: string | RegExp) {
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false }),
 }))
+const platformAdmin = vi.hoisted(() => ({ isAdmin: false, loading: false }))
+vi.mock("@/hooks/usePlatformAdmin", () => ({
+  usePlatformAdmin: () => ({
+    isAdmin: platformAdmin.isAdmin,
+    loading: platformAdmin.loading,
+  }),
+}))
 const listMyOrgs = vi.fn()
+const listOrgsPage = vi.fn()
 const createOrg = vi.fn()
 vi.mock("@/lib/frontier/orgs", () => ({
   listMyOrgs: (...a: unknown[]) => listMyOrgs(...a),
+  listOrgsPage: (...a: unknown[]) => listOrgsPage(...a),
   createOrg: (...a: unknown[]) => createOrg(...a),
+  ORG_SWITCHER_PAGE_SIZE: 40,
 }))
 
 const fetchAccessibleProjects = vi.fn()
@@ -38,9 +48,12 @@ vi.mock("@/lib/sync/cloud-projects", () => ({
 beforeEach(() => {
   localStorage.clear()
   listMyOrgs.mockReset()
+  listOrgsPage.mockReset()
   createOrg.mockReset()
   fetchAccessibleProjects.mockReset()
   fetchAccessibleProjects.mockResolvedValue([])
+  platformAdmin.isAdmin = false
+  platformAdmin.loading = false
 })
 afterEach(() => vi.restoreAllMocks())
 
@@ -482,6 +495,104 @@ describe("OrgSwitcher", () => {
       await waitFor(() => expect(listMyOrgs).toHaveBeenCalled())
       expect(screen.queryByTestId("org-switcher-error")).not.toBeInTheDocument()
       expect(container).toBeEmptyDOMElement()
+    })
+  })
+
+  describe("platform-admin catalog (async combobox)", () => {
+    it("loads the first catalog page on open instead of dumping every org from context", async () => {
+      platformAdmin.isAdmin = true
+      listMyOrgs.mockResolvedValue([
+        { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+      ])
+      listOrgsPage.mockResolvedValue({
+        orgs: [
+          { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+          { id: 9, name: "Foreign Org", role: { level: 700, name: "admin" }, viaPlatformAdmin: true },
+        ],
+        nextCursor: "9:Foreign%20Org",
+      })
+
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
+      expect(listOrgsPage).not.toHaveBeenCalled()
+
+      await act(async () => {
+        screen.getByRole("combobox", { name: /acme/i }).click()
+      })
+      await waitFor(() => expect(screen.getByText("Foreign Org")).toBeInTheDocument())
+      expect(listOrgsPage).toHaveBeenCalledWith(
+        "jwt",
+        expect.objectContaining({ q: "", limit: 40 }),
+      )
+      expect(screen.getByTestId("org-switcher-load-more")).toBeInTheDocument()
+    })
+
+    it("searches the catalog as you type", async () => {
+      platformAdmin.isAdmin = true
+      listMyOrgs.mockResolvedValue([
+        { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+      ])
+      listOrgsPage.mockImplementation(async (_jwt: string, opts?: { q?: string }) => {
+        const q = opts?.q?.trim().toLowerCase() ?? ""
+        if (q === "beta") {
+          return {
+            orgs: [{ id: 9, name: "Beta Org", role: { level: 700, name: "admin" }, viaPlatformAdmin: true }],
+            nextCursor: null,
+          }
+        }
+        return {
+          orgs: [
+            { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+            { id: 9, name: "Beta Org", role: { level: 700, name: "admin" }, viaPlatformAdmin: true },
+          ],
+          nextCursor: null,
+        }
+      })
+
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
+      await act(async () => {
+        screen.getByRole("combobox", { name: /acme/i }).click()
+      })
+      await waitFor(() => expect(screen.getByRole("option", { name: /beta org/i })).toBeInTheDocument())
+
+      const search = await screen.findByRole("combobox", { name: /find an organization/i })
+      fireEvent.change(search, { target: { value: "beta" } })
+      await waitFor(() =>
+        expect(listOrgsPage).toHaveBeenCalledWith(
+          "jwt",
+          expect.objectContaining({ q: "beta" }),
+        ),
+      )
+      await waitFor(() => expect(screen.getByRole("option", { name: /beta org/i })).toBeInTheDocument())
+      expect(screen.queryByRole("option", { name: /acme/i })).not.toBeInTheDocument()
+    })
+
+    it("keeps a guest-grant org in the Guest section instead of listing it twice as Admin", async () => {
+      platformAdmin.isAdmin = true
+      listMyOrgs.mockResolvedValue([
+        { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+      ])
+      fetchAccessibleProjects.mockResolvedValue([
+        { id: "p2", name: "Proj 2", orgId: 9, orgName: "Alice Co", role: { level: 100, name: "viewer", source: "override" } },
+      ])
+      listOrgsPage.mockResolvedValue({
+        orgs: [
+          { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+          { id: 9, name: "Alice Co", role: { level: 700, name: "admin" }, viaPlatformAdmin: true },
+        ],
+        nextCursor: null,
+      })
+
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
+      await act(async () => {
+        screen.getByRole("combobox", { name: /acme/i }).click()
+      })
+      await waitFor(() => expect(screen.getByTestId("guest-orgs")).toBeInTheDocument())
+      expect(screen.getAllByRole("option", { name: /alice co/i })).toHaveLength(1)
+      expect(screen.getByRole("option", { name: /alice co guest/i })).toBeInTheDocument()
+      expect(screen.queryByRole("option", { name: /alice co admin/i })).not.toBeInTheDocument()
     })
   })
 })

@@ -47,7 +47,9 @@ import { portfolioAttentionReasons, type ProjectAttentionReason } from "@/lib/pr
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { SignedOutWorkspace } from "./SignedOutWorkspace"
 
-const PROJECT_PREVIEW_LIMIT = 10
+/** Bounded pane so the continuous project list does not push workload / usage off-screen. */
+const PROJECTS_PANEL_MAX_H =
+  "max-h-[clamp(14rem,calc(100dvh-22rem),28rem)]"
 
 type OverviewProjectRow = {
   project: PortfolioProjectRow
@@ -96,10 +98,9 @@ function OverviewLoadingTemplate() {
 }
 
 /**
- * Single-org Overview: admin-style operator home — rollup tiles, recently
- * updated projects, plus team workload / usage / credits. The first ten
- * projects are directly reachable here; the full directory also lives on
- * `/orgs/:id/projects`.
+ * Single-org Overview: admin-style operator home — rollup tiles, a
+ * continuous recently-updated project list, plus team workload / usage /
+ * credits. The full searchable directory also lives on `/orgs/:id/projects`.
  */
 export function OrgOverview() {
   const { t } = useI18n()
@@ -115,7 +116,6 @@ export function OrgOverview() {
   const memberProgressViewerRole = activeOrg?.role?.level ?? null
 
   const [pendingInvites, setPendingInvites] = useState<MyPendingInvite[]>([])
-  const [expandedProjectsOrgId, setExpandedProjectsOrgId] = useState<number | null>(null)
 
   useEffect(() => {
     if (!jwt) {
@@ -154,12 +154,6 @@ export function OrgOverview() {
         ),
     [portfolio.projects, portfolio.now],
   )
-  const projectsExpanded = expandedProjectsOrgId === activeOrgId
-  const hiddenProjectCount = Math.max(0, projectRows.length - PROJECT_PREVIEW_LIMIT)
-  const visibleProjectRows = projectsExpanded
-    ? projectRows
-    : projectRows.slice(0, PROJECT_PREVIEW_LIMIT)
-
   const projectColumns = useMemo<ColumnDef<OverviewProjectRow>[]>(
     () => [
       {
@@ -305,35 +299,26 @@ export function OrgOverview() {
               <Section
                 title={t("nav.projects")}
                 description={t("org.overview.projectsDescription")}
-                headerClassName={ADMIN_TABLE_SECTION_HEADER}
-                contentClassName={ADMIN_TABLE_SECTION_CONTENT}
+                className={cn("flex min-w-0 flex-col overflow-hidden", PROJECTS_PANEL_MAX_H)}
+                headerClassName={cn(ADMIN_TABLE_SECTION_HEADER, "shrink-0")}
+                contentClassName={cn(
+                  ADMIN_TABLE_SECTION_CONTENT,
+                  "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+                )}
               >
-                <div id="org-overview-projects-table">
+                <div
+                  id="org-overview-projects-table"
+                  className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+                >
                   <DataTable
                     columns={projectColumns}
-                    data={visibleProjectRows}
+                    data={projectRows}
                     getRowId={(r) => r.project.id}
                     onRowClick={(r) => navigate(`/projects/${r.project.id}`)}
                     testId="org-overview-projects-table"
                     className={ADMIN_TABLE_CLASS}
                     dense
-                    footer={
-                      hiddenProjectCount > 0 ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setExpandedProjectsOrgId(projectsExpanded ? null : activeOrgId)
-                          }
-                          aria-expanded={projectsExpanded}
-                          aria-controls="org-overview-projects-table"
-                          className="w-full text-start text-sm text-muted-foreground"
-                        >
-                          {projectsExpanded
-                            ? t("org.projectOverview.showFewer")
-                            : t("org.overview.showMoreProjects", { count: hiddenProjectCount })}
-                        </button>
-                      ) : null
-                    }
+                    fillHeight
                     emptyState={
                       <EmptyState
                         variant="inline"

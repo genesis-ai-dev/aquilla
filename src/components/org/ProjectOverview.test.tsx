@@ -612,12 +612,10 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
   })
 })
 
-// ── File list show-more ────────────────────────────────────────────────────
+// ── File list (continuous, no pager) ───────────────────────────────────────
 
-describe("ProjectOverview file list show-more", () => {
-  it("shows only the first 12 files when there are more than 12, then reveals all after clicking show-all", async () => {
-    // WHY: the file list was silently capped at 12 with no way to reach the rest (AQU-136).
-    // This asserts that all files become reachable via the show-more toggle.
+describe("ProjectOverview file list", () => {
+  it("shows every file in a continuous list when there are more than 12", async () => {
     const totalFiles = 16
     const fileList = Array.from({ length: totalFiles }, (_, i) => fileSummary(i + 1))
 
@@ -632,22 +630,9 @@ describe("ProjectOverview file list show-more", () => {
 
     renderOverview()
 
-    // Wait for async file fetch to populate the list
-    await waitFor(() => expect(screen.queryByText(/top 12 of 16/)).toBeInTheDocument())
-
-    // Only 12 files should be visible initially
-    // Scoped to file rows (data-testid="file-row") — a plain listitem-role query
-    // also picks up unrelated <li>s rendered elsewhere in the shell (e.g. the
-    // org switcher's popover list), which aren't part of what this test covers.
-    expect(screen.getAllByTestId("file-row").length).toBe(12)
-
-    // Clicking show-more reveals all 16 files
-    const showMore = screen.getByRole("button", { name: /show all/i })
-    fireEvent.click(showMore)
-
     await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(totalFiles))
-    // Header should now say "(16)" not "top 12 of 16"
     expect(screen.queryByText(/top 12 of 16/)).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /show all/i })).not.toBeInTheDocument()
     expect(screen.getByText(/\(16\)/)).toBeInTheDocument()
   })
 })

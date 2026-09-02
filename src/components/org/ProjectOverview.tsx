@@ -104,9 +104,6 @@ import { bidiIsolate } from "@/lib/i18n/format"
 import { SegmentTabs } from "@/components/ui/tabs"
 import { SignedOutWorkspace } from "./SignedOutWorkspace"
 
-/** Max per-file rows shown on the overview; the rest are counted as "+N more". */
-const FILE_ROW_CAP = 12
-
 type FileProgressSnapshot = Awaited<ReturnType<typeof getFileProgress>>
 type ProgressSection = FileProgressSnapshot["sections"][number]
 
@@ -601,7 +598,6 @@ export function ProjectOverview() {
   // stringified userId, or "" for unassigned) while the dialog is open.
   const [pmDialogOpen, setPmDialogOpen] = useState(false)
   const [pmSelection, setPmSelection] = useState<string>("")
-  const [showAllFiles, setShowAllFiles] = useState(false)
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
 
   // AQU-538 §3.3: the lane filter tab selection. `null` = "All" — today's
@@ -1584,7 +1580,7 @@ export function ProjectOverview() {
                 />
               )}
 
-              {/* ── Per-file rows (always fully visible per user decision) ── */}
+              {/* ── Per-file rows (continuous list; filter/sort, no pager) ── */}
               {files.length > 0 && (() => {
                 // AQU-499: filter by name, then sort by the selected mode.
                 // Expansion state (rollups/expandedFileId) is keyed by
@@ -1592,15 +1588,8 @@ export function ProjectOverview() {
                 // disturbs an already-expanded row's chapter/verse rollup.
                 const filtered = filterFilesByName(files, fileNameFilter)
                 const sorted = sortFiles(filtered, fileSortMode)
-                const shown = showAllFiles ? sorted : sorted.slice(0, FILE_ROW_CAP)
-                const hidden = sorted.length - shown.length
 
-                // AQU-500: export the full sorted+filtered list (honoring
-                // AQU-499's current sort/filter), not just the `shown` slice
-                // — the FILE_ROW_CAP is a display truncation for readability,
-                // not a data filter, so a PM exporting "what I see" should
-                // get every row matching their filter/sort, not just the
-                // first FILE_ROW_CAP rows.
+                // AQU-500: export the full sorted+filtered list.
                 async function handleCopyCsv() {
                   const csv = progressRowsToCsv(sorted)
                   try {
@@ -1622,9 +1611,7 @@ export function ProjectOverview() {
                   <div className="rounded-lg border bg-card p-5">
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                       <h2 className="text-xs font-semibold text-muted-foreground">
-                        {!showAllFiles && hidden > 0
-                          ? t("org.projectOverview.filesHeadingTruncated", { cap: FILE_ROW_CAP, total: sorted.length })
-                          : t("org.projectOverview.filesHeadingCount", { count: sorted.length })}
+                        {t("org.projectOverview.filesHeadingCount", { count: sorted.length })}
                       </h2>
                       <span className="flex items-center gap-3 text-[10px] text-muted-foreground">
                         <span className="flex items-center gap-1">
@@ -1743,8 +1730,11 @@ export function ProjectOverview() {
                           <span className="w-12 text-end">{t("org.projectOverview.columnWords")}</span>
                         </span>
                       </div>
-                      <ul className="space-y-2" aria-label={t("org.projectOverview.filesListAria")}>
-                        {shown.map((f) => {
+                      <ul
+                        className="max-h-[clamp(14rem,calc(100dvh-22rem),28rem)] space-y-2 overflow-auto overscroll-contain"
+                        aria-label={t("org.projectOverview.filesListAria")}
+                      >
+                        {sorted.map((f) => {
                           const tPct = f.cellCount > 0 ? Math.round((f.filledCount / f.cellCount) * 100) : 0
                           const vPct = f.cellCount > 0 ? Math.round((f.approvedCount / f.cellCount) * 100) : 0
                           const isExpanded = expandedFileId === f.fileId
@@ -1805,22 +1795,6 @@ export function ProjectOverview() {
                         })}
                       </ul>
                     </>
-                    )}
-                    {!showAllFiles && hidden > 0 && (
-                      <button
-                        className="mt-3 text-xs text-muted-foreground hover:text-foreground underline"
-                        onClick={() => setShowAllFiles(true)}
-                      >
-                        {t("org.projectOverview.moreFilesShowAll", { count: hidden })}
-                      </button>
-                    )}
-                    {showAllFiles && sorted.length > FILE_ROW_CAP && (
-                      <button
-                        className="mt-3 text-xs text-muted-foreground hover:text-foreground underline"
-                        onClick={() => setShowAllFiles(false)}
-                      >
-                        {t("org.projectOverview.showFewer")}
-                      </button>
                     )}
                   </div>
                 )

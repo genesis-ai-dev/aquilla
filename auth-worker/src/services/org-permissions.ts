@@ -118,6 +118,91 @@ export async function listUserOrgs(env: Env, user: AuthUser): Promise<UserOrgSum
   return Array.from(byId.values()).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""))
 }
 
+/** First page of the org-switcher catalog (platform-admin append). */
+export const ORG_DIRECTORY_DEFAULT_LIMIT = 40
+export const ORG_DIRECTORY_MAX_LIMIT = 100
+
+export function encodeOrgDirectoryCursor(id: number, name: string | null): string {
+  return `${id}:${encodeURIComponent(name ?? "")}`
+}
+
+export function decodeOrgDirectoryCursor(raw: string): { id: number; name: string } | null {
+  const sep = raw.indexOf(":")
+  if (sep < 0) return null
+  const id = Number(raw.slice(0, sep))
+  if (!Number.isInteger(id) || id < 1) return null
+  try {
+    return { id, name: decodeURIComponent(raw.slice(sep + 1)) }
+  } catch {
+    return null
+  }
+}
+
+export function clampOrgDirectoryLimit(raw: string | undefined): number {
+  const n = raw == null || raw === "" ? ORG_DIRECTORY_DEFAULT_LIMIT : Number(raw)
+  if (!Number.isFinite(n)) return ORG_DIRECTORY_DEFAULT_LIMIT
+  return Math.min(ORG_DIRECTORY_MAX_LIMIT, Math.max(1, Math.floor(n)))
+}
+
+/**
+ * One page of orgs the caller does not already reach via membership or a
+ * project grant. Used by GET /orgs?limit= for the switcher's infinite list —
+ * never by the unparameterized memberships fetch (session boot).
+ */
+export async function listPlatformAdminOrgsPage(
+  env: Env,
+  opts: {
+    excludeIds: ReadonlySet<number>
+    /** Lowercased substring; empty string matches all names. */
+    q: string
+    limit: number
+    cursor: { id: number; name: string } | null
+  },
+): Promise<{ orgs: Array<{ id: number; name: string | null }>; nextCursor: string | null }> {
+  const binds: unknown[] = []
+  const where: string[] = []
+
+  if (opts.q) {
+    where.push("strpos(lower(coalesce(name, '')), ?) > 0")
+    binds.push(opts.q)
+  }
+
+  const exclude = [...opts.excludeIds]
+  if (exclude.length > 0) {
+    where.push(`id NOT IN (${exclude.map(() => "?").join(", ")})`)
+    binds.push(...exclude)
+  }
+
+  if (opts.cursor) {
+    const cursorName = opts.cursor.name.toLowerCase()
+    where.push(
+      "(lower(coalesce(name, '')) > ? OR (lower(coalesce(name, '')) = ? AND id > ?))",
+    )
+    binds.push(cursorName, cursorName, opts.cursor.id)
+  }
+
+  const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""
+  binds.push(opts.limit + 1)
+
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT id, name FROM organizations
+      ${whereSql}
+      ORDER BY lower(coalesce(name, '')), id
+      LIMIT ?`,
+  )
+    .bind(...binds)
+    .all<{ id: number; name: string | null }>()
+
+  const list = rows.results ?? []
+  const hasMore = list.length > opts.limit
+  const page = hasMore ? list.slice(0, opts.limit) : list
+  const last = page[page.length - 1]
+  return {
+    orgs: page,
+    nextCursor: hasMore && last ? encodeOrgDirectoryCursor(last.id, last.name) : null,
+  }
+}
+
 /**
  * Orgs the caller can reach via a project-level grant (direct, group, or
  * creator) — including orgs they also belong to. GET /orgs uses this to keep

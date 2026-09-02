@@ -615,7 +615,7 @@ describe("OrgOverview / OrgProjects", () => {
     expect(screen.queryByRole("button", { name: /view projects/i })).not.toBeInTheDocument()
   })
 
-  it("shows the ten most recently updated projects first and expands the rest inline", async () => {
+  it("shows every project in a continuous list, with no show-more pager", async () => {
     const { getPortfolio } = await import("@/lib/frontier/portfolio")
     const now = Date.now()
     vi.mocked(getPortfolio).mockResolvedValue(
@@ -641,21 +641,10 @@ describe("OrgOverview / OrgProjects", () => {
     const table = await screen.findByTestId("org-overview-projects-table")
     expect(within(table).getByText("Project 01")).toBeInTheDocument()
     expect(within(table).getByText("Project 10")).toBeInTheDocument()
-    expect(within(table).queryByText("Project 11")).not.toBeInTheDocument()
-
-    const showAll = within(table).getByRole("button", { name: "Show 2 more" })
-    expect(showAll).toHaveAttribute("aria-expanded", "false")
-    expect(showAll.closest("tr")).toBe(table.querySelector("tbody tr:last-child"))
-    fireEvent.click(showAll)
-
     expect(within(table).getByText("Project 11")).toBeInTheDocument()
     expect(within(table).getByText("Project 12")).toBeInTheDocument()
-    const showFewer = within(table).getByRole("button", { name: "Show fewer" })
-    expect(showFewer).toHaveAttribute("aria-expanded", "true")
-    expect(showFewer.closest("tr")).toBe(table.querySelector("tbody tr:last-child"))
-
-    fireEvent.click(showFewer)
-    expect(within(table).queryByText("Project 11")).not.toBeInTheDocument()
+    expect(within(table).queryByRole("button", { name: /show \d+ more/i })).not.toBeInTheDocument()
+    expect(within(table).queryByRole("button", { name: /show fewer/i })).not.toBeInTheDocument()
   })
 
   it("shows the audio rollup card and per-project audio % on the projects table", async () => {

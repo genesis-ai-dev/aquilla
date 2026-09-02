@@ -25,6 +25,7 @@ import {
   getOrgDeletedFiles,
   getOrgPortfolio,
   getOrgPortfolios,
+  getOrgMemberRole,
   getRosterViewMinRole,
   groupExistsInOrg,
   listEffectiveMembersForOrg,
@@ -33,7 +34,10 @@ import {
   listPendingInvitesInOrg,
   listUserDirectMembershipsInOrg,
   listProjectGrantOrgIds,
+  listPlatformAdminOrgsPage,
   listUserOrgs,
+  clampOrgDirectoryLimit,
+  decodeOrgDirectoryCursor,
   removeGroupMember,
   renameOrg,
   updateGroup,
@@ -155,50 +159,72 @@ orgs.get("/invite-preview/:token", async (c) => {
 
 orgs.use("*", authMiddleware)
 
-/**
- * GET /api/v2/orgs — every org the caller belongs to (owned + member).
- * Platform operators additionally get every other org in the tenancy,
- * flagged `viaPlatformAdmin` and appended AFTER genuine memberships — the
- * SPA's default active org is the first entry, which must stay a real
- * membership so an admin's fresh session doesn't land in someone else's org.
- *
- * Exception: an org the operator already reaches via a project-level grant
- * (no org_members row) is omitted from that append. The SPA derives it as a
- * guest org from the project directory, so the picker can tag it Guest
- * instead of Admin.
- */
-orgs.get("/", async (c) => {
-  const user = c.get("user")
-  const list = await listUserOrgs(c.env, user)
-  const result: Array<{
-    id: number
-    name: string | null
-    role: { level: number; name: string }
-    viaPlatformAdmin?: boolean
-  }> = list.map((o) => ({
+type OrgListItem = {
+  id: number
+  name: string | null
+  role: { level: number; name: string }
+  viaPlatformAdmin?: boolean
+}
+
+function toMemberItem(o: { id: number; name: string | null; role: number }): OrgListItem {
+  return {
     id: o.id,
     name: o.name,
     role: { level: o.role, name: ROLE_NAMES[o.role] ?? "unknown" },
-  }))
+  }
+}
 
-  if (isPlatformAdminEmail(c.env, user.email)) {
-    const memberIds = new Set(list.map((o) => o.id))
-    const guestGrantOrgIds = await listProjectGrantOrgIds(c.env, user.id)
-    const all = await c.env.AQUILLA_PG.prepare(
-      "SELECT id, name FROM organizations ORDER BY LOWER(COALESCE(name, ''))",
-    ).all<{ id: number; name: string | null }>()
-    for (const o of all.results ?? []) {
-      if (memberIds.has(o.id) || guestGrantOrgIds.has(o.id)) continue
-      result.push({
-        id: o.id,
-        name: o.name,
-        role: { level: 700, name: "admin" },
-        viaPlatformAdmin: true,
-      })
-    }
+/**
+ * GET /api/v2/orgs — every org the caller belongs to (owned + member).
+ *
+ * Unparameterized (session boot / OrgContext): memberships only. Platform
+ * operators do NOT receive the rest of the tenancy here — that dump made
+ * boot and the org switcher O(all orgs).
+ *
+ * Picker mode (`q`, `limit`, and/or `cursor`): memberships matching `q` on
+ * the first page, then one page of `viaPlatformAdmin` catalog rows. Scroll
+ * sends `cursor` and gets catalog-only pages. Guest-grant orgs stay off the
+ * catalog so the SPA can tag them Guest.
+ */
+orgs.get("/", async (c) => {
+  const user = c.get("user")
+  const qRaw = (c.req.query("q") ?? "").trim()
+  const q = qRaw.toLowerCase()
+  const limitRaw = c.req.query("limit")
+  const cursorRaw = c.req.query("cursor")
+  const pickerMode = limitRaw != null || cursorRaw != null || qRaw !== ""
+
+  const list = await listUserOrgs(c.env, user)
+  const memberships = q
+    ? list.filter((o) => (o.name ?? "").toLowerCase().includes(q))
+    : list
+  const memberItems = memberships.map(toMemberItem)
+
+  if (!pickerMode || !isPlatformAdminEmail(c.env, user.email)) {
+    return c.json({ orgs: memberItems, nextCursor: null })
   }
 
-  return c.json({ orgs: result })
+  const cursor = cursorRaw ? decodeOrgDirectoryCursor(cursorRaw) : null
+  if (cursorRaw && !cursor) return c.json({ error: "invalid cursor" }, 400)
+
+  const guestGrantOrgIds = await listProjectGrantOrgIds(c.env, user.id)
+  const excludeIds = new Set<number>([...list.map((o) => o.id), ...guestGrantOrgIds])
+  const page = await listPlatformAdminOrgsPage(c.env, {
+    excludeIds,
+    q,
+    limit: clampOrgDirectoryLimit(limitRaw),
+    cursor,
+  })
+  const catalog: OrgListItem[] = page.orgs.map((o) => ({
+    id: o.id,
+    name: o.name,
+    role: { level: 700, name: "admin" },
+    viaPlatformAdmin: true,
+  }))
+
+  // Later pages are catalog-only — memberships already went out on page 1.
+  const orgs = cursor ? catalog : [...memberItems, ...catalog]
+  return c.json({ orgs, nextCursor: page.nextCursor })
 })
 
 /** POST /api/v2/orgs — create a new named org; caller becomes owner. */
@@ -232,6 +258,39 @@ orgs.get("/me", async (c) => {
     id: org.id,
     name: org.name,
     role: { level: org.role, name: ROLE_NAMES[org.role] ?? "owner" },
+  })
+})
+
+/**
+ * GET /api/v2/orgs/:orgId — one org the caller can reach (membership or
+ * platform-admin). Hydrates switcher chrome when the URL names a catalog org
+ * that is not in the memberships list. Registered after `/me` so that path
+ * cannot be captured as orgId "me".
+ */
+orgs.get("/:orgId", async (c) => {
+  const user = c.get("user")
+  const orgId = parseInt(c.req.param("orgId"), 10)
+  if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+  const row = await c.env.AQUILLA_PG.prepare(
+    "SELECT id, name FROM organizations WHERE id = ?",
+  ).bind(orgId).first<{ id: number; name: string | null }>()
+  if (!row) return c.json({ error: "not found" }, 404)
+  const membership = await getOrgMemberRole(c.env, orgId, user.id)
+  const platform = isPlatformAdminEmail(c.env, user.email)
+  if (membership == null) {
+    if (!platform) return c.json({ error: "forbidden" }, 403)
+    return c.json({
+      id: row.id,
+      name: row.name,
+      role: { level: 700, name: "admin" },
+      viaPlatformAdmin: true,
+    })
+  }
+  const roleLevel = platform ? Math.max(membership, 700) : membership
+  return c.json({
+    id: row.id,
+    name: row.name,
+    role: { level: roleLevel, name: ROLE_NAMES[roleLevel] ?? "unknown" },
   })
 })
 

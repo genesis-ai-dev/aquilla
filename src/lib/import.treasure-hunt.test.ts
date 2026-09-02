@@ -25,7 +25,8 @@ vi.mock("@/lib/idml/idml-worker-client", async (importOriginal) => {
   }
 })
 
-const { importBiblicaStudyNotes, TREASURE_HUNT_PROFILE_ID } = await import("./import")
+const { importBiblicaStudyNotes } = await import("@/lib/partner-integrations/biblica/import")
+const { TREASURE_HUNT_PROFILE_ID } = await import("./import")
 
 afterEach(() => vi.unstubAllGlobals())
 

@@ -31,17 +31,22 @@ export const EXCLUDE_PATHS: string[] = [
   // ── Tier 1: third-party copyrighted media ───────────────────────────────
   "public/kokoro-previews/**", // TTS of copyrighted Bible translations
 
-  // ── Tier 3: partner trademark asset (orphaned in the tree — safe now) ───
+  // ── Tier 3: partner trademark asset (orphaned in the tree) ──────────────
   "public/biblica-logo.svg",
-  // NOTE: the Biblica *code* is coupled and CANNOT be file-deleted here without
-  // producing a non-compiling tree. Its surface spans src/lib/biblica/**,
-  // src/lib/parsers/biblica*.ts, src/lib/export/exporters/idml.{reach4life,
-  // treasure-hunt,rejoin}.* AND ~23 sites in src/components/ImportDialog.tsx
-  // (imports, Screen union, BiblicaPanel, i18n keys). Removing it cleanly needs
-  // a seam refactor (a partner-integrations registry). Until that lands, this
-  // code remains in the tree and the FORBIDDEN "Biblica" gate BLOCKS publish
-  // by design — see README "Pending: Biblica". Add the code excludes here once
-  // the seam exists.
+  // ── Partner integration module (behind the partner-integrations seam) ───
+  //   The whole Biblica module drops out; index.ts is regenerated empty (see
+  //   GENERATED_FILES) so the dialog degrades to its built-in sources.
+  "src/lib/partner-integrations/biblica/**",
+  // Biblica tests that live outside the module (import its fixtures/exports)
+  "src/lib/import.biblica.test.ts",
+  "src/lib/import.reach4life.test.ts",
+  "src/lib/import.treasure-hunt.test.ts",
+  "src/lib/export/exporters/idml.rejoin.test.ts",
+  "src/lib/export/exporters/idml.reach4life.test.ts",
+  "src/lib/export/exporters/idml.treasure-hunt.test.ts",
+  "e2e/specs/editor/import-biblica-study-notes.spec.ts",
+  "e2e/specs/editor/import-reach4life.spec.ts",
+  "e2e/specs/editor/import-treasure-hunt-bible.spec.ts",
 
   // ── One-off importer referencing a minority-language community dataset ──
   "scripts/import-blackfoot-john.ts",
@@ -117,6 +122,8 @@ export const GENERATED_FILES: Array<{ path: string; from: "template" | "generato
   // always emits a known-good registry regardless of what brands main adds).
   // types.ts is NOT regenerated — the BrandId union is narrowed by codemod so
   // the ThemeTokens/BrandData/Brand shapes stay exactly as main defines them.
+  // Empty partner-integrations registry (the biblica module is excluded)
+  { path: "src/lib/partner-integrations/index.ts", from: "generator", source: "partnerRegistry", note: "empty partner registry" },
   { path: "src/branding/brands/index.ts", from: "generator", source: "brandIndex", note: "BRANDS registry" },
   { path: "src/branding/brands/data.ts", from: "generator", source: "brandData", note: "BRAND_DATA registry" },
   { path: "src/branding/brands/acme.data.ts", from: "template", source: "templates/acme.data.ts", note: "example brand" },

@@ -339,6 +339,20 @@ export interface TimelineEditorProps {
    *  whether to jump the live queue or cue a paused one). */
   onSeekToTime?(sec: number): void
   /**
+   * AQU-1117: the same destination, but "start playing there" rather than "cue
+   * there, paused". Only "Play from this cue" sends it; ruler clicks, chip
+   * clicks and text-table row clicks keep their cue-only contract.
+   *
+   * A SIBLING CALLBACK, NOT A FLAG ON `onSeekToTime` — the rule immediately
+   * below still holds. It is also why the intent travels down here at all
+   * rather than the press site simply calling play: the second is computed here
+   * (`layout.seekSecFor`), and a play issued before this call has landed starts
+   * the film wherever it was last paused and jumps afterwards. One call, one
+   * destination, one intent. Falls back to `onSeekToTime` when unwired, so an
+   * arrangement with no play command still cues.
+   */
+  onPlayFromTime?(sec: number): void
+  /**
    * AQU-646 stage 5: the playhead is being dragged / has been released.
    *
    * BRACKETING, NOT A FLAG ON `onSeekToTime`. A scrub says three different
@@ -365,8 +379,10 @@ export interface TimelineEditorProps {
    *  (activateRequest, the mount trace) stays silent to avoid echo loops. */
   onChipActivated?(cellId: string): void
   /** 2026-08-07 (wire b): a text-table row click, as a nonce'd request —
-   *  selects the chip and centers/cues exactly like a chip click. */
-  activateRequest?: { cellId: string; nonce: number } | null
+   *  selects the chip and centers/cues exactly like a chip click.
+   *  AQU-1117: `play` marks the one sender that means "and roll from there"
+   *  ("Play from this cue"); absent/false keeps the row-click cue-only rule. */
+  activateRequest?: { cellId: string; nonce: number; play?: boolean } | null
   /** SUB-53: which job this FILE is for (pre-merge round: per-file, resolved
    *  via resolveFileTimingMode). "dubbing" (the default) draws the track
    *  against the imported recording's clock; "audioFirst" lays the verses out
@@ -998,6 +1014,7 @@ export function TimelineEditor({
   hasAudioCueTrack = false,
   audioCues,
   onSeekToTime,
+  onPlayFromTime,
   onScrubStart,
   onScrubEnd,
   onOpenRecording,
@@ -2915,6 +2932,15 @@ export function TimelineEditor({
   }
 
   function seekTo(sec: number) {
+    sendSeek(sec, onSeekToTime)
+  }
+
+  /** AQU-1117: seek AND roll. Same landing rules; a different command out. */
+  function playFromTime(sec: number) {
+    sendSeek(sec, onPlayFromTime ?? onSeekToTime)
+  }
+
+  function sendSeek(sec: number, send: ((sec: number) => void) | undefined) {
     // A deliberate seek must land exactly where it was aimed: the timeline is
     // an editor, and at rest the head has to agree with the chip edge under it.
     setCompensating(false)
@@ -2924,7 +2950,7 @@ export function TimelineEditor({
     // seek for the pane before deciding what the queue can do with it, because
     // the queue legitimately drops some seeks (no session, a gap no section
     // owns) and the picture must move regardless.
-    onSeekToTime?.(Math.max(0, sec))
+    send?.(Math.max(0, sec))
     setFollow(true)
   }
 
@@ -2942,7 +2968,7 @@ export function TimelineEditor({
   // Center the track on a clip and cue playback (paused) at its start —
   // identical to a clean card click. Reads the live clientWidth (viewportPx
   // state can still be 0 pre-measurement). Untimed cells: no timecode, no-op.
-  function centerAndCue(cellId: string) {
+  function centerAndCue(cellId: string, opts?: { play?: boolean }) {
     // Searches the AUDIO CUES too. A cue is a legitimate destination now — the
     // pairing drawer navigates to one — and looking only in `cells` meant every
     // such request found nothing and silently returned, so the track never
@@ -2952,7 +2978,8 @@ export function TimelineEditor({
     if (at == null) return
     const viewport = scrollRef.current?.clientWidth ?? 0
     scrollTrackTo(Math.max(0, secToPx(at, pxPerSec) - viewport / 2))
-    seekTo(at)
+    if (opts?.play) playFromTime(at)
+    else seekTo(at)
   }
 
   // AQU-646 round 3: consume the text→media trace once on mount (the seed
@@ -2971,7 +2998,7 @@ export function TimelineEditor({
     setSelectedId(activateRequest.cellId)
     // AQU-928: a row click is a plain selection, so it replaces the batch scope.
     setExtraIds([])
-    centerAndCue(activateRequest.cellId)
+    centerAndCue(activateRequest.cellId, { play: activateRequest.play })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consumed per nonce
   }, [activateRequest?.nonce])
 

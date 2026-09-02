@@ -941,6 +941,97 @@ describe("TimelineEditor", () => {
     )
     expect(onSeekToTime).toHaveBeenCalledWith(10)
   })
+
+  // ── AQU-1117: "Play from this cue" is a different command from a cue ──
+  //
+  // The button was wired onto the row-click path, so it inherited the
+  // "cue, paused" contract and the press read as dead: the frame moved, the
+  // film did not. The two now leave here as two callbacks, which is what keeps
+  // one from silently acquiring the other's behaviour again.
+
+  it("a play request sends the cue's second as PLAY, not as a bare cue", () => {
+    const onSeekToTime = vi.fn()
+    const onPlayFromTime = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}}
+        onSeekToTime={onSeekToTime} onPlayFromTime={onPlayFromTime}
+        activateRequest={null}
+      />,
+    )
+    rerender(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}}
+        onSeekToTime={onSeekToTime} onPlayFromTime={onPlayFromTime}
+        activateRequest={{ cellId: "m2", nonce: 1, play: true }}
+      />,
+    )
+    // Same destination as a cue — the button's whole job is that second.
+    expect(onPlayFromTime).toHaveBeenCalledWith(10)
+    expect(onSeekToTime).not.toHaveBeenCalled()
+    // And it still centres and selects, exactly like a row click.
+    expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "m2")
+  })
+
+  it("a row click carries no play intent — it still only cues", () => {
+    const onSeekToTime = vi.fn()
+    const onPlayFromTime = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}}
+        onSeekToTime={onSeekToTime} onPlayFromTime={onPlayFromTime}
+        activateRequest={null}
+      />,
+    )
+    rerender(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}}
+        onSeekToTime={onSeekToTime} onPlayFromTime={onPlayFromTime}
+        activateRequest={{ cellId: "m2", nonce: 1 }}
+      />,
+    )
+    expect(onSeekToTime).toHaveBeenCalledWith(10)
+    expect(onPlayFromTime).not.toHaveBeenCalled()
+  })
+
+  it("a clean chip click only cues, play command or none", () => {
+    const onSeekToTime = vi.fn()
+    const onPlayFromTime = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}}
+        onSeekToTime={onSeekToTime} onPlayFromTime={onPlayFromTime}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-card-m2"))
+    expect(onSeekToTime).toHaveBeenCalledWith(10)
+    expect(onPlayFromTime).not.toHaveBeenCalled()
+  })
+
+  it("falls back to cueing when no play command is wired", () => {
+    // The film-less arrangements leave onPlayFromTime unwired (AQU-1118), and
+    // there the press must still land on the line rather than doing nothing.
+    const onSeekToTime = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}} onSeekToTime={onSeekToTime} activateRequest={null}
+      />,
+    )
+    rerender(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}} onSeekToTime={onSeekToTime}
+        activateRequest={{ cellId: "m2", nonce: 1, play: true }}
+      />,
+    )
+    expect(onSeekToTime).toHaveBeenCalledWith(10)
+  })
 })
 
 // ── SUB-53: audio-first ─────────────────────────────────────────────────────

@@ -9,13 +9,15 @@
  * truthy) rather than throwing a type error.
  */
 
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect, vi, afterEach } from "vitest"
 import { createHash } from "node:crypto"
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
 import { EditorActionsProvider, type EditorActionsContextValue } from "@/context/EditorActionsContext"
+import { setTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
+import { MemoryRouter } from "react-router-dom"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
@@ -202,6 +204,10 @@ function renderTable(
 ) {
   const qc = new QueryClient()
   return render(
+    // AQU-646 stage 4c: the synth badge's recovery action navigates to voice
+    // setup, so it calls `useNavigate()` and cannot mount outside a router.
+    // Harmless for every case that never renders the badge.
+    <MemoryRouter>
     <QueryClientProvider client={qc}>
       <EditorActionsProvider value={actions}>
         <EditorTable
@@ -223,7 +229,8 @@ function renderTable(
           targetTextDirection="ltr"
         />
       </EditorActionsProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
+    </MemoryRouter>,
   )
 }
 
@@ -538,5 +545,79 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     const button = await screen.findByRole("button", { name: "Add comment" })
     fireEvent.click(button)
     expect(onMediaRowActivate).not.toHaveBeenCalled()
+  })
+})
+
+// ── AQU-646 stage 4c ─────────────────────────────────────────────────────────
+//
+// The row's synth badge — the one carrying the popover with "Open audio setup",
+// which is the richest failure surface in the app — watched the WRONG CELL on
+// every file with an audio-cue sibling.
+//
+// Stage 3f moved the voice button beside it to the heard line that performs the
+// subtitle, because that is where the audio belongs. The badge stayed on the
+// row's own id, so the button wrote its failure to `synth:<cue>` while the
+// badge listened on `synth:<subtitle>` and the two never met. On the dubbing
+// workflow — every episode The Chosen ships — a voice failure was therefore
+// invisible in the table.
+describe("EditorTable — the synth badge watches where the audio lives (stage 4c)", () => {
+  const CUE_ID = "cue-for-cell-1"
+  afterEach(() => {
+    setTtsStatus(ttsStatusKey(CUE_ID), { kind: "idle" })
+    setTtsStatus(ttsStatusKey("cell-1"), { kind: "idle" })
+  })
+
+  /** The arrangement that broke: this row's audio lives on a cue in the sibling
+   *  file, which is what `audioHomeFor` reports. */
+  const cueHome: Partial<EditorActionsContextValue> = {
+    audioHomeFor: () => [{ id: CUE_ID, fileId: "f1-cues" } as never],
+    // Not under test — it is the affordance these cases wait on to know the
+    // row has settled, and it only renders when its callback exists.
+    onOpenComments: () => {},
+  }
+
+  it("lights up for a failure filed under the cue that performs the line", async () => {
+    setTtsStatus(ttsStatusKey(CUE_ID), {
+      kind: "error",
+      message: "voice/tts failed (503): TTS not configured",
+    })
+    renderTable(cueHome)
+    // Before the fix this badge never appeared, however loudly the generation
+    // had failed — the failure was filed one cell away from the only thing
+    // watching for it.
+    expect(await screen.findByTestId("synth-status-error")).toBeInTheDocument()
+  })
+
+  // …AND STILL FOR ONE FILED UNDER THE ROW ITSELF, which is the half an
+  // adversarial review caught me getting wrong. Stage 3f moved only the rail's
+  // voice button to the cue; three producers still write under the row's own
+  // cell — the audio lens's CellVoicePanel, a voice dropped from the dock, and
+  // "Voice together" — and none of them has an error surface of its own. A
+  // badge pointed only at the cue trades one blind spot for three.
+  it("lights up for a failure filed under the row's own cell too", async () => {
+    setTtsStatus(ttsStatusKey("cell-1"), {
+      kind: "error",
+      message: "voice/tts failed (503): TTS not configured",
+    })
+    renderTable(cueHome)
+    expect(await screen.findByTestId("synth-status-error")).toBeInTheDocument()
+  })
+
+  // A run in flight outranks a stale failure on the other key — otherwise the
+  // badge announces the outcome of something that is still running.
+  it("shows a run in progress rather than the failure it may be replacing", async () => {
+    setTtsStatus(ttsStatusKey("cell-1"), { kind: "error", message: "voice/tts failed (503): x" })
+    setTtsStatus(ttsStatusKey(CUE_ID), { kind: "synthesizing" })
+    renderTable(cueHome)
+    expect(await screen.findByTestId("synth-status-busy")).toBeInTheDocument()
+    expect(screen.queryByTestId("synth-status-error")).toBeNull()
+  })
+
+  // …and the ordinary arrangement is untouched: with no cue sibling the audio
+  // home IS the row, so the badge reads exactly the key it always did.
+  it("still reads the row's own cell on a file with no cues", async () => {
+    setTtsStatus(ttsStatusKey("cell-1"), { kind: "error", message: "voice/tts failed (503): x" })
+    renderTable({ onOpenComments: () => {} })
+    expect(await screen.findByTestId("synth-status-error")).toBeInTheDocument()
   })
 })

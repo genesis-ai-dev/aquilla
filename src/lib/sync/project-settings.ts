@@ -68,6 +68,34 @@ export interface ProjectWideSettings {
    */
   cellEditingFloor?: "none" | "maintainer" | "project_lead" | "contributor"
   /**
+   * AQU-646 stage 2: may this project's timelines be RESTRUCTURED — tracks
+   * added and deleted, grouped into folders, recoloured?
+   *
+   * OFF unless explicitly turned on, and it is a SECOND gate rather than a
+   * floor change: `file.track.set` is already maintainer-floored, so this
+   * answers *whether*, not *who*, and with it off the write is refused even to
+   * an owner. Multi-track is capability for clients who want it; a project that
+   * never turns it on should not be able to tell it was built.
+   *
+   * RENAME AND DRAG-TO-REORDER ARE DELIBERATELY NOT GATED ON THIS. Both already
+   * ship, and a new setting defaulting to off must not silently take an
+   * existing capability away from every project that has one. They stay
+   * maintainer-only, which is what they were.
+   *
+   * NOTE HOW THIS DIFFERS FROM `cellEditingFloor` ABOVE — which is AQU-1068's
+   * replacement for the `allowLineCreation` this paragraph used to contrast
+   * against. The surviving difference is shape, not stranding: that one names a
+   * role FLOOR as well as answering whether, while this is a bare whether
+   * riding `file.track.set`'s existing MAINTAINER floor. On stranding they now
+   * AGREE, because the tier governs removal as well as insertion. Switching
+   * this off strands — three user-added tracks become un-deletable and
+   * un-recolourable until it goes back on. That is Sam's call (2026-08-22) and
+   * it is the coherent one for a structural switch: the tracks keep working and
+   * keep playing, they simply stop being editable, which is exactly what "turn
+   * track editing off" should mean.
+   */
+  allowTrackEditing?: boolean
+  /**
    * AQU-186: minimum role level required to trigger a harmonization sweep on
    * this project. Default (absent) = project_lead (500). Configurable up to
    * maintainer (600); lowering below project_lead is not allowed (hard floor).

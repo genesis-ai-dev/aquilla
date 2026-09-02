@@ -65,7 +65,33 @@ export function DurationBar({ elapsedMs, targetSec, overrunHeadroomSec = 1.5, cl
         <span className={cn(state === "over" && "font-medium text-red-500")}>
           {formatTime(elapsedMs)}
         </span>
-        <span>{t("workspace.durationBar.targetLabel", { time: formatTime(targetSec * 1000) })}</span>
+        {/* HOW FAR OVER, so nobody has to subtract two timecodes in their head
+            while a take is running (Sam, 2026-08-26). Only past the window: a
+            take that is going fine has nothing to say here, and a third number
+            on a row this small would be read every time for no reason.
+
+            It appears exactly when the bar turns red, so the colour and the
+            number always agree — and it needs no separate idle case, because
+            an un-started take is never over its window. */}
+        {/* RIGHT-JUSTIFIED, NOT CENTRED (Sam, 2026-08-27). With three flat
+            children a `justify-between` row puts the middle one wherever the
+            other two leave it, so the difference drifted around under the bar
+            as the digits changed. Grouping it with the target label makes the
+            row two children again — running time left, the target and how far
+            past it right — so the number has a fixed edge to sit against.
+
+            The red stays on the difference itself rather than moving to this
+            wrapper: it is the thing that turns red, and the elapsed time beside
+            it reddens on its own. */}
+        <span className="flex items-center gap-2">
+          {/* i18n-exempt "over" is this bar's own state tag, not copy */}
+          {state === "over" && (
+            <span data-testid="rec-overrun-by" className="font-medium text-red-500">
+              {t("workspace.durationBar.overBy", { seconds: (elapsedSec - targetSec).toFixed(1) })}
+            </span>
+          )}
+          <span>{t("workspace.durationBar.targetLabel", { time: formatTime(targetSec * 1000) })}</span>
+        </span>
       </div>
     </div>
   )

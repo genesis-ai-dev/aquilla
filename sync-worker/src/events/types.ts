@@ -55,6 +55,7 @@ export type EventKind =
   // timings, a duration heal) wiped them: "no opinion" and "cleared" were both
   // expressed as an absent field. See the payload doc below.
   | 'cell.audio.trim'
+  | 'cell.audio.place'
   // Backfill a measured duration onto a take that predates duration capture.
   // Fills only a NULL duration_ms — never selects, never touches url/slot/
   // trims (a re-attach would re-select the clip and plain-assign trims).
@@ -370,7 +371,8 @@ export interface EventPayloads {
   'cell.audio.attach': {
     audioId: string
     url: string
-    slot: 'recording' | 'generatedVoice'
+    /** Open string (AQU-646): extra target tracks use the track id as the slot. */
+    slot: string
     mimeType?: string
     voiceId?: string
     referenceAudioId?: string
@@ -401,7 +403,8 @@ export interface EventPayloads {
   }
   'cell.audio.select': {
     audioId: string
-    slot: 'recording' | 'generatedVoice'
+    /** Open string (AQU-646): extra target tracks use the track id as the slot. */
+    slot: string
   }
   // AQU-646 round 8: rename a take — label only, deliberately NOT a
   // re-attach (which would also re-select the clip). null clears.
@@ -420,6 +423,28 @@ export interface EventPayloads {
     audioId: string
     trimStartMs: number | null
     trimEndMs: number | null
+  }
+  /**
+   * AQU-646 stage 3: where THIS take sits against the line it performs, as an
+   * offset in ms from the line's own start. May be negative (a take that leads
+   * its line) and `0` is a real value.
+   *
+   * ITS OWN KIND, NEVER RIDING ATTACH. The anchor used to live on the CELL
+   * (`cell.lane.retime`'s `targetOffsetMs` → `cells.metadata`), which was exact
+   * while a line could hold one dub; with extra target tracks two takes share a
+   * line and would share one anchor, so dragging one chip would move the other.
+   * Absence has to keep meaning exactly one thing — 'never placed by hand' —
+   * which is why this cannot be a field on attach, where absence would also
+   * mean 'this attach had no opinion'.
+   *
+   * `null` CLEARS the placement back to the line's start. Required-and-nullable
+   * for the reason `cell.audio.trim` is: an optional field made 'no opinion'
+   * and 'clear it' indistinguishable and cost every take its trim window once
+   * already.
+   */
+  'cell.audio.place': {
+    audioId: string
+    targetOffsetMs: number | null
   }
   /**
    * Stage 4: link or unlink ONE subtitle cell and ONE audio cue.
@@ -685,13 +710,26 @@ export interface EventPayloads {
   // kind is its identity. The patch is FLAT on purpose — the projection
   // strips nulls recursively (see buildFileTrackSetStmt). No emitter until
   // stage 3.
+  //
+  // Stage 2 adds the two ADDED kinds ('folder' / 'audio'), plus `color` (a
+  // palette id, never colour values) and `sourceTrackId` (which track's cells
+  // an added track lines up with, set once at creation). Both new fields have a
+  // null form — clearing a colour is how you go back to the default pair.
+  //
+  // WHICH OPERATION AN EVENT OF THIS KIND PERFORMS IS DECIDED BY ITS PATCH, and
+  // that is why authorize.ts inspects the keys: a rename and a reorder are
+  // maintainer work, while creating, deleting, foldering and recolouring are
+  // additionally gated on the project's allowTrackEditing setting. One kind,
+  // two authority levels — see track-editing-authority.ts.
   'file.track.set': {
     trackId: string
     patch: {
-      kind?: 'source-subtitles' | 'source-audio' | 'target-subtitles' | 'target-audio'
+      kind?: 'source-subtitles' | 'source-audio' | 'target-subtitles' | 'target-audio' | 'folder' | 'audio'
       name?: string | null
       order?: number | null
       groupId?: string | null
+      color?: string | null
+      sourceTrackId?: string | null
     } | null
   }
 

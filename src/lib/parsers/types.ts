@@ -253,6 +253,12 @@ export interface Voice {
    * plain TTS, no conversion.
    */
   referenceAudioId?: string
+  /**
+   * When the clone reference was lifted from a line take, `${cellId}:${slot}`
+   * of that take. The Reference audio tab is filled only when `referenceAudioId`
+   * is set *without* this key (a recorded or uploaded clip).
+   */
+  referenceTakeKey?: string
 }
 
 export interface ProjectTtsSettings {
@@ -413,6 +419,13 @@ export interface ProjectRecord {
    *  nobody, whatever their rank — see ProjectWideSettings.cellEditingFloor
    *  for the full rationale, and `resolveCellEditingFloor` for the mapping. */
   cellEditingFloor?: "none" | "maintainer" | "project_lead" | "contributor"
+  /** AQU-646 stage 2: may this project's timelines be restructured — tracks
+   *  added, deleted, foldered, recoloured? Off unless turned on; a SECOND gate
+   *  on top of the maintainer floor, so with it off the write is refused even
+   *  to an owner. Rename and drag-to-reorder are NOT gated on it. See
+   *  ProjectWideSettings.allowTrackEditing for why switching it off is allowed
+   *  to strand tracks that are already there. */
+  allowTrackEditing?: boolean
   /**
    * AQU-701: set when the user explicitly skips the voice & transcription setup
    * step ("we don't use voice or transcription"). Marks that step complete in

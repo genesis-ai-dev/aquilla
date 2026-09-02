@@ -42,6 +42,7 @@ export type OutboxEventKind =
   | "cell.audio.remove"
   | "cell.audio.rename"
   | "cell.audio.trim"
+  | "cell.audio.place"
   | "cell.audio.measure"
   // Stage 4: one edge between a subtitle cell and an audio cue
   // (contributor-level; non-chain-mutating).
@@ -269,7 +270,10 @@ export interface OutboxEventPayloads {
   "cell.audio.attach": {
     audioId: string
     url: string
-    slot: "recording" | "generatedVoice"
+    /** AQU-646: an OPEN string. `cell_audio.slot` is unconstrained TEXT, and an
+     *  extra target-audio track addresses its takes by its own track id. The
+     *  two well-known values are "recording" and "generatedVoice". */
+    slot: string
     mimeType?: string
     voiceId?: string
     referenceAudioId?: string
@@ -286,7 +290,9 @@ export interface OutboxEventPayloads {
   }
   "cell.audio.select": {
     audioId: string
-    slot: "recording" | "generatedVoice"
+    /** Scopes the sibling-deselect only; it is never written onto the row, so
+     *  select cannot move a clip between slots. Open string — see attach. */
+    slot: string
   }
   "cell.audio.remove": {
     audioId: string
@@ -307,6 +313,28 @@ export interface OutboxEventPayloads {
     audioId: string
     trimStartMs: number | null
     trimEndMs: number | null
+  }
+  /**
+   * AQU-646 stage 3: where THIS take sits against the line it performs, as an
+   * offset in ms from the line's own start. May be negative (a take that leads
+   * its line) and `0` is a real value.
+   *
+   * ITS OWN KIND, NEVER RIDING ATTACH. The anchor used to live on the CELL
+   * (`cell.lane.retime`'s `targetOffsetMs` → `cells.metadata`), which was exact
+   * while a line could hold one dub; with extra target tracks two takes share a
+   * line and would share one anchor, so dragging one chip would move the other.
+   * Absence has to keep meaning exactly one thing — "never placed by hand" —
+   * which is why this cannot be a field on attach, where absence would also
+   * mean "this attach had no opinion".
+   *
+   * `null` CLEARS the placement back to the line's start. Required-and-nullable
+   * for the reason `cell.audio.trim` is: an optional field made "no opinion"
+   * and "clear it" indistinguishable and cost every take its trim window once
+   * already.
+   */
+  "cell.audio.place": {
+    audioId: string
+    targetOffsetMs: number | null
   }
   // Duration backfill for takes that predate duration capture. The server
   // fills only a NULL duration_ms — never selection/url/slot/trims — so
@@ -474,13 +502,20 @@ export interface OutboxEventPayloads {
   // @/lib/timeline/tracks: this module is the wire mirror of
   // sync-worker/src/events/types.ts and stays free of app imports, so drift
   // shows up against the server, not against a local re-export.
+  //
+  // Stage 2 adds the two ADDED kinds ("folder" / "audio"), plus `color` (a
+  // palette id, never colour values) and `sourceTrackId` (which track's cells
+  // an added track lines up with, set once at creation). Both new fields have a
+  // null form — clearing a colour is how you go back to the default pair.
   "file.track.set": {
     trackId: string
     patch: {
-      kind?: "source-subtitles" | "source-audio" | "target-subtitles" | "target-audio"
+      kind?: "source-subtitles" | "source-audio" | "target-subtitles" | "target-audio" | "folder" | "audio"
       name?: string | null
       order?: number | null
       groupId?: string | null
+      color?: string | null
+      sourceTrackId?: string | null
     } | null
   }
   // Timeline editor: set/clear a file's core video URL (timeline preview).

@@ -71,6 +71,7 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'cell.audio.remove': ROLE.CONTRIBUTOR,
   'cell.audio.rename': ROLE.CONTRIBUTOR,
   'cell.audio.trim': ROLE.CONTRIBUTOR,
+  'cell.audio.place': ROLE.CONTRIBUTOR,
   'cell.audio.measure': ROLE.CONTRIBUTOR,
 
   // AQU-646 (Sam, 2026-08-18): RAISED from CONTRIBUTOR to PROJECT_LEAD.

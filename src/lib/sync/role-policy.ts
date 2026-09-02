@@ -55,6 +55,7 @@ const REQUIRED_ROLE: Record<string, number> = {
   "cell.audio.remove": ROLE.CONTRIBUTOR,
   "cell.audio.rename": ROLE.CONTRIBUTOR,
   "cell.audio.trim": ROLE.CONTRIBUTOR,
+  "cell.audio.place": ROLE.CONTRIBUTOR,
   // AQU-646: project lead, not contributor. The pairings are settled during
   // setup and handed off; a contributor re-cutting one silently moves which
   // line a recording belongs to, for everyone.

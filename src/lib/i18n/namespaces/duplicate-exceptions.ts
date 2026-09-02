@@ -72,6 +72,12 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "as its siblings. editor.selection.validate is the imperative toolbar button " +
     "that performs the sign-off. Operation name vs command; they diverge wherever " +
     "operation names are nominalized.",
+  "audio.newVoice.kokoroLabel":
+    "Field label for the Kokoro speaker dropdown in the New voice modal — which " +
+    "built-in voice this engine should speak with. editor.navTitle.voice is the " +
+    "editor's own audio-lens tab label naming a workspace mode. A form-field " +
+    "label and a navigation tab are different UI roles that happen to share the " +
+    "word 'Voice' and diverge in most target languages.",
   "audio.newVoice.mmsLanguageLabel":
     "Names the spoken language the MMS engine should synthesize. common.language " +
     "labels the switcher that changes the language of the interface itself. Two " +
@@ -361,6 +367,11 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "Page heading of the Project Settings index. editor.navTitle.projectSettings " +
     "is the breadcrumb/nav label used while inside the editor to link TO " +
     "settings. A page naming itself vs a link naming its destination.",
+  "projectSettings.section.editor":
+    "Card heading for the settings group configuring the editor surface " +
+    "(chapter paging). editor.navTitle.editor is the editor's own nav-title/tab " +
+    "label when it is the active surface. A settings card naming the feature it " +
+    "configures vs a page naming itself are different grammatical roles.",
   "projectSettings.section.voice":
     "Card heading for this project's Voice/TTS API-key configuration. " +
     "editor.navTitle.voice is the editor's own audio-lens tab label. A settings " +

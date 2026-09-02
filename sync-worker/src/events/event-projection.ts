@@ -23,6 +23,7 @@ import type { EventKind, EventPayloads, CommentScope } from './types'
 import type { ChainSlot } from './chain-claims'
 import { eventQualifiedParentKey } from './chain-claims'
 import { ROLE } from './role-policy'
+import { trackPatchRequiresExisting } from './track-editing-authority'
 
 // A single event row as it lives in Postgres. JSON.parse on `payload` is the
 // caller's responsibility — `payload` here is already an object.
@@ -1424,6 +1425,41 @@ case 'cell.audio.attach': {
       return ['cell_audio']
     }
 
+    case 'cell.audio.place': {
+      // WHERE THIS TAKE SITS, and nothing else. (AQU-646 stage 3)
+      //
+      // The sibling of cell.audio.trim above, and the same discipline: one
+      // column, always stated, `null` meaning "clear it". It is a separate kind
+      // from the attach for the reason spelled out on the payload type —
+      // absence must go on meaning exactly one thing.
+      //
+      // NOT SCOPED BY SLOT, on purpose. `audio_id` is unique within a cell (it
+      // is part of the primary key), so naming the take is naming the row; a
+      // slot term could only ever disagree with itself.
+      const p = event.payload as EventPayloads['cell.audio.place']
+      if (!event.fileId || !event.cellId) {
+        throw new Error(`cell.audio.place event ${event.id} is missing fileId or cellId`)
+      }
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE cell_audio SET target_offset_ms = ?
+              WHERE project_id = ? AND file_id = ? AND cell_id = ? AND audio_id = ?`,
+          )
+          .bind(
+            // `?? null` and NOT `|| null`: 0 is a legal, common offset — a take
+            // placed exactly at its line's start — and `||` would turn it back
+            // into "never placed".
+            p.targetOffsetMs ?? null,
+            event.projectId,
+            event.fileId,
+            event.cellId,
+            p.audioId,
+          ),
+      )
+      return ['cell_audio']
+    }
+
     case 'cell.link.set': {
       // One edge between a subtitle cell (the envelope) and an audio cue (the
       // payload). The ENDPOINTS are the primary key, so this is idempotent by
@@ -2042,7 +2078,12 @@ case 'cell.audio.attach': {
         throw new Error(`file.track.set event ${event.id} is missing fileId`)
       }
       stmts.push(
-        buildFileTrackSetStmt(db, event.projectId, event.fileId, event.id, p.trackId, p.patch),
+        // Same rule on replay as on the live path, or a rebuild would
+        // resurrect the kind-less junk the live path now refuses.
+        buildFileTrackSetStmt(
+          db, event.projectId, event.fileId, event.id, p.trackId, p.patch,
+          trackPatchRequiresExisting(p.trackId, p.patch),
+        ),
       )
       return ['files']
     }
@@ -2350,6 +2391,25 @@ export function buildFileTrackSetStmt(
   eventId: string,
   trackId: string,
   patch: EventPayloads['file.track.set']['patch'],
+  /**
+   * Must the track already be in `trackOverrides` for this write to apply?
+   * (2026-08-27)
+   *
+   * True for any patch that cannot bring a track into being — one carrying no
+   * `kind`. Without it, `{order: 1}` for an id that does not exist merged a
+   * kind-less entry into `files.meta`, which `mergeTrackOverrides` then skips
+   * when rendering (`isTrackKind(patch.kind)` fails): invisible in the UI,
+   * untargetable by any control, and unremovable, because removal is
+   * `patch: null` and THAT is gated. Creation ungated, deletion gated — junk
+   * that only re-enabling the setting could clear, on a blob read on every
+   * file listing.
+   *
+   * Enforced in SQL because the handler is synchronous and never loads the
+   * file's meta. A failing condition is a no-op rather than an error, which is
+   * also the right answer for the race it incidentally fixes: a reorder that
+   * arrives after someone else's delete no longer resurrects the track as junk.
+   */
+  requireExisting = false,
 ): AquillaStatement {
   const NOW = "(extract(epoch from now()) * 1000)::bigint"
   const META = "COALESCE(NULLIF(meta, ''), '{}')::jsonb"
@@ -2369,16 +2429,22 @@ export function buildFileTrackSetStmt(
   // json-bind-contract test greps the tree for exactly that mistake). trackId
   // binds twice — once as the key written, once to read the entry it merges
   // onto.
-  return db
-    .prepare(
-      `UPDATE files
-          SET meta = (${META} || jsonb_build_object('trackOverrides',
-                COALESCE(${META} -> 'trackOverrides', '{}'::jsonb) || jsonb_build_object(?::text,
-                  jsonb_strip_nulls(COALESCE(${META} -> 'trackOverrides' -> ?::text, '{}'::jsonb) || ?::text::jsonb))))::text,
-              event_id = ?, updated_at = ${NOW}
-        WHERE id = ? AND project_id = ?`,
-    )
-    .bind(trackId, trackId, JSON.stringify(patch), eventId, fileId, projectId)
+  // `jsonb_exists(...)` rather than the `?` key-exists OPERATOR: `?` is also
+  // this driver's bind placeholder, and the two cannot share a statement.
+  const existsTerm = requireExisting
+    ? ` AND jsonb_exists(COALESCE(${META} -> 'trackOverrides', '{}'::jsonb), ?::text)`
+    : ''
+  const stmt = db.prepare(
+    `UPDATE files
+        SET meta = (${META} || jsonb_build_object('trackOverrides',
+              COALESCE(${META} -> 'trackOverrides', '{}'::jsonb) || jsonb_build_object(?::text,
+                jsonb_strip_nulls(COALESCE(${META} -> 'trackOverrides' -> ?::text, '{}'::jsonb) || ?::text::jsonb))))::text,
+            event_id = ?, updated_at = ${NOW}
+      WHERE id = ? AND project_id = ?${existsTerm}`,
+  )
+  return requireExisting
+    ? stmt.bind(trackId, trackId, JSON.stringify(patch), eventId, fileId, projectId, trackId)
+    : stmt.bind(trackId, trackId, JSON.stringify(patch), eventId, fileId, projectId)
 }
 
 /**

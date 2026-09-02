@@ -9,6 +9,7 @@ import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from '
 import { resolveAllowSelfAssignment } from './assignment-authority'
 import { isLockedTimingEvent, isUserInsertedCell, resolveTimingLocked } from './timing-authority'
 import { resolveCellEditingFloor } from './cell-editing-authority'
+import { isGatedTrackPatch, resolveAllowTrackEditing } from './track-editing-authority'
 import { laneOfEvent } from './event-projection'
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
@@ -340,6 +341,29 @@ export async function authorize<K extends EventKind>(
           reason: 'removing an imported cell requires maintainer',
         }
       }
+    }
+  }
+
+  // AQU-646 stage 2: RESTRUCTURING a timeline needs the project to have opted
+  // in, on top of the maintainer floor `file.track.set` already carries.
+  //
+  // NO `tokenClaims.role < X` TERM, AND ITS ABSENCE IS DELIBERATE. The
+  // self-assign and timing-lock blocks above carry one because both are
+  // conditional floor RAISES on kinds whose static floor was lowered. This
+  // kind's floor was never lowered — it is MAINTAINER in role-policy.ts and
+  // has been since it shipped — so there is nothing to raise and no clearance
+  // that should skip the question. The setting answers *whether* a project
+  // restructures its timelines, not *who* may do it, which is why an OWNER is
+  // refused here too. Two gates means two gates. Adding a role term to make
+  // this resemble its neighbours would open exactly the back door the second
+  // gate exists to close.
+  //
+  // A rename or a reorder is NOT restructuring, and both already ship — see
+  // isGatedTrackPatch for the three clauses that separate them, and why
+  // `patch: null` needs a clause of its own.
+  if (db != null && raw.kind === 'file.track.set' && isGatedTrackPatch(raw.payload)) {
+    if (!(await resolveAllowTrackEditing(db, raw.projectId))) {
+      return { ok: false, status: 403, reason: 'timeline track editing is not enabled for this project' }
     }
   }
 

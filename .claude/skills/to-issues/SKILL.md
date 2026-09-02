@@ -14,7 +14,9 @@ Break a plan into independently-grabbable issues using vertical slices (tracer b
 - **Every slice is created with status `Triage`** (`086173c5-e3e4-4f37-93d5-ae2f069ab6a6`) — new issues are **never created in `Todo`** (`a3c6383f-3893-4691-a75a-b4add1ff1ce1`), whatever their type. The HITL/AFK split determines what happens *after* creation:
   - **AFK slice** — agent-ready once promoted: a human promotes it `Triage → Todo` (via `/triage`, or by explicitly approving promotion in step 6 of an interactive run), and only then do the swarm and `/issue next` see it. A slice without acceptance criteria isn't AFK.
   - **HITL slice** — stays in `Triage`: a human must make the decision / do the review / implement before it's agent-ready. Agents never pick these up. `/triage` promotes it to `Todo` once (and if) it becomes AFK.
-- Tag every issue with a category label: **`Bug`**, **`Feature`**, or **`Improvement`**.
+- **Every issue is created from one of the Aquilla team's issue templates** (`Bug Report`,
+  `Feature Request`, or `Task` — see step 6). The template applies the category label
+  (**`Bug`**, **`Feature`**, or **`Improvement`** for `Task`) by itself.
 
 ## Process
 
@@ -64,41 +66,95 @@ Iterate until the user approves the breakdown.
 
 ### 6. Publish the issues to the issue tracker
 
-For each approved slice, publish a new issue to the issue tracker. Use the issue body template below. **Create every issue with status `Triage`** (see "Where each slice lands" above) — never `Todo`, even for AFK slices. Add the `Bug`/`Feature`/`Improvement` category label, and mark the slice's type (HITL/AFK) in the issue body. If the user is present and explicitly approves it, promote the AFK slices to `Todo` after creation; in an unattended run, leave everything in `Triage` for `/triage` to promote. An AFK slice you can't write acceptance criteria for isn't AFK — it's HITL.
+For each approved slice, publish a new issue **from one of the Aquilla team's issue
+templates** — pass `template` to `save_issue`:
 
-**Set BOTH the team and the project on every issue.** Verify the publish response actually shows the project assigned — do not assume it stuck.
+- **`Bug Report`** — something is broken
+- **`Feature Request`** — a new user-facing capability
+- **`Task`** — everything else (chores, improvements, refactors, infra)
 
-Publish issues in dependency order (blockers first) so you can reference real issue identifiers in the "Blocked by" field.
+The template applies the matching category label by itself (`Bug` / `Feature` /
+`Improvement` for `Task`) — don't re-pass it; extra labels you do pass are merged, not
+replaced.
 
-<issue-template>
+**Create every issue with status `Triage`** (see "Where each slice lands" above) — never
+`Todo`, even for AFK slices. ⚠️ **All three templates embed status `Todo`**: you MUST pass
+`state: Triage` explicitly on every create (an explicit `state` overrides the template's),
+and **verify the create response says `status: Triage`** — if it came back `Todo`,
+immediately re-save it to `Triage`.
+
+**Leave every issue unassigned.** The team's auto-assign rotation sets an assignee at
+create time (it wins even if you pass no assignee) — if the create response shows an
+assignee, immediately re-save with `assignee: null` and confirm the response no longer
+lists one.
+
+Mark the slice's type (HITL/AFK) in the issue body (see below). If the user is present and
+explicitly approves it, promote the AFK slices to `Todo` after creation; in an unattended
+run, leave everything in `Triage` for `/triage` to promote. An AFK slice you can't write
+acceptance criteria for isn't AFK — it's HITL.
+
+**Set BOTH the team and the project on every issue.** Verify the publish response actually
+shows the project assigned — do not assume it stuck.
+
+Publish issues in dependency order (blockers first) so you can reference real issue
+identifiers in the "Blocked by" field.
+
+**Fill the template's body, don't replace it.** Passing a `description` replaces the
+template's pre-filled body wholesale, so author the description using the template's exact
+section headings, filled with real content (never placeholder text), then append the
+slice-tracking sections at the end. Section requirements:
+
+<template-bodies>
+
+Common to all three templates (they all end with `## Acceptance Criteria` then
+`## Test Checklist`):
+
+- **Acceptance Criteria** — write these so QA can **verify the fix and demonstrate WHY it's
+  fixed**, not just trust that it is. Each criterion is a checkbox observable by someone
+  driving the real app — a concrete state, value, or behavior they can see, not an internal
+  implementation detail. Tie at least one criterion back to the reproduction ("the step that
+  used to fail now does X"). Include the negative/edge case where relevant (e.g.
+  genuinely-empty still shows 0%, no false positive). If a criterion can't be checked by
+  observing the app, it belongs in the description sections, not here.
+- **Test Checklist** — the concrete checks a tester performs to prove the criteria (what to
+  drive, what to observe), grouped under sub-headers when there are distinct surfaces.
+- Avoid specific file paths or code snippets — they go stale fast. Exception: a
+  prototype-produced snippet that encodes a decision more precisely than prose can (state
+  machine, reducer, schema, type shape) — inline just the decision-rich parts and note it
+  came from a prototype.
+
+**`Bug Report`** (`## Description`, `## Steps to Reproduce`, `## Expected Behavior`,
+`## Actual Behavior`, then the common sections): Steps to Reproduce must let a QA tester
+recreate the situation cold, with no memory of this conversation — exact steps, route/URL,
+account or data state. Actual Behavior carries the observed wrong behavior (error, 500,
+0%, etc.).
+
+**`Feature Request`** (`## Summary`, `## Problem`, then the common sections): Summary
+describes the end-to-end slice behavior, not layer-by-layer implementation. Problem gives
+the starting state, the current workflow and why it falls short, and where a tester
+exercises the new behavior.
+
+**`Task`** (`## Summary`, `## Context`, then the common sections): Summary is the slice's
+end-to-end behavior; Context is why it needs doing, plus background and links.
+
+Append these tracking sections to every issue body, after the template's sections:
+
+```
+## Slice
+
+HITL or AFK (one line on why, if HITL).
+
 ## Parent
 
-A reference to the parent issue on the issue tracker (if the source was an existing issue, otherwise omit this section).
-
-## What to build
-
-A concise description of this vertical slice. Describe the end-to-end behavior, not layer-by-layer implementation.
-
-Avoid specific file paths or code snippets — they go stale fast. Exception: if a prototype produced a snippet that encodes a decision more precisely than prose can (state machine, reducer, schema, type shape), inline it here and note briefly that it came from a prototype. Trim to the decision-rich parts — not a working demo, just the important bits.
-
-## Reproduction / context
-
-How a QA tester recreates the situation cold, with no memory of this conversation. For a bug: the exact steps, route/URL, account or data state, and the observed wrong behavior (error, 500, 0%, etc.). For a feature: the starting state and where to exercise the new behavior. A QA lead must be able to land here and reproduce the original problem without asking anyone.
-
-## Acceptance criteria
-
-Write these so QA can **verify the fix and demonstrate WHY it's fixed**, not just trust that it is. Each criterion must be observable by someone driving the real app — a concrete state, value, or behavior they can see, not an internal implementation detail. Tie at least one criterion back to the reproduction above ("the step that used to fail now does X"). Include the negative/edge case where relevant (e.g. genuinely-empty still shows 0%, no false positive). If a criterion can't be checked by observing the app, it belongs in the description, not here.
-
-- [ ] Criterion 1 (observable: what the tester sees / does)
-- [ ] Criterion 2
-- [ ] Criterion 3
+A reference to the parent issue (omit this section if the source wasn't an existing issue).
 
 ## Blocked by
 
 - A reference to the blocking ticket (if any)
 
 Or "None - can start immediately" if no blockers.
+```
 
-</issue-template>
+</template-bodies>
 
 Do NOT close or modify any parent issue.

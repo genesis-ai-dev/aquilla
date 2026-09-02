@@ -64,6 +64,10 @@ export const EXCLUDE_PATHS: string[] = [
   "public/favicon-codex.svg",
   "public/favicon-honeycomb.svg",
   "public/favicon-context.svg",
+  // Brand-registry tests are coupled to the removed brands (they import
+  // codex/honeycomb and index the narrowed BrandId), so they can't compile
+  // against the regenerated aquilla+acme registry.
+  "src/branding/__tests__/**",
 
   // ── Real Modal model-wrapper code (derived from upstream models) ────────
   //   Replaced by generic stubs in GENERATED_FILES.
@@ -111,6 +115,7 @@ export const STRING_REPLACEMENTS: Array<{ find: string | RegExp; replace: string
   { find: /Biblica(?!l)/g, replace: "Partner", note: "partner name (i18n/tests/docs)" },
   { find: /Reach4Life/g, replace: "PartnerEd", note: "partner product name" },
   { find: /reach4life/g, replace: "partnered", note: "partner product key" },
+  { find: /REACH4LIFE/g, replace: "PARTNERED", note: "partner product const (unused in public)" },
   { find: /Reach 4 Life/g, replace: "Partner Edition", note: "partner product name" },
   { find: /privacy@frontierrnd\.com/g, replace: "privacy@example.com", note: "privacy contact email" },
   // NOTE: no blanket "biblica" rewrite here — that would inconsistently mangle

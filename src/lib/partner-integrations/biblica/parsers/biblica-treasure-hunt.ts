@@ -3,10 +3,10 @@ import { parseIdmlInWorker } from "@/lib/idml/idml-worker-client"
 import {
   selectTreasureHuntNotes,
   type TreasureHuntSelection,
-} from "@/lib/biblica/treasure-hunt/notes"
+} from "@/lib/partner-integrations/biblica/treasure-hunt/notes"
 import { IDML_REJOIN_METADATA_KEY, idmlRejoinMetadata } from "@/lib/idml/rejoin"
-import { idmlUnitToTranslatableString, type IdmlParseExecutor } from "./idml"
-import type { TranslatableString } from "./types"
+import { idmlUnitToTranslatableString, type IdmlParseExecutor } from "@/lib/parsers/idml"
+import type { TranslatableString } from "@/lib/parsers/types"
 
 export interface TreasureHuntParseOptions {
   signal?: AbortSignal

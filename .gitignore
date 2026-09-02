@@ -112,3 +112,7 @@ i18n-todo/
 
 # Google OAuth credential downloads — never commit
 client_secret*.json
+
+# public-release pipeline staging output
+.public-build
+.public-build.report.txt

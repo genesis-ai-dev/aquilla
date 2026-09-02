@@ -22,9 +22,9 @@ import {
   SAMPLE_REACH4LIFE,
   makeReach4LifeIdml,
   reach4LifeWorkbookSampleStory,
-} from "@/lib/biblica/reach4life/__fixtures__/reach4life-idml"
+} from "@/lib/partner-integrations/biblica/reach4life/__fixtures__/reach4life-idml"
 import { buildBulkCellsWithSpeakers, REACH4LIFE_PROFILE_ID } from "@/lib/import"
-import { extractReach4LifeStrings } from "@/lib/parsers/biblica-reach4life"
+import { extractReach4LifeStrings } from "@/lib/partner-integrations/biblica/parsers/biblica-reach4life"
 import { exportIdml, IdmlWebExportError, type IdmlExportExecutor } from "./idml"
 
 const directExecutor: IdmlExportExecutor = {

@@ -1,0 +1,14 @@
+{
+  "generatedAt": "1970-01-01T00:00:00.000Z",
+  "source": "example — replace by running scripts/seed-extract.ts against your own database",
+  "r2": {
+    "accountId": "YOUR_CLOUDFLARE_ACCOUNT_ID",
+    "bucket": "your-snapshots-bucket",
+    "key": "seed/dev-seed-000000000000.jsonl.zst"
+  },
+  "bundleBytes": 0,
+  "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "schemaHash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "projectIds": ["00000000-0000-0000-0000-000000000001"],
+  "counts": { "projects": 1, "users": 3, "organizations": 1, "cells": 42 }
+}

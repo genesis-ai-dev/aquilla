@@ -51,9 +51,9 @@ import {
 import { extractDocxStrings } from "./parsers/docx"
 import { extractPptxStrings } from "./parsers/pptx"
 import { extractIdmlStrings } from "./parsers/idml"
-import { extractBiblicaStudyNoteStrings } from "./parsers/biblica"
-import { extractTreasureHuntStrings } from "./parsers/biblica-treasure-hunt"
-import { extractReach4LifeStrings } from "./parsers/biblica-reach4life"
+import { extractBiblicaStudyNoteStrings } from "@/lib/partner-integrations/biblica/parsers/biblica"
+import { extractTreasureHuntStrings } from "@/lib/partner-integrations/biblica/parsers/biblica-treasure-hunt"
+import { extractReach4LifeStrings } from "@/lib/partner-integrations/biblica/parsers/biblica-reach4life"
 import { extractHtmlStrings } from "./parsers/html"
 import { extractEpubImport, type EpubSpineMember } from "./parsers/epub"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
@@ -1294,7 +1294,7 @@ export interface BiblicaProgress {
  * its notes positively (`intro:*`); the Treasure Hunt Bible and Reach4Life mark
  * scripture instead, so everything set around the Bible text is imported —
  * facts and hunts, lessons and journeys, book introductions and front matter.
- * See `@/lib/biblica/treasure-hunt/notes` and `@/lib/biblica/reach4life/notes`.
+ * See `@/lib/partner-integrations/biblica/treasure-hunt/notes` and `@/lib/partner-integrations/biblica/reach4life/notes`.
  *
  * The study Bible's own front and back matter — contents, "how to use", the
  * Bible Dictionary, the timelines, the maps, the cover — ships as separate

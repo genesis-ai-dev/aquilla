@@ -11,8 +11,8 @@ import {
   paragraph,
   run,
   scripture,
-} from "@/lib/biblica/treasure-hunt/__fixtures__/treasure-hunt-idml"
-import { selectTreasureHuntNotes } from "@/lib/biblica/treasure-hunt/notes"
+} from "@/lib/partner-integrations/biblica/treasure-hunt/__fixtures__/treasure-hunt-idml"
+import { selectTreasureHuntNotes } from "@/lib/partner-integrations/biblica/treasure-hunt/notes"
 import { extractTreasureHuntStrings } from "./biblica-treasure-hunt"
 
 describe("Treasure Hunt parser adapter", () => {

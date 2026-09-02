@@ -15,8 +15,8 @@ import {
   note,
   paragraph,
   run,
-} from "@/lib/biblica/__fixtures__/biblica-idml"
-import { selectBiblicaStudyNotes } from "@/lib/biblica/study-notes"
+} from "@/lib/partner-integrations/biblica/__fixtures__/biblica-idml"
+import { selectBiblicaStudyNotes } from "@/lib/partner-integrations/biblica/study-notes"
 import { extractBiblicaStudyNoteStrings } from "./biblica"
 
 describe("Biblica study-notes parser adapter", () => {

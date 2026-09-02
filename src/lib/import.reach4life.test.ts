@@ -5,9 +5,9 @@ import {
   reach4LifeWorkbookSampleStory,
   scripture,
   styled,
-} from "./biblica/reach4life/__fixtures__/reach4life-idml"
-import { makeTreasureHuntIdml } from "./biblica/treasure-hunt/__fixtures__/treasure-hunt-idml"
-import { makeBiblicaIdml } from "./biblica/__fixtures__/biblica-idml"
+} from "@/lib/partner-integrations/biblica/reach4life/__fixtures__/reach4life-idml"
+import { makeTreasureHuntIdml } from "@/lib/partner-integrations/biblica/treasure-hunt/__fixtures__/treasure-hunt-idml"
+import { makeBiblicaIdml } from "@/lib/partner-integrations/biblica/__fixtures__/biblica-idml"
 
 // The production path parses in a transferable Web Worker, which does not exist
 // in this runtime. Run the identical shared engine inline so the commit path is

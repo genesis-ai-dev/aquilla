@@ -3,12 +3,12 @@ import { parseIdmlInWorker } from "@/lib/idml/idml-worker-client"
 import {
   selectReach4LifeNotes,
   type Reach4LifeSelection,
-} from "@/lib/biblica/reach4life/notes"
+} from "@/lib/partner-integrations/biblica/reach4life/notes"
 import { getBookName } from "@/lib/file-labeling/bible-book-names"
 import { IDML_REJOIN_METADATA_KEY, idmlRejoinMetadata } from "@/lib/idml/rejoin"
-import type { ImportMilestone } from "../../../shared/import-contract"
-import { idmlUnitToTranslatableString, type IdmlParseExecutor } from "./idml"
-import type { TranslatableString } from "./types"
+import type { ImportMilestone } from "../../../../../shared/import-contract"
+import { idmlUnitToTranslatableString, type IdmlParseExecutor } from "@/lib/parsers/idml"
+import type { TranslatableString } from "@/lib/parsers/types"
 
 export interface Reach4LifeParseOptions {
   signal?: AbortSignal

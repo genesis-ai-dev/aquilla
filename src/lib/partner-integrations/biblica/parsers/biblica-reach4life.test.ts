@@ -11,8 +11,8 @@ import {
   reach4LifeWorkbookSampleStory,
   scripture,
   styled,
-} from "@/lib/biblica/reach4life/__fixtures__/reach4life-idml"
-import { selectReach4LifeNotes } from "@/lib/biblica/reach4life/notes"
+} from "@/lib/partner-integrations/biblica/reach4life/__fixtures__/reach4life-idml"
+import { selectReach4LifeNotes } from "@/lib/partner-integrations/biblica/reach4life/notes"
 import { extractReach4LifeStrings } from "./biblica-reach4life"
 
 async function extractFrom(paragraphs?: readonly string[]) {

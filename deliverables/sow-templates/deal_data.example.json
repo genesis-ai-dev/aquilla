@@ -1,0 +1,12 @@
+{
+  "CLIENT_LEGAL_NAME": "Example Client Organization",
+  "CLIENT_SHORT_NAME": "Example Client",
+  "SOW_DATE": "September 1, 2026",
+  "KICKOFF_DATE": "September 15, 2026",
+  "IMPLEMENTATION_FEE": "USD $75,000",
+  "ANNUAL_SUPPORT_FEE": "USD $75,000 / year",
+  "MONTHLY_SUPPORT_EQUIVALENT": "USD $6,250",
+  "ANNUAL_LICENSE_FEE": "USD $65,000 / year",
+  "LANGUAGE_RANGE": "150-200",
+  "CURRENT_ACTIVE_LANGUAGES": "155"
+}

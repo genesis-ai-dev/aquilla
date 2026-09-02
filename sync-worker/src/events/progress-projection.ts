@@ -472,27 +472,45 @@ export function fullProgressRecomputeStmts(
       projectId, fileId, updatedAt,
     ),
     db.prepare(
-      // Prune sections/books whose cells are gone. A book row also dies when
-      // the file stops being Scripture at all (its last verse-shaped ref was
-      // removed), which the key match alone would not catch.
+      // Prune sections/books whose cells are gone, and every book row once the
+      // file stops being Scripture at all.
+      //
+      // THESE TWO CONDITIONS MUST MIRROR THE INSERT EXACTLY. Book rows are
+      // written for any non-empty book key when the FILE holds a verse-shaped
+      // ref anywhere (`has_books`). An earlier version demanded that verse
+      // shape of the same row that matched the book key, which is a per-BOOK
+      // test, so a book of chapter-only refs inside a Scripture file was
+      // inserted and deleted in one batch — present after an incremental
+      // recompute, gone after a full one. Since a file with book rows has no
+      // file-grain unit, those cells then belonged to no planning unit at all
+      // and any date or Done mark stored against the book became unreachable.
       `DELETE FROM file_section_progress progress
         WHERE progress.project_id = ?
           AND progress.file_id = ?
           AND progress.scope IN ('section', 'book')
-          AND NOT EXISTS (
-            SELECT 1
-              FROM cells source
-             WHERE source.project_id = progress.project_id
-               AND source.file_id = progress.file_id
-               AND source.side = 'source'
-               AND CASE progress.scope
-                     WHEN 'section' THEN ${sectionKeyExpr('source')}
-                     ELSE ${bookKeyExpr('source')}
-                   END = progress.section_key
-               AND (
-                 progress.scope = 'section'
-                 OR COALESCE(source.canonical_ref, '') ~ '^\\S+ \\d+:\\d+'
-               )
+          AND (
+            NOT EXISTS (
+              SELECT 1
+                FROM cells source
+               WHERE source.project_id = progress.project_id
+                 AND source.file_id = progress.file_id
+                 AND source.side = 'source'
+                 AND CASE progress.scope
+                       WHEN 'section' THEN ${sectionKeyExpr('source')}
+                       ELSE ${bookKeyExpr('source')}
+                     END = progress.section_key
+            )
+            OR (
+              progress.scope = 'book'
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM cells scripture
+                 WHERE scripture.project_id = progress.project_id
+                   AND scripture.file_id = progress.file_id
+                   AND scripture.side = 'source'
+                   AND COALESCE(scripture.canonical_ref, '') ~ '^\\S+ \\d+:\\d+'
+              )
+            )
           )`,
     ).bind(projectId, fileId),
   ]

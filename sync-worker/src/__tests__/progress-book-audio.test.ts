@@ -279,6 +279,43 @@ describe("pruning", () => {
     await recompute(db)
     expect(await rows(db, "book")).toHaveLength(0)
   })
+
+  it("keeps a book whose own refs are chapter-only, in a file that IS Scripture", async () => {
+    // THE INSERT AND THE PRUNE HAVE TO AGREE. Book rows are written whenever
+    // the FILE holds any verse-shaped ref; the prune used to demand that each
+    // BOOK hold one. A book of chapter-only refs sitting in a Scripture file
+    // was therefore written and deleted in the same batch, so it existed after
+    // an incremental recompute and vanished after a full one.
+    //
+    // The damage is not cosmetic: a file with book rows has no file-grain
+    // unit, so MAT's cells would belong to no planning unit at all — off the
+    // board, out of the CSV, and any target date or Done mark already stored
+    // against (file, 'MAT') unreachable, because the write route 404s a unit
+    // it cannot enumerate.
+    const { db } = await makeTestDb({
+      cells: [
+        cell({ cell_id: "g1", canonical_ref: "GEN 1:1" }),
+        cell({ cell_id: "m1", canonical_ref: "MAT 1" }),
+        cell({ cell_id: "m2", canonical_ref: "MAT 2" }),
+      ],
+    })
+    await recompute(db)
+    expect((await rows(db, "book")).map((b) => b.section_key)).toEqual(["GEN", "MAT"])
+  })
+
+  it("agrees with the incremental path about which books exist", async () => {
+    const seeds = [
+      cell({ cell_id: "g1", canonical_ref: "GEN 1:1" }),
+      cell({ cell_id: "m1", canonical_ref: "MAT 1" }),
+    ]
+    const full = await makeTestDb({ cells: seeds })
+    await recompute(full.db)
+    const incremental = await makeTestDb({ cells: seeds })
+    await sectionsProgressRecomputeStmt(incremental.db, P, F, TS).run()
+
+    expect((await rows(full.db, "book")).map((b) => b.section_key))
+      .toEqual((await rows(incremental.db, "book")).map((b) => b.section_key))
+  })
 })
 
 describe("partial recompute", () => {

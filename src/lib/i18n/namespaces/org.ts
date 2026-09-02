@@ -1139,10 +1139,6 @@ export const org = defineNamespace({
     "org.projectOverview.plan.doneBelowFullNudge":
       "Validated is at {validated}%. Marking done records your judgment, not the numbers \u2014 the bars stay visible beside the mark.",
     "org.projectOverview.plan.progress": "Progress",
-    "org.projectOverview.plan.textTranslated": "Text translated",
-    "org.projectOverview.plan.textValidated": "Text validated",
-    "org.projectOverview.plan.audioRecorded": "Audio recorded",
-    "org.projectOverview.plan.audioValidated": "Audio validated",
     "org.projectOverview.plan.lastActivity": "Last activity {when}.",
     "org.projectOverview.plan.noActivity": "No activity yet.",
     "org.projectOverview.plan.resizeInspector": "Resize the details panel",
@@ -2268,22 +2264,6 @@ export const org = defineNamespace({
       "org.projectOverview.plan.progress": {
         description: "Section label above the four progress bars.",
         maxLength: 16,
-      },
-      "org.projectOverview.plan.textTranslated": {
-        description: "Progress bar label: share of cells with target text.",
-        maxLength: 22,
-      },
-      "org.projectOverview.plan.textValidated": {
-        description: "Progress bar label: share of cells validated by enough reviewers.",
-        maxLength: 22,
-      },
-      "org.projectOverview.plan.audioRecorded": {
-        description: "Progress bar label: share of cells with a recording.",
-        maxLength: 22,
-      },
-      "org.projectOverview.plan.audioValidated": {
-        description: "Progress bar label: share of cells whose selected recording is approved.",
-        maxLength: 22,
       },
       "org.projectOverview.plan.lastActivity": {
         description: "When this unit was last edited.",

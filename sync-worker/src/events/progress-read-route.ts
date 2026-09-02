@@ -12,6 +12,10 @@ interface ProgressRow {
   filled_count: number | string
   validator_histogram: Record<string, number> | string | null
   revision: number | string | bigint
+  // AQU-1098: written by the projection since 0083. Absent on the synthetic
+  // rows plan-route builds, which carry their own audio numbers.
+  audio_count?: number | string | null
+  audio_validated_count?: number | string | null
 }
 
 export interface ProgressCounts {
@@ -19,6 +23,13 @@ export interface ProgressCounts {
   filledCount: number
   validatedCount: number
   validationLevels: number[]
+  /**
+   * AQU-1098: source cells carrying a live take, and those whose take is
+   * selected AND approved. Same rule the org portfolio counts by, so a
+   * chapter's audio and the project's audio can never disagree.
+   */
+  audioCount: number
+  audioValidatedCount: number
 }
 
 export interface FileProgressResponse {
@@ -83,6 +94,8 @@ export function counts(row: ProgressRow, validationCount: number): ProgressCount
     filledCount: Number(row.filled_count) || 0,
     validatedCount: validationLevels[Math.min(levelCap, validationCount) - 1] ?? 0,
     validationLevels,
+    audioCount: Number(row.audio_count) || 0,
+    audioValidatedCount: Number(row.audio_validated_count) || 0,
   }
 }
 
@@ -222,7 +235,8 @@ export async function handleProgressReadRequest(
   const [rowsResult, validationCount] = await Promise.all([
     env.AQUILLA_PG
       .prepare(
-        `SELECT scope, section_key, total_count, filled_count, validator_histogram, revision
+        `SELECT scope, section_key, total_count, filled_count, validator_histogram, revision,
+                audio_count, audio_validated_count
            FROM file_section_progress
           WHERE project_id = ? AND file_id = ? AND target_lang = ?`,
       )
@@ -251,6 +265,9 @@ export async function handleProgressReadRequest(
       scope: 'file', section_key: '', total_count: fallback.total_count,
       filled_count: fallback.filled_count, validator_histogram: histogram,
       revision: fallback.revision,
+      // `files` carries no audio rollup — the projection is the only source,
+      // and this branch runs only before it has been backfilled.
+      audio_count: 0, audio_validated_count: 0,
     }]
     source = 'file-counter-fallback'
   }
@@ -262,7 +279,10 @@ export async function handleProgressReadRequest(
   // sequence. Include the source so clients cannot retain an empty fallback
   // through a false 304 after projection rows appear.
   const laneTag = lane ? `:lane:${encodeURIComponent(lane)}` : ''
-  const etag = `"progress:${fileId}:${revision}:v${validationCount}:${source === 'projection' ? 'p' : 'f'}${laneTag}"`
+  // `s2` marks the response SHAPE (audio counts added, AQU-1098). Without it
+  // a client holding a pre-audio cached body would 304 and keep it forever:
+  // the shape changed without the revision moving.
+  const etag = `"progress:${fileId}:${revision}:v${validationCount}:${source === 'projection' ? 'p' : 'f'}:s2${laneTag}"`
   if (request.headers.get('If-None-Match') === etag) {
     return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
   }

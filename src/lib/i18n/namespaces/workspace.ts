@@ -51,8 +51,6 @@ export const workspace = defineNamespace({
     // -- ProjectWorkspace: AppShell chrome --
     "workspace.sidebar.collapse": "Collapse sidebar",
     "workspace.readOnlyGitBanner": "Read-only — imported from git. Push is coming in Phase 2.",
-    "workspace.videoUnavailable":
-      "Video file not available on this device. Attach it locally or paste a URL via the Film icon.",
     "workspace.staleSibling.viewInHistory": "View in history",
     "workspace.staleSource.message":
       "Source text changed since your last edit — your translation was saved, but please re-confirm it reflects the latest source.",
@@ -186,6 +184,8 @@ export const workspace = defineNamespace({
 
     // -- AudioRecorder/DurationBar --
     "workspace.durationBar.targetLabel": "target {time}",
+    // AQU-646: how far past the window a take has run.
+    "workspace.durationBar.overBy": "+{seconds}s",
 
     // -- CellAiStatusPopover --
     "workspace.aiStatusPopover.technicalDetail": "Technical detail",
@@ -307,15 +307,6 @@ export const workspace = defineNamespace({
       "measured",
     ),
 
-    // -- ProjectWorkspace: CSV cast/character label-picker import toasts --
-    "workspace.labelPicker.noLabelsAppliedToast":
-      "No labels applied — the CSV doesn't match {fileName}. Re-download the template and try again.",
-    "workspace.labelPicker.partiallyAppliedToast": "Applied {applied} of {total} labels to {fileName}.",
-    "workspace.labelPicker.appliedToast": plural(
-      { one: "Applied {applied} label to {fileName}.", other: "Applied {applied} labels to {fileName}." },
-      "applied",
-    ),
-
     // -- WorkspaceSkeleton --
     "workspace.skeleton.loadingProject": "Loading project",
 
@@ -326,7 +317,6 @@ export const workspace = defineNamespace({
     "workspace.denoise.revertButton": "Revert",
 
     // -- chat/ChatComposer (Send reuses autopilot.steering.send, Stop reuses common.stop) --
-    "workspace.chatComposer.keyboardHint": "Enter to send · Shift+Enter for newline",
     "workspace.chatComposer.queueTooltip": "Queue — sends when the current run finishes",
     "workspace.chatComposer.queueMessage": "Queue message",
 
@@ -381,9 +371,17 @@ export const workspace = defineNamespace({
     "workspace.chipStrip.diffEndDetail": "End: {value}",
 
     // -- timeline/TargetAudioLane --
+    "workspace.targetAudioLane.previewTooLong":
+      "This take is too long to preview here — play the timeline instead.",
+    "workspace.targetAudioLane.previewTooLarge": "This take is too big to preview yet.",
+    "workspace.targetAudioLane.previewTooLargeDetail":
+      "Its length has never been measured, so it cannot be prepared for preview. Run Measure all from the file menu and try again.",
+    "workspace.targetAudioLane.previewUnavailable": "This take cannot be previewed.",
     "workspace.targetAudioLane.overlapsNext": "Overlaps the next dub",
     "workspace.targetAudioLane.overlapsPrevious": "Overlaps the previous dub",
     "workspace.targetAudioLane.recordAudio": "Record audio for this line",
+    // AQU-646 stage 5: the other corner of the same chip.
+    "workspace.targetAudioLane.playClip": "Play this clip",
     "workspace.targetAudioLane.runsPastSectionTooltip": "Runs {sec}s past the section",
     "workspace.targetAudioLane.drawnShortNeighboringDubsStay":
       "Drawn short at rest so the neighbouring dubs stay reachable",
@@ -523,12 +521,6 @@ export const workspace = defineNamespace({
           "'git' and 'Phase 2' are technical/roadmap terms — keep 'git' " +
           "untranslated as the tool's name.",
         maxLength: 90,
-      },
-      "workspace.videoUnavailable": {
-        description:
-          "Banner shown over a subtitle file's timeline when its linked video " +
-          "blob isn't present on this device and no video URL is attached yet. " +
-          "'Film icon' refers to the toolbar icon that opens the attach-video flow.",
       },
       "workspace.staleSibling.viewInHistory": {
         description:
@@ -1000,6 +992,18 @@ export const workspace = defineNamespace({
           "translatable and not hardcoded.",
       },
 
+      "workspace.durationBar.overBy": {
+        description:
+          "Shown beside the running time in the recorder when a take has passed " +
+          "the length of the line it is for, so the performer does not have to " +
+          "subtract two timecodes while recording. The plus sign is meaningful " +
+          "— it always reads as an overrun and never as a countdown — and the " +
+          "unit is seconds to one decimal place. Keep it very short; it sits " +
+          "between two other numbers on one narrow row.",
+        placeholders: {
+          seconds: "How far past the target the take has run, in seconds to one decimal place, without a sign.",
+        },
+      },
       "workspace.durationBar.targetLabel": {
         description:
           "Small caption beside the elapsed-time readout on a recording's " +
@@ -1365,32 +1369,6 @@ export const workspace = defineNamespace({
           "zero failures.",
         placeholders: { measured: "How many recordings were successfully measured; also selects the plural form." },
       },
-      "workspace.labelPicker.noLabelsAppliedToast": {
-        description:
-          "Warning toast after importing a cast/character CSV whose rows matched none of " +
-          "the file's speaker labels at all.",
-        placeholders: { fileName: "Name of the file the CSV was checked against — not translated." },
-      },
-      "workspace.labelPicker.partiallyAppliedToast": {
-        description:
-          "Warning toast after importing a cast/character CSV that matched some but not " +
-          "all rows against the file's speaker labels.",
-        placeholders: {
-          applied: "How many labels were successfully applied.",
-          total: "Total labels attempted (applied + unmatched).",
-          fileName: "Name of the file the labels were applied to — not translated.",
-        },
-      },
-      "workspace.labelPicker.appliedToast": {
-        description:
-          "Success toast after importing a cast/character CSV that matched every row " +
-          "against the file's speaker labels.",
-        placeholders: {
-          applied: "How many labels were applied; also selects the plural form.",
-          fileName: "Name of the file the labels were applied to — not translated.",
-        },
-      },
-
       "workspace.skeleton.loadingProject": {
         description:
           "Accessible label for the full-page loading skeleton shown while a " +
@@ -1416,12 +1394,6 @@ export const workspace = defineNamespace({
         description: "Button that re-selects the original recording take instead of the denoised one.",
       },
 
-      "workspace.chatComposer.keyboardHint": {
-        description:
-          "Small footer hint inside the AI chat composer explaining the " +
-          "keyboard shortcuts for sending vs inserting a newline.",
-        maxLength: 48,
-      },
       "workspace.chatComposer.queueTooltip": {
         description:
           "Tooltip on the queue button shown while a run is streaming (only " +
@@ -1602,6 +1574,29 @@ export const workspace = defineNamespace({
         placeholders: { value: "Already-formatted signed seconds (e.g. '+0.3s') — not translated." },
       },
 
+      "workspace.targetAudioLane.previewTooLong": {
+        description:
+          "Toast when the chip's play button is pressed on a take too long to " +
+          "decode for preview. It points at the timeline, which streams and can " +
+          "play it.",
+      },
+      "workspace.targetAudioLane.previewTooLarge": {
+        description:
+          "Toast when the play button is pressed on a take whose LENGTH was " +
+          "never recorded and whose file is over the preview size ceiling. " +
+          "Distinct from 'too long' because it has a cure: measuring the take. " +
+          "Before this the button simply made no sound and said nothing.",
+      },
+      "workspace.targetAudioLane.previewTooLargeDetail": {
+        description:
+          "Body for the above, naming the fix. 'Measure all' is the file-menu " +
+          "action that backfills missing durations.",
+      },
+      "workspace.targetAudioLane.previewUnavailable": {
+        description:
+          "Toast when the play button cannot reach a take's audio at all — a " +
+          "legacy attachment whose bytes are gone, or no audio device.",
+      },
       "workspace.targetAudioLane.overlapsNext": {
         description:
           "Tooltip line on a target-audio (dub) chip whose tail overlaps the " +
@@ -1612,6 +1607,14 @@ export const workspace = defineNamespace({
         description:
           "Tooltip line on a target-audio (dub) chip whose head overlaps the " +
           "PREVIOUS verse's dub, mirroring workspace.targetAudioLane.overlapsNext.",
+      },
+      "workspace.targetAudioLane.playClip": {
+        description:
+          "Hover and screen-reader name of the small play button in the top-" +
+          "left corner of an audio clip in the timeline, opposite the record " +
+          "button. It plays only that one clip, trimmed exactly as the " +
+          "timeline draws it, without moving the playhead or starting the " +
+          "rest of the timeline.",
       },
       "workspace.targetAudioLane.recordAudio": {
         description:

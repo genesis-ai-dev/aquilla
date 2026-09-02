@@ -22,12 +22,33 @@
 
 import type { QueueForFile } from "./queue-scope"
 
-export type TransportSource = "queue" | "video"
+export type TransportSource = "queue" | "video" | "virtual"
 
 export interface TransportForFile extends QueueForFile {
   /** Which engine these numbers came from. `"video"` only ever for a file whose
-   *  linked picture is the transport — see `videoOwnsFile`. */
+   *  linked picture is the transport — see `videoOwnsFile`; `"virtual"` only for
+   *  one with timings and no master at all — see `virtualOwnsFile`. */
   source: TransportSource
+}
+
+/**
+ * The virtual clock's side of the story. (AQU-646 stage 3h)
+ *
+ * Deliberately thinner than the video's: there is no `buffering`, because there
+ * is nothing to open or seek — a clock is ready the instant it exists — and no
+ * `durationSec` guesswork, because the end of the last cue is known exactly
+ * rather than waiting on metadata.
+ */
+export interface VirtualTransportInput {
+  /** `virtual-clock.ts`; null when it is not driving. */
+  currentSec: number | null
+  playing: boolean
+  /** End of the last cue. Known up front, unlike a media file's. */
+  durationSec: number
+  /** `cellIdAtSec` over the driver cells — the line the playhead is on. */
+  soundingCellId: string | null
+  rate: number
+  volume: number
 }
 
 /** The video's side of the story, as the stores already publish it. */
@@ -77,6 +98,38 @@ export function videoOwnsFile(
 }
 
 /**
+ * …and does NOTHING own it? (AQU-646 stage 3h)
+ *
+ * A VTT imported on its own has timings and no master: no film to play, and no
+ * imported source recording to make the queue's clock a file position. So the
+ * playhead had no writer and pressing play did nothing — Sam, 2026-08-25.
+ *
+ * The three tests are the negatives of the two above plus one of its own:
+ *
+ *  - **No picture driving.** A linked film is the master where there is one, and
+ *    two transports both claiming the file is the failure this module exists to
+ *    prevent. Note this reads `videoOwnsFile`'s answer, not `coreMediaUrl` —
+ *    a film whose pane is off screen has nothing to drive, so a virtual clock
+ *    is correct there.
+ *  - **No imported source recording**, for the same reason the queue's clock is
+ *    only a file position with one: that recording IS the master.
+ *  - **Something to play over.** A file with no timings at all — scripture,
+ *    a plain document — has no timeline to run a playhead along, and offering a
+ *    transport there would be a control that moves nothing.
+ *
+ * Free timing needs no clause: it re-flows the programme and the queue owns
+ * playback there, which `anyCellClockIsFileTime` already reflects, and Sam
+ * notes VTT files disable Free timing anyway.
+ */
+export function virtualOwnsFile(
+  videoIsTransport: boolean,
+  anyCellClockIsFileTime: boolean,
+  durationSec: number,
+): boolean {
+  return !videoIsTransport && !anyCellClockIsFileTime && durationSec > 0
+}
+
+/**
  * Fold the two engines into one answer.
  *
  * The queue WINS whenever it is genuinely running this file's cells, even on a
@@ -87,8 +140,38 @@ export function videoOwnsFile(
 export function selectTransportForFile(
   queue: QueueForFile,
   video: VideoTransportInput | null,
+  /** AQU-646 stage 3h. Null unless nothing else owns the file. */
+  virtual: VirtualTransportInput | null = null,
 ): TransportForFile {
-  if (!video || queue.active) return { ...queue, source: "queue" }
+  // THE QUEUE STILL WINS WHENEVER IT IS GENUINELY RUNNING, for both of the
+  // others — that is this module's existing precedence and a third source does
+  // not get to change it. A user playing one take from a row's rail is the
+  // queue, on any file.
+  if (queue.active) return { ...queue, source: "queue" }
+  if (!video && virtual) {
+    const duration = Number.isFinite(virtual.durationSec) ? virtual.durationSec : 0
+    // `currentSec` is non-null exactly while this owns the file, so it is the
+    // same "is it driving" test the picture uses — but there is no buffering
+    // here and never will be: there is nothing to open, seek or download. A
+    // clock is ready the moment it exists.
+    const active = virtual.currentSec != null
+    return {
+      active,
+      playing: active && virtual.playing,
+      running: active && virtual.playing,
+      cellId: active ? virtual.soundingCellId : null,
+      kind: active ? (virtual.playing ? "playing" : "paused") : "idle",
+      errorMessage: null,
+      progress: {
+        currentTime: virtual.currentSec ?? 0,
+        duration,
+        rate: virtual.rate,
+        volume: virtual.volume,
+      },
+      source: "virtual",
+    }
+  }
+  if (!video) return { ...queue, source: "queue" }
   // A picture that has been ASKED to play is the transport, even before it has
   // published a position. On a file just opened nothing has ticked or seeked
   // yet, so `currentSec` is still null — and gating on that alone meant the

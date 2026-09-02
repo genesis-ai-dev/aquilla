@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
+import { openRowMenu } from "@/test-utils/row-menu"
 import { ArchivedProjects } from "./ArchivedProjects"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -86,7 +87,7 @@ describe("ArchivedProjects", () => {
     expect(screen.getByRole("tab", { name: "Projects" })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "Recently deleted" })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "More actions for Old Project" }))
+    await openRowMenu("More actions for Old Project")
     fireEvent.click(screen.getByRole("menuitem", { name: "Restore" }))
     await waitFor(() => expect(unarchiveProjectRemote).toHaveBeenCalledWith("old", "jwt"))
   })
@@ -161,7 +162,7 @@ describe("ArchivedProjects", () => {
     expect(screen.getByRole("columnheader", { name: /Project/i })).toBeInTheDocument()
     expect(screen.getByRole("columnheader", { name: /Deleted/i })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "More actions for EXO.usfm" }))
+    await openRowMenu("More actions for EXO.usfm")
     fireEvent.click(screen.getByRole("menuitem", { name: "Restore" }))
     await waitFor(() =>
       expect(emitFileRestore).toHaveBeenCalledWith({

@@ -65,7 +65,7 @@ describe("ContextualRunPill", () => {
     expect(screen.queryByRole("button", { name: "Run Autopilot" })).not.toBeInTheDocument()
   })
 
-  it("idle + backend unavailable: Play is clickable and opens setup (never disabled)", async () => {
+  it("idle + backend unavailable: the run button is clickable and opens setup (never disabled)", async () => {
     const onSetupNeeded = vi.fn()
     render(<ContextualRunPill projectId="p1" fileId="file-1" onSetupNeeded={onSetupNeeded} canControl />)
     expect(screen.getByTestId("contextual-run-pill")).toHaveAttribute("data-contextual-available", "false")
@@ -73,6 +73,35 @@ describe("ContextualRunPill", () => {
     expect(play).not.toBeDisabled()
     await act(async () => { fireEvent.click(play) })
     expect(onSetupNeeded).toHaveBeenCalledTimes(1)
+  })
+
+  it("start and resume do not wear the media Play glyph (AQU-1012)", () => {
+    // The editor's audio/video controls own Play/Pause; an autopilot run is
+    // not media playback, so the pill must not borrow that triangle.
+    const idle = render(<ContextualRunPill projectId="p1" fileId="file-1" canControl />)
+    expect(
+      screen.getByRole("button", { name: "Run Autopilot" }).querySelector("svg.lucide-play"),
+    ).toBeNull()
+    expect(
+      screen.getByRole("button", { name: "Run Autopilot" }).querySelector("svg.lucide-pencil-sparkles"),
+    ).not.toBeNull()
+    idle.unmount()
+
+    setContextualTransport(makeTransport())
+    applyRemoteFrame(frame("paused", { done: 5, total: 10 }))
+    render(<ContextualRunPill projectId="p1" fileId="file-1" canControl />)
+    const resume = screen.getByRole("button", { name: "Resume drafting" })
+    expect(resume.querySelector("svg.lucide-play")).toBeNull()
+    expect(resume.querySelector("svg.lucide-pencil-sparkles")).not.toBeNull()
+  })
+
+  it("keeps Pause on the pause control — only the run/resume glyphs changed (AQU-1012)", () => {
+    setContextualTransport(makeTransport())
+    applyRemoteFrame(frame("running", { done: 3, total: 12 }))
+    render(<ContextualRunPill projectId="p1" fileId="file-1" canControl />)
+    expect(
+      screen.getByRole("button", { name: "Pause after this passage" }).querySelector("svg.lucide-pause"),
+    ).not.toBeNull()
   })
 
   it("exposes when the available backend snapshot has reached the control", async () => {
@@ -83,7 +112,7 @@ describe("ContextualRunPill", () => {
     expect(screen.getByTestId("contextual-run-pill")).toHaveAttribute("data-contextual-available", "true")
   })
 
-  it("Play during snapshot hydration starts the run instead of opening setup", async () => {
+  it("clicking run during snapshot hydration starts the run instead of opening setup", async () => {
     resetContextualRunStore()
     let resolveSnap!: (value: { available: boolean; run: null }) => void
     const snap = new Promise<{ available: boolean; run: null }>((resolve) => {
@@ -111,7 +140,7 @@ describe("ContextualRunPill", () => {
       await Promise.resolve()
     })
     expect(onSetupNeeded).not.toHaveBeenCalled()
-    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "")
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "", undefined)
   })
 
   it("announces a visible recovery message when starting fails", async () => {
@@ -252,7 +281,7 @@ describe("ContextualRunPill", () => {
     expect(screen.queryByText(/Project default only/)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Run Autopilot" }))
 
-    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "fr")
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "fr", undefined)
   })
 
   it("closes the default-run inspector when the editor switches to another language lane", async () => {

@@ -21,6 +21,7 @@
 // not invent its own.
 
 import { memo } from "react"
+import { TRACK_DASH_CLASS, trackHueVarsFor } from "@/lib/timeline/track-colors"
 import { secToPx, isVisible, chipRadiusPx } from "@/lib/timeline/scale"
 import { MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import {
@@ -139,7 +140,13 @@ function SourceRegionLaneImpl({
   )
 
   return (
-    <div data-testid="tl-source-regions" data-variant="source-audio-cues" className={`relative ${TL_ROW_H_CLASS} border-b border-border`}>
+    <div
+      data-testid="tl-source-regions"
+      data-variant="source-audio-cues"
+      // The source-audio row's other tenant, so it wears that row's hue.
+      style={trackHueVarsFor("source-audio", null)}
+      className={`relative ${TL_ROW_H_CLASS} border-b border-border`}
+    >
       {visibleGaps.map((g) => {
         const widthPx = secToPx(g.endSec - g.startSec, pxPerSec)
         return (
@@ -156,7 +163,13 @@ function SourceRegionLaneImpl({
           // TimelineCard's geometry and radius, dashed and unfilled — the
           // established "slot with nothing in it yet" treatment (the untimed
           // strip's chips are the precedent), kept in the lane's sky family.
-          className={`absolute ${TL_CHIP_BOX_CLASS} cursor-pointer overflow-hidden border border-dashed border-sky-300 bg-sky-50/30 transition-colors hover:bg-sky-100/40 dark:border-sky-900 dark:bg-sky-950/20 dark:hover:bg-sky-950/40`}
+          // Stage 7: the shared dotted-chip treatment — lower rung, no fill,
+          // filling to 33% under the pointer. This region marks source audio
+          // with no cell behind it, so a block of colour at rest would overstate
+          // it (the old `bg-sky-50/30` was nearly nothing for the same reason).
+          // No `dark:` pair anywhere: an alpha over the page is already right
+          // in both themes.
+          className={`absolute ${TL_CHIP_BOX_CLASS} cursor-pointer overflow-hidden border ${TRACK_DASH_CLASS} transition-colors`}
           // The radius shrinks with the chip. A narrow silence flush against a
           // solid-walled cue is exactly where the two used to read as one
           // interlocked shape.

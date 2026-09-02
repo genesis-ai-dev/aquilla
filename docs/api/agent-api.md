@@ -375,7 +375,7 @@ routes mirror the same shape and codes by convention.)
 | `validation_failed` | 400 | Malformed request, bad command shape, oversize/wrong-content-type artifact, expired changeset, wrong changeset status for the action, a `CreateProject`/`UpdateProjectSettings`/`LinkMedia` not staged as the sole (or only-LinkMedia) command in its changeset, etc. | Fix the request per `details`/`message`; do not retry unchanged. |
 | `conflict` | 409 | `CreateProject` only: the chosen project id was claimed by a different caller between `prepare` and `commit` — a genuine race, distinct from your own crash-retry (which is idempotent success, not a conflict). | Don't retry with the same id. Choose a different `projectId` (or omit it and let the next changeset's URL id pick a fresh one) and re-`prepare`. |
 | `job_failed` | 500 | Unexpected server-side failure (misconfiguration, unhandled exception, partial apply on `PlanImport`). | Safe to retry once; if it persists, treat as a bug — check `details.receipt` for a `PlanImport` partial-apply accounting. |
-| `rate_limited` | 429 | Reserved in the error contract; **not currently enforced anywhere in code** — no rate limiter exists in v1. | N/A today; documented for forward compatibility. |
+| `rate_limited` | 429 | Too many requests from this credential in the trailing 15 minutes — enforced per credential on every external route (`db/shared/rate-limit.ts`, wired in across the 2026-07-30, 2026-08-20, and 2026-08-27 pen-test passes). | Back off and retry later; don't tighten a polling loop in response to a 429. |
 | `not_found` | 404 | Resource (changeset, artifact, project, credential) doesn't exist or isn't visible to this credential. | Don't retry with the same id. |
 
 MCP tool errors use the identical code set inside the tool result (`isError: true`, JSON text
@@ -451,7 +451,7 @@ discarded plans" is **not yet implemented** — treat it as aspirational, not sh
 | Cell history page cap | 200 rows | `HISTORY_MAX_LIMIT`, `sync-worker/src/external/read-routes.ts` |
 | Accepted `audio`-kind artifact content types | `audio/wav`, `audio/mpeg`, `audio/mp4`, `audio/x-m4a`, `audio/ogg` | `AUDIO_CONTENT_TYPES`, `sync-worker/src/external/artifacts-route.ts`. Same 25 MB cap as any artifact — audio gets no separate limit. |
 | Credential `name` length | 1–200 chars | `createSchema`, `auth-worker/src/routes/credentials.ts` |
-| Rate limiting | **not implemented** | `rate_limited` is a reserved error code with no enforcement in code today |
+| Rate limiting | 300 req/15 min/credential on reads and lifecycle ops, 120/15 min on heavy R2 egress-or-ingress ops (upload, artifact content) | `db/shared/rate-limit.ts`; every external route is now covered — see §8 |
 
 ## 8. What's not yet available
 
@@ -469,7 +469,6 @@ Documented explicitly so you don't go looking for it:
 - **Server-side import parsing** (`preview_import`) — `PlanImport` requires already-parsed
   `cells[]`; the server only sniffs format on `/inspect`, it does not parse USFM/XLIFF/JSON into
   cells.
-- **Rate limiting** — the `rate_limited` error code exists in the contract but nothing enforces it.
 - **Manifest-in-R2 for large imports** — large `PlanImport`s must be split into ≤5,000-cell
   changesets; there is no digest-referenced manifest object.
 

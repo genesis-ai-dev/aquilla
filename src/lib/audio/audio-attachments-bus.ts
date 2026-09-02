@@ -61,7 +61,22 @@ export function notifyAudioAttachmentsChanged(fileId: string): void {
 //              Lives SETTLED_GRACE_MS longer to cover the projection/read lag,
 //              then yields to server truth.
 
-export type AudioSlot = "recording" | "generatedVoice"
+/**
+ * Which slot of a cell a clip occupies. At most one clip per (cell, slot) is
+ * selected, enforced by the projection's sibling-deselect.
+ *
+ * AQU-646: an OPEN string, not a two-value union. `cell_audio.slot` is
+ * unconstrained TEXT and always has been, and extra target-audio tracks address
+ * their takes by using the track's own id as the slot — so the set of legal
+ * values is no longer knowable at compile time. The two well-known values are
+ * `"recording"` (mic/upload takes, and the imported source clip, which are told
+ * apart by the audioId seeding convention instead) and `"generatedVoice"`.
+ *
+ * Because this is now a plain string, the compiler no longer catches a
+ * hard-coded `"recording"` written where a variable slot belongs. Read the
+ * clip's own slot, or take it as an argument; never infer it.
+ */
+export type AudioSlot = string
 
 export type ShadowPhase = "binding" | "queued" | "settled"
 
@@ -334,6 +349,52 @@ export function injectOptimisticAudioTrim(
 }
 
 /**
+ * Optimistically move ONE take against the line it performs. (AQU-646 stage 3)
+ *
+ * The twin of `injectOptimisticAudioTrim` above, for `cell.audio.place`, and it
+ * exists for the same reason: the chip has to stay where it was dropped while
+ * the write is in flight, or it springs back for the duration of a round trip.
+ *
+ * `null` is a REAL value here — "clear the placement" — so the field is stamped
+ * on unconditionally rather than only when set.
+ */
+export function injectOptimisticAudioPlace(
+  fileId: string,
+  cellId: string,
+  base: AudioAttachmentOut,
+  eventId?: string | Promise<string>,
+): void {
+  const attachment = withoutViewFlags(base)
+  const byCell = cellMap(fileId)
+  const list = byCell.get(cellId) ?? []
+
+  // A pending delete outranks a placement, exactly as it outranks a trim:
+  // moving a take the user just removed is no reason to paint it back.
+  if (list.some((s) => s.kind === "remove" && s.audioId === attachment.audioId)) return
+
+  const live = list.find((s) => s.kind === "attach" && s.att.audioId === attachment.audioId)
+  if (live && live.kind === "attach") {
+    live.att = { ...live.att, targetOffsetMs: attachment.targetOffsetMs }
+    attachEventBinding(fileId, live, eventId)
+    broadcast(fileId, cellId, live)
+    return
+  }
+
+  const shadow: OptimisticShadow = {
+    key: nextShadowKey++,
+    eventId: null,
+    phase: "binding",
+    graceStartedAt: Date.now(),
+    kind: "attach",
+    att: attachment,
+    claimsSelection: false,
+  }
+  byCell.set(cellId, [...list, shadow])
+  attachEventBinding(fileId, shadow, eventId)
+  broadcast(fileId, cellId, shadow)
+}
+
+/**
  * Optimistically hide a just-deleted clip. Also neutralises any live attach
  * overlay for the same clip — without this, deleting a take you just recorded
  * left its attach overlay painting the take back for the rest of its lifetime
@@ -483,7 +544,15 @@ export async function rehydrateShadowsFromOutbox(projectId: string, fileId: stri
       const url = payload.url
       const slot = payload.slot
       if (typeof audioId !== "string" || typeof url !== "string") continue
-      if (slot !== "recording" && slot !== "generatedVoice") continue
+      // ANY non-empty slot. (AQU-646 stage 3)
+      //
+      // This used to accept only the two well-known names, which meant a
+      // QUEUED attach on an extra target track was dropped here — so a take
+      // recorded offline onto track 2 vanished from the timeline on reload and
+      // did not come back until the flusher delivered it. That is precisely
+      // the SUB-48 disappearance this function exists to prevent, reintroduced
+      // for every slot the list did not enumerate.
+      if (typeof slot !== "string" || slot === "") continue
       injectOptimisticAudioAttachment(
         fileId,
         cellId,

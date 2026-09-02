@@ -17,48 +17,11 @@ export interface CellAudioReadEnv {
   SYNC_SECRET_KEY?: string
 }
 
+import { collapseCellAudioRows, type AudioRowRaw } from "./cell-audio-collapse"
+
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/audio-attachments$/
 
-interface AudioRowRaw {
-  cell_id: string
-  audio_id: string
-  slot: string
-  url: string
-  mime_type: string | null
-  voice_id: string | null
-  reference_audio_id: string | null
-  duration_ms: number | null
-  label: string | null
-  trim_start_ms: number | null
-  trim_end_ms: number | null
-  timings_json: string | null
-  selected: number
-  created_ts: number
-}
 
-interface AttachmentOut {
-  audioId: string
-  url: string
-  slot: string
-  mimeType: string | null
-  voiceId: string | null
-  referenceAudioId: string | null
-  durationMs: number | null
-  /** AQU-646 round 8: the take's permanent display name. */
-  label: string | null
-  trimStartMs: number | null
-  trimEndMs: number | null
-}
-
-interface CellAudioOut {
-  attachments: Record<string, AttachmentOut>
-  /** Active clip in the "recording" slot. */
-  selectedAudioId: string | null
-  /** Active clip in the "generatedVoice" slot. */
-  selectedGeneratedVoiceAudioId: string | null
-  /** Whisper word timings by audioId. */
-  audioTimings: Record<string, unknown>
-}
 
 export async function handleCellAudioReadRequest(
   request: Request,
@@ -88,7 +51,8 @@ export async function handleCellAudioReadRequest(
 
   const res = await env.AQUILLA_PG.prepare(
     `SELECT cell_id, audio_id, slot, url, mime_type, voice_id, reference_audio_id,
-            duration_ms, label, trim_start_ms, trim_end_ms, timings_json, selected, created_ts
+            duration_ms, label, trim_start_ms, trim_end_ms, target_offset_ms,
+              timings_json, selected, created_ts
        FROM cell_audio
       WHERE project_id = ? AND file_id = ? AND deleted = 0
       ORDER BY created_ts ASC`,
@@ -96,42 +60,7 @@ export async function handleCellAudioReadRequest(
     .bind(projectId, fileId)
     .all<AudioRowRaw>()
 
-  const cells: Record<string, CellAudioOut> = {}
-  for (const r of res.results ?? []) {
-    let entry = cells[r.cell_id]
-    if (!entry) {
-      entry = {
-        attachments: {},
-        selectedAudioId: null,
-        selectedGeneratedVoiceAudioId: null,
-        audioTimings: {},
-      }
-      cells[r.cell_id] = entry
-    }
-    entry.attachments[r.audio_id] = {
-      audioId: r.audio_id,
-      url: r.url,
-      slot: r.slot,
-      mimeType: r.mime_type,
-      voiceId: r.voice_id,
-      referenceAudioId: r.reference_audio_id,
-      durationMs: r.duration_ms,
-      label: r.label,
-      trimStartMs: r.trim_start_ms,
-      trimEndMs: r.trim_end_ms,
-    }
-    if (r.timings_json) {
-      try {
-        entry.audioTimings[r.audio_id] = JSON.parse(r.timings_json)
-      } catch {
-        // ignore malformed timings — playback degrades to no karaoke
-      }
-    }
-    if (r.selected === 1) {
-      if (r.slot === "recording") entry.selectedAudioId = r.audio_id
-      else if (r.slot === "generatedVoice") entry.selectedGeneratedVoiceAudioId = r.audio_id
-    }
-  }
+  const cells = collapseCellAudioRows(res.results ?? [])
 
   return Response.json({ cells })
 }

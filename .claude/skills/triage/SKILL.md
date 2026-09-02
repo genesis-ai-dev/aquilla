@@ -49,6 +49,8 @@ Every triaged issue should carry exactly one category role and one state role. I
 
 The consequence that matters: **`ready-for-agent` = `Todo` is the only thing `/issue next` and `/swarm` pick up. Everything a human must touch stays in `Triage`.** HITL / `ready-for-human` work is safe from agents by construction — it never leaves `Triage` until you promote it to `Todo`.
 
+**Creating a new issue during triage:** create it **from the team's issue template** — pass `template` to `save_issue`: `Bug Report` (bug), `Feature Request` (new user-facing capability), or `Task` (everything else; it carries the `Improvement` label). The template applies the category label itself. Author the description using the template's exact section headings — a passed `description` replaces the template body, so fill its sections rather than inventing your own. ⚠️ All three templates embed status `Todo`: pass `state: Triage` explicitly (it overrides the template's) and confirm the create response says `Triage`. Leave the issue **unassigned** — the team rotation auto-assigns at create time; if the response shows an assignee, clear it with a follow-up `assignee: null` save.
+
 State transitions: an un-triaged issue lands in **`Triage`** (`needs-triage`); from there it moves to `needs-info` (stays in Triage), `ready-for-agent` (→ `Todo`), `ready-for-human` (stays in Triage), or `wontfix` (→ `Canceled`). `needs-info` returns to active-Triage attention once the reporter replies. The maintainer can override at any time — flag transitions that look unusual and ask before proceeding.
 
 ## Invocation

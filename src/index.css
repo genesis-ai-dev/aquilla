@@ -114,6 +114,13 @@
     --secondary-foreground: oklch(0.30 0.01 264);
     --muted: oklch(0.955 0.002 264);
     --muted-foreground: oklch(0.48 0.008 264);
+    /* The timeline's folder heading band. Its own token because it must differ
+       from --background in BOTH themes, and --muted does not: in dark that one
+       is defined to exactly --surface, so a band painted with it disappeared
+       into the page (2026-08-27). Light steps DOWN from a near-white ground,
+       dark steps UP from a mid grey-blue one — a heading is "slightly apart
+       from the page" either way, not "always darker". */
+    --tl-folder-band: oklch(0.945 0.003 264);
     /* Neutral hover/selection overlay — no blue tint on the chrome. */
     --accent: oklch(0.94 0.003 264);
     --accent-foreground: oklch(0.27 0.008 264);
@@ -156,6 +163,10 @@
     --secondary-foreground: oklch(0.88 0.010 250);
     --muted: oklch(0.30 0.012 250);
     --muted-foreground: oklch(0.66 0.014 250);
+    /* See the light block. --background here is var(--surface) = 0.30, so this
+       must sit clear of it; 0.355 reads as a band without becoming a second
+       surface. */
+    --tl-folder-band: oklch(0.355 0.014 250);
     --accent: oklch(0.38 0.04 248);
     --accent-foreground: oklch(0.82 0.09 245);
     --destructive: oklch(0.62 0.15 25);

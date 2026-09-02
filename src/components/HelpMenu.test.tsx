@@ -58,4 +58,16 @@ describe("HelpMenu", () => {
     // Report moved out of its own dock button and into this menu.
     expect(screen.getByText("Report")).toBeInTheDocument()
   })
+
+  it("opens the compact question-mark menu start-aligned", async () => {
+    render(
+      <MemoryRouter>
+        <HelpMenu compact />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /help & community/i }))
+    const homepage = await screen.findByRole("menuitem", { name: /homepage/i })
+    expect(homepage.closest("[data-side]")).toHaveAttribute("data-side", "top")
+    expect(homepage.closest("[data-align]")).toHaveAttribute("data-align", "start")
+  })
 })

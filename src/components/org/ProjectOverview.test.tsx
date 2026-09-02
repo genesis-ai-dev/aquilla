@@ -1415,7 +1415,8 @@ describe("plan board on the overview", () => {
     fireEvent.click(await screen.findByTestId("plan-row-f1-"))
     await screen.findByTestId("plan-inspector")
     expect(screen.queryByTestId("plan-mark-done")).toBeNull()
-    expect(screen.getByTestId("plan-target-readonly")).toHaveTextContent("2026-11-01")
+    // Formatted the way the project deadline above it is formatted, not raw ISO.
+    expect(screen.getByTestId("plan-target-readonly")).toHaveTextContent("November 1")
   })
 
   it("shows an empty state when nothing is plannable yet", async () => {

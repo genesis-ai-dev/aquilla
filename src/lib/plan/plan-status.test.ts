@@ -10,6 +10,7 @@ import {
   planHasAudio,
   PLAN_GROUP_ORDER,
   type PlanUnit,
+  planUnitNote,
 } from "./plan-status"
 
 function unit(over: Partial<PlanUnit> = {}): PlanUnit {
@@ -198,5 +199,48 @@ describe("planHasAudio", () => {
 
   it("is true as soon as one unit has a recording", () => {
     expect(planHasAudio([unit(), unit({ fileId: "2", audioCount: 1 })])).toBe(true)
+  })
+})
+
+describe("planUnitNote", () => {
+  const base = {
+    fileId: "f", fileName: "Mark", sectionKey: "",
+    totalCount: 10, filledCount: 0, validatedCount: 0,
+    audioCount: 0, audioValidatedCount: 0, lastEditAt: null,
+    targetDate: null, doneAt: null, doneBy: null,
+  }
+  // 2026-09-02T09:00Z. A target of 2026-08-10 expired at 2026-08-11T12:00Z.
+  const NOW = Date.parse("2026-09-02T09:00:00Z")
+
+  it("says when a finished unit was marked", () => {
+    const at = Date.parse("2026-07-28T00:00:00Z")
+    expect(planUnitNote({ ...base, doneAt: at, doneBy: "randall" }, NOW))
+      .toEqual({ kind: "marked", at })
+  })
+
+  it("counts whole days late from the Anywhere-on-Earth expiry", () => {
+    expect(planUnitNote({ ...base, targetDate: "2026-08-10" }, NOW))
+      .toEqual({ kind: "days_late", days: 23 })
+  })
+
+  it("never reads zero days late — the grace period already carries it past a day", () => {
+    // One hour after the Anywhere-on-Earth grace ended, which is 37h past the
+    // date itself, so the plain calendar count is already 1.
+    const justExpired = Date.parse("2026-08-10T00:00:00Z") + 37 * 3_600_000
+    expect(planUnitNote({ ...base, targetDate: "2026-08-10" }, justExpired))
+      .toEqual({ kind: "days_late", days: 1 })
+  })
+
+  it("counts down for a unit that is due soon", () => {
+    expect(planUnitNote({ ...base, targetDate: "2026-09-05", filledCount: 4 }, NOW))
+      .toEqual({ kind: "days_until", days: 3 })
+  })
+
+  it("flags a started unit that nobody has given a date", () => {
+    expect(planUnitNote({ ...base, filledCount: 4 }, NOW)).toEqual({ kind: "no_target" })
+  })
+
+  it("has nothing to add about an untouched, undated unit", () => {
+    expect(planUnitNote(base, NOW)).toBeNull()
   })
 })

@@ -1093,12 +1093,13 @@ export const org = defineNamespace({
     // nothing here may say "books".
     "org.projectOverview.plan.heading": "Plan",
     "org.projectOverview.plan.regionAria": "Planning units, grouped by status",
-    "org.projectOverview.plan.summaryDone": "{done} of {total} done",
-    "org.projectOverview.plan.summaryOverdue": plural({
-      one: "{count} overdue",
-      other: "{count} overdue",
-    }),
-    "org.projectOverview.plan.empty": "Nothing to plan yet. Import a source and its books, episodes or documents appear here.",
+    "org.projectOverview.plan.summaryDoneLabel": "of {total} done",
+    "org.projectOverview.plan.summaryOverdueLabel": plural({ one: "overdue", other: "overdue" }),
+    "org.projectOverview.plan.summaryInProgressLabel": plural({ one: "in progress", other: "in progress" }),
+    "org.projectOverview.plan.emptyTitle": "Nothing to plan yet",
+    "org.projectOverview.plan.importSource": "Import source",
+    "org.projectOverview.plan.empty":
+      "Import a source and its books, episodes or documents appear here as rows you can give target dates and mark done.",
     "org.projectOverview.plan.keyboardHint": "Arrow keys move between units \u00b7 Esc closes",
     "org.projectOverview.plan.cellCount": plural({ one: "{count} cell", other: "{count} cells" }),
     "org.projectOverview.plan.textBarsAria": "Text {translated}% translated, {validated}% validated",
@@ -1137,7 +1138,7 @@ export const org = defineNamespace({
     "org.projectOverview.plan.textValidated": "Text validated",
     "org.projectOverview.plan.audioRecorded": "Audio recorded",
     "org.projectOverview.plan.audioValidated": "Audio validated",
-    "org.projectOverview.plan.lastActivity": "Last activity {date}.",
+    "org.projectOverview.plan.lastActivity": "Last activity {when}.",
     "org.projectOverview.plan.noActivity": "No activity yet.",
     "org.projectOverview.plan.resizeInspector": "Resize the details panel",
     "org.projectOverview.plan.textBarLabel": "TXT",
@@ -1145,6 +1146,12 @@ export const org = defineNamespace({
     "org.projectOverview.plan.noTargetShort": "\u2014",
     "org.projectOverview.plan.daysLate": plural({ one: "{count} day late", other: "{count} days late" }),
     "org.projectOverview.plan.markedOn": "marked {date}",
+    "org.projectOverview.plan.daysUntil": plural({ one: "in {count} day", other: "in {count} days" }),
+    "org.projectOverview.plan.noTargetDate": "no target date",
+    "org.projectOverview.plan.chapters": "Chapters",
+    "org.projectOverview.plan.sections": "Sections",
+    "org.projectOverview.plan.chapterCount": plural({ one: "{count} chapter", other: "{count} chapters" }),
+    "org.projectOverview.plan.sectionCount": plural({ one: "{count} section", other: "{count} sections" }),
 
     // -- TeamDetail: single team's page. Most call-site strings here reuse
     // existing org.teamDetail.* / org.teamForm.* / common.* keys already
@@ -2091,13 +2098,25 @@ export const org = defineNamespace({
       "org.projectOverview.plan.regionAria": {
         description: "Screen-reader name for the plan list region, which arrow keys navigate.",
       },
-      "org.projectOverview.plan.summaryDone": {
-        description: "Summary above the plan table: how many units are marked finished.",
-        placeholders: { done: "Units marked done — a number.", total: "Units in the project — a number." },
+      "org.projectOverview.plan.summaryDoneLabel": {
+        description:
+          "Summary pill above the plan table. The count of finished units is rendered as a bold numeral IMMEDIATELY BEFORE this text, so the phrase continues from it: \"2\" + \"of 66 done\".",
+        placeholders: { total: "Units in the project — a number." },
       },
-      "org.projectOverview.plan.summaryOverdue": {
-        description: "Summary badge: units past their target date with no Done mark.",
-        placeholders: { count: "Overdue units — a number." },
+      "org.projectOverview.plan.summaryOverdueLabel": {
+        description:
+          "Summary pill. The count is rendered as a bold numeral immediately before this text: \"1\" + \"overdue\". The plural form is selected by that count even though it does not appear in the string.",
+      },
+      "org.projectOverview.plan.summaryInProgressLabel": {
+        description:
+          "Summary pill. The count is rendered as a bold numeral immediately before this text: \"28\" + \"in progress\". Counts units that are started or due soon but not finished.",
+      },
+      "org.projectOverview.plan.emptyTitle": {
+        description: "Heading of the empty state, when a project has no plannable files yet.",
+      },
+      "org.projectOverview.plan.importSource": {
+        description:
+          "Button in the plan's empty state. Opens the editor, which is where importing a source happens.",
       },
       "org.projectOverview.plan.empty": {
         description: "Shown when a project has no plannable files yet.",
@@ -2240,7 +2259,7 @@ export const org = defineNamespace({
       },
       "org.projectOverview.plan.lastActivity": {
         description: "When this unit was last edited.",
-        placeholders: { date: "ISO date, e.g. 2026-09-02." },
+        placeholders: { when: "How long ago the unit was last edited \u2014 already-formatted relative time." },
       },
       "org.projectOverview.plan.resizeInspector": {
         description:
@@ -2277,6 +2296,27 @@ export const org = defineNamespace({
       "org.projectOverview.plan.markedOn": {
         description: "Under a finished unit's date: when a manager marked it done.",
         placeholders: { date: "A short calendar date, already formatted." },
+      },
+      "org.projectOverview.plan.daysUntil": {
+        description: "Note beside a Due soon unit: how long until its target date.",
+        placeholders: { count: "Days remaining — a number." },
+      },
+      "org.projectOverview.plan.noTargetDate": {
+        description: "Note beside a started unit that nobody has given a target date.",
+      },
+      "org.projectOverview.plan.chapters": {
+        description: "Inspector heading over the per-chapter breakdown of a Bible book.",
+      },
+      "org.projectOverview.plan.sections": {
+        description: "Inspector heading over the per-section breakdown of a non-Scripture unit.",
+      },
+      "org.projectOverview.plan.chapterCount": {
+        description: "Part of the inspector subtitle, e.g. \"1,007 cells \u00b7 21 chapters \u00b7 Tok Pisin\".",
+        placeholders: { count: "Chapters in the unit — a number." },
+      },
+      "org.projectOverview.plan.sectionCount": {
+        description: "Part of the inspector subtitle for a non-Scripture unit.",
+        placeholders: { count: "Sections in the unit — a number." },
       },
       "org.memberActivityPanel.fileRollupSummary": {
         description:

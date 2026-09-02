@@ -6,14 +6,7 @@
 
 import { useT } from "@/lib/i18n/I18nProvider"
 import { planUnitStatus, PLAN_STATUS_LABEL_KEY, type PlanUnit, type PlanUnitStatus } from "@/lib/plan/plan-status"
-
-const TONE: Record<PlanUnitStatus, { dot: string; text: string; bg: string }> = {
-  done: { dot: "bg-emerald-500", text: "text-emerald-700 dark:text-emerald-400", bg: "bg-emerald-500/10" },
-  overdue: { dot: "bg-destructive", text: "text-destructive", bg: "bg-destructive/10" },
-  soon: { dot: "bg-amber-500", text: "text-amber-700 dark:text-amber-400", bg: "bg-amber-500/10" },
-  in_progress: { dot: "bg-primary", text: "text-primary", bg: "bg-primary/10" },
-  not_started: { dot: "bg-muted-foreground/50", text: "text-muted-foreground", bg: "bg-muted" },
-}
+import { PLAN_TONE } from "./plan-tone"
 
 export function PlanStatusPill({ status, unit, now, compact = false }: {
   status?: PlanUnitStatus
@@ -23,7 +16,7 @@ export function PlanStatusPill({ status, unit, now, compact = false }: {
 }) {
   const t = useT()
   const resolved = status ?? (unit ? planUnitStatus(unit, now) : "not_started")
-  const tone = TONE[resolved]
+  const tone = PLAN_TONE[resolved]
   return (
     <span
       data-testid={`plan-status-${resolved}`}

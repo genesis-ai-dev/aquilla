@@ -11,7 +11,9 @@
 // says "2 of 6 done".
 
 import { useCallback, useMemo, useRef } from "react"
+import { SearchX } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { TableEmptyState } from "@/components/ui/empty"
 import {
   groupPlanUnits,
   planHasAudio,
@@ -21,6 +23,7 @@ import {
   type PlanUnit,
   type PlanUnitStatus,
 } from "@/lib/plan/plan-status"
+import { PLAN_TONE } from "./plan-tone"
 import { PlanRow } from "./PlanRow"
 
 const GROUP_HINT_KEY: Record<PlanUnitStatus, string> = {
@@ -31,21 +34,51 @@ const GROUP_HINT_KEY: Record<PlanUnitStatus, string> = {
   done: "org.projectOverview.plan.groupHintDone",
 }
 
-const GROUP_DOT: Record<PlanUnitStatus, string> = {
-  overdue: "bg-destructive",
-  soon: "bg-amber-500",
-  in_progress: "bg-primary",
-  not_started: "bg-muted-foreground/50",
-  done: "bg-emerald-500",
+/**
+ * A figure and its label. The numeral is rendered outside the translated
+ * string so it can carry the weight that makes the strip scannable; the label
+ * keeps every word — and the total — inside translatable text.
+ */
+function PlanStat({ value, label, tone, testId }: {
+  value: number
+  label: string
+  tone?: "late"
+  testId: string
+}) {
+  const late = tone === "late"
+  return (
+    // Laid out as inline text, NOT as a flex row: flex would put the numeral
+    // and the label in separate boxes with only a `gap` between them, which
+    // looks spaced but reads as "1of 3 done" to anything consuming the text —
+    // a screen reader, a copy-paste, an assertion. Inline flow gives a real
+    // word space and the baseline alignment the design wants for free.
+    <span
+      data-testid={testId}
+      className={`whitespace-nowrap rounded-full px-[11px] py-1 text-[12.5px] ${
+        late ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"
+      }`}
+    >
+      <b
+        className={`me-0.5 text-sm font-semibold tabular-nums ${
+          late ? "text-destructive" : "text-foreground"
+        }`}
+      >
+        {value}
+      </b>{" "}
+      {label}
+    </span>
+  )
 }
 
-export function PlanBoard({ units, now, selectedId, onSelect, actions }: {
+export function PlanBoard({ units, now, selectedId, onSelect, actions, emptyAction }: {
   units: PlanUnit[]
   now: number
   selectedId: string | null
   onSelect: (id: string | null) => void
   /** Export controls etc., rendered beside the summary. */
   actions?: React.ReactNode
+  /** The one action that creates rows, offered when there are none. */
+  emptyAction?: React.ReactNode
 }) {
   const t = useT()
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -78,34 +111,44 @@ export function PlanBoard({ units, now, selectedId, onSelect, actions }: {
   )
 
   return (
-    <div className="rounded-lg border bg-card" data-testid="plan-board">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
-        <div className="flex items-center gap-3">
-          <h2 className="text-xs font-semibold text-muted-foreground">
+    <div className="overflow-hidden rounded-lg border bg-card" data-testid="plan-board">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-[17px] py-3.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="me-1 text-xs font-semibold text-muted-foreground">
             {t("org.projectOverview.plan.heading")}
           </h2>
-          <span
-            data-testid="plan-summary"
-            className="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground"
-          >
-            {t("org.projectOverview.plan.summaryDone", { done: summary.done, total: summary.total })}
-          </span>
+          <PlanStat
+            testId="plan-summary"
+            value={summary.done}
+            label={t("org.projectOverview.plan.summaryDoneLabel", { total: summary.total })}
+          />
           {summary.overdue > 0 && (
-            <span
-              data-testid="plan-summary-overdue"
-              className="rounded-full bg-destructive/10 px-2.5 py-1 text-xs font-medium text-destructive"
-            >
-              {t("org.projectOverview.plan.summaryOverdue", { count: summary.overdue })}
-            </span>
+            <PlanStat
+              testId="plan-summary-overdue"
+              value={summary.overdue}
+              tone="late"
+              label={t("org.projectOverview.plan.summaryOverdueLabel", { count: summary.overdue })}
+            />
+          )}
+          {summary.inFlight > 0 && (
+            <PlanStat
+              testId="plan-summary-in-progress"
+              value={summary.inFlight}
+              label={t("org.projectOverview.plan.summaryInProgressLabel", { count: summary.inFlight })}
+            />
           )}
         </div>
         {actions}
       </div>
 
       {units.length === 0 ? (
-        <p className="px-4 py-8 text-center text-xs text-muted-foreground" data-testid="plan-empty">
-          {t("org.projectOverview.plan.empty")}
-        </p>
+        <TableEmptyState
+          data-testid="plan-empty"
+          icon={SearchX}
+          title={t("org.projectOverview.plan.emptyTitle")}
+          description={t("org.projectOverview.plan.empty")}
+          action={emptyAction}
+        />
       ) : (
         <div
           ref={listRef}
@@ -115,34 +158,39 @@ export function PlanBoard({ units, now, selectedId, onSelect, actions }: {
           onKeyDown={onKeyDown}
           className="outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          {groups.map((group) => (
-            <section key={group.status} data-testid={`plan-group-${group.status}`}>
-              <header className="flex items-center gap-2 border-b bg-muted/50 px-4 py-1.5">
-                <span className={`h-1.5 w-1.5 rounded-full ${GROUP_DOT[group.status]}`} aria-hidden />
-                <h3 className="text-[11px] font-semibold">{t(PLAN_STATUS_LABEL_KEY[group.status] as never)}</h3>
-                <span className="rounded-full border bg-card px-1.5 text-[10px] font-semibold tabular-nums text-muted-foreground">
-                  {group.units.length}
-                </span>
-                <span className="ms-auto hidden text-[11px] text-muted-foreground sm:block">
-                  {t(GROUP_HINT_KEY[group.status] as never)}
-                </span>
-              </header>
-              <ul className="divide-y">
-                {group.units.map((unit) => (
-                  <PlanRow
-                    key={planUnitId(unit)}
-                    unit={unit}
-                    now={now}
-                    showAudio={showAudio}
-                    selected={planUnitId(unit) === selectedId}
-                    onSelect={() => onSelect(planUnitId(unit))}
-                  />
-                ))}
-              </ul>
-            </section>
-          ))}
+          {groups.map((group) => {
+            const tone = PLAN_TONE[group.status]
+            return (
+              <section key={group.status} data-testid={`plan-group-${group.status}`}>
+                <header className="flex items-center gap-2.5 border-y bg-muted px-[17px] py-[11px] first:border-t-0">
+                  <span className={`h-[7px] w-[7px] shrink-0 rounded-full ${tone.dot}`} aria-hidden />
+                  <h3 className={`text-[12.5px] font-semibold ${tone.text}`}>
+                    {t(PLAN_STATUS_LABEL_KEY[group.status] as never)}
+                  </h3>
+                  <span className="rounded-full border bg-card px-[7px] text-[11px] font-bold tabular-nums text-muted-foreground">
+                    {group.units.length}
+                  </span>
+                  <span className="ms-auto hidden text-[11.5px] text-muted-foreground sm:block">
+                    {t(GROUP_HINT_KEY[group.status] as never)}
+                  </span>
+                </header>
+                <ul className="divide-y">
+                  {group.units.map((unit) => (
+                    <PlanRow
+                      key={planUnitId(unit)}
+                      unit={unit}
+                      now={now}
+                      showAudio={showAudio}
+                      selected={planUnitId(unit) === selectedId}
+                      onSelect={() => onSelect(planUnitId(unit))}
+                    />
+                  ))}
+                </ul>
+              </section>
+            )
+          })}
           {selectedId && (
-            <p className="border-t bg-muted/50 px-4 py-1.5 text-[11px] text-muted-foreground">
+            <p className="border-t bg-muted px-[17px] py-2 text-[11.5px] text-muted-foreground">
               {t("org.projectOverview.plan.keyboardHint")}
             </p>
           )}

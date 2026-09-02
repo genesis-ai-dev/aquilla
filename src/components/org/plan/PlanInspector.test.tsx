@@ -21,6 +21,7 @@ function renderInspector(u: PlanUnit, canPlan = true, showAudio = false) {
   const onStep = vi.fn()
   render(
     <PlanInspector unit={u} now={NOW} canPlan={canPlan} showAudio={showAudio}
+      projectId="p1" getToken={null} lane="" languageLabel="Tok Pisin"
       onPatch={onPatch} onClose={onClose} onStep={onStep} />,
   )
   return { onPatch, onClose, onStep }
@@ -38,13 +39,13 @@ describe("access adapts the content", () => {
     renderInspector(unit({ targetDate: "2026-11-01" }), false)
     expect(screen.queryByTestId("plan-mark-done")).toBeNull()
     expect(screen.queryByTestId("plan-target-clear")).toBeNull()
-    expect(screen.getByTestId("plan-target-readonly")).toHaveTextContent("2026-11-01")
+    expect(screen.getByTestId("plan-target-readonly")).toHaveTextContent("November 1")
     expect(screen.getByText(/Only maintainers can set target dates/)).toBeInTheDocument()
   })
 
   it("still shows a contributor who marked a unit done, and when", () => {
-    renderInspector(unit({ doneAt: Date.parse("2026-08-20T00:00:00Z"), doneBy: "randall" }), false)
-    expect(screen.getByTestId("plan-done-provenance")).toHaveTextContent("Marked done 2026-08-20 by randall")
+    renderInspector(unit({ doneAt: new Date(2026, 7, 20, 12).getTime(), doneBy: "randall" }), false)
+    expect(screen.getByTestId("plan-done-provenance")).toHaveTextContent("Marked done August 20 by randall")
     expect(screen.queryByTestId("plan-unmark-done")).toBeNull()
   })
 })

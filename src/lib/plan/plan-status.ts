@@ -120,6 +120,50 @@ export function sortUnitsInGroup(units: readonly PlanUnit[]): PlanUnit[] {
   })
 }
 
+/**
+ * The one line that sits beside a unit's status — in the row under the date,
+ * and in the inspector beside the pill. Shared so the two surfaces can never
+ * word the same fact differently.
+ *
+ * It always answers the question the status raises but cannot itself answer:
+ * Done raises "when was that decided", Overdue raises "how late", Due soon
+ * raises "how long have I got", and a started unit with no date raises "is
+ * anyone planning this". Everything else has nothing to add, and says nothing.
+ */
+export type PlanUnitNote =
+  | { kind: "marked"; at: number }
+  | { kind: "days_late"; days: number }
+  | { kind: "days_until"; days: number }
+  | { kind: "no_target" }
+
+function targetTime(targetDate: string | null): number | null {
+  if (!targetDate) return null
+  const t = Date.parse(targetDate)
+  return Number.isNaN(t) ? null : t
+}
+
+/**
+ * Distances are measured from the DATE the manager typed, not from the
+ * Anywhere-on-Earth instant it expires. The grace period decides *when* a unit
+ * turns overdue; it must not also shift the number the reader sees, or a unit
+ * whose target was the 10th would report being late since the 11th. A unit can
+ * never read "0 days late", because it does not become overdue until the grace
+ * period has already carried it past a full day.
+ */
+export function planUnitNote(u: PlanUnit, now: number): PlanUnitNote | null {
+  const status = planUnitStatus(u, now)
+  if (status === "done") return u.doneAt != null ? { kind: "marked", at: u.doneAt } : null
+  const target = targetTime(u.targetDate)
+  if (status === "overdue" && target != null) {
+    return { kind: "days_late", days: Math.max(1, Math.floor((now - target) / 86_400_000)) }
+  }
+  if (status === "soon" && target != null) {
+    return { kind: "days_until", days: Math.max(0, Math.ceil((target - now) / 86_400_000)) }
+  }
+  if (status === "in_progress" && !u.targetDate) return { kind: "no_target" }
+  return null
+}
+
 /** i18n key per status, so the label lives beside the vocabulary it names. */
 export const PLAN_STATUS_LABEL_KEY: Record<PlanUnitStatus, string> = {
   done: "org.projectOverview.plan.statusDone",
@@ -168,6 +212,11 @@ export function planSummary(units: readonly PlanUnit[], now: number): PlanSummar
     else if (s === "in_progress" || s === "soon") inFlight += 1
   }
   return { total: units.length, done, overdue, inFlight }
+}
+
+/** A whole-number percentage, floored at 0 while a denominator is still zero. */
+export function planPct(part: number, whole: number): number {
+  return whole > 0 ? Math.round((part / whole) * 100) : 0
 }
 
 /** Does this project track audio at all? Drives whether audio bars render. */

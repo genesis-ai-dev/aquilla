@@ -522,6 +522,12 @@ export function ProjectOverview() {
     },
     [planUnits, tableNow, selectedPlanUnitId],
   )
+  // The lane whose numbers the inspector is showing, named the way the lane
+  // tabs name it — so nobody reads a French percentage as a Spanish one.
+  // Labeled exactly as the lane tabs label it: the project's target language
+  // for the default lane, the lane tag itself for any other. Derived here
+  // rather than read off `selectedLane`, which is declared further down.
+  const planLanguageLabel = selectedLaneTag || project?.targetLanguage || null
   const planInspector = selectedPlanUnit ? (
     <PlanInspector
       key={planUnitId(selectedPlanUnit)}
@@ -529,6 +535,10 @@ export function ProjectOverview() {
       now={tableNow}
       canPlan={canPlan}
       showAudio={planShowAudio}
+      projectId={id ?? null}
+      getToken={getPlanToken}
+      lane={selectedLaneTag ?? ""}
+      languageLabel={planLanguageLabel}
       onPatch={patchPlanUnit}
       onClose={() => setSelectedPlanUnitId(null)}
       onStep={stepPlanUnit}
@@ -1343,6 +1353,16 @@ export function ProjectOverview() {
                 now={tableNow}
                 selectedId={selectedPlanUnitId}
                 onSelect={setSelectedPlanUnitId}
+                emptyAction={
+                  <Button
+                    size="sm"
+                    data-testid="plan-empty-import"
+                    disabled={openPending}
+                    onClick={() => openWorkspace(`/project/${id}/editor`)}
+                  >
+                    {t("org.projectOverview.plan.importSource")}
+                  </Button>
+                }
                 actions={
                   orgSettings.canExport && planUnits.length > 0 ? (
                     <ButtonGroup>

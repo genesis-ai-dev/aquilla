@@ -524,6 +524,7 @@ export function ProjectOverview() {
   )
   const planInspector = selectedPlanUnit ? (
     <PlanInspector
+      key={planUnitId(selectedPlanUnit)}
       unit={selectedPlanUnit}
       now={tableNow}
       canPlan={canPlan}

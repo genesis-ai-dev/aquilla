@@ -10,7 +10,7 @@
 // with one line saying who may change them. Same rule the cell-editing floor
 // settled on: no access, nothing renders.
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -25,6 +25,12 @@ function pct(part: number, whole: number): number {
   return whole > 0 ? Math.round((part / whole) * 100) : 0
 }
 
+/**
+ * Mounted with a `key` per unit by its caller, so stepping to another unit
+ * remounts rather than carrying the previous one's half-finished confirmation
+ * across. That is React's own answer to "reset state when a prop changes", and
+ * it beats an effect that writes state during render.
+ */
 export function PlanInspector({
   unit, now, canPlan, showAudio, onPatch, onClose, onStep,
 }: {
@@ -42,9 +48,6 @@ export function PlanInspector({
   const [busy, setBusy] = useState(false)
   const status = planUnitStatus(unit, now)
   const validatedPct = pct(unit.validatedCount, unit.totalCount)
-
-  // Stepping to another unit must not carry the previous one's confirmation.
-  useEffect(() => setConfirmingDone(false), [unit.fileId, unit.sectionKey])
 
   const patch = async (p: Omit<PlanUnitPatch, "fileId" | "sectionKey">) => {
     setBusy(true)

@@ -17,11 +17,11 @@ import {
   planHasAudio,
   planSummary,
   planUnitId,
+  PLAN_STATUS_LABEL_KEY,
   type PlanUnit,
   type PlanUnitStatus,
 } from "@/lib/plan/plan-status"
 import { PlanRow } from "./PlanRow"
-import { PLAN_STATUS_LABEL_KEY } from "./PlanStatusPill"
 
 const GROUP_HINT_KEY: Record<PlanUnitStatus, string> = {
   overdue: "org.projectOverview.plan.groupHintOverdue",

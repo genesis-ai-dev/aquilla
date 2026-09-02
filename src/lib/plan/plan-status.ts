@@ -120,6 +120,15 @@ export function sortUnitsInGroup(units: readonly PlanUnit[]): PlanUnit[] {
   })
 }
 
+/** i18n key per status, so the label lives beside the vocabulary it names. */
+export const PLAN_STATUS_LABEL_KEY: Record<PlanUnitStatus, string> = {
+  done: "org.projectOverview.plan.statusDone",
+  overdue: "org.projectOverview.plan.statusOverdue",
+  soon: "org.projectOverview.plan.statusSoon",
+  in_progress: "org.projectOverview.plan.statusInProgress",
+  not_started: "org.projectOverview.plan.statusNotStarted",
+}
+
 export interface PlanGroup {
   status: PlanUnitStatus
   units: PlanUnit[]

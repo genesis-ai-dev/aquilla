@@ -225,8 +225,18 @@ const ESTIMATED_ROW_HEIGHT_PX = 140
 
 /** The gutter track widens by the character circle's w-6 when the cast
  *  gutter is on (stacked media lens). One shared type keeps the header row,
- *  paragraph bar, and rows in the same template. */
-type EditorGridCols = "grid-cols-[84px_1fr_1fr]" | "grid-cols-[132px_1fr_1fr]"
+ *  paragraph bar, and rows in the same template.
+ *
+ *  AQU-1101: the text tracks are `minmax(0,1fr)`, never a bare `1fr`. A bare
+ *  `1fr` carries an implicit `min-width: auto`, so a single unbreakable token
+ *  (a URL, a long identifier) widens ITS track to min-content and steals the
+ *  width from the sibling — source and target stop lining up with each other
+ *  and with the header row. Flooring the minimum at 0 makes the two tracks
+ *  equal fractions of the row whatever the content is; the cell surfaces then
+ *  break the token with `break-words` (see EditorCellSurface). */
+type EditorGridCols =
+  | "grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
+  | "grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
 const LEGEND_LIST_DRAW_DISTANCE_PX = 240
 
 /**
@@ -1733,7 +1743,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // fixed width keeps Source header-aligned. No right gutter; the floating
   // action rail is absolutely positioned. Target reserves pe-9 for the
   // expand chevron.
-  const gridCols: EditorGridCols = castGutter ? "grid-cols-[132px_1fr_1fr]" : "grid-cols-[84px_1fr_1fr]"
+  const gridCols: EditorGridCols = castGutter
+    ? "grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
+    : "grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
@@ -5849,7 +5861,12 @@ function EditorRow({
               // source column. pe-7 clears the floating pencil.
               // select-text: global chrome disables selection; source must stay
               // selectable for add-to-termbase / Ask AI from selection.
-              "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 pe-7 select-text transition-[colors,opacity]",
+              // AQU-1101: min-w-0 + break-words. `minmax(0,1fr)` floors the
+              // TRACK, but a grid item keeps `min-width: auto` and would still
+              // overflow its area on an unbreakable token; min-w-0 lets it
+              // shrink and break-words (inherited by the text below) breaks the
+              // token instead of blowing the column out.
+              "relative flex h-full min-h-[40px] min-w-0 flex-col break-words rounded-lg px-2 py-1.5 pe-7 select-text transition-[colors,opacity]",
               // Match the target well — same muted fill + ring (not a darker
               // primary-tinted edit chrome).
               "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",

@@ -61,7 +61,11 @@ export const EditorSourceCellSurface = forwardRef<HTMLDivElement, EditorSourceCe
         data-editor-cell-surface="source"
         data-cell-type="source"
         className={cn(
-          "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 transition-[colors,opacity]",
+          // AQU-1101: min-w-0 + break-words — see the note on `EditorGridCols`
+          // in EditorTable. The grid track is floored at 0, but a grid item's
+          // own `min-width: auto` would still let an unbreakable token overflow
+          // its column; these two keep the token inside the cell.
+          "relative flex h-full min-h-[40px] min-w-0 flex-col break-words rounded-lg px-2 py-1.5 transition-[colors,opacity]",
           reserveAction ? "pr-7" : "pr-2",
           "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
           editing && "bg-muted ring-1 ring-ring/40 ring-inset",
@@ -107,7 +111,9 @@ export function EditorTargetCellColumn({
       data-cell-type="target-column"
       dir="ltr"
       className={cn(
-        "relative flex flex-col pl-3 transition-opacity",
+        // AQU-1101: the target column is the third grid item — min-w-0 so it
+        // can shrink to its track, break-words so the text inside breaks.
+        "relative flex min-w-0 flex-col break-words pl-3 transition-opacity",
         reserveActionRail ? "pr-9" : "pr-3",
         busy && "opacity-70",
         className,
@@ -141,7 +147,9 @@ export function EditorTargetCellWell({
       data-editor-cell-surface="target"
       data-cell-type="target"
       className={cn(
-        "relative flex min-h-[40px] flex-1 flex-col rounded-lg px-2 py-1.5 transition-colors",
+        // AQU-1101: min-w-0 — the well is a flex child of the target column and
+        // would otherwise refuse to shrink below its content's min-content width.
+        "relative flex min-h-[40px] min-w-0 flex-1 flex-col rounded-lg px-2 py-1.5 transition-colors",
         compact && "min-h-0 py-0.5",
         "hover:bg-muted/60 focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
         empty && "bg-muted/40",
@@ -174,7 +182,10 @@ export const EditorTargetReadSurface = forwardRef<HTMLDivElement, EditorTargetRe
         role="textbox"
         aria-multiline="true"
         className={cn(
-          "relative min-h-[40px] w-full flex-1 whitespace-pre-wrap rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
+          // AQU-1101: `whitespace-pre-wrap` alone preserves an unbreakable run
+          // intact; `break-words` is what lets it break mid-token so the target
+          // column keeps its half of the row.
+          "relative min-h-[40px] w-full min-w-0 flex-1 whitespace-pre-wrap break-words rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
           editable && "cursor-text focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-1",
           subdued && "opacity-30 transition-opacity",
           empty && "text-muted-foreground/60",

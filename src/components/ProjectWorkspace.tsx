@@ -3741,6 +3741,10 @@ export function ProjectWorkspace() {
     refresh,
     patchSettings as Parameters<typeof useRules>[2],
     orgRules,
+    undefined,
+    // AQU-609: every consumer of this instance's `rules` evaluates against the
+    // active lane's cell view, so lane-scoped rules for other lanes drop here.
+    activeLane,
   )
   const {
     comments: allProjectComments,

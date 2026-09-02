@@ -1,6 +1,7 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
 import { ensureAuthState, injectAdditionalSession, injectSessions } from "../../helpers/auth"
 import { AccountSwitcherPage } from "../../helpers/page-objects/AccountSwitcher"
+import { seedUser } from "../../helpers/seed"
 import {
   jwtFor,
   openSeededProject,
@@ -176,4 +177,57 @@ test("inactive account outbox drains with its own JWT while another account is a
     author: "alice",
     payload: { name: renamedFile },
   })
+})
+
+test("logout and second-user sign-in survive unavailable private storage", async ({ alice }) => {
+  test.setTimeout(120_000)
+  const bob = seedUser("bob")
+
+  // Safari Private Browsing exposes OPFS but rejects getDirectory() with this
+  // UnknownError. Install the same browser-level constraint before reloading
+  // so every app module observes the private-storage behavior.
+  await alice.context().addInitScript(() => {
+    Object.defineProperty(navigator.storage, "getDirectory", {
+      configurable: true,
+      value: () => Promise.reject(new DOMException(
+        "The operation failed for an unknown transient reason (e.g. out of memory).",
+        "UnknownError",
+      )),
+    })
+  })
+  await alice.reload()
+
+  await new AccountSwitcherPage(alice).logOutCurrentAccount("alice")
+  await expect(alice.getByRole("button", { name: "Log in" })).toBeVisible({ timeout: 30_000 })
+
+  // `orgRoute(alice)` is the org-scoped gate route (`/orgs/:id`) — where a
+  // single-org user lands from `/orgs/all` and then logs out. It must show the
+  // same signed-out workspace, not the gate's "Organization not found" chrome.
+  for (const path of [
+    "/orgs/all",
+    orgRoute(alice),
+    "/projects/private-storage-project",
+    "/project/private-storage-project/editor",
+  ]) {
+    await alice.goto(path)
+    await expect(alice.getByText("Sign in to see your workspace")).toBeVisible({ timeout: 30_000 })
+    await expect(alice.getByRole("link", { name: "Sign in", exact: true })).toHaveAttribute(
+      "href",
+      `/login?next=${encodeURIComponent(path)}`,
+    )
+    await expect(alice.locator('[data-slot="app-shell-sidebar-footer"]')).toBeVisible()
+    await expect(alice.getByRole("heading", { name: /Organization not found/i })).toHaveCount(0)
+  }
+
+  await alice.goto("/orgs/all")
+  await alice.getByRole("link", { name: "Sign in" }).click()
+
+  await alice.getByLabel("Username or email").fill(bob.username)
+  await alice.getByRole("textbox", { name: "Password" }).fill(bob.password)
+  await alice.getByRole("button", { name: "Sign in" }).click()
+
+  await expect(alice.getByRole("button", { name: /Account menu: bob/i })).toBeVisible({
+    timeout: 30_000,
+  })
+  await expect(alice.getByText(/couldn't safely finish switching accounts/i)).toHaveCount(0)
 })

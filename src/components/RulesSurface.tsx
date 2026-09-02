@@ -296,8 +296,11 @@ export function RulesSurface({
             <DialogTitle>{t("rules.surface.createRuleDialog.title")}</DialogTitle>
             <DialogDescription>{t("rules.surface.createRuleDialog.description")}</DialogDescription>
           </DialogHeader>
+          {/* shrink-0: the editor root clips its own overflow, so as a flex
+              item it would shrink to the dialog height and hide its footer
+              instead of letting DialogContent scroll. */}
           <RuleEditor
-            className="rounded-none border-0"
+            className="shrink-0 rounded-none border-0"
             cells={cells}
             lanes={projectLanes}
             defaultLaneLabel={defaultLaneLabel}
@@ -323,8 +326,11 @@ export function RulesSurface({
             <DialogTitle>{t("rules.surface.createOrgRuleDialog.title")}</DialogTitle>
             <DialogDescription>{t("rules.surface.createOrgRuleDialog.description")}</DialogDescription>
           </DialogHeader>
+          {/* shrink-0: the editor root clips its own overflow, so as a flex
+              item it would shrink to the dialog height and hide its footer
+              instead of letting DialogContent scroll. */}
           <RuleEditor
-            className="rounded-none border-0"
+            className="shrink-0 rounded-none border-0"
             cells={cells}
             onSave={async (rule) => {
               await addOrgRule(rule)

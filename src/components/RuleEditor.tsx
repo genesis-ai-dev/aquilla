@@ -15,7 +15,7 @@
 import { useState, useMemo, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Field, FieldError, FieldLabel, OptionalMark } from "@/components/ui/field"
+import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
 import { LaneCombobox } from "@/components/LaneCombobox"
 import { ChevronDown, X } from "lucide-react"
@@ -305,7 +305,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className, la
         </Field>
         <Field>
           <FieldLabel htmlFor="re-desc" className="text-xs">
-            {t("common.descriptionOptional")} <OptionalMark />
+            {t("common.descriptionOptional")}
           </FieldLabel>
           <Input
             id="re-desc"
@@ -531,7 +531,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className, la
           onClick={() => setShowAutofix((v) => !v)}
           className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
         >
-          {showAutofix ? t("rules.editor.hideAutofix") : <>{t("rules.editor.addAutofix")} <OptionalMark /></>}
+          {showAutofix ? t("rules.editor.hideAutofix") : t("rules.editor.addAutofix")}
         </button>
         {showAutofix && (
           <div className="mt-2 space-y-2 rounded border p-3">

@@ -30,7 +30,7 @@ import { AssignWork } from "./AssignWork"
 import { MemberActivityPanel } from "./MemberActivityPanel"
 import { ProjectAutopilotPanel } from "./ProjectAutopilotPanel"
 import { isFlagEnabled } from "@/lib/features/flags"
-import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
+import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, audioValidatedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
@@ -245,19 +245,15 @@ function MetaFieldEditButton({
 
 // ── Stat tiles (big %) ────────────────────────────────────────────────────────
 
-function StatTile({ label, pct, colorClass, tooltip, display }: {
+function StatTile({ label, pct, colorClass, tooltip }: {
   label: string
   pct: number
   colorClass: string
   tooltip?: string
-  /** AQU-490: override the rendered value (e.g. "N/A") when there is no real
-   *  metric to show a percentage for. `pct` is still required by callers but
-   *  ignored visually when `display` is set. */
-  display?: string
 }) {
   const tile = (
     <div className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center">
-      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{display ?? `${Math.round(pct * 100)}%`}</p>
+      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{`${Math.round(pct * 100)}%`}</p>
       <p className="mt-0.5 text-[11px] text-muted-foreground">{label}</p>
     </div>
   )
@@ -1355,17 +1351,6 @@ export function ProjectOverview() {
                   with project access can see it. The badge is read-only
                   (informational), matching that reality rather than implying
                   a toggle that doesn't exist server-side. */}
-              {/*
-               * SWARM-TODO(AQU-490): verify live — open an oral/dubbed project
-               * overview with partial audio validation and confirm the Progress
-               * card shows "Has Audio" (coverage, relabeled from "Audio") and a
-               * separate "Audio Validated" tile reading "N/A" with a tooltip
-               * explaining validation isn't tracked per-medium yet; then open a
-               * text-only project and confirm neither audio tile renders (no
-               * misleading figure). Blocked on new server work — see the
-               * in-card comment above the "Audio Validated" tile for exactly
-               * what's missing.
-               */}
               {audio && audio.totalCells > 0 && (
                 <div className="rounded-lg border bg-card p-5" data-testid="progress-card">
                   <div className="mb-3 flex items-center justify-between gap-2">
@@ -1455,35 +1440,22 @@ export function ProjectOverview() {
                           />
                         )}
                         {/*
-                         * AQU-490 (was TODO(AQU-168)): a distinct audio-VALIDATION metric
-                         * is not reachable today. Investigated 2026-07-08:
-                         *   - `cells.validated` (db/postgres/schema.sql) is ONE boolean per
-                         *     cell, shared by text and audio review — there is no per-medium
-                         *     validated flag.
-                         *   - `cell_audio` (the per-take audio table) has no
-                         *     validated/approved column at all.
-                         *   - The `cell.validate` event payload
-                         *     (sync-worker/src/events/types.ts) is `{ editEventId }` only —
-                         *     no medium/kind field distinguishing "validated the text" from
-                         *     "validated the audio".
-                         *   - `readValidationCountAudio` (src/lib/progress/read-validation-count.ts)
-                         *     is a live, unrelated setting: the *required number of
-                         *     validators* for audio-bearing projects, not a count of
-                         *     validated audio cells. AQU-298's "possibly dead" flag was
-                         *     about a different symbol; this one is alive but doesn't help.
-                         * Needs new server work: either a `cell_audio.approved` column (or
-                         * equivalent) populated by a medium-aware validate event, or a
-                         * `validated_audio_cells` rollup column on `files`/portfolio SQL
-                         * analogous to `approved_count`. Until then this is an honest
-                         * placeholder, not a fabricated metric.
+                         * AQU-1092: the metric the old placeholder said was missing now
+                         * exists. `cell_audio.approved` landed with AQU-508 and the org
+                         * portfolio counts it (auth-worker org-permissions: audio cells
+                         * whose SELECTED take is approved), so this reads a real number.
+                         * Denominator is `audioCells`, not `totalCells` — "how much of the
+                         * recorded audio is validated", the audio analogue of
+                         * validated-of-translated. Greyed with the cross-lane tooltip like
+                         * "Has Audio": takes hang off the cell, not a language lane, so
+                         * there is nothing per-lane to show.
                          */}
                         {statVisible("audio-validated") && (
                           <StatTile
                             label={t("org.projectOverview.audioValidated")}
-                            pct={0}
-                            display="N/A"
-                            colorClass="text-muted-foreground"
-                            tooltip={t("org.projectOverview.audioValidatedTooltip")}
+                            pct={audioValidatedPct(audio)}
+                            colorClass={activeLane ? "text-muted-foreground/60" : "text-sky-700"}
+                            tooltip={activeLane ? CROSS_LANE_TOOLTIP : t("org.projectOverview.audioValidatedTooltip")}
                           />
                         )}
                       </>

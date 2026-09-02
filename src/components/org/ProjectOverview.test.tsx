@@ -47,6 +47,9 @@ vi.mock("@/lib/frontier/portfolio", () => ({
   getPortfolio: (jwt: string, orgId: number) => getPortfolio(jwt, orgId),
   // Real implementations — tests must not override these with wrong stubs
   audioPct: (p: { audioCells: number; totalCells: number }) => (p.totalCells > 0 ? p.audioCells / p.totalCells : 0),
+  // AQU-1092: denominator is audioCells (share of RECORDED audio validated).
+  audioValidatedPct: (p: { validatedAudioCells: number; audioCells: number }) =>
+    (p.audioCells > 0 ? p.validatedAudioCells / p.audioCells : 0),
   translatedPct: (p: { filledCells: number; totalCells: number }) => (p.totalCells > 0 ? p.filledCells / p.totalCells : 0),
   validatedPct: (p: { validatedCells: number; totalCells: number }) => (p.totalCells > 0 ? p.validatedCells / p.totalCells : 0),
   aiDraftedPct: (p: { aiDraftedCells: number; totalCells: number }) => (p.totalCells > 0 ? p.aiDraftedCells / p.totalCells : 0),
@@ -490,7 +493,7 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     expect(screen.queryByText("Audio Validated")).not.toBeInTheDocument()
   })
 
-  it("audio-only project: shows Has Audio + Audio Validated (N/A) tiles but hides Translated/Validated tiles", async () => {
+  it("audio-only project: shows Has Audio + a real Audio Validated percentage", async () => {
     fetchSyncToken.mockResolvedValue({ token: "tok" })
     fetchProjectFiles.mockResolvedValue([])
     useProject.mockReturnValue({
@@ -503,7 +506,7 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
       validatedCells: 0,
       aiDraftedCells: 0,
       audioCells: 60, // audio present
-      validatedAudioCells: 0,
+      validatedAudioCells: 15, // a quarter of the recorded audio is validated
       recordedMs: 90000, lastEditAt: null, deadlineAt: null,
       sourceLanguage: null, targetLanguage: null,
     }])
@@ -520,12 +523,13 @@ describe("ProjectOverview per-metric conditionality (AQU-168)", () => {
     // The audio-only guard is specifically: audioCells > 0 shows Has Audio, always shows text when totalCells > 0.
     // This test therefore confirms Has Audio appears when audioCells > 0.
     expect(screen.getAllByText("Has audio").length).toBeGreaterThan(0)
-    // AQU-490: a distinct audio-validated count doesn't exist server-side
-    // (see the in-component comment for the full investigation). The tile
-    // must appear — labeled, honest, and reading "N/A" — never a fabricated
-    // percentage.
+    // AQU-1092: the tile used to render a hardcoded "N/A" because the metric
+    // was said not to exist. It does (cell_audio.approved, counted by the org
+    // portfolio), so the tile must show the real share of RECORDED audio that
+    // is validated — 15 of 60 takes = 25%, NOT 15 of 100 cells.
     expect(screen.getByText("Audio Validated")).toBeInTheDocument()
-    expect(screen.getByText("N/A")).toBeInTheDocument()
+    expect(screen.getByText("25%")).toBeInTheDocument()
+    expect(screen.queryByText("N/A")).not.toBeInTheDocument()
   })
 
   // AQU-489: a PM who has never seen the dashboard must be able to name what

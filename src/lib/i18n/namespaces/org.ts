@@ -378,7 +378,7 @@ export const org = defineNamespace({
       "Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status.",
     "org.projectOverview.audioValidated": "Audio Validated",
     "org.projectOverview.audioValidatedTooltip":
-      "Not tracked yet — the server does not record whether a validation applies to text or audio content (see AQU-490).",
+      "How much of the recorded audio has been validated. Counted against cells that have audio, not every cell.",
     "org.projectOverview.crossLaneTooltip": "Cross-language stat — not broken down per language.",
     "org.projectOverview.cellsSuffix": "cells",
     "org.projectOverview.laneDefaultFallback": "Default",

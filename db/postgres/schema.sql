@@ -545,19 +545,33 @@ CREATE TABLE cells (
 CREATE TABLE file_section_progress (
     project_id          TEXT NOT NULL,
     file_id             TEXT NOT NULL,
-    scope               TEXT NOT NULL CHECK (scope IN ('file', 'section')),
+    -- AQU-1093: 'book' rolls a scripture file's chapter sections up to the
+    -- Bible book, the unit the project dashboard plans by.
+    scope               TEXT NOT NULL,
     section_key         TEXT NOT NULL DEFAULT '',
     target_lang         TEXT NOT NULL DEFAULT '',
     total_count         INTEGER NOT NULL DEFAULT 0 CHECK (total_count >= 0),
     filled_count        INTEGER NOT NULL DEFAULT 0 CHECK (filled_count >= 0),
     validator_histogram JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- AQU-1093: same definitions as the org portfolio's audio aggregate — a
+    -- cell has audio when ANY live take exists, and is validated when its
+    -- SELECTED take is approved — so per-unit rows and the project tiles can
+    -- never disagree.
+    audio_count           INTEGER NOT NULL DEFAULT 0,
+    audio_validated_count INTEGER NOT NULL DEFAULT 0,
+    -- AQU-1096: newest edit in this scope+lane. files.last_edit_at is per file
+    -- and cannot answer "which book is being worked on" for a 66-book import.
+    last_edit_at        BIGINT,
     revision            BIGINT NOT NULL DEFAULT 0,
     updated_at          BIGINT NOT NULL,
     PRIMARY KEY (project_id, file_id, scope, section_key, target_lang),
-    CHECK (
+    CONSTRAINT file_section_progress_scope_check CHECK (scope IN ('file', 'section', 'book')),
+    CONSTRAINT file_section_progress_shape_check CHECK (
       (scope = 'file' AND section_key = '') OR
-      (scope = 'section' AND section_key <> '')
-    )
+      (scope IN ('section', 'book') AND section_key <> '')
+    ),
+    CONSTRAINT file_section_progress_audio_count_check CHECK (audio_count >= 0),
+    CONSTRAINT file_section_progress_audio_validated_count_check CHECK (audio_validated_count >= 0)
 );
 
 CREATE INDEX idx_file_section_progress_file_revision ON file_section_progress(project_id, file_id, revision);

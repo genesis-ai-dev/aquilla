@@ -378,7 +378,9 @@ export const org = defineNamespace({
       "Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status.",
     "org.projectOverview.audioValidated": "Audio Validated",
     "org.projectOverview.audioValidatedTooltip":
-      "Share of every cell whose selected recording has been validated \u2014 counted the same way as Validated, so it agrees with the Plan below. Of the audio actually recorded, {ofRecorded}% is validated.",
+      "Share of every cell whose selected recording has been validated. Counted against every cell, the same way as Validated, so it agrees with the Plan below.",
+    "org.projectOverview.audioValidatedOfRecorded":
+      "Of the audio actually recorded, {percent}% is validated.",
     "org.projectOverview.crossLaneTooltip": "Cross-language stat — not broken down per language.",
     "org.projectOverview.cellsSuffix": "cells",
     "org.projectOverview.laneDefaultFallback": "Default",
@@ -1097,6 +1099,9 @@ export const org = defineNamespace({
     "org.projectOverview.plan.summaryOverdueLabel": plural({ one: "overdue", other: "overdue" }),
     "org.projectOverview.plan.summaryInProgressLabel": plural({ one: "in progress", other: "in progress" }),
     "org.projectOverview.plan.emptyTitle": "Nothing to plan yet",
+    "org.projectOverview.plan.loading": "Loading the plan\u2026",
+    "org.projectOverview.plan.errorTitle": "The plan could not be loaded",
+    "org.projectOverview.plan.error": "Something went wrong reading this project's plan. Nothing has been lost \u2014 try again.",
     "org.projectOverview.plan.importSource": "Import source",
     "org.projectOverview.plan.empty":
       "Import a source and its books, episodes or documents appear here as rows you can give target dates and mark done.",
@@ -1152,16 +1157,16 @@ export const org = defineNamespace({
     // filterFiles* keys say "files", which this surface never does.
     "org.projectOverview.plan.filterPlaceholder": "Filter by name\u2026",
     "org.projectOverview.plan.filterAria": "Filter the plan by name",
-    "org.projectOverview.plan.clearFilter": "Clear filter",
+    "org.projectOverview.plan.clearFilter": "Clear the plan filter",
     "org.projectOverview.plan.noMatchTitle": "Nothing matches",
     "org.projectOverview.plan.noMatch": "No unit matches the filters you have set. Clear them to see the whole plan again.",
     "org.projectOverview.plan.showingCount": "Showing {shown} of {total}.",
-    "org.projectOverview.plan.viewStatus": "Status",
-    "org.projectOverview.plan.viewOrder": "Order",
+    "org.projectOverview.plan.viewStatus": "By status",
+    "org.projectOverview.plan.viewOrder": "In order",
     "org.projectOverview.plan.needsDate": "Needs a date",
     "org.projectOverview.plan.needsDateTooltip": "Show only the units nobody has given a target date yet.",
-    "org.projectOverview.plan.chapters": "Chapters",
-    "org.projectOverview.plan.sections": "Sections",
+    "org.projectOverview.plan.chapters": "Progress by chapter",
+    "org.projectOverview.plan.sections": "Progress by section",
     "org.projectOverview.plan.chapterCount": plural({ one: "{count} chapter", other: "{count} chapters" }),
     "org.projectOverview.plan.sectionCount": plural({ one: "{count} section", other: "{count} sections" }),
 
@@ -2103,11 +2108,11 @@ export const org = defineNamespace({
         description:
           "Accessible name for the segmented All/per-lane tabs that filter the Progress card's stats by target language, shown only when the project has more than one lane.",
       },
-      "org.projectOverview.audioValidatedTooltip": {
+      "org.projectOverview.audioValidatedOfRecorded": {
         description:
-          "Tooltip on the Progress card's Audio Validated tile. Explains that the tile counts against every cell (like the Validated tile and the Plan board's bars), then gives the other ratio a reviewer usually wants.",
+          "Second sentence of the Audio Validated tooltip, appended after org.projectOverview.audioValidatedTooltip. Gives the other ratio a reviewer usually wants: validated audio measured against the audio that exists rather than against every cell. A separate sentence, and a separate key, so it can be ordered independently.",
         placeholders: {
-          ofRecorded: "Validated audio as a percentage of the audio actually recorded \u2014 a whole number, no % sign.",
+          percent: "Validated audio as a percentage of the audio actually recorded \u2014 a whole number, no % sign.",
         },
       },
       "org.projectOverview.plan.heading": {
@@ -2132,6 +2137,10 @@ export const org = defineNamespace({
       },
       "org.projectOverview.plan.emptyTitle": {
         description: "Heading of the empty state, when a project has no plannable files yet.",
+      },
+      "org.projectOverview.plan.errorTitle": {
+        description:
+          "Heading shown when the plan read fails. Deliberately distinct from the empty state, which would tell a manager their project has no work in it.",
       },
       "org.projectOverview.plan.importSource": {
         description:
@@ -2342,13 +2351,13 @@ export const org = defineNamespace({
       },
       "org.projectOverview.plan.viewStatus": {
         description:
-          "Button that arranges the plan grouped by status (the default). Paired with 'Order'.",
-        maxLength: 12,
+          "Button that arranges the plan grouped by status (the default). Paired with 'In order'.",
+        maxLength: 14,
       },
       "org.projectOverview.plan.viewOrder": {
         description:
-          "Button that arranges the plan as one flat list in canonical order \u2014 Bible book order, or file order. Paired with 'Status'.",
-        maxLength: 12,
+          "Button that arranges the plan as one flat list in canonical order \u2014 Bible book order, or file order. Paired with 'By status'.",
+        maxLength: 14,
       },
       "org.projectOverview.plan.needsDate": {
         description:

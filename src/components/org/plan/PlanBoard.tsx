@@ -17,7 +17,7 @@
 // "needs a date" narrowing, and per-group folds.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Search, X, ChevronDown, ChevronRight, CalendarOff } from "lucide-react"
+import { Search, X, ChevronDown, ChevronRight, CalendarOff, AlertTriangle } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { TableEmptyState } from "@/components/ui/empty"
@@ -45,6 +45,7 @@ import {
   toggleCollapsedGroup,
   type PlanViewMode,
 } from "@/lib/plan/plan-view"
+import type { PlanStatus } from "@/hooks/useProjectPlan"
 import { PLAN_TONE } from "./plan-tone"
 import { PlanRow } from "./PlanRow"
 
@@ -92,13 +93,32 @@ function PlanStat({ value, label, tone, testId }: {
   )
 }
 
-export function PlanBoard({ units, now, projectId, selectedId, onSelect, actions, emptyAction }: {
+export function PlanBoard({
+  units, now, projectId, selectedId, onSelect, actions, emptyAction,
+  status = "ready", onRetry, orderRef,
+}: {
   units: PlanUnit[]
   now: number
   /** Scopes the per-project group folds. Null while the route id is unresolved. */
   projectId: string | null
   selectedId: string | null
   onSelect: (id: string | null) => void
+  /**
+   * The plan read's state. Without it an empty `units` means three different
+   * things — still loading, failed, or genuinely nothing to plan — and the
+   * board would tell a PM with sixty-six books that their project is empty.
+   */
+  status?: PlanStatus
+  /** Retries a failed read. */
+  onRetry?: () => void
+  /**
+   * Receives the rows as drawn, in drawn order. The inspector's prev/next
+   * buttons live outside this component but must walk exactly what is on
+   * screen, and the filters and folds that decide that are state in here.
+   * A ref rather than a callback: the parent reads it in an event handler,
+   * so there is nothing to re-render and no update loop to create.
+   */
+  orderRef?: React.MutableRefObject<PlanUnit[]>
   /** Export controls etc., rendered beside the summary. */
   actions?: React.ReactNode
   /** The one action that creates rows, offered when there are none. */
@@ -162,14 +182,40 @@ export function PlanBoard({ units, now, projectId, selectedId, onSelect, actions
     return groups.flatMap((g) => (collapsed.has(g.status) ? [] : g.units))
   }, [view, visible, groups, collapsed])
 
+  useEffect(() => {
+    if (orderRef) orderRef.current = ordered
+  }, [orderRef, ordered])
+
+  /**
+   * Moving the selection must move the FOCUS RING with it. Without this the
+   * ring stays on the row the reader tabbed to while the highlight and the
+   * inspector move somewhere else, Enter re-selects the row behind them, and a
+   * screen reader announces nothing at all — `aria-current` changing on an
+   * unfocused element is silent.
+   */
+  const focusRow = useCallback((id: string) => {
+    listRef.current
+      ?.querySelector<HTMLElement>(`[data-plan-unit="${CSS.escape(id)}"]`)
+      ?.focus()
+  }, [])
+
   const step = useCallback(
     (delta: number) => {
       if (ordered.length === 0) return
       const index = ordered.findIndex((u) => planUnitId(u) === selectedId)
-      const next = ordered[Math.min(ordered.length - 1, Math.max(0, (index < 0 ? 0 : index) + delta))]
-      if (next) onSelect(planUnitId(next))
+      // Nothing selected yet means the cursor sits BEFORE the first row, so
+      // either arrow lands on it. Treating -1 as 0 made ArrowDown skip to the
+      // second row while ArrowUp correctly chose the first.
+      const next = index < 0
+        ? ordered[0]
+        : ordered[Math.min(ordered.length - 1, Math.max(0, index + delta))]
+      if (next) {
+        const id = planUnitId(next)
+        onSelect(id)
+        focusRow(id)
+      }
     },
-    [ordered, selectedId, onSelect],
+    [ordered, selectedId, onSelect, focusRow],
   )
 
   const onKeyDown = useCallback(
@@ -316,7 +362,26 @@ export function PlanBoard({ units, now, projectId, selectedId, onSelect, actions
         </div>
       )}
 
-      {units.length === 0 ? (
+      {status === "error" && units.length === 0 ? (
+        // A failed read is NOT an empty project. Saying "nothing to plan yet"
+        // here tells a PM with sixty-six books that their work has vanished,
+        // and offers them an import they do not need.
+        <TableEmptyState
+          data-testid="plan-error"
+          icon={AlertTriangle}
+          title={t("org.projectOverview.plan.errorTitle")}
+          description={t("org.projectOverview.plan.error")}
+          action={onRetry ? (
+            <Button variant="outline" size="sm" data-testid="plan-retry" onClick={onRetry}>
+              {t("common.retry")}
+            </Button>
+          ) : undefined}
+        />
+      ) : units.length === 0 && status !== "ready" ? (
+        <p className="px-[17px] py-10 text-center text-xs text-muted-foreground" data-testid="plan-loading">
+          {t("org.projectOverview.plan.loading")}
+        </p>
+      ) : units.length === 0 ? (
         <TableEmptyState
           data-testid="plan-empty"
           icon={Search}

@@ -368,3 +368,74 @@ describe("arrow keys walk only what is on screen", () => {
     expect(onSelect).toHaveBeenLastCalledWith("b:GEN")  // folded: clamps
   })
 })
+
+describe("read state is not confused with an empty project", () => {
+  it("says it is loading rather than claiming there is nothing to plan", () => {
+    render(<PlanBoard units={[]} now={NOW} projectId="p1" status="loading"
+      selectedId={null} onSelect={vi.fn()} />)
+    expect(screen.getByTestId("plan-loading")).toBeInTheDocument()
+    expect(screen.queryByTestId("plan-empty")).toBeNull()
+  })
+
+  it("offers a retry on failure, not an import", () => {
+    // The bug this pins: a 500 told a PM with 66 books that their project was
+    // empty, and offered to import a source they already have.
+    const onRetry = vi.fn()
+    render(<PlanBoard units={[]} now={NOW} projectId="p1" status="error"
+      onRetry={onRetry} selectedId={null} onSelect={vi.fn()}
+      emptyAction={<button type="button">Import source</button>} />)
+    expect(screen.getByTestId("plan-error")).toBeInTheDocument()
+    expect(screen.queryByTestId("plan-empty")).toBeNull()
+    expect(screen.queryByText("Import source")).toBeNull()
+    fireEvent.click(screen.getByTestId("plan-retry"))
+    expect(onRetry).toHaveBeenCalled()
+  })
+
+  it("shows the empty state only once the read has actually succeeded", () => {
+    render(<PlanBoard units={[]} now={NOW} projectId="p1" status="ready"
+      selectedId={null} onSelect={vi.fn()} />)
+    expect(screen.getByTestId("plan-empty")).toBeInTheDocument()
+  })
+})
+
+describe("keyboard navigation", () => {
+  const region = () => screen.getByRole("region", { name: /Planning units/ })
+
+  it("selects the FIRST row from a cold start, not the second", () => {
+    const { onSelect } = renderBoard(BOOKS)
+    fireEvent.keyDown(region(), { key: "ArrowDown" })
+    // -1 used to be treated as index 0, so ArrowDown skipped a row while
+    // ArrowUp correctly landed on the first.
+    expect(onSelect).toHaveBeenLastCalledWith("b:EXO")
+  })
+
+  it("moves the focus ring with the selection", () => {
+    // Without this the ring stays where the reader tabbed, Enter re-selects the
+    // row behind them, and a screen reader is told nothing at all.
+    render(<PlanBoard units={BOOKS} now={NOW} projectId="p1" selectedId="b:EXO" onSelect={vi.fn()} />)
+    fireEvent.keyDown(region(), { key: "ArrowDown" })
+    expect(document.activeElement).toHaveAttribute("data-plan-unit", "b:GEN")
+  })
+})
+
+describe("the order ref the inspector navigates by", () => {
+  it("reports exactly the rows on screen, in drawn order", () => {
+    const orderRef = { current: [] as PlanUnit[] }
+    const { rerender } = render(
+      <PlanBoard units={BOOKS} now={NOW} projectId="p1" orderRef={orderRef}
+        selectedId={null} onSelect={vi.fn()} />,
+    )
+    expect(orderRef.current.map((u) => u.sectionKey)).toEqual(["EXO", "GEN", "LEV"])
+
+    // Filtering must narrow it, or the inspector's chevrons step onto rows
+    // that are not rendered.
+    fireEvent.change(screen.getByTestId("plan-filter"), { target: { value: "genesis" } })
+    expect(orderRef.current.map((u) => u.sectionKey)).toEqual(["GEN"])
+
+    fireEvent.click(screen.getByTestId("plan-filter-clear"))
+    fireEvent.click(screen.getByTestId("plan-fold-done"))
+    expect(orderRef.current.map((u) => u.sectionKey)).toEqual(["EXO", "GEN"])
+    rerender(<PlanBoard units={BOOKS} now={NOW} projectId="p1" orderRef={orderRef}
+      selectedId={null} onSelect={vi.fn()} />)
+  })
+})

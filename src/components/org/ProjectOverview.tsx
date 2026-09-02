@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom"
 import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
@@ -40,7 +40,7 @@ import { useIsLgUp } from "@/components/AppShell"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { planHasAudio } from "@/lib/plan/plan-status"
 import { useProjectPlan } from "@/hooks/useProjectPlan"
-import { planUnitId, planUnitLabel, groupPlanUnits } from "@/lib/plan/plan-status"
+import { planUnitId, planUnitLabel, type PlanUnit } from "@/lib/plan/plan-status"
 import { planRowsToCsv, planCsvFilename } from "@/lib/progress/plan-csv"
 import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
@@ -501,7 +501,19 @@ export function ProjectOverview() {
       return token.token
     }
   }, [id, jwt, firstFileId, project?.name])
-  const { units: planUnits, patchUnit: patchPlanUnit } = useProjectPlan({ projectId: id ?? null, lane: selectedLaneTag ?? "", getToken: getPlanToken })
+  const {
+    units: planUnits,
+    patchUnit: patchPlanUnit,
+    status: planStatus,
+    refresh: refreshPlan,
+  } = useProjectPlan({ projectId: id ?? null, lane: selectedLaneTag ?? "", getToken: getPlanToken })
+  /**
+   * The rows the board is actually drawing, in drawn order. The board owns the
+   * filter, the arrangement and the folds that decide this, so the inspector's
+   * prev/next buttons have to read it from there rather than re-deriving it —
+   * re-deriving is how they ended up stepping onto rows nobody could see.
+   */
+  const planOrderRef = useRef<PlanUnit[]>([])
   const tableNow = useMemo(() => Date.now(), [planUnits])
   const planLgUp = useIsLgUp()
   const selectedPlanUnit = useMemo(
@@ -515,12 +527,15 @@ export function ProjectOverview() {
   const canPlan = (roleLevel ?? 0) >= 600
   const stepPlanUnit = useCallback(
     (delta: number) => {
-      const ordered = groupPlanUnits(planUnits, tableNow).flatMap((g) => g.units)
+      const ordered = planOrderRef.current
+      if (ordered.length === 0) return
       const index = ordered.findIndex((u) => planUnitId(u) === selectedPlanUnitId)
-      const next = ordered[Math.min(ordered.length - 1, Math.max(0, (index < 0 ? 0 : index) + delta))]
+      const next = index < 0
+        ? ordered[0]
+        : ordered[Math.min(ordered.length - 1, Math.max(0, index + delta))]
       if (next) setSelectedPlanUnitId(planUnitId(next))
     },
-    [planUnits, tableNow, selectedPlanUnitId],
+    [selectedPlanUnitId],
   )
   // The lane whose numbers the inspector is showing, named the way the lane
   // tabs name it — so nobody reads a French percentage as a Spanish one.
@@ -1233,9 +1248,12 @@ export function ProjectOverview() {
                             label={t("org.projectOverview.audioValidated")}
                             pct={audioValidatedPct(audio)}
                             colorClass={activeLane ? "text-muted-foreground/60" : "text-sky-700"}
-                            tooltip={activeLane ? CROSS_LANE_TOOLTIP : t("org.projectOverview.audioValidatedTooltip", {
-                              ofRecorded: Math.round(audioValidatedOfRecordedPct(audio) * 100),
-                            })}
+                            tooltip={activeLane ? CROSS_LANE_TOOLTIP : [
+                              t("org.projectOverview.audioValidatedTooltip"),
+                              t("org.projectOverview.audioValidatedOfRecorded", {
+                                percent: Math.round(audioValidatedOfRecordedPct(audio) * 100),
+                              }),
+                            ].join(" ")}
                           />
                         )}
                       </>
@@ -1361,6 +1379,9 @@ export function ProjectOverview() {
                 units={planUnits}
                 now={tableNow}
                 projectId={id ?? null}
+                status={planStatus}
+                onRetry={refreshPlan}
+                orderRef={planOrderRef}
                 selectedId={selectedPlanUnitId}
                 onSelect={setSelectedPlanUnitId}
                 emptyAction={

@@ -44,6 +44,9 @@ export function PlanRow({ unit, now, selected, showAudio, showStatus = false, on
       <button
         type="button"
         data-testid={`plan-row-${unit.fileId}-${unit.sectionKey}`}
+        // The board focuses rows by unit id when the arrows move the
+        // selection; the testid's shape cannot be matched to one reliably.
+        data-plan-unit={`${unit.fileId}:${unit.sectionKey}`}
         data-selected={selected ? "true" : undefined}
         aria-current={selected ? "true" : undefined}
         onClick={onSelect}

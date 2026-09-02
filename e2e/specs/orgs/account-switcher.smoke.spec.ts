@@ -200,7 +200,15 @@ test("logout and second-user sign-in survive unavailable private storage", async
   await new AccountSwitcherPage(alice).logOutCurrentAccount("alice")
   await expect(alice.getByRole("button", { name: "Log in" })).toBeVisible({ timeout: 30_000 })
 
-  for (const path of ["/orgs/all", "/projects/private-storage-project", "/project/private-storage-project/editor"]) {
+  // `orgRoute(alice)` is the org-scoped gate route (`/orgs/:id`) — where a
+  // single-org user lands from `/orgs/all` and then logs out. It must show the
+  // same signed-out workspace, not the gate's "Organization not found" chrome.
+  for (const path of [
+    "/orgs/all",
+    orgRoute(alice),
+    "/projects/private-storage-project",
+    "/project/private-storage-project/editor",
+  ]) {
     await alice.goto(path)
     await expect(alice.getByText("Sign in to see your workspace")).toBeVisible({ timeout: 30_000 })
     await expect(alice.getByRole("link", { name: "Sign in", exact: true })).toHaveAttribute(
@@ -208,6 +216,7 @@ test("logout and second-user sign-in survive unavailable private storage", async
       `/login?next=${encodeURIComponent(path)}`,
     )
     await expect(alice.locator('[data-slot="app-shell-sidebar-footer"]')).toBeVisible()
+    await expect(alice.getByRole("heading", { name: /Organization not found/i })).toHaveCount(0)
   }
 
   await alice.goto("/orgs/all")

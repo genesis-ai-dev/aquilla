@@ -7,6 +7,10 @@ import { OrgRouteGate } from "./OrgRouteGate"
 // orgs. The gate must (a) admit a guest org's index route, (b) wait for the
 // project directory before rejecting a possible guest org (so a reload doesn't
 // flash not-found), and (c) keep guests out of member-only tool sub-routes.
+//
+// AQU-1046: with no session the gate must render the canonical signed-out
+// workspace (route-preserving sign-in link) instead of classifying membership
+// from empty org lists and landing on "Organization not found".
 
 const orgContext = vi.hoisted(() => ({
   orgs: [] as { id: number }[],
@@ -16,13 +20,30 @@ const orgContext = vi.hoisted(() => ({
   error: null as string | null,
 }))
 
+type FakeSession = { jwt: string; username: string; createdAt: string } | null
+const sessionState = vi.hoisted(() => ({
+  session: { jwt: "jwt", username: "alice", createdAt: "x" } as FakeSession,
+  loading: false,
+}))
+
 vi.mock("@/context/OrgContext", () => ({
   useActiveOrg: () => orgContext,
+}))
+
+vi.mock("@/hooks/useFrontierSession", () => ({
+  useFrontierSession: () => sessionState,
 }))
 
 vi.mock("@/components/AccountSwitcher", () => ({
   AccountSwitcher: () => <div data-testid="account-switcher" />,
 }))
+
+// SignedOutWorkspace renders the real AppShell; keep the org sidebar and help
+// menu out so the gate test stays about the gate, not sidebar data hooks.
+vi.mock("./OrgSidebar", () => ({
+  OrgSidebar: () => <nav data-testid="org-sidebar" />,
+}))
+vi.mock("@/components/HelpMenu", () => ({ HelpMenu: () => null }))
 
 function LocationProbe() {
   const location = useLocation()
@@ -50,6 +71,8 @@ beforeEach(() => {
   orgContext.isLoading = false
   orgContext.accessibleProjectsLoading = false
   orgContext.error = null
+  sessionState.session = { jwt: "jwt", username: "alice", createdAt: "x" }
+  sessionState.loading = false
 })
 
 describe("OrgRouteGate (AQU-790 guest orgs)", () => {
@@ -112,5 +135,63 @@ describe("OrgRouteGate (AQU-790 guest orgs)", () => {
     renderGate("/orgs/7")
     expect(screen.getByRole("status", { name: "Loading organization" })).toBeInTheDocument()
     expect(screen.queryByTestId("account-switcher")).not.toBeInTheDocument()
+  })
+})
+
+describe("OrgRouteGate (AQU-1046 signed-out)", () => {
+  it("renders the signed-out workspace instead of not-found when there is no session", () => {
+    // Why: a user who logs out on `/orgs/:id` (e.g. a single-org user bounced
+    // there from `/orgs/all`) has empty org lists — that is "signed out", not
+    // "no access to organization #N".
+    sessionState.session = null
+    renderGate("/orgs/1")
+
+    expect(screen.getByText("Sign in to see your workspace")).toBeInTheDocument()
+    expect(screen.queryByText("Organization not found")).not.toBeInTheDocument()
+    expect(screen.queryByText("ORG INDEX")).not.toBeInTheDocument()
+    // The gate's not-found chrome (header account switcher) must not be used.
+    expect(screen.queryByTestId("account-switcher")).not.toBeInTheDocument()
+    expect(screen.getByTestId("org-sidebar")).toBeInTheDocument()
+  })
+
+  it("keeps the current org path in the sign-in link", () => {
+    sessionState.session = null
+    renderGate("/orgs/1")
+
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute(
+      "href",
+      "/login?next=%2Forgs%2F1",
+    )
+  })
+
+  it("preserves a sub-route and query in the sign-in link", () => {
+    sessionState.session = null
+    renderGate("/orgs/1/settings?tab=members")
+
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute(
+      "href",
+      "/login?next=%2Forgs%2F1%2Fsettings%3Ftab%3Dmembers",
+    )
+  })
+
+  it("does not show the signed-out workspace while the session is still loading", () => {
+    // Session hydration from IDB: org context is also loading, so the gate
+    // must keep its loading state rather than flashing a sign-in prompt.
+    sessionState.session = null
+    sessionState.loading = true
+    orgContext.isLoading = true
+    renderGate("/orgs/1")
+
+    expect(screen.getByRole("status", { name: "Loading organization" })).toBeInTheDocument()
+    expect(screen.queryByText("Sign in to see your workspace")).not.toBeInTheDocument()
+    expect(screen.queryByText("Organization not found")).not.toBeInTheDocument()
+  })
+
+  it("still shows not-found for a signed-in user without access", () => {
+    // Default session is signed in; empty org lists mean a real access miss.
+    renderGate("/orgs/999")
+
+    expect(screen.getByText("Organization not found")).toBeInTheDocument()
+    expect(screen.queryByText("Sign in to see your workspace")).not.toBeInTheDocument()
   })
 })

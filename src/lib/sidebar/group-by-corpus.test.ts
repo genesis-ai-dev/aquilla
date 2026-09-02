@@ -83,3 +83,52 @@ describe("groupByCorpus", () => {
     expect(groups[0].files.map((x) => x.name)).toEqual(["John", "alpha", "zeta"])
   })
 })
+
+// AQU-1084: corpusMarker is client-local and often missing after reload, so on
+// a fresh device every Bible book used to land in "Ungrouped". The server-backed
+// bookCode still says which testament a file belongs to; fall back to it.
+describe("groupByCorpus — bookCode fallback (AQU-1084)", () => {
+  function b(name: string, bookCode?: string, corpusMarker?: string) {
+    return { ...f(name, corpusMarker), bookCode }
+  }
+
+  it("derives OT/NT groups from bookCode when corpusMarker is missing", () => {
+    const groups = groupByCorpus([
+      b("Revelation", "REV"),
+      b("Genesis", "GEN"),
+      b("Matthew", "MAT"),
+      b("Exodus", "EXO"),
+    ])
+    expect(groups.map((g) => g.label)).toEqual(["OT", "NT"])
+    expect(groups[0].files.map((x) => x.name)).toEqual(["Genesis", "Exodus"])
+    expect(groups[1].files.map((x) => x.name)).toEqual(["Matthew", "Revelation"])
+  })
+
+  it("flags a derived group so callers can hide rename (renameCorpus matches on corpusMarker)", () => {
+    const groups = groupByCorpus([b("Genesis", "GEN"), b("Exodus", "EXO", "OT")])
+    expect(groups).toHaveLength(1)
+    expect(groups[0].label).toBe("OT")
+    expect(groups[0].derived).toBe(true)
+    // Marker-authored groups carry no flag at all (keeps toEqual shapes stable).
+    expect(groupByCorpus([b("Exodus", "EXO", "OT")])[0].derived).toBeUndefined()
+  })
+
+  it("lets corpusMarker win over bookCode so custom groups are untouched", () => {
+    const groups = groupByCorpus([b("Genesis", "GEN", "Season 1"), b("Matthew", "MAT", "Season 1")])
+    expect(groups.map((g) => g.label)).toEqual(["Season 1"])
+    expect(groups[0].derived).toBeUndefined()
+    expect(groups[0].files.map((x) => x.name)).toEqual(["Genesis", "Matthew"])
+  })
+
+  it("merges derived books into an existing marker-authored testament group", () => {
+    const groups = groupByCorpus([b("Matthew", "MAT", "NT"), b("John", "JHN"), b("Mark", "MRK")])
+    expect(groups.map((g) => g.label)).toEqual(["NT"])
+    expect(groups[0].files.map((x) => x.name)).toEqual(["Matthew", "Mark", "John"])
+  })
+
+  it("keeps files with an unknown or missing bookCode in Ungrouped", () => {
+    const groups = groupByCorpus([b("notes", "XYZ"), b("readme"), b("Genesis", "GEN")])
+    expect(groups.map((g) => g.label)).toEqual(["OT", "Ungrouped"])
+    expect(groups[1].files.map((x) => x.name)).toEqual(["notes", "readme"])
+  })
+})

@@ -1,4 +1,5 @@
 import { compareByCanonicalBookOrder } from "@/lib/file-labeling/bible-book-names"
+import { getTestament } from "@/lib/codex-editor/bible-books"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
 export interface CorpusGroup<T = unknown> {
@@ -19,6 +20,14 @@ export interface CorpusGroup<T = unknown> {
    * for named groups (`group.labelKey ? t(group.labelKey) : group.label`).
    */
   labelKey?: MessageKey
+  /**
+   * Set ONLY when at least one member landed here through the AQU-1084
+   * fallback (no `corpusMarker`; testament derived from `bookCode`) rather
+   * than through its own marker. `renameCorpus` matches on `corpusMarker`, so
+   * renaming such a group would skip those members — callers hide the rename
+   * affordance when this is set.
+   */
+  derived?: true
   files: T[]
 }
 
@@ -36,22 +45,45 @@ function corpusFileCompare(label: string, a: { name: string }, b: { name: string
   return a.name.localeCompare(b.name)
 }
 
-export function groupByCorpus<T extends { name: string; corpusMarker?: string }>(
+/**
+ * The marker a file groups under. `corpusMarker` always wins so custom
+ * groupings (seasons, series, …) are untouched. It is client-local state
+ * though, and often missing after a reload or on a fresh device (see
+ * `src/lib/file-labeling/detect.ts`), which used to drop every Bible book
+ * into "Ungrouped" exactly when a new user opened the project. When it is
+ * absent, the server-backed `bookCode` still tells us the testament (AQU-1084).
+ */
+function resolveMarker(file: { corpusMarker?: string; bookCode?: string }):
+  { marker: string; derived: boolean } | null {
+  const raw = file.corpusMarker?.trim()
+  if (raw) return { marker: raw, derived: false }
+  const testament = file.bookCode ? getTestament(file.bookCode) : undefined
+  if (testament) return { marker: testament, derived: true }
+  return null
+}
+
+export function groupByCorpus<T extends { name: string; corpusMarker?: string; bookCode?: string }>(
   files: T[],
 ): CorpusGroup<T>[] {
-  const groupsByKey = new Map<string, { label: string; files: T[] }>()
+  const groupsByKey = new Map<string, CorpusGroup<T>>()
   const ungrouped: T[] = []
 
   for (const file of files) {
-    const raw = file.corpusMarker?.trim()
-    if (!raw) {
+    const resolved = resolveMarker(file)
+    if (!resolved) {
       ungrouped.push(file)
       continue
     }
-    const key = normalize(raw)
+    const key = normalize(resolved.marker)
     const existing = groupsByKey.get(key)
-    if (existing) existing.files.push(file)
-    else groupsByKey.set(key, { label: raw, files: [file] })
+    if (existing) {
+      existing.files.push(file)
+      if (resolved.derived) existing.derived = true
+    } else {
+      const group: CorpusGroup<T> = { label: resolved.marker, files: [file] }
+      if (resolved.derived) group.derived = true
+      groupsByKey.set(key, group)
+    }
   }
 
   for (const group of groupsByKey.values()) {

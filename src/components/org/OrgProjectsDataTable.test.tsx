@@ -51,6 +51,11 @@ function renderTable(
     jwt?: string | null
     viewerUsername?: string | null
     layout?: "page" | "embedded"
+    searchValue?: string
+    onSearchChange?: (value: string) => void
+    searching?: boolean
+    hasMore?: boolean
+    onLoadMore?: () => void
   } = {},
 ) {
   const roleByProjectId = new Map<string, CloudProjectSummary["role"]>(
@@ -70,6 +75,11 @@ function renderTable(
         author="anna"
         viewerUsername={opts.viewerUsername ?? null}
         layout={opts.layout ?? "page"}
+        searchValue={opts.searchValue}
+        onSearchChange={opts.onSearchChange}
+        searching={opts.searching}
+        hasMore={opts.hasMore}
+        onLoadMore={opts.onLoadMore}
       />
     </MemoryRouter>,
   )
@@ -357,5 +367,42 @@ describe("PM column self marker (AQU-1027)", () => {
   it("is absent in embedded layout, which has no PM column at all", () => {
     renderTable(rows(), { viewerUsername: "anna", layout: "embedded" })
     expect(screen.queryAllByTestId("project-pm-you")).toHaveLength(0)
+  })
+})
+
+describe("OrgProjectsDataTable async directory", () => {
+  it("does not locally filter rows when search is controlled by the parent", () => {
+    const onSearchChange = vi.fn()
+    renderTable(
+      [baseProject({ id: "gospels", name: "Gospels" }), baseProject({ id: "ruth", name: "Ruth" })],
+      { searchValue: "zzz", onSearchChange },
+    )
+    expect(screen.getByText("Gospels")).toBeInTheDocument()
+    expect(screen.getByText("Ruth")).toBeInTheDocument()
+    fireEvent.change(screen.getByRole("textbox", { name: /Search projects/i }), {
+      target: { value: "gos" },
+    })
+    expect(onSearchChange).toHaveBeenCalledWith("gos")
+    expect(screen.getByText("Ruth")).toBeInTheDocument()
+  })
+
+  it("shows a spinner in the search field while the directory query is in flight", () => {
+    renderTable([baseProject({ id: "gospels", name: "Gospels" })], {
+      searchValue: "gos",
+      onSearchChange: vi.fn(),
+      searching: true,
+    })
+    const search = screen.getByRole("textbox", { name: /Search projects/i })
+    expect(search.closest("[data-slot='input-group']")).toHaveAttribute("aria-busy", "true")
+    expect(screen.getByRole("status", { name: /searching/i })).toBeInTheDocument()
+    expect(screen.getByText("Gospels")).toBeInTheDocument()
+  })
+
+  it("renders the load-more sentinel when another page remains", () => {
+    renderTable([baseProject({ id: "gospels", name: "Gospels" })], {
+      hasMore: true,
+      onLoadMore: vi.fn(),
+    })
+    expect(screen.getByTestId("project-directory-load-more")).toBeInTheDocument()
   })
 })

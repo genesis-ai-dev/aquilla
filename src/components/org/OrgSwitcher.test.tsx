@@ -568,6 +568,56 @@ describe("OrgSwitcher", () => {
       expect(screen.queryByRole("option", { name: /acme/i })).not.toBeInTheDocument()
     })
 
+    it("shows a spinner in the search field while a catalog query is in flight", async () => {
+      platformAdmin.isAdmin = true
+      listMyOrgs.mockResolvedValue([
+        { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+      ])
+      let resolveSearch: ((value: { orgs: unknown[]; nextCursor: null }) => void) | undefined
+      listOrgsPage
+        .mockResolvedValueOnce({
+          orgs: [
+            { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+            { id: 9, name: "Beta Org", role: { level: 700, name: "admin" }, viaPlatformAdmin: true },
+          ],
+          nextCursor: null,
+        })
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveSearch = resolve
+            }),
+        )
+
+      render(<MemoryRouter><OrgProvider><OrgSwitcher /></OrgProvider></MemoryRouter>)
+      await waitFor(() => expect(screen.getByText("Acme")).toBeInTheDocument())
+      await act(async () => {
+        screen.getByRole("combobox", { name: /acme/i }).click()
+      })
+      await waitFor(() => expect(screen.getByRole("option", { name: /beta org/i })).toBeInTheDocument())
+
+      const search = await screen.findByRole("combobox", { name: /find an organization/i })
+      fireEvent.change(search, { target: { value: "beta" } })
+      expect(screen.getByRole("status", { name: /searching/i })).toBeInTheDocument()
+      expect(search.closest("[data-slot='input-group']")).toHaveAttribute("aria-busy", "true")
+
+      await waitFor(() =>
+        expect(listOrgsPage).toHaveBeenCalledWith(
+          "jwt",
+          expect.objectContaining({ q: "beta" }),
+        ),
+      )
+      await act(async () => {
+        resolveSearch?.({
+          orgs: [{ id: 9, name: "Beta Org", role: { level: 700, name: "admin" }, viaPlatformAdmin: true }],
+          nextCursor: null,
+        })
+      })
+      await waitFor(() =>
+        expect(screen.queryByRole("status", { name: /searching/i })).not.toBeInTheDocument(),
+      )
+    })
+
     it("keeps a guest-grant org in the Guest section instead of listing it twice as Admin", async () => {
       platformAdmin.isAdmin = true
       listMyOrgs.mockResolvedValue([

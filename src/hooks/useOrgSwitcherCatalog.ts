@@ -20,6 +20,8 @@ export function useOrgSwitcherCatalog(opts: {
 }): {
   orgs: OrgSummary[]
   loading: boolean
+  /** True while the typed query is debouncing or a catalog page is in flight. */
+  searching: boolean
   loadingMore: boolean
   error: string | null
   hasMore: boolean
@@ -112,6 +114,7 @@ export function useOrgSwitcherCatalog(opts: {
   return {
     orgs,
     loading,
+    searching: Boolean(open && enabled && jwt && (query !== debouncedQuery || loading)),
     loadingMore,
     error,
     hasMore: nextCursor != null,

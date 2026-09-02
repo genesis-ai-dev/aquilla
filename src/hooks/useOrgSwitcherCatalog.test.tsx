@@ -66,6 +66,8 @@ describe("useOrgSwitcherCatalog", () => {
     expect(result.current.hasMore).toBe(false)
 
     rerender({ query: "gam" })
+    expect(result.current.searching).toBe(true)
     await waitFor(() => expect(result.current.orgs.map((o) => o.name)).toEqual(["Gamma"]))
+    expect(result.current.searching).toBe(false)
   })
 })

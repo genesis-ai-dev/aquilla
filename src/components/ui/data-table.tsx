@@ -119,6 +119,18 @@ interface DataTableProps<TData, TValue> {
   initialSorting?: SortingState
   /** When set, renders a search input that drives TanStack `globalFilter`. */
   searchPlaceholder?: string
+  /**
+   * Controlled search. When set with `onSearchChange`, the field does not
+   * filter rows locally — the parent fetches a server page (async combobox /
+   * infinite-scroll tables).
+   */
+  searchValue?: string
+  onSearchChange?: (value: string) => void
+  /**
+   * In-field spinner while an async search is pending (debounce or fetch).
+   * Independent of `loading`, which skeletonizes the table body.
+   */
+  searching?: boolean
   globalFilterFn?: FilterFn<TData>
   /** Extra controls in the toolbar row (counts, lens filters, etc.). */
   toolbar?: React.ReactNode | ((table: TanStackTable<TData>) => React.ReactNode)
@@ -170,6 +182,10 @@ interface DataTableProps<TData, TValue> {
    * Hidden while loading or when there are no rows.
    */
   footer?: React.ReactNode
+  /** Infinite-scroll sentinel at the end of the body. */
+  hasMore?: boolean
+  onLoadMore?: () => void
+  loadingMore?: boolean
 }
 
 function DataTable<TData, TValue>({
@@ -178,6 +194,9 @@ function DataTable<TData, TValue>({
   getRowId,
   initialSorting,
   searchPlaceholder,
+  searchValue,
+  onSearchChange,
+  searching = false,
   globalFilterFn,
   toolbar,
   testId,
@@ -194,6 +213,9 @@ function DataTable<TData, TValue>({
   tableClassName,
   fillHeight = false,
   footer,
+  hasMore = false,
+  onLoadMore,
+  loadingMore = false,
 }: DataTableProps<TData, TValue>) {
   const t = useT()
   const [sorting, setSorting] = React.useState<SortingState>(
@@ -242,22 +264,31 @@ function DataTable<TData, TValue>({
       {(searchPlaceholder || toolbarNode) && (
         <div className="flex shrink-0 flex-wrap items-center gap-3">
           {searchPlaceholder ? (
-            <InputGroup className={TABLE_SEARCH_GROUP_CLASS}>
+            <InputGroup className={TABLE_SEARCH_GROUP_CLASS} aria-busy={searching || undefined}>
               <InputGroupAddon>
                 <Search />
               </InputGroupAddon>
               <InputGroupInput
                 className={TABLE_SEARCH_INPUT_CLASS}
                 placeholder={searchPlaceholder}
-                value={globalFilter}
-                onChange={(event) => setGlobalFilter(event.target.value)}
+                value={onSearchChange ? (searchValue ?? "") : globalFilter}
+                onChange={(event) => {
+                  const next = event.target.value
+                  if (onSearchChange) onSearchChange(next)
+                  else setGlobalFilter(next)
+                }}
                 aria-label={searchPlaceholder}
                 autoComplete="off"
                 autoCorrect="off"
                 autoCapitalize="none"
                 spellCheck={false}
-                disabled={loading}
+                disabled={loading && !onSearchChange}
               />
+              {searching ? (
+                <InputGroupAddon align="inline-end">
+                  <Spinner className="size-4" aria-label={t("common.searching")} />
+                </InputGroupAddon>
+              ) : null}
             </InputGroup>
           ) : null}
           {toolbarNode}
@@ -372,13 +403,20 @@ function DataTable<TData, TValue>({
                   </TableCell>
                 </TableRow>
               )}
-              {footer && hasRows && !loading ? (
+              {(footer || hasMore || loadingMore) && hasRows && !loading ? (
                 <TableRow className="hover:bg-transparent">
                   <TableCell
                     colSpan={visibleColumnCount}
                     className={dense ? "py-1.5" : "py-2.5"}
                   >
                     {footer}
+                    {(hasMore || loadingMore) && onLoadMore ? (
+                      <LoadMoreSentinel
+                        disabled={!hasMore || loadingMore}
+                        loading={loadingMore}
+                        onVisible={onLoadMore}
+                      />
+                    ) : null}
                   </TableCell>
                 </TableRow>
               ) : null}
@@ -386,6 +424,45 @@ function DataTable<TData, TValue>({
           </Table>
         )}
       </div>
+    </div>
+  )
+}
+
+function LoadMoreSentinel({
+  disabled,
+  loading,
+  onVisible,
+}: {
+  disabled: boolean
+  loading: boolean
+  onVisible: () => void
+}) {
+  const t = useT()
+  const ref = React.useRef<HTMLDivElement>(null)
+  React.useEffect(() => {
+    if (disabled) return
+    const el = ref.current
+    if (!el) return
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) onVisible()
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [disabled, onVisible])
+
+  return (
+    <div
+      ref={ref}
+      role="status"
+      data-testid="project-directory-load-more"
+      className="flex items-center justify-center gap-2 text-xs text-muted-foreground"
+    >
+      {loading ? (
+        <>
+          <Spinner className="size-3" />
+          {t("common.loadingSpinner")}
+        </>
+      ) : null}
     </div>
   )
 }

@@ -259,6 +259,26 @@ describe("DataTable", () => {
     expect(screen.getByTestId("loading-table").querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0)
   })
 
+  it("shows a spinner in the search field while searching without skeletonizing rows", () => {
+    render(
+      <DataTable
+        columns={columns}
+        data={rows}
+        searchPlaceholder="Search…"
+        searchValue="al"
+        onSearchChange={vi.fn()}
+        searching
+        testId="searching-table"
+      />,
+    )
+    const search = screen.getByLabelText("Search…")
+    expect(search).toBeEnabled()
+    expect(search.closest("[data-slot='input-group']")).toHaveAttribute("aria-busy", "true")
+    expect(screen.getByRole("status", { name: /searching/i })).toBeInTheDocument()
+    expect(screen.getByText("Alpha")).toBeInTheDocument()
+    expect(screen.getByTestId("searching-table").querySelectorAll('[data-slot="skeleton"]')).toHaveLength(0)
+  })
+
   it("opens renderRowMenuItems from row right-click and from the ⋯ button", async () => {
     renderRowMenuTable()
 

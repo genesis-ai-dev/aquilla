@@ -586,6 +586,7 @@ export function OrgSwitcher() {
           <ComboboxInput
             showTrigger={false}
             showSearchIcon
+            loading={catalogEnabled && catalog.searching}
             // Gate on query text — Base UI Clear stays visible for any selection.
             showClear={inputValue !== ""}
             placeholder={t("org.switcher.searchPlaceholder")}
@@ -600,14 +601,10 @@ export function OrgSwitcher() {
                   variant="icon"
                   className="mb-0 border border-border bg-transparent text-muted-foreground"
                 >
-                  {catalogEnabled && catalog.loading ? (
-                    <Spinner />
-                  ) : (
-                    <SearchIcon />
-                  )}
+                  <SearchIcon />
                 </EmptyMedia>
                 <EmptyTitle className="text-muted-foreground font-normal">
-                  {catalogEnabled && catalog.loading
+                  {catalogEnabled && catalog.searching
                     ? t("common.searching")
                     : catalog.error
                       ? t("org.switcher.searchFailed")
@@ -616,7 +613,7 @@ export function OrgSwitcher() {
               </EmptyHeader>
             </Empty>
           </ComboboxEmpty>
-          <ComboboxList className="max-h-80 flex-1" aria-busy={catalog.loading || catalog.loadingMore || undefined}>
+          <ComboboxList className="max-h-80 flex-1" aria-busy={catalog.searching || catalog.loadingMore || undefined}>
             <OrgSwitcherList
               guestSelected={guestSelected}
               isAllOrgs={viewingAllOrgs}

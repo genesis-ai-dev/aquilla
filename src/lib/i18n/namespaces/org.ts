@@ -1113,6 +1113,33 @@ export const org = defineNamespace({
     "org.projectOverview.plan.groupHintInProgress": "active, comfortably ahead",
     "org.projectOverview.plan.groupHintNotStarted": "no content yet",
     "org.projectOverview.plan.groupHintDone": "marked complete by a manager",
+    // The inspector docked beside the board.
+    "org.projectOverview.plan.inspectorAria": "Details for {unit}",
+    "org.projectOverview.plan.previousUnit": "Previous unit",
+    "org.projectOverview.plan.nextUnit": "Next unit",
+    "org.projectOverview.plan.targetDate": "Target date",
+    "org.projectOverview.plan.noTarget": "No target",
+    "org.projectOverview.plan.noTargetSet": "No target date set",
+    "org.projectOverview.plan.targetVisibleHint": "Visible to everyone on the project.",
+    "org.projectOverview.plan.targetMaintainerOnly": "Only maintainers can set target dates.",
+    "org.projectOverview.plan.completion": "Completion",
+    "org.projectOverview.plan.markDone": "Mark done",
+    "org.projectOverview.plan.markDoneHint": "Undoable.",
+    "org.projectOverview.plan.markDoneAnyway": "Mark done anyway",
+    "org.projectOverview.plan.unmarkDone": "Un-mark",
+    "org.projectOverview.plan.notMarkedDone": "Not marked done.",
+    "org.projectOverview.plan.aMaintainer": "a maintainer",
+    "org.projectOverview.plan.markedDoneBy": "Marked done {date} by {user}",
+    "org.projectOverview.plan.doneBelowFullNudge":
+      "Validated is at {validated}%. Marking done records your judgment, not the numbers \u2014 the bars stay visible beside the mark.",
+    "org.projectOverview.plan.progress": "Progress",
+    "org.projectOverview.plan.textTranslated": "Text translated",
+    "org.projectOverview.plan.textValidated": "Text validated",
+    "org.projectOverview.plan.audioRecorded": "Audio recorded",
+    "org.projectOverview.plan.audioValidated": "Audio validated",
+    "org.projectOverview.plan.lastActivity": "Last activity {date}.",
+    "org.projectOverview.plan.noActivity": "No activity yet.",
+    "org.projectOverview.plan.resizeInspector": "Resize the details panel",
 
     // -- TeamDetail: single team's page. Most call-site strings here reuse
     // existing org.teamDetail.* / org.teamForm.* / common.* keys already
@@ -2119,6 +2146,104 @@ export const org = defineNamespace({
       },
       "org.projectOverview.plan.groupHintDone": {
         description: "Hint on the Done group header, stressing that the mark is a human judgment.",
+      },
+      "org.projectOverview.plan.inspectorAria": {
+        description: "Screen-reader name for the detail panel docked beside the plan.",
+        placeholders: { unit: "The unit's name — a book name, episode or document title. Not translated." },
+      },
+      "org.projectOverview.plan.previousUnit": {
+        description: "Tooltip on the up arrow that steps to the previous unit.",
+        maxLength: 20,
+      },
+      "org.projectOverview.plan.nextUnit": {
+        description: "Tooltip on the down arrow that steps to the next unit.",
+        maxLength: 20,
+      },
+      "org.projectOverview.plan.targetDate": {
+        description: "Label for the date a manager plans this unit to be finished by.",
+        maxLength: 18,
+      },
+      "org.projectOverview.plan.noTarget": {
+        description: "Placeholder in the target-date picker when none is set.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.noTargetSet": {
+        description: "Shown instead of a date picker to someone who cannot set dates.",
+        maxLength: 28,
+      },
+      "org.projectOverview.plan.targetVisibleHint": {
+        description: "Hint under the target-date picker: the date is not private to the person setting it.",
+      },
+      "org.projectOverview.plan.targetMaintainerOnly": {
+        description: "Explains to a non-maintainer why no date control is offered.",
+      },
+      "org.projectOverview.plan.completion": {
+        description: "Section label above the Mark done control.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.markDone": {
+        description: "Button marking a unit finished. An explicit human judgment, not derived from percentages.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.markDoneHint": {
+        description: "Reassurance beside Mark done that the action can be reversed.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.markDoneAnyway": {
+        description: "Confirms marking a unit done although its validated percentage is below 100.",
+        maxLength: 22,
+      },
+      "org.projectOverview.plan.unmarkDone": {
+        description: "Button reversing a Done mark.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.notMarkedDone": {
+        description: "Shown to a non-maintainer when a unit has no Done mark.",
+        maxLength: 24,
+      },
+      "org.projectOverview.plan.aMaintainer": {
+        description: "Fallback for who marked a unit done when the username is unknown.",
+        maxLength: 18,
+      },
+      "org.projectOverview.plan.markedDoneBy": {
+        description: "Provenance line: when a unit was marked done and by whom.",
+        placeholders: { date: "ISO date, e.g. 2026-09-02.", user: "Username — not translated." },
+      },
+      "org.projectOverview.plan.doneBelowFullNudge": {
+        description: "Shown when marking a unit done whose validated share is under 100%. Informative, not blocking — the mark is a judgment the numbers cannot make.",
+        placeholders: { validated: "Percent validated — a number." },
+      },
+      "org.projectOverview.plan.progress": {
+        description: "Section label above the four progress bars.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.textTranslated": {
+        description: "Progress bar label: share of cells with target text.",
+        maxLength: 22,
+      },
+      "org.projectOverview.plan.textValidated": {
+        description: "Progress bar label: share of cells validated by enough reviewers.",
+        maxLength: 22,
+      },
+      "org.projectOverview.plan.audioRecorded": {
+        description: "Progress bar label: share of cells with a recording.",
+        maxLength: 22,
+      },
+      "org.projectOverview.plan.audioValidated": {
+        description: "Progress bar label: share of cells whose selected recording is approved.",
+        maxLength: 22,
+      },
+      "org.projectOverview.plan.lastActivity": {
+        description: "When this unit was last edited.",
+        placeholders: { date: "ISO date, e.g. 2026-09-02." },
+      },
+      "org.projectOverview.plan.resizeInspector": {
+        description:
+          "Accessible name for the drag handle on the left edge of the docked details panel.",
+      },
+      "org.projectOverview.plan.noActivity": {
+        description: "Shown when a unit has never been edited.",
+        maxLength: 24,
       },
       "org.memberActivityPanel.fileRollupSummary": {
         description:

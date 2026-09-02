@@ -34,8 +34,13 @@ import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, audi
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { downloadBlob } from "@/lib/export/export-service"
 import { PlanBoard } from "./plan/PlanBoard"
+import { PlanInspector } from "./plan/PlanInspector"
+import { RightSidebarPanel } from "@/components/RightSidebarPanel"
+import { useIsLgUp } from "@/components/AppShell"
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { planHasAudio } from "@/lib/plan/plan-status"
 import { useProjectPlan } from "@/hooks/useProjectPlan"
-import { planUnitId } from "@/lib/plan/plan-status"
+import { planUnitId, planUnitLabel, groupPlanUnits } from "@/lib/plan/plan-status"
 import { planRowsToCsv, planCsvFilename } from "@/lib/progress/plan-csv"
 import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
@@ -496,8 +501,38 @@ export function ProjectOverview() {
       return token.token
     }
   }, [id, jwt, firstFileId, project?.name])
-  const { units: planUnits } = useProjectPlan({ projectId: id ?? null, lane: selectedLaneTag ?? "", getToken: getPlanToken })
+  const { units: planUnits, patchUnit: patchPlanUnit } = useProjectPlan({ projectId: id ?? null, lane: selectedLaneTag ?? "", getToken: getPlanToken })
   const tableNow = useMemo(() => Date.now(), [planUnits])
+  const planLgUp = useIsLgUp()
+  const selectedPlanUnit = useMemo(
+    () => planUnits.find((u) => planUnitId(u) === selectedPlanUnitId) ?? null,
+    [planUnits, selectedPlanUnitId],
+  )
+  const planShowAudio = useMemo(() => planHasAudio(planUnits), [planUnits])
+  // AQU-1094/1095: setting a date and marking a unit done are maintainer work,
+  // the same floor the project deadline uses. Read the FRESH role from
+  // useProject, not the cached syncRole snapshot.
+  const canPlan = (roleLevel ?? 0) >= 600
+  const stepPlanUnit = useCallback(
+    (delta: number) => {
+      const ordered = groupPlanUnits(planUnits, tableNow).flatMap((g) => g.units)
+      const index = ordered.findIndex((u) => planUnitId(u) === selectedPlanUnitId)
+      const next = ordered[Math.min(ordered.length - 1, Math.max(0, (index < 0 ? 0 : index) + delta))]
+      if (next) setSelectedPlanUnitId(planUnitId(next))
+    },
+    [planUnits, tableNow, selectedPlanUnitId],
+  )
+  const planInspector = selectedPlanUnit ? (
+    <PlanInspector
+      unit={selectedPlanUnit}
+      now={tableNow}
+      canPlan={canPlan}
+      showAudio={planShowAudio}
+      onPatch={patchPlanUnit}
+      onClose={() => setSelectedPlanUnitId(null)}
+      onStep={stepPlanUnit}
+    />
+  ) : null
   // Selecting a unit that a refetch removed (a file deleted elsewhere) would
   // leave the inspector pointing at nothing.
   useEffect(() => {
@@ -713,6 +748,24 @@ export function ProjectOverview() {
       sidebar={<OrgSidebar />}
       header={<OrgBreadcrumb section={project?.name ?? t("common.project")} orgId={project?.orgId} />}
       statusBar={null}
+      // AQU-1094…1098: wide enough, the inspector takes REAL width and the
+      // board reflows beside it — no dim, no covering, so you can keep
+      // clicking rows and watch one move to Done as you mark it. Narrower, it
+      // becomes an overlay, which is the same trade AppShell makes for the
+      // navigation rail at this breakpoint.
+      aside={
+        planInspector && planLgUp ? (
+          <RightSidebarPanel
+            storageKey="plan-inspector"
+            defaultWidth={384}
+            minWidth={300}
+            maxWidth={560}
+            resizeLabel={t("org.projectOverview.plan.resizeInspector")}
+          >
+            {planInspector}
+          </RightSidebarPanel>
+        ) : null
+      }
       main={
         <div className="h-full overflow-y-auto">
           {openingOverlay}
@@ -1270,6 +1323,20 @@ export function ProjectOverview() {
                   this file", never "are we finishing on time". The plan groups
                   planning units by status, and the per-unit detail moved into
                   the inspector beside it. */}
+              {planInspector && !planLgUp && (
+                <Sheet open onOpenChange={(open) => { if (!open) setSelectedPlanUnitId(null) }}>
+                  <SheetContent side="right" className="w-full p-0 sm:max-w-md!">
+                    <SheetHeader className="sr-only">
+                      <SheetTitle>
+                        {t("org.projectOverview.plan.inspectorAria", {
+                          unit: selectedPlanUnit ? planUnitLabel(selectedPlanUnit) : "",
+                        })}
+                      </SheetTitle>
+                    </SheetHeader>
+                    {planInspector}
+                  </SheetContent>
+                </Sheet>
+              )}
               <PlanBoard
                 units={planUnits}
                 now={tableNow}

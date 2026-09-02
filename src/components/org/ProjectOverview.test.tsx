@@ -55,6 +55,13 @@ vi.mock("@/lib/frontier/portfolio", () => ({
   aiDraftedPct: (p: { aiDraftedCells: number; totalCells: number }) => (p.totalCells > 0 ? p.aiDraftedCells / p.totalCells : 0),
   recordedMinutes: (p: { recordedMs: number }) => Math.round(p.recordedMs / 60000),
   deadlineStatus: () => _deadlineStatusResult,
+  // AQU-1092…1098: plan-status.ts imports these to decide overdue/due-soon.
+  // Real implementations, not stubs — a unit and its project must agree about
+  // what "late" means, and a wrong stub here would hide that.
+  AOE_GRACE_MS: (24 + 12) * 60 * 60 * 1000,
+  DEADLINE_SOON_WINDOW_MS: 7 * 24 * 60 * 60 * 1000,
+  isDeadlineOverdue: (deadlineUtcMidnight: number, nowMs: number) =>
+    nowMs >= deadlineUtcMidnight + (24 + 12) * 60 * 60 * 1000,
   // AQU-538 §3.3: real per-lane helpers so the lane table/tiles compute true %s.
   laneTranslatedPct: (l: { filledCells: number; totalCells: number }) => (l.totalCells > 0 ? l.filledCells / l.totalCells : 0),
   laneValidatedPct: (l: { validatedCells: number; totalCells: number }) => (l.totalCells > 0 ? l.validatedCells / l.totalCells : 0),
@@ -243,6 +250,9 @@ beforeEach(async () => {
   // AQU-1092…1098: an empty but well-formed plan by default, so the board
   // renders its empty state rather than an error in unrelated tests.
   fetchProjectPlan.mockResolvedValue({ projectId: "p1", lane: "", validationCount: 1, revision: 1, units: [] })
+  // The plan mints a sync token like the file list does; without a default,
+  // whether a test sees units depends on which test ran before it.
+  fetchSyncToken.mockResolvedValue({ token: "tok" })
   canEditRosterProgressFloorMock.mockImplementation((level: number | null | undefined) => (level ?? 0) >= 700)
 })
 afterEach(() => vi.clearAllMocks())
@@ -1364,6 +1374,48 @@ describe("plan board on the overview", () => {
     const summary = await screen.findByTestId("plan-summary")
     expect(summary).toHaveTextContent("1 of 2 done")
     expect(summary.textContent).not.toMatch(/book/i)
+  })
+
+  it("docks the inspector beside the board on a wide screen", async () => {
+    // Docked means it takes real width and the board reflows — not an overlay.
+    // AppShell renders `aside` inline; the Sheet path is the narrow fallback.
+    useProject.mockReturnValue({ project: projectRecord({ level: 600 }), status: "ready", refresh })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100, filledCells: 50, validatedCells: 10,
+      aiDraftedCells: 0, audioCells: 0, validatedAudioCells: 0, recordedMs: 0,
+      lastEditAt: null, deadlineAt: null, sourceLanguage: null, targetLanguage: null,
+    }])
+    fetchProjectPlan.mockResolvedValue({
+      projectId: "p1", lane: "", validationCount: 1, revision: 1, units: [planUnit()],
+    })
+    renderOverview()
+
+    fireEvent.click(await screen.findByTestId("plan-row-f1-"))
+    const inspector = await screen.findByTestId("plan-inspector")
+    expect(inspector).toBeInTheDocument()
+    // Not inside a dialog: the page stays interactive behind it.
+    expect(inspector.closest('[role="dialog"]')).toBeNull()
+  })
+
+  it("withholds the planning controls from someone below maintainer", async () => {
+    useProject.mockReturnValue({
+      project: projectRecord({ level: 400 }), status: "ready", refresh, roleLevel: 400,
+    })
+    getPortfolio.mockResolvedValue([{
+      id: "p1", name: "John", totalCells: 100, filledCells: 50, validatedCells: 10,
+      aiDraftedCells: 0, audioCells: 0, validatedAudioCells: 0, recordedMs: 0,
+      lastEditAt: null, deadlineAt: null, sourceLanguage: null, targetLanguage: null,
+    }])
+    fetchProjectPlan.mockResolvedValue({
+      projectId: "p1", lane: "", validationCount: 1, revision: 1,
+      units: [planUnit({ targetDate: "2026-11-01" })],
+    })
+    renderOverview()
+
+    fireEvent.click(await screen.findByTestId("plan-row-f1-"))
+    await screen.findByTestId("plan-inspector")
+    expect(screen.queryByTestId("plan-mark-done")).toBeNull()
+    expect(screen.getByTestId("plan-target-readonly")).toHaveTextContent("2026-11-01")
   })
 
   it("shows an empty state when nothing is plannable yet", async () => {

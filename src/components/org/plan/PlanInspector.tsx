@@ -1,0 +1,223 @@
+// AQU-1094/1095/1096/1098: the unit inspector.
+//
+// Docked beside the board rather than laid over it, so the page stays visible
+// and interactive: you can click one unit after another, watch a row move to
+// Done as you mark it, and walk the list with the arrow keys without ever
+// closing anything.
+//
+// Content ADAPTS TO ACCESS rather than disabling controls. A contributor never
+// receives the date picker or the Done button — the values are still readable,
+// with one line saying who may change them. Same rule the cell-editing floor
+// settled on: no access, nothing renders.
+
+import { useEffect, useState } from "react"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { DatePicker, deadlineStringToDate, dateToDeadlineString } from "@/components/ui/date-picker"
+import { Progress, ProgressLabel, ProgressValue } from "@/components/ui/progress"
+import { X, ChevronUp, ChevronDown } from "lucide-react"
+import { planUnitLabel, planUnitStatus, type PlanUnit } from "@/lib/plan/plan-status"
+import type { PlanUnitPatch } from "@/lib/sync/plan"
+import { PlanStatusPill } from "./PlanStatusPill"
+
+function pct(part: number, whole: number): number {
+  return whole > 0 ? Math.round((part / whole) * 100) : 0
+}
+
+export function PlanInspector({
+  unit, now, canPlan, showAudio, onPatch, onClose, onStep,
+}: {
+  unit: PlanUnit
+  now: number
+  /** MAINTAINER+: may set target dates and mark units done. */
+  canPlan: boolean
+  showAudio: boolean
+  onPatch: (patch: PlanUnitPatch) => Promise<boolean>
+  onClose: () => void
+  onStep: (delta: number) => void
+}) {
+  const t = useT()
+  const [confirmingDone, setConfirmingDone] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const status = planUnitStatus(unit, now)
+  const validatedPct = pct(unit.validatedCount, unit.totalCount)
+
+  // Stepping to another unit must not carry the previous one's confirmation.
+  useEffect(() => setConfirmingDone(false), [unit.fileId, unit.sectionKey])
+
+  const patch = async (p: Omit<PlanUnitPatch, "fileId" | "sectionKey">) => {
+    setBusy(true)
+    await onPatch({ fileId: unit.fileId, sectionKey: unit.sectionKey, ...p })
+    setBusy(false)
+  }
+
+  const markDone = () => {
+    setConfirmingDone(false)
+    void patch({ done: true })
+  }
+
+  return (
+    <aside
+      data-testid="plan-inspector"
+      aria-label={t("org.projectOverview.plan.inspectorAria", { unit: planUnitLabel(unit) })}
+      className="flex h-full min-h-0 flex-col overflow-hidden border-s bg-card"
+    >
+      <header className="flex items-start justify-between gap-2 border-b px-4 py-3">
+        <div className="min-w-0">
+          <h3 className="truncate text-sm font-semibold">{planUnitLabel(unit)}</h3>
+          <p className="mt-0.5 text-[11px] tabular-nums text-muted-foreground">
+            {t("org.projectOverview.plan.cellCount", { count: unit.totalCount })}
+          </p>
+        </div>
+        <div className="flex shrink-0 gap-1">
+          <Button variant="ghost" size="icon-xs" data-testid="plan-inspector-prev"
+            title={t("org.projectOverview.plan.previousUnit")} onClick={() => onStep(-1)}>
+            <ChevronUp className="h-3.5 w-3.5" />
+          </Button>
+          <Button variant="ghost" size="icon-xs" data-testid="plan-inspector-next"
+            title={t("org.projectOverview.plan.nextUnit")} onClick={() => onStep(1)}>
+            <ChevronDown className="h-3.5 w-3.5" />
+          </Button>
+          <Button variant="ghost" size="icon-xs" data-testid="plan-inspector-close"
+            title={t("common.close")} onClick={onClose}>
+            <X className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </header>
+
+      <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-4">
+        <div className="flex items-center gap-2">
+          <PlanStatusPill status={status} now={now} />
+        </div>
+
+        {/* Target date */}
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={`plan-target-${unit.fileId}${unit.sectionKey}`}>
+            {t("org.projectOverview.plan.targetDate")}
+          </Label>
+          {canPlan ? (
+            <>
+              <div className="flex items-center gap-2">
+                <DatePicker
+                  id={`plan-target-${unit.fileId}${unit.sectionKey}`}
+                  value={deadlineStringToDate(unit.targetDate)}
+                  placeholder={t("org.projectOverview.plan.noTarget")}
+                  disabled={busy}
+                  onChange={(d) => void patch({ targetDate: d ? dateToDeadlineString(d) : null })}
+                />
+                {unit.targetDate && (
+                  <Button variant="ghost" size="sm" disabled={busy}
+                    data-testid="plan-target-clear"
+                    onClick={() => void patch({ targetDate: null })}>
+                    {t("common.clear")}
+                  </Button>
+                )}
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                {t("org.projectOverview.plan.targetVisibleHint")}
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm tabular-nums" data-testid="plan-target-readonly">
+                {unit.targetDate ?? t("org.projectOverview.plan.noTargetSet")}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                {t("org.projectOverview.plan.targetMaintainerOnly")}
+              </p>
+            </>
+          )}
+        </div>
+
+        {/* Completion */}
+        <div className="flex flex-col gap-2">
+          <Label>{t("org.projectOverview.plan.completion")}</Label>
+          {unit.doneAt != null ? (
+            <>
+              <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400"
+                 data-testid="plan-done-provenance">
+                {t("org.projectOverview.plan.markedDoneBy", {
+                  date: new Date(unit.doneAt).toISOString().slice(0, 10),
+                  user: unit.doneBy ?? t("org.projectOverview.plan.aMaintainer"),
+                })}
+              </p>
+              {canPlan && (
+                <div>
+                  <Button variant="outline" size="sm" disabled={busy}
+                    data-testid="plan-unmark-done"
+                    onClick={() => void patch({ done: false })}>
+                    {t("org.projectOverview.plan.unmarkDone")}
+                  </Button>
+                </div>
+              )}
+            </>
+          ) : !canPlan ? (
+            <p className="text-sm text-muted-foreground" data-testid="plan-done-readonly">
+              {t("org.projectOverview.plan.notMarkedDone")}
+            </p>
+          ) : confirmingDone ? (
+            <>
+              {/* Informative, not blocking: Done is a judgment the percentages
+                  cannot make, so this acknowledges the mismatch and moves on. */}
+              <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs"
+                 data-testid="plan-done-nudge">
+                {t("org.projectOverview.plan.doneBelowFullNudge", { validated: validatedPct })}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button size="sm" disabled={busy} data-testid="plan-mark-done-anyway" onClick={markDone}>
+                  {t("org.projectOverview.plan.markDoneAnyway")}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setConfirmingDone(false)}>
+                  {t("common.cancel")}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Button size="sm" disabled={busy} data-testid="plan-mark-done"
+                onClick={() => (validatedPct < 100 ? setConfirmingDone(true) : markDone())}>
+                {t("org.projectOverview.plan.markDone")}
+              </Button>
+              <span className="text-[11px] text-muted-foreground">
+                {t("org.projectOverview.plan.markDoneHint")}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Progress */}
+        <div className="flex flex-col gap-3">
+          <Label>{t("org.projectOverview.plan.progress")}</Label>
+          <Progress value={pct(unit.filledCount, unit.totalCount)}>
+            <ProgressLabel>{t("org.projectOverview.plan.textTranslated")}</ProgressLabel>
+            <ProgressValue />
+          </Progress>
+          <Progress value={validatedPct}>
+            <ProgressLabel>{t("org.projectOverview.plan.textValidated")}</ProgressLabel>
+            <ProgressValue />
+          </Progress>
+          {showAudio && (
+            <>
+              <Progress value={pct(unit.audioCount, unit.totalCount)}>
+                <ProgressLabel>{t("org.projectOverview.plan.audioRecorded")}</ProgressLabel>
+                <ProgressValue />
+              </Progress>
+              <Progress value={pct(unit.audioValidatedCount, unit.totalCount)}>
+                <ProgressLabel>{t("org.projectOverview.plan.audioValidated")}</ProgressLabel>
+                <ProgressValue />
+              </Progress>
+            </>
+          )}
+          <p className="text-[11px] text-muted-foreground" data-testid="plan-last-activity">
+            {unit.lastEditAt
+              ? t("org.projectOverview.plan.lastActivity", {
+                  date: new Date(unit.lastEditAt).toISOString().slice(0, 10),
+                })
+              : t("org.projectOverview.plan.noActivity")}
+          </p>
+        </div>
+      </div>
+    </aside>
+  )
+}

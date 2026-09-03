@@ -13,6 +13,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import type { AudioAttachmentOut } from "@/lib/sync/cell-audio-read-types"
+import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { audioIdSeededWith, fetchCellAudio, isDenoisedAudioId, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
@@ -102,8 +103,14 @@ export function TakesStrip({
   // recorded take holding the recording slot wins; otherwise the selected
   // generated (TTS) take. When the slot holds the source clip (not a take),
   // it falls through to the generated selection.
+  // AQU-646 stage 3: SLOT-AGNOSTIC. The old form required the take to be in
+  // the literal "recording" slot, so an added track's take — whose slot is the
+  // track's own id — never matched and the strip highlighted nothing. The
+  // default row is unaffected: its source clip is not in `takes`, so a
+  // selection pointing at it still falls through to the generated pointer,
+  // which is the behaviour that has always shipped.
   const activeTakeId =
-    takes.some((t) => t.audioId === selectedAudioId && t.slot === "recording")
+    takes.some((t) => t.audioId === selectedAudioId)
       ? selectedAudioId
       : (selectedGeneratedAudioId ?? null)
 
@@ -168,13 +175,24 @@ export function TakesStrip({
     // SUB-48: the overlay is handed the emit PROMISE, so it paints now and
     // stays alive for exactly as long as its event sits in the outbox.
     const take = takes.find((t) => t.audioId === audioId)
-    const slot = take?.slot === "generatedVoice" ? "generatedVoice" : "recording"
+    // THE TAKE'S OWN SLOT, VERBATIM. (AQU-646 stage 3)
+    //
+    // This used to be a binary coercion — anything that was not
+    // `"generatedVoice"` became `"recording"` — which was right while those
+    // were the only two slots and is a DATA-MOVER now: a take on an added
+    // track would be selected into the default row's slot, and the
+    // per-(cell, slot) deselect would drop whatever was really there.
+    const slot = take?.slot ?? RECORDING_SLOT
     // Round 8c: a generated take only sounds when no recorded take holds the
     // recording slot — hand that slot back to the source clip alongside.
+    //
+    // THE DEFAULT TRACK ONLY. An added track has one slot holding both kinds,
+    // so picking either already deselects the other and there is no shared
+    // source clip to park anything on.
     const displaceToSource =
-      slot === "generatedVoice" &&
+      slot === GENERATED_VOICE_SLOT &&
       sourceClip != null &&
-      takes.some((t) => t.audioId === selectedAudioId && t.slot === "recording")
+      takes.some((t) => t.audioId === selectedAudioId && t.slot === RECORDING_SLOT)
     try {
       const selectP = emitCellAudioSelect({ projectId, fileId, cellId, audioId, slot, author })
       if (take) injectOptimisticAudioAttachment(fileId, cellId, take, selectP)
@@ -205,9 +223,10 @@ export function TakesStrip({
       // screen while its remove sat in the outbox — reading as "it won't
       // delete" — and any still-queued attach for the same clip painted it
       // back (injectOptimisticAudioRemove cancels that attach outright).
-      const slot = takes.find((t) => t.audioId === audioId)?.slot === "generatedVoice"
-        ? "generatedVoice"
-        : "recording"
+      // The take's own slot, verbatim — see the note in `circle` above for why
+      // the old binary coercion became a data-mover once a take could belong
+      // to an added track.
+      const slot = takes.find((t) => t.audioId === audioId)?.slot ?? RECORDING_SLOT
       const removeP = emitCellAudioRemove({ projectId, fileId, cellId, audioId, author })
       injectOptimisticAudioRemove(fileId, cellId, audioId, slot, removeP)
       await removeP
@@ -216,8 +235,11 @@ export function TakesStrip({
       // list, so the survivors are everything else that is a take OF THIS CELL
       // — `audioIdSeededWith` keeps the shared imported source clip, which is
       // seeded with the file's id, from counting as one.
+      // …and "a recording" means a non-synthetic one on ANY track, which the
+      // attachment says (`voiceId`) rather than the slot: an added track's one
+      // slot holds recorded and generated takes alike.
       const ownTakesLeft = takes.filter(
-        (t) => t.audioId !== audioId && t.slot !== "generatedVoice" && audioIdSeededWith(t.audioId, cellId),
+        (t) => t.audioId !== audioId && !t.voiceId && audioIdSeededWith(t.audioId, cellId),
       )
       if (ownTakesLeft.length === 0) onLastTakeRemoved?.(cellId)
     } catch {
@@ -372,7 +394,10 @@ export function TakesStrip({
           // Use optimistic override while in-flight; fall back to server value.
           const effectiveSelectedId = optimisticSelectedId ?? activeTakeId
           const isCircled = att.audioId === effectiveSelectedId
-          const isGenerated = att.slot === "generatedVoice"
+            // AQU-646 stage 3: synthetic-ness comes off the TAKE, not off its slot —
+    // an added track's single slot holds both kinds. `voiceId` is set by all
+    // three paths that mint a generated voice.
+    const isGenerated = Boolean(att.voiceId) || att.slot === GENERATED_VOICE_SLOT
           const isPlaying = att.audioId === playingId
           const isLoading = att.audioId === loadingId
           const isBusy = att.audioId === busyId

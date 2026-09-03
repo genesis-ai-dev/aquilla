@@ -70,6 +70,21 @@ export const PASSWORD_RESET_ATTEMPT_MAX_FAILURES = 10
 // hits it.
 export const CREDENTIAL_MINT_MAX_PER_USER = 10
 
+// [Pen test] Auth & session mgmt (2026-08-31): POST /api/v2/access-links/:token/redeem
+// is the only credential-verification endpoint in this file with no per-IP
+// throttle — every sibling (login, admin elevation, password reset) pairs its
+// per-resource lockout with an IP-scoped one so a caller can't dodge a
+// single-token/single-identifier lockout by spreading guesses across many
+// leaked tokens or many stolen-but-locked links from one source. The 128-bit
+// token makes guessing a *token* infeasible regardless; this closes the gap
+// for a caller who already holds several real tokens (e.g. a leaked
+// distribution list) and is guessing PINs across them. Counts every terminal
+// outcome (unknown/revoked/expired/locked/wrong-PIN alike), not just wrong
+// PINs, so token-enumeration attempts count too. Wide enough that a real user
+// mistyping a PIN a couple of times, or several teammates redeeming distinct
+// links from a shared office/campus IP, never trips it.
+export const ACCESS_LINK_REDEEM_MAX_PER_IP = 30
+
 export type RateLimitKind =
   | "login"
   | "password_reset_request"
@@ -78,6 +93,7 @@ export type RateLimitKind =
   | "admin_elevation_verify"
   | "register"
   | "credential_mint"
+  | "access_link_redeem"
 
 /** Roughly 1-in-50 calls also prunes stale rows so the table stays bounded
  *  without a scheduled job. Cheap (indexed on created_at via the lookup

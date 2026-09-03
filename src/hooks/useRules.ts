@@ -9,6 +9,7 @@ import type {
 } from "@/lib/parsers/types"
 import { patchProject } from "@/lib/store/project-index"
 import { resolveBuiltinRules } from "@/lib/lqa/builtin-resolver"
+import { rulesForLane } from "@/lib/rules/rule-engine"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { compileConceptsToRules } from "@/lib/terminology/compile"
 import type { Concept } from "@/lib/terminology/types"
@@ -34,6 +35,14 @@ export function useRules(
    * so are unioned ahead of it.
    */
   subscribedConcepts?: Concept[],
+  /**
+   * AQU-609: the active target-language lane (`''` = default lane). When
+   * provided, the merged `rules` array excludes lane-scoped rules belonging to
+   * OTHER lanes, so every evaluation consumer downstream is lane-correct.
+   * Management surfaces omit it and see the full list (`userRules` is never
+   * filtered either way).
+   */
+  lane?: string,
 ) {
   const userRules = project?.rules || []
   const algorithmicChecks = project?.algorithmicChecks
@@ -110,11 +119,12 @@ export function useRules(
 
   // Order: builtins → org rules → project rules → terminology
   // (subscribed + local). Project rules can shadow org rules (same id wins in
-  // evaluation order).
-  const rules = useMemo(
-    () => [...builtinRules, ...(orgRules ?? []), ...userRules, ...terminologyRules],
-    [builtinRules, orgRules, userRules, terminologyRules],
-  )
+  // evaluation order). With a `lane`, lane-scoped rules for other lanes are
+  // dropped from the evaluation list (AQU-609).
+  const rules = useMemo(() => {
+    const merged = [...builtinRules, ...(orgRules ?? []), ...userRules, ...terminologyRules]
+    return lane === undefined ? merged : rulesForLane(merged, lane)
+  }, [builtinRules, orgRules, userRules, terminologyRules, lane])
 
   const addRule = useCallback(async (rule: Omit<TranslationRule, "id" | "createdAt">) => {
     if (!project) return

@@ -25,8 +25,7 @@
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
-import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
-import { JWTService } from "../auth/jwt"
+import { authMiddleware, optionalCaller, type AuthHonoEnv } from "../middleware/auth"
 import {
   INVITE_MIN_ROLE,
   LINK_ROLE_CAP,
@@ -73,25 +72,6 @@ import {
 import { createProjectShared } from "../../../db/shared/projects"
 
 const projects = new Hono<AuthHonoEnv>()
-
-/**
- * FRO-347 follow-up: best-effort caller identity for the (otherwise public)
- * invite-preview route. Unlike `authMiddleware`, a missing/invalid/expired
- * token is NOT an error here — it just means "treat this preview as
- * anonymous", since the route must stay reachable for signed-out visitors
- * following a share link. Mirrors `optionalCaller` in routes/invites.ts.
- */
-async function optionalCaller(env: Env, authHeader: string | null): Promise<AuthUser | null> {
-  if (!authHeader) return null
-  const jwtService = new JWTService(env)
-  const token = jwtService.extractTokenFromHeader(authHeader)
-  if (!token) return null
-  const payload = await jwtService.verifyToken(token)
-  if (!payload) return null
-  const now = Math.floor(Date.now() / 1000)
-  if (payload.exp < now) return null
-  return jwtService.getUserByUsername(payload.sub)
-}
 
 function roleNameFor(level: number): string {
   return ROLE_NAMES[level] ?? `level_${level}`

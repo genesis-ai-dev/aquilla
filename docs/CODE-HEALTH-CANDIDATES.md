@@ -4,6 +4,24 @@ Bigger opportunities spotted during `/code-health` runs that exceeded that run's
 (one theme, ≤300 lines, ≤8 files). Not done yet — pick one up in a future run. Prune entries
 a later run completes.
 
+## `src/components/org/ArchivedProjects.test.tsx` — flaky in the full `pnpm test` run
+
+Spotted in the 2026-08-28 run's baseline (unrelated to that run's `milestones.ts` change —
+reproduced with zero diff against `dev`, twice). "lists archived projects in a table and
+restores on click" and/or "lists recently deleted files with a project column and restores
+on click" intermittently fail with `getByRole("menuitem", { name: "Restore" })` not found
+(the dropdown menu wasn't open yet when the assertion ran) when run inside the full 939-file
+suite; count varied 2–3 failing tests across repeated full-suite runs. Not reproduced by
+running the file in isolation (not attempted this run — full-suite reproduction was already
+consistent enough to treat as pre-existing and out of scope). Likely the same family of
+issue as the `TeamsList.test.tsx` full-suite-only flake filed as
+[#410](https://github.com/genesis-ai-dev/aquilla/issues/410) (test-isolation/ordering
+sensitivity under vitest's worker sharding), though this one appears without any file-count
+change, so it may be a distinct root cause (a race between the click and the menu's open
+animation/portal mount, not sharding). Needs a `/diagnose` pass or a human to add a
+`findByRole`/`waitFor` around the menu-open step in that test — out of scope here since this
+routine never modifies test files.
+
 ## ESLint `globalIgnores(['dist', '.claude'])` doesn't reach nested `packages/*/dist`
 
 - **Found**: 2026-08-26 run, while diffing `pnpm lint` output against baseline for the

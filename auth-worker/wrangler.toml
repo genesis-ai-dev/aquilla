@@ -164,7 +164,7 @@ GITLAB_URL = "https://git.genesisrnd.com"
 # session); bypassed under WRANGLER_LOCAL=1 (local dev-stack / e2e) so the local
 # console stays open. The named production profile re-declares both values below;
 # the unnamed profile is local-only and is never a production deploy source.
-ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com"
+ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com,sampetetc@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 # Monday.com integration (non-secret ids; empty defaults — set real values per
 # deploy). Secrets MONDAY_CLIENT_SECRET + MONDAY_SIGNING_SECRET go through
@@ -247,7 +247,7 @@ DEPLOYMENT_WORKER_NAME = "aquilla-identity"
 LEGACY_USER_MIGRATION_ENABLED = "true"
 FRONTIER_D1_ACCOUNT_ID = "6a80496d1e59948a9cbaa3c643ba81d7"
 GITLAB_URL = "https://git.genesisrnd.com"
-ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com"
+ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com,sampetetc@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 # PostHog *project* token (public — same one shipped in the SPA bundle).
 # Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
@@ -333,7 +333,7 @@ GITLAB_URL = "https://git.genesisrnd.com"
 # own runtime, not a developer laptop. Local dev-stack injects either its
 # optional :8790 container or an explicitly configured remote endpoint.
 # AGENT_SANDBOX_URL = "https://<aquilla-agent-sandbox-dev-url>"
-ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com"
+ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com,sampetetc@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 # Monday.com integration (see top-level [vars] note).
 MONDAY_CLIENT_ID = ""

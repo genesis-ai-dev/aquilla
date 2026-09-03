@@ -53,7 +53,10 @@ import {
   type IdmlDeleteGranularity,
   type IdmlEditorConfiguration,
 } from "@/lib/richtext/idml-editor"
-import type { IdmlPointerSelection } from "@/lib/richtext/idml-caret"
+import {
+  idmlPointerIsBelowEditableSlots,
+  type IdmlPointerSelection,
+} from "@/lib/richtext/idml-caret"
 import {
   FOOTNOTE_NODE_NAME,
   buildUsfmPlainTextMap,
@@ -364,14 +367,14 @@ interface TranslatedEditorProps {
   onNavigateCell?: (direction: "prev" | "next") => void
   /**
    * Optional managed terminology concepts. When provided, active concepts are
-   * highlighted with a tiny status-tinted chip at the top-right of each match.
+   * shown with the shared subtle blue highlight on each match.
    * Defaults to undefined (feature off) so other call sites are unaffected.
-   * Chip click exposes `data-source-term` for AQU-204 (TermLookupPopover).
+   * Highlight clicks expose `data-source-term` for AQU-204 (TermLookupPopover).
    */
   terminologyConcepts?: Concept[]
   /**
-   * AQU-204: Called when the user clicks a term chip in the editor.
-   * Receives the sourceTerm string and the chip DOM element as an anchor.
+   * AQU-204: Called when the user clicks a managed-term highlight in the editor.
+   * Receives the sourceTerm string and the highlight DOM element as an anchor.
    * The caller is responsible for opening TermLookupPopover.
    */
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
@@ -750,6 +753,13 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       },
       handleClick(view, pos, event) {
         if (!idmlContext) return false
+        // AQU-1031: the slot-caret clamp is for caret placement (tall well /
+        // phantom trailing br), not for selecting text. A drag or Shift-click
+        // range must not be collapsed on mouseup.
+        const native = view.dom.ownerDocument.getSelection()
+        if (event.shiftKey || !view.state.selection.empty || (native && !native.isCollapsed)) {
+          return false
+        }
         const target = event.target instanceof HTMLElement
           ? event.target.closest<HTMLElement>("[data-idml-slot]")
           : null
@@ -792,8 +802,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
             ? event.target.closest<HTMLElement>("[data-idml-slot]")
             : null
           // Direct text/slot clicks retain their precise browser coordinates.
-          // Only blank space owned by the tall editor well needs clamping.
           if (target) return false
+          // AQU-1031: the caret gap after the last letter is on the slot's
+          // line, not in the tall well. Stealing that mousedown made
+          // drag-select fail whenever the caret was already at the end.
+          if (!idmlPointerIsBelowEditableSlots(view.dom, event.clientY)) return false
           const selectedSlot = isEditableIdmlSelection(view.state.selection)
             ? Number(view.state.selection.$from.parent.attrs.slot)
             : undefined
@@ -1676,21 +1689,26 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         onKeyDownCapture={handleEditorKeyDownCapture}
         onClick={(e) => {
           const target = e.target as HTMLElement
-          // AQU-204: term chip click → open TermLookupPopover via caller
+          // A violation owns the term text when both decorations overlap.
+          // This preserves the blot-to-toast path after removing the tiny,
+          // separate terminology glyph.
+          if (onRuleClick) {
+            const blot = target.closest("[data-rule-id]")
+            if (blot) {
+              onRuleClick(blot.getAttribute("data-rule-id")!, blot as HTMLElement)
+              return
+            }
+          }
+          // AQU-204: managed-term highlight click → open TermLookupPopover.
           if (onTermChipClick) {
-            const chip = target.closest(".term-chip[data-source-term]")
-            if (chip) {
-              const term = chip.getAttribute("data-source-term")
+            const termHighlight = target.closest(".term-chip-host[data-source-term]")
+            if (termHighlight) {
+              const term = termHighlight.getAttribute("data-source-term")
               if (term) {
-                onTermChipClick(term, chip as HTMLElement)
+                onTermChipClick(term, termHighlight as HTMLElement)
                 return
               }
             }
-          }
-          if (!onRuleClick) return
-          const blot = target.closest("[data-rule-id]")
-          if (blot) {
-            onRuleClick(blot.getAttribute("data-rule-id")!, blot as HTMLElement)
           }
         }}
       >

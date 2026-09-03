@@ -250,6 +250,8 @@ export const rules = defineNamespace({
     "rules.editor.mode.required": "Required",
     "rules.editor.mode.match": "Must match",
     "rules.editor.sideLabel": "Side",
+    "rules.editor.sideTargetOnlyNote":
+      "Forbidden and Required checks constrain the target. Use Must match for a rule that spans both sides.",
     "rules.editor.laneLabel": "Applies to",
     "rules.editor.lane.allLanes": "All lanes",
     "rules.editor.lane.defaultLane": "Default lane",
